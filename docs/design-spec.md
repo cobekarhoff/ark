@@ -91,18 +91,64 @@ ark/
 
 ### Agentic environment (committed)
 
+Multi-repo product, or repos you can't commit to: a separate environment repo.
+
 ```text
 <product>-agentic-environment/
 ├── ark/
-│   ├── environment.yaml     # product id, repos, dependency edges, forge, policy
+│   ├── environment.yaml     # the environment contract (below)
 │   ├── pipeline.yaml        # extends or replaces ark default
 │   ├── roles/*.yaml         # role overrides within policy
-│   ├── risk-rules.jdm.json  # deterministic risk rules (moves from factory/)
+│   ├── risk-rules.jdm.json  # deterministic risk rules (optional)
 │   ├── tasks/               # env up/seed/health/down, binding tasks
-│   └── skills/              # add-on skills
+│   ├── skills/              # add-on skills
+│   └── docs/                # product-specific ark findings, onboarding report
 ├── knowledge/
 └── repos/
 ```
+
+Single-repo product (decision 46): the product repo is its own environment, with `ark/` at its root and `repos:` pointing at `.`. A monorepo is a single repo with per-component `checks` and `paths`.
+
+### Environment contract
+
+Ark knows no stack. Every environment answers the same questions with commands and data in `ark/environment.yaml`; Python, Node, Compose, CDK and Playwright all hide behind them.
+
+| Ark needs | `environment.yaml` field |
+|---|---|
+| Repos, location, base branch rule | `repos[]`: id, path, remote, `base` rule (`main`, `release/*`), forge |
+| Components inside a repo (monorepo) | `repos[].components[]`: id, paths |
+| What depends on what | `edges[]` and `bindings[]` (task that installs an artifact, pins a submodule, or connects a service) |
+| Baseline health | `checks[]` per repo or component: build, lint, unit commands |
+| A clean running system | `env`: `up`, `seed`, `health`, `down` tasks, `slots`, `limitations[]` |
+| How to run an acceptance check | `check_runners[]`: id, command template (pytest, Playwright, HTTP script, …) |
+| Policy | `policy`: approved model routes, gates, risk rules path |
+| Agent context | `knowledge`: index path |
+
+### Onboarding (`/ark onboard` + `ark doctor`)
+
+An agent drafts the contract; deterministic checks prove it. Same split as the rest of ark.
+
+```mermaid
+flowchart LR
+    A["/ark onboard<br/>ark-onboard skill"] --> B["Discover: repos, CI files,<br/>Compose, Taskfiles, knowledge"]
+    B --> C["Ask the engineer<br/>only on unknowns"]
+    C --> D["Draft ark/ config"]
+    D --> E["ark doctor (deterministic)"]
+    E -->|fail| D
+    E -->|pass| F["Onboarding report in ark/docs/<br/>engineer commits ark/"]
+```
+
+`ark doctor` checks, each with evidence in the report:
+
+1. Config parses against schemas; every repo resolves to a commit; pipeline validates against roles.
+2. Baseline checks run per repo or component. A red baseline is recorded, not hidden.
+3. A fresh environment comes up, seeds, passes health, and tears down, twice in a row, leaving no containers, volumes or projects.
+4. Images are run-scoped and rebuilt, never reused from the engineer's dev stack; fixed container names and ports are overridden.
+5. A canary acceptance check passes, and its positive control proves it fails for the intended reason.
+6. Limitations are declared (stubbed auth, unpinned network installs, tag-not-digest images, build secrets held by the runner).
+
+`ark doctor` rerun later detects drift between the contract and the repos (the `maintain-verification-skill` idea).
+
 
 ### Generated (gitignored `.ark/`)
 
