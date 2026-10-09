@@ -1,0 +1,14 @@
+{
+  "name": "ark",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=26" },
+  "scripts": {
+    "test": "node --test 'src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.core.json"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
