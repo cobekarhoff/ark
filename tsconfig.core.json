@@ -16,6 +16,6 @@
   "files": [
     "src/core/hash.ts", "src/core/ids.ts", "src/core/contracts.ts", "src/core/pipeline.ts",
     "src/core/effects.ts", "src/core/events.ts", "src/core/state.ts", "src/core/world.ts",
-    "src/core/decide.ts"
+    "src/core/decide.ts", "src/core/harness.ts"
   ]
 }
