@@ -1,0 +1,87 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "landing.v1"
+    },
+    "ticket": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "produced_by": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "manifest_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "manifest_hash"
+      ],
+      "additionalProperties": true
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact",
+          "hash"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "enum": [
+            "merged",
+            "closed"
+          ]
+        },
+        "merged_sha": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "outcome",
+        "merged_sha"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "schema",
+    "ticket",
+    "run",
+    "attempt",
+    "produced_by",
+    "inputs",
+    "body"
+  ],
+  "additionalProperties": false
+}

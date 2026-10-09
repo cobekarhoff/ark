@@ -1,0 +1,116 @@
+{
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "qe_report.v1"
+    },
+    "ticket": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "produced_by": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "manifest_hash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "manifest_hash"
+      ],
+      "additionalProperties": true
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact",
+          "hash"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "enum": [
+            "pass",
+            "defect",
+            "check_invalid"
+          ]
+        },
+        "defects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "check": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "check",
+              "evidence"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "invalid_check": {
+          "type": "string"
+        },
+        "same_model_as_builder": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "verdict",
+        "defects",
+        "same_model_as_builder"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "schema",
+    "ticket",
+    "run",
+    "attempt",
+    "produced_by",
+    "inputs",
+    "body"
+  ],
+  "additionalProperties": false
+}
