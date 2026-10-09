@@ -11,7 +11,14 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.core.json"
   },
   "devDependencies": {
+    "@types/fs-ext": "^2.0.3",
     "@types/node": "^26.6.4",
     "typescript": "^5"
+  },
+  "dependencies": {
+    "fs-ext": "^2.1.1"
+  },
+  "allowScripts": {
+    "fs-ext@2.1.1": true
   }
 }

@@ -11,9 +11,9 @@
  * Why not pid files: a pid file needs start-time matching to survive pid reuse and has a window between spawn
  * and write. A kernel lock has neither, and survives service death by construction.
  *
- * Implementation note (an open risk, see RATIONALE): Node has no built-in flock. The implementation needs a
- * native addon (`fs-ext`) or a ~10-line helper (`perl -MFcntl -e 'flock'`, present on macOS). Whichever it is,
- * it is confined to this file.
+ * Implementation: the build uses the native `fs-ext` addon for flock(2), including a Node 26/macOS build. The
+ * process-tree launcher passes the locked descriptor into the wrapper and descendants. This dependency is confined
+ * to the shell layer.
  */
 import type { AbsPath } from "./ids";
 
