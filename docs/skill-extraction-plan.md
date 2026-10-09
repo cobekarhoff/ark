@@ -12,6 +12,7 @@ Engine first, skills against contracts. While building ark, engineers use the in
 | 3 (contracts, guard, admit) | `ark-acceptance`, `ark-test-audit` (author/review/defect modes), tried by hand on the pilot ticket |
 | 4–5 (harness, plan gate) | `ark-intake`, `ark-architect`, `ark-build` |
 | 6–8 (verify, forge) | `ark-review`, `ark-review-lead`, `ark-qe` |
+| 10 (doctor, onboarding, packaging) | `ark-onboard` |
 | After live pilot-ticket replay | Fold in failures seen in real runs; port `how`/`why`/`unslop`/principles only where role skills need them |
 
 Skills stay thin: read inputs, write one schema-valid output file, no subagents, no model choice. Grow them from observed failures, not upfront porting.
@@ -71,7 +72,7 @@ pstack's harness mapping (explore, implement, review, parallel, ask_user, verify
 | `ark-unslop` | review-lead | publisher, reflector | pstack `unslop` | Applies to MR descriptions, plan/ticket prose, and defect reports; not to code |
 | `ark-qe` | qe | — | pstack verification concepts | Runs `ark verify`, interprets failures, writes `defect.v1` with repro; may not edit source or checks; checks regression proof rule |
 | `ark-reflect` | reflector | — | pstack `reflect` | Scheduled pipeline over completed runs; proposals as MRs to ark (skills) or the environment (knowledge); never edits active runs; no auto-apply |
-| `ark-env-verify-recipe` | (onboarding) | — | pstack `create-verification-skill` / `maintain-verification-skill` | Helps author environment `ark/tasks/` (up/seed/health/down) and keeps them current; output reviewed by humans |
+| `ark-onboard` | onboarder | — | pstack `create-verification-skill` / `maintain-verification-skill` | Reads the product repos (CI files, Compose, Taskfiles, package manifests, knowledge index) and drafts `ark/environment.yaml`, env tasks, checks and check runners; asks the engineer only about unknowns; loops with `ark doctor` until it passes; writes the onboarding report. Never decides pass/fail itself: `ark doctor` does. Rerun to repair drift doctor reports |
 
 Dropped from pstack: `tdd` (replaced by `ark-test-audit` + acceptance-first flow), `poteto-mode` routing and playbook selection (orchestrator owns flow), `swarm` as a skill (fan-out is pipeline config; aggregation rules move into stage definitions), `setup-pstack`, `automate-me`, `bro`, `make-bot-ui`, `show-me-your-work` (ledger covers it), `babysit`/`shipping` (engineers merge).
 
