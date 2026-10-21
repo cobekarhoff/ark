@@ -350,70 +350,57 @@ From the end of the walking skeleton (M1a), the Ark builds itself: every remaini
 
 ## How we build it
 
-Bootstrap with pstack, build the deterministic CLI first, reach a walking skeleton, then let Ark build the rest of itself.
+Build a thin deterministic CLI and agent loop by hand, run Ark's first ticket on itself, then dogfood everything else, onboarding first.
 
-1. **The backlog is local tickets.** The M0 and walking-skeleton tickets (ARK-001 to ARK-021) are written in Ark's local ticket format, with acceptance criteria traced to this PRD. They live in the Ark repo under `tickets/`. Later requirements become tickets the same way when their milestone starts.
-2. **M0 spikes in plain OMP.** Each spike is a small experiment whose answer and evidence go in a decision log (pstack's show-me-your-work format), which doubles as a prototype of the ledger.
-3. **Bootstrap with pstack.** Install the pstack mirror into OMP, set its model file (`~/.agents/pstack-models.md`) to Opus for judgment and Codex for code, and use its Feature playbook per ticket with `interrogate` as the two-model review. Ark formalizes pstack's patterns, so this also tests them before they become code.
-4. **Deterministic CLI first.** State, ledger, `advance`, `ark test` with red-green proof, `trace-check`, plan check and render, worktrees and `ark mr`. This is ordinary software with testable criteria, and it holds most of the risk. `ark test` and `trace-check` pay off before any agent uses them.
-5. **Agent layer on top.** Router skill, `ticket` playbook, implementer, validator and one cross-vendor reviewer, all calling the CLI.
-6. **Walking skeleton, then dogfood.** Once one Ark ticket (ARK-022) goes from local ticket to MR through G1 and G2 (ARK-021), every later ticket runs through Ark.
-7. **Config by hand before setup.** Write `ark.yml` and `.ark/repo.yml` by hand for the Ark repo and one product repo. `ark setup` is automated afterwards, once the hand-written configs show what detection must find.
-8. **Console early.** It only reads files, so a runs list, DAG and gate inbox land in M1 and make dogfood runs easier to follow.
+1. **The backlog is local tickets.** Tickets are written in Ark's local ticket format with acceptance criteria traced to this PRD, and live outside the repo in `~/.ark/projects/<project>/tickets/`, next to the runs. Later requirements become tickets the same way.
+2. **One spike upfront.** Only ARK-101 (plugin install, CLI on PATH, runtime) blocks building. The other harness questions are answered by the ticket that first uses the feature, as a "record observed behavior" criterion. Hooks and session files inside subagents are settled right before the tickets that depend on them (ARK-112, ARK-113).
+3. **Built directly in OMP.** No pstack bootstrap; the thin loop is built by hand in OMP sessions, as tickets with tagged tests and GitHub PRs you review and merge.
+4. **Deterministic CLI first, thin.** `run start`, `advance`, `gate`, `ws create`, `test --red-green`, `trace-check` and `mr`. Plan check and render, context render, session capture, manifest and the console are deferred to dogfooded tickets.
+5. **Agent layer on top.** Router skill, `ticket` playbook, implementer, validator and `reviewer-x`, lead judgment by the orchestrator, a main-session write-block hook and the vendor preflight.
+6. **Thin loop, then dogfood.** ARK-109 (`ark context`) is the first ticket Ark runs on itself, from local ticket to PR through G1 and G2. Every later ticket runs through Ark.
+7. **Onboarding right after.** Ark's own config is hand-written to start. The first dogfood ticket after the thin loop is the `setup` playbook with a thin doctor (ARK-110), then the pytest and behave parsers with CLARA as the first real onboarding (ARK-111). CLARA runs use local tickets and stop at a ready branch with no MR until the GitLab and Jira adapters exist.
+8. **Console after the loop.** It only reads files, so it can be dogfooded once the run folder shape settles.
 
-**Walking-skeleton backlog.**
+**Thin-loop backlog.** ARK-101 to ARK-108 are built by hand; ARK-109 is the first Ark run; the rest are dogfooded. This supersedes the earlier ARK-001 to ARK-021.
 
 | ID | Ticket | Traces | Depends on |
 | --- | --- | --- | --- |
-| ARK-001 | Spike: do project hooks fire inside subagent sessions? | FR-05, FR-17, M5 trigger | None |
-| ARK-002 | Spike: where subagent session files land, how they link to the parent, and whether they are written live | FR-21, FR-30 | None |
-| ARK-003 | Spike: agent output schemas and how the parent reads typed results | FR-09 | None |
-| ARK-004 | Spike: can a subagent work in a worktree outside the session's repo? | FR-09, FR-18 | None |
-| ARK-005 | Spike: is an `ask` question and answer recorded in the session file? | FR-15 | None |
-| ARK-006 | Spike: model selectors, custom role aliases in project config, in-vendor fallback chains | FR-13, FR-26 | None |
-| ARK-007 | Spike: plugin install from Git, CLI on PATH, typed tools | FR-24 | None |
-| ARK-008 | Spike: pstack runs in OMP with Opus and Codex | How we build it | None |
-| ARK-009 | Decision: CLI language and runtime | NFR-01, NFR-03 | ARK-007 |
-| ARK-010 | Repo scaffold: package layout, CLI skeleton, schemas, CI | FR-01, FR-24 | ARK-009 |
-| ARK-011 | Run folder, ledger, state projection and `ark advance` | FR-03 | ARK-010 |
-| ARK-012 | Local ticket adapter and AC normalization | FR-07, FR-34, FR-35 | ARK-011 |
-| ARK-013 | `ark test` with tagged selection, JUnit capture and red-green proof | FR-10, FR-11 | ARK-011 |
-| ARK-014 | `trace-check` builds the matrix and gates the loop | FR-12 | ARK-012, ARK-013 |
-| ARK-015 | `run-plan.json` with plan check and plan render, single repo | FR-08 | ARK-011 |
-| ARK-016 | Worktrees with push disabled, and `ark mr` through the GitHub adapter | FR-09, FR-20, FR-36 | ARK-011 |
-| ARK-017 | Gates G1 and G2: `ask` plus `ark gate` with packet hashes | FR-15 | ARK-011 |
-| ARK-018 | Router skill, `ticket` playbook and context rendering | FR-02, FR-04 | ARK-015, ARK-017 |
-| ARK-019 | Agents: implementer, validator, one cross-vendor reviewer, lead judgment | FR-09, FR-13, FR-14 | ARK-003, ARK-018 |
-| ARK-020 | Session capture and manifest for the main session | FR-21 | ARK-002, ARK-011 |
-| ARK-021 | Walking-skeleton acceptance run | M1a exit | ARK-012 to ARK-020 |
+| ARK-101 | Spike: plugin install from Git, CLI on PATH, typed tools, runtime | FR-24, NFR-03 | None |
+| ARK-102 | Scaffold: Bun/TS package, `ark` bin, skills, agents, extensions, schemas, CI | FR-01, FR-24 | ARK-101 |
+| ARK-103 | Run core: `run start`, ledger, state replay, `ark advance` | FR-01 to 03, FR-07, FR-35 | ARK-102 |
+| ARK-104 | Gates: `ark gate` packet and answer for G0, G1, G2 | FR-15 | ARK-103 |
+| ARK-105 | Worktrees and `ark test` with red-green proof | FR-09 to 12, FR-28 | ARK-103 |
+| ARK-106 | `trace-check` builds the matrix and gates G2 | FR-12 | ARK-105 |
+| ARK-107 | `ark mr` through `gh`, optional per project | FR-20, FR-36 | ARK-106 |
+| ARK-108 | Router skill, `ticket` playbook, agents, lead judgment, write-block hook | FR-02, 09, 13, 14, 17 | ARK-104 to 106 |
+| ARK-109 | `ark context` renders the resume brief, as the first Ark run | FR-04 | ARK-107, ARK-108 |
+| ARK-110 | Setup playbook and thin doctor, on Ark | FR-25, 27, 37 | ARK-109 |
+| ARK-111 | pytest and behave parsers; onboard CLARA platform | FR-28, FR-37 | ARK-110 |
+| ARK-112 | Hooks inside subagents: per-role rules, always-pause list | FR-05, FR-17 | ARK-109 |
+| ARK-113 | Session capture, `MANIFEST.sha256` and `ark verify` | FR-21 | ARK-109 |
+| ARK-114 | `run-plan.json` with plan check and plan render | FR-08 | ARK-109 |
 
 ## Milestones
 
-Six milestones, each closed by exit criteria a reviewer can check; no dates until M0 answers the open technical questions.
+Milestones are closed by exit criteria a reviewer can check; no dates yet.
 
 | Milestone | Scope | Exit criteria | Built by |
 | --- | --- | --- | --- |
-| M0 Spikes | The questions below | Each answered by a real run and logged with evidence | OMP by hand |
-| M1a Walking skeleton | FR-01 (core commands), 02 (`ticket`), 03, 07, 08 (single repo), 09 to 12, 13 (one reviewer), 14, 15 (G1, G2), 20 (one MR), 21 (main session), 24, 34 (interfaces), 35 (local tickets), 36 (GitHub) | One ticket from Ark's own local backlog goes from ticket to MR through G1 and G2, on the Ark repo on GitHub, with hand-written config (ARK-021) | OMP with pstack, in Ark shape |
+| M1a Thin loop | FR-01 (thin command set), 02 (`ticket`), 03, 07, 09 to 12, 13 (one reviewer), 14, 15 (G0, G1, G2), 20 (one PR), 35 (local tickets), 36 (GitHub) | ARK-109 runs through Ark on its own repo from local ticket to PR through G1 and G2, with hand-written config, and its ledger replays to the same state | OMP by hand |
 | M1 Single repo, complete | FR-02 (`setup`, `resume`), 04, 16, 22, 25 (single repo), 26 to 28, 29 (DAG), 30 (main session), 31, 32, 35 (Jira), 36 (GitLab), 37, 38 (registry, console across projects) | Setup and full doctor pass on the Ark project and one team project on Jira and GitLab. Three real team tickets reach merge-ready MRs, with G1 and G2 answered in the console. Ledger replay is byte-identical. Resume works from every state | The Ark |
 | M2 Multi-repo | FR-05, 06, 08 (multi-repo), 17 to 20, 21 (subagents), 25 (multi-repo project), 29 (swim lanes), 30 (subagents), 38 (multi-repo projects) | Multi-repo project setup over the knowledge-base repo succeeds. One three-repo ticket runs end to end, watched live in the console | The Ark |
 | M3 Review tiers, metrics and MR watch | FR-02 (remaining playbooks), 13 (tiers), 23, 33 | 20 runs completed; reviewer value report produced; one multi-repo run watched through to merge | The Ark |
 | M4 Retention and audit outputs | Closed runs shipped to write-once S3; the audit outputs QA and RA choose | A closed run verifies from S3 | The Ark |
-| M5 RPC runner (only if needed) | Live subagent capture, a deterministic outer state machine | Triggered if M0 shows hooks do not fire inside subagents | The Ark |
+| M5 RPC runner (only if needed) | Live subagent capture, a deterministic outer state machine | Triggered if ARK-112 shows hooks do not fire inside subagents | The Ark |
 
-**M0 spikes.**
+**Harness questions and where they are answered.**
 
-- [ ] Does a project hook fire inside subagent sessions?
-- [ ] Where do subagent JSONL files land, and does `parentSession` link them to the parent?
-- [ ] Does the `output` schema work as written in agent frontmatter, and how does the parent read the result?
-- [ ] Can a subagent work in a worktree outside the session's own repo?
-- [ ] Is an `ask` question and answer recorded in full in the session file?
-- [ ] Do role-keyed fallback chains behave as configured, and is each fallback logged?
-- [ ] Exact model selectors from `omp models` for both providers.
-- [ ] Does a project `.omp/config.yml` (with `modelRoleStorage: project`) accept the custom role aliases?
-- [ ] Does installing the plugin from Git or npm put the `ark` CLI on PATH, or does setup need to install it?
-- [ ] Can the package's `tools/` expose CLI commands as typed OMP tools, so agents call `advance` or `test` without raw shell access?
-- [ ] Are subagent session files written as the agent works, so the console can tail them live?
+- [ ] Plugin install from Git puts `ark` on PATH; `tools/` exposes typed tools; runtime (ARK-101).
+- [ ] Is an `ask` question and answer recorded in the session file (ARK-104)?
+- [ ] Can a subagent work in a worktree outside the session's repo (ARK-105)?
+- [ ] Output schemas in agent frontmatter, how the parent reads them; model selectors, project role aliases, in-vendor fallback (ARK-108).
+- [ ] Do project hooks fire inside subagents, with the role visible (ARK-112)? If not, M5 triggers.
+- [ ] Where subagent session files land, how they link to the parent, and whether they grow live (ARK-113).
 
 ## Risks
 
@@ -450,11 +437,11 @@ Ideas raised during design and deliberately left out of v1, kept here so nobody 
 
 ## Decided questions
 
-Settled on 2026-10-21 in a design grilling. M0 starts with ARK-001, ARK-002 and ARK-007, because ARK-001 alone can trigger M5; the other spikes follow in parallel, and the design is re-grilled if M5 triggers.
+Settled on 2026-10-21 in two design grillings. The second cut the walking skeleton to a thin loop so dogfooding and onboarding start sooner (see How we build it).
 
 1. **Tickets.** Ark's own project uses local tickets and GitHub; team projects use Jira and GitLab. Jira acceptance criteria come from a description section matched by heading (`ac_from: description-section`).
 2. **Arbiter.** Humans handle Arbiter findings until M3. In M3, a read-only Arbiter adapter arrives with `ark watch`, and its findings follow the same verify-before-bounce rule and round budget.
-3. **Implementer vendor.** Configurable per project. `ark.yml` names every role's model explicitly, and preflight enforces the vendor invariants (FR-13). The default is chosen after ARK-008.
+3. **Implementer vendor.** Configurable per project. `ark.yml` names every role's model explicitly, and preflight enforces the vendor invariants (FR-13). The default is chosen during ARK-108.
 4. **Real test environment.** A suite may declare `env.up` and `env.down` commands, such as Docker Compose with floci for AWS services. `ark test` brings the environment up and down around both the red and green runs and fingerprints image digests. Local emulators of owned dependencies count as real, not mocks. Ephemeral AWS environments stay parked.
 5. **QA and RA.** G1 and G2 are engineering records: approver from OS and git identity, time and packet hash. Formal sign-off is the host's MR approval. Ark ships a per-run audit bundle (the run folder with a verified manifest). Production use waits for QA and RA to review this mapping (NFR-05).
 6. **Where runs execute.** Laptops only in v1. CI installs the plugin and runs the golden smoke ticket. A shared runner waits for S3 storage (M4).
