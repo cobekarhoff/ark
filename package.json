@@ -1,0 +1,9 @@
+{
+  "name": "ark",
+  "version": "0.0.1-spike",
+  "description": "ARK-101 spike toy package",
+  "type": "module",
+  "private": true,
+  "bin": { "ark": "./cli/ark.ts" },
+  "omp": { "extensions": ["./extensions/index.ts"] }
+}
