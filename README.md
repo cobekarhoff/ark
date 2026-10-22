@@ -35,6 +35,14 @@ ark test <run_id> --acs ID,.. [--repo name]              # run the AC-tagged tes
 ark test <run_id> --acs ID,.. --red-green [--repo name]  # base source + head tests must fail, head must pass
 ```
 
+## Trace matrix
+
+```sh
+ark trace-check <run_id>   # write <run>/trace-matrix.md, record trace.checked; exit 1 with the reasons when it fails
+```
+
+Inputs: `ac.yml` (`level` per AC, default `e2e`), the latest `ark test` / `ark test --red-green` evidence per AC and repo, and `<run>/manual/<AC-ID>.md` for `level: manual` ACs (needs `signed-by:` and `at:` lines). It fails on an AC with no passing tagged test (flaky is not passing), a test tagged with an AC that `ac.yml` does not list, an e2e/integration/unit AC without red-green proof at the head SHA that passed, and an unsigned manual AC. The matrix has no timestamps: identical inputs give identical bytes. `ark gate packet <run_id> G2` refuses unless the latest `trace.checked` passed, the matrix still matches its `matrix_sha256`, and no test ran after it.
+
 `.ark/repo.yml` lists suites (see [docs/prd.md](docs/prd.md)): `format`, `level`, `run` (with a `{tags}` selector; `$ARK_OUT` is `<run>/artifacts/test/<attempt>/`), `junit` (glob in the last path segment), optional `env.up`/`env.down`, and optional `tests` globs (default `**/*.test.ts`, `test/**`) that decide which changed files red-green overlays and which files the implementer step may not touch when they carry an AC tag. Optional `commands.build` runs in the temporary base worktree before the red run (dependencies are not checked in). Every suite runs for every `ark test`; give each suite its own JUnit file name. Each attempt saves JUnit, `<suite>.{stdout,stderr}.log` and `fingerprint.json` (git SHA, bun version, OS, `docker compose images` when an env is declared), and appends a `test.result` or `test.red_green` event.
 
 `ark advance <run_id> implementer.completed --data '{"repo":"<name>"}'` refuses when base..HEAD of that worktree touches a test file carrying an AC ID, and otherwise records the head SHA.

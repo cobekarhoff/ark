@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { append, commit, project, readLedger, runDir, sha256 } from "./run";
+import { append, commit, type LedgerEvent, project, readLedger, runDir, sha256 } from "./run";
 import { transitions } from "./transitions";
 
 // Gate packets (PRD "Gates and loop policy"): built from run-folder artifacts, no model involved.
@@ -24,12 +24,23 @@ function buildPacket(dir: string, runId: string, gate: string): string {
   return `# ${gate} packet: ${runId}\n\n${sections.join("\n")}`;
 }
 
+// G2 is built only from a trace-check that passed on the matrix now on disk, with no test evidence recorded after it.
+function requireTrace(dir: string, events: LedgerEvent[]) {
+  const t = events.findLast((e) => e.type === "trace.checked");
+  if (!t) throw new Error("G2 packet needs a passing trace-matrix.md; run 'ark trace-check' first");
+  if (!t.data.passed) throw new Error(`G2 packet refused: the latest trace-check failed:\n${(t.data.failures as string[]).map((f) => `  - ${f}`).join("\n")}`);
+  if (events.some((e) => e.seq > t.seq && e.type.startsWith("test."))) throw new Error("G2 packet refused: tests ran after the last trace-check; rerun 'ark trace-check'");
+  const file = join(dir, "trace-matrix.md");
+  if (!existsSync(file) || sha256(readFileSync(file)) !== t.data.matrix_sha256) throw new Error("G2 packet refused: trace-matrix.md changed since trace-check; rerun 'ark trace-check'");
+}
+
 export function gatePacket(runId: string, gate: string): string {
   if (!(gate in REQUIRED)) throw new Error(`unknown gate '${gate}'; expected G0, G1 or G2`);
   const dir = runDir(runId);
   const events = readLedger(dir);
   const state = project(events).state;
   if (!(`gate.packet:${gate}` in transitions[state])) throw new Error(`cannot build the ${gate} packet in state '${state}'`);
+  if (gate === "G2") requireTrace(dir, events);
   const body = buildPacket(dir, runId, gate);
   const path = `gates/${gate}.packet.md`;
   const hash = sha256(body);

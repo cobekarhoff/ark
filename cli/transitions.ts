@@ -23,6 +23,7 @@ export const transitions = {
     "implementer.completed": "building",
     "test.result": "building",
     "test.red_green": "building",
+    "trace.checked": "building",
     abort: "aborted",
   },
   judging: {
@@ -31,6 +32,7 @@ export const transitions = {
     "gate.packet:G2": "awaiting_g2",
     "test.result": "judging",
     "test.red_green": "judging",
+    "trace.checked": "judging",
     abort: "aborted",
   },
   awaiting_ge: { "ge.answered": "building", abort: "aborted" },
