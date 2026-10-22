@@ -195,6 +195,17 @@ describe("ARK-107-AC1", () => {
     expect(onRemote(`refs/heads/${branch()}`, evil)).toBeNull();
   });
 
+  test("a pre-push hook the agent sets up through its worktree config does not run during the credentialed push", () => {
+    const hooks = join(root, "hooks");
+    mkdirSync(hooks);
+    writeFileSync(join(hooks, "pre-push"), `#!/bin/sh\ntouch ${join(root, "hook-ran")}\n`);
+    chmodSync(join(hooks, "pre-push"), 0o755);
+    git(wt(), "config", "--worktree", "core.hooksPath", hooks);
+    ok(ark("mr", run()));
+    expect(onRemote(`refs/heads/${branch()}`)).toBe(runState().repos[0].head_sha);
+    expect(existsSync(join(root, "hook-ran"))).toBe(false);
+  });
+
   test("a credential in the origin URL never reaches stderr or the ledger, for a failed push or a malformed URL", () => {
     for (const url of [`https://x-access-token:${SENTINEL}@127.0.0.1:1/acme/demo.git`, `https://user:${SENTINEL}@host`]) {
       git(proj, "remote", "set-url", "origin", url);

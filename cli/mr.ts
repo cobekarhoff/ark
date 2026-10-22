@@ -53,7 +53,7 @@ export function mr(runId: string): string {
     if (!repo.head_sha) throw new Error(`${repo.name} has no recorded head_sha; record implementer.completed before ark mr`);
     if (git(wt, "rev-parse", "HEAD") !== repo.head_sha) throw new Error(`${wt} HEAD differs from the approved ${repo.head_sha}; commits made after approval are not pushed`);
 
-    // The URL comes from the shared config of the main checkout: `git config --worktree` in the agent's worktree cannot redirect it.
+    // The URL comes from the shared config of the main checkout, not the agent's worktree config.
     const common = git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir");
     const url = git(wt, "config", "--file", join(common, "config"), "--get", "remote.origin.url");
     const slug = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/)?.[1];
@@ -62,12 +62,10 @@ export function mr(runId: string): string {
     if (head.exitCode !== 0) throw new Error(`${repo.name} has no origin/HEAD to read the default branch from; run 'git remote set-head origin -a'`);
     const base = head.stdout.toString().trim().replace(/^origin\//, "");
 
-    try {
-      // The worktree's pushurl is DISABLED for agents; an explicit URL bypasses it with the CLI's own credentials.
-      git(wt, "push", url, `${repo.head_sha}:refs/heads/${repo.branch}`);
-    } catch (e) {
-      throw new Error(redact((e as Error).message));
-    }
+    // The worktree's pushurl is DISABLED for agents; an explicit URL bypasses it with the CLI's own credentials.
+    // Pushed from the shared git dir, so the agent's per-worktree config (insteadOf, hooksPath) is never loaded; the SHA resolves in the shared object store.
+    const push = Bun.spawnSync(["git", "--git-dir", common, "push", url, `${repo.head_sha}:refs/heads/${repo.branch}`]);
+    if (push.exitCode !== 0) throw new Error(redact(`git push ${url} failed: ${push.stderr.toString().trim()}`));
 
     const bodyFile = join(dir, "mr", `${repo.name}.md`);
     mkdirSync(join(dir, "mr"), { recursive: true });
