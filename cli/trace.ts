@@ -7,6 +7,15 @@ type Ev = LedgerEvent & { data: { repo: string; head_sha: string; base_sha?: str
 
 const NEW_BEHAVIOR = ["e2e", "integration", "unit"]; // red-green proof applies to these; manual ACs need a signed record instead
 const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim() || "-";
+// Locale-independent natural order: digit runs compare as integers, everything else by code unit, so AC2 < AC10 on every machine.
+const cmp = (a: string, b: string): number => {
+  const [x, y] = [a, b].map((s) => s.match(/\d+|\D+/g) ?? []);
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = /^\d/.test(x[i]) && /^\d/.test(y[i]) ? Number(x[i]) - Number(y[i]) : x[i] < y[i] ? -1 : x[i] > y[i] ? 1 : 0;
+    if (d) return d;
+  }
+  return x.length - y.length;
+};
 const uniq = (xs: string[]) => [...new Set(xs)].sort();
 // ark test records "pass"|"fail"|"flaky"|"missing"; ark test --red-green records "proven"|"no-red" (green passed) or "green-failed"|"missing".
 const green = (v: string) => (v === "proven" || v === "no-red" ? "pass" : v === "green-failed" ? "fail" : v);
@@ -42,7 +51,7 @@ export function traceCheck(runId: string): string {
     const tests: string[] = [], red: string[] = [], grn: string[] = [], evidence: string[] = [];
     const bad: string[] = [];
     let passing = 0;
-    for (const [repo, { res, rg }] of Object.entries(latest[id] ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [repo, { res, rg }] of Object.entries(latest[id] ?? {}).sort(([a], [b]) => cmp(a, b))) {
       const g = !res || (rg && rg.seq > res.seq) ? rg! : res;
       const outcome = green(g.data.acs[id]);
       const mine = g.data.tests.filter((t) => t.acs.includes(id));
@@ -75,12 +84,12 @@ export function traceCheck(runId: string): string {
     }
     if (!known.has(id) && !unknown.has(id)) unknown.set(id, []);
   }
-  for (const [tag, ts] of [...unknown].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [tag, ts] of [...unknown].sort(([a], [b]) => cmp(a, b))) {
     failures.push(`${tag}: unknown AC, not in ac.yml${ts.length ? ` (tagged on: ${uniq(ts).join("; ")})` : ""}`);
     rows.push({ id: tag, line: `| ${cell(tag)} | - | ${cell(uniq(ts).join("; "))} | - | - | - | fail |` });
   }
 
-  rows.sort((a, b) => a.id.localeCompare(b.id, "en", { numeric: true }));
+  rows.sort((a, b) => cmp(a.id, b.id));
   const matrix = `# Trace matrix: ${runId}\n\n| AC | Level | Tests | Red (SHA, outcome) | Green (SHA, outcome) | Evidence | Status |\n| --- | --- | --- | --- | --- | --- | --- |\n${rows.map((r) => `${r.line}\n`).join("")}`;
   writeFileSync(join(dir, "trace-matrix.md"), matrix);
   const passed = failures.length === 0;

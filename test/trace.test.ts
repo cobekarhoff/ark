@@ -146,6 +146,17 @@ describe("ARK-106-AC1", () => {
   });
 });
 
+describe("ARK-106-AC1 ordering", () => {
+  test("rows sort by AC number, not text: AC2 comes before AC10", () => {
+    toBuilding();
+    acYml(["AC10", "manual"], ["AC2", "manual"]);
+    sign("AC10");
+    sign("AC2");
+    ok(trace());
+    expect(matrix().split("\n").slice(4, 6).map((l) => l.split(" | ")[0])).toEqual(["| DEMO-1-AC2", "| DEMO-1-AC10"]);
+  });
+});
+
 describe("ARK-106-AC2", () => {
   test("an AC with no recorded test fails, naming it, and the failing matrix and trace.checked are still written", () => {
     toBuilding();
