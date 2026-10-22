@@ -14,10 +14,11 @@ export function git(cwd: string, ...args: string[]): string {
   return r.stdout.toString().trim();
 }
 
-export function loadRepo(dir: string): RepoConfig {
-  const file = join(dir, ".ark", "repo.yml");
-  if (!existsSync(file)) throw new Error(`no ${file}`);
-  const cfg = Bun.YAML.parse(readFileSync(file, "utf8")) as RepoConfig | null;
+// `ref`: read the config as committed at that ref instead of from disk (the AC7 guard trusts the base config, not the implementer's edit of it).
+export function loadRepo(dir: string, ref?: string): RepoConfig {
+  const file = ref ? `${ref}:.ark/repo.yml` : join(dir, ".ark", "repo.yml");
+  if (!ref && !existsSync(file)) throw new Error(`no ${file}`);
+  const cfg = Bun.YAML.parse(ref ? git(dir, "show", file) : readFileSync(file, "utf8")) as RepoConfig | null;
   const suites = Object.entries(cfg?.suites ?? {});
   if (!suites.length) throw new Error(`${file} has no suites`);
   for (const [name, s] of suites) {

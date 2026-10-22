@@ -23,8 +23,8 @@ export function parse(xml: string): Case[] {
   });
 }
 
-// Selector for `-t`: test names are matched as a regex against the full describe path.
-export const tags = (ids: string[]) => ids.join("|");
+// Selector for `-t`: a regex over the full describe path; (?!\d) keeps AC1 from selecting AC10.
+export const tags = (ids: string[]) => `(${ids.join("|")})(?!\\d)`;
 
 // Static check for AC7: does this source file carry an AC tag?
 export const taggedFile = (source: string) => (source.match(AC_ID) ?? []).length > 0;

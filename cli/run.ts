@@ -215,7 +215,8 @@ export function advance(runId: string, type: string, rawData?: string): string {
     const repo = state.repos.find((r) => r.name === data.repo);
     if (!repo) throw new Error(`implementer.completed needs --data '{"repo":"<name>"}' naming a worktree of this run`);
     const wt = join(dir, "ws", repo.name);
-    const hit = touchedTaggedTests(wt, repo.base_sha, loadRepo(wt));
+    if (git(wt, "status", "--porcelain", "--untracked-files=no")) throw new Error(`${wt} has uncommitted changes; commit them so the check sees the whole step`);
+    const hit = touchedTaggedTests(wt, repo.base_sha, loadRepo(wt, repo.base_sha)); // base config: the implementer cannot widen its own exemptions
     if (hit.length) throw new Error(`implementer step touches AC-tagged test files: ${hit.join(", ")}`);
     data = { repo: repo.name, head_sha: git(wt, "rev-parse", "HEAD") };
   }

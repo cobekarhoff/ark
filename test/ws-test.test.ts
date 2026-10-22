@@ -37,7 +37,9 @@ let bin: string; // PATH shim for docker
 let counter: string;
 
 const git = (cwd: string, ...args: string[]) => {
-  const r = Bun.spawnSync(["git", ...args], { cwd, env: process.env }); // explicit: spawnSync would otherwise ignore the identity set above
+  // Observed: with the bare `{ cwd }` CI failed "empty ident name" although the identity is set above; passing env explicitly fixed it.
+  // Not reproducible on a dev machine, where git falls back to the OS user name.
+  const r = Bun.spawnSync(["git", ...args], { cwd, env: process.env });
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.toString()}`);
   return r.stdout.toString().trim();
 };
@@ -141,8 +143,9 @@ describe("ARK-105-AC1", () => {
     ]);
 
     commitAll(wt(), { "x.txt": "x" });
-    const push = Bun.spawnSync(["git", "push", "origin", "HEAD"], { cwd: wt() });
+    const push = Bun.spawnSync(["git", "push", "origin", "HEAD:refs/heads/ark/probe"], { cwd: wt() });
     expect(push.exitCode).not.toBe(0);
+    expect(push.stderr.toString()).toContain("DISABLED"); // it is the push URL that stopped it
     expect(git(bare, "branch", "--list").includes("ark/")).toBe(false);
     // the main checkout shares the repo but keeps its push URL
     git(proj, "push", "-q", "origin", "HEAD:refs/heads/probe");
@@ -296,6 +299,7 @@ test("untagged tests are ignored", () => { expect(1).toBe(2); });`),
     expect(r.code).toBe(1);
     const [ev] = events("test.result");
     expect(ev.data.acs).toEqual({ "DEMO-1-AC1": "pass", "DEMO-1-AC3": "pass", "DEMO-1-AC4": "pass", "DEMO-1-AC5": "fail" });
+    expect(slurp(runFile("artifacts/test/1/bun.xml"))).toMatch(/DEMO-1-AC10[^>]*>\s*<skipped/); // AC1 did not select AC10
     expect(ev.data.tests).toEqual([
       { suite: "unit", test: "test/mix.test.ts > inner > DEMO-1-AC1 outer > plain name", acs: ["DEMO-1-AC1"], status: "pass" },
       { suite: "unit", test: "test/mix.test.ts > DEMO-1-AC3 and DEMO-1-AC4 share one test", acs: ["DEMO-1-AC3", "DEMO-1-AC4"], status: "pass" },
@@ -332,6 +336,20 @@ describe("ARK-105-AC7", () => {
     expect(done().code).toBe(0);
     expect(state().repos[0]).toMatchObject({ head_sha: git(wt(), "rev-parse", "HEAD"), step: "implemented" });
     expect(ark("run", "replay", run(), "--check").code).toBe(0);
+  });
+
+  test("the guard uses the base .ark/repo.yml and a clean worktree, so neither a config edit nor an uncommitted edit gets past it", () => {
+    toBuilding();
+    const done = () => ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    const cfg = JSON.parse(slurp(join(wt(), ".ark/repo.yml")));
+    cfg.suites.unit.tests = ["nothing/**"]; // narrows the suite's test globs so stable.test.ts looks like a plain file
+    commitAll(wt(), { ".ark/repo.yml": JSON.stringify(cfg), "test/stable.test.ts": "// edited\n" });
+    expect(done().err).toContain("touches AC-tagged test files: test/stable.test.ts");
+    git(wt(), "reset", "-q", "--hard", "HEAD~1");
+
+    writeFileSync(join(wt(), "test/stable.test.ts"), "// uncommitted\n");
+    expect(done().err).toContain("uncommitted changes");
+    expect(events("implementer.completed")).toEqual([]);
   });
 
   test("implementer.completed must name a worktree of the run", () => {
