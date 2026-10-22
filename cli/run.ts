@@ -109,11 +109,14 @@ function readLedger(dir: string): LedgerEvent[] {
   });
 }
 
-function append(dir: string, events: LedgerEvent[], type: string, data: Record<string, unknown>): LedgerEvent[] {
-  const e = { seq: events.length + 1, ts: new Date().toISOString(), type, data };
+// Validates the event and the state it projects to before anything is written, so a failure leaves the ledger untouched.
+function append(dir: string, events: LedgerEvent[], type: string, data: Record<string, unknown>, ts = new Date().toISOString()): LedgerEvent[] {
+  const e = { seq: events.length + 1, ts, type, data };
   check("ledger", e, `event '${type}'`);
+  const next = [...events, e];
+  render(next);
   appendFileSync(join(dir, "ledger.ndjson"), `${JSON.stringify(e)}\n`);
-  return [...events, e];
+  return next;
 }
 
 const render = (events: LedgerEvent[]) => {
@@ -170,7 +173,7 @@ export function start(id: string): string {
   writeFileSync(join(dir, "ticket.json"), ticketJson);
   writeFileSync(join(dir, "ac.yml"), acYml);
   writeFileSync(join(dir, "ledger.ndjson"), "");
-  events = append(dir, events, "run.started", { ticket: id, playbook: "ticket", acs: acs.map((a) => a.id), artifacts });
+  events = append(dir, events, "run.started", { ticket: id, playbook: "ticket", acs: acs.map((a) => a.id), artifacts }, ts); // same ts as the folder name, so run_id matches it
   if (!acs.length) events = append(dir, events, "g0.opened", { reason: "ticket has no acceptance criteria" });
   return `started ${summary(commit(dir, events))}`;
 }

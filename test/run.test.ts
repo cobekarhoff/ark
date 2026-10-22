@@ -140,9 +140,19 @@ describe("ARK-103-AC3", () => {
     return id;
   };
 
+  // Hand-reviewed expectations, so the recorded state.json files are not just the code's own output echoed back.
+  // lifecycle ends closed; fix-round's first event is on the 21st UTC but later events are on the 22nd (run_id uses the first);
+  // no-ac opened G0 straight from run.started.
+  const expected: Record<string, object> = {
+    lifecycle: { run_id: "2026-10-21-ARK-901", state: "done", status: "done", next_action: null, ledger_seq: 9 },
+    "fix-round": { run_id: "2026-10-21-ARK-902", state: "building", status: "active", next_action: { kind: "continue_build", agent: "orchestrator" }, ledger_seq: 10 },
+    "no-ac": { run_id: "2026-10-21-ARK-903", state: "awaiting_g0", status: "waiting_human", next_action: { kind: "answer_g0", agent: "human" }, acs: {}, ledger_seq: 2 },
+  };
+
   for (const name of fixtures) {
     test(`fixture ledger '${name}' replays to the recorded state.json byte for byte`, () => {
       const id = place(name);
+      expect(JSON.parse(readFileSync(join(FIXTURES, name, "state.json"), "utf8"))).toMatchObject(expected[name]);
       const target = join(runsDir(), id, "state.json");
       expect(ark("run", "replay", id).code).toBe(0);
       expect(readFileSync(target)).toEqual(readFileSync(join(FIXTURES, name, "state.json")));
