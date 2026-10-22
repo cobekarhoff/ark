@@ -23,4 +23,6 @@ Undo with `bun unlink` and `omp plugin uninstall ark`.
 ark run start ARK-109                  # start the run, or show the existing one
 ark advance <run_id> <event> [--data json]   # legal transitions only (cli/transitions.ts)
 ark run replay <run_id> [--check]      # rebuild state.json from ledger.ndjson
+ark gate packet <run_id> <G0|G1|G2>   # build gates/<gate>.packet.md from run artifacts, print its sha256
+ark gate answer <run_id> <gate> <answer> --packet <sha256>   # G0 accept|edit|abort, G1 approve|change|abort, G2 approve|send_back|abort
 ```
