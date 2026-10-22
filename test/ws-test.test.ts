@@ -37,7 +37,7 @@ let bin: string; // PATH shim for docker
 let counter: string;
 
 const git = (cwd: string, ...args: string[]) => {
-  const r = Bun.spawnSync(["git", ...args], { cwd });
+  const r = Bun.spawnSync(["git", ...args], { cwd, env: process.env }); // explicit: spawnSync would otherwise ignore the identity set above
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.toString()}`);
   return r.stdout.toString().trim();
 };
