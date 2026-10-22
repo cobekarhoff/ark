@@ -7,9 +7,10 @@ import frontmatterSchema from "../schemas/ticket-frontmatter.schema.json";
 import ledgerSchema from "../schemas/ledger-event.schema.json";
 import stateSchema from "../schemas/state.schema.json";
 import ticketSchema from "../schemas/ticket.schema.json";
+import { git, loadRepo, touchedTaggedTests } from "./repo";
 import { nextActions, type State, transitions } from "./transitions";
 
-type LedgerEvent = { seq: number; ts: string; type: string; data: Record<string, unknown> };
+export type LedgerEvent = { seq: number; ts: string; type: string; data: Record<string, unknown> };
 type Ac = { id: string; text: string };
 type Frontmatter = { id: string; title: string; status: string; milestone?: string; traces?: string[]; depends_on?: string[]; acceptance_criteria?: Ac[] };
 type RunStarted = { ticket: string; playbook: string; acs: string[]; artifacts: Record<string, string> };
@@ -25,7 +26,7 @@ export interface RunState {
   round: number;
   next_action: (typeof nextActions)[State];
   gates: Record<string, never>;
-  repos: never[];
+  repos: { name: string; order: number; branch: string; base_sha: string; head_sha: string | null; step: string }[];
   acs: Record<string, string>;
   artifacts: Record<string, string>;
   sessions: never[];
@@ -47,19 +48,22 @@ const TICKET_ID = /^[A-Z][A-Z0-9]*-[0-9]+$/;
 const sha256 = (bytes: string | Uint8Array) => `sha256:${new Bun.CryptoHasher("sha256").update(bytes).digest("hex")}`;
 const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;
 
-function projectRoot(): string {
+// The directory holding the nearest ark.yml (the project's root repo).
+export function projectDir(): string {
   for (let d = process.cwd(); ; d = dirname(d)) {
-    const f = join(d, "ark.yml");
-    if (existsSync(f)) {
-      const name = (Bun.YAML.parse(readFileSync(f, "utf8")) as { project?: unknown } | null)?.project;
-      if (typeof name !== "string" || !name) throw new Error(`${f} has no 'project:' key`);
-      return join(process.env.ARK_HOME ?? join(homedir(), ".ark"), "projects", name);
-    }
+    if (existsSync(join(d, "ark.yml"))) return d;
     if (d === dirname(d)) throw new Error(`no ark.yml found from ${process.cwd()} upward`);
   }
 }
 
-function runDir(runId: string): string {
+function projectRoot(): string {
+  const f = join(projectDir(), "ark.yml");
+  const name = (Bun.YAML.parse(readFileSync(f, "utf8")) as { project?: unknown } | null)?.project;
+  if (typeof name !== "string" || !name) throw new Error(`${f} has no 'project:' key`);
+  return join(process.env.ARK_HOME ?? join(homedir(), ".ark"), "projects", name);
+}
+
+export function runDir(runId: string): string {
   if (!/^\d{4}-\d{2}-\d{2}-[A-Z][A-Z0-9]*-[0-9]+$/.test(runId)) throw new Error(`invalid run id '${runId}'`);
   const dir = join(projectRoot(), "runs", runId);
   if (!existsSync(dir)) throw new Error(`no such run '${runId}'`);
@@ -72,12 +76,20 @@ export function project(events: LedgerEvent[]): RunState {
   if (first?.type !== "run.started") throw new Error("ledger must begin with run.started");
   const { ticket, playbook, acs, artifacts } = first.data as RunStarted;
   let state: State = "intake";
+  const repos: RunState["repos"] = [];
   for (const [i, e] of events.entries()) {
     if (e.seq !== i + 1) throw new Error(`ledger seq ${e.seq} at position ${i + 1}`);
     if (i === 0) continue;
     const next = (transitions[state] as Record<string, State>)[e.type];
     if (!next) throw new Error(`ledger event ${e.seq} '${e.type}' is illegal in '${state}'`);
     state = next;
+    const d = e.data as { repo: string; branch: string; base_sha: string; head_sha: string };
+    if (e.type === "ws.created") repos.push({ name: d.repo, order: repos.length + 1, branch: d.branch, base_sha: d.base_sha, head_sha: null, step: "pending" });
+    if (e.type === "implementer.completed") {
+      const r = repos.find((r) => r.name === d.repo);
+      if (!r) throw new Error(`ledger event ${e.seq} names unknown repo '${d.repo}'`);
+      Object.assign(r, { head_sha: d.head_sha, step: "implemented" });
+    }
   }
   const next_action = nextActions[state];
   return {
@@ -91,7 +103,7 @@ export function project(events: LedgerEvent[]): RunState {
     round: 0,
     next_action,
     gates: {},
-    repos: [],
+    repos,
     acs: Object.fromEntries(acs.map((id) => [id, "pending"])),
     artifacts,
     sessions: [],
@@ -100,7 +112,7 @@ export function project(events: LedgerEvent[]): RunState {
   };
 }
 
-function readLedger(dir: string): LedgerEvent[] {
+export function readLedger(dir: string): LedgerEvent[] {
   const lines = readFileSync(join(dir, "ledger.ndjson"), "utf8").split("\n").filter(Boolean);
   return lines.map((l, i) => {
     const e = JSON.parse(l);
@@ -130,6 +142,20 @@ function commit(dir: string, events: LedgerEvent[]) {
   writeFileSync(join(dir, "state.json"), bytes);
   return state;
 }
+
+// The run folder and state, refusing (before anything is written) an event type that is illegal in the current state.
+export function open(runId: string, type: string) {
+  const dir = runDir(runId);
+  const state = project(readLedger(dir));
+  const legal = Object.keys(transitions[state.state]);
+  if (!legal.includes(type)) {
+    throw new Error(`illegal event '${type}' in state '${state.state}'; ${legal.length ? `legal: ${legal.join(", ")}` : "run is closed"}`);
+  }
+  return { dir, state };
+}
+
+export const record = (dir: string, type: string, data: Record<string, unknown>) =>
+  commit(dir, append(dir, readLedger(dir), type, data));
 
 function summary(s: RunState): string {
   const n = s.next_action;
@@ -179,19 +205,21 @@ export function start(id: string): string {
 }
 
 export function advance(runId: string, type: string, rawData?: string): string {
-  const dir = runDir(runId);
-  let data: unknown = {};
+  const { dir, state } = open(runId, type);
+  let data: Record<string, unknown> = {};
   if (rawData !== undefined) {
     try { data = JSON.parse(rawData); } catch { throw new Error("--data is not valid JSON"); }
     if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("--data must be a JSON object");
   }
-  const events = readLedger(dir);
-  const state = project(events).state;
-  const legal = Object.keys(transitions[state]);
-  if (!legal.includes(type)) {
-    throw new Error(`illegal event '${type}' in state '${state}'; ${legal.length ? `legal: ${legal.join(", ")}` : "run is closed"}`);
+  if (type === "implementer.completed") { // AC7: implementers never edit AC-tagged tests
+    const repo = state.repos.find((r) => r.name === data.repo);
+    if (!repo) throw new Error(`implementer.completed needs --data '{"repo":"<name>"}' naming a worktree of this run`);
+    const wt = join(dir, "ws", repo.name);
+    const hit = touchedTaggedTests(wt, repo.base_sha, loadRepo(wt));
+    if (hit.length) throw new Error(`implementer step touches AC-tagged test files: ${hit.join(", ")}`);
+    data = { repo: repo.name, head_sha: git(wt, "rev-parse", "HEAD") };
   }
-  return `advanced ${summary(commit(dir, append(dir, events, type, data as Record<string, unknown>)))}`;
+  return `advanced ${summary(record(dir, type, data))}`;
 }
 
 export function replay(runId: string, checkOnly: boolean): string {

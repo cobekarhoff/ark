@@ -24,3 +24,15 @@ ark run start ARK-109                  # start the run, or show the existing one
 ark advance <run_id> <event> [--data json]   # legal transitions only (cli/transitions.ts)
 ark run replay <run_id> [--check]      # rebuild state.json from ledger.ndjson
 ```
+
+## Worktrees and tests
+
+```sh
+ark ws create <run_id> [--repo path]   # worktree at <run>/ws/<repo> on ark/<ticket>-<slug>, push URL disabled
+ark test <run_id> --acs ID,.. [--repo name]              # run the AC-tagged tests in the worktree
+ark test <run_id> --acs ID,.. --red-green [--repo name]  # base source + head tests must fail, head must pass
+```
+
+`.ark/repo.yml` lists suites (see [docs/prd.md](docs/prd.md)): `format`, `level`, `run` (with a `{tags}` selector; `$ARK_OUT` is `<run>/artifacts/test/<attempt>/`), `junit` (glob in the last path segment), optional `env.up`/`env.down`, and optional `tests` globs (default `**/*.test.ts`, `test/**`) that decide which changed files red-green overlays and which files the implementer step may not touch when they carry an AC tag. Optional `commands.build` runs in the temporary base worktree before the red run (dependencies are not checked in). Every suite runs for every `ark test`; give each suite its own JUnit file name. Each attempt saves JUnit, `<suite>.{stdout,stderr}.log` and `fingerprint.json` (git SHA, bun version, OS, `docker compose images` when an env is declared), and appends a `test.result` or `test.red_green` event.
+
+`ark advance <run_id> implementer.completed --data '{"repo":"<name>"}'` refuses when base..HEAD of that worktree touches a test file carrying an AC ID, and otherwise records the head SHA.
