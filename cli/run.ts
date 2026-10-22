@@ -147,12 +147,15 @@ export function commit(dir: string, events: LedgerEvent[]) {
   return state;
 }
 
+const MR_EVENTS = ["mr.opened", "run.closed"]; // written only by `ark mr`
+
 // The run folder and state, refusing (before anything is written) an event type that is illegal in the current state.
 export function open(runId: string, type: string) {
   const dir = runDir(runId);
   const state = project(readLedger(dir));
   if (type.startsWith("gate.")) throw new Error(`'${type}' is written by 'ark gate', not advance (state '${state.state}')`);
-  const legal = Object.keys(transitions[state.state]).filter((e) => !e.startsWith("gate."));
+  if (MR_EVENTS.includes(type)) throw new Error(`'${type}' is written by 'ark mr', not advance (state '${state.state}')`);
+  const legal = Object.keys(transitions[state.state]).filter((e) => !e.startsWith("gate.") && !MR_EVENTS.includes(e));
   if (!legal.includes(type)) {
     const gate = state.state.match(/^awaiting_(g[012])$/)?.[1].toUpperCase();
     throw new Error(

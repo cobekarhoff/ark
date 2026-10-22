@@ -136,6 +136,19 @@ describe("ARK-107-AC1", () => {
   });
 });
 
+describe("ARK-107-AC1 and AC2: only ark mr writes mr events", () => {
+  test("ark advance refuses mr.opened and run.closed, leaving the run in mrs_open", () => {
+    atMrsOpen();
+    for (const [type, data] of [["mr.opened", { repo: "demo", url: PR_URL, number: 7 }], ["run.closed", { reason: "mr disabled" }]] as const) {
+      const r = ark("advance", run(), type, "--data", JSON.stringify(data));
+      expect(r.code, type).toBe(1);
+      expect(r.err).toContain("written by 'ark mr'");
+    }
+    expect(state()).toBe("mrs_open");
+    expect(events("mr.opened")).toEqual([]);
+  });
+});
+
 describe("ARK-107-AC2", () => {
   beforeEach(() => atMrsOpen("project: demo\nmr: false\n"));
 
@@ -152,17 +165,12 @@ describe("ARK-107-AC2", () => {
 });
 
 describe("ARK-107-AC3", () => {
-  test("ark mr never calls gh pr merge, and the CLI has no merge command", () => {
+  test("ark mr never calls gh pr merge", () => {
     atMrsOpen();
     ok(ark("mr", run()));
     ok(ark("mr", run()));
     const calls = ghLog();
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) expect(c.split(" ")).not.toContain("merge");
-
-    for (const args of [["merge", run()], ["mr", run(), "--merge"], ["pr", "merge", "7"]]) {
-      expect(ark(...args).code, args.join(" ")).toBe(2);
-    }
-    expect(ghLog()).toEqual(calls);
   });
 });

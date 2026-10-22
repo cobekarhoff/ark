@@ -49,7 +49,7 @@ export function mr(runId: string): string {
     const bodyFile = join(dir, "mr", `${repo.name}.md`);
     mkdirSync(join(dir, "mr"), { recursive: true });
     writeFileSync(bodyFile, body);
-    const [found] = JSON.parse(gh("pr", "list", "--repo", slug, "--head", repo.branch, "--json", "url,number") || "[]") as { url: string; number: number }[];
+    const [found] = JSON.parse(gh("pr", "list", "--repo", slug, "--head", repo.branch, "--state", "all", "--json", "url,number") || "[]") as { url: string; number: number }[];
     const prUrl = found?.url ?? gh("pr", "create", "--repo", slug, "--head", repo.branch, "--base", base, "--title", `${state.ticket}: ${ticket.title}`, "--body-file", bodyFile).split("\n").pop()!;
     const number = found?.number ?? Number(prUrl.match(/\/pull\/(\d+)/)?.[1]);
     if (!Number.isInteger(number)) throw new Error(`cannot read a PR number from '${prUrl}'`);
