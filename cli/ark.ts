@@ -1,9 +1,14 @@
 #!/usr/bin/env bun
+import { readFileSync } from "node:fs";
 import pkg from "../package.json" with { type: "json" };
 import { gateAnswer, gatePacket } from "./gate";
 import { mr } from "./mr";
+import { hookToolCall } from "./hook";
+import { preflight } from "./preflight";
+import { artifactRecord, findingsRecord, logRoute } from "./record";
 import { advance, replay, start } from "./run";
 import { runTest } from "./test";
+import { traceCheck } from "./trace";
 import { wsCreate } from "./ws";
 
 const usage = `ark ${pkg.version}
@@ -17,10 +22,17 @@ Commands:
   ws create <run_id> [--repo path]        Create the run's worktree for a repo (default: the project root), push disabled
   test <run_id> --acs ID,.. [--red-green] [--repo name]
                                           Run the AC-tagged tests in the worktree; --red-green proves them on base then head
+  trace-check <run_id>                    Build trace-matrix.md from ac.yml and the recorded test evidence; exit 1 listing why it fails
   gate packet <run_id> <G0|G1|G2>         Build the gate packet from run artifacts and print its sha256
   gate answer <run_id> <gate> <answer> --packet <sha256>
                                           Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort)
   mr <run_id>                             Push the run branches and open a GitHub PR per repo (ark.yml mr: false closes the run at the ready branch instead)
+  preflight                               Refuse (exit 1) unless .omp/config.yml puts validate and review-x on another provider than implement, and review-s on the same one
+  log route [<run_id>] <playbook> "<why>" Record route.chosen, the first event after run.started (no run_id: the active run)
+  findings record <run_id> <file.json>    Validate the judged findings and record them (judging state)
+  artifact record <run_id> <implementer|validator|reviewer> <file.json>
+                                          Schema-check an agent's output and keep it as artifacts/<agent>/<n>.json
+  hook tool_call                          Read {tool,input,cwd} JSON on stdin; exit 1 with the reason when the main session may not make the call
   --version                               Print the version
   --help                                  Print this help
 `;
@@ -44,6 +56,8 @@ if (args[0] === "--version") {
   const check = args.includes("--check");
   const rest = args.slice(2).filter((a) => a !== "--check");
   if (rest.length === 1) run = () => replay(rest[0], check);
+} else if (args[0] === "trace-check" && args.length === 2) {
+  run = () => traceCheck(args[1]);
 } else if (args[0] === "gate" && args[1] === "packet" && args.length === 4) {
   run = () => gatePacket(args[2], args[3]);
 } else if (args[0] === "gate" && args[1] === "answer") {
@@ -65,6 +79,16 @@ if (args[0] === "--version") {
   const rg = args.indexOf("--red-green");
   if (rg >= 0) args.splice(rg, 1);
   if (args.length === 2 && acs) run = () => runTest(args[1], acs.split(","), repo, rg >= 0);
+} else if (args[0] === "preflight" && args.length === 1) {
+  run = preflight;
+} else if (args[0] === "log" && args[1] === "route" && (args.length === 4 || args.length === 5)) {
+  run = () => logRoute(args.slice(2));
+} else if (args[0] === "findings" && args[1] === "record" && args.length === 4) {
+  run = () => findingsRecord(args[2], args[3]);
+} else if (args[0] === "artifact" && args[1] === "record" && args.length === 5) {
+  run = () => artifactRecord(args[2], args[3], args[4]);
+} else if (args[0] === "hook" && args[1] === "tool_call" && args.length === 2) {
+  run = () => (hookToolCall(readFileSync(0, "utf8")), "");
 }
 
 if (!run) {

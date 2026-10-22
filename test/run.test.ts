@@ -3,6 +3,7 @@ import Ajv2020 from "ajv/dist/2020";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OMP_CONFIG } from "./omp-config";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 const FIXTURES = join(import.meta.dir, "fixtures", "ledgers");
@@ -54,8 +55,16 @@ const go = (id: string, event: string, data?: string) => {
   const [gate, answer] = gated[event] ?? [];
   if (!gate) return ark("advance", id, event, ...(data ? ["--data", data] : []));
   if (answer) return ark("gate", "answer", id, gate, answer, "--packet", packetHash(id, gate));
-  const needs = { G1: "plan.md", G2: "trace-matrix.md" }[gate];
-  if (needs && !existsSync(join(runsDir(), id, needs))) writeFileSync(join(runsDir(), id, needs), `# ${needs}\n`);
+  if (gate === "G1" && !existsSync(join(runsDir(), id, "plan.md"))) writeFileSync(join(runsDir(), id, "plan.md"), "# plan.md\n");
+  if (gate === "G2") { // every AC is manual and signed, so the real trace-check passes
+    const dir = join(runsDir(), id);
+    const ids = (Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) as { id: string; text: string }[]).map((a) => a.id);
+    writeFileSync(join(dir, "ac.yml"), ids.map((i) => `- id: ${i}\n  text: t\n  level: manual\n`).join("") || "[]\n");
+    mkdirSync(join(dir, "manual"), { recursive: true });
+    for (const i of ids) writeFileSync(join(dir, "manual", `${i}.md`), "signed-by: Gate Tester\nat: 2026-10-21\n");
+    const t = ark("trace-check", id);
+    if (t.code !== 0) return t;
+  }
   return ark("gate", "packet", id, gate);
 };
 
@@ -65,6 +74,8 @@ beforeEach(() => {
   gitconfig = join(mkdtempSync(join(tmpdir(), "ark-git-")), "config");
   writeFileSync(gitconfig, "[user]\n\tname = Gate Tester\n\temail = gate@example.test\n");
   writeFileSync(join(proj, "ark.yml"), "project: demo\n");
+  mkdirSync(join(proj, ".omp"));
+  writeFileSync(join(proj, ".omp", "config.yml"), OMP_CONFIG);
   mkdirSync(join(proj, "sub", "deeper"), { recursive: true });
 });
 

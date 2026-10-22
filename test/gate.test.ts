@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
+import { OMP_CONFIG } from "./omp-config";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 
@@ -48,9 +49,17 @@ const toJudging = () => {
   advance("build.started");
   advance("build.completed");
 };
+// Both ACs manual and signed, so the real trace-check passes without a worktree.
+const signOff = () => {
+  const ids = ["ARK-950-AC1", "ARK-950-AC2"];
+  writeFileSync(runPath("ac.yml"), ids.map((i) => `- id: ${i}\n  text: t\n  level: manual\n`).join(""));
+  mkdirSync(runPath("manual"), { recursive: true });
+  for (const i of ids) writeFileSync(runPath("manual", `${i}.md`), "signed-by: Gate Tester\nat: 2026-10-21\n");
+  expect(ark("trace-check", id).code).toBe(0);
+};
 const atG2 = () => {
   toJudging();
-  writeFileSync(runPath("trace-matrix.md"), "| AC | test |\n| ARK-950-AC1 | t |\n");
+  signOff();
   return hashOf(packet("G2"));
 };
 const reach = { G0: atG0, G1: atG1, G2: atG2 };
@@ -66,6 +75,8 @@ beforeEach(() => {
   gitconfig = join(mkdtempSync(join(tmpdir(), "ark-git-")), "config");
   writeFileSync(gitconfig, "[user]\n\tname = Gate Tester\n\temail = gate@example.test\n");
   writeFileSync(join(proj, "ark.yml"), "project: demo\n");
+  mkdirSync(join(proj, ".omp"));
+  writeFileSync(join(proj, ".omp", "config.yml"), OMP_CONFIG);
 });
 
 describe("ARK-104-AC1", () => {
@@ -96,12 +107,12 @@ describe("ARK-104-AC1", () => {
 
   test("G2 packet holds the trace matrix and lists the test evidence files that exist, sorted", () => {
     toJudging();
-    writeFileSync(runPath("trace-matrix.md"), "matrix marker\n");
+    signOff();
     mkdirSync(runPath("artifacts", "logs"), { recursive: true });
     writeFileSync(runPath("artifacts", "logs", "red.txt"), "red");
     writeFileSync(runPath("artifacts", "junit.xml"), "<x/>");
     expect(packet("G2").code).toBe(0);
-    expect(read("gates/G2.packet.md")).toContain("matrix marker");
+    expect(read("gates/G2.packet.md")).toContain("| ARK-950-AC1 | manual | signed-by Gate Tester at 2026-10-21 |");
     expect(read("gates/G2.packet.md")).toContain("- artifacts/junit.xml\n- artifacts/logs/red.txt");
     expect(state().state).toBe("awaiting_g2");
   });

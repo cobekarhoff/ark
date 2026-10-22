@@ -30,5 +30,15 @@
       "verdict": "blocked",
       "notes": "Test stack would not start"
     }
+  ],
+  "test_audit": [
+    {
+      "test": "test/retry.test.ts > ABC-123-AC1 stops on 400",
+      "ac": "ABC-123-AC1",
+      "verdict": "pass",
+      "asserts_ac_behavior": true,
+      "mock_supplies_assertion": false,
+      "expected_from_subject": false
+    }
   ]
 }

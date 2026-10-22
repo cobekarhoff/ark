@@ -7,7 +7,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
 
 // One worktree per repo under <run>/ws/<repo>, on ark/<ticket>-<slug>, with pushing disabled.
 export function wsCreate(runId: string, repoPath?: string): string {
-  const { dir, state } = open(runId, "ws.created");
+  const { dir, state } = open(runId, "ws.created", "ws");
   const top = git(resolve(repoPath ?? projectDir()), "rev-parse", "--show-toplevel");
   const repo = basename(top);
   if (state.repos.some((r) => r.name === repo)) throw new Error(`run ${runId} already has a worktree for '${repo}'`);

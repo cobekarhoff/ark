@@ -1,8 +1,9 @@
 // Run lifecycle as data (PRD "Run state and resume"). Row: state -> { event -> next state }.
 // Gate events are `gate.packet` and `gate.answered`, written only by `ark gate`; their row key is `<type>:<gate>[:<answer>]` (see eventKey).
 export const transitions = {
-  intake: { "analysis.completed": "analyzed", "g0.opened": "awaiting_g0", "gate.packet:G0": "awaiting_g0", abort: "aborted" },
+  intake: { "route.chosen": "intake", "analysis.completed": "analyzed", "g0.opened": "awaiting_g0", "gate.packet:G0": "awaiting_g0", abort: "aborted" },
   awaiting_g0: {
+    "route.chosen": "awaiting_g0",
     "gate.packet:G0": "awaiting_g0",
     "gate.answered:G0:accept": "intake",
     "gate.answered:G0:edit": "intake",
@@ -23,14 +24,17 @@ export const transitions = {
     "implementer.completed": "building",
     "test.result": "building",
     "test.red_green": "building",
+    "trace.checked": "building",
     abort: "aborted",
   },
   judging: {
     "fix_round.started": "building",
+    "findings.recorded": "judging",
     "ge.opened": "awaiting_ge",
     "gate.packet:G2": "awaiting_g2",
     "test.result": "judging",
     "test.red_green": "judging",
+    "trace.checked": "judging",
     abort: "aborted",
   },
   awaiting_ge: { "ge.answered": "building", abort: "aborted" },
@@ -44,6 +48,18 @@ export const transitions = {
   done: {},
   aborted: {},
 } as const satisfies Record<string, Record<string, string>>;
+
+// Event types written by a dedicated command, which `ark advance` refuses: the owner is what makes the ledger evidence trustworthy.
+export const owner: Record<string, string> = {
+  "gate.packet": "gate",
+  "gate.answered": "gate",
+  "ws.created": "ws",
+  "test.result": "test",
+  "test.red_green": "test",
+  "trace.checked": "trace-check",
+  "mr.opened": "mr",
+  "run.closed": "mr",
+};
 
 export type State = keyof typeof transitions;
 

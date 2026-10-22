@@ -22,16 +22,20 @@ function sh(cmd: string, cwd: string, out: string, log: string): number {
 }
 
 // ponytail: the glob may only be in the last path segment of `junit`; widen if a runner needs more.
-function readJunit(s: Suite, out: string, ids: string[]): Case[] {
+// `tags`: every AC-shaped ID in the report, skipped tests included, so trace-check can spot a typo'd tag no selected AC reaches.
+function readJunit(s: Suite, out: string, ids: string[]): { cases: Case[]; tags: string[] } {
   const pat = s.junit.replace(/\$\{?ARK_OUT\}?/g, out);
   const files = [...new Bun.Glob(basename(pat)).scanSync({ cwd: dirname(pat), absolute: true })].sort();
-  return files.flatMap((f) => parsers[s.format].parse(readFileSync(f, "utf8")))
-    .filter((c) => c.status !== "skipped" && c.acs.some((a) => ids.includes(a))); // bun reports every unselected test as skipped
+  const all = files.flatMap((f) => parsers[s.format].parse(readFileSync(f, "utf8")));
+  return {
+    cases: all.filter((c) => c.status !== "skipped" && c.acs.some((a) => ids.includes(a))), // bun reports every unselected test as skipped
+    tags: all.flatMap((c) => c.acs),
+  };
 }
 
 function runOnce(name: string, s: Suite, cwd: string, out: string, ids: string[]) {
   const exit = sh(s.run.replaceAll("{tags}", parsers[s.format].tags(ids)), cwd, out, name);
-  return { exit, cases: readJunit(s, out, ids) };
+  return { exit, ...readJunit(s, out, ids) };
 }
 
 // env.up, run, (on head) rerun each failing test once, env.down: down always runs.
@@ -52,7 +56,7 @@ function runSuite(name: string, s: Suite, cwd: string, out: string, ids: string[
       ? new Map(rerun ? runOnce(name, s, cwd, join(out, "rerun"), [...new Set(failing.flatMap((c) => c.acs.filter((a) => ids.includes(a))))]).cases.map((c) => [key(c), c]) : [])
       : new Map<string, Case>();
     const cases: Tc[] = first.cases.map((c) => ({ ...c, suite: name, status: bad(c.status) && again.get(key(c))?.status === "pass" ? "flaky" : c.status }));
-    return { exit: first.exit, cases };
+    return { exit: first.exit, cases, tags: first.tags };
   } finally {
     if (s.env?.down) sh(s.env.down, cwd, out, `${name}.env-down`);
   }
@@ -61,15 +65,17 @@ function runSuite(name: string, s: Suite, cwd: string, out: string, ids: string[
 // ponytail: every suite runs for every AC set; add `collect`-based suite selection when env.up cost bites.
 function tagged(cfg: RepoConfig, cwd: string, out: string, ids: string[], rerun: boolean, fp: Fp) {
   const runs = Object.entries(cfg.suites).map(([name, s]) => ({ name, ...runSuite(name, s, cwd, out, ids, rerun, fp) }));
-  return { cases: runs.flatMap((r) => r.cases), exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])) };
+  return { cases: runs.flatMap((r) => r.cases), tags: runs.flatMap((r) => r.tags), exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])) };
 }
 
 function prepare(runId: string, type: string, ids: string[], repoName?: string) {
-  const { dir, state } = open(runId, type);
+  const { dir, state } = open(runId, type, "test");
   const unknown = ids.filter((id) => !(id in state.acs));
   if (!ids.length || unknown.length) throw new Error(`--acs must name ACs of this run${unknown.length ? `; unknown: ${unknown.join(", ")}` : ""}`);
   const repo = repoName ? state.repos.find((r) => r.name === repoName) : state.repos.length === 1 ? state.repos[0] : undefined;
   if (!repo) throw new Error(`pick a worktree with --repo <name> (have: ${state.repos.map((r) => r.name).join(", ") || "none, run ark ws create"})`);
+  const pending = state.repos.filter((r) => r.step !== "implemented").map((r) => r.name);
+  if (type === "test.red_green" && pending.length) throw new Error(`red-green runs only after every repo is implemented; no implementer.completed yet for: ${pending.join(", ")}`);
 
   const wt = join(dir, "ws", repo.name);
   if (git(wt, "status", "--porcelain", "--untracked-files=no")) throw new Error(`${wt} has uncommitted changes; commit them so the run proves a SHA`);
@@ -80,7 +86,8 @@ function prepare(runId: string, type: string, ids: string[], repoName?: string) 
   const out = join(root, String(attempt));
   mkdirSync(out);
   const fp: Fp = { git_sha: head, bun: Bun.version, os: `${process.platform} ${release()} ${arch()}`, images: [] };
-  return { dir, repo, wt, head, attempt, out, fp, cfg: loadRepo(wt), where: relative(dir, out) };
+  const unknownTags = (tags: string[]) => [...new Set(tags)].filter((t) => t.startsWith(`${state.ticket}-AC`) && !(t in state.acs)).sort();
+  return { dir, repo, wt, head, unknownTags, attempt, out, fp, cfg: loadRepo(wt), where: relative(dir, out) };
 }
 
 const finish = (ok: boolean, text: string) => {
@@ -93,7 +100,7 @@ export function runTest(runId: string, ids: string[], repoName?: string, redGree
 }
 
 function proveGreen(runId: string, ids: string[], repoName?: string): string {
-  const { dir, repo, wt, head, attempt, out, fp, cfg, where } = prepare(runId, "test.result", ids, repoName);
+  const { dir, repo, wt, head, attempt, out, fp, cfg, where, unknownTags } = prepare(runId, "test.result", ids, repoName);
   let res;
   try { res = tagged(cfg, wt, out, ids, true, fp); } finally { writeFileSync(join(out, "fingerprint.json"), `${JSON.stringify(fp, null, 2)}\n`); }
   const acs = Object.fromEntries(ids.map((id) => {
@@ -101,12 +108,12 @@ function proveGreen(runId: string, ids: string[], repoName?: string): string {
     return [id, !ts.length ? "missing" : ts.some((c) => bad(c.status)) ? "fail" : ts.some((c) => c.status === "flaky") ? "flaky" : "pass"];
   }));
   const tests = res.cases.map((c) => ({ suite: c.suite, test: label(c), acs: c.acs, status: c.status }));
-  record(dir, "test.result", { repo: repo.name, head_sha: head, attempt, out: where, acs, tests });
+  record(dir, "test.result", { repo: repo.name, head_sha: head, attempt, out: where, acs, tests, unknown_tags: unknownTags(res.tags) });
   return finish(Object.values(acs).every((v) => v === "pass"), `test attempt ${attempt} on ${head.slice(0, 12)}\n${Object.entries(acs).map(([id, v]) => `${id}: ${v}\n`).join("")}`);
 }
 
 function proveRedGreen(runId: string, ids: string[], repoName?: string): string {
-  const { dir, repo, wt, head, attempt, out, fp, cfg, where } = prepare(runId, "test.red_green", ids, repoName);
+  const { dir, repo, wt, head, attempt, out, fp, cfg, where, unknownTags } = prepare(runId, "test.red_green", ids, repoName);
   fp.base_sha = repo.base_sha;
   const overlay = changedTestFiles(wt, repo.base_sha, cfg);
   const tmp = mkdtempSync(join(tmpdir(), "ark-red-"));
@@ -136,6 +143,6 @@ function proveRedGreen(runId: string, ids: string[], repoName?: string): string 
     return [id, !ts.length ? "missing" : ts.some((t) => t.green !== "pass") ? "green-failed" : ts.some((t) => !bad(t.red)) ? "no-red" : "proven"];
   }));
   const ok = Object.values(acs).every((v) => v === "proven");
-  record(dir, "test.red_green", { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay, acs, tests, ok });
+  record(dir, "test.red_green", { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay, acs, tests, unknown_tags: unknownTags(green.tags), ok });
   return finish(ok, `red-green attempt ${attempt}: base ${repo.base_sha.slice(0, 12)} head ${head.slice(0, 12)}\n${Object.entries(acs).map(([id, v]) => `${id}: ${v}\n`).join("")}${tests.map((t) => `  red=${t.red} green=${t.green}  ${t.test}\n`).join("")}`);
 }

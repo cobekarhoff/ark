@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OMP_CONFIG } from "./omp-config";
 
 setDefaultTimeout(60_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
@@ -28,7 +29,6 @@ case "$1 $2" in
   *) echo "fake gh: unexpected $*" >&2; exit 1 ;;
 esac
 `;
-const MATRIX = "| AC | Level | Tests | Red (SHA, outcome) | Green (SHA, outcome) | Evidence | Status |\n| DEMO-1-AC1 | integration | t | r | g | artifacts/evidence.txt | pass |\n";
 const REPO_YML = JSON.stringify({ suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}"', junit: "$ARK_OUT/bun.xml" } } });
 const pr = (n: number, o: { owner?: string; base?: string; state?: string } = {}) =>
   ({ url: `https://github.com/acme/demo/pull/${n}`, number: n, state: o.state ?? "OPEN", baseRefName: o.base ?? "main", headRepositoryOwner: { login: o.owner ?? "acme" } });
@@ -83,6 +83,8 @@ function atG2Approved(arkYml = "project: demo\n") {
   mkdirSync(join(proj, ".ark"), { recursive: true });
   git(proj, "init", "-q", "-b", "main");
   writeFileSync(join(proj, "ark.yml"), arkYml);
+  mkdirSync(join(proj, ".omp"));
+  writeFileSync(join(proj, ".omp", "config.yml"), OMP_CONFIG);
   writeFileSync(join(proj, ".ark", "repo.yml"), REPO_YML);
   git(proj, "add", "-A");
   git(proj, "commit", "-qm", "base");
@@ -106,8 +108,11 @@ function atG2Approved(arkYml = "project: demo\n") {
   git(wt(), "commit", "-qm", "feature");
   ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'));
   ok(ark("advance", run(), "build.completed"));
-  writeFileSync(runFile("trace-matrix.md"), MATRIX);
-  mkdirSync(runFile("artifacts"));
+  writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: criterion one\n  level: manual\n");
+  mkdirSync(runFile("manual"));
+  writeFileSync(runFile("manual/DEMO-1-AC1.md"), "signed-by: MR Tester\nat: 2026-10-22\n");
+  ok(ark("trace-check", run()));
+  mkdirSync(runFile("artifacts"), { recursive: true });
   writeFileSync(runFile("artifacts/evidence.txt"), "evidence\n");
   ok(ark("gate", "answer", run(), "G2", "approve", "--packet", ark("gate", "packet", run(), "G2").out.trim()));
 }
@@ -126,7 +131,7 @@ describe("ARK-107-AC1", () => {
     expect(created).toMatchObject({ baseRefName: "main", headRepositoryOwner: { login: "acme" } });
     expect(creates()[0]).toContain("--title DEMO-1: Add the feature");
     const body = readFileSync(join(root, "gh.body"), "utf8");
-    expect(body).toContain(MATRIX.trim());
+    expect(body).toContain(readFileSync(runFile("trace-matrix.md"), "utf8").trim());
     expect(body).toContain("- artifacts/evidence.txt");
     expect(body).toContain("DEMO-1-AC1: criterion one");
 
@@ -277,7 +282,7 @@ describe("ARK-107-AC3", () => {
     for (const [type, data, owner] of [
       ["mr.opened", { repo: "demo", url: PR_URL, number: 7 }, "ark mr"],
       ["run.closed", { reason: "mr disabled" }, "ark mr"],
-      ["ws.created", { repo: "demo2", branch: "main", base_sha: "0".repeat(40) }, "ark ws create"],
+      ["ws.created", { repo: "demo2", branch: "main", base_sha: "0".repeat(40) }, "ark ws"],
     ] as const) {
       const r = ark("advance", run(), type, "--data", JSON.stringify(data));
       expect(r.code, type).toBe(1);
