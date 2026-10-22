@@ -8,7 +8,7 @@ import ledgerSchema from "../schemas/ledger-event.schema.json";
 import stateSchema from "../schemas/state.schema.json";
 import ticketSchema from "../schemas/ticket.schema.json";
 import { git, loadRepo, touchedTaggedTests } from "./repo";
-import { nextActions, type State, transitions } from "./transitions";
+import { eventKey, nextActions, type State, transitions } from "./transitions";
 
 export type LedgerEvent = { seq: number; ts: string; type: string; data: Record<string, unknown> };
 type Ac = { id: string; text: string };
@@ -25,7 +25,7 @@ export interface RunState {
   tier: null;
   round: number;
   next_action: (typeof nextActions)[State];
-  gates: Record<string, never>;
+  gates: Record<string, { answer: string; by: string; at: string; packet_sha256: string }>;
   repos: { name: string; order: number; branch: string; base_sha: string; head_sha: string | null; step: string }[];
   acs: Record<string, string>;
   artifacts: Record<string, string>;
@@ -45,7 +45,7 @@ const check = (schema: string, value: unknown, what: string) => {
 };
 
 const TICKET_ID = /^[A-Z][A-Z0-9]*-[0-9]+$/;
-const sha256 = (bytes: string | Uint8Array) => `sha256:${new Bun.CryptoHasher("sha256").update(bytes).digest("hex")}`;
+export const sha256 = (bytes: string | Uint8Array) => `sha256:${new Bun.CryptoHasher("sha256").update(bytes).digest("hex")}`;
 const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;
 
 // The directory holding the nearest ark.yml (the project's root repo).
@@ -62,7 +62,6 @@ function projectRoot(): string {
   if (typeof name !== "string" || !name) throw new Error(`${f} has no 'project:' key`);
   return join(process.env.ARK_HOME ?? join(homedir(), ".ark"), "projects", name);
 }
-
 export function runDir(runId: string): string {
   if (!/^\d{4}-\d{2}-\d{2}-[A-Z][A-Z0-9]*-[0-9]+$/.test(runId)) throw new Error(`invalid run id '${runId}'`);
   const dir = join(projectRoot(), "runs", runId);
@@ -77,10 +76,11 @@ export function project(events: LedgerEvent[]): RunState {
   const { ticket, playbook, acs, artifacts } = first.data as RunStarted;
   let state: State = "intake";
   const repos: RunState["repos"] = [];
+  const gates: RunState["gates"] = {};
   for (const [i, e] of events.entries()) {
     if (e.seq !== i + 1) throw new Error(`ledger seq ${e.seq} at position ${i + 1}`);
     if (i === 0) continue;
-    const next = (transitions[state] as Record<string, State>)[e.type];
+    const next = (transitions[state] as Record<string, State>)[eventKey(e)];
     if (!next) throw new Error(`ledger event ${e.seq} '${e.type}' is illegal in '${state}'`);
     state = next;
     const d = e.data as { repo: string; branch: string; base_sha: string; head_sha: string };
@@ -89,6 +89,10 @@ export function project(events: LedgerEvent[]): RunState {
       const r = repos.find((r) => r.name === d.repo);
       if (!r) throw new Error(`ledger event ${e.seq} names unknown repo '${d.repo}'`);
       Object.assign(r, { head_sha: d.head_sha, step: "implemented" });
+    }
+    if (e.type === "gate.answered") {
+      const { gate, answer, by, packet_sha256 } = e.data as Record<string, string>;
+      gates[gate] = { answer, by, at: e.ts, packet_sha256 };
     }
   }
   const next_action = nextActions[state];
@@ -102,7 +106,7 @@ export function project(events: LedgerEvent[]): RunState {
     tier: null,
     round: 0,
     next_action,
-    gates: {},
+    gates,
     repos,
     acs: Object.fromEntries(acs.map((id) => [id, "pending"])),
     artifacts,
@@ -122,7 +126,7 @@ export function readLedger(dir: string): LedgerEvent[] {
 }
 
 // Validates the event and the state it projects to before anything is written, so a failure leaves the ledger untouched.
-function append(dir: string, events: LedgerEvent[], type: string, data: Record<string, unknown>, ts = new Date().toISOString()): LedgerEvent[] {
+export function append(dir: string, events: LedgerEvent[], type: string, data: Record<string, unknown>, ts = new Date().toISOString()): LedgerEvent[] {
   const e = { seq: events.length + 1, ts, type, data };
   check("ledger", e, `event '${type}'`);
   const next = [...events, e];
@@ -137,7 +141,7 @@ const render = (events: LedgerEvent[]) => {
   return { state, bytes: json(state) };
 };
 
-function commit(dir: string, events: LedgerEvent[]) {
+export function commit(dir: string, events: LedgerEvent[]) {
   const { state, bytes } = render(events);
   writeFileSync(join(dir, "state.json"), bytes);
   return state;
@@ -147,9 +151,14 @@ function commit(dir: string, events: LedgerEvent[]) {
 export function open(runId: string, type: string) {
   const dir = runDir(runId);
   const state = project(readLedger(dir));
-  const legal = Object.keys(transitions[state.state]);
+  if (type.startsWith("gate.")) throw new Error(`'${type}' is written by 'ark gate', not advance (state '${state.state}')`);
+  const legal = Object.keys(transitions[state.state]).filter((e) => !e.startsWith("gate."));
   if (!legal.includes(type)) {
-    throw new Error(`illegal event '${type}' in state '${state.state}'; ${legal.length ? `legal: ${legal.join(", ")}` : "run is closed"}`);
+    const gate = state.state.match(/^awaiting_(g[012])$/)?.[1].toUpperCase();
+    throw new Error(
+      `illegal event '${type}' in state '${state.state}'; ${legal.length ? `legal: ${legal.join(", ")}` : "run is closed"}` +
+        (gate ? `; ${gate} has no approving answer yet (ark gate answer)` : ""),
+    );
   }
   return { dir, state };
 }
@@ -157,7 +166,7 @@ export function open(runId: string, type: string) {
 export const record = (dir: string, type: string, data: Record<string, unknown>) =>
   commit(dir, append(dir, readLedger(dir), type, data));
 
-function summary(s: RunState): string {
+export function summary(s: RunState): string {
   const n = s.next_action;
   return `${s.run_id}\nstate: ${s.state}\nstatus: ${s.status}\nnext_action: ${n ? `${n.kind} (${n.agent})` : "none"}\n`;
 }

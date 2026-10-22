@@ -119,7 +119,10 @@ function fixture(up = "echo up >> $ARK_OUT/order") {
   ark("run", "start", "DEMO-1");
 }
 const toApproved = () => {
-  for (const e of ["analysis.completed", "g1.opened", "g1.approved"]) expect(ark("advance", run(), e).code).toBe(0);
+  expect(ark("advance", run(), "analysis.completed").code).toBe(0);
+  writeFileSync(join(home, "projects", "demo", "runs", run(), "plan.md"), "# Plan\n");
+  const h = ark("gate", "packet", run(), "G1").out.trim();
+  expect(ark("gate", "answer", run(), "G1", "approve", "--packet", h).err).toBe("");
 };
 const toBuilding = (...extra: string[]) => {
   toApproved();

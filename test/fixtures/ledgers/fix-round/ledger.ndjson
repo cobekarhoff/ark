@@ -1,7 +1,7 @@
 {"seq":1,"ts":"2026-10-21T23:59:59.999Z","type":"run.started","data":{"ticket":"ARK-902","playbook":"ticket","acs":["ARK-902-AC1","ARK-902-AC2"],"artifacts":{"ticket.md":"sha256:0000000000000000000000000000000000000000000000000000000000000000","ticket.json":"sha256:0000000000000000000000000000000000000000000000000000000000000000","ac.yml":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}}}
 {"seq":2,"ts":"2026-10-22T00:00:01Z","type":"analysis.completed","data":{}}
-{"seq":3,"ts":"2026-10-22T00:01:00Z","type":"g1.opened","data":{}}
-{"seq":4,"ts":"2026-10-22T00:02:00Z","type":"g1.approved","data":{}}
+{"seq":3,"ts":"2026-10-22T00:01:00Z","type":"gate.packet","data":{"gate":"G1","path":"gates/G1.packet.md","packet_sha256":"sha256:1111111111111111111111111111111111111111111111111111111111111111"}}
+{"seq":4,"ts":"2026-10-22T00:02:00Z","type":"gate.answered","data":{"gate":"G1","answer":"approve","by":"Cobe Karhoff <cobe@example.com> (cobe)","os_user":"cobe","git_name":"Cobe Karhoff","git_email":"cobe@example.com","packet_sha256":"sha256:1111111111111111111111111111111111111111111111111111111111111111"}}
 {"seq":5,"ts":"2026-10-22T00:03:00Z","type":"build.started","data":{}}
 {"seq":6,"ts":"2026-10-22T00:30:00Z","type":"build.completed","data":{}}
 {"seq":7,"ts":"2026-10-22T00:31:00Z","type":"fix_round.started","data":{"findings":["F1"]}}

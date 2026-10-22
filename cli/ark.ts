@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import pkg from "../package.json" with { type: "json" };
+import { gateAnswer, gatePacket } from "./gate";
 import { advance, replay, start } from "./run";
 import { runTest } from "./test";
 import { wsCreate } from "./ws";
@@ -15,6 +16,9 @@ Commands:
   ws create <run_id> [--repo path]        Create the run's worktree for a repo (default: the project root), push disabled
   test <run_id> --acs ID,.. [--red-green] [--repo name]
                                           Run the AC-tagged tests in the worktree; --red-green proves them on base then head
+  gate packet <run_id> <G0|G1|G2>         Build the gate packet from run artifacts and print its sha256
+  gate answer <run_id> <gate> <answer> --packet <sha256>
+                                          Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort)
   --version                               Print the version
   --help                                  Print this help
 `;
@@ -38,6 +42,11 @@ if (args[0] === "--version") {
   const check = args.includes("--check");
   const rest = args.slice(2).filter((a) => a !== "--check");
   if (rest.length === 1) run = () => replay(rest[0], check);
+} else if (args[0] === "gate" && args[1] === "packet" && args.length === 4) {
+  run = () => gatePacket(args[2], args[3]);
+} else if (args[0] === "gate" && args[1] === "answer") {
+  const packet = flag("--packet");
+  if (packet && args.length === 5) run = () => gateAnswer(args[2], args[3], args[4], packet);
 } else if (args[0] === "advance") {
   const i = args.indexOf("--data");
   const data = i < 0 ? undefined : args[i + 1];

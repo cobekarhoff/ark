@@ -11,7 +11,14 @@
     "kind": "continue_build",
     "agent": "orchestrator"
   },
-  "gates": {},
+  "gates": {
+    "G1": {
+      "answer": "approve",
+      "by": "Cobe Karhoff <cobe@example.com> (cobe)",
+      "at": "2026-10-22T00:02:00Z",
+      "packet_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  },
   "repos": [],
   "acs": {
     "ARK-902-AC1": "pending",
