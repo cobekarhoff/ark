@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "run_id": "2026-10-21-ARK-903",
+  "ticket": "ARK-903",
+  "playbook": "ticket",
+  "state": "awaiting_g0",
+  "status": "waiting_human",
+  "tier": null,
+  "round": 0,
+  "next_action": {
+    "kind": "answer_g0",
+    "agent": "human"
+  },
+  "gates": {},
+  "repos": [],
+  "acs": {},
+  "artifacts": {
+    "ticket.md": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "ticket.json": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "ac.yml": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "sessions": [],
+  "lock": null,
+  "ledger_seq": 2
+}

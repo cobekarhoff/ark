@@ -24,6 +24,11 @@ describe("ARK-102-AC2", () => {
     expect(ark("--help").exitCode).toBe(0);
   });
 
+  test("--help lists the run and advance commands", () => {
+    const out = ark("--help").stdout.toString();
+    for (const c of ["run start", "run replay", "advance"]) expect(out).toContain(c);
+  });
+
   test("unknown command exits 2", () => {
     const r = ark("nope");
     expect(r.exitCode).toBe(2);

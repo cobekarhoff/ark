@@ -14,3 +14,13 @@ bun test            # runs the tests
 ```
 
 Undo with `bun unlink` and `omp plugin uninstall ark`.
+
+## Run core
+
+`ark` finds its project from the nearest `ark.yml` (`project:` key) above the current directory and keeps state under `$ARK_HOME` (default `~/.ark`): tickets in `projects/<project>/tickets/<ID>.md`, runs in `projects/<project>/runs/<date>-<ID>/`.
+
+```sh
+ark run start ARK-109                  # start the run, or show the existing one
+ark advance <run_id> <event> [--data json]   # legal transitions only (cli/transitions.ts)
+ark run replay <run_id> [--check]      # rebuild state.json from ledger.ndjson
+```
