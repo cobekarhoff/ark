@@ -1,20 +1,36 @@
 // Run lifecycle as data (PRD "Run state and resume"). Row: state -> { event -> next state }.
-// Gate answer semantics (approver, packet hash) arrive with ARK-104; here gate events are plain moves.
+// Gate events are `gate.packet` and `gate.answered`, written only by `ark gate`; their row key is `<type>:<gate>[:<answer>]` (see eventKey).
 export const transitions = {
-  intake: { "analysis.completed": "analyzed", "g0.opened": "awaiting_g0", abort: "aborted" },
-  awaiting_g0: { "g0.answered": "intake", abort: "aborted" },
-  analyzed: { "g1.opened": "awaiting_g1", abort: "aborted" },
-  awaiting_g1: { "g1.approved": "approved", "g1.changed": "analyzed", abort: "aborted" },
+  intake: { "analysis.completed": "analyzed", "g0.opened": "awaiting_g0", "gate.packet:G0": "awaiting_g0", abort: "aborted" },
+  awaiting_g0: {
+    "gate.packet:G0": "awaiting_g0",
+    "gate.answered:G0:accept": "intake",
+    "gate.answered:G0:edit": "intake",
+    "gate.answered:G0:abort": "aborted",
+    abort: "aborted",
+  },
+  analyzed: { "gate.packet:G1": "awaiting_g1", abort: "aborted" },
+  awaiting_g1: {
+    "gate.answered:G1:approve": "approved",
+    "gate.answered:G1:change": "analyzed",
+    "gate.answered:G1:abort": "aborted",
+    abort: "aborted",
+  },
   approved: { "build.started": "building", abort: "aborted" },
   building: { "build.completed": "judging", abort: "aborted" },
   judging: {
     "fix_round.started": "building",
     "ge.opened": "awaiting_ge",
-    "g2.opened": "awaiting_g2",
+    "gate.packet:G2": "awaiting_g2",
     abort: "aborted",
   },
   awaiting_ge: { "ge.answered": "building", abort: "aborted" },
-  awaiting_g2: { "g2.approved": "mrs_open", "g2.rejected": "building", abort: "aborted" },
+  awaiting_g2: {
+    "gate.answered:G2:approve": "mrs_open",
+    "gate.answered:G2:send_back": "building",
+    "gate.answered:G2:abort": "aborted",
+    abort: "aborted",
+  },
   mrs_open: { "run.completed": "done", abort: "aborted" },
   done: {},
   aborted: {},
@@ -37,3 +53,7 @@ export const nextActions: Record<State, { kind: string; agent: "orchestrator" | 
   done: null,
   aborted: null,
 };
+
+// The table key of a ledger event: gate events are keyed by gate and answer, everything else by type.
+export const eventKey = (e: { type: string; data: Record<string, unknown> }) =>
+  e.type.startsWith("gate.") ? `${e.type}:${e.data.gate}${e.type === "gate.answered" ? `:${e.data.answer}` : ""}` : e.type;

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -25,22 +25,45 @@ Body line two.
 
 let home: string;
 let proj: string; // cwd: a project directory holding ark.yml
+let gitconfig: string; // the approver's git identity, via GIT_CONFIG_GLOBAL
 const runsDir = () => join(home, "projects", "demo", "runs");
 const writeTicket = (id: string, acs: string[]) => {
   mkdirSync(join(home, "projects", "demo", "tickets"), { recursive: true });
   writeFileSync(join(home, "projects", "demo", "tickets", `${id}.md`), ticketMd(id, acs));
 };
 const ark = (...args: string[]) => {
-  const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env: { ...process.env, ARK_HOME: home } });
+  const r = Bun.spawnSync(["bun", CLI, ...args], {
+    cwd: proj,
+    env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1" },
+  });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const runId = (id: string) => readdirSync(runsDir()).find((r) => r.endsWith(`-${id}`))!;
 const runFile = (id: string, f: string) => readFileSync(join(runsDir(), runId(id), f), "utf8");
 const state = (id: string) => JSON.parse(runFile(id, "state.json"));
 
+// Gate events are written only by `ark gate`, so tests that walk the lifecycle drive them through it.
+const gated: Record<string, [gate: string, answer?: string]> = {
+  "g0.opened": ["G0"], "g0.answered": ["G0", "accept"],
+  "g1.opened": ["G1"], "g1.approved": ["G1", "approve"], "g1.changed": ["G1", "change"],
+  "g2.opened": ["G2"], "g2.approved": ["G2", "approve"], "g2.rejected": ["G2", "send_back"],
+};
+const packetHash = (id: string, gate: string) =>
+  `sha256:${new Bun.CryptoHasher("sha256").update(readFileSync(join(runsDir(), id, "gates", `${gate}.packet.md`))).digest("hex")}`;
+const go = (id: string, event: string, data?: string) => {
+  const [gate, answer] = gated[event] ?? [];
+  if (!gate) return ark("advance", id, event, ...(data ? ["--data", data] : []));
+  if (answer) return ark("gate", "answer", id, gate, answer, "--packet", packetHash(id, gate));
+  const needs = { G1: "plan.md", G2: "trace-matrix.md" }[gate];
+  if (needs && !existsSync(join(runsDir(), id, needs))) writeFileSync(join(runsDir(), id, needs), `# ${needs}\n`);
+  return ark("gate", "packet", id, gate);
+};
+
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "ark-home-"));
   proj = mkdtempSync(join(tmpdir(), "ark-proj-"));
+  gitconfig = join(mkdtempSync(join(tmpdir(), "ark-git-")), "config");
+  writeFileSync(gitconfig, "[user]\n\tname = Gate Tester\n\temail = gate@example.test\n");
   writeFileSync(join(proj, "ark.yml"), "project: demo\n");
   mkdirSync(join(proj, "sub", "deeper"), { recursive: true });
 });
@@ -144,7 +167,10 @@ describe("ARK-103-AC3", () => {
   // lifecycle ends closed; fix-round's first event is on the 21st UTC but later events are on the 22nd (run_id uses the first);
   // no-ac opened G0 straight from run.started.
   const expected: Record<string, object> = {
-    lifecycle: { run_id: "2026-10-21-ARK-901", state: "done", status: "done", next_action: null, ledger_seq: 9 },
+    lifecycle: {
+      run_id: "2026-10-21-ARK-901", state: "done", status: "done", next_action: null, ledger_seq: 9,
+      gates: { G1: { answer: "approve", at: "2026-10-21T20:41:07Z" }, G2: { answer: "approve", at: "2026-10-22T08:00:00Z" } },
+    },
     "fix-round": { run_id: "2026-10-21-ARK-902", state: "building", status: "active", next_action: { kind: "continue_build", agent: "orchestrator" }, ledger_seq: 10 },
     "no-ac": { run_id: "2026-10-21-ARK-903", state: "awaiting_g0", status: "waiting_human", next_action: { kind: "answer_g0", agent: "human" }, acs: {}, ledger_seq: 2 },
   };
@@ -175,7 +201,7 @@ describe("ARK-103-AC3", () => {
     ark("run", "start", "ARK-901");
     const id = runId("ARK-901");
     for (const e of ["analysis.completed", "g1.opened", "g1.approved", "build.started", "build.completed", "fix_round.started"]) {
-      expect(ark("advance", id, e, "--data", '{"n":1}').code).toBe(0);
+      expect(go(id, e, '{"n":1}').code).toBe(0);
     }
     const written = runFile("ARK-901", "state.json");
     expect(ark("run", "replay", id, "--check").code).toBe(0);
@@ -219,14 +245,15 @@ describe("ARK-103-AC4", () => {
 
   // Every file in the run folder with its bytes and mtime.
   const snapshot = (dir: string) =>
-    readdirSync(dir).sort().map((f) => [f, readFileSync(join(dir, f), "utf8"), statSync(join(dir, f)).mtimeMs]);
+    (readdirSync(dir, { recursive: true }) as string[]).sort().filter((f) => statSync(join(dir, f)).isFile())
+      .map((f) => [f, readFileSync(join(dir, f), "utf8"), statSync(join(dir, f)).mtimeMs]);
 
   for (const [name, acs, path, illegal] of cases) {
     test(`${name}: '${illegal}' is refused with a reason and changes no file`, async () => {
       writeTicket("ARK-901", acs);
       ark("run", "start", "ARK-901");
       const id = runId("ARK-901");
-      for (const e of path) expect(ark("advance", id, e).code, e).toBe(0);
+      for (const e of path) expect(go(id, e).code, e).toBe(0);
       expect(state("ARK-901").state).toBe(name);
 
       const before = snapshot(join(runsDir(), id));
@@ -247,7 +274,7 @@ describe("ARK-103-AC4", () => {
       writeTicket("ARK-901", acs);
       ark("run", "start", "ARK-901");
       const id = runId("ARK-901");
-      for (const e of path) ark("advance", id, e);
+      for (const e of path) go(id, e);
       const out = ark("advance", id, "abort", "--data", '{"reason":"stop"}');
       expect(out.code, out.err).toBe(0);
       expect(state("ARK-901")).toMatchObject({ state: "aborted", status: "aborted", next_action: null });
@@ -282,7 +309,7 @@ describe("ARK-103-AC4", () => {
       ["run.completed", "done"],
     ];
     for (const [event, to] of walk) {
-      expect(ark("advance", id, event).code, event).toBe(0);
+      expect(go(id, event).code, event).toBe(0);
       expect(state("ARK-901").state).toBe(to);
     }
   });
@@ -311,7 +338,7 @@ describe("ARK-103-AC5", () => {
     ];
     expect(state("ARK-901").next_action).toMatchObject({ kind: expect.any(String), agent: "orchestrator" });
     for (const [event, to, who] of steps) {
-      ark("advance", id, event);
+      go(id, event);
       const s = state("ARK-901");
       expect(s.state).toBe(to);
       if (who === null) expect(s.next_action).toBeNull();

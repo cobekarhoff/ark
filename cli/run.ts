@@ -7,7 +7,7 @@ import frontmatterSchema from "../schemas/ticket-frontmatter.schema.json";
 import ledgerSchema from "../schemas/ledger-event.schema.json";
 import stateSchema from "../schemas/state.schema.json";
 import ticketSchema from "../schemas/ticket.schema.json";
-import { nextActions, type State, transitions } from "./transitions";
+import { eventKey, nextActions, type State, transitions } from "./transitions";
 
 type LedgerEvent = { seq: number; ts: string; type: string; data: Record<string, unknown> };
 type Ac = { id: string; text: string };
@@ -24,7 +24,7 @@ export interface RunState {
   tier: null;
   round: number;
   next_action: (typeof nextActions)[State];
-  gates: Record<string, never>;
+  gates: Record<string, { answer: string; by: string; at: string; packet_sha256: string }>;
   repos: never[];
   acs: Record<string, string>;
   artifacts: Record<string, string>;
@@ -44,7 +44,7 @@ const check = (schema: string, value: unknown, what: string) => {
 };
 
 const TICKET_ID = /^[A-Z][A-Z0-9]*-[0-9]+$/;
-const sha256 = (bytes: string | Uint8Array) => `sha256:${new Bun.CryptoHasher("sha256").update(bytes).digest("hex")}`;
+export const sha256 = (bytes: string | Uint8Array) => `sha256:${new Bun.CryptoHasher("sha256").update(bytes).digest("hex")}`;
 const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;
 
 function projectRoot(): string {
@@ -59,7 +59,7 @@ function projectRoot(): string {
   }
 }
 
-function runDir(runId: string): string {
+export function runDir(runId: string): string {
   if (!/^\d{4}-\d{2}-\d{2}-[A-Z][A-Z0-9]*-[0-9]+$/.test(runId)) throw new Error(`invalid run id '${runId}'`);
   const dir = join(projectRoot(), "runs", runId);
   if (!existsSync(dir)) throw new Error(`no such run '${runId}'`);
@@ -72,12 +72,17 @@ export function project(events: LedgerEvent[]): RunState {
   if (first?.type !== "run.started") throw new Error("ledger must begin with run.started");
   const { ticket, playbook, acs, artifacts } = first.data as RunStarted;
   let state: State = "intake";
+  const gates: RunState["gates"] = {};
   for (const [i, e] of events.entries()) {
     if (e.seq !== i + 1) throw new Error(`ledger seq ${e.seq} at position ${i + 1}`);
     if (i === 0) continue;
-    const next = (transitions[state] as Record<string, State>)[e.type];
+    const next = (transitions[state] as Record<string, State>)[eventKey(e)];
     if (!next) throw new Error(`ledger event ${e.seq} '${e.type}' is illegal in '${state}'`);
     state = next;
+    if (e.type === "gate.answered") {
+      const { gate, answer, by, packet_sha256 } = e.data as Record<string, string>;
+      gates[gate] = { answer, by, at: e.ts, packet_sha256 };
+    }
   }
   const next_action = nextActions[state];
   return {
@@ -90,7 +95,7 @@ export function project(events: LedgerEvent[]): RunState {
     tier: null,
     round: 0,
     next_action,
-    gates: {},
+    gates,
     repos: [],
     acs: Object.fromEntries(acs.map((id) => [id, "pending"])),
     artifacts,
@@ -100,7 +105,7 @@ export function project(events: LedgerEvent[]): RunState {
   };
 }
 
-function readLedger(dir: string): LedgerEvent[] {
+export function readLedger(dir: string): LedgerEvent[] {
   const lines = readFileSync(join(dir, "ledger.ndjson"), "utf8").split("\n").filter(Boolean);
   return lines.map((l, i) => {
     const e = JSON.parse(l);
@@ -110,7 +115,7 @@ function readLedger(dir: string): LedgerEvent[] {
 }
 
 // Validates the event and the state it projects to before anything is written, so a failure leaves the ledger untouched.
-function append(dir: string, events: LedgerEvent[], type: string, data: Record<string, unknown>, ts = new Date().toISOString()): LedgerEvent[] {
+export function append(dir: string, events: LedgerEvent[], type: string, data: Record<string, unknown>, ts = new Date().toISOString()): LedgerEvent[] {
   const e = { seq: events.length + 1, ts, type, data };
   check("ledger", e, `event '${type}'`);
   const next = [...events, e];
@@ -125,13 +130,13 @@ const render = (events: LedgerEvent[]) => {
   return { state, bytes: json(state) };
 };
 
-function commit(dir: string, events: LedgerEvent[]) {
+export function commit(dir: string, events: LedgerEvent[]) {
   const { state, bytes } = render(events);
   writeFileSync(join(dir, "state.json"), bytes);
   return state;
 }
 
-function summary(s: RunState): string {
+export function summary(s: RunState): string {
   const n = s.next_action;
   return `${s.run_id}\nstate: ${s.state}\nstatus: ${s.status}\nnext_action: ${n ? `${n.kind} (${n.agent})` : "none"}\n`;
 }
@@ -187,9 +192,14 @@ export function advance(runId: string, type: string, rawData?: string): string {
   }
   const events = readLedger(dir);
   const state = project(events).state;
-  const legal = Object.keys(transitions[state]);
+  if (type.startsWith("gate.")) throw new Error(`'${type}' is written by 'ark gate', not advance (state '${state}')`);
+  const legal = Object.keys(transitions[state]).filter((e) => !e.startsWith("gate."));
   if (!legal.includes(type)) {
-    throw new Error(`illegal event '${type}' in state '${state}'; ${legal.length ? `legal: ${legal.join(", ")}` : "run is closed"}`);
+    const gate = state.match(/^awaiting_(g[012])$/)?.[1].toUpperCase();
+    throw new Error(
+      `illegal event '${type}' in state '${state}'; ${legal.length ? `legal: ${legal.join(", ")}` : "run is closed"}` +
+        (gate ? `; ${gate} has no approving answer yet (ark gate answer)` : ""),
+    );
   }
   return `advanced ${summary(commit(dir, append(dir, events, type, data as Record<string, unknown>)))}`;
 }

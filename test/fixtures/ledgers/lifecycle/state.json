@@ -8,7 +8,20 @@
   "tier": null,
   "round": 0,
   "next_action": null,
-  "gates": {},
+  "gates": {
+    "G1": {
+      "answer": "approve",
+      "by": "Cobe Karhoff <cobe@example.com> (cobe)",
+      "at": "2026-10-21T20:41:07Z",
+      "packet_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "G2": {
+      "answer": "approve",
+      "by": "Cobe Karhoff <cobe@example.com> (cobe)",
+      "at": "2026-10-22T08:00:00Z",
+      "packet_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  },
   "repos": [],
   "acs": {
     "ARK-901-AC1": "pending",
