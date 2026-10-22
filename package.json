@@ -1,0 +1,16 @@
+{
+  "name": "ark",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ark": "./cli/ark.ts"
+  },
+  "omp": {},
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1"
+  }
+}
