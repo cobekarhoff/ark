@@ -22,8 +22,13 @@ const FLAKY = bunTest(
   `test("DEMO-1-AC3 fails on its first run only", () => { appendFileSync(process.env.FLAKY_COUNTER!, "x"); expect(readFileSync(process.env.FLAKY_COUNTER!, "utf8").length).toBeGreaterThan(1); });`,
   `import { appendFileSync, readFileSync } from "node:fs";`,
 );
-// One test carrying two AC tags: selecting AC1 records AC4 as a tag on the test.
-const SHARED = bunTest(`test("DEMO-1-AC1 and DEMO-1-AC4 share one test", () => { expect(feature()).toBe("new"); });`, `import { feature } from "../src/feature";`);
+// One test carrying two AC tags; DEMO-1-AC9 is not an AC of the ticket.
+const TYPO = bunTest(`test("DEMO-1-AC9 typo tag", () => { expect(1).toBe(1); });`);
+const SHARED = bunTest(`test("DEMO-1-AC1 and DEMO-1-AC9 share one test", () => { expect(feature()).toBe("new"); });`, `import { feature } from "../src/feature";`);
+
+const REPO_YML = JSON.stringify({
+  suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml" } },
+});
 
 let home: string;
 let proj: string;
@@ -58,11 +63,27 @@ const events = (type: string) => slurp("ledger.ndjson").trim().split("\n").map((
 const wt = () => runFile("ws/demo");
 const matrix = () => slurp("trace-matrix.md");
 const row = (id: string) => matrix().split("\n").find((l) => l.startsWith(`| ${id} |`))!;
-const acYml = (...acs: [id: string, level?: string][]) =>
-  writeFileSync(runFile("ac.yml"), acs.map(([id, level]) => `- id: DEMO-1-${id}\n  text: t${level ? `\n  level: ${level}` : ""}\n`).join(""));
+const RUN_ACS = ["AC1", "AC2", "AC3", "AC4", "AC5", "AC10"];
 const sign = (id: string, body = "signed-by: Pat Reviewer\nat: 2026-10-21T10:00:00Z\n") => {
   mkdirSync(runFile("manual"), { recursive: true });
   writeFileSync(runFile(`manual/DEMO-1-${id}.md`), body);
+};
+const writeAcs = (acs: [id: string, level?: string][]) =>
+  writeFileSync(runFile("ac.yml"), acs.map(([id, level]) => `- id: DEMO-1-${id}\n  text: t${level ? `\n  level: ${level}` : ""}\n`).join(""));
+// ac.yml must list exactly the run's ACs, so the ones a test does not care about are signed manual ACs.
+const acYml = (...acs: [id: string, level?: string][]) => {
+  const rest = RUN_ACS.filter((id) => !acs.some(([a]) => a === id));
+  writeAcs([...acs, ...rest.map((id): [string, string] => [id, "manual"])]);
+  for (const id of rest) sign(id);
+};
+// Rewrites the ledger line of the newest event of `type` (the tests' way to present evidence the CLI itself would never record).
+const tamper = (type: string, edit: (data: Record<string, unknown>) => void) => {
+  const lines = slurp("ledger.ndjson").trim().split("\n");
+  const i = lines.findLastIndex((l) => JSON.parse(l).type === type);
+  const e = JSON.parse(lines[i]);
+  edit(e.data);
+  lines[i] = JSON.stringify(e);
+  writeFileSync(runFile("ledger.ndjson"), `${lines.join("\n")}\n`);
 };
 const trace = () => ark("trace-check", run());
 
@@ -71,7 +92,7 @@ id: DEMO-1
 title: "Add the feature"
 status: ready
 acceptance_criteria:
-${[1, 2, 3, 4, 5].map((n) => `  - id: DEMO-1-AC${n}\n    text: "criterion ${n}"`).join("\n")}
+${[1, 2, 3, 4, 5, 10].map((n) => `  - id: DEMO-1-AC${n}\n    text: "criterion ${n}"`).join("\n")}
 ---
 Body.
 `;
@@ -85,11 +106,10 @@ function fixture() {
   const bare = join(root, "remote.git");
   mkdirSync(proj);
   git(proj, "init", "-q", "-b", "main");
-  const suite = { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml" };
   commitAll(proj, {
     "ark.yml": "project: demo\n",
     ".gitignore": "node_modules\n",
-    ".ark/repo.yml": JSON.stringify({ suites: { unit: suite } }),
+    ".ark/repo.yml": REPO_YML,
     "src/feature.ts": `export const feature = () => "old";\n`,
     "test/stable.test.ts": bunTest(`test("DEMO-1-AC2 stays green", () => { expect(typeof feature()).toBe("string"); });`, `import { feature } from "../src/feature";`),
   });
@@ -118,8 +138,17 @@ const toJudging = () => {
 
 beforeEach(fixture);
 
+// A second repo with a suite but no AC tags, added to the run as worktree 'other'.
+const addOtherRepo = () => {
+  const other = join(dirname(proj), "other");
+  mkdirSync(other);
+  git(other, "init", "-q", "-b", "main");
+  commitAll(other, { ".ark/repo.yml": REPO_YML, "test/untagged.test.ts": bunTest(`test("nothing tagged here", () => { expect(1).toBe(1); });`) });
+  return other;
+};
+
 describe("ARK-106-AC1", () => {
-  test("writes trace-matrix.md from ac.yml, the red-green and test evidence, and the manual record, rows sorted by AC ID", () => {
+  test("writes trace-matrix.md from ac.yml, the red-green and test evidence, and the manual record, rows sorted by AC number", () => {
     toBuilding();
     commitAll(wt(), HEAD_FILES);
     ok(ark("test", run(), "--acs", "DEMO-1-AC1,DEMO-1-AC4", "--red-green"));
@@ -131,11 +160,10 @@ describe("ARK-106-AC1", () => {
     expect(r.code).toBe(0);
     const [rg] = events("test.red_green");
     const [base, head] = [rg.data.base_sha.slice(0, 12), rg.data.head_sha.slice(0, 12)];
-    expect(matrix().split("\n").slice(4, 7)).toEqual([
-      `| DEMO-1-AC1 | e2e | test/feature.test.ts > DEMO-1-AC1 new feature | ${base} failure | ${head} pass | artifacts/test/1 | pass |`,
-      "| DEMO-1-AC2 | manual | signed-by Pat Reviewer at 2026-10-21T10:00:00Z | - | - | manual/DEMO-1-AC2.md | pass |",
-      `| DEMO-1-AC4 | integration | test/added.test.ts > DEMO-1-AC4 added module answers | ${base} error | ${head} pass | artifacts/test/1 | pass |`,
-    ]);
+    expect(row("DEMO-1-AC1")).toBe(`| DEMO-1-AC1 | e2e | test/feature.test.ts > DEMO-1-AC1 new feature | ${base} failure | ${head} pass | artifacts/test/1 | pass |`);
+    expect(row("DEMO-1-AC2")).toBe("| DEMO-1-AC2 | manual | signed-by Pat Reviewer at 2026-10-21T10:00:00Z | - | - | manual/DEMO-1-AC2.md | pass |");
+    expect(row("DEMO-1-AC4")).toBe(`| DEMO-1-AC4 | integration | test/added.test.ts > DEMO-1-AC4 added module answers | ${base} error | ${head} pass | artifacts/test/1 | pass |`);
+    expect(matrix().split("\n").slice(4, -1).map((l) => l.split(" | ")[0])).toEqual(["| DEMO-1-AC1", "| DEMO-1-AC2", "| DEMO-1-AC3", "| DEMO-1-AC4", "| DEMO-1-AC5", "| DEMO-1-AC10"]);
     expect(matrix().split("\n")[0]).toContain(run());
     expect(events("trace.checked")[0].data).toEqual({
       passed: true,
@@ -143,17 +171,6 @@ describe("ARK-106-AC1", () => {
       matrix_sha256: `sha256:${new Bun.CryptoHasher("sha256").update(readFileSync(runFile("trace-matrix.md"))).digest("hex")}`,
     });
     expect(ark("run", "replay", run(), "--check").code).toBe(0);
-  });
-});
-
-describe("ARK-106-AC1 ordering", () => {
-  test("rows sort by AC number, not text: AC2 comes before AC10", () => {
-    toBuilding();
-    acYml(["AC10", "manual"], ["AC2", "manual"]);
-    sign("AC10");
-    sign("AC2");
-    ok(trace());
-    expect(matrix().split("\n").slice(4, 6).map((l) => l.split(" | ")[0])).toEqual(["| DEMO-1-AC2", "| DEMO-1-AC10"]);
   });
 });
 
@@ -168,16 +185,25 @@ describe("ARK-106-AC2", () => {
     expect(events("trace.checked")[0].data).toMatchObject({ passed: false, failures: ["DEMO-1-AC1: no passing tagged test recorded"] });
   });
 
-  test("a test that names an AC missing from ac.yml fails as an unknown tag, even though its own AC is proven", () => {
+  test("a test tagged with an AC that is not the ticket's fails as an unknown tag, whether it also carries a real AC or only the typo", () => {
     toBuilding();
-    commitAll(wt(), { "src/feature.ts": HEAD_FILES["src/feature.ts"], "test/shared.test.ts": SHARED });
+    commitAll(wt(), { "src/feature.ts": HEAD_FILES["src/feature.ts"], "test/shared.test.ts": SHARED, "test/typo.test.ts": TYPO });
     ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green"));
     acYml(["AC1"]);
     const r = trace();
     expect(r.code).toBe(1);
-    expect(r.err).toContain("DEMO-1-AC4: unknown AC, not in ac.yml (tagged on: test/shared.test.ts > DEMO-1-AC1 and DEMO-1-AC4 share one test)");
+    expect(events("trace.checked")[0].data.failures).toEqual(["DEMO-1-AC9: unknown AC tag, not an AC of this run"]);
     expect(row("DEMO-1-AC1")).toEndWith("| pass |");
-    expect(row("DEMO-1-AC4")).toEndWith("| fail |");
+    expect(row("DEMO-1-AC9")).toEndWith("| fail |");
+  });
+
+  test("tags of other tickets' ACs are not unknown", () => {
+    toBuilding();
+    commitAll(wt(), { "src/feature.ts": HEAD_FILES["src/feature.ts"], "test/other.test.ts": bunTest(`test("OTHER-7-AC1 and DEMO-1-AC1 are tagged together", () => { expect(1).toBe(1); });`) });
+    ok(ark("test", run(), "--acs", "DEMO-1-AC1"));
+    acYml(["AC1", "manual"]);
+    sign("AC1");
+    expect(trace().code).toBe(0);
   });
 
   test("new-behavior ACs need red-green proof: a green-only run fails, and so does a test that already passed on base", () => {
@@ -206,6 +232,33 @@ describe("ARK-106-AC2", () => {
     expect(row("DEMO-1-AC3")).toContain("flaky");
   });
 
+  test("the newest evidence for an AC wins, whether it is a result or a red-green run", () => {
+    toBuilding();
+    commitAll(wt(), { "test/flaky.test.ts": FLAKY });
+    acYml(["AC3", "integration"]);
+    writeFileSync(counter, "");
+    expect(ark("test", run(), "--acs", "DEMO-1-AC3").code).toBe(1); // flaky
+    writeFileSync(counter, ""); // red sees one run (fails on its assertion), green sees two (passes)
+    ok(ark("test", run(), "--acs", "DEMO-1-AC3", "--red-green"));
+    expect(trace().code).toBe(0); // the red-green run is newer than the flaky result
+
+    writeFileSync(counter, "");
+    expect(ark("test", run(), "--acs", "DEMO-1-AC3").code).toBe(1); // flaky again, now newer than the proof
+    expect(trace().err).toContain("DEMO-1-AC3: no passing tagged test; demo: flaky");
+  });
+
+  test("a repo with no tagged test for an AC does not fail an AC that another repo proves", () => {
+    toBuilding();
+    commitAll(wt(), HEAD_FILES);
+    const other = addOtherRepo();
+    ok(ark("ws", "create", run(), "--repo", other));
+    ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green", "--repo", "demo"));
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--repo", "other").code).toBe(1); // missing there
+    expect(events("test.result").at(-1).data).toMatchObject({ repo: "other", acs: { "DEMO-1-AC1": "missing" } });
+    acYml(["AC1"]);
+    expect(trace().err).toBe("");
+  });
+
   test("a manual AC needs a record with both signed-by: and at: lines", () => {
     toBuilding();
     acYml(["AC2", "manual"]);
@@ -218,6 +271,27 @@ describe("ARK-106-AC2", () => {
     expect(trace().code).toBe(1);
     sign("AC2");
     expect(trace().code).toBe(0);
+  });
+
+  test("ac.yml must be schema-valid and list exactly the run's ACs", () => {
+    toBuilding();
+    acYml();
+    ok(trace());
+    writeAcs(RUN_ACS.map((id) => [id, "E2E"])); // level outside the enum
+    let r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("level");
+
+    writeFileSync(runFile("ac.yml"), "[]\n"); // every AC dropped
+    r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("DEMO-1-AC1: in the run but missing from ac.yml");
+
+    acYml();
+    writeFileSync(runFile("ac.yml"), `${slurp("ac.yml")}- id: DEMO-1-AC7\n  text: t\n  level: manual\n`);
+    r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("DEMO-1-AC7: in ac.yml but not an AC of this run");
   });
 });
 
@@ -250,12 +324,12 @@ describe("ARK-106-AC3", () => {
 });
 
 describe("ARK-106-AC4", () => {
-  test("G2 packet is refused with no trace-check, with a failed one, and after the matrix is edited or newer tests ran; a passing one builds it", () => {
+  test("G2 packet recomputes the check: refused while it fails, when the matrix is stale or edited, or when any input changed after a pass", () => {
     toJudging();
     acYml(["AC2", "manual"]);
     let r = ark("gate", "packet", run(), "G2");
     expect(r.code).toBe(1);
-    expect(r.err).toContain("ark trace-check");
+    expect(r.err).toContain("DEMO-1-AC2: manual AC has no signed record"); // no trace-check was ever run
 
     expect(trace().code).toBe(1); // unsigned
     r = ark("gate", "packet", run(), "G2");
@@ -264,19 +338,76 @@ describe("ARK-106-AC4", () => {
     expect(() => readFileSync(runFile("gates/G2.packet.md"))).toThrow();
 
     sign("AC2");
+    expect(ark("gate", "packet", run(), "G2").err).toContain("out of date"); // passes now, but the matrix on disk is the failing one
     ok(trace());
-    writeFileSync(runFile("trace-matrix.md"), `${matrix()}| tampered |\n`);
-    expect(ark("gate", "packet", run(), "G2").err).toContain("changed since trace-check");
+    const good = matrix();
+    writeFileSync(runFile("trace-matrix.md"), `${good}| tampered |\n`);
+    expect(ark("gate", "packet", run(), "G2").err).toContain("out of date");
+    writeFileSync(runFile("trace-matrix.md"), good);
 
-    ok(trace());
-    ok(ark("test", run(), "--acs", "DEMO-1-AC2")); // newer evidence than the check
-    expect(ark("gate", "packet", run(), "G2").err).toContain("tests ran after the last trace-check");
+    writeFileSync(runFile("manual/DEMO-1-AC2.md"), "nothing\n"); // a passing check's input is withdrawn afterwards
+    expect(ark("gate", "packet", run(), "G2").err).toContain("DEMO-1-AC2: manual AC has no signed record");
+    sign("AC2");
+    writeFileSync(runFile("ac.yml"), "[]\n"); // and ac.yml emptied
+    expect(ark("gate", "packet", run(), "G2").err).toContain("in the run but missing from ac.yml");
+    acYml(["AC2", "manual"]);
+    sign("AC2");
 
-    ok(trace());
     r = ark("gate", "packet", run(), "G2");
     expect(r.err).toBe("");
     expect(r.out.trim()).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(slurp("gates/G2.packet.md")).toContain("| DEMO-1-AC2 | manual |");
     expect(JSON.parse(slurp("state.json")).state).toBe("awaiting_g2");
+  });
+
+  test("evidence counts only at the current HEAD: a proof from an older commit no longer passes once the code moved on", () => {
+    toBuilding();
+    commitAll(wt(), HEAD_FILES);
+    ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green"));
+    acYml(["AC1"]);
+    expect(trace().code).toBe(0);
+    commitAll(wt(), { "src/feature.ts": `export const feature = () => "broken";\n` }); // AC1's test now fails, but nobody reran it
+    const r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("DEMO-1-AC1: no passing tagged test at the current HEAD");
+    commitAll(wt(), { "src/feature.ts": HEAD_FILES["src/feature.ts"] });
+    ok(ark("test", run(), "--acs", "DEMO-1-AC1")); // green again at the newest head, but red was proven on an older one
+    expect(trace().err).toMatch(/DEMO-1-AC1: demo: no red-green proof at \w{12}/);
+  });
+
+  test("evidence from a repo that is not in the run, or red proven on a base other than the run's, does not count", () => {
+    toBuilding();
+    commitAll(wt(), HEAD_FILES);
+    ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green"));
+    acYml(["AC1"]);
+    ok(trace());
+    tamper("test.red_green", (d) => { d.base_sha = "f".repeat(40); });
+    expect(trace().err).toContain("DEMO-1-AC1: no passing tagged test at the current HEAD");
+    tamper("test.red_green", (d) => { d.base_sha = events("ws.created")[0].data.base_sha; d.repo = "ghost"; });
+    expect(trace().err).toContain("DEMO-1-AC1: no passing tagged test at the current HEAD");
+  });
+});
+
+describe("ARK-106 event ownership", () => {
+  test("advance refuses events a dedicated command owns, so a trace receipt or test evidence cannot be forged, and G2 stays closed", () => {
+    toJudging();
+    acYml(["AC1"]); // automated AC with no evidence
+    const forged: [event: string, data: object, owner: string][] = [
+      ["trace.checked", { passed: true, failures: [], matrix_sha256: `sha256:${"0".repeat(64)}` }, "trace-check"],
+      ["test.red_green", { repo: "demo", ok: true }, "test"],
+      ["test.result", { repo: "demo" }, "test"],
+      ["ws.created", { repo: "x", branch: "b", base_sha: "a" }, "ws"],
+      ["gate.answered", { gate: "G2", answer: "approve" }, "gate"],
+      ["gate.packet", { gate: "G2" }, "gate"],
+    ];
+    const ledgerBefore = slurp("ledger.ndjson");
+    for (const [event, data, owner] of forged) {
+      const r = ark("advance", run(), event, "--data", JSON.stringify(data));
+      expect(r.code, event).toBe(1);
+      expect(r.err, event).toContain(`written by 'ark ${owner}'`);
+    }
+    expect(slurp("ledger.ndjson")).toBe(ledgerBefore);
+    writeFileSync(runFile("trace-matrix.md"), "| AC | Level |\n");
+    expect(ark("gate", "packet", run(), "G2").code).toBe(1);
   });
 });

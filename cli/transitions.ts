@@ -47,6 +47,16 @@ export const transitions = {
   aborted: {},
 } as const satisfies Record<string, Record<string, string>>;
 
+// Event types written by a dedicated command, which `ark advance` refuses: the owner is what makes the ledger evidence trustworthy.
+export const owner: Record<string, string> = {
+  "gate.packet": "gate",
+  "gate.answered": "gate",
+  "ws.created": "ws",
+  "test.result": "test",
+  "test.red_green": "test",
+  "trace.checked": "trace-check",
+};
+
 export type State = keyof typeof transitions;
 
 // PRD state table: next action and who acts. Closed states have none.
