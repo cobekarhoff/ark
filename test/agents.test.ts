@@ -233,6 +233,16 @@ describe("ARK-108-AC6", () => {
     expect(call("write", { path: inRun("sub/../state.json") }).code).toBe(1);
   });
 
+  test("worktrees under ws/ are blocked, and an edit or write that names no checkable path fails closed", () => {
+    ark(["run", "start", "DEMO-7"]);
+    expect(call("write", { path: inRun("ws/demo/src/a.ts") }).err).toContain("worktrees belong to the implementer");
+    expect(call("edit", { paths: [inRun("plan.md"), inRun("ws")] }).code).toBe(1);
+    expect(call("write", { path: inRun("wsx.md") }).code).toBe(0);
+    expect(call("edit", { input: "unparsable patch" }).err).toContain("names no path");
+    expect(call("write", {}).code).toBe(1);
+    expect(call("write", { path: "" }).code).toBe(1);
+  });
+
   test("bash redirects onto state.json or ledger.ndjson are blocked; reads and ark calls are not", () => {
     ark(["run", "start", "DEMO-7"]);
     expect(call("bash", { command: `echo x >> ${inRun("ledger.ndjson")}` }).code).toBe(1);

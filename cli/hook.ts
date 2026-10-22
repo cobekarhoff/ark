@@ -24,6 +24,7 @@ export function hookToolCall(raw: string): void {
   }
   if (!["edit", "write", "ast_edit"].includes(tool)) return;
   const paths = [input.path, ...(Array.isArray(input.paths) ? input.paths : [])].filter((p): p is string => typeof p === "string");
+  if (!paths.length) throw new Error(`blocked: ${tool} call names no path the hook can check`);
   const runReal = real(run);
   for (const p of paths) {
     if (p === "xd://ast_edit") throw new Error("blocked: the orchestrator does not rewrite code; ast_edit is for subagents");
@@ -31,5 +32,6 @@ export function hookToolCall(raw: string): void {
     const rel = relative(runReal, real(resolve(cwd, p)));
     if (rel === ".." || rel.startsWith("../")) throw new Error(`blocked: ${tool} outside the active run folder ${run} (${p}); product code goes to the implementer`);
     if (rel === "state.json" || rel === "ledger.ndjson") throw new Error(`blocked: ${rel} is written only by the ark CLI`);
+    if (rel === "ws" || rel.startsWith("ws/")) throw new Error(`blocked: ${tool} in ${rel}; the worktrees belong to the implementer and validator`);
   }
 }
