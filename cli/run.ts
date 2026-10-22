@@ -95,7 +95,9 @@ export function project(events: LedgerEvent[]): RunState {
       gates[gate] = { answer, by, at: e.ts, packet_sha256 };
     }
   }
-  const next_action = nextActions[state];
+  // In mrs_open the orchestrator has to open the MRs (ark mr) until every repo has one; only then does a human merge.
+  const mrsPending = state === "mrs_open" && !repos.every((r) => events.some((e) => e.type === "mr.opened" && e.data.repo === r.name));
+  const next_action = mrsPending ? { kind: "open_mrs", agent: "orchestrator" as const } : nextActions[state];
   return {
     schema: 1,
     run_id: `${first.ts.slice(0, 10)}-${ticket}`,
@@ -147,15 +149,22 @@ export function commit(dir: string, events: LedgerEvent[]) {
   return state;
 }
 
-const MR_EVENTS = ["mr.opened", "run.closed"]; // written only by `ark mr`
+// Events whose facts only a CLI command can establish; advance refuses them.
+const CLI_OWNED: Record<string, string> = { "mr.opened": "ark mr", "run.closed": "ark mr", "ws.created": "ark ws create" };
+
+// ark.yml `mr:` (default true); false ends the run at G2 approval with ready branches.
+export function mrEnabled(): boolean {
+  const mr = (Bun.YAML.parse(readFileSync(join(projectDir(), "ark.yml"), "utf8")) as { mr?: unknown } | null)?.mr;
+  if (mr !== undefined && typeof mr !== "boolean") throw new Error("ark.yml: mr must be true or false");
+  return mr !== false;
+}
 
 // The run folder and state, refusing (before anything is written) an event type that is illegal in the current state.
 export function open(runId: string, type: string) {
   const dir = runDir(runId);
   const state = project(readLedger(dir));
   if (type.startsWith("gate.")) throw new Error(`'${type}' is written by 'ark gate', not advance (state '${state.state}')`);
-  if (MR_EVENTS.includes(type)) throw new Error(`'${type}' is written by 'ark mr', not advance (state '${state.state}')`);
-  const legal = Object.keys(transitions[state.state]).filter((e) => !e.startsWith("gate.") && !MR_EVENTS.includes(e));
+  const legal = Object.keys(transitions[state.state]).filter((e) => !e.startsWith("gate.") && (e === type || !(e in CLI_OWNED)));
   if (!legal.includes(type)) {
     const gate = state.state.match(/^awaiting_(g[012])$/)?.[1].toUpperCase();
     throw new Error(
@@ -217,6 +226,7 @@ export function start(id: string): string {
 }
 
 export function advance(runId: string, type: string, rawData?: string): string {
+  if (type in CLI_OWNED) throw new Error(`'${type}' is written by '${CLI_OWNED[type]}', not advance`);
   const { dir, state } = open(runId, type);
   let data: Record<string, unknown> = {};
   if (rawData !== undefined) {
