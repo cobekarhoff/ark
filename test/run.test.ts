@@ -232,19 +232,18 @@ describe("ARK-103-AC4", () => {
     });
   }
 
-  test("abort is legal from every non-terminal state and the closed states accept nothing", () => {
-    for (const [name, acs, path] of cases.filter((c) => !["done", "aborted"].includes(c[0]))) {
-      home = mkdtempSync(join(tmpdir(), "ark-home-")); // a fresh home per state: one run per ticket
+  for (const [name, acs, path] of cases.filter((c) => !["done", "aborted"].includes(c[0]))) {
+    test(`${name}: abort is legal, closes the run, and a closed run accepts nothing`, () => {
       writeTicket("ARK-901", acs);
       ark("run", "start", "ARK-901");
       const id = runId("ARK-901");
       for (const e of path) ark("advance", id, e);
       const out = ark("advance", id, "abort", "--data", '{"reason":"stop"}');
-      expect(out.code, `${name}: ${out.err}`).toBe(0);
+      expect(out.code, out.err).toBe(0);
       expect(state("ARK-901")).toMatchObject({ state: "aborted", status: "aborted", next_action: null });
       expect(ark("advance", id, "analysis.completed").err).toContain("closed");
-    }
-  });
+    });
+  }
 
   test("every legal edge of the lifecycle is accepted", () => {
     writeTicket("ARK-901", ["a"]);
