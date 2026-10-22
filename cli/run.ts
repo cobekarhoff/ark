@@ -8,7 +8,7 @@ import ledgerSchema from "../schemas/ledger-event.schema.json";
 import stateSchema from "../schemas/state.schema.json";
 import ticketSchema from "../schemas/ticket.schema.json";
 import { git, loadRepo, touchedTaggedTests } from "./repo";
-import { eventKey, nextActions, type State, transitions } from "./transitions";
+import { eventKey, nextActions, owner, type State, transitions } from "./transitions";
 
 export type LedgerEvent = { seq: number; ts: string; type: string; data: Record<string, unknown> };
 type Ac = { id: string; text: string };
@@ -39,7 +39,7 @@ const validators = Object.fromEntries(
   Object.entries({ ac: acSchema, frontmatter: frontmatterSchema, ledger: ledgerSchema, state: stateSchema, ticket: ticketSchema })
     .map(([k, s]) => [k, ajv.compile(s)]),
 );
-const check = (schema: string, value: unknown, what: string) => {
+export const check = (schema: string, value: unknown, what: string) => {
   const v = validators[schema];
   if (!v(value)) throw new Error(`${what} fails ${schema} schema: ${ajv.errorsText(v.errors)}`);
 };
@@ -147,13 +147,15 @@ export function commit(dir: string, events: LedgerEvent[]) {
   return state;
 }
 
-// The run folder and state, refusing (before anything is written) an event type that is illegal in the current state.
-export function open(runId: string, type: string) {
+// The run folder and state, refusing (before anything is written) an event type that is illegal in the current state,
+// or that another command owns: `via` is the owning command calling for its own event, `ark advance` passes none.
+export function open(runId: string, type: string, via?: string) {
   const dir = runDir(runId);
   const state = project(readLedger(dir));
-  if (type.startsWith("gate.")) throw new Error(`'${type}' is written by 'ark gate', not advance (state '${state.state}')`);
-  const legal = Object.keys(transitions[state.state]).filter((e) => !e.startsWith("gate."));
-  if (!legal.includes(type)) {
+  if (owner[type] && owner[type] !== via) throw new Error(`'${type}' is written by 'ark ${owner[type]}', not advance (state '${state.state}')`);
+  const types = Object.keys(transitions[state.state]).map((k) => k.split(":")[0]);
+  const legal = [...new Set(types.filter((t) => !owner[t]))];
+  if (!types.includes(type)) {
     const gate = state.state.match(/^awaiting_(g[012])$/)?.[1].toUpperCase();
     throw new Error(
       `illegal event '${type}' in state '${state.state}'; ${legal.length ? `legal: ${legal.join(", ")}` : "run is closed"}` +

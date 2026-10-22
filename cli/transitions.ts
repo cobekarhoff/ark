@@ -23,6 +23,7 @@ export const transitions = {
     "implementer.completed": "building",
     "test.result": "building",
     "test.red_green": "building",
+    "trace.checked": "building",
     abort: "aborted",
   },
   judging: {
@@ -31,6 +32,7 @@ export const transitions = {
     "gate.packet:G2": "awaiting_g2",
     "test.result": "judging",
     "test.red_green": "judging",
+    "trace.checked": "judging",
     abort: "aborted",
   },
   awaiting_ge: { "ge.answered": "building", abort: "aborted" },
@@ -44,6 +46,16 @@ export const transitions = {
   done: {},
   aborted: {},
 } as const satisfies Record<string, Record<string, string>>;
+
+// Event types written by a dedicated command, which `ark advance` refuses: the owner is what makes the ledger evidence trustworthy.
+export const owner: Record<string, string> = {
+  "gate.packet": "gate",
+  "gate.answered": "gate",
+  "ws.created": "ws",
+  "test.result": "test",
+  "test.red_green": "test",
+  "trace.checked": "trace-check",
+};
 
 export type State = keyof typeof transitions;
 

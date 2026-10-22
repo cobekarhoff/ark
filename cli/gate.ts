@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { append, commit, project, readLedger, runDir, sha256 } from "./run";
+import { append, commit, type LedgerEvent, project, readLedger, runDir, sha256 } from "./run";
+import { buildMatrix } from "./trace";
 import { transitions } from "./transitions";
 
 // Gate packets (PRD "Gates and loop policy"): built from run-folder artifacts, no model involved.
@@ -24,12 +25,21 @@ function buildPacket(dir: string, runId: string, gate: string): string {
   return `# ${gate} packet: ${runId}\n\n${sections.join("\n")}`;
 }
 
+// G2 is built only when the matrix recomputed now passes and is byte-identical to trace-matrix.md; no stored verdict is trusted.
+function requireTrace(dir: string, runId: string, events: LedgerEvent[]) {
+  const { matrix, failures } = buildMatrix(dir, runId, project(events), events);
+  if (failures.length) throw new Error(`G2 packet refused: trace-matrix.md would fail trace-check:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
+  const file = join(dir, "trace-matrix.md");
+  if (!existsSync(file) || readFileSync(file, "utf8") !== matrix) throw new Error("G2 packet refused: trace-matrix.md is out of date; run 'ark trace-check'");
+}
+
 export function gatePacket(runId: string, gate: string): string {
   if (!(gate in REQUIRED)) throw new Error(`unknown gate '${gate}'; expected G0, G1 or G2`);
   const dir = runDir(runId);
   const events = readLedger(dir);
   const state = project(events).state;
   if (!(`gate.packet:${gate}` in transitions[state])) throw new Error(`cannot build the ${gate} packet in state '${state}'`);
+  if (gate === "G2") requireTrace(dir, runId, events);
   const body = buildPacket(dir, runId, gate);
   const path = `gates/${gate}.packet.md`;
   const hash = sha256(body);
