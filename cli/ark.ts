@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
+import { readFileSync } from "node:fs";
 import pkg from "../package.json" with { type: "json" };
 import { gateAnswer, gatePacket } from "./gate";
+import { hookToolCall } from "./hook";
+import { preflight } from "./preflight";
+import { artifactRecord, findingsRecord, logRoute } from "./record";
 import { advance, replay, start } from "./run";
 import { runTest } from "./test";
 import { wsCreate } from "./ws";
@@ -19,6 +23,12 @@ Commands:
   gate packet <run_id> <G0|G1|G2>         Build the gate packet from run artifacts and print its sha256
   gate answer <run_id> <gate> <answer> --packet <sha256>
                                           Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort)
+  preflight                               Refuse (exit 1) unless .omp/config.yml puts validate and review-x on another provider than implement, and review-s on the same one
+  log route [<run_id>] <playbook> "<why>" Record route.chosen, the first event after run.started (no run_id: the active run)
+  findings record <run_id> <file.json>    Validate the judged findings and record them (judging state)
+  artifact record <run_id> <implementer|validator|reviewer> <file.json>
+                                          Schema-check an agent's output and keep it as artifacts/<agent>/<n>.json
+  hook tool_call                          Read {tool,input,cwd} JSON on stdin; exit 1 with the reason when the main session may not make the call
   --version                               Print the version
   --help                                  Print this help
 `;
@@ -61,6 +71,16 @@ if (args[0] === "--version") {
   const rg = args.indexOf("--red-green");
   if (rg >= 0) args.splice(rg, 1);
   if (args.length === 2 && acs) run = () => runTest(args[1], acs.split(","), repo, rg >= 0);
+} else if (args[0] === "preflight" && args.length === 1) {
+  run = preflight;
+} else if (args[0] === "log" && args[1] === "route" && (args.length === 4 || args.length === 5)) {
+  run = () => logRoute(args.slice(2));
+} else if (args[0] === "findings" && args[1] === "record" && args.length === 4) {
+  run = () => findingsRecord(args[2], args[3]);
+} else if (args[0] === "artifact" && args[1] === "record" && args.length === 5) {
+  run = () => artifactRecord(args[2], args[3], args[4]);
+} else if (args[0] === "hook" && args[1] === "tool_call" && args.length === 2) {
+  run = () => (hookToolCall(readFileSync(0, "utf8")), "");
 }
 
 if (!run) {

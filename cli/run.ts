@@ -1,12 +1,13 @@
 import Ajv2020 from "ajv/dist/2020";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import acSchema from "../schemas/ac.schema.json";
 import frontmatterSchema from "../schemas/ticket-frontmatter.schema.json";
 import ledgerSchema from "../schemas/ledger-event.schema.json";
 import stateSchema from "../schemas/state.schema.json";
 import ticketSchema from "../schemas/ticket.schema.json";
+import { preflight } from "./preflight";
 import { git, loadRepo, touchedTaggedTests } from "./repo";
 import { eventKey, nextActions, type State, transitions } from "./transitions";
 
@@ -56,7 +57,7 @@ export function projectDir(): string {
   }
 }
 
-function projectRoot(): string {
+export function projectRoot(): string {
   const f = join(projectDir(), "ark.yml");
   const name = (Bun.YAML.parse(readFileSync(f, "utf8")) as { project?: unknown } | null)?.project;
   if (typeof name !== "string" || !name) throw new Error(`${f} has no 'project:' key`);
@@ -67,6 +68,21 @@ export function runDir(runId: string): string {
   const dir = join(projectRoot(), "runs", runId);
   if (!existsSync(dir)) throw new Error(`no such run '${runId}'`);
   return dir;
+}
+
+// Active run = the run id in <project>/active-run, written by `ark run start`; a done or aborted run no longer binds the session (ARK-108 hook).
+export const setActive = (runId: string) => writeFileSync(join(projectRoot(), "active-run"), `${runId}\n`);
+
+export function activeRunDir(): string | undefined {
+  let root: string;
+  try { root = projectRoot(); } catch { return undefined; } // no ark.yml: not an Ark project
+  const ptr = join(root, "active-run");
+  if (!existsSync(ptr)) return undefined;
+  const dir = join(root, "runs", readFileSync(ptr, "utf8").trim());
+  if (!existsSync(dir)) return undefined;
+  const st = join(dir, "state.json");
+  const status = existsSync(st) ? (JSON.parse(readFileSync(st, "utf8")) as { status: string }).status : "active";
+  return status === "done" || status === "aborted" ? undefined : dir;
 }
 
 // The projection: state.json is a pure function of the ledger.
@@ -173,10 +189,14 @@ export function summary(s: RunState): string {
 
 export function start(id: string): string {
   if (!TICKET_ID.test(id ?? "")) throw new Error(`invalid ticket id '${id}'`);
+  preflight();
   const root = projectRoot();
   const runs = join(root, "runs");
   const existing = existsSync(runs) && readdirSync(runs).find((r) => new RegExp(`^\\d{4}-\\d{2}-\\d{2}-${id}$`).test(r));
-  if (existing) return `resumed ${summary(JSON.parse(readFileSync(join(runs, existing, "state.json"), "utf8")))}`;
+  if (existing) {
+    setActive(existing);
+    return `resumed ${summary(JSON.parse(readFileSync(join(runs, existing, "state.json"), "utf8")))}`;
+  }
 
   const src = join(root, "tickets", `${id}.md`);
   if (!existsSync(src)) throw new Error(`no ticket file ${src}`);
@@ -210,6 +230,7 @@ export function start(id: string): string {
   writeFileSync(join(dir, "ledger.ndjson"), "");
   events = append(dir, events, "run.started", { ticket: id, playbook: "ticket", acs: acs.map((a) => a.id), artifacts }, ts); // same ts as the folder name, so run_id matches it
   if (!acs.length) events = append(dir, events, "g0.opened", { reason: "ticket has no acceptance criteria" });
+  setActive(basename(dir));
   return `started ${summary(commit(dir, events))}`;
 }
 

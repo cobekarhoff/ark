@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
+import { OMP_CONFIG } from "./omp-config";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 
@@ -66,6 +67,8 @@ beforeEach(() => {
   gitconfig = join(mkdtempSync(join(tmpdir(), "ark-git-")), "config");
   writeFileSync(gitconfig, "[user]\n\tname = Gate Tester\n\temail = gate@example.test\n");
   writeFileSync(join(proj, "ark.yml"), "project: demo\n");
+  mkdirSync(join(proj, ".omp"));
+  writeFileSync(join(proj, ".omp", "config.yml"), OMP_CONFIG);
 });
 
 describe("ARK-104-AC1", () => {

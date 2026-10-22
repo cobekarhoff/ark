@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-
+import { OMP_CONFIG } from "./omp-config";
 setDefaultTimeout(60_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
 // Git identity as config, passed only to ark itself so `ark gate answer` records an approver on CI machines without a global user.
@@ -105,6 +105,7 @@ function fixture(up = "echo up >> $ARK_OUT/order") {
   };
   commitAll(proj, {
     "ark.yml": "project: demo\n",
+    ".omp/config.yml": OMP_CONFIG,
     ".gitignore": "node_modules\n",
     ".ark/repo.yml": JSON.stringify({ suites: { unit: suite } }),
     "src/feature.ts": `export const feature = () => "old";\n`,
@@ -131,6 +132,12 @@ const toBuilding = (...extra: string[]) => {
   const ws = ark("ws", "create", run(), ...extra);
   expect(ws.err).toBe("");
   expect(ark("advance", run(), "build.started").code).toBe(0);
+};
+// What the validator's red-green needs first: src committed and implementer.completed recorded, then the tagged tests committed on top.
+const implemented = () => {
+  commitAll(wt(), Object.fromEntries(Object.entries(HEAD_FILES).filter(([f]) => f.startsWith("src/"))));
+  expect(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}').err).toBe("");
+  commitAll(wt(), Object.fromEntries(Object.entries(HEAD_FILES).filter(([f]) => f.startsWith("test/"))));
 };
 
 beforeEach(() => fixture());
@@ -239,7 +246,7 @@ describe("ARK-105-AC2", () => {
 describe("ARK-105-AC3", () => {
   test("red runs the head test files on the base source and each tagged test fails or errors, recording which; green passes on head", () => {
     toBuilding();
-    commitAll(wt(), HEAD_FILES);
+    implemented();
     const r = ark("test", run(), "--acs", "DEMO-1-AC1,DEMO-1-AC4", "--red-green");
     expect(r.code).toBe(0);
     const [ev] = events("test.red_green");
@@ -265,7 +272,7 @@ describe("ARK-105-AC3", () => {
 describe("ARK-105-AC4", () => {
   test("a tagged test that passes on the red run fails the check, and the other ACs still report", () => {
     toBuilding();
-    commitAll(wt(), HEAD_FILES);
+    implemented();
     const r = ark("test", run(), "--acs", "DEMO-1-AC1,DEMO-1-AC2", "--red-green");
     expect(r.code).toBe(1);
     expect(r.out).toContain("DEMO-1-AC2: no-red");
@@ -360,5 +367,17 @@ describe("ARK-105-AC7", () => {
   test("implementer.completed must name a worktree of the run", () => {
     toBuilding();
     expect(ark("advance", run(), "implementer.completed").err).toContain("naming a worktree");
+  });
+});
+
+describe("ARK-108-AC3 (ARK-105 gap)", () => {
+  test("red-green is refused until implementer.completed is recorded for every repo, and records nothing", () => {
+    toBuilding();
+    commitAll(wt(), HEAD_FILES);
+    const r = ark("test", run(), "--acs", "DEMO-1-AC1,DEMO-1-AC4", "--red-green");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("no implementer.completed yet for: demo");
+    expect(events("test.red_green")).toEqual([]);
+    expect(existsSync(runFile("artifacts/test"))).toBe(false);
   });
 });
