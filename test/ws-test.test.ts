@@ -4,11 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 setDefaultTimeout(60_000);
-// Isolated git identity (git reads these as config), so `ark gate answer` can record an approver on CI machines without a global user.
-Object.assign(process.env, {
-  GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t",
-  GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "user.name", GIT_CONFIG_VALUE_0: "t", GIT_CONFIG_KEY_1: "user.email", GIT_CONFIG_VALUE_1: "t@t",
-});
+Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
+// Git identity as config, passed only to ark itself so `ark gate answer` records an approver on CI machines without a global user.
+const GIT_IDENTITY = { GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "user.name", GIT_CONFIG_VALUE_0: "t", GIT_CONFIG_KEY_1: "user.email", GIT_CONFIG_VALUE_1: "t@t" };
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 const DOCKER_ARGS = "compose-args: compose images --format json";
@@ -59,7 +57,7 @@ const commitAll = (dir: string, files: Record<string, string>, msg = "change") =
   git(dir, "commit", "-qm", msg);
 };
 const ark = (...args: string[]) => {
-  const env = { ...process.env, ARK_HOME: home, FLAKY_COUNTER: counter, PATH: `${bin}:${process.env.PATH}` };
+  const env = { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, FLAKY_COUNTER: counter, PATH: `${bin}:${process.env.PATH}` };
   const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
