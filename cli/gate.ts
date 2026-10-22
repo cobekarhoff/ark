@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { append, commit, type LedgerEvent, project, readLedger, runDir, sha256 } from "./run";
+import { append, commit, type LedgerEvent, mrEnabled, project, readLedger, runDir, sha256 } from "./run";
 import { buildMatrix } from "./trace";
 import { transitions } from "./transitions";
 
@@ -75,6 +75,9 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
   const git_email = git("user.email");
   if (!git_name || !git_email) throw new Error("git config user.name and user.email must be set to record the approver");
   const by = `${git_name} <${git_email}> (${os_user})`;
-  commit(dir, append(dir, events, "gate.answered", { gate, answer, by, os_user, git_name, git_email, packet_sha256: packetHash }));
-  return `${gate} ${answer} recorded by ${by}\n`;
+  // ark.yml mr: false: approval ends the run at ready branches, no ark mr. Read before anything is written.
+  const closing = gate === "G2" && answer === "approve" && !mrEnabled();
+  const answered = append(dir, events, "gate.answered", { gate, answer, by, os_user, git_name, git_email, packet_sha256: packetHash });
+  commit(dir, closing ? append(dir, answered, "run.closed", { reason: "mr disabled" }) : answered);
+  return `${gate} ${answer} recorded by ${by}\n${closing ? "MRs are disabled in ark.yml; run closed at ready branches\n" : ""}`;
 }

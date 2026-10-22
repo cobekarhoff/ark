@@ -111,7 +111,9 @@ export function project(events: LedgerEvent[]): RunState {
       gates[gate] = { answer, by, at: e.ts, packet_sha256 };
     }
   }
-  const next_action = nextActions[state];
+  // In mrs_open the orchestrator has to open the MRs (ark mr) until every repo has one; only then does a human merge.
+  const mrsPending = state === "mrs_open" && !repos.every((r) => events.some((e) => e.type === "mr.opened" && e.data.repo === r.name));
+  const next_action = mrsPending ? { kind: "open_mrs", agent: "orchestrator" as const } : nextActions[state];
   return {
     schema: 1,
     run_id: `${first.ts.slice(0, 10)}-${ticket}`,
@@ -161,6 +163,13 @@ export function commit(dir: string, events: LedgerEvent[]) {
   const { state, bytes } = render(events);
   writeFileSync(join(dir, "state.json"), bytes);
   return state;
+}
+
+// ark.yml `mr:` (default true); false ends the run at G2 approval with ready branches.
+export function mrEnabled(): boolean {
+  const mr = (Bun.YAML.parse(readFileSync(join(projectDir(), "ark.yml"), "utf8")) as { mr?: unknown } | null)?.mr;
+  if (mr !== undefined && typeof mr !== "boolean") throw new Error("ark.yml: mr must be true or false");
+  return mr !== false;
 }
 
 // The run folder and state, refusing (before anything is written) an event type that is illegal in the current state,

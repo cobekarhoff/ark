@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { OMP_CONFIG } from "./omp-config";
 
 setDefaultTimeout(60_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
@@ -108,6 +109,7 @@ function fixture() {
   git(proj, "init", "-q", "-b", "main");
   commitAll(proj, {
     "ark.yml": "project: demo\n",
+    ".omp/config.yml": OMP_CONFIG,
     ".gitignore": "node_modules\n",
     ".ark/repo.yml": REPO_YML,
     "src/feature.ts": `export const feature = () => "old";\n`,
@@ -136,6 +138,14 @@ const toJudging = () => {
   ok(ark("advance", run(), "build.completed"));
 };
 
+// Product code belongs to the implementer; tagged tests are committed afterwards by the validator.
+const implement = (files: Record<string, string>) => {
+  const source = Object.fromEntries(Object.entries(files).filter(([f]) => !f.startsWith("test/")));
+  const tests = Object.fromEntries(Object.entries(files).filter(([f]) => f.startsWith("test/")));
+  if (Object.keys(source).length) commitAll(wt(), source);
+  ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'));
+  if (Object.keys(tests).length) commitAll(wt(), tests);
+};
 beforeEach(fixture);
 
 // A second repo with a suite but no AC tags, added to the run as worktree 'other'.
@@ -150,7 +160,7 @@ const addOtherRepo = () => {
 describe("ARK-106-AC1", () => {
   test("writes trace-matrix.md from ac.yml, the red-green and test evidence, and the manual record, rows sorted by AC number", () => {
     toBuilding();
-    commitAll(wt(), HEAD_FILES);
+    implement(HEAD_FILES);
     ok(ark("test", run(), "--acs", "DEMO-1-AC1,DEMO-1-AC4", "--red-green"));
     acYml(["AC4", "integration"], ["AC2", "manual"], ["AC1"]); // AC1 has no level: e2e by default
     sign("AC2");
@@ -187,7 +197,7 @@ describe("ARK-106-AC2", () => {
 
   test("a test tagged with an AC that is not the ticket's fails as an unknown tag, whether it also carries a real AC or only the typo", () => {
     toBuilding();
-    commitAll(wt(), { "src/feature.ts": HEAD_FILES["src/feature.ts"], "test/shared.test.ts": SHARED, "test/typo.test.ts": TYPO });
+    implement({ "src/feature.ts": HEAD_FILES["src/feature.ts"], "test/shared.test.ts": SHARED, "test/typo.test.ts": TYPO });
     ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green"));
     acYml(["AC1"]);
     const r = trace();
@@ -199,7 +209,7 @@ describe("ARK-106-AC2", () => {
 
   test("tags of other tickets' ACs are not unknown", () => {
     toBuilding();
-    commitAll(wt(), { "src/feature.ts": HEAD_FILES["src/feature.ts"], "test/other.test.ts": bunTest(`test("OTHER-7-AC1 and DEMO-1-AC1 are tagged together", () => { expect(1).toBe(1); });`) });
+    implement({ "src/feature.ts": HEAD_FILES["src/feature.ts"], "test/other.test.ts": bunTest(`test("OTHER-7-AC1 and DEMO-1-AC1 are tagged together", () => { expect(1).toBe(1); });`) });
     ok(ark("test", run(), "--acs", "DEMO-1-AC1"));
     acYml(["AC1", "manual"]);
     sign("AC1");
@@ -208,7 +218,7 @@ describe("ARK-106-AC2", () => {
 
   test("new-behavior ACs need red-green proof: a green-only run fails, and so does a test that already passed on base", () => {
     toBuilding();
-    commitAll(wt(), HEAD_FILES);
+    implement(HEAD_FILES);
     ok(ark("test", run(), "--acs", "DEMO-1-AC1"));
     expect(ark("test", run(), "--acs", "DEMO-1-AC2", "--red-green").code).toBe(1); // no-red: passes on base too
     acYml(["AC1", "unit"], ["AC2", "integration"]);
@@ -234,7 +244,7 @@ describe("ARK-106-AC2", () => {
 
   test("the newest evidence for an AC wins, whether it is a result or a red-green run", () => {
     toBuilding();
-    commitAll(wt(), { "test/flaky.test.ts": FLAKY });
+    implement({ "test/flaky.test.ts": FLAKY });
     acYml(["AC3", "integration"]);
     writeFileSync(counter, "");
     expect(ark("test", run(), "--acs", "DEMO-1-AC3").code).toBe(1); // flaky
@@ -249,9 +259,10 @@ describe("ARK-106-AC2", () => {
 
   test("a repo with no tagged test for an AC does not fail an AC that another repo proves", () => {
     toBuilding();
-    commitAll(wt(), HEAD_FILES);
+    implement(HEAD_FILES);
     const other = addOtherRepo();
     ok(ark("ws", "create", run(), "--repo", other));
+    ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"other"}'));
     ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green", "--repo", "demo"));
     expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--repo", "other").code).toBe(1); // missing there
     expect(events("test.result").at(-1).data).toMatchObject({ repo: "other", acs: { "DEMO-1-AC1": "missing" } });
@@ -298,7 +309,7 @@ describe("ARK-106-AC2", () => {
 describe("ARK-106-AC3", () => {
   test("running it twice on the same inputs gives byte-identical output, and changing an input changes it", () => {
     toBuilding();
-    commitAll(wt(), HEAD_FILES);
+    implement(HEAD_FILES);
     ok(ark("test", run(), "--acs", "DEMO-1-AC1,DEMO-1-AC4", "--red-green"));
     acYml(["AC4", "integration"], ["AC2", "manual"], ["AC1"]);
     sign("AC2");
@@ -362,7 +373,7 @@ describe("ARK-106-AC4", () => {
 
   test("evidence counts only at the current HEAD: a proof from an older commit no longer passes once the code moved on", () => {
     toBuilding();
-    commitAll(wt(), HEAD_FILES);
+    implement(HEAD_FILES);
     ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green"));
     acYml(["AC1"]);
     expect(trace().code).toBe(0);
@@ -376,9 +387,10 @@ describe("ARK-106-AC4", () => {
   });
 
   test("a dirty worktree at the proven HEAD gives no current evidence, for tracked edits and untracked files alike, and G2 refuses", () => {
-    toJudging();
-    commitAll(wt(), HEAD_FILES);
+    toBuilding();
+    implement(HEAD_FILES);
     ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green"));
+    ok(ark("advance", run(), "build.completed"));
     acYml(["AC1"]);
     ok(trace());
     writeFileSync(join(wt(), "src/feature.ts"), `export const feature = () => "edited after the proof";\n`); // tracked, uncommitted
@@ -399,7 +411,7 @@ describe("ARK-106-AC4", () => {
 
   test("evidence from a repo that is not in the run, or red proven on a base other than the run's, does not count", () => {
     toBuilding();
-    commitAll(wt(), HEAD_FILES);
+    implement(HEAD_FILES);
     ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green"));
     acYml(["AC1"]);
     ok(trace());
