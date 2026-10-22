@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "run_id": "2026-10-21-ARK-902",
+  "ticket": "ARK-902",
+  "playbook": "ticket",
+  "state": "building",
+  "status": "active",
+  "tier": null,
+  "round": 0,
+  "next_action": {
+    "kind": "continue_build",
+    "agent": "orchestrator"
+  },
+  "gates": {},
+  "repos": [],
+  "acs": {
+    "ARK-902-AC1": "pending",
+    "ARK-902-AC2": "pending"
+  },
+  "artifacts": {
+    "ticket.md": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "ticket.json": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "ac.yml": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "sessions": [],
+  "lock": null,
+  "ledger_seq": 10
+}

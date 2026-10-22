@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "run_id": "2026-10-21-ARK-901",
+  "ticket": "ARK-901",
+  "playbook": "ticket",
+  "state": "done",
+  "status": "done",
+  "tier": null,
+  "round": 0,
+  "next_action": null,
+  "gates": {},
+  "repos": [],
+  "acs": {
+    "ARK-901-AC1": "pending",
+    "ARK-901-AC2": "pending"
+  },
+  "artifacts": {
+    "ticket.md": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "ticket.json": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "ac.yml": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "sessions": [],
+  "lock": null,
+  "ledger_seq": 9
+}

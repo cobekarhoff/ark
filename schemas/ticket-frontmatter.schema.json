@@ -3,7 +3,7 @@
   "$id": "https://github.com/cobekarhoff/ark/schemas/ticket-frontmatter.schema.json",
   "title": "Local ticket frontmatter (parsed to JSON)",
   "type": "object",
-  "required": ["id", "title", "status", "acceptance_criteria"],
+  "required": ["id", "title", "status"],
   "properties": {
     "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$" },
     "title": { "type": "string", "minLength": 1 },

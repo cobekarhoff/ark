@@ -10,7 +10,7 @@
   "scripts": {
     "test": "bun test"
   },
-  "devDependencies": {
+  "dependencies": {
     "ajv": "^8.17.1"
   }
 }
