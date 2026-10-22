@@ -74,6 +74,8 @@ function prepare(runId: string, type: string, ids: string[], repoName?: string) 
   if (!ids.length || unknown.length) throw new Error(`--acs must name ACs of this run${unknown.length ? `; unknown: ${unknown.join(", ")}` : ""}`);
   const repo = repoName ? state.repos.find((r) => r.name === repoName) : state.repos.length === 1 ? state.repos[0] : undefined;
   if (!repo) throw new Error(`pick a worktree with --repo <name> (have: ${state.repos.map((r) => r.name).join(", ") || "none, run ark ws create"})`);
+  const pending = state.repos.filter((r) => r.step !== "implemented").map((r) => r.name);
+  if (type === "test.red_green" && pending.length) throw new Error(`red-green runs only after every repo is implemented; no implementer.completed yet for: ${pending.join(", ")}`);
 
   const wt = join(dir, "ws", repo.name);
   if (git(wt, "status", "--porcelain", "--untracked-files=no")) throw new Error(`${wt} has uncommitted changes; commit them so the run proves a SHA`);

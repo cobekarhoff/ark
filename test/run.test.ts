@@ -3,6 +3,7 @@ import Ajv2020 from "ajv/dist/2020";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OMP_CONFIG } from "./omp-config";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 const FIXTURES = join(import.meta.dir, "fixtures", "ledgers");
@@ -73,6 +74,8 @@ beforeEach(() => {
   gitconfig = join(mkdtempSync(join(tmpdir(), "ark-git-")), "config");
   writeFileSync(gitconfig, "[user]\n\tname = Gate Tester\n\temail = gate@example.test\n");
   writeFileSync(join(proj, "ark.yml"), "project: demo\n");
+  mkdirSync(join(proj, ".omp"));
+  writeFileSync(join(proj, ".omp", "config.yml"), OMP_CONFIG);
   mkdirSync(join(proj, "sub", "deeper"), { recursive: true });
 });
 

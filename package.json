@@ -6,7 +6,11 @@
   "bin": {
     "ark": "./cli/ark.ts"
   },
-  "omp": {},
+  "omp": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
   "scripts": {
     "test": "bun test"
   },

@@ -1,8 +1,9 @@
 // Run lifecycle as data (PRD "Run state and resume"). Row: state -> { event -> next state }.
 // Gate events are `gate.packet` and `gate.answered`, written only by `ark gate`; their row key is `<type>:<gate>[:<answer>]` (see eventKey).
 export const transitions = {
-  intake: { "analysis.completed": "analyzed", "g0.opened": "awaiting_g0", "gate.packet:G0": "awaiting_g0", abort: "aborted" },
+  intake: { "route.chosen": "intake", "analysis.completed": "analyzed", "g0.opened": "awaiting_g0", "gate.packet:G0": "awaiting_g0", abort: "aborted" },
   awaiting_g0: {
+    "route.chosen": "awaiting_g0",
     "gate.packet:G0": "awaiting_g0",
     "gate.answered:G0:accept": "intake",
     "gate.answered:G0:edit": "intake",
@@ -28,6 +29,7 @@ export const transitions = {
   },
   judging: {
     "fix_round.started": "building",
+    "findings.recorded": "judging",
     "ge.opened": "awaiting_ge",
     "gate.packet:G2": "awaiting_g2",
     "test.result": "judging",

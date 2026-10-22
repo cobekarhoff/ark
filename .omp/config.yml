@@ -1,0 +1,21 @@
+# Ark model roles (hand-written until `ark setup` generates them from ark.yml). Selectors checked with
+# `omp models anthropic` and `omp models openai-codex`. `ark preflight` reads modelRoles from this file.
+# Codex implements; Claude validates and reviews; review-s is the implementer's vendor in a fresh context.
+modelRoles:
+  implement: openai-codex/gpt-6.1-sol:high
+  validate: anthropic/claude-sonnet-5-5:high
+  review-x: anthropic/claude-opus-5-5:high
+  review-s: openai-codex/gpt-6.1-sol:high
+
+retry:
+  modelFallback: true
+  fallbackChains:            # each chain stays inside its role's vendor
+    implement: [openai-codex/gpt-6-sol]
+    validate: [anthropic/claude-sonnet-5]
+    review-x: [anthropic/claude-sonnet-5-5]
+    review-s: [openai-codex/gpt-6-sol]
+
+task:
+  agentPrewalk:              # no hand-off to smol mid-edit
+    implementer: "off"
+    validator: "off"
