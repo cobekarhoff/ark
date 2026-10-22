@@ -32,8 +32,14 @@ export function buildMatrix(dir: string, runId: string, state: RunState, events:
   for (const id of listed) if (!(id in state.acs)) failures.push(`${id}: in ac.yml but not an AC of this run`);
 
   // Evidence counts only for a repo of the run, at that repo's worktree HEAD, and red only from the repo's recorded base.
+  // A worktree with tracked edits or untracked, non-ignored files is not the HEAD it was proven at, so it has no current HEAD.
+  const dirty = new Set<string>();
   const heads = new Map(state.repos.map((r) => {
-    try { return [r.name, git(join(dir, "ws", r.name), "rev-parse", "HEAD")] as const; } catch { return [r.name, undefined] as const; }
+    const wt = join(dir, "ws", r.name);
+    try {
+      if (git(wt, "status", "--porcelain")) dirty.add(r.name);
+      return [r.name, dirty.has(r.name) ? undefined : git(wt, "rev-parse", "HEAD")] as const;
+    } catch { return [r.name, undefined] as const; }
   }));
   const bases = new Map(state.repos.map((r) => [r.name, r.base_sha]));
   const stale = new Set<string>(); // ACs that have evidence which does not count
@@ -84,7 +90,8 @@ export function buildMatrix(dir: string, runId: string, state: RunState, events:
       }
     }
     const none = `no passing tagged test${stale.has(id) ? " at the current HEAD" : bad.length ? "" : " recorded"}`;
-    const why = !passing || bad.length ? [!passing && none, ...bad].filter(Boolean).join("; ") : undefined;
+    const dirtied = stale.has(id) ? [...dirty].sort(cmp).map((r) => `${r} has uncommitted changes`) : [];
+    const why = !passing || bad.length ? [!passing && none, ...bad, ...dirtied].filter(Boolean).join("; ") : undefined;
     return row(uniq(tests).join("; "), uniq(red).join("; "), uniq(grn).join("; "), uniq(evidence).join(", "), why);
   });
 

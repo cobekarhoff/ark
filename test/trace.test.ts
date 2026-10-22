@@ -375,6 +375,28 @@ describe("ARK-106-AC4", () => {
     expect(trace().err).toMatch(/DEMO-1-AC1: demo: no red-green proof at \w{12}/);
   });
 
+  test("a dirty worktree at the proven HEAD gives no current evidence, for tracked edits and untracked files alike, and G2 refuses", () => {
+    toJudging();
+    commitAll(wt(), HEAD_FILES);
+    ok(ark("test", run(), "--acs", "DEMO-1-AC1", "--red-green"));
+    acYml(["AC1"]);
+    ok(trace());
+    writeFileSync(join(wt(), "src/feature.ts"), `export const feature = () => "edited after the proof";\n`); // tracked, uncommitted
+    let r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("DEMO-1-AC1: no passing tagged test at the current HEAD; demo has uncommitted changes");
+    expect(ark("gate", "packet", run(), "G2").err).toContain("demo has uncommitted changes");
+    git(wt(), "checkout", "--", "src/feature.ts");
+    ok(trace());
+    writeFileSync(join(wt(), "src/untracked.ts"), "export {};\n");
+    r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("demo has uncommitted changes");
+    git(wt(), "clean", "-fdq");
+    ok(trace());
+    expect(ark("gate", "packet", run(), "G2").err).toBe("");
+  });
+
   test("evidence from a repo that is not in the run, or red proven on a base other than the run's, does not count", () => {
     toBuilding();
     commitAll(wt(), HEAD_FILES);
