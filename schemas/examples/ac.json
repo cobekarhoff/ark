@@ -1,0 +1,10 @@
+[
+  {
+    "id": "ARK-013-AC1",
+    "text": "ark test runs a repo's tagged-test command for a set of AC IDs and saves JUnit XML and logs to the run folder",
+    "restatement": "Given AC IDs, ark test runs the repo's tagged-test command and writes JUnit XML and logs under the run folder",
+    "level": "integration",
+    "repos": ["ark"],
+    "risk_tags": ["subprocess"]
+  }
+]

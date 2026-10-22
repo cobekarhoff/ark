@@ -1,0 +1,12 @@
+{
+  "repo": "core-lib",
+  "head_sha": "a41e0000",
+  "verdicts": [
+    {
+      "ac": "ABC-123-AC1",
+      "verdict": "pass",
+      "red": { "sha": "77c00000", "outcome": "fail", "evidence": "evidence/core-lib/red-AC1.xml" },
+      "green": { "sha": "a41e0000", "outcome": "pass", "evidence": "evidence/core-lib/green-AC1.xml" }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "ARK-013",
+  "title": "ark test runs tagged tests and records red-green proof",
+  "status": "ready",
+  "milestone": "M1a",
+  "traces": ["FR-10", "FR-11"],
+  "depends_on": ["ARK-011"],
+  "acceptance_criteria": [
+    { "id": "ARK-013-AC1", "text": "ark test runs a repo's tagged-test command for a set of AC IDs and saves JUnit XML and logs to the run folder" }
+  ]
+}
