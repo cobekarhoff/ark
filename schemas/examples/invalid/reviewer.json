@@ -1,0 +1,1 @@
+{ "reviewer": "reviewer-x", "repo": "core-lib", "findings": [{ "severity": "P9", "confidence": 2, "file": "a.ts", "line": 0, "title": "t", "evidence": "e" }] }
