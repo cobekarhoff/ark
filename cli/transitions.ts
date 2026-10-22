@@ -40,7 +40,7 @@ export const transitions = {
     "gate.answered:G2:abort": "aborted",
     abort: "aborted",
   },
-  mrs_open: { "run.completed": "done", abort: "aborted" },
+  mrs_open: { "mr.opened": "mrs_open", "run.closed": "done", "run.completed": "done", abort: "aborted" },
   done: {},
   aborted: {},
 } as const satisfies Record<string, Record<string, string>>;

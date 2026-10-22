@@ -27,6 +27,14 @@ ark gate packet <run_id> <G0|G1|G2>   # build gates/<gate>.packet.md from run ar
 ark gate answer <run_id> <gate> <answer> --packet <sha256>   # G0 accept|edit|abort, G1 approve|change|abort, G2 approve|send_back|abort
 ```
 
+## Merge requests
+
+```sh
+ark mr <run_id>   # in mrs_open: push each run branch with the CLI's own credentials, open a GitHub PR per repo via gh
+```
+
+The PR description carries the ticket's ACs, `trace-matrix.md` and the evidence paths relative to the run folder. Running it twice opens no second PR. `mr: false` in `ark.yml` makes `ark mr` record `run.closed` (`mr disabled`) instead, leaving the branches ready locally. There is no merge command, and `ark mr` only ever calls `gh pr list` and `gh pr create`; agents get no gh or merge tool (ARK-108 owns agent tool lists).
+
 ## Worktrees and tests
 
 ```sh
