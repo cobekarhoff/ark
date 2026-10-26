@@ -53,12 +53,16 @@ export function mr(runId: string): string {
     if (!repo.head_sha) throw new Error(`${repo.name} has no recorded head_sha; record implementer.completed before ark mr`);
     if (git(wt, "rev-parse", "HEAD") !== repo.head_sha) throw new Error(`${wt} HEAD differs from the approved ${repo.head_sha}; commits made after approval are not pushed`);
 
-    // The URL comes from the shared config of the main checkout, not the agent's worktree config.
-    const common = git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir");
-    const url = git(wt, "config", "--file", join(common, "config"), "--get", "remote.origin.url");
+    // The trusted git dir comes from the source checkout recorded by ark ws create (an event advance cannot forge), never from the
+    // worktree's .git file, which an agent can repoint at another repository with its own origin and hooks.
+    const source = events.find((e) => e.type === "ws.created" && e.data.repo === repo.name)?.data.source;
+    if (typeof source !== "string") throw new Error(`${repo.name} has no recorded source checkout; recreate its worktree with ark ws create`);
+    const common = git(source, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    if (!Bun.spawnSync(["git", "--git-dir", common, "cat-file", "-e", `${repo.head_sha}^{commit}`]).success) throw new Error(`approved ${repo.head_sha} is not in ${source}`);
+    const url = git(source, "config", "--file", join(common, "config"), "--get", "remote.origin.url");
     const slug = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/)?.[1];
     if (!slug) throw new Error(`cannot read owner/repo from remote.origin.url '${redact(url)}'`);
-    const head = Bun.spawnSync(["git", "-C", wt, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+    const head = Bun.spawnSync(["git", "--git-dir", common, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
     if (head.exitCode !== 0) throw new Error(`${repo.name} has no origin/HEAD to read the default branch from; run 'git remote set-head origin -a'`);
     const base = head.stdout.toString().trim().replace(/^origin\//, "");
 

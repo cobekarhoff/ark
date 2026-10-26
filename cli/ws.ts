@@ -23,6 +23,6 @@ export function wsCreate(runId: string, repoPath?: string): string {
   git(top, "worktree", "add", "-b", branch, wt, base_sha);
   for (const remote of git(top, "remote").split("\n").filter(Boolean)) git(wt, "config", "--worktree", `remote.${remote}.pushurl`, "DISABLED");
 
-  record(dir, "ws.created", { repo, branch, base_sha });
+  record(dir, "ws.created", { repo, branch, base_sha, source: top }); // source: the human's checkout; ark mr trusts its git dir, never the worktree's .git file
   return `created ${wt}\nbranch: ${branch}\nbase_sha: ${base_sha}\n`;
 }
