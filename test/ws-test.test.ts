@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { OMP_CONFIG } from "./omp-config";
@@ -57,11 +57,12 @@ const commitAll = (dir: string, files: Record<string, string>, msg = "change") =
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", msg);
 };
-const ark = (...args: string[]) => {
-  const env = { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, FLAKY_COUNTER: counter, PATH: `${bin}:${process.env.PATH}` };
+const arkWith = (extra: Record<string, string>, ...args: string[]) => {
+  const env = { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`, ...extra };
   const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
+const ark = (...args: string[]) => arkWith({}, ...args);
 const runsDir = () => join(home, "projects", "demo", "runs");
 const run = () => readdirSync(runsDir())[0];
 const runFile = (f: string) => join(runsDir(), run(), f);
@@ -86,7 +87,8 @@ Body.
 
 // A project repo with an origin, a unit suite and (optionally) env.up/env.down that log their order.
 // `suiteOver` replaces keys of the base suite (`env: undefined` drops the environment).
-function fixture(up = "echo up >> $ARK_OUT/order", suiteOver: Record<string, unknown> = {}) {
+// `more`: further suites and base files (a second suite that matches none of the selected tests).
+function fixture(up = "echo up >> $ARK_OUT/order", suiteOver: Record<string, unknown> = {}, more: { suites?: Record<string, unknown>; files?: Record<string, string> } = {}) {
   home = mkdtempSync(join(tmpdir(), "ark-home-"));
   root = realpathSync(mkdtempSync(join(tmpdir(), "ark-fx-")));
   bin = join(root, "bin");
@@ -103,14 +105,15 @@ function fixture(up = "echo up >> $ARK_OUT/order", suiteOver: Record<string, unk
     level: "integration",
     run: 'echo run >> $ARK_OUT/order; bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml',
     junit: "$ARK_OUT/bun.xml",
-    env: { up, down: "echo down >> $ARK_OUT/order" },
+    env: { up, down: "echo down >> $ARK_OUT/order", vars: { FLAKY_COUNTER: counter } }, // the suite's own environment: nothing else of the caller's reaches it
     ...suiteOver,
   };
   commitAll(proj, {
     "ark.yml": "project: demo\n",
     ".omp/config.yml": OMP_CONFIG,
     ".gitignore": "node_modules\n",
-    ".ark/repo.yml": JSON.stringify({ suites: { unit: suite } }),
+    ".ark/repo.yml": JSON.stringify({ suites: { unit: suite, ...more.suites } }),
+    ...more.files,
     "src/feature.ts": `export const feature = () => "old";\n`,
     "test/stable.test.ts": bunTest(`test("DEMO-1-AC2 stays green", () => { expect(typeof feature()).toBe("string"); });`, `import { feature } from "../src/feature";`),
     "test/plain.test.ts": bunTest(`test("untagged helper check", () => { expect(1).toBe(1); });`),
@@ -483,9 +486,9 @@ describe("ARK-115-AC7", () => {
 
   test("a test skipped on base is inconclusive even when an unrelated file errors there", () => {
     toBuilding();
-    withSrc(NEW_FEATURE, {
+    withSrc({ ...NEW_FEATURE, "src/extra.ts": `export const extra = 1;\n` }, { // the unrelated file loads on head and fails to load only on base
       "test/never-red.test.ts": bunTest(`(feature() === "old" ? test.skip : test)("DEMO-1-AC1 never red", () => { expect(true).toBe(true); });`, `import { feature } from "../src/feature";`),
-      "test/unrelated.test.ts": bunTest(`test("untagged", () => { expect(nope).toBe(1); });`, `import { nope } from "../src/nope";`),
+      "test/unrelated.test.ts": bunTest(`test("untagged", () => { expect(extra).toBe(1); });`, `import { extra } from "../src/extra";`),
     });
     const r = redGreen("DEMO-1-AC1");
     expect(r.code).toBe(1);
@@ -514,5 +517,117 @@ describe("ARK-115-AC7", () => {
     const rg = redGreen("DEMO-1-AC1");
     expect(rg.code).toBe(1);
     expect(acsOf("test.red_green")["DEMO-1-AC1"]).toBe("green-failed");
+  });
+});
+
+describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
+  test("a repo with a second suite that has no record for the selected AC is not broken by that suite's non-zero exit", () => {
+    const e2e = { format: "bun-test", level: "e2e", run: 'bun test ./e2e -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml', junit: "$ARK_OUT/e2e.xml" };
+    fixture(undefined, {}, { suites: { e2e }, files: { "e2e/e.test.ts": bunTest(`test("DEMO-1-AC2 only in e2e", () => { expect(1).toBe(1); });`) } });
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 in unit only", () => { expect(1).toBe(1); });`) });
+    const r = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(r.out).toContain("DEMO-1-AC1: pass");
+    expect(r.code).toBe(0);
+  });
+
+  test("files under test/, tests/ and __tests__/ that are not themselves tests (helpers) are overlaid on red, so a test importing one still gets a red record", () => {
+    toBuilding();
+    withSrc(NEW_FEATURE, {
+      "test/helpers.ts": `export const expected = () => "new";\n`,
+      "tests/more.ts": `export const x = 1;\n`,
+      "test/h.test.ts": bunTest(`test("DEMO-1-AC1 uses a helper", () => { expect(feature()).toBe(expected()); });`, `import { feature } from "../src/feature";\nimport { expected } from "./helpers";`),
+    });
+    const r = redGreen("DEMO-1-AC1");
+    expect(r.err).toBe("");
+    expect(events("test.red_green")[0].data).toMatchObject({ overlay: ["test/h.test.ts", "test/helpers.ts", "tests/more.ts"], acs: { "DEMO-1-AC1": "proven" } });
+  });
+
+  test("the other extensions bun discovers (.mts, .mjs, .cts, .cjs) count as test files", () => {
+    toBuilding();
+    withSrc(NEW_FEATURE, {
+      "src/m.test.mts": bunTest(`test("DEMO-1-AC1 mts", () => { expect(feature()).toBe("new"); });`, `import { feature } from "./feature";`),
+      "src/j.spec.mjs": `import { expect, test } from "bun:test";\nimport { feature } from "./feature.ts";\ntest("DEMO-1-AC4 mjs", () => { expect(feature()).toBe("new"); });\n`,
+    });
+    expect(redGreen("DEMO-1-AC1", "DEMO-1-AC4").err).toBe("");
+    expect(events("test.red_green")[0].data.overlay).toEqual(["src/j.spec.mjs", "src/m.test.mts"]);
+  });
+
+  test("a committed symlink whose target is outside the checkout makes the run inconclusive, in red-green and in a plain run; links inside the checkout are fine", () => {
+    toBuilding();
+    const outside = join(root, "outside-feature.ts");
+    writeFileSync(outside, `export const feature = () => "new";\n`); // never committed
+    rmSync(join(wt(), "src/feature.ts"));
+    symlinkSync(outside, join(wt(), "src/feature.ts"));
+    git(wt(), "add", "-A");
+    git(wt(), "commit", "-qm", "link");
+    expect(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}').err).toBe("");
+    commitAll(wt(), { "test/feature.test.ts": FEATURE_TEST });
+    const r = redGreen("DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(acsOf("test.red_green")["DEMO-1-AC1"]).toBe("inconclusive");
+    expect(events("test.red_green")[0].data.reason).toContain("src/feature.ts");
+    const g = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(g.code).toBe(1);
+    expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("inconclusive");
+  });
+
+  test("a symlink that stays inside the checkout is kept", () => {
+    toBuilding();
+    commitAll(wt(), { "src/real.ts": `export const feature = () => "new";\n` });
+    symlinkSync("real.ts", join(wt(), "src/feature.ts.link"));
+    git(wt(), "add", "-A");
+    git(wt(), "commit", "-qm", "inner link");
+    commitAll(wt(), { "test/link.test.ts": bunTest(`test("DEMO-1-AC1 through an inner link", () => { expect(feature()).toBe("new"); });`, `import { feature } from "../src/feature.ts.link";`) });
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1").out).toContain("DEMO-1-AC1: pass");
+  });
+
+  test("clean filters, smudge filters and hooks cannot change what the checkout holds: the tests see the committed blob", () => {
+    git(proj, "config", "filter.panel.smudge", "sed s/old/new/");
+    git(proj, "config", "filter.panel.clean", "cat");
+    toBuilding();
+    withSrc({ ".gitattributes": "src/feature.ts filter=panel\n" }, { "test/feature.test.ts": FEATURE_TEST });
+    const r = redGreen("DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(acsOf("test.red_green")["DEMO-1-AC1"]).toBe("green-failed"); // the committed source is still "old"
+  });
+
+  test("suites get an allowlisted environment: a variable only the caller has reaches no suite, one declared in the suite's env.vars does", () => {
+    const FROM_ENV = { "src/feature.ts": `export const feature = () => process.env.FEATURE_MODE ?? "old";\n` };
+    toBuilding();
+    commitAll(wt(), { ...FROM_ENV, "test/feature.test.ts": FEATURE_TEST });
+    const leaked = arkWith({ FEATURE_MODE: "new" }, "test", run(), "--acs", "DEMO-1-AC1");
+    expect(leaked.code).toBe(1);
+    expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("fail");
+
+    fixture(undefined, { env: { vars: { FEATURE_MODE: "new" } } });
+    toBuilding();
+    commitAll(wt(), { ...FROM_ENV, "test/feature.test.ts": FEATURE_TEST });
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1").out).toContain("DEMO-1-AC1: pass");
+  });
+});
+
+describe("ARK-115-AC7 (per selected test)", () => {
+  test("a second selected test that is skipped on both sides makes the AC inconclusive, not proven", () => {
+    toBuilding();
+    withSrc(NEW_FEATURE, {
+      "test/feature.test.ts": FEATURE_TEST,
+      "test/skipped.test.ts": bunTest(`test.skip("DEMO-1-AC1 never runs", () => { expect(1).toBe(2); });`),
+    });
+    const r = redGreen("DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(acsOf("test.red_green")["DEMO-1-AC1"]).toBe("inconclusive");
+  });
+
+  test("same-named tests in one file are told apart by line: one test's red failure is not another's", () => {
+    toBuilding();
+    withSrc(NEW_FEATURE, {
+      "test/dup.test.ts": bunTest(`test("DEMO-1-AC1 dup", () => { expect(feature()).toBe("new"); });
+(feature() === "old" ? test.skip : test)("DEMO-1-AC1 dup", () => { expect(1).toBe(1); });`, `import { feature } from "../src/feature";`),
+    });
+    const r = redGreen("DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(acsOf("test.red_green")["DEMO-1-AC1"]).toBe("inconclusive");
+    expect(events("test.red_green")[0].data.tests.map((t: { red: string }) => t.red).sort()).toEqual(["failure", "skipped"]);
   });
 });

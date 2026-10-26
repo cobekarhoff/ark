@@ -8,7 +8,8 @@ const ID = `(?<![A-Za-z0-9-])${ticketSchema.properties.id.pattern.slice(1, -1)}-
 export const AC_ID = new RegExp(ID, "g");
 
 export type Status = "pass" | "failure" | "error" | "skipped";
-export type Case = { file: string; name: string; classname: string; acs: string[]; status: Status };
+// `line`: where the test is declared, so same-named tests in one file stay distinct.
+export type Case = { file: string; name: string; classname: string; line: string; acs: string[]; status: Status };
 
 const unescape = (s: string) =>
   s.replace(/&(#\d+|lt|gt|amp|quot|apos);/g, (_, e: string) =>
@@ -18,13 +19,13 @@ const attrs = (s: string) => Object.fromEntries([...s.matchAll(/([\w:-]+)="([^"]
 // ponytail: regex over bun's flat, escaped JUnit; a real XML parser if another runner's output needs it.
 export function parse(xml: string): Case[] {
   return [...xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)].map(([, a, body = ""]) => {
-    const { name = "", classname = "", file = "" } = attrs(a);
+    const { name = "", classname = "", file = "", line = "" } = attrs(a);
     const acs = [...new Set(`${name} ${classname}`.match(AC_ID) ?? [])];
     const bad = body.match(/<(failure|error)\b([^>]*)>/);
     let status: Status = "pass";
     if (/<skipped\b/.test(body)) status = "skipped";
     else if (bad) status = bad[1] === "error" || (attrs(bad[2]).type && !/assert/i.test(attrs(bad[2]).type)) ? "error" : "failure";
-    return { file, name, classname, acs, status };
+    return { file, name, classname, line, acs, status };
   });
 }
 
