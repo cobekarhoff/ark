@@ -17,7 +17,8 @@ const HEAD_FILES = {
   "src/feature.ts": `export const feature = () => "new";\n`,
   "src/added.ts": `export const added = () => 42;\n`,
   "test/feature.test.ts": bunTest(`test("DEMO-1-AC1 new feature", () => { expect(feature()).toBe("new"); });`, `import { feature } from "../src/feature";`),
-  "test/added.test.ts": bunTest(`test("DEMO-1-AC4 added module answers", () => { expect(added()).toBe(42); });`, `import { added } from "../src/added";`),
+  // loaded inside the test: on base the failure is a JUnit record (a failing top-level import leaves none, and red then is inconclusive)
+  "test/added.test.ts": bunTest(`test("DEMO-1-AC4 added module answers", async () => { const { added } = await import("../src/added"); expect(added()).toBe(42); });`),
 };
 const FLAKY = bunTest(
   `test("DEMO-1-AC3 fails on its first run only", () => { appendFileSync(process.env.FLAKY_COUNTER!, "x"); expect(readFileSync(process.env.FLAKY_COUNTER!, "utf8").length).toBeGreaterThan(1); });`,

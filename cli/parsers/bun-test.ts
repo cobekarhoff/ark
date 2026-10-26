@@ -1,6 +1,9 @@
+import ticketSchema from "../../schemas/ticket.schema.json";
+
 // bun:test has no native tags: an AC ID sits in the test name or any describe name.
 // bun's JUnit puts the describe path in `classname` (innermost first) and thrown errors in <failure type="Error">.
-export const AC_ID = /[A-Z][A-Z0-9]+-\d+-AC\d+/g;
+// The ticket id pattern is the schema's own, so a one-letter project prefix (A-1-AC1) is a tag too.
+export const AC_ID = new RegExp(`${ticketSchema.properties.id.pattern.slice(1, -1)}-AC\\d+`, "g");
 
 export type Status = "pass" | "failure" | "error" | "skipped";
 export type Case = { file: string; name: string; classname: string; acs: string[]; status: Status };
