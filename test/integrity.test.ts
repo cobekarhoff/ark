@@ -110,6 +110,20 @@ describe("ARK-115-AC1", () => {
     ok(ark("log", "route", run(), "ticket", "because"));
     expect(events().map((e) => e.type)).toEqual(["run.started", "route.chosen"]);
   });
+
+  test("escalation goes through ark gate: a GE packet from premise.md and the latest findings, answered by a human answer", () => {
+    toBuilding();
+    ok(ark("advance", run(), "build.completed"));
+    expect(ark("gate", "packet", run(), "GE").err).toContain("premise.md"); // the packet needs the shared premise
+    writeFileSync(runFile("premise.md"), "Both fixes assumed the cache is cold.\n");
+    const h = ark("gate", "packet", run(), "GE").out.trim();
+    expect(slurp(`gates/GE.${h.slice("sha256:".length)}.packet.md`)).toContain(sha("Both fixes assumed the cache is cold.\n"));
+    expect(slurp("state.json")).toContain('"state": "awaiting_ge"');
+    expect(ark("gate", "answer", run(), "GE", "guess", "--packet", h).err).toContain("unknown answer");
+    ok(ark("gate", "answer", run(), "GE", "one_more_round", "--packet", h));
+    expect(slurp("state.json")).toContain('"state": "building"');
+    expect(events().at(-1)).toMatchObject({ type: "gate.answered", data: { gate: "GE", answer: "one_more_round" } });
+  });
 });
 
 describe("ARK-115-AC2", () => {
@@ -319,6 +333,24 @@ describe("ARK-115-AC5", () => {
     const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
     expect(r.code).toBe(1);
     expect(r.err).toContain("test/über.test.ts");
+  });
+});
+
+describe("ARK-115-AC5 forged step start", () => {
+  test("--data heads is refused on any event, so a tagged-test edit made before build.started still reaches the guard", () => {
+    ok(ark("advance", run(), "analysis.completed"));
+    writeFileSync(runFile("plan.md"), "# Plan\n");
+    ok(ark("gate", "answer", run(), "G1", "approve", "--packet", ark("gate", "packet", run(), "G1").out.trim()));
+    ok(ark("ws", "create", run()));
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") }); // a tagged test the step will have to answer for
+    const forged = JSON.stringify({ heads: { demo: git(wt(), "rev-parse", "HEAD") } });
+    const r = ark("advance", run(), "build.started", "--data", forged);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("heads");
+    ok(ark("advance", run(), "build.started"));
+    const done = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    expect(done.code).toBe(1);
+    expect(done.err).toContain("test/f.test.ts");
   });
 });
 

@@ -60,7 +60,7 @@ Run each command through bash. A non-zero exit is a refusal: read its message, f
 ### 8. Fix loop
 - Exit when there is no open `act_on` P0/P1 and every AC passes: `skip: clean` and go to step 9.
 - Otherwise, round 1 or 2: write `<dir>/premise.md` first (the premise this fix shares with the last; check it directly before round 2). `ark advance <run> fix_round.started` (back to `building`). Respawn the implementer with the Act-on findings, failing tests and their evidence in the brief; repeat steps 4 (record + `implementer.completed`), 5, 6 and 7 on the new head.
-- After the second round still fails: stop and give the human your diagnosis and the options (guidance / take over / one more round / abort). `ark advance` refuses `ge.opened` and `ge.answered` (the escalation is a gate, answered through `ark gate` once ARK-117 lands); `ark advance <run> abort` ends the run if the human decides to abort.
+- After the second round still fails: write `<dir>/premise.md` (the premise both fixes shared, and your diagnosis), `ark gate packet <run> GE` (premise plus the latest findings; prints `sha256:...`). `ask` with One more round (fold any guidance the human gives into the next brief) / Take over / Abort, then `ark gate answer <run> GE one_more_round|take_over|abort --packet <sha256>`. `ark advance` refuses `ge.*`: escalation is a gate. One more round and take over return to `building`; abort ends the run.
 
 ### 9. Evidence pack
 - `ark trace-check <run>` writes `<dir>/trace-matrix.md` and exits 0 when it passes. Exit 1 prints why: fix it through step 8.

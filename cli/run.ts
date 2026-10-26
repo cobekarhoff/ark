@@ -280,15 +280,15 @@ export function unattributed(dir: string, state: RunState): string[] {
   });
 }
 
-// The HEAD of every worktree, recorded in the event that starts a round (fix_round.started, a G2 send-back): the next implementer step is measured from it,
-// so tests the validator committed in the round before are not the implementer's.
+// The HEAD of every worktree, recorded in the event that starts a round (fix_round.started, a G2 send-back, a GE answer that grants a round): the next implementer
+// step is measured from it, so tests the validator committed in the round before are not the implementer's. Only the CLI writes it (advance refuses --data heads).
 export const worktreeHeads = (dir: string, state: RunState): Record<string, string> =>
   Object.fromEntries(state.repos.map((r) => [r.name, git(join(dir, "ws", r.name), "rev-parse", "HEAD")]));
 
 // Where the implementer step in progress began: the newest of the repo's last implementer head and the heads recorded when a round started; base_sha before both.
 function stepStart(events: LedgerEvent[], repo: RunState["repos"][number]): string {
   for (const e of events.toReversed()) {
-    const heads = e.data.heads as Record<string, string> | undefined; // written by worktreeHeads
+    const heads = e.type === "fix_round.started" || e.type === "gate.answered" ? (e.data.heads as Record<string, string> | undefined) : undefined; // written by worktreeHeads
     const head = e.type === "implementer.completed" && e.data.repo === repo.name ? e.data.head_sha : heads?.[repo.name];
     if (typeof head === "string") return head;
   }
@@ -355,6 +355,7 @@ export function advance(runId: string, type: string, rawData?: string): string {
   if (rawData !== undefined) {
     try { data = JSON.parse(rawData); } catch { throw new Error("--data is not valid JSON"); }
     if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("--data must be a JSON object");
+    if (Object.hasOwn(data, "heads")) throw new Error("--data may not set 'heads': the CLI records the worktree heads itself when a round starts");
   }
   if (type === "build.completed" || type === "fix_round.started") { // AC4: nothing leaves building, or opens a round, that no recorded step vouches for
     const bad = unattributed(dir, state);

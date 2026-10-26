@@ -1,5 +1,5 @@
 // Run lifecycle as data (PRD "Run state and resume"). Row: state -> { event -> next state }.
-// Gate events are `gate.packet` and `gate.answered`, written only by `ark gate`; their row key is `<type>:<gate>[:<answer>]` (see eventKey).
+// Gate events are `gate.packet` and `gate.answered`, written only by `ark gate`; their row key is `<type>:<gate>[:<answer>]` (see eventKey). Gates: G0, G1, G2 and GE (escalation).
 export const transitions = {
   intake: { "route.chosen": "intake", "analysis.completed": "analyzed", "g0.opened": "awaiting_g0", "gate.packet:G0": "awaiting_g0", abort: "aborted" },
   awaiting_g0: {
@@ -30,14 +30,19 @@ export const transitions = {
   judging: {
     "fix_round.started": "building",
     "findings.recorded": "judging",
-    "ge.opened": "awaiting_ge",
+    "gate.packet:GE": "awaiting_ge",
     "gate.packet:G2": "awaiting_g2",
     "test.result": "judging",
     "test.red_green": "judging",
     "trace.checked": "judging",
     abort: "aborted",
   },
-  awaiting_ge: { "ge.answered": "building", abort: "aborted" },
+  awaiting_ge: {
+    "gate.answered:GE:one_more_round": "building",
+    "gate.answered:GE:take_over": "building",
+    "gate.answered:GE:abort": "aborted",
+    abort: "aborted",
+  },
   awaiting_g2: {
     "gate.answered:G2:approve": "mrs_open",
     "gate.answered:G2:send_back": "building",
@@ -51,7 +56,7 @@ export const transitions = {
 
 // Event types written by a dedicated command, which `ark advance` refuses: the owner is what makes the ledger evidence trustworthy.
 // A key ending in "." owns the whole family (test.* ...), any other key one type. Ownership holds in every state, before legality is asked.
-// ge.* belongs to `ark gate` (escalation is a gate, ARK-117); `ark ac update` (ac.updated) arrives with ARK-117.
+// ge.* is retired: escalation is the GE gate, so a stray `advance ge.opened` is pointed at `ark gate`. `ark ac update` (ac.updated) arrives with ARK-117.
 const owners: [prefix: string, command: string][] = [
   ["gate.", "gate"], ["ge.", "gate"], ["ws.", "ws"], ["test.", "test"], ["trace.", "trace-check"], ["mr.", "mr"],
   ["artifact.", "artifact record"], ["ac.", "ac update"],

@@ -20,10 +20,3 @@ export function rechain(runDir: string) {
   if (state.ledger_seq >= 1 && state.ledger_seq <= lines.length) state.ledger_head = sha(lines[state.ledger_seq - 1]);
   writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
 }
-
-// Appends an event (chained) without any CLI check: the stand-in for a command that does not exist yet (ge.* belongs to the escalation gate, ARK-117).
-export function inject(runDir: string, type: string, data: Record<string, unknown> = {}) {
-  const lines = read(runDir);
-  const e = { seq: lines.length + 1, ts: new Date().toISOString(), type, data, prev: sha(lines[lines.length - 1]) };
-  writeFileSync(join(runDir, "ledger.ndjson"), `${lines.map((l) => `${l}\n`).join("")}${JSON.stringify(e)}\n`);
-}

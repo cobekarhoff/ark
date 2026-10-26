@@ -23,9 +23,9 @@ Commands:
   test <run_id> --acs ID,.. [--red-green] [--repo name]
                                           Run the AC-tagged tests in the worktree; --red-green proves them on base then head
   trace-check <run_id>                    Build trace-matrix.md from ac.yml and the recorded test evidence; exit 1 listing why it fails
-  gate packet <run_id> <G0|G1|G2>         Build the gate packet from run artifacts and print its sha256
+  gate packet <run_id> <G0|G1|G2|GE>      Build the gate packet from run artifacts and print its sha256
   gate answer <run_id> <gate> <answer> --packet <sha256>
-                                          Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort)
+                                          Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort, GE: one_more_round|take_over|abort)
   mr <run_id>                             Push the run branches and open a GitHub PR per repo (ark.yml mr: false closes the run at the ready branch instead)
   preflight                               Refuse (exit 1) unless every model validate and review-x can reach (comma candidates, retry.fallbackChains) is off implement's provider, and every review-s model on it
   log route [<run_id>] <playbook> "<why>" Record route.chosen, the first event after run.started (no run_id: the active run)

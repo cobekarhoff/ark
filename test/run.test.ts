@@ -3,7 +3,7 @@ import Ajv2020 from "ajv/dist/2020";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inject, rechain } from "./ledger";
+import { rechain } from "./ledger";
 import { OMP_CONFIG } from "./omp-config";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
@@ -49,6 +49,7 @@ const gated: Record<string, [gate: string, answer?: string]> = {
   "g0.opened": ["G0"], "g0.answered": ["G0", "accept"],
   "g1.opened": ["G1"], "g1.approved": ["G1", "approve"], "g1.changed": ["G1", "change"],
   "g2.opened": ["G2"], "g2.approved": ["G2", "approve"], "g2.rejected": ["G2", "send_back"],
+  "ge.opened": ["GE"], "ge.answered": ["GE", "one_more_round"],
 };
 // The hash `ark gate packet` recorded for the gate's newest packet (gates/<gate>.<hash>.packet.md).
 const packetHash = (id: string, gate: string): string =>
@@ -56,10 +57,7 @@ const packetHash = (id: string, gate: string): string =>
     .findLast((e) => e.type === "gate.packet" && e.data.gate === gate).data.packet_sha256;
 const go = (id: string, event: string, data?: string) => {
   const [gate, answer] = gated[event] ?? [];
-  if (event.startsWith("ge.")) { // no command writes escalation events until ARK-117 makes GE a gate; advance refuses them (ARK-115-AC1)
-    inject(join(runsDir(), id), event, data ? JSON.parse(data) : {});
-    return ark("run", "replay", id);
-  }
+  if (gate === "GE" && !answer) writeFileSync(join(runsDir(), id, "premise.md"), "# premise\n"); // the packet's required input
   if (!gate) return ark("advance", id, event, ...(data ? ["--data", data] : []));
   if (answer) return ark("gate", "answer", id, gate, answer, "--packet", packetHash(id, gate));
   if (gate === "G1" && !existsSync(join(runsDir(), id, "plan.md"))) writeFileSync(join(runsDir(), id, "plan.md"), "# plan.md\n");
