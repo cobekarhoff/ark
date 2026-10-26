@@ -1,10 +1,10 @@
-{"seq":1,"ts":"2026-10-21T23:59:59.999Z","type":"run.started","data":{"ticket":"ARK-902","playbook":"ticket","acs":["ARK-902-AC1","ARK-902-AC2"],"artifacts":{"ticket.md":"sha256:0000000000000000000000000000000000000000000000000000000000000000","ticket.json":"sha256:0000000000000000000000000000000000000000000000000000000000000000","ac.yml":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}}}
-{"seq":2,"ts":"2026-10-22T00:00:01Z","type":"analysis.completed","data":{}}
-{"seq":3,"ts":"2026-10-22T00:01:00Z","type":"gate.packet","data":{"gate":"G1","path":"gates/G1.packet.md","packet_sha256":"sha256:1111111111111111111111111111111111111111111111111111111111111111"}}
-{"seq":4,"ts":"2026-10-22T00:02:00Z","type":"gate.answered","data":{"gate":"G1","answer":"approve","by":"Cobe Karhoff <cobe@example.com> (cobe)","os_user":"cobe","git_name":"Cobe Karhoff","git_email":"cobe@example.com","packet_sha256":"sha256:1111111111111111111111111111111111111111111111111111111111111111"}}
-{"seq":5,"ts":"2026-10-22T00:03:00Z","type":"build.started","data":{}}
-{"seq":6,"ts":"2026-10-22T00:30:00Z","type":"build.completed","data":{}}
-{"seq":7,"ts":"2026-10-22T00:31:00Z","type":"fix_round.started","data":{"findings":["F1"]}}
-{"seq":8,"ts":"2026-10-22T00:50:00Z","type":"build.completed","data":{}}
-{"seq":9,"ts":"2026-10-22T00:51:00Z","type":"ge.opened","data":{}}
-{"seq":10,"ts":"2026-10-22T01:00:00Z","type":"ge.answered","data":{"answer":"one more round"}}
+{"seq":1,"ts":"2026-10-21T23:59:59.999Z","type":"run.started","data":{"ticket":"ARK-902","playbook":"ticket","acs":["ARK-902-AC1","ARK-902-AC2"],"artifacts":{"ticket.md":"sha256:0000000000000000000000000000000000000000000000000000000000000000","ticket.json":"sha256:0000000000000000000000000000000000000000000000000000000000000000","ac.yml":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}},"prev":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+{"seq":2,"ts":"2026-10-22T00:00:01Z","type":"analysis.completed","data":{},"prev":"sha256:ee0ce79d9ff1a90515f1def7c50ddcabd05fd84ef9dcac3643bd6908192bd016"}
+{"seq":3,"ts":"2026-10-22T00:01:00Z","type":"gate.packet","data":{"gate":"G1","path":"gates/G1.packet.md","packet_sha256":"sha256:1111111111111111111111111111111111111111111111111111111111111111"},"prev":"sha256:561f3c5df6d96ad289e78ad63619ae8820854c8117039b009d67d33e5e43f9ac"}
+{"seq":4,"ts":"2026-10-22T00:02:00Z","type":"gate.answered","data":{"gate":"G1","answer":"approve","by":"Cobe Karhoff <cobe@example.com> (cobe)","os_user":"cobe","git_name":"Cobe Karhoff","git_email":"cobe@example.com","packet_sha256":"sha256:1111111111111111111111111111111111111111111111111111111111111111"},"prev":"sha256:c94d5a254493db6289e4fce1a32869b43fa38a25424b684625d30d2cc5e89caa"}
+{"seq":5,"ts":"2026-10-22T00:03:00Z","type":"build.started","data":{},"prev":"sha256:ae67300974f6835dbede27c59cd50004ec4798fe2d94f7270b08c7ddb82b4c6c"}
+{"seq":6,"ts":"2026-10-22T00:30:00Z","type":"build.completed","data":{},"prev":"sha256:528e21c0961dfccb1291ad7b6ef573f8f46fd7a9a68d084b05b3622d8ceadd48"}
+{"seq":7,"ts":"2026-10-22T00:31:00Z","type":"fix_round.started","data":{"findings":["F1"]},"prev":"sha256:316c56e32d9e87317b48a3e1b95bb227b0d1eb283b3ac553a3c50bf7e49a0723"}
+{"seq":8,"ts":"2026-10-22T00:50:00Z","type":"build.completed","data":{},"prev":"sha256:5424a94bc973808844e0621df0b2f5754929223df686a9a036d24f6257f3fe85"}
+{"seq":9,"ts":"2026-10-22T00:51:00Z","type":"ge.opened","data":{},"prev":"sha256:1fbb372bcdb5dcdf85b41991d0328c3994f7169baa99b413bae18d9d1a7699a7"}
+{"seq":10,"ts":"2026-10-22T01:00:00Z","type":"ge.answered","data":{"answer":"one more round"},"prev":"sha256:ff1e623d7b3de8a9283e4c8f3dc7e39c6c44c808bf78974f3ba671d3522cbeed"}

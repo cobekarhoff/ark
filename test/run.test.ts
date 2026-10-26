@@ -3,6 +3,7 @@ import Ajv2020 from "ajv/dist/2020";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inject, rechain } from "./ledger";
 import { OMP_CONFIG } from "./omp-config";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
@@ -49,10 +50,16 @@ const gated: Record<string, [gate: string, answer?: string]> = {
   "g1.opened": ["G1"], "g1.approved": ["G1", "approve"], "g1.changed": ["G1", "change"],
   "g2.opened": ["G2"], "g2.approved": ["G2", "approve"], "g2.rejected": ["G2", "send_back"],
 };
-const packetHash = (id: string, gate: string) =>
-  `sha256:${new Bun.CryptoHasher("sha256").update(readFileSync(join(runsDir(), id, "gates", `${gate}.packet.md`))).digest("hex")}`;
+// The hash `ark gate packet` recorded for the gate's newest packet (gates/<gate>.<hash>.packet.md).
+const packetHash = (id: string, gate: string): string =>
+  readFileSync(join(runsDir(), id, "ledger.ndjson"), "utf8").trim().split("\n").map((l) => JSON.parse(l))
+    .findLast((e) => e.type === "gate.packet" && e.data.gate === gate).data.packet_sha256;
 const go = (id: string, event: string, data?: string) => {
   const [gate, answer] = gated[event] ?? [];
+  if (event.startsWith("ge.")) { // no command writes escalation events until ARK-117 makes GE a gate; advance refuses them (ARK-115-AC1)
+    inject(join(runsDir(), id), event, data ? JSON.parse(data) : {});
+    return ark("run", "replay", id);
+  }
   if (!gate) return ark("advance", id, event, ...(data ? ["--data", data] : []));
   if (answer) return ark("gate", "answer", id, gate, answer, "--packet", packetHash(id, gate));
   if (gate === "G1" && !existsSync(join(runsDir(), id, "plan.md"))) writeFileSync(join(runsDir(), id, "plan.md"), "# plan.md\n");
@@ -228,6 +235,7 @@ describe("ARK-103-AC3", () => {
     writeFileSync(path, `${[lines[0], lines[2]].join("\n")}\n`); // seq jumps 1 -> 3
     expect(ark("run", "replay", id).code).toBe(1);
     writeFileSync(path, `${[lines[0], lines[4].replace('"seq":5', '"seq":2')].join("\n")}\n`); // build.started in intake
+    rechain(join(runsDir(), id)); // a hand-built ledger whose chain holds, so replay reaches the state machine
     const r = ark("run", "replay", id);
     expect(r.code).toBe(1);
     expect(r.err).toContain("illegal");
@@ -248,7 +256,7 @@ describe("ARK-103-AC4", () => {
     ["building", ["a"], toBuilding, "build.started"],
     ["judging", ["a"], toJudging, "build.completed"],
     ["awaiting_ge", ["a"], [...toJudging, "ge.opened"], "g2.approved"],
-    ["awaiting_g2", ["a"], toG2, "ge.answered"],
+    ["awaiting_g2", ["a"], toG2, "build.completed"],
     ["mrs_open", ["a"], [...toG2, "g2.approved"], "build.started"],
     ["done", ["a"], [...toG2, "g2.approved", "run.completed"], "abort"],
     ["aborted", ["a"], ["abort"], "abort"],

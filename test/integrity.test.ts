@@ -128,7 +128,8 @@ describe("ARK-115-AC2", () => {
   });
 
   const setLines = (ls: string[]) => writeFileSync(runFile("ledger.ndjson"), ls.length ? `${ls.join("\n")}\n` : "");
-  const edited = (ls: string[], i: number) => ls.map((l, j) => (j === i ? l.replace('"type":', '"x":1,"type":') : l));
+  // A schema-valid change (the year of ts moves back one), so only the hash chain can notice it.
+  const edited = (ls: string[], i: number) => ls.map((l, j) => (j === i ? l.replace(/"ts":"(\d{4})/, (_, y) => `"ts":"${Number(y) - 1}`) : l));
   // [what was done to a 4-line ledger, the seq the refusal names]
   const damage: [string, (ls: string[]) => string[], number][] = [
     ["an edited middle line", (ls) => edited(ls, 1), 2],
@@ -165,8 +166,32 @@ describe("ARK-115-AC2", () => {
   });
 });
 
+// Every AC manual and signed, so trace-check passes without a test run; returns the G2 packet hash. Needs building state.
+const toG2Packet = () => {
+  ok(ark("advance", run(), "build.completed"));
+  writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: t\n  level: manual\n- id: DEMO-1-AC2\n  text: t\n  level: manual\n");
+  mkdirSync(runFile("manual"), { recursive: true });
+  for (const id of ["DEMO-1-AC1", "DEMO-1-AC2"]) writeFileSync(runFile(`manual/${id}.md`), "signed-by: P\nat: 2026-10-26\n");
+  mkdirSync(runFile("artifacts"), { recursive: true });
+  writeFileSync(runFile("artifacts/junit.xml"), "<testsuite/>");
+  ok(ark("trace-check", run()));
+  return ark("gate", "packet", run(), "G2").out.trim();
+};
+
 describe("ARK-115-AC3", () => {
   const finding = (n: number) => [{ id: `F${n}`, reviewer: "r", model: "anthropic/claude-opus-5-5", priority: "P2", file: "src/a.ts", line: 1, claim: "c", bucket: "consider", reason: "r" }];
+
+  test("40 parallel advances leave a replayable chain with unique seq values", async () => {
+    toBuilding();
+    const procs = Array.from({ length: 40 }, () => Bun.spawn(["bun", CLI, "advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'], { cwd: proj, env: env(), stderr: "pipe", stdout: "pipe" }));
+    const results = await Promise.all(procs.map(async (p) => ({ code: await p.exited, err: await new Response(p.stderr).text() })));
+    expect(results.filter((r) => r.code !== 0)).toEqual([]);
+
+    const seqs = events().map((e) => e.seq);
+    expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => i + 1));
+    expect(events().filter((e) => e.type === "implementer.completed").length).toBe(40);
+    ok(ark("run", "replay", run(), "--check"));
+  });
 
   test("40 parallel findings records leave a replayable chain with unique seq values and 40 distinct artifacts", async () => {
     toBuilding();
@@ -203,7 +228,8 @@ describe("ARK-115-AC3", () => {
     writeFileSync(lock, "crashed");
     const old = new Date(Date.now() - 10 * 60_000);
     utimesSync(lock, old, old);
-    ok(ark("advance", run(), "g0.opened"));
+    ok(ark("advance", run(), "abort"));
+    expect(existsSync(lock)).toBe(false);
   });
 });
 
@@ -239,6 +265,23 @@ describe("ARK-115-AC4", () => {
     refused(ark("gate", "packet", run(), "G2"), "src/late.ts");
   });
 
+  test("a G2 approval or send-back refuses an unrecorded commit; an abort vouches for nothing and goes through", () => {
+    step({ "src/a.ts": "export const a = 1;\n" });
+    const h = toG2Packet();
+    commitAll(wt(), { "src/late.ts": "export const l = 1;\n" });
+    refused(ark("gate", "answer", run(), "G2", "approve", "--packet", h), "src/late.ts");
+    refused(ark("gate", "answer", run(), "G2", "send_back", "--packet", h), "src/late.ts");
+    expect(slurp("state.json")).toContain('"state": "awaiting_g2"');
+    ok(ark("gate", "answer", run(), "G2", "abort", "--packet", h)); // an abort vouches for nothing
+  });
+
+  test("fix_round.started refuses an unrecorded commit", () => {
+    step({ "src/a.ts": "export const a = 1;\n" });
+    ok(ark("advance", run(), "build.completed"));
+    commitAll(wt(), { "src/late.ts": "export const l = 1;\n" });
+    refused(ark("advance", run(), "fix_round.started"), "src/late.ts");
+  });
+
   test("an unrecorded dirty file blocks trace-check, naming it", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
     ok(ark("advance", run(), "build.completed"));
@@ -261,6 +304,14 @@ describe("ARK-115-AC5", () => {
     const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
     expect(r.code).toBe(1);
     expect(r.err).toContain("test/f.test.ts");
+  });
+
+  test("a G2 send-back starts the next step the same way", () => {
+    step({ "src/f.ts": "export const f = 1;\n" });
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") }); // validator
+    const h = toG2Packet();
+    ok(ark("gate", "answer", run(), "G2", "send_back", "--packet", h));
+    step({ "src/f.ts": "export const f = 2;\n" });
   });
 
   test("a tagged test whose name git would quote is still caught", () => {
@@ -289,6 +340,7 @@ describe("ARK-115-AC8", () => {
     expect(r.err).toContain("plan.md");
     expect(slurp("state.json")).toContain('"state": "awaiting_g1"');
 
+    ok(ark("gate", "answer", run(), "G1", "change", "--packet", h)); // the way out of a changed source: answer, then rebuild
     const h2 = ark("gate", "packet", run(), "G1").out.trim(); // rebuilding keeps the first packet on disk
     expect(h2).not.toBe(h);
     expect(packetFiles()).toEqual([`G1.${h.slice(7)}.packet.md`, `G1.${h2.slice(7)}.packet.md`].sort());
@@ -297,14 +349,7 @@ describe("ARK-115-AC8", () => {
 
   test("a G2 packet covers the evidence files: changing one after the packet refuses the answer", () => {
     toBuilding();
-    ok(ark("advance", run(), "build.completed"));
-    writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: t\n  level: manual\n- id: DEMO-1-AC2\n  text: t\n  level: manual\n");
-    mkdirSync(runFile("manual"), { recursive: true });
-    for (const id of ["DEMO-1-AC1", "DEMO-1-AC2"]) writeFileSync(runFile(`manual/${id}.md`), "signed-by: P\nat: 2026-10-26\n");
-    mkdirSync(runFile("artifacts"), { recursive: true });
-    writeFileSync(runFile("artifacts/junit.xml"), "<testsuite/>");
-    ok(ark("trace-check", run()));
-    const h = ark("gate", "packet", run(), "G2").out.trim();
+    const h = toG2Packet();
     expect(slurp(`gates/G2.${h.slice(7)}.packet.md`)).toContain(sha("<testsuite/>"));
 
     writeFileSync(runFile("artifacts/junit.xml"), "<testsuite failures='1'/>");

@@ -27,7 +27,7 @@ Commands:
   gate answer <run_id> <gate> <answer> --packet <sha256>
                                           Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort)
   mr <run_id>                             Push the run branches and open a GitHub PR per repo (ark.yml mr: false closes the run at the ready branch instead)
-  preflight                               Refuse (exit 1) unless .omp/config.yml puts validate and review-x on another provider than implement, and review-s on the same one
+  preflight                               Refuse (exit 1) unless every model validate and review-x can reach (comma candidates, retry.fallbackChains) is off implement's provider, and every review-s model on it
   log route [<run_id>] <playbook> "<why>" Record route.chosen, the first event after run.started (no run_id: the active run)
   findings record <run_id> <file.json>    Validate the judged findings and record them (judging state)
   artifact record <run_id> <implementer|validator|reviewer> <file.json>

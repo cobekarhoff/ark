@@ -19,6 +19,18 @@ export const git = (cwd: string, ...args: string[]) => gitRaw(cwd, ...args).trim
 // Paths of `git diff --name-only <args>`, read with -z so no name is quoted or escaped (core.quotePath).
 export const diffFiles = (cwd: string, ...args: string[]) => gitRaw(cwd, "diff", "-z", "--name-only", ...args).split("\0").filter(Boolean);
 
+// Uncommitted paths (tracked edits and untracked, non-ignored files), from `git status -z` so names stay literal; a rename lists its source as a second entry.
+export function dirtyFiles(cwd: string): string[] {
+  const parts = gitRaw(cwd, "status", "--porcelain", "-z", "--untracked-files=all").split("\0");
+  const paths: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue;
+    paths.push(parts[i].slice(3));
+    if (/[RC]/.test(parts[i].slice(0, 2))) i++;
+  }
+  return paths;
+}
+
 // `ref`: read the config as committed at that ref instead of from disk (the AC7 guard trusts the base config, not the implementer's edit of it).
 export function loadRepo(dir: string, ref?: string): RepoConfig {
   const file = ref ? `${ref}:.ark/repo.yml` : join(dir, ".ark", "repo.yml");

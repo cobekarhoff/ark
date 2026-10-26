@@ -23,9 +23,11 @@ Undo with `bun unlink` and `omp plugin uninstall ark`.
 ark run start ARK-109                  # start the run, or show the existing one
 ark advance <run_id> <event> [--data json]   # legal transitions only (cli/transitions.ts)
 ark run replay <run_id> [--check]      # rebuild state.json from ledger.ndjson
-ark gate packet <run_id> <G0|G1|G2>   # build gates/<gate>.packet.md from run artifacts, print its sha256
+ark gate packet <run_id> <G0|G1|G2>   # build gates/<gate>.<hash>.packet.md from run artifacts (each source listed with its sha256), print its sha256
 ark gate answer <run_id> <gate> <answer> --packet <sha256>   # G0 accept|edit|abort, G1 approve|change|abort, G2 approve|send_back|abort
 ```
+
+Guardrail integrity (ARK-115): `ark advance` refuses every event a command owns (`ws.created`, `test.*`, `trace.checked`, `gate.*`, `ge.*`, `mr.*`, `run.closed`, `route.chosen`, `findings.recorded`, `artifact.*`, `ac.*`), naming the command. Each ledger line carries `prev`, the sha256 of the previous line, and `state.json` records `ledger_seq` and `ledger_head`; replay and every command refuse an edited, removed, reordered or truncated line, naming the first bad seq. Writers hold `ledger.lock` (O_EXCL, taken over after 30 s) around read-and-append. `ark run start` on an existing run replays the ledger and rewrites a missing or stale `state.json`. Product changes count only through recorded implementer steps: `build.completed`, `fix_round.started`, `ark trace-check` and the G2 packet and answer refuse a worktree with commits to non-test files after its last recorded step head, or uncommitted files, naming them; the implementer guard diffs from the start of the step (the last recorded `head_sha`, or the HEADs recorded when a round started). An approving gate answer rebuilds the packet and refuses when any source artifact changed. `ark preflight` checks every selector a role can reach: comma candidates, `retry.fallbackChains` (role, `default`, exact-model and `provider/*` keys, followed transitively) unless `retry.modelFallback` is `false`.
 
 ## Merge requests
 
@@ -64,7 +66,7 @@ Events owned by a command (`gate.*`, `ws.created`, `test.*`, `trace.checked`; th
 Start with `/skill:ark ticket <ID>` (the skill is `disable-model-invocation`; it is still reachable as `skill://ark`). It runs `ark run start`, logs the route, copies `skills/ark/playbooks/ticket.md`'s steps into the todo list and names every CLI call per step.
 
 ```sh
-ark preflight                                  # .omp/config.yml modelRoles: validate and review-x must not share implement's provider, review-s must
+ark preflight                                  # .omp/config.yml modelRoles and retry.fallbackChains: every model validate and review-x can reach must be off implement's provider(s), every review-s model on it
 ark log route [<run_id>] <playbook> "<why>"    # route.chosen, the first event after run.started (no run_id: the active run)
 ark artifact record <run_id> <implementer|validator|reviewer> <file.json>   # schema-check an agent result, keep it as artifacts/<agent>/<n>.json
 ark findings record <run_id> <file.json>       # judging state: bucket + reason per finding; act_on P0/P1 needs evidence {failing_test} or {trace_path}

@@ -31,5 +31,6 @@
   },
   "sessions": [],
   "lock": null,
-  "ledger_seq": 10
+  "ledger_seq": 10,
+  "ledger_head": "sha256:be10f94d39d7c57292467cf24e303756f9e42d9403655520bc6b978759f18bce"
 }

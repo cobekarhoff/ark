@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./repo";
-import { check, open, readLedger, record, type RunState, sha256, type LedgerEvent } from "./run";
+import { check, locked, open, project, readLedger, record, type RunState, sha256, type LedgerEvent, unattributed } from "./run";
 
 type TestRow = { test: string; acs: string[]; red?: string };
 type Ev = LedgerEvent & { data: { repo: string; head_sha: string; base_sha?: string; out: string; acs: Record<string, string>; tests: TestRow[]; unknown_tags?: string[] } };
@@ -26,7 +26,7 @@ const green = (v: string) => (v === "proven" || v === "no-red" ? "pass" : v === 
 export function buildMatrix(dir: string, runId: string, state: RunState, events: LedgerEvent[]): { matrix: string; failures: string[] } {
   const acs = (Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) ?? []) as { id: string; level?: string }[];
   check("ac", acs, "ac.yml");
-  const failures: string[] = [];
+  const failures: string[] = unattributed(dir, state); // changes no recorded implementer step vouches for
   const listed = new Set(acs.map((a) => a.id));
   for (const id of Object.keys(state.acs)) if (!listed.has(id)) failures.push(`${id}: in the run but missing from ac.yml`);
   for (const id of listed) if (!(id in state.acs)) failures.push(`${id}: in ac.yml but not an AC of this run`);
@@ -107,11 +107,15 @@ export function buildMatrix(dir: string, runId: string, state: RunState, events:
 }
 
 export function traceCheck(runId: string): string {
-  const { dir, state } = open(runId, "trace.checked", "trace-check");
-  const { matrix, failures } = buildMatrix(dir, runId, state, readLedger(dir));
-  writeFileSync(join(dir, "trace-matrix.md"), matrix);
-  const passed = failures.length === 0;
-  record(dir, "trace.checked", { passed, failures, matrix_sha256: sha256(matrix) });
-  if (!passed) throw new Error(`trace-check failed for ${runId}:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
-  return `trace-check passed: ${Object.keys(state.acs).length} ACs, ${sha256(matrix)}\n`;
+  const { dir } = open(runId, "trace.checked", "trace-check");
+  return locked(dir, () => { // the matrix, its verdict and the event it is recorded in come from one ledger read
+    const events = readLedger(dir);
+    const state = project(events);
+    const { matrix, failures } = buildMatrix(dir, runId, state, events);
+    writeFileSync(join(dir, "trace-matrix.md"), matrix);
+    const passed = failures.length === 0;
+    record(dir, "trace.checked", { passed, failures, matrix_sha256: sha256(matrix) });
+    if (!passed) throw new Error(`trace-check failed for ${runId}:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
+    return `trace-check passed: ${Object.keys(state.acs).length} ACs, ${sha256(matrix)}\n`;
+  });
 }

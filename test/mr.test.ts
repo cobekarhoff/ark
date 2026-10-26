@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { rechain } from "./ledger";
 import { OMP_CONFIG } from "./omp-config";
 
 setDefaultTimeout(60_000);
@@ -226,6 +227,7 @@ describe("ARK-107-AC1", () => {
   test("a branch outside ark/ in the ledger is refused and main on the remote does not move", () => {
     const ledger = readFileSync(runFile("ledger.ndjson"), "utf8");
     writeFileSync(runFile("ledger.ndjson"), ledger.replace(`"branch":"${branch()}"`, '"branch":"main"'));
+    rechain(dirname(runFile("ledger.ndjson"))); // a chained ledger that carries the bad branch, so the mr guard (not the chain check) is what refuses
     const base = onRemote("refs/heads/main");
     const r = ark("mr", run());
     expect(r.code).toBe(1);
