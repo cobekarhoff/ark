@@ -16,8 +16,9 @@ export function gitRaw(cwd: string, ...args: string[]): string {
 }
 export const git = (cwd: string, ...args: string[]) => gitRaw(cwd, ...args).trim();
 
-// Paths of `git diff --name-only <args>`, read with -z so no name is quoted or escaped (core.quotePath).
-export const diffFiles = (cwd: string, ...args: string[]) => gitRaw(cwd, "diff", "-z", "--name-only", ...args).split("\0").filter(Boolean);
+// Paths of `git diff --name-only <args>`, read with -z so no name is quoted or escaped (core.quotePath). --no-renames lists both the old and the new path of a move,
+// so moving a tagged test out of the test globs still shows the test as touched.
+export const diffFiles = (cwd: string, ...args: string[]) => gitRaw(cwd, "diff", "-z", "--name-only", "--no-renames", ...args).split("\0").filter(Boolean);
 
 // Uncommitted paths (tracked edits and untracked, non-ignored files), from `git status -z` so names stay literal; a rename lists its source as a second entry.
 export function dirtyFiles(cwd: string): string[] {

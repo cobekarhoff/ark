@@ -62,7 +62,7 @@ const owners: [prefix: string, command: string][] = [
   ["artifact.", "artifact record"], ["ac.", "ac update"],
   ["run.closed", "mr"], ["route.chosen", "log route"], ["findings.recorded", "findings record"],
 ];
-export const ownerOf = (type: string) => owners.find(([p]) => type.startsWith(p))?.[1];
+export const ownerOf = (type: string) => owners.find(([p]) => (p.endsWith(".") ? type.startsWith(p) : type === p))?.[1];
 
 export type State = keyof typeof transitions;
 

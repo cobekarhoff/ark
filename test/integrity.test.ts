@@ -328,6 +328,19 @@ describe("ARK-115-AC5", () => {
     step({ "src/f.ts": "export const f = 2;\n" });
   });
 
+  test("moving a tagged test out of the test globs is still a touched tagged test", () => {
+    step({ "src/f.ts": "export const f = 1;\n" });
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") }); // validator
+    ok(ark("advance", run(), "build.completed"));
+    ok(ark("advance", run(), "fix_round.started"));
+    mkdirSync(join(wt(), "notes"));
+    git(wt(), "mv", "test/f.test.ts", "notes/f.txt");
+    git(wt(), "commit", "-qm", "move");
+    const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("test/f.test.ts");
+  });
+
   test("a tagged test whose name git would quote is still caught", () => {
     commitAll(wt(), { "test/über.test.ts": tagged("DEMO-1-AC2") });
     const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
