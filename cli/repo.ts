@@ -8,11 +8,16 @@ export const parsers = { "bun-test": bunTest } as const;
 export type Suite = { format: keyof typeof parsers; level: string; collect?: string; run: string; junit: string; tests?: string[]; env?: { up?: string; down?: string } };
 export type RepoConfig = { commands?: { build?: string }; suites: Record<string, Suite> };
 
-export function git(cwd: string, ...args: string[]): string {
+// Untrimmed stdout, for NUL-separated (-z) output where a path may begin or end in whitespace.
+export function gitRaw(cwd: string, ...args: string[]): string {
   const r = Bun.spawnSync(["git", "-C", cwd, ...args]);
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${r.stderr.toString().trim()}`);
-  return r.stdout.toString().trim();
+  return r.stdout.toString();
 }
+export const git = (cwd: string, ...args: string[]) => gitRaw(cwd, ...args).trim();
+
+// Paths of `git diff --name-only <args>`, read with -z so no name is quoted or escaped (core.quotePath).
+export const diffFiles = (cwd: string, ...args: string[]) => gitRaw(cwd, "diff", "-z", "--name-only", ...args).split("\0").filter(Boolean);
 
 // `ref`: read the config as committed at that ref instead of from disk (the AC7 guard trusts the base config, not the implementer's edit of it).
 export function loadRepo(dir: string, ref?: string): RepoConfig {
@@ -33,6 +38,7 @@ export function loadRepo(dir: string, ref?: string): RepoConfig {
 
 const testGlobs = (s: Suite) => s.tests ?? ["**/*.test.ts", "test/**"];
 const isTest = (s: Suite, f: string) => testGlobs(s).some((g) => new Bun.Glob(g).match(f));
+export const isTestFile = (cfg: RepoConfig, f: string) => Object.values(cfg.suites).some((s) => isTest(s, f));
 const show = (wt: string, ref: string, f: string) => {
   const r = Bun.spawnSync(["git", "-C", wt, "show", `${ref}:${f}`]);
   return r.exitCode === 0 ? r.stdout.toString() : "";
@@ -40,13 +46,12 @@ const show = (wt: string, ref: string, f: string) => {
 
 // Test files changed between base and head that still exist at head (what red-green overlays).
 export function changedTestFiles(wt: string, base: string, cfg: RepoConfig): string[] {
-  const files = git(wt, "diff", "--name-only", "--diff-filter=d", `${base}..HEAD`).split("\n").filter(Boolean);
-  return files.filter((f) => Object.values(cfg.suites).some((s) => isTest(s, f)));
+  return diffFiles(wt, "--diff-filter=d", `${base}..HEAD`).filter((f) => isTestFile(cfg, f));
 }
 
-// AC7: files in base..HEAD that are test files carrying an AC tag, before or after the change.
-export function touchedTaggedTests(wt: string, base: string, cfg: RepoConfig): string[] {
-  const files = git(wt, "diff", "--name-only", `${base}..HEAD`).split("\n").filter(Boolean);
-  return files.filter((f) =>
-    Object.values(cfg.suites).some((s) => isTest(s, f) && [show(wt, "HEAD", f), show(wt, base, f)].some(parsers[s.format].taggedFile)));
+// AC7: files in from..HEAD that are test files carrying an AC tag, before or after the change.
+// `from` is where the step began: the repo's last recorded head_sha, or its base_sha before the first step.
+export function touchedTaggedTests(wt: string, from: string, cfg: RepoConfig): string[] {
+  return diffFiles(wt, `${from}..HEAD`).filter((f) =>
+    Object.values(cfg.suites).some((s) => isTest(s, f) && [show(wt, "HEAD", f), show(wt, from, f)].some(parsers[s.format].taggedFile)));
 }

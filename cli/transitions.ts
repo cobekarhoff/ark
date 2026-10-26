@@ -50,16 +50,14 @@ export const transitions = {
 } as const satisfies Record<string, Record<string, string>>;
 
 // Event types written by a dedicated command, which `ark advance` refuses: the owner is what makes the ledger evidence trustworthy.
-export const owner: Record<string, string> = {
-  "gate.packet": "gate",
-  "gate.answered": "gate",
-  "ws.created": "ws",
-  "test.result": "test",
-  "test.red_green": "test",
-  "trace.checked": "trace-check",
-  "mr.opened": "mr",
-  "run.closed": "mr",
-};
+// A key ending in "." owns the whole family (test.* ...), any other key one type. Ownership holds in every state, before legality is asked.
+// ge.* belongs to `ark gate` (escalation is a gate, ARK-117); `ark ac update` (ac.updated) arrives with ARK-117.
+const owners: [prefix: string, command: string][] = [
+  ["gate.", "gate"], ["ge.", "gate"], ["ws.", "ws"], ["test.", "test"], ["trace.", "trace-check"], ["mr.", "mr"],
+  ["artifact.", "artifact record"], ["ac.", "ac update"],
+  ["run.closed", "mr"], ["route.chosen", "log route"], ["findings.recorded", "findings record"],
+];
+export const ownerOf = (type: string) => owners.find(([p]) => type.startsWith(p))?.[1];
 
 export type State = keyof typeof transitions;
 
