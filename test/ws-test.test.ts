@@ -536,11 +536,12 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     withSrc(NEW_FEATURE, {
       "test/helpers.ts": `export const expected = () => "new";\n`,
       "tests/more.ts": `export const x = 1;\n`,
+      "src/__tests__/util.ts": `export const y = 1;\n`, // colocated, Jest-style
       "test/h.test.ts": bunTest(`test("DEMO-1-AC1 uses a helper", () => { expect(feature()).toBe(expected()); });`, `import { feature } from "../src/feature";\nimport { expected } from "./helpers";`),
     });
     const r = redGreen("DEMO-1-AC1");
     expect(r.err).toBe("");
-    expect(events("test.red_green")[0].data).toMatchObject({ overlay: ["test/h.test.ts", "test/helpers.ts", "tests/more.ts"], acs: { "DEMO-1-AC1": "proven" } });
+    expect(events("test.red_green")[0].data).toMatchObject({ overlay: ["src/__tests__/util.ts", "test/h.test.ts", "test/helpers.ts", "tests/more.ts"], acs: { "DEMO-1-AC1": "proven" } });
   });
 
   test("the other extensions bun discovers (.mts, .mjs, .cts, .cjs) count as test files", () => {

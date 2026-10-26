@@ -38,7 +38,7 @@ export function loadRepo(dir: string, ref?: string): RepoConfig {
 }
 
 // Without `tests`: the files bun test discovers, plus everything under the usual test directories (helpers and fixtures a test imports).
-const testGlobs = (s: Suite) => s.tests ?? ["**/*{.test,_test,.spec,_spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}", "{test,tests,__tests__}/**"];
+const testGlobs = (s: Suite) => s.tests ?? ["**/*{.test,_test,.spec,_spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}", "**/{test,tests,__tests__}/**"];
 const isTest = (s: Suite, f: string) => testGlobs(s).some((g) => new Bun.Glob(g).match(f));
 export const isTestFile = (cfg: RepoConfig, f: string) => Object.values(cfg.suites).some((s) => isTest(s, f));
 const show = (wt: string, ref: string, f: string) => {
