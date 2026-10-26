@@ -3,7 +3,9 @@ import ticketSchema from "../../schemas/ticket.schema.json";
 // bun:test has no native tags: an AC ID sits in the test name or any describe name.
 // bun's JUnit puts the describe path in `classname` (innermost first) and thrown errors in <failure type="Error">.
 // The ticket id pattern is the schema's own, so a one-letter project prefix (A-1-AC1) is a tag too.
-export const AC_ID = new RegExp(`${ticketSchema.properties.id.pattern.slice(1, -1)}-AC\\d+`, "g");
+// Bounded on both sides: with one-letter prefixes, `XA-1-AC1` must not yield `A-1-AC1`, nor `A-1-AC10` yield `A-1-AC1`.
+const ID = `(?<![A-Za-z0-9-])${ticketSchema.properties.id.pattern.slice(1, -1)}-AC\\d+(?!\\d)`;
+export const AC_ID = new RegExp(ID, "g");
 
 export type Status = "pass" | "failure" | "error" | "skipped";
 export type Case = { file: string; name: string; classname: string; acs: string[]; status: Status };
@@ -26,8 +28,8 @@ export function parse(xml: string): Case[] {
   });
 }
 
-// Selector for `-t`: a regex over the full describe path; (?!\d) keeps AC1 from selecting AC10.
-export const tags = (ids: string[]) => `(${ids.join("|")})(?!\\d)`;
+// Selector for `-t`: a regex over the full describe path, bounded like AC_ID so AC1 selects neither AC10 nor BA-1-AC1.
+export const tags = (ids: string[]) => `(?<![A-Za-z0-9-])(${ids.join("|")})(?!\\d)`;
 
 // Static check for AC7: does this source file carry an AC tag?
 export const taggedFile = (source: string) => (source.match(AC_ID) ?? []).length > 0;

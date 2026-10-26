@@ -448,11 +448,15 @@ describe("ARK-115-AC6", () => {
     expect(ark("gate", "answer", rid, "G1", "approve", "--packet", h).err).toBe("");
     expect(ark("ws", "create", rid).err).toBe("");
     expect(ark("advance", rid, "build.started").code).toBe(0);
-    commitAll(join(runsDir(), rid, "ws", "demo"), { "test/x.test.ts": bunTest(`test("X-1-AC1 one-letter prefix", () => { expect(1).toBe(1); });`) });
+    // BX-1-AC1 is another ticket's tag and X-1-AC10 another AC: neither may be selected by X-1-AC1 (both fail if run)
+    commitAll(join(runsDir(), rid, "ws", "demo"), { "test/x.test.ts": bunTest(`test("X-1-AC1 one-letter prefix", () => { expect(1).toBe(1); });
+test("BX-1-AC1 another ticket", () => { expect(1).toBe(2); });
+test("X-1-AC10 another criterion", () => { expect(1).toBe(2); });`) });
     const r = ark("test", rid, "--acs", "X-1-AC1");
     expect(r.err).toBe("");
     expect(JSON.parse(slurp(join(runsDir(), rid, "state.json"))).acs).toHaveProperty("X-1-AC1");
     expect(r.out).toContain("X-1-AC1: pass");
+    expect(r.code).toBe(0);
   });
 });
 

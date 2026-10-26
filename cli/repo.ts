@@ -46,8 +46,8 @@ const show = (wt: string, ref: string, f: string) => {
 };
 
 // Test files changed between base and head that still exist at head (what red-green overlays).
-export function changedTestFiles(wt: string, base: string, cfg: RepoConfig): string[] {
-  return diffFiles(wt, "--diff-filter=d", `${base}..HEAD`).filter((f) => isTestFile(cfg, f));
+export function changedTestFiles(wt: string, base: string, cfg: RepoConfig, head = "HEAD"): string[] {
+  return diffFiles(wt, "--diff-filter=d", `${base}..${head}`).filter((f) => isTestFile(cfg, f));
 }
 
 // AC7: files in from..HEAD that are test files carrying an AC tag, before or after the change.

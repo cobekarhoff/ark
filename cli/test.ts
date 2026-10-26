@@ -107,7 +107,7 @@ function inCheckout<T>(wt: string, sha: string, cfg: RepoConfig, out: string, wh
   const tmp = mkdtempSync(join(tmpdir(), "ark-proof-"));
   try {
     git(wt, "worktree", "add", "--detach", tmp, sha);
-    if (overlay.length) git(tmp, "checkout", from, "--", ...overlay);
+    if (overlay.length) git(tmp, "--literal-pathspecs", "checkout", from, "--", ...overlay);
     if (cfg.commands?.build && sh(cfg.commands.build, tmp, out, "build") !== 0) throw new Error(`commands.build failed in the checkout of ${sha.slice(0, 12)}, see ${join(where, "build.stderr.log")}`);
     return fn(tmp);
   } finally {
@@ -152,7 +152,7 @@ function verdict(id: string, red: Row[], green: Row[]): string {
 function proveRedGreen(runId: string, ids: string[], repoName?: string): string {
   const { dir, repo, wt, head, attempt, out, fp, cfg, where, unknownTags } = prepare(runId, "test.red_green", ids, repoName);
   fp.base_sha = repo.base_sha;
-  const overlay = changedTestFiles(wt, repo.base_sha, cfg);
+  const overlay = changedTestFiles(wt, repo.base_sha, cfg, head);
   let red, green;
   try {
     red = inCheckout(wt, repo.base_sha, cfg, join(out, "red"), join(where, "red"), (d) => tagged(cfg, d, join(out, "red"), ids, false, fp), overlay, head);

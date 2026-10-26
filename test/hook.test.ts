@@ -45,6 +45,10 @@ describe("ARK-115-AC10", () => {
       expect(call("lsp", input).code).toBe(1);
     }
     expect(call("lsp", { action: "rename", file: "src.ts", apply: false }).code).toBe(0); // a preview changes nothing
+    expect(call("lsp", { action: "rename", file: "src.ts" }).code).toBe(1); // rename applies by default
+    expect(call("lsp", { action: "code_actions", file: "src.ts" }).code).toBe(0); // lists by default
+    expect(call("lsp", { action: "invented_future_action" }).code).toBe(1);
+    expect(call("lsp", {}).code).toBe(1);
     expect(call("lsp", { action: "diagnostics", file: "*" }).code).toBe(0);
     expect(call("lsp", { action: "references", file: "src.ts", symbol: "x" }).code).toBe(0);
   });
@@ -58,6 +62,10 @@ describe("ARK-115-AC10", () => {
     expect(call("write", { path: "vault://note.md", content: "x" }).code).toBe(1);
     expect(call("write", { path: "ssh://host/etc/x", content: "x" }).code).toBe(1);
     expect(call("write", { path: "local://scratch.md", content: "x" }).code).toBe(0);
+    expect(call("write", { path: "[conflict://1#AB12]", content: "@ours" }).code).toBe(1); // hashline header around a conflict URL
+    expect(call("write", { path: "cfg://tools.enabled", content: "x" }).code).toBe(1);
+    expect(call("write", { path: "proc://job1", content: "rm -rf x\n" }).code).toBe(1); // stdin to a background job is exec
+    expect(call("write", { path: "proc://job1/kill" }).code).toBe(0);
     expect(call("write", { path: "agent://Peer", content: "hi" }).code).toBe(0);
     expect(call("write", { path: "xd://report_issue", content: JSON.stringify({}) }).code).toBe(0);
   });
@@ -88,6 +96,15 @@ describe("ARK-115-AC10", () => {
     rmSync(pointer);
     expect(call("write", { path: product() }, bound).code).toBe(1); // pointer missing
     expect(call("write", { path: join(dirOf("DEMO-7"), "plan.md") }, bound).code).toBe(0);
+  });
+
+  test("a closed ARK_RUN does not hide the run the pointer moved to", () => {
+    const stale = { ARK_RUN: runOf("DEMO-7") };
+    expect(ark(["advance", runOf("DEMO-7"), "abort"]).code).toBe(0);
+    expect(call("write", { path: product() }, stale).code).toBe(0); // nothing open
+    expect(ark(["run", "start", "DEMO-8"]).code).toBe(0); // same session starts the next run; the pointer follows
+    expect(call("write", { path: product() }, stale).err).toContain("outside the active run folder");
+    expect(call("write", { path: join(dirOf("DEMO-8"), "plan.md") }, stale).code).toBe(0);
   });
 
   test("with no ARK_RUN, a pointer to a missing run fails closed but still lets bash repair it; a closed run frees the session", () => {

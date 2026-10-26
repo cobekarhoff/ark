@@ -14,25 +14,29 @@ const real = (p: string): string => {
 
 const BASH_WRITE = /(>>?|\btee\b|\bsed\s+-\S*i|\bmv\b|\bcp\b|\brm\b|\btruncate\b)[^|;&\n]*\b(state\.json|ledger\.ndjson)\b/;
 const GUARDED = ["edit", "write", "ast_edit", "bash", "eval", "lsp"];
-// lsp actions that cannot change a file; `rename` and `code_actions` apply by default, so they pass only when `apply` is false.
+// lsp actions that cannot change a file. `rename` applies unless `apply` is false; `code_actions` only lists unless `apply` is true. Anything else, unknown actions included, is blocked.
 const LSP_READ = ["diagnostics", "definition", "references", "hover", "symbols", "type_definition", "implementation", "status", "capabilities"];
-// Internal URLs a write may name: OMP-owned scratch and coordination writes. Every other scheme can reach a file the hook cannot see.
-const URL_OK = ["local", "agent", "proc"];
+// Internal URLs a write may name: OMP-owned scratch, peer messages, and cancelling a background job. Every other scheme can reach a file or a process the hook cannot see.
+const urlOk = (scheme: string, p: string) => scheme === "local" || scheme === "agent" || (scheme === "proc" && /\/kill$/.test(p));
 
-// The run this session is bound to: ARK_RUN (set by the router), else the project's active-run pointer. Fails closed:
-// a binding that names no run, or whose state cannot be read, binds the session; only a run that is done or aborted frees it.
+// The run this session is bound to: ARK_RUN (set by the router) when it names an open run, else the project's active-run pointer when that does.
+// ARK_RUN is fixed at launch, so a closed one must not hide the run the pointer moved to. Fails closed: a binding that names no run,
+// or whose state.json cannot be read, binds the session; only when every named run is done or aborted is the session free.
 function boundRun(): string | undefined {
   let root: string;
   try { root = projectRoot(); } catch { return undefined; } // no ark.yml: not an Ark project
   const ptr = join(root, "active-run");
-  const id = process.env.ARK_RUN || (existsSync(ptr) ? readFileSync(ptr, "utf8").trim() : "");
-  if (!id) return undefined;
-  let dir: string;
-  try { dir = runDir(id); } catch (e) { throw new Error(`blocked: ${(e as Error).message}${process.env.ARK_RUN ? " (ARK_RUN)" : " (active-run pointer)"}; fix the binding with 'ark run start <ID>'`); }
-  try {
-    const status = (JSON.parse(readFileSync(join(dir, "state.json"), "utf8")) as { status: string }).status;
-    return status === "done" || status === "aborted" ? undefined : dir;
-  } catch { return dir; }
+  const named = [[process.env.ARK_RUN, "ARK_RUN"], [existsSync(ptr) ? readFileSync(ptr, "utf8").trim() : "", "active-run pointer"]];
+  for (const [id, source] of named) {
+    if (!id) continue;
+    let dir: string;
+    try { dir = runDir(id); } catch (e) { throw new Error(`blocked: ${(e as Error).message} (${source}); fix the binding with 'ark run start <ID>'`); }
+    try {
+      const status = (JSON.parse(readFileSync(join(dir, "state.json"), "utf8")) as { status: string }).status;
+      if (status !== "done" && status !== "aborted") return dir;
+    } catch { return dir; }
+  }
+  return undefined;
 }
 
 // Throws the refusal reason, returns when the call is allowed. `raw` is {tool, input, cwd} as JSON.
@@ -51,7 +55,8 @@ function guard(run: string, tool: string, input: Record<string, unknown>, cwd: s
   }
   if (tool === "eval") throw new Error("blocked: eval can write any file; the orchestrator works through the ark CLI and subagents");
   if (tool === "lsp") {
-    if (!LSP_READ.includes(String(input.action)) && !(["rename", "code_actions"].includes(String(input.action)) && input.apply === false))
+    const read = LSP_READ.includes(String(input.action)) || (input.action === "rename" && input.apply === false) || (input.action === "code_actions" && input.apply !== true);
+    if (!read)
       throw new Error(`blocked: lsp ${String(input.action)} can rewrite product files; the implementer does that`);
     return;
   }
@@ -73,7 +78,7 @@ function guard(run: string, tool: string, input: Record<string, unknown>, cwd: s
       continue;
     }
     if (scheme) {
-      if (URL_OK.includes(scheme)) continue;
+      if (urlOk(scheme, p)) continue;
       throw new Error(`blocked: ${tool} on ${p}; ${scheme}:// can reach files outside the run folder`);
     }
     // `archive.zip:member`, `db.sqlite:table`, `file:10-20`: the file written is some prefix before a colon, so check each (a symlinked container resolves to its real file).
