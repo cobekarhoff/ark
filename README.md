@@ -27,6 +27,14 @@ ark gate packet <run_id> <G0|G1|G2>   # build gates/<gate>.packet.md from run ar
 ark gate answer <run_id> <gate> <answer> --packet <sha256>   # G0 accept|edit|abort, G1 approve|change|abort, G2 approve|send_back|abort
 ```
 
+## Merge requests
+
+```sh
+ark mr <run_id>   # in mrs_open: push each run branch with the CLI's own credentials, open a GitHub PR per repo via gh
+```
+
+Per repo it pushes the approved `head_sha` to `ark/*` branches only (refusing if the worktree HEAD moved since), using the origin URL from the main checkout's config, with credentials redacted from errors. The PR description carries the ticket's ACs, `trace-matrix.md` and the evidence paths relative to the run folder. An open PR from this repo into the default branch is adopted instead of opening a second; a closed or merged one is refused by name. Until every repo has an MR the run's next action is `open_mrs` (orchestrator). `mr: false` in `ark.yml` makes the G2 approval itself record `run.closed` (`mr disabled`), leaving ready branches. `ark advance` refuses `mr.opened`, `run.closed` and `ws.created`. There is no merge command, and `ark mr` only ever calls `gh pr list` and `gh pr create`; agents get no gh or merge tool (ARK-108 owns agent tool lists).
+
 ## Worktrees and tests
 
 ```sh

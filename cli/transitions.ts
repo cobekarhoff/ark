@@ -44,7 +44,7 @@ export const transitions = {
     "gate.answered:G2:abort": "aborted",
     abort: "aborted",
   },
-  mrs_open: { "run.completed": "done", abort: "aborted" },
+  mrs_open: { "mr.opened": "mrs_open", "run.closed": "done", "run.completed": "done", abort: "aborted" },
   done: {},
   aborted: {},
 } as const satisfies Record<string, Record<string, string>>;
@@ -57,6 +57,8 @@ export const owner: Record<string, string> = {
   "test.result": "test",
   "test.red_green": "test",
   "trace.checked": "trace-check",
+  "mr.opened": "mr",
+  "run.closed": "mr",
 };
 
 export type State = keyof typeof transitions;
