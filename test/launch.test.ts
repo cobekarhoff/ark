@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OMP_CONFIG } from "./omp-config";
@@ -39,6 +39,8 @@ async function rpc(argv: string[], commands: object[], opt: { cwd: string; env: 
 const toolNames = (f: Frame) => (f.data.dumpTools as { name: string }[]).map((t) => t.name);
 
 let root: string;
+let extraConfig = ""; // appended to the human's ~/.gitconfig in the stand-in tests
+let launchCwd = ""; // the directory the stand-in tests launch from (default: root)
 const HERE = () => ({
   PATH: process.env.PATH!,
   HOME: join(root, "home"),
@@ -51,6 +53,8 @@ const HERE = () => ({
 const MODEL = ["--model", "anthropic/claude-haiku", "--no-session"];
 
 beforeEach(() => {
+  extraConfig = "";
+  launchCwd = "";
   root = mkdtempSync(join(tmpdir(), "ark-launch-"));
   mkdirSync(join(root, "home"));
   mkdirSync(join(root, "empty")); // a folder that is no project and has no .omp/tools
@@ -125,6 +129,42 @@ describe("ARK-118-AC2 real omp", () => {
   });
 });
 
+// A git credential can also be an `Authorization` header in http.extraHeader / http.<url>.extraHeader: a helper reset does not touch those.
+describe("ARK-118-AC2 real omp: http authentication headers", () => {
+  let seen: (string | null)[];
+  let server: ReturnType<typeof Bun.serve>;
+  beforeEach(() => {
+    seen = [];
+    server = Bun.serve({ port: 0, fetch: (req) => (seen.push(req.headers.get("authorization")), new Response("no", { status: 401 })) });
+  });
+  afterEach(() => server.stop(true));
+  const url = () => `http://127.0.0.1:${server.port}/x.git`;
+  const fixture = () => {
+    const repo = join(root, "repo");
+    mkdirSync(repo);
+    // the human's config sets the header generically, for the server's URL, and (the most specific, so the one git would send) in this repository
+    writeFileSync(join(root, "home", ".gitconfig"), `[http]\n\textraHeader = Authorization: Basic HEADER_GENERIC\n[http "http://127.0.0.1:${server.port}/"]\n\textraHeader = Authorization: Basic HEADER_URL\n`);
+    const env = { ...HERE() };
+    Bun.spawnSync(["git", "init", "-q"], { cwd: repo, env });
+    Bun.spawnSync(["git", "config", `http.${url()}.extraHeader`, "Authorization: Basic HEADER_LOCAL"], { cwd: repo, env });
+    return { repo, env };
+  };
+
+  test("control: the human's header reaches the server when omp is not launched credential-free", async () => {
+    const { repo, env } = fixture();
+    await Bun.spawn(["git", "ls-remote", url()], { cwd: repo, env: { ...env, GIT_TERMINAL_PROMPT: "0" }, stdout: "pipe", stderr: "pipe" }).exited; // async: this process serves the request
+    for (const h of ["HEADER_GENERIC", "HEADER_URL", "HEADER_LOCAL"]) expect(seen.join()).toContain(h); // git sends every layer's header
+  });
+
+  test("under ark launch an agent's plain git ls-remote sends no Authorization header, whichever layer sets it", async () => {
+    const { repo, env } = fixture();
+    const r = await rpc([process.execPath, CLI, "launch", "--mode", "rpc", ...MODEL], [{ type: "bash", command: `git ls-remote ${url()}` }], { cwd: repo, env });
+    expect(r["0"].data.output).toContain("could not read Username"); // the server answered 401: the request was made and refused
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((h) => h !== null)).toEqual([]);
+  });
+});
+
 // ---- stand-in omp: it drives the real typed tools the way omp does, once as the launched process and once through each tool's child. ----
 // The stand-in `bun` records which ark verb ran and what git and gh can see in that child's environment.
 const PROBE = `${FILL}`;
@@ -162,15 +202,15 @@ const envOf = (f: string) => Object.fromEntries(read(f).split("\n").filter((l) =
 
 function standIn(...args: string[]) {
   out = join(root, "out");
-  mkdirSync(out);
-  mkdirSync(join(root, "bin"));
+  mkdirSync(out, { recursive: true });
+  mkdirSync(join(root, "bin"), { recursive: true });
   for (const [name, body] of [["omp", FAKE_OMP], ["bun", FAKE_BUN], ["gh", FAKE_GH]]) {
     writeFileSync(join(root, "bin", name), body);
     chmodSync(join(root, "bin", name), 0o755);
   }
   // The human's setup: an identity and a credential helper that has the password, a gh login in their own config dir, and an identity set through GIT_CONFIG_COUNT.
-  writeFileSync(join(root, "home", ".gitconfig"), `[credential]\n\thelper = ${helper("SECRET")}\n`);
-  mkdirSync(join(root, "human-gh"));
+  writeFileSync(join(root, "home", ".gitconfig"), `[credential]\n\thelper = ${helper("SECRET")}\n${extraConfig}`);
+  mkdirSync(join(root, "human-gh"), { recursive: true });
   writeFileSync(join(root, "human-gh", "hosts.yml"), "github.com: human-login\n");
   const env = {
     PATH: `${join(root, "bin")}:${process.env.PATH}`,
@@ -181,7 +221,7 @@ function standIn(...args: string[]) {
     GH_CONFIG_DIR: join(root, "human-gh"),
     GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "user.name", GIT_CONFIG_VALUE_0: "Human",
   };
-  const r = Bun.spawnSync([process.execPath, CLI, "launch", ...args], { env, cwd: root });
+  const r = Bun.spawnSync([process.execPath, CLI, "launch", ...args], { env, cwd: launchCwd || root });
   return { code: r.exitCode, err: r.stderr.toString() };
 }
 
@@ -206,6 +246,37 @@ describe("ARK-118-AC1", () => {
     expect(argv.slice(-4)).toEqual(["-p", "--model", "m", "hello"]);
   });
 
+  test("a credential inside a remote URL or a url.<x>.insteadOf rewrite refuses the launch, naming the key and redacting the secret; clean URLs launch", () => {
+    const repo = join(root, "repo");
+    mkdirSync(repo);
+    const git = (...a: string[]) => Bun.spawnSync(["git", ...a], { cwd: repo, env: { ...process.env, HOME: join(root, "home") } });
+    git("init", "-q");
+    launchCwd = repo;
+    git("config", "remote.origin.url", "https://github.com/acme/demo.git");
+    git("config", "remote.backup.url", "ssh://git@github.com/acme/demo.git"); // a user name without a secret in an ssh URL is no credential
+    expect(standIn().code).toBe(0);
+
+    for (const [key, value] of [["remote.origin.url", "https://user:tok-secret@github.com/acme/demo.git"], ["remote.origin.pushurl", "https://tok-secret@github.com/acme/demo.git"]]) {
+      git("config", key, value);
+      rmSync(out, { recursive: true, force: true });
+      rmSync(join(root, "bin"), { recursive: true, force: true });
+      const r = standIn();
+      expect(r.code, key).toBe(1);
+      expect(r.err).toContain(key);
+      expect(r.err).toContain("***@");
+      expect(r.err).not.toContain("tok-secret");
+      expect(existsSync(join(out, "argv")), "omp was not started").toBe(false);
+      git("config", "--unset", key);
+    }
+    extraConfig = '[url "https://user:tok-secret@github.com/"]\n\tinsteadOf = https://github.com/\n'; // the human's global config
+    rmSync(out, { recursive: true, force: true });
+    rmSync(join(root, "bin"), { recursive: true, force: true });
+    const r = standIn();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("url.https://***@github.com/.insteadof");
+    expect(r.err).not.toContain("tok-secret");
+  });
+
   test("a typed tool runs the CLI with the session id the bash tool would have exported", () => {
     standIn();
     expect(read("child-advance.env")).toContain("PI_SESSION_ID=session-118");
@@ -225,6 +296,7 @@ describe("ARK-118-AC2", () => {
   });
 
   test("ark mr alone gets the human's values back: credential helper, gh login and their own GIT_CONFIG_COUNT identity; every other ark tool stays credential-free", () => {
+    extraConfig = '[http]\n\textraHeader = Authorization: Basic H1\n[http "https://example.com/"]\n\textraHeader = Authorization: Basic H2\n';
     standIn();
     const mr = envOf("child-mr.env");
     expect(read("child-mr.fill")).toContain("password=SECRET");
@@ -232,6 +304,8 @@ describe("ARK-118-AC2", () => {
     expect(read("child-mr.gh")).toContain("human-login"); // gh sees the human's config dir, not the empty one
     expect(mr.GH_CONFIG_DIR).toBe(join(root, "human-gh"));
     expect(mr.GIT_CONFIG_COUNT).toBe("1"); // the human's own value, not launch's
+    expect(mr.GIT_CONFIG_KEY_1).toBeUndefined(); // and none of the resets launch appended (credential.helper, http.extraHeader and each http.<url>.extraHeader)
+    expect(envOf("env").GIT_CONFIG_COUNT).toBe("4"); // the human's one entry, plus those three resets
     expect(read("child-mr.name").trim()).toBe("Human");
     expect(mr.GIT_CONFIG_NOSYSTEM).toBeUndefined();
     expect(mr.ARK_LAUNCH_HUMAN_ENV).toBeUndefined();

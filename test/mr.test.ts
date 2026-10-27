@@ -331,7 +331,7 @@ const arkMrTool = () => {
     ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`,
     GH_LOG: join(root, "gh.log"), GH_STATE: join(root, "gh.state"), GH_BODY: join(root, "gh.body"),
   };
-  const r = Bun.spawnSync(["bun", driver, run()], { cwd: proj, env: credentialFreeEnv(env, join(root, "empty-gh")) });
+  const r = Bun.spawnSync(["bun", driver, run()], { cwd: proj, env: credentialFreeEnv(env, join(root, "empty-gh"), proj) });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 

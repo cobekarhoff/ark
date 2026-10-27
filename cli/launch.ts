@@ -20,17 +20,29 @@ const SAVED = "ARK_LAUNCH_HUMAN_ENV"; // the human's own values of what the laun
 
 type Env = Record<string, string | undefined>;
 
+// `git config --get-regexp` as the human's git sees it from `cwd`: system, global, the repository and its worktree config, and the human's own command-line entries.
+const gitConfigMatching = (base: Env, cwd: string, pattern: string): [key: string, value: string][] => {
+  const r = Bun.spawnSync(["git", "config", "--get-regexp", pattern], { cwd, env: base as Record<string, string> });
+  if (r.exitCode !== 0) return []; // 1 = no match; no git or no readable config leaves nothing to reset
+  return r.stdout.toString().split("\n").filter(Boolean).map((l) => [l.slice(0, l.indexOf(" ")), l.slice(l.indexOf(" ") + 1)]);
+};
+// userinfo in an http(s) URL is a credential no reset can strip: https://user:token@host/..., https://token@host/...
+const WITH_USERINFO = /https?:\/\/[^/\s@]*@/i;
+const redact = (s: string) => s.replace(/(https?:\/\/)[^/\s@]*@/gi, "$1***@");
+
 // The environment of the whole omp process. `credential.helper=` is set at command-line scope (GIT_CONFIG_COUNT), which outranks system, global,
-// repo and worktree config, and an empty value resets every helper read before it. GIT_CONFIG_NOSYSTEM keeps the system config (Apple's names osxkeychain) out altogether.
-export function credentialFreeEnv(base: Env, ghConfigDir: string): Env {
+// repo and worktree config, and an empty value resets every helper read before it. The same empty value resets `http.extraHeader` and every
+// `http.<url>.extraHeader` the human's config (system, global, the launch directory's repo) sets: an Authorization header there would otherwise go out with every
+// fetch. GIT_CONFIG_NOSYSTEM keeps the system config (Apple's names osxkeychain) out altogether.
+// Credentials inside a remote URL or a url.<x>.insteadOf rewrite cannot be reset, so such a config refuses the launch. Only the launch directory's repo is scanned.
+export function credentialFreeEnv(base: Env, ghConfigDir: string, cwd = process.cwd()): Env {
+  for (const [key, value] of gitConfigMatching(base, cwd, "^(remote\\..*\\.(push)?url|url\\..*\\.(push)?insteadof)$"))
+    if (WITH_USERINFO.test(key) || WITH_USERINFO.test(value))
+      throw new Error(`refusing to launch: git config ${redact(key)} = ${redact(value)} carries credentials in a URL, which an agent's git would use; remove the credentials from the URL (use a credential helper)`);
+  const reset = ["credential.helper", "http.extraHeader", ...gitConfigMatching(base, cwd, "^http\\..*\\.extraheader$").map(([k]) => k)];
   const n = Number.isInteger(Number(base.GIT_CONFIG_COUNT ?? 0)) ? Number(base.GIT_CONFIG_COUNT ?? 0) : 0;
-  const set: Env = {
-    GIT_CONFIG_COUNT: String(n + 1),
-    [`GIT_CONFIG_KEY_${n}`]: "credential.helper",
-    [`GIT_CONFIG_VALUE_${n}`]: "",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GH_CONFIG_DIR: ghConfigDir, // empty: no hosts.yml, so gh is logged out
-  };
+  const set: Env = { GIT_CONFIG_COUNT: String(n + reset.length), GIT_CONFIG_NOSYSTEM: "1", GH_CONFIG_DIR: ghConfigDir }; // GH_CONFIG_DIR: empty, so gh is logged out
+  reset.forEach((key, i) => Object.assign(set, { [`GIT_CONFIG_KEY_${n + i}`]: key, [`GIT_CONFIG_VALUE_${n + i}`]: "" }));
   const env: Env = { ...base, ...set, GIT_TERMINAL_PROMPT: "0" }; // a push without credentials fails instead of asking
   // GIT_CONFIG_PARAMETERS (what `git -c` sets) is read after GIT_CONFIG_COUNT, so a helper in it would survive the reset: drop it and restore it for ark_mr.
   env[SAVED] = JSON.stringify(Object.fromEntries([...Object.keys(set), "GIT_CONFIG_PARAMETERS"].map((k) => [k, base[k] ?? null])));
