@@ -44,7 +44,7 @@ const route = (selector: string, literal: boolean) => {
   return literal && parsed ? `${parsed.provider}/${parsed.id}` : undefined;
 };
 
-// `unresolved`: configured selectors (role candidates, listed chain entries) that name no model OMP can find; the caller refuses them rather than skip them.
+// `unresolved`: role candidates that name no model OMP can find; the caller refuses them rather than skip them.
 function reach(role: string): { models: Reach[]; unresolved: string[] } | null {
   const value = settings.getModelRole(role);
   if (!value?.trim()) return null;
