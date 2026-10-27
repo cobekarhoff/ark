@@ -72,13 +72,21 @@ function runSuite(name: string, s: Suite, cwd: string, out: string, ids: string[
   }
 }
 
-// Only a suite with a test file (its globs, in this checkout) that carries a selected AC runs; every suite that runs must then exit 0.
+// Only a suite with a test file (its globs, in this checkout) that carries a selected AC runs; every suite that runs must then exit 0
+// and report, in its own JUnit, a record for each selected AC its files carry (`silent`: it did not, e.g. a command that runs nothing).
 // No runner output is read to excuse a non-zero exit: a suite's `run` is a shell command, and nothing in its output says which step failed.
+// `tags` also holds every tag found in the suites' files, run or not, so a mistyped tag in an unselected suite still reaches trace-check.
 // ponytail: selection is by tag text in the files, not by what the runner collects; add `collect`-based selection when a runner needs it.
 function tagged(cfg: RepoConfig, cwd: string, out: string, ids: string[], rerun: boolean, fp: Fp) {
-  const holds = (s: Suite) => suiteTestFiles(s, cwd).some((f) => parsers[s.format].tagsIn(readFileSync(join(cwd, f), "utf8")).some((t) => ids.includes(t)));
-  const runs = Object.entries(cfg.suites).filter(([, s]) => holds(s)).map(([name, s]) => ({ name, ...runSuite(name, s, cwd, out, ids, rerun, fp) }));
-  return { cases: runs.flatMap((r) => r.cases), tags: runs.flatMap((r) => r.tags), exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])) };
+  const found = Object.entries(cfg.suites).map(([name, s]) => ({ name, s, held: [...new Set(suiteTestFiles(s, cwd).flatMap((f) => parsers[s.format].tagsIn(readFileSync(join(cwd, f), "utf8"))))] }));
+  const runs = found.filter((f) => f.held.some((t) => ids.includes(t))).map((f) => ({ ...f, ...runSuite(f.name, f.s, cwd, out, ids, rerun, fp) }));
+  const silent = runs.flatMap((r) => r.held.filter((t) => ids.includes(t) && !r.cases.some((c) => c.acs.includes(t))).map((ac) => ({ suite: r.name, ac })));
+  return {
+    cases: runs.flatMap((r) => r.cases),
+    tags: [...runs.flatMap((r) => r.tags), ...found.flatMap((f) => f.held)],
+    exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])),
+    silent,
+  };
 }
 
 function prepare(runId: string, type: string, ids: string[], repoName?: string) {
@@ -188,7 +196,7 @@ function proveGreen(runId: string, ids: string[], repoName?: string): string {
   const cases = res.cases.filter((c) => c.status !== "skipped");
   const acs = Object.fromEntries(ids.map((id) => {
     const ts = cases.filter((c) => c.acs.includes(id));
-    return [id, !ts.length ? "missing" : ts.some((c) => bad(c.status)) ? "fail" : ts.some((c) => c.status === "flaky") ? "flaky" : broken(res) ? "fail" : "pass"];
+    return [id, res.silent.some((x) => x.ac === id) ? "fail" : !ts.length ? "missing" : ts.some((c) => bad(c.status)) ? "fail" : ts.some((c) => c.status === "flaky") ? "flaky" : broken(res) ? "fail" : "pass"];
   }));
   const tests = cases.map((c) => ({ suite: c.suite, test: label(c), acs: c.acs, status: c.status }));
   record(dir, "test.result", { repo: repo.name, head_sha: head, attempt, out: where, acs, tests, exits: res.exits, unknown_tags: unknownTags(res.tags) });
@@ -197,11 +205,14 @@ function proveGreen(runId: string, ids: string[], repoName?: string): string {
 
 // A suite that exits non-zero without a failing selected test broke somewhere the tags do not show: a file that fails to load, a runner that never started, a failing step.
 // ponytail: when a selected test also failed, the exit code is not told apart from that failure; per-file results would be needed.
-type Ran = { cases: Tc[]; exits: Record<string, number> };
+type Ran = { cases: Tc[]; exits: Record<string, number>; silent: { suite: string; ac: string }[] };
 const brokenSuites = (r: Ran) =>
   Object.entries(r.exits).filter(([s, c]) => c && !r.cases.some((t) => t.suite === s && (bad(t.status) || t.status === "flaky"))).map(([s]) => s);
 const broken = (r: Ran) => brokenSuites(r).length > 0;
-const exitNote = (r: Ran, side = "") => brokenSuites(r).map((s) => `suite '${s}' exited ${r.exits[s]}${side} with no failing selected test\n`).join("");
+const silentSuites = (r: Ran) => [...new Set(r.silent.map((x) => x.suite))];
+const exitNote = (r: Ran, side = "") =>
+  brokenSuites(r).map((s) => `suite '${s}' exited ${r.exits[s]}${side} with no failing selected test\n`).join("") +
+  silentSuites(r).map((s) => `suite '${s}' holds tagged tests for ${r.silent.filter((x) => x.suite === s).map((x) => x.ac).join(", ")} but reported none${side}\n`).join("");
 
 // Per AC, over every selected test (identified by suite, file, describe path, name and line, on either side):
 // a test passing on red is `no-red`, even when it is skipped (or absent) on green; a test failing or erroring on green is `green-failed`;
@@ -241,7 +252,9 @@ function proveRedGreen(runId: string, ids: string[], repoName?: string): string 
   const acsOf = new Map([...byId].map(([k, c]) => [k, c.acs]));
   const acs = Object.fromEntries(ids.map((ac) => {
     const v = verdict(ac, redOf, greenOf, acsOf, ambiguous);
-    return [ac, v === "proven" ? (broken(green) ? "green-failed" : broken(red) ? "inconclusive" : v) : v];
+    const silent = (r: Ran) => r.silent.some((x) => x.ac === ac);
+    if (silent(green) || (v === "proven" && broken(green))) return [ac, "green-failed"];
+    return [ac, (v === "proven" && broken(red)) || (v !== "no-red" && silent(red)) ? "inconclusive" : v];
   }));
   const ok = Object.values(acs).every((v) => v === "proven");
   record(dir, "test.red_green", { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay, acs, tests, ambiguous: [...ambiguous].map((k) => k.replaceAll("\0", " > ")), exits: { red: red.exits, green: green.exits }, unknown_tags: unknownTags(green.tags), ok });

@@ -584,8 +584,38 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(acsOf("test.result")["DEMO-1-AC2"]).toBe("fail");
   });
 
+  test("a suite that holds tagged tests for a selected AC but reports none (a command that runs nothing) fails green and makes red inconclusive", () => {
+    const silent = { format: "bun-test", level: "e2e", run: "true # {tags}", junit: "$ARK_OUT/silent.xml" };
+    fixture(undefined, {}, { suites: { silent } });
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
+    const g = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(g.code).toBe(1);
+    expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("fail");
+    expect(g.out).toContain("suite 'silent' holds tagged tests for DEMO-1-AC1 but reported none");
+
+    // the second suite does its job on head only: on base it runs nothing
+    const late = { format: "bun-test", level: "e2e", run: 'if [ -f late.txt ]; then bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/late.xml; fi', junit: "$ARK_OUT/late.xml" };
+    fixture(undefined, {}, { suites: { late } });
+    toBuilding();
+    withSrc({ ...NEW_FEATURE, "late.txt": "x\n" }, { "test/feature.test.ts": FEATURE_TEST });
+    const rg = redGreen("DEMO-1-AC1");
+    expect(rg.code).toBe(1);
+    expect(acsOf("test.red_green")["DEMO-1-AC1"]).toBe("inconclusive");
+    expect(rg.out).toContain("suite 'late' holds tagged tests for DEMO-1-AC1 but reported none");
+  });
+
+  test("a mistyped tag in a file of a suite that holds no selected AC still reaches unknown_tags", () => {
+    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml', junit: "$ARK_OUT/e2e.xml" };
+    fixture(undefined, { tests: ["test/**"], run: 'bun test ./test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { e2e }, files: { "e2e/typo.test.ts": bunTest(`test("DEMO-1-AC11 typo", () => { expect(1).toBe(1); });`) } });
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1").code).toBe(0);
+    expect(events("test.result")[0].data.unknown_tags).toEqual(["DEMO-1-AC11"]);
+  });
+
   test("a second suite that produces no JUnit and exits non-zero fails the run, on green; on red it makes the AC inconclusive", () => {
-    const ghost = { format: "bun-test", level: "e2e", run: "test -f ghost.txt # {tags}", junit: "$ARK_OUT/ghost.xml" }; // exits 1 without a report until ghost.txt exists
+    const ghost = { format: "bun-test", level: "e2e", run: 'test -f ghost.txt && bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/ghost.xml', junit: "$ARK_OUT/ghost.xml" }; // exits 1 without a report until ghost.txt exists
     fixture(undefined, {}, { suites: { ghost } });
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
