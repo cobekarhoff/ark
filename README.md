@@ -23,9 +23,19 @@ Undo with `bun unlink` and `omp plugin uninstall ark`.
 ark run start ARK-109                  # start the run, or show the existing one
 ark advance <run_id> <event> [--data json]   # legal transitions only (cli/transitions.ts)
 ark run replay <run_id> [--check]      # rebuild state.json from ledger.ndjson
-ark gate packet <run_id> <G0|G1|G2>   # build gates/<gate>.packet.md from run artifacts, print its sha256
-ark gate answer <run_id> <gate> <answer> --packet <sha256>   # G0 accept|edit|abort, G1 approve|change|abort, G2 approve|send_back|abort
+ark gate packet <run_id> <G0|G1|G2|GE> # build gates/<gate>.<hash>.packet.md from run artifacts (each source listed with its sha256), print its sha256
+ark gate answer <run_id> <gate> <answer> --packet <sha256>   # G0 accept|edit|abort, G1 approve|change|abort, G2 approve|send_back|abort, GE one_more_round|take_over|abort
 ```
+
+Guardrail integrity (ARK-115). Trust model: v1 trusts the user's own processes (agents run as the user), so none of this stops a deliberate forger; it catches mistakes and bugs and makes honest runs auditable. See [docs/adr/0003-same-user-trust-for-v1.md](docs/adr/0003-same-user-trust-for-v1.md) for the decision.
+
+- **Owned events.** `ark advance` refuses every event a command owns (`ws.created`, `test.*`, `trace.checked`, `gate.*`, `ge.*`, `mr.*`, `run.closed`, `route.chosen`, `findings.recorded`, `artifact.*`, `ac.*`), naming the command.
+- **Hash chain.** Each ledger line carries `prev`, the sha256 of the previous line, and `state.json` records `ledger_seq` and `ledger_head`. Replay and every command refuse an edited, removed, reordered or cut-off line, naming the first bad seq. This detects accidental corruption and truncation relative to the cached head; it does **not** detect deliberate same-user tampering (anyone who can write the files can recompute the chain and the head).
+- **Lock.** Writers hold `ledger.lock` (O_EXCL, naming its pid) around read-and-append. A lock is taken over only when its owner process is gone, never because it is old.
+- **Resume.** `ark run start` on an existing run replays the ledger and rewrites a missing or stale `state.json`; the hook decides whether a run is open from the ledger, not `state.json`.
+- **Attribution.** Product changes count only through recorded implementer steps: `build.completed`, `fix_round.started`, `ark trace-check`, the G2 packet and a G2/escalation answer refuse a worktree with commits to non-test files after its last recorded step head, an AC-tagged test changed after the newest recorded head (the validator's tests count once `ark test` ran on them), a HEAD that no longer descends from the recorded heads, or uncommitted files (including files hidden with `assume-unchanged`/`skip-worktree`), naming them. Git calls ignore `refs/replace`. The implementer guard diffs from the start of the step (the last recorded implementer head, or the HEADs recorded when a round started).
+- **Gates.** A packet lists each source with its sha256 and is stored by hash. An approving answer rebuilds the packet and refuses when any source changed; the G2 packet binds `ac.yml` and `manual/*`, and a G2 approval recomputes the trace matrix.
+- **Preflight** checks every model a role can reach, using OMP's own resolver and fallback functions rather than a copy of them: `cli/omp-models.ts` (the only file that imports OMP, run as a subprocess; the CLI core stays free of OMP imports) loads the installed OMP package (`omp` on PATH, or `$ARK_OMP_PACKAGE`), reads the effective settings (global and project) and walks the real fallback chain from every comma candidate of each role, through every reached model's own chain, until it is exhausted. Fuzzy selectors, thinking suffixes, wildcard entries and chain ownership therefore resolve exactly as OMP resolves them. If OMP cannot be loaded, preflight refuses. A refusal names the offending chain and the config file (project or global) that defines it. The suite needs OMP installed (CI installs the pinned version).
 
 ## Merge requests
 
@@ -68,7 +78,7 @@ Red needs a JUnit record per selected test with a failure or error; tests are to
 Start with `/skill:ark ticket <ID>` (the skill is `disable-model-invocation`; it is still reachable as `skill://ark`). It runs `ark run start`, logs the route, copies `skills/ark/playbooks/ticket.md`'s steps into the todo list and names every CLI call per step.
 
 ```sh
-ark preflight                                  # .omp/config.yml modelRoles: validate and review-x must not share implement's provider, review-s must
+ark preflight                                  # effective OMP config (modelRoles, retry.fallbackChains): every model validate and review-x can reach must be on another vendor than implement, every review-s model on the same one
 ark log route [<run_id>] <playbook> "<why>"    # route.chosen, the first event after run.started (no run_id: the active run)
 ark artifact record <run_id> <implementer|validator|reviewer> <file.json>   # schema-check an agent result, keep it as artifacts/<agent>/<n>.json
 ark findings record <run_id> <file.json>       # judging state: bucket + reason per finding; act_on P0/P1 needs evidence {failing_test} or {trace_path}

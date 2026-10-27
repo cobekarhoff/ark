@@ -18,6 +18,6 @@ You are the orchestrator. Input is `ticket <ID>` (a ticket ID such as `ARK-108`)
 - You never edit `state.json`, `ledger.ndjson` or a gate packet by hand. State moves only through `ark advance`, `ark gate`, `ark log`, `ark findings`, `ark test` and `ark ws`.
 - Subagents do not see this conversation. Every brief carries the spec, the AC IDs, the contract, prior findings and absolute paths.
 - Every human gate: `ark gate packet`, then `ask` with the fixed answers, then `ark gate answer` with the packet hash. Never answer a gate yourself.
-- Two fix rounds, then escalate to the human (GE) with a diagnosis.
+- Two fix rounds, then escalate to the human through the escalation gate (`GE`) with a diagnosis.
 - Bucket every finding as Act on, Consider, Noted or Dismissed, each with a reason. An Act-on P0 or P1 goes back to the implementer only with a failing test or a traced path.
 - No agent merges. `ark mr` opens the PRs; the human merges on the host.

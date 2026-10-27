@@ -19,5 +19,6 @@
   "artifacts": { "ac.yml": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "impact.json": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "plan.md": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
   "sessions": [{ "role": "orchestrator", "file": "sessions/orchestrator-1.jsonl" }],
   "lock": { "session": "omp-7b1d", "since": "2026-10-21T20:41:30Z" },
-  "ledger_seq": 14
+  "ledger_seq": 14,
+  "ledger_head": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }

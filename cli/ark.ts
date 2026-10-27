@@ -23,11 +23,11 @@ Commands:
   test <run_id> --acs ID,.. [--red-green] [--repo name]
                                           Run the AC-tagged tests in the worktree; --red-green proves them on base then head
   trace-check <run_id>                    Build trace-matrix.md from ac.yml and the recorded test evidence; exit 1 listing why it fails
-  gate packet <run_id> <G0|G1|G2>         Build the gate packet from run artifacts and print its sha256
+  gate packet <run_id> <G0|G1|G2|GE>      Build the gate packet from run artifacts and print its sha256 (GE is the escalation gate)
   gate answer <run_id> <gate> <answer> --packet <sha256>
-                                          Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort)
+                                          Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort, GE escalation: one_more_round|take_over|abort)
   mr <run_id>                             Push the run branches and open a GitHub PR per repo (ark.yml mr: false closes the run at the ready branch instead)
-  preflight                               Refuse (exit 1) unless .omp/config.yml puts validate and review-x on another provider than implement, and review-s on the same one
+  preflight                               Refuse (exit 1) unless every model validate and review-x can reach (comma candidates, retry.fallbackChains, global and project OMP config) is on another vendor than implement, and every review-s model on the same one
   log route [<run_id>] <playbook> "<why>" Record route.chosen, the first event after run.started (no run_id: the active run)
   findings record <run_id> <file.json>    Validate the judged findings and record them (judging state)
   artifact record <run_id> <implementer|validator|reviewer> <file.json>

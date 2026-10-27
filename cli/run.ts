@@ -1,5 +1,5 @@
 import Ajv2020 from "ajv/dist/2020";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import acSchema from "../schemas/ac.schema.json";
@@ -9,10 +9,10 @@ import stateSchema from "../schemas/state.schema.json";
 import ticketSchema from "../schemas/ticket.schema.json";
 import { bindSession } from "./binding";
 import { preflight } from "./preflight";
-import { git, loadRepo, touchedTaggedTests } from "./repo";
-import { eventKey, nextActions, owner, type State, transitions } from "./transitions";
+import { diffFiles, dirtyFiles, git, isTestFile, loadRepo, touchedTaggedTests } from "./repo";
+import { eventKey, nextActions, ownerOf, type State, transitions } from "./transitions";
 
-export type LedgerEvent = { seq: number; ts: string; type: string; data: Record<string, unknown> };
+export type LedgerEvent = { seq: number; ts: string; type: string; data: Record<string, unknown>; prev: string };
 type Ac = { id: string; text: string };
 type Frontmatter = { id: string; title: string; status: string; milestone?: string; traces?: string[]; depends_on?: string[]; acceptance_criteria?: Ac[] };
 type RunStarted = { ticket: string; playbook: string; acs: string[]; artifacts: Record<string, string> };
@@ -34,6 +34,7 @@ export interface RunState {
   sessions: never[];
   lock: null;
   ledger_seq: number;
+  ledger_head: string;
 }
 
 const ajv = new Ajv2020();
@@ -84,8 +85,10 @@ export function activeRunDir(): string | undefined {
   if (!existsSync(ptr)) return undefined;
   const dir = join(root, "runs", readFileSync(ptr, "utf8").trim());
   if (!existsSync(dir)) return undefined;
-  const st = join(dir, "state.json");
-  const status = existsSync(st) ? (JSON.parse(readFileSync(st, "utf8")) as { status: string }).status : "active";
+  // The ledger decides whether the run is open, not the cached state.json: editing state.json must not lift the hook's protection.
+  // A ledger that cannot be replayed (broken chain, bad line) keeps the run guarded.
+  let status = "active";
+  try { status = project(readLedger(dir)).status; } catch { /* guarded */ }
   return status === "done" || status === "aborted" ? undefined : dir;
 }
 
@@ -100,7 +103,8 @@ export function project(events: LedgerEvent[]): RunState {
   for (const [i, e] of events.entries()) {
     if (e.seq !== i + 1) throw new Error(`ledger seq ${e.seq} at position ${i + 1}`);
     if (i === 0) continue;
-    const next = (transitions[state] as Record<string, State>)[eventKey(e)];
+    const row = transitions[state] as Record<string, State>;
+    const next = Object.hasOwn(row, eventKey(e)) ? row[eventKey(e)] : undefined;
     if (!next) throw new Error(`ledger event ${e.seq} '${e.type}' is illegal in '${state}'`);
     state = next;
     const d = e.data as { repo: string; branch: string; base_sha: string; head_sha: string };
@@ -135,25 +139,111 @@ export function project(events: LedgerEvent[]): RunState {
     sessions: [],
     lock: null,
     ledger_seq: events.length,
+    ledger_head: chainHash(events.at(-1)),
   };
 }
 
-export function readLedger(dir: string): LedgerEvent[] {
-  const lines = readFileSync(join(dir, "ledger.ndjson"), "utf8").split("\n").filter(Boolean);
-  return lines.map((l, i) => {
-    const e = JSON.parse(l);
-    check("ledger", e, `ledger line ${i + 1}`);
-    return e;
-  });
+// The ledger is a hash chain: every line is the canonical JSON of its event, and `prev` is the sha256 of the previous line ("" before the first),
+// so an edited, removed, reordered or cut-off line breaks it. The newest line and a removed tail are anchored by state.json (`ledger_seq`, `ledger_head`),
+// which is always at most one event behind the ledger.
+// What this is: a detector of accidental corruption and truncation (a crash mid-write, a bad merge, an editor, a half-run script), relative to the cached head.
+// What it is not: protection against deliberate tampering. A process running as the same user can recompute every `prev`, rewrite state.json and pass the check.
+// v1 accepts same-user trust; see docs/adr/0003-same-user-trust-for-v1.md for the decision and what would close it (an anchor outside the user's reach).
+const line = (e: LedgerEvent) => JSON.stringify(e);
+function chainHash(e?: LedgerEvent) {
+  return sha256(e ? line(e) : "");
+}
+const broken = (seq: number, why: string) => new Error(`ledger chain broken at seq ${seq}: ${why}`);
+
+// An O_EXCL lock file is the mutex: one process at a time reads and appends. The file names its owner ({ pid, started, token }).
+// A lock is taken over only when its owner is gone (the pid no longer exists), never because it is old: a holder may legitimately be slow.
+// Takeover runs under a second O_EXCL guard, so two waiters cannot both delete a lock and one of them then delete the other's fresh one,
+// and a holder deletes its own lock only if the file still carries its token.
+// ponytail: a pid reused by an unrelated process keeps a crashed holder's lock alive; the wait error names the pid and says to delete the file.
+const LOCK_WAIT_MS = Number(process.env.ARK_LOCK_WAIT_MS) || 60_000;
+const LOCK_UNWRITTEN_MS = 5_000; // a lock file with no owner in it is a holder that died between creating and writing it
+const held = new Set<string>();
+const started = new Date(Date.now() - process.uptime() * 1000).toISOString();
+
+const alive = (pid: number) => {
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
+};
+function lockOwner(file: string): { pid: number; started: string; token: string } | undefined {
+  try {
+    const o = JSON.parse(readFileSync(file, "utf8"));
+    return typeof o?.pid === "number" && typeof o.token === "string" ? o : undefined;
+  } catch { return undefined; }
+}
+function abandoned(lock: string): boolean {
+  const o = lockOwner(lock);
+  if (o) return !alive(o.pid);
+  try { return Date.now() - statSync(lock).mtimeMs > LOCK_UNWRITTEN_MS; } catch { return false; }
+}
+function reap(lock: string) {
+  const guard = `${lock}.reap`;
+  try { writeFileSync(guard, "", { flag: "wx" }); } catch {
+    try { if (Date.now() - statSync(guard).mtimeMs > 10_000) rmSync(guard, { force: true }); } catch { /* gone */ }
+    Bun.sleepSync(2);
+    return;
+  }
+  try { if (abandoned(lock)) rmSync(lock, { force: true }); } finally { rmSync(guard, { force: true }); } // re-checked under the guard
 }
 
+export function locked<T>(dir: string, fn: () => T): T {
+  if (held.has(dir)) return fn();
+  const lock = join(dir, "ledger.lock");
+  const token = crypto.randomUUID();
+  const t0 = Date.now();
+  for (;;) {
+    try { writeFileSync(lock, JSON.stringify({ pid: process.pid, started, token }), { flag: "wx" }); break; } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
+    if (abandoned(lock)) { reap(lock); continue; }
+    if (Date.now() - t0 > LOCK_WAIT_MS) {
+      const o = lockOwner(lock);
+      throw new Error(`${lock} is held by ${o ? `pid ${o.pid} (started ${o.started})` : "another ark process"}; delete it if that process is not running`);
+    }
+    Bun.sleepSync(5);
+  }
+  held.add(dir);
+  try { return fn(); } finally { held.delete(dir); if (lockOwner(lock)?.token === token) rmSync(lock, { force: true }); }
+}
+
+const anchor = (dir: string): { ledger_seq?: unknown; ledger_head?: unknown } => {
+  try { return JSON.parse(readFileSync(join(dir, "state.json"), "utf8")); } catch { return {}; } // missing or unreadable: nothing to anchor to
+};
+
+export const readLedger = (dir: string): LedgerEvent[] =>
+  locked(dir, () => {
+    const lines = readFileSync(join(dir, "ledger.ndjson"), "utf8").split("\n");
+    const tail = lines.pop(); // "" after the final newline
+    const events: LedgerEvent[] = [];
+    for (const [i, l] of lines.entries()) {
+      const at = i + 1;
+      let e: LedgerEvent;
+      try { e = JSON.parse(l); } catch { throw broken(at, "the line is not valid JSON"); }
+      check("ledger", e, `ledger seq ${at}`);
+      if (e.seq !== at) throw broken(at, `found seq ${e.seq} where seq ${at} belongs (a line was removed, added or reordered)`);
+      if (line(e) !== l) throw broken(at, "the line is not in the form the CLI writes");
+      if (e.prev !== chainHash(events.at(-1))) throw broken(Math.max(1, at - 1), `seq ${at} records a different hash for it, so it was edited or removed`);
+      events.push(e);
+    }
+    if (tail) throw broken(lines.length + 1, "the final line is cut off");
+    const { ledger_seq: n, ledger_head: head } = anchor(dir);
+    if (typeof n === "number" && typeof head === "string") {
+      if (n > events.length) throw broken(events.length + 1, `state.json records ${n} events but the ledger ends at seq ${events.length}; the tail was removed`);
+      if (n > 0 && chainHash(events[n - 1]) !== head) throw broken(n, "it no longer matches the hash state.json recorded");
+    }
+    return events;
+  });
+
 // Validates the event and the state it projects to before anything is written, so a failure leaves the ledger untouched.
+// The caller holds the lock and read `events` under it (record, or locked around a read and this).
 export function append(dir: string, events: LedgerEvent[], type: string, data: Record<string, unknown>, ts = new Date().toISOString()): LedgerEvent[] {
-  const e = { seq: events.length + 1, ts, type, data };
+  if (!held.has(dir)) throw new Error("append needs the ledger lock");
+  const e: LedgerEvent = { seq: events.length + 1, ts, type, data, prev: chainHash(events.at(-1)) };
   check("ledger", e, `event '${type}'`);
   const next = [...events, e];
   render(next);
-  appendFileSync(join(dir, "ledger.ndjson"), `${JSON.stringify(e)}\n`);
+  appendFileSync(join(dir, "ledger.ndjson"), `${line(e)}\n`);
   return next;
 }
 
@@ -163,9 +253,16 @@ const render = (events: LedgerEvent[]) => {
   return { state, bytes: json(state) };
 };
 
+// Written beside and renamed over, so a reader (the hook) never sees half a state.json.
+const writeState = (dir: string, bytes: string) => {
+  const tmp = join(dir, "state.json.tmp");
+  writeFileSync(tmp, bytes);
+  renameSync(tmp, join(dir, "state.json"));
+};
+
 export function commit(dir: string, events: LedgerEvent[]) {
   const { state, bytes } = render(events);
-  writeFileSync(join(dir, "state.json"), bytes);
+  writeState(dir, bytes);
   return state;
 }
 
@@ -181,9 +278,10 @@ export function mrEnabled(): boolean {
 export function open(runId: string, type: string, via?: string) {
   const dir = runDir(runId);
   const state = project(readLedger(dir));
-  if (owner[type] && owner[type] !== via) throw new Error(`'${type}' is written by 'ark ${owner[type]}', not advance (state '${state.state}')`);
+  const own = ownerOf(type);
+  if (own && own !== via) throw new Error(`'${type}' is written by 'ark ${own}', not advance (state '${state.state}')`);
   const types = Object.keys(transitions[state.state]).map((k) => k.split(":")[0]);
-  const legal = [...new Set(types.filter((t) => !owner[t]))];
+  const legal = [...new Set(types.filter((t) => !ownerOf(t)))];
   if (!types.includes(type)) {
     const gate = state.state.match(/^awaiting_(g[012])$/)?.[1].toUpperCase();
     throw new Error(
@@ -194,8 +292,61 @@ export function open(runId: string, type: string, via?: string) {
   return { dir, state };
 }
 
+// Read, append and project under one lock, so parallel writers cannot share a seq.
 export const record = (dir: string, type: string, data: Record<string, unknown>) =>
-  commit(dir, append(dir, readLedger(dir), type, data));
+  locked(dir, () => commit(dir, append(dir, readLedger(dir), type, data)));
+
+// AC4: product changes count only through recorded implementer steps. Per repo, from `impl` (the last implementer head, or the heads a round start recorded; base_sha before any):
+// - a non-test file changed in impl..HEAD is unattributed, whatever ran since (an `ark test` run records a head but never vouches for product code);
+// - an AC-tagged test changed after the newest recorded head is unattributed. The validator's tagged tests count once `ark test` ran on them: that run records its head `test`,
+//   accepted as a start for tagged tests only when impl..test changed test files alone;
+// - HEAD must descend from the newest recorded head (history rewritten, a reset that drops recorded work), and the worktree must hold no uncommitted file.
+// Untagged test files are free.
+export function unattributed(dir: string, state: RunState, events: LedgerEvent[]): string[] {
+  return state.repos.flatMap((r) => {
+    const wt = join(dir, "ws", r.name);
+    const { impl, test } = stepPoints(events, r);
+    const descends = (from: string) => Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "merge-base", "--is-ancestor", from, "HEAD"]).exitCode === 0;
+    try {
+      const out: string[] = [];
+      const newest = test ?? impl;
+      if (!descends(newest)) {
+        out.push(`${r.name}: HEAD is not a descendant of the recorded ${newest.slice(0, 12)}; history was rewritten after a recorded step`);
+      } else {
+        const cfg = loadRepo(wt, r.base_sha);
+        const files = diffFiles(wt, `${impl}..HEAD`).filter((f) => !isTestFile(cfg, f));
+        if (files.length) out.push(`${r.name}: commits after ${impl.slice(0, 12)} changed ${files.join(", ")}, which no implementer step recorded`);
+        const testsOnly = test !== undefined && diffFiles(wt, `${impl}..${test}`).every((f) => isTestFile(cfg, f));
+        const tests = touchedTaggedTests(wt, testsOnly ? test : impl, cfg);
+        if (tests.length) out.push(`${r.name}: commits after ${(testsOnly ? test : impl).slice(0, 12)} changed AC-tagged tests ${tests.join(", ")}, which neither an implementer step nor an 'ark test' run recorded`);
+      }
+      const dirty = dirtyFiles(wt);
+      if (dirty.length) out.push(`${r.name}: uncommitted files ${dirty.join(", ")}, which no implementer step recorded`);
+      return out;
+    } catch (e) {
+      return [`${r.name}: cannot check for unrecorded changes: ${(e as Error).message}`];
+    }
+  });
+}
+
+// The HEAD of every worktree, recorded in the event that starts a round (fix_round.started, a G2 send-back, a GE answer that grants a round): the next implementer
+// step is measured from it, so tests the validator committed in the round before are not the implementer's. Only the CLI writes it (advance refuses --data heads).
+export const worktreeHeads = (dir: string, state: RunState): Record<string, string> =>
+  Object.fromEntries(state.repos.map((r) => [r.name, git(join(dir, "ws", r.name), "rev-parse", "HEAD")]));
+
+// `impl`: where the implementer step in progress began (the newest `implementer.completed` head or round-start head; base_sha before both).
+// `test`: the newest head an `ark test` / red-green run recorded since then, if any. The implementer guard measures from `impl` alone.
+function stepPoints(events: LedgerEvent[], repo: RunState["repos"][number]): { impl: string; test?: string } {
+  let test: string | undefined;
+  for (const e of events.toReversed()) {
+    const heads = e.type === "fix_round.started" || e.type === "gate.answered" ? (e.data.heads as Record<string, string> | undefined) : undefined; // written by worktreeHeads
+    const mine = e.data.repo === repo.name;
+    if (mine && (e.type === "test.result" || e.type === "test.red_green") && typeof e.data.head_sha === "string") test ??= e.data.head_sha;
+    const impl = mine && e.type === "implementer.completed" ? e.data.head_sha : heads?.[repo.name];
+    if (typeof impl === "string") return { impl, test };
+  }
+  return { impl: repo.base_sha, test };
+}
 
 export function summary(s: RunState): string {
   const n = s.next_action;
@@ -210,7 +361,7 @@ export function start(id: string): string {
   const existing = existsSync(runs) && readdirSync(runs).find((r) => new RegExp(`^\\d{4}-\\d{2}-\\d{2}-${id}$`).test(r));
   if (existing) {
     setActive(existing);
-    return `resumed ${summary(JSON.parse(readFileSync(join(runs, existing, "state.json"), "utf8")))}`;
+    return `resumed ${summary(refresh(join(runs, existing)))}`;
   }
 
   const src = join(root, "tickets", `${id}.md`);
@@ -234,7 +385,6 @@ export function start(id: string): string {
   const acYml = acs.length ? Bun.YAML.stringify(acs, null, 2) : "[]\n";
   const artifacts = { "ticket.md": sha256(raw), "ticket.json": sha256(ticketJson), "ac.yml": sha256(acYml) };
 
-  let events: LedgerEvent[] = [];
   const ts = new Date().toISOString();
   const dir = join(runs, `${ts.slice(0, 10)}-${id}`);
   mkdirSync(runs, { recursive: true });
@@ -243,10 +393,13 @@ export function start(id: string): string {
   writeFileSync(join(dir, "ticket.json"), ticketJson);
   writeFileSync(join(dir, "ac.yml"), acYml);
   writeFileSync(join(dir, "ledger.ndjson"), "");
-  events = append(dir, events, "run.started", { ticket: id, playbook: "ticket", acs: acs.map((a) => a.id), artifacts }, ts); // same ts as the folder name, so run_id matches it
-  if (!acs.length) events = append(dir, events, "g0.opened", { reason: "ticket has no acceptance criteria" });
+  const state = locked(dir, () => {
+    let events = append(dir, [], "run.started", { ticket: id, playbook: "ticket", acs: acs.map((a) => a.id), artifacts }, ts); // same ts as the folder name, so run_id matches it
+    if (!acs.length) events = append(dir, events, "g0.opened", { reason: "ticket has no acceptance criteria" });
+    return commit(dir, events);
+  });
   setActive(basename(dir));
-  return `started ${summary(commit(dir, events))}`;
+  return `started ${summary(state)}`;
 }
 
 export function advance(runId: string, type: string, rawData?: string): string {
@@ -255,27 +408,46 @@ export function advance(runId: string, type: string, rawData?: string): string {
   if (rawData !== undefined) {
     try { data = JSON.parse(rawData); } catch { throw new Error("--data is not valid JSON"); }
     if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("--data must be a JSON object");
+    if (Object.hasOwn(data, "heads")) throw new Error("--data may not set 'heads': the CLI records the worktree heads itself when a round starts");
+  }
+  if (type === "build.completed" || type === "fix_round.started") { // AC4: nothing leaves building, or opens a round, that no recorded step vouches for
+    const bad = unattributed(dir, state, readLedger(dir));
+    if (bad.length) throw new Error(`${type} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
+    if (type === "fix_round.started") data = { ...data, heads: worktreeHeads(dir, state) };
   }
   if (type === "implementer.completed") { // AC7: implementers never edit AC-tagged tests
     const repo = state.repos.find((r) => r.name === data.repo);
     if (!repo) throw new Error(`implementer.completed needs --data '{"repo":"<name>"}' naming a worktree of this run`);
     const wt = join(dir, "ws", repo.name);
-    if (git(wt, "status", "--porcelain", "--untracked-files=no")) throw new Error(`${wt} has uncommitted changes; commit them so the check sees the whole step`);
-    const hit = touchedTaggedTests(wt, repo.base_sha, loadRepo(wt, repo.base_sha)); // base config: the implementer cannot widen its own exemptions
+    const dirty = dirtyFiles(wt);
+    if (dirty.length) throw new Error(`${wt} has uncommitted changes (${dirty.join(", ")}); commit them so the check sees the whole step`);
+    const from = stepPoints(readLedger(dir), repo).impl;
+    if (Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "merge-base", "--is-ancestor", from, "HEAD"]).exitCode !== 0) throw new Error(`${wt} HEAD is not a descendant of the recorded ${from}; history was rewritten`);
+    const hit = touchedTaggedTests(wt, from, loadRepo(wt, repo.base_sha)); // base config: the implementer cannot widen its own exemptions
     if (hit.length) throw new Error(`implementer step touches AC-tagged test files: ${hit.join(", ")}`);
     data = { repo: repo.name, head_sha: git(wt, "rev-parse", "HEAD") };
   }
   return `advanced ${summary(record(dir, type, data))}`;
 }
 
+// state.json recomputed from the ledger and rewritten when it differs: a crash between the append and the state write leaves it missing or stale.
+function refresh(dir: string): RunState {
+  return locked(dir, () => {
+    const { state, bytes } = render(readLedger(dir));
+    const file = join(dir, "state.json");
+    if (!existsSync(file) || readFileSync(file, "utf8") !== bytes) writeState(dir, bytes);
+    return state;
+  });
+}
+
 export function replay(runId: string, checkOnly: boolean): string {
   const dir = runDir(runId);
+  if (!checkOnly) {
+    refresh(dir);
+    return `replayed ${runId}\n`;
+  }
   const { bytes } = render(readLedger(dir));
   const file = join(dir, "state.json");
-  if (checkOnly) {
-    if (!existsSync(file) || readFileSync(file, "utf8") !== bytes) throw new Error(`state.json differs from ledger replay for ${runId}`);
-    return `ok ${runId}\n`;
-  }
-  writeFileSync(file, bytes);
-  return `replayed ${runId}\n`;
+  if (!existsSync(file) || readFileSync(file, "utf8") !== bytes) throw new Error(`state.json differs from ledger replay for ${runId}`);
+  return `ok ${runId}\n`;
 }

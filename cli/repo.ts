@@ -10,15 +10,31 @@ export type RepoConfig = { commands?: { build?: string }; suites: Record<string,
 
 // Untrimmed stdout, for NUL-separated (-z) output where a path may begin or end in whitespace.
 export function gitRaw(cwd: string, ...args: string[]): string {
-  const r = Bun.spawnSync(["git", "-C", cwd, ...args]);
+  const r = Bun.spawnSync(["git", "--no-replace-objects", "-C", cwd, ...args]);
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${r.stderr.toString().trim()}`);
   return r.stdout.toString();
 }
 export const git = (cwd: string, ...args: string[]) => gitRaw(cwd, ...args).trim();
 
-// Paths of `git diff --name-only <args>`, read with -z so no name is quoted or escaped (core.quotePath).
-export const diffFiles = (cwd: string, ...args: string[]) => gitRaw(cwd, "diff", "-z", "--name-only", ...args).split("\0").filter(Boolean);
+// Paths of `git diff --name-only <args>`, read with -z so no name is quoted or escaped (core.quotePath). --no-renames lists both the old and the new path of a move,
+// so moving a tagged test out of the test globs still shows the test as touched.
+export const diffFiles = (cwd: string, ...args: string[]) => gitRaw(cwd, "diff", "-z", "--name-only", "--no-renames", ...args).split("\0").filter(Boolean);
 
+// Uncommitted paths: tracked edits and untracked, non-ignored files from `git status -z` (names stay literal; a rename lists its source as a second entry),
+// plus tracked files flagged assume-unchanged (lowercase tag) or skip-worktree (`S`) in `git ls-files -v`, which `git status` then never reports.
+export function dirtyFiles(cwd: string): string[] {
+  const parts = gitRaw(cwd, "status", "--porcelain", "-z", "--untracked-files=all").split("\0");
+  const paths: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue;
+    paths.push(parts[i].slice(3));
+    if (/[RC]/.test(parts[i].slice(0, 2))) i++;
+  }
+  for (const entry of gitRaw(cwd, "ls-files", "-v", "-z").split("\0")) {
+    if (/^[a-zS] /.test(entry)) paths.push(`${entry.slice(2)} (hidden from git status by assume-unchanged or skip-worktree)`);
+  }
+  return paths;
+}
 // `ref`: read the config as committed at that ref instead of from disk (the AC7 guard trusts the base config, not the implementer's edit of it).
 export function loadRepo(dir: string, ref?: string): RepoConfig {
   const file = ref ? `${ref}:.ark/repo.yml` : join(dir, ".ark", "repo.yml");
@@ -45,7 +61,7 @@ export const suiteTestFiles = (s: Suite, cwd: string): string[] =>
 const isTest = (s: Suite, f: string) => testGlobs(s).some((g) => new Bun.Glob(g).match(f));
 export const isTestFile = (cfg: RepoConfig, f: string) => Object.values(cfg.suites).some((s) => isTest(s, f));
 const show = (wt: string, ref: string, f: string) => {
-  const r = Bun.spawnSync(["git", "-C", wt, "show", `${ref}:${f}`]);
+  const r = Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "show", `${ref}:${f}`]);
   return r.exitCode === 0 ? r.stdout.toString() : "";
 };
 
@@ -54,7 +70,8 @@ export function changedTestFiles(wt: string, base: string, cfg: RepoConfig, head
   return diffFiles(wt, "--diff-filter=d", `${base}..${head}`).filter((f) => isTestFile(cfg, f));
 }
 
-// AC7: files in from..HEAD that are test files carrying an AC tag, before or after the change. `from` is the commit the diff starts at.
+// AC7: files in from..HEAD that are test files carrying an AC tag, before or after the change.
+// `from` is where the step began: the repo's last recorded head_sha, or its base_sha before the first step.
 export function touchedTaggedTests(wt: string, from: string, cfg: RepoConfig): string[] {
   return diffFiles(wt, `${from}..HEAD`).filter((f) =>
     Object.values(cfg.suites).some((s) => isTest(s, f) && [show(wt, "HEAD", f), show(wt, from, f)].some(parsers[s.format].taggedFile)));

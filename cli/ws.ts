@@ -31,6 +31,6 @@ export function wsCreate(runId: string, repoPath?: string): string {
   chmodSync(join(hooks, "pre-push"), 0o755);
   git(wt, "config", "--worktree", "core.hooksPath", hooks);
 
-  record(dir, "ws.created", { repo, branch, base_sha });
+  record(dir, "ws.created", { repo, branch, base_sha, source: top }); // source: the human's checkout; ark mr trusts its git dir, never the worktree's .git file
   return `created ${wt}\nbranch: ${branch}\nbase_sha: ${base_sha}\n`;
 }

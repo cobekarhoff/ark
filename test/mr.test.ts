@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { rechain } from "./ledger";
 import { OMP_CONFIG } from "./omp-config";
 
 setDefaultTimeout(60_000);
@@ -211,6 +212,25 @@ describe("ARK-107-AC1", () => {
     expect(existsSync(join(root, "hook-ran"))).toBe(false);
   });
 
+  test("repointing the worktree's .git file at another repository redirects neither the push nor its hooks", () => {
+    // The attacker repo holds the approved commit, its own origin, and a hook that marks it ran.
+    const evil = join(root, "evil");
+    const evilRemote = join(root, "evil-remote.git");
+    git(root, "clone", "-q", proj, evil);
+    git(evil, "fetch", "-q", wt(), `${runState().repos[0].head_sha}:refs/heads/stolen`);
+    git(root, "init", "-q", "--bare", "-b", "main", evilRemote);
+    git(evil, "remote", "set-url", "origin", evilRemote);
+    writeFileSync(join(evil, ".git", "hooks", "pre-push"), `#!/bin/sh\ntouch ${join(root, "evil-hook-ran")}\n`);
+    chmodSync(join(evil, ".git", "hooks", "pre-push"), 0o755);
+    git(evil, "checkout", "-q", "stolen");
+    writeFileSync(join(wt(), ".git"), `gitdir: ${join(evil, ".git")}\n`);
+
+    ok(ark("mr", run()));
+    expect(onRemote(`refs/heads/${branch()}`)).toBe(runState().repos[0].head_sha);
+    expect(onRemote(`refs/heads/${branch()}`, evilRemote)).toBeNull();
+    expect(existsSync(join(root, "evil-hook-ran"))).toBe(false);
+  });
+
   test("a credential in the origin URL never reaches stderr or the ledger, for a failed push or a malformed URL", () => {
     for (const url of [`https://x-access-token:${SENTINEL}@127.0.0.1:1/acme/demo.git`, `https://user:${SENTINEL}@host`]) {
       git(proj, "remote", "set-url", "origin", url);
@@ -226,6 +246,7 @@ describe("ARK-107-AC1", () => {
   test("a branch outside ark/ in the ledger is refused and main on the remote does not move", () => {
     const ledger = readFileSync(runFile("ledger.ndjson"), "utf8");
     writeFileSync(runFile("ledger.ndjson"), ledger.replace(`"branch":"${branch()}"`, '"branch":"main"'));
+    rechain(dirname(runFile("ledger.ndjson"))); // a chained ledger that carries the bad branch, so the mr guard (not the chain check) is what refuses
     const base = onRemote("refs/heads/main");
     const r = ark("mr", run());
     expect(r.code).toBe(1);

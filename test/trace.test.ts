@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { rechain } from "./ledger";
 import { OMP_CONFIG } from "./omp-config";
 
 setDefaultTimeout(60_000);
@@ -87,6 +88,7 @@ const tamper = (type: string, edit: (data: Record<string, unknown>) => void) => 
   edit(e.data);
   lines[i] = JSON.stringify(e);
   writeFileSync(runFile("ledger.ndjson"), `${lines.join("\n")}\n`);
+  rechain(dirname(runFile("ledger.ndjson"))); // the edit is the point, not a broken chain
 };
 const trace = () => ark("trace-check", run());
 
@@ -359,7 +361,7 @@ describe("ARK-106-AC4", () => {
     r = ark("gate", "packet", run(), "G2");
     expect(r.code).toBe(1);
     expect(r.err).toContain("DEMO-1-AC2: manual AC has no signed record");
-    expect(() => readFileSync(runFile("gates/G2.packet.md"))).toThrow();
+    expect(readdirSync(runFile("gates")).filter((f) => f.startsWith("G2."))).toEqual([]); // no G2 packet was written
 
     sign("AC2");
     expect(ark("gate", "packet", run(), "G2").err).toContain("out of date"); // passes now, but the matrix on disk is the failing one
@@ -380,7 +382,7 @@ describe("ARK-106-AC4", () => {
     r = ark("gate", "packet", run(), "G2");
     expect(r.err).toBe("");
     expect(r.out.trim()).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(slurp("gates/G2.packet.md")).toContain("| DEMO-1-AC2 | manual |");
+    expect(slurp(`gates/G2.${r.out.trim().slice("sha256:".length)}.packet.md`)).toContain("| DEMO-1-AC2 | manual |");
     expect(JSON.parse(slurp("state.json")).state).toBe("awaiting_g2");
   });
 

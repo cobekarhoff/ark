@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import implementerSchema from "../schemas/implementer.schema.json";
 import reviewerSchema from "../schemas/reviewer.schema.json";
 import validatorSchema from "../schemas/validator.schema.json";
-import { activeRunDir, open, readLedger, record, runDir, sha256, summary } from "./run";
+import { activeRunDir, locked, open, readLedger, record, runDir, sha256, summary } from "./run";
 
 const PLAYBOOKS = ["setup", "ticket", "bugfix", "investigate", "review", "resume"];
 
@@ -17,11 +17,13 @@ export function logRoute(args: string[]): string {
   if (!runId) throw new Error("no active run; pass the run id: ark log route <run_id> <playbook> \"<why>\"");
   if (!PLAYBOOKS.includes(playbook)) throw new Error(`unknown playbook '${playbook}'; expected ${PLAYBOOKS.join(", ")}`);
   if (!why?.trim()) throw new Error("route needs a reason");
-  const { dir } = open(runId, "route.chosen");
-  const events = readLedger(dir);
-  if (events.some((e) => e.type === "route.chosen")) throw new Error("the route is already logged for this run");
-  if (events.some((e) => e.type !== "run.started" && e.type !== "g0.opened")) throw new Error("route.chosen must be the first event after run.started");
-  return `routed ${summary(record(dir, "route.chosen", { playbook, reason: why.trim() }))}`;
+  const { dir } = open(runId, "route.chosen", "log route");
+  return locked(dir, () => {
+    const events = readLedger(dir);
+    if (events.some((e) => e.type === "route.chosen")) throw new Error("the route is already logged for this run");
+    if (events.some((e) => e.type !== "run.started" && e.type !== "g0.opened")) throw new Error("route.chosen must be the first event after run.started");
+    return `routed ${summary(record(dir, "route.chosen", { playbook, reason: why.trim() }))}`;
+  });
 }
 
 // AC3: an agent's typed output is checked against its schema before it is kept under artifacts/<agent>/<n>.json.
@@ -42,10 +44,13 @@ export function artifactRecord(runId: string, agent: string, file: string): stri
   const value = readJson(file);
   const check = ajv.compile(schema);
   if (!check(value)) throw new Error(`${file} fails the ${agent} schema: ${ajv.errorsText(check.errors)}`);
-  const out = nextFile(join(dir, "artifacts", agent));
-  const bytes = `${JSON.stringify(value, null, 2)}\n`;
-  writeFileSync(out, bytes);
-  return `${out.slice(dir.length + 1)} ${sha256(bytes)}\n`;
+  return locked(dir, () => { // reading the ledger first refuses a broken chain; the lock keeps the artifact numbering unique
+    readLedger(dir);
+    const out = nextFile(join(dir, "artifacts", agent));
+    const bytes = `${JSON.stringify(value, null, 2)}\n`;
+    writeFileSync(out, bytes);
+    return `${out.slice(dir.length + 1)} ${sha256(bytes)}\n`;
+  });
 }
 
 // FR-14: every finding is bucketed with a reason; an Act-on P0 or P1 goes back only with a failing test or a traced path.
@@ -72,27 +77,29 @@ function checkFinding(f: unknown, at: string): string[] {
 }
 
 export function findingsRecord(runId: string, file: string): string {
-  const { dir } = open(runId, "findings.recorded");
-  const list = readJson(file);
-  if (!Array.isArray(list) || !list.length) throw new Error(`${file} must be a non-empty JSON array of findings`);
-  const prior = readLedger(dir).filter((e) => e.type === "findings.recorded");
-  const seen = new Set(prior.flatMap((e) => e.data.ids as string[]));
-  const bad = list.flatMap((f, i) => {
-    const id = (f as { id?: unknown })?.id;
-    const dup = typeof id === "string" && seen.has(id) ? [`finding ${i + 1}: id '${id}' is already recorded in this run`] : [];
-    if (typeof id === "string") seen.add(id);
-    return [...checkFinding(f, `finding ${i + 1}`), ...dup];
-  });
-  if (bad.length) throw new Error(`${file} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
+  const { dir } = open(runId, "findings.recorded", "findings record");
+  return locked(dir, () => { // numbering the artifact and recording it are one step, or parallel records overwrite each other's file
+    const list = readJson(file);
+    if (!Array.isArray(list) || !list.length) throw new Error(`${file} must be a non-empty JSON array of findings`);
+    const prior = readLedger(dir).filter((e) => e.type === "findings.recorded");
+    const seen = new Set(prior.flatMap((e) => e.data.ids as string[]));
+    const bad = list.flatMap((f, i) => {
+      const id = (f as { id?: unknown })?.id;
+      const dup = typeof id === "string" && seen.has(id) ? [`finding ${i + 1}: id '${id}' is already recorded in this run`] : [];
+      if (typeof id === "string") seen.add(id);
+      return [...checkFinding(f, `finding ${i + 1}`), ...dup];
+    });
+    if (bad.length) throw new Error(`${file} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
 
-  const bytes = `${JSON.stringify(list, null, 2)}\n`;
-  const out = nextFile(join(dir, "artifacts", "findings"));
-  writeFileSync(out, bytes);
-  const count = (b: string) => list.filter((f) => f.bucket === b).length;
-  const blocking = list.filter((f) => f.bucket === "act_on" && (f.priority === "P0" || f.priority === "P1")).length;
-  record(dir, "findings.recorded", {
-    path: out.slice(dir.length + 1), sha256: sha256(bytes), ids: list.map((f) => f.id),
-    buckets: Object.fromEntries(BUCKET.map((b) => [b, count(b)])), blocking,
+    const bytes = `${JSON.stringify(list, null, 2)}\n`;
+    const out = nextFile(join(dir, "artifacts", "findings"));
+    writeFileSync(out, bytes);
+    const count = (b: string) => list.filter((f) => f.bucket === b).length;
+    const blocking = list.filter((f) => f.bucket === "act_on" && (f.priority === "P0" || f.priority === "P1")).length;
+    record(dir, "findings.recorded", {
+      path: out.slice(dir.length + 1), sha256: sha256(bytes), ids: list.map((f) => f.id),
+      buckets: Object.fromEntries(BUCKET.map((b) => [b, count(b)])), blocking,
+    });
+    return `recorded ${list.length} findings (${BUCKET.map((b) => `${b} ${count(b)}`).join(", ")}); open act_on P0/P1: ${blocking}\n`;
   });
-  return `recorded ${list.length} findings (${BUCKET.map((b) => `${b} ${count(b)}`).join(", ")}); open act_on P0/P1: ${blocking}\n`;
 }

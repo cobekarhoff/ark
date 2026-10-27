@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { boundRunDir } from "./binding";
 import { GUARDED } from "./guarded";
-import { projectRoot, runDir } from "./run";
+import { project, projectRoot, readLedger, runDir } from "./run";
 
 // tool_call policy for the main session (PRD "Agents and models": the orchestrator writes only in the run folder).
 // A speed bump, not a sandbox: tampering with the ledger is detected by its hash chain, and product changes by attribution (ARK-115).
@@ -20,11 +20,12 @@ const LSP_READ = ["diagnostics", "definition", "references", "hover", "symbols",
 // Internal URLs a write may name: OMP-owned scratch, peer messages, and cancelling a background job. Every other scheme can reach a file or a process the hook cannot see.
 const urlOk = (scheme: string, p: string) => scheme === "local" || scheme === "agent" || (scheme === "proc" && /\/kill$/.test(p));
 
+// The ledger decides whether a run is open, never the cached state.json (ARK-115-AC2): editing state.json must not free the session.
 const open = (dir: string) => {
   try {
-    const status = (JSON.parse(readFileSync(join(dir, "state.json"), "utf8")) as { status: string }).status;
+    const status = project(readLedger(dir)).status;
     return status !== "done" && status !== "aborted";
-  } catch { return true; } // unreadable state: still bound
+  } catch { return true; } // a ledger that cannot be replayed keeps the run guarded
 };
 
 // The run folder this call is bound by, or undefined when the session is free.

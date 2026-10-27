@@ -47,8 +47,8 @@ The number of rounds a run may use before a human must decide; two by default. O
 _Avoid_: Retry limit, max attempts
 
 **Escalation**:
-The point where a run stops for a human decision because its round budget is spent; the human grants exactly one more round, takes over, or aborts.
-_Avoid_: GE, failure, stuck run
+The point where a run stops for a human decision because its round budget is spent; the human grants exactly one more round, takes over, or aborts. Its gate id in the CLI is `GE`; in prose say escalation.
+_Avoid_: GE (in prose), failure, stuck run
 
 ## Roles
 
