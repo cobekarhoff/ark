@@ -3,13 +3,13 @@
   "$id": "https://github.com/cobekarhoff/ark/schemas/ledger-event.schema.json",
   "title": "One line of ledger.ndjson",
   "type": "object",
-  "required": ["seq", "ts", "type", "data"],
+  "required": ["seq", "ts", "type", "data", "prev"],
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
     "ts": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$" },
     "type": { "type": "string", "minLength": 1 },
     "data": { "type": "object" },
-    "prev": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Hash of the previous event line" }
+    "prev": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "sha256 of the previous raw line; of the empty string for seq 1" }
   },
   "additionalProperties": false
 }

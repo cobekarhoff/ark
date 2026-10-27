@@ -79,14 +79,16 @@ beforeEach(() => {
   writeFileSync(join(proj, ".omp", "config.yml"), OMP_CONFIG);
 });
 
+const packetFile = (gate: string, h: string) => `gates/${gate}.${h.slice("sha256:".length)}.packet.md`;
+
 describe("ARK-104-AC1", () => {
   test("G1 packet holds plan.md and ac.yml, its sha256 is printed and recorded, state moves to awaiting_g1", () => {
     const h = atG1();
-    const file = read("gates/G1.packet.md");
+    const file = read(packetFile("G1", h));
     expect(h).toBe(sha(file)); // the printed hash is the hash of the file on disk
     expect(file).toContain("# Plan marker");
     expect(file).toContain("ARK-950-AC2");
-    expect(ledger().at(-1)).toMatchObject({ type: "gate.packet", data: { gate: "G1", path: "gates/G1.packet.md", packet_sha256: h } });
+    expect(ledger().at(-1)).toMatchObject({ type: "gate.packet", data: { gate: "G1", path: packetFile("G1", h), packet_sha256: h } });
     expect(state()).toMatchObject({ state: "awaiting_g1", status: "waiting_human" });
   });
 
@@ -98,7 +100,7 @@ describe("ARK-104-AC1", () => {
 
   test("G0 packet holds the ticket, ac.yml and what is missing, and the run stays in awaiting_g0", () => {
     const h = atG0();
-    const file = read("gates/G0.packet.md");
+    const file = read(packetFile("G0", h));
     expect(h).toBe(sha(file));
     expect(file).toContain("Ticket body marker.");
     expect(file).toContain("the ticket has none");
@@ -111,9 +113,9 @@ describe("ARK-104-AC1", () => {
     mkdirSync(runPath("artifacts", "logs"), { recursive: true });
     writeFileSync(runPath("artifacts", "logs", "red.txt"), "red");
     writeFileSync(runPath("artifacts", "junit.xml"), "<x/>");
-    expect(packet("G2").code).toBe(0);
-    expect(read("gates/G2.packet.md")).toContain("| ARK-950-AC1 | manual | signed-by Gate Tester at 2026-10-21 |");
-    expect(read("gates/G2.packet.md")).toContain("- artifacts/junit.xml\n- artifacts/logs/red.txt");
+    const h = hashOf(packet("G2"));
+    expect(read(packetFile("G2", h))).toContain("| ARK-950-AC1 | manual | signed-by Gate Tester at 2026-10-21 |");
+    expect(read(packetFile("G2", h))).toMatch(/- artifacts\/junit\.xml \(sha256:[0-9a-f]{64}\)\n- artifacts\/logs\/red\.txt \(sha256:[0-9a-f]{64}\)/);
     expect(state().state).toBe("awaiting_g2");
   });
 
@@ -277,11 +279,12 @@ describe("ARK-104-AC4", () => {
 
   test("a packet file edited after it was hashed is refused", () => {
     const h = atG1();
-    writeFileSync(runPath("gates/G1.packet.md"), `${read("gates/G1.packet.md")}\nsneaked in\n`);
+    const file = packetFile("G1", h);
+    writeFileSync(runPath(file), `${read(file)}\nsneaked in\n`);
     const r = answer("G1", "approve", h);
     expect(r.code).toBe(1);
     expect(r.err).toContain("changed since it was hashed");
-    rmSync(runPath("gates/G1.packet.md"));
+    rmSync(runPath(file));
     expect(answer("G1", "approve", h).code).toBe(1); // deleted is refused too
     expect(state().state).toBe("awaiting_g1");
   });

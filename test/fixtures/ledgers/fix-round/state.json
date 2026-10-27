@@ -17,6 +17,12 @@
       "by": "Cobe Karhoff <cobe@example.com> (cobe)",
       "at": "2026-10-22T00:02:00Z",
       "packet_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "GE": {
+      "answer": "one_more_round",
+      "by": "Cobe Karhoff <cobe@example.com> (cobe)",
+      "at": "2026-10-22T01:00:00Z",
+      "packet_sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
     }
   },
   "repos": [],
@@ -31,5 +37,6 @@
   },
   "sessions": [],
   "lock": null,
-  "ledger_seq": 10
+  "ledger_seq": 10,
+  "ledger_head": "sha256:1dbbbec13f4b53fa0d0ea0ca196be2dac5633d3b710174f54ddbb4d5d1fe18bf"
 }

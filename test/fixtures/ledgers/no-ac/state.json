@@ -21,5 +21,6 @@
   },
   "sessions": [],
   "lock": null,
-  "ledger_seq": 2
+  "ledger_seq": 2,
+  "ledger_head": "sha256:02b62a09bd068b4eeece0faadfda634f9999a093ed9c7ac52e87d5972109550f"
 }

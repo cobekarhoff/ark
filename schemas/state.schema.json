@@ -3,7 +3,7 @@
   "$id": "https://github.com/cobekarhoff/ark/schemas/state.schema.json",
   "title": "Run state.json",
   "type": "object",
-  "required": ["schema", "run_id", "ticket", "playbook", "state", "status", "tier", "round", "next_action", "gates", "repos", "acs", "artifacts", "sessions", "lock", "ledger_seq"],
+  "required": ["schema", "run_id", "ticket", "playbook", "state", "status", "tier", "round", "next_action", "gates", "repos", "acs", "artifacts", "sessions", "lock", "ledger_seq", "ledger_head"],
   "properties": {
     "schema": { "const": 1 },
     "run_id": { "type": "string", "minLength": 1 },
@@ -96,7 +96,8 @@
         }
       ]
     },
-    "ledger_seq": { "type": "integer", "minimum": 0 }
+    "ledger_seq": { "type": "integer", "minimum": 0 },
+    "ledger_head": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "sha256 of the last ledger line (the anchor for edit/truncation detection)" }
   },
   "additionalProperties": false
 }
