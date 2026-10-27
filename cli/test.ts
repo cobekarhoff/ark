@@ -126,11 +126,15 @@ class Refused extends Error {}
 // Writes the blobs of `sha` (all of them, or only `only`) into `dest` straight from the object database, so no smudge or eol filter,
 // attribute, hook or submodule can change what the tests see. Returns the symlinks (by path) whose target leaves `dest`.
 function materialize(wt: string, sha: string, dest: string, only?: string[]): string[] {
-  const entries = gitRaw(wt, "ls-tree", "-r", "-z", "--full-tree", sha).split("\0").filter(Boolean).map((line) => {
+  let entries = gitRaw(wt, "ls-tree", "-r", "-z", "--full-tree", sha).split("\0").filter(Boolean).map((line) => {
     const tab = line.indexOf("\t");
     const [mode, , oid] = line.slice(0, tab).split(" ");
     return { mode, oid, path: line.slice(tab + 1) };
-  }).filter((e) => e.mode !== "160000" && (!only || only.includes(e.path)));
+  });
+  // Fail closed: a submodule's files are not in this tree, yet bun in the worktree would run them. Not materialized (yet).
+  const gitlinks = entries.filter((e) => e.mode === "160000").map((e) => e.path);
+  if (!only && gitlinks.length) throw new Refused(`submodules are not supported by ark test yet: ${gitlinks.join(", ")}`);
+  entries = entries.filter((e) => !only || only.includes(e.path));
   const cat = Bun.spawnSync(["git", "-C", wt, "cat-file", "--batch"], { stdin: Buffer.from(`${entries.map((e) => e.oid).join("\n")}\n`) });
   if (cat.exitCode !== 0) throw new Error(`git cat-file failed in ${wt}: ${cat.stderr.toString().trim()}`);
   const real = realpathSync(dest);

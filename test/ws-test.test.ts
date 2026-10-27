@@ -614,6 +614,22 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(events("test.result")[0].data.unknown_tags).toEqual(["DEMO-1-AC11"]);
   });
 
+  test("a recorded tree with a submodule (gitlink) cannot be proven: green and red-green are inconclusive, naming the path", () => {
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
+    const lib = join(root, "lib-sub"); // a local repository holding a failing tagged test that bun would run from inside the worktree
+    mkdirSync(lib);
+    git(lib, "init", "-q", "-b", "main");
+    commitAll(lib, { "bad.test.ts": bunTest(`test("DEMO-1-AC1 fails inside the submodule", () => { expect(1).toBe(2); });`) });
+    git(wt(), "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "vendor/lib");
+    git(wt(), "commit", "-qm", "submodule");
+    const g = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(g.err).toBe("");
+    expect(g.code).toBe(1);
+    expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("inconclusive");
+    expect(g.out).toContain("submodules are not supported by ark test yet: vendor/lib");
+  });
+
   test("a second suite that produces no JUnit and exits non-zero fails the run, on green; on red it makes the AC inconclusive", () => {
     const ghost = { format: "bun-test", level: "e2e", run: 'test -f ghost.txt && bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/ghost.xml', junit: "$ARK_OUT/ghost.xml" }; // exits 1 without a report until ghost.txt exists
     fixture(undefined, {}, { suites: { ghost } });
