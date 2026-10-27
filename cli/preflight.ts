@@ -55,6 +55,7 @@ export function preflight(): string {
     if (got.unresolved.length) throw new Error(`preflight refused: ${r} names no model OMP knows: ${got.unresolved.map((s) => `'${s}'`).join(", ")}`);
     if (!got.models.length) throw new Error(`preflight refused: ${r} resolves to no model`);
   }
+  if (!roles.default) throw new Error("preflight refused: modelRoles.default is not set; set modelRoles.default explicitly; OMP falls back to the parent model when a role's credential is missing");
   const model = Object.fromEntries(ROLES.map((r) => [r, roles[r]!.models])) as Record<(typeof ROLES)[number], Reach[]>;
   // A subagent whose role has no working credential runs on the parent session's model, whatever retry.modelFallback says
   // (OMP: resolveModelOverrideWithAuthFallback, src/config/model-resolver.ts). Ark's parent is the orchestrator, the `default` role, so what `default` can reach

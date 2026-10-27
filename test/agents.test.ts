@@ -139,7 +139,7 @@ describe("ARK-108-AC3", () => {
 
 describe("ARK-108-AC4", () => {
   const roles = (r: Record<string, string>) => `modelRoles:\n${Object.entries(r).map(([k, v]) => `  ${k}: ${JSON.stringify(v)}\n`).join("")}`;
-  const ok = { implement: "openai-codex/gpt-6.1-sol:high", validate: "anthropic/claude-sonnet-5-5:high", "review-x": "anthropic/claude-opus-5-5:high", "review-s": "openai-codex/gpt-6-sol" };
+  const ok = { implement: "openai-codex/gpt-6.1-sol:high", validate: "anthropic/claude-sonnet-5-5:high", "review-x": "anthropic/claude-opus-5-5:high", "review-s": "openai-codex/gpt-6-sol", default: "anthropic/claude-opus-5-5" };
 
   test("preflight accepts implement on one provider, validate and review-x on another, review-s on the implementer's", () => {
     const r = ark(["preflight"]);

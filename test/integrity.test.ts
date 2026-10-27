@@ -537,7 +537,7 @@ describe("ARK-115-AC9", () => {
   const config = (roles: Record<string, string>, extra = "") =>
     writeFileSync(join(proj, ".omp", "config.yml"), `modelRoles:\n${Object.entries(roles).map(([k, v]) => `  ${k}: ${JSON.stringify(v)}\n`).join("")}${extra}`);
   const CODEX = "openai-codex/gpt-6.1-sol";
-  const base = { implement: CODEX, validate: "anthropic/claude-sonnet-5-5:high", "review-x": "anthropic/claude-opus-5-5:high", "review-s": CODEX };
+  const base = { implement: CODEX, validate: "anthropic/claude-sonnet-5-5:high", "review-x": "anthropic/claude-opus-5-5:high", "review-s": CODEX, default: "anthropic/claude-opus-5-5" };
 
   test.each([
     ["a comma candidate on the implementer's provider", { ...base, validate: `anthropic/DOES-NOT-EXIST,${CODEX}` }, "", `validate (${CODEX}) shares`],
@@ -584,7 +584,7 @@ describe("ARK-115-AC9", () => {
 
   test("a role only the global OMP config defines counts, and the project's roles win over it", () => {
     globalConfig(`modelRoles:\n  review-s: ${CODEX}\n  validate: ${CODEX}\n`);
-    config({ implement: CODEX, validate: "anthropic/claude-sonnet-5-5", "review-x": "anthropic/claude-opus-5-5" });
+    config({ implement: CODEX, validate: "anthropic/claude-sonnet-5-5", "review-x": "anthropic/claude-opus-5-5", default: "anthropic/claude-opus-5-5" });
     ok(ark("preflight")); // review-s from the global file, validate from the project file
   });
 
@@ -627,7 +627,7 @@ describe("ARK-115-AC9", () => {
     const r = Bun.spawnSync(["bun", CLI, "preflight"], { cwd: proj, env: env(login) });
     return { code: r.exitCode, err: r.stderr.toString(), out: r.stdout.toString() };
   };
-  const onCopilot = { implement: "github-copilot/gpt-5", validate: "anthropic/claude-sonnet-5-5", "review-x": "anthropic/claude-opus-5-5", "review-s": "github-copilot/gpt-5" };
+  const onCopilot = { implement: "github-copilot/gpt-5", validate: "anthropic/claude-sonnet-5-5", "review-x": "anthropic/claude-opus-5-5", "review-s": "github-copilot/gpt-5", default: "anthropic/claude-opus-5-5" };
 
   test.each([
     ["a bare primary selector", "gpt-5"],
@@ -681,6 +681,16 @@ describe("ARK-115-AC9", () => {
   test("the PRD default (default on the validator's vendor, implement on the implementer's) stays valid", () => {
     config({ ...base, default: "anthropic/claude-opus-5-5" });
     ok(ark("preflight"));
+  });
+
+  // Auth fallback to the parent model cannot be satisfied by any static config for every role (two vendors), so it is audited at runtime (ARK-113).
+  // What preflight can demand is that the parent is named: with `default` unset OMP picks a parent on its own.
+  test("an unset default role is refused: the parent model must be named", () => {
+    const { default: _unset, ...withoutDefault } = base as Record<string, string>;
+    config(withoutDefault);
+    const p = ark("preflight");
+    expect(p.code).toBe(1);
+    expect(p.err).toContain("set modelRoles.default explicitly; OMP falls back to the parent model when a role's credential is missing");
   });
 
   test("when OMP cannot be loaded, preflight refuses instead of guessing", () => {

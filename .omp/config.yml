@@ -6,6 +6,7 @@ modelRoles:
   validate: anthropic/claude-sonnet-5-5:high
   review-x: anthropic/claude-opus-5-5:high
   review-s: openai-codex/gpt-6.1-sol:high
+  default: anthropic/claude-opus-5-5:high   # the orchestrator, i.e. the parent model a subagent falls back to when its credential is missing
 
 retry:
   modelFallback: true
