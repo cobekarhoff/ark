@@ -656,6 +656,33 @@ describe("ARK-115-AC9", () => {
     expect(p.err).toContain(`${role} names no model OMP knows: 'zzz-no-such-model'`);
   });
 
+  // A subagent whose role has no working credential runs on the parent session's model (OMP's resolveModelOverrideWithAuthFallback), whatever retry.modelFallback says.
+  // Ark's parent is the orchestrator, i.e. the `default` role. Isolated repro: anthropic has a key command that yields nothing, default is on the implementer's vendor.
+  const noAnthropicKey = () => writeFileSync(join(agentDir, "models.yml"), `providers:\n  anthropic:\n    apiKey: "!true"\n`);
+
+  test.each([
+    ["validate", { ...base, default: CODEX }],
+    ["review-x", { ...base, default: CODEX }],
+  ])("a default role on the implementer's vendor is reachable by %s through the parent fallback, and refused", (role, roles) => {
+    noAnthropicKey();
+    config(roles);
+    const p = ark("preflight");
+    expect(p.code).toBe(1);
+    expect(p.err).toContain(`${role} (${CODEX}) shares the implementer's vendor 'openai-codex' via the parent session model (the default role)`);
+  });
+
+  test("the default role's own fallback chain is part of what the parent fallback reaches", () => {
+    config({ ...base, default: "anthropic/claude-opus-5-5" }, `retry:\n  fallbackChains:\n    default: [${CODEX}]\n    validate: []\n    review-x: []\n`); // the roles' own empty chains keep them off the default chain
+    const p = ark("preflight");
+    expect(p.code).toBe(1);
+    expect(p.err).toContain(`via the parent session model`);
+  });
+
+  test("the PRD default (default on the validator's vendor, implement on the implementer's) stays valid", () => {
+    config({ ...base, default: "anthropic/claude-opus-5-5" });
+    ok(ark("preflight"));
+  });
+
   test("when OMP cannot be loaded, preflight refuses instead of guessing", () => {
     config(base);
     const r = Bun.spawnSync(["bun", CLI, "preflight"], { cwd: proj, env: env({ ARK_OMP_PACKAGE: join(agentDir, "no-such-omp") }) });
