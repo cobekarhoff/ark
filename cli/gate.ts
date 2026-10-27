@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { userInfo } from "node:os";
 import { join } from "node:path";
-import { append, commit, type LedgerEvent, locked, mrEnabled, project, readLedger, runDir, sha256, unattributed, worktreeHeads } from "./run";
+import { approver, withTerminal } from "./human";
+import { append, commit, type LedgerEvent, locked, maxRounds, mrEnabled, project, readLedger, runDir, sha256, unattributed, worktreeHeads } from "./run";
 import { buildMatrix } from "./trace";
 import { transitions } from "./transitions";
 
@@ -15,9 +15,14 @@ function buildPacket(dir: string, runId: string, gate: string): string {
     const bytes = readFileSync(join(dir, f));
     return `## ${f} (${sha256(bytes)})\n\n${bytes.toString("utf8").trimEnd()}\n`;
   });
+  const acs = () => Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) as { id: string; kind?: string }[];
   if (gate === "G0") {
-    const none = (Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) as unknown[]).length === 0;
+    const none = acs().length === 0;
     sections.push(`## Missing\n\n${none ? "- acceptance criteria: the ticket has none" : "- nothing detected by the CLI"}\n`);
+  }
+  if (gate === "G1") {
+    const unkinded = withoutKind(acs());
+    sections.push(`## Missing\n\n${unkinded.length ? `- AC kind (new or preserved, confirmed by your approval): ${unkinded.join(", ")}` : "- nothing detected by the CLI"}\n`);
   }
   if (gate === "G2") {
     const art = join(dir, "artifacts");
@@ -26,8 +31,11 @@ function buildPacket(dir: string, runId: string, gate: string): string {
     const man = join(dir, "manual");
     const signed = existsSync(man) ? (readdirSync(man, { recursive: true }) as string[]).filter((f) => statSync(join(man, f)).isFile()).sort() : [];
     sections.push(`## Manual records\n\n${signed.length ? signed.map((f) => `- manual/${f} (${sha256(readFileSync(join(man, f)))})`).join("\n") : "- none"}\n`);
+    sections.push(`## Verified findings\n\n${verifiedFindings(dir).map((l) => `- ${l}`).join("\n") || "- none"}\n`);
   }
-  if (gate === "GE") { // the escalation packet: the shared premise and the newest recorded findings
+  if (gate === "GE") { // the escalation packet: the round budget, the shared premise and the newest recorded findings
+    const run = project(readLedger(dir));
+    sections.push(`## Rounds\n\n- rounds used: ${run.round} of ${maxRounds()} (the round budget)\n- the human answers one_more_round (exactly one more round), take_over (the human implements) or abort\n`);
     const dirF = join(dir, "artifacts", "findings");
     const newest = existsSync(dirF) ? Math.max(0, ...readdirSync(dirF).map((f) => parseInt(f)).filter(Number.isInteger)) : 0;
     if (!newest) sections.push("## Latest findings\n\n- none recorded\n");
@@ -61,6 +69,7 @@ export function gatePacket(runId: string, gate: string): string {
     const events = readLedger(dir);
     const state = project(events).state;
     if (!Object.hasOwn(transitions[state], `gate.packet:${gate}`)) throw new Error(`cannot build the ${gate} packet in state '${state}'`);
+    if (gate === "GE" && project(events).round < maxRounds()) throw new Error(`cannot build the GE packet: ${project(events).round} of ${maxRounds()} rounds used; escalation opens only once the round budget is spent (ark advance fix_round.started starts a round)`);
     if (gate === "G2") requireTrace(dir, runId, events, "G2 packet");
     const body = buildPacket(dir, runId, gate);
     const hash = sha256(body);
@@ -72,7 +81,18 @@ export function gatePacket(runId: string, gate: string): string {
   });
 }
 
-const git = (key: string) => Bun.spawnSync(["git", "config", key]).stdout.toString().trim();
+const withoutKind = (acs: { id: string; kind?: string }[]) => acs.filter((a) => !a.kind).map((a) => a.id);
+
+type Finding = { id: string; priority: string; bucket: string; file: string; line: number; evidence?: { failing_test?: string; traced_path?: string } };
+
+// Verified findings (CONTEXT.md): act-on P0 and P1 findings, oldest recorded first, each with what verified it. A traced path is weaker evidence than a failing test, and the packet says so.
+function verifiedFindings(dir: string): string[] {
+  const folder = join(dir, "artifacts", "findings");
+  if (!existsSync(folder)) return [];
+  return readdirSync(folder).filter((f) => /^\d+\.json$/.test(f)).sort((a, b) => parseInt(a) - parseInt(b)).flatMap((f) =>
+    (JSON.parse(readFileSync(join(folder, f), "utf8")) as Finding[]).filter((x) => x.bucket === "act_on" && (x.priority === "P0" || x.priority === "P1")).map((x) =>
+      `${x.id} ${x.priority} ${x.file}:${x.line}: ${x.evidence?.failing_test ? `failing test '${x.evidence.failing_test}'` : `traced path, weaker evidence (no test reaches it): ${x.evidence?.traced_path}`}`));
+}
 
 export function gateAnswer(runId: string, gate: string, answer: string, packetHash: string): string {
   checkGate(gate);
@@ -81,7 +101,8 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
   if (!allowed.includes(answer)) throw new Error(`unknown answer '${answer}' for ${gate}; expected ${allowed.join(", ")}`);
 
   const dir = runDir(runId);
-  return locked(dir, () => {
+  // ADR 0002: an answer is the gate name typed on /dev/tty, which a process without a controlling terminal (an agent's shell) cannot do. Checked first, confirmed last.
+  return withTerminal("a gate answer", (confirm) => locked(dir, () => {
     const events = readLedger(dir);
     const packet = events.findLast((e) => e.type === "gate.packet" && e.data.gate === gate);
     if (!packet) throw new Error(`${gate} has no packet; run 'ark gate packet ${runId} ${gate}' first`);
@@ -105,6 +126,9 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
         throw new Error(`${gate} packet is stale: ${changed.join(", ") || "its sources"} changed since it was built; answer change (or edit, send_back) and rebuild the packet`);
       }
       if (gate === "G2" && answer === "approve") requireTrace(dir, runId, events, "G2 approval");
+      // The AC kind is proposed at intake and confirmed by the human at the plan gate: no approval while one is missing.
+      const unkinded = gate === "G1" ? withoutKind(Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) as { id: string; kind?: string }[]) : [];
+      if (unkinded.length) throw new Error(`G1 approve refused: ${unkinded.join(", ")} ${unkinded.length > 1 ? "have" : "has"} no kind; set 'kind: new' or 'kind: preserved' in ac.yml and rebuild the packet`);
     }
     // An answer that approves or starts a round vouches for the worktrees as they are now; one that starts a round also marks where the next implementer step begins.
     const run = project(events);
@@ -115,15 +139,12 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
       if (bad.length) throw new Error(`${gate} ${answer} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
       if (startsRound) heads = { heads: worktreeHeads(dir, run) };
     }
-    const os_user = userInfo().username;
-    const git_name = git("user.name");
-    const git_email = git("user.email");
-    if (!git_name || !git_email) throw new Error("git config user.name and user.email must be set to record the approver");
-    const by = `${git_name} <${git_email}> (${os_user})`;
-    // ark.yml mr: false: approval ends the run at ready branches, no ark mr. Read before anything is written.
+    const who = approver();
+    // ark.yml mr: false: approval ends the run at ready branches, handed off, with no ark mr. Read before anything is written.
     const closing = gate === "G2" && answer === "approve" && !mrEnabled();
-    const answered = append(dir, events, "gate.answered", { gate, answer, by, os_user, git_name, git_email, packet_sha256: packetHash, ...heads });
-    commit(dir, closing ? append(dir, answered, "run.closed", { reason: "mr disabled" }) : answered);
-    return `${gate} ${answer} recorded by ${by}\n${closing ? "MRs are disabled in ark.yml; run closed at ready branches\n" : ""}`;
-  });
+    confirm(`${runId}: answer ${gate} '${answer}' to packet ${packetHash}\nType ${gate} to confirm: `, gate);
+    const answered = append(dir, events, "gate.answered", { gate, answer, ...who, packet_sha256: packetHash, channel: "tty", ...heads });
+    commit(dir, closing ? append(dir, answered, "run.closed", { outcome: "handed_off", reason: "mr disabled" }) : answered);
+    return `${gate} ${answer} recorded by ${who.by}\n${closing ? "MRs are disabled in ark.yml; run closed at ready branches, handed off\n" : ""}`;
+  }));
 }

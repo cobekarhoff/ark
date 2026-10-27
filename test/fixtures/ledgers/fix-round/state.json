@@ -1,12 +1,14 @@
 {
   "schema": 1,
-  "run_id": "2026-10-21-ARK-902",
+  "run_id": "2026-10-21-ARK-902-1",
   "ticket": "ARK-902",
   "playbook": "ticket",
   "state": "building",
   "status": "active",
+  "outcome": null,
   "tier": null,
-  "round": 0,
+  "round": 2,
+  "implementer": "agent",
   "next_action": {
     "kind": "continue_build",
     "agent": "orchestrator"
@@ -38,5 +40,5 @@
   "sessions": [],
   "lock": null,
   "ledger_seq": 10,
-  "ledger_head": "sha256:1dbbbec13f4b53fa0d0ea0ca196be2dac5633d3b710174f54ddbb4d5d1fe18bf"
+  "ledger_head": "sha256:c829d1811c395fd9668a1ca44b115f59553843c34269029bd163fcd4764061c0"
 }

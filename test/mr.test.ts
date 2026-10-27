@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { rechain } from "./ledger";
+import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
 import { credentialFreeEnv } from "../cli/launch";
+import { spawnArk } from "./tty";
 
 setDefaultTimeout(60_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
@@ -52,7 +54,7 @@ const ark = (...args: string[]) => {
     ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`,
     GH_LOG: join(root, "gh.log"), GH_STATE: join(root, "gh.state"), GH_BODY: join(root, "gh.body"),
   };
-  const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env });
+  const r = spawnArk(["bun", CLI, ...args], { cwd: proj, env });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const run = () => readdirSync(join(home, "projects", "demo", "runs"))[0];
@@ -102,6 +104,7 @@ function atG2Approved(arkYml = "project: demo\n") {
   ok(ark("run", "start", "DEMO-1"));
   ok(ark("advance", run(), "analysis.completed"));
   writeFileSync(runFile("plan.md"), "# Plan\n");
+  setKinds(runFile(""));
   ok(ark("gate", "answer", run(), "G1", "approve", "--packet", ark("gate", "packet", run(), "G1").out.trim()));
   ok(ark("ws", "create", run()));
   ok(ark("advance", run(), "build.started"));
@@ -110,7 +113,7 @@ function atG2Approved(arkYml = "project: demo\n") {
   git(wt(), "commit", "-qm", "feature");
   ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'));
   ok(ark("advance", run(), "build.completed"));
-  writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: criterion one\n  level: manual\n");
+  writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: criterion one\n  level: manual\n  kind: new\n");
   mkdirSync(runFile("manual"));
   writeFileSync(runFile("manual/DEMO-1-AC1.md"), "signed-by: MR Tester\nat: 2026-10-22\n");
   ok(ark("trace-check", run()));
@@ -167,14 +170,14 @@ describe("ARK-107-AC1", () => {
       seedPrs(pr(9, { state }));
       const r = ark("mr", run());
       expect(r.code, state).toBe(1);
-      expect(r.err).toContain(`${state.toLowerCase()} PR https://github.com/acme/demo/pull/9`);
+      expect(r.err).toContain(`${state.toLowerCase()} MR https://github.com/acme/demo/pull/9`);
       expect(creates()).toEqual([]);
       expect(events("mr.opened")).toEqual([]);
     }
   });
 
   test("ark mr outside mrs_open is refused before anything is pushed or called", () => {
-    ok(ark("advance", run(), "run.completed"));
+    ok(ark("run", "close", run(), "abandoned"));
     const r = ark("mr", run());
     expect(r.code).toBe(1);
     expect(r.err).toContain("mrs_open");
@@ -269,7 +272,7 @@ describe("ARK-107-AC2", () => {
   beforeEach(() => atG2Approved("project: demo\nmr: false\n"));
 
   test("with mr: false the G2 approval itself ends the run at the ready branch, with no push and no gh call", () => {
-    expect(events("run.closed").map((e) => e.data)).toEqual([{ reason: "mr disabled" }]);
+    expect(events("run.closed").map((e) => e.data)).toEqual([{ outcome: "handed_off", reason: "mr disabled" }]);
     expect(runState().state).toBe("done");
     expect(ghLog()).toEqual([]);
     expect(onRemote(`refs/heads/${branch()}`)).toBeNull();
@@ -303,7 +306,7 @@ describe("ARK-107-AC3", () => {
     const before = readFileSync(runFile("ledger.ndjson"), "utf8");
     for (const [type, data, owner] of [
       ["mr.opened", { repo: "demo", url: PR_URL, number: 7 }, "ark mr"],
-      ["run.closed", { reason: "mr disabled" }, "ark mr"],
+      ["run.closed", { outcome: "merged" }, "ark run close"],
       ["ws.created", { repo: "demo2", branch: "main", base_sha: "0".repeat(40) }, "ark ws"],
     ] as const) {
       const r = ark("advance", run(), type, "--data", JSON.stringify(data));
@@ -364,5 +367,55 @@ describe("ARK-118-AC2", () => {
     git(proj, "config", "core.hooksPath", join(root, "source-hooks"));
     pushed(arkMrTool());
     expect(existsSync(mark)).toBe(false);
+  });
+});
+
+// `ark run close` as a person (typed on a terminal) or as an agent's shell (typed = null: no controlling terminal).
+const closeTyped = (typed: string | null, outcome: string) =>
+  spawnArk(["bun", CLI, "run", "close", run(), outcome], {
+    cwd: proj,
+    env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`, GH_LOG: join(root, "gh.log"), GH_STATE: join(root, "gh.state"), GH_BODY: join(root, "gh.body") },
+  }, typed);
+
+describe("ARK-117-AC2", () => {
+  test("with mr: false the G2 approval ends the run as handed off", () => {
+    atG2Approved("project: demo\nmr: false\n");
+    expect(runState()).toMatchObject({ state: "done", status: "done", outcome: "handed_off" });
+  });
+
+  test("a run with open MRs stays open; a human records merged, once every repo has an MR", () => {
+    atG2Approved();
+    const early = closeTyped("merged", "merged");
+    expect(early.exitCode).toBe(1);
+    expect(early.stderr.toString()).toContain("no MR was opened for demo");
+
+    ok(ark("mr", run()));
+    expect(runState()).toMatchObject({ state: "mrs_open", status: "waiting_human", outcome: null });
+    const r = closeTyped("merged", "merged");
+    expect(r.exitCode, r.stderr.toString()).toBe(0);
+    expect(runState()).toMatchObject({ state: "done", status: "done", outcome: "merged" });
+    expect(events("run.closed")[0].data).toMatchObject({ outcome: "merged", channel: "tty", by: "t <t@t> (" + userInfo().username + ")" });
+  });
+
+  test("an MR closed unmerged after G2 is recorded as abandoned by a human", () => {
+    atG2Approved();
+    ok(ark("mr", run()));
+    const r = closeTyped("abandoned", "abandoned");
+    expect(r.exitCode, r.stderr.toString()).toBe(0);
+    expect(runState()).toMatchObject({ state: "done", outcome: "abandoned" });
+  });
+
+  test("ark run close needs the outcome typed on a terminal: without one, or with another word, nothing is recorded", () => {
+    atG2Approved();
+    ok(ark("mr", run()));
+    const before = readFileSync(runFile("ledger.ndjson"), "utf8");
+    const agent = closeTyped(null, "merged");
+    expect(agent.exitCode).toBe(1);
+    expect(agent.stderr.toString()).toContain("no controlling terminal");
+    const wrong = closeTyped("abandoned", "merged");
+    expect(wrong.exitCode).toBe(1);
+    expect(wrong.stderr.toString()).toContain("expected 'merged'");
+    expect(readFileSync(runFile("ledger.ndjson"), "utf8")).toBe(before);
+    expect(ark("run", "close", run(), "aborted").err).toContain("unknown outcome");
   });
 });

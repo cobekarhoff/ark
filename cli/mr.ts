@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { approver, withTerminal } from "./human";
 import { git } from "./repo";
-import { mrEnabled, project, readLedger, record, runDir } from "./run";
+import { commit, append, locked, mrEnabled, project, readLedger, record, runDir } from "./run";
 
 type Pr = { url: string; number: number; state: string; baseRefName: string; headRepositoryOwner: { login: string } | null };
 
@@ -14,7 +15,7 @@ function gh(...args: string[]): string {
   return r.stdout.toString().trim();
 }
 
-// Opens one GitHub PR per repo worktree. The only gh subcommands used are `pr list` and `pr create`: nothing here, or anywhere in the CLI, merges.
+// Opens one merge request (a GitHub pull request) per repo worktree. The only gh subcommands used are `pr list` and `pr create`: nothing here, or anywhere in the CLI, merges.
 export function mr(runId: string): string {
   const dir = runDir(runId);
   const events = readLedger(dir);
@@ -22,7 +23,7 @@ export function mr(runId: string): string {
   const illegal = () => new Error(`ark mr is legal only in state 'mrs_open' (state '${state.state}')`);
 
   if (!mrEnabled()) { // normally G2 approval already closed the run; this covers a config flipped after approval
-    if (state.state === "mrs_open") record(dir, "run.closed", { reason: "mr disabled" });
+    if (state.state === "mrs_open") record(dir, "run.closed", { outcome: "handed_off", reason: "mr disabled" });
     else if (state.state !== "done") throw illegal();
     return `MRs are disabled in ark.yml; run closed at ready branches: ${state.repos.map((r) => r.branch).join(", ")}\n`;
   }
@@ -75,18 +76,36 @@ export function mr(runId: string): string {
     const bodyFile = join(dir, "mr", `${repo.name}.md`);
     mkdirSync(join(dir, "mr"), { recursive: true });
     writeFileSync(bodyFile, body);
-    // A PR counts as ours only if it is from this repo (not a fork with the same branch name) into the default branch.
+    // An MR counts as ours only if it is from this repo (not a fork with the same branch name) into the default branch.
     const owner = slug.split("/")[0].toLowerCase();
     const prs = JSON.parse(gh("pr", "list", "--repo", slug, "--head", repo.branch, "--state", "all", "--json", "url,number,state,baseRefName,headRepositoryOwner") || "[]") as Pr[];
     const mine = prs.filter((p) => p.baseRefName === base && p.headRepositoryOwner?.login.toLowerCase() === owner);
     const found = mine.find((p) => p.state === "OPEN");
     const dead = mine.find((p) => p.state !== "OPEN");
-    if (!found && dead) throw new Error(`${repo.branch} already has a ${dead.state.toLowerCase()} PR ${dead.url}; ark mr will not reuse it`);
+    if (!found && dead) throw new Error(`${repo.branch} already has a ${dead.state.toLowerCase()} MR ${dead.url}; ark mr will not reuse it`);
     const prUrl = found?.url ?? gh("pr", "create", "--repo", slug, "--head", repo.branch, "--base", base, "--title", `${state.ticket}: ${ticket.title}`, "--body-file", bodyFile).split("\n").pop()!;
     const number = found?.number ?? Number(prUrl.match(/\/pull\/(\d+)/)?.[1]);
-    if (!Number.isInteger(number)) throw new Error(`cannot read a PR number from '${prUrl}'`);
+    if (!Number.isInteger(number)) throw new Error(`cannot read an MR number from '${prUrl}'`);
     record(dir, "mr.opened", { repo: repo.name, url: prUrl, number });
     out.push(`${repo.name}: ${prUrl}`);
   }
   return `${out.join("\n")}\n`;
+}
+
+// The outcome of a run whose MRs are open is a human's to record: merged (every MR merged) or abandoned (the MRs closed unmerged).
+// Typed on /dev/tty like a gate answer (ADR 0002), because nothing else tells Ark what happened on the git host.
+export function closeRun(runId: string, outcome: string): string {
+  if (outcome !== "merged" && outcome !== "abandoned") throw new Error(`unknown outcome '${outcome}'; a human records merged or abandoned (aborted and handed off are recorded by Ark)`);
+  const dir = runDir(runId);
+  return withTerminal("closing a run", (confirm) => locked(dir, () => {
+    const events = readLedger(dir);
+    const state = project(events);
+    if (state.state !== "mrs_open") throw new Error(`ark run close is legal only in state 'mrs_open' (state '${state.state}')`);
+    const unopened = state.repos.filter((r) => !events.some((e) => e.type === "mr.opened" && e.data.repo === r.name)).map((r) => r.name);
+    if (outcome === "merged" && unopened.length) throw new Error(`cannot record merged: no MR was opened for ${unopened.join(", ")}`);
+    const who = approver();
+    confirm(`${runId}: close the run as ${outcome}\nType ${outcome} to confirm: `, outcome);
+    commit(dir, append(dir, events, "run.closed", { outcome, ...who, channel: "tty" }));
+    return `closed ${runId}: ${outcome}, recorded by ${who.by}\n`;
+  }));
 }

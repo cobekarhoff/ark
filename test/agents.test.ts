@@ -3,7 +3,9 @@ import Ajv2020 from "ajv/dist/2020";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
+import { spawnArk } from "./tty";
 
 const ROOT = join(import.meta.dir, "..");
 const CLI = join(ROOT, "cli", "ark.ts");
@@ -24,7 +26,7 @@ Body.
 let home: string;
 let proj: string;
 const ark = (args: string[], stdin?: string) => {
-  const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home }, stdin: stdin === undefined ? undefined : Buffer.from(stdin) });
+  const r = spawnArk(["bun", CLI, ...args], { cwd: proj, env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home }, stdin: stdin === undefined ? undefined : Buffer.from(stdin) });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const runsDir = () => join(home, "projects", "demo", "runs");
@@ -52,6 +54,7 @@ const toJudging = () => {
   expect(ark(["run", "start", "DEMO-7"]).code).toBe(0);
   expect(ark(["advance", run(), "analysis.completed"]).code).toBe(0);
   writeFileSync(join(dir(), "plan.md"), "# Plan\n");
+  setKinds(dir());
   const h = ark(["gate", "packet", run(), "G1"]).out.trim();
   expect(ark(["gate", "answer", run(), "G1", "approve", "--packet", h]).err).toBe("");
   expect(ark(["advance", run(), "build.started"]).code).toBe(0);
@@ -177,7 +180,7 @@ describe("ARK-108-AC5", () => {
 
   test("every bucket is recorded with its reason; the ledger event and artifact carry the counts", () => {
     toJudging();
-    const list = [finding(), finding({ id: "F2", bucket: "noted" }), finding({ id: "F3", bucket: "dismissed", reason: "false positive" }), finding({ id: "F4", priority: "P1", bucket: "act_on", evidence: { failing_test: "DEMO-7-AC1 stops" } })];
+    const list = [finding(), finding({ id: "F2", bucket: "noted" }), finding({ id: "F3", bucket: "dismissed", reason: "false positive" }), finding({ id: "F4", priority: "P1", bucket: "act_on", evidence: { traced_path: "src/a.ts:3 -> src/b.ts:9" } })];
     const r = ark(["findings", "record", run(), tmp("f.json", list)]);
     expect(r.code).toBe(0);
     const ev = ledger().at(-1);
@@ -189,7 +192,7 @@ describe("ARK-108-AC5", () => {
 
   test.each([
     ["act_on P0 without evidence", { priority: "P0", bucket: "act_on" }, "act_on P0 goes back only with evidence"],
-    ["act_on P1 with empty evidence", { priority: "P1", bucket: "act_on", evidence: { trace_path: " " } }, "non-empty failing_test or trace_path"],
+    ["act_on P1 with empty evidence", { priority: "P1", bucket: "act_on", evidence: { traced_path: " " } }, "non-empty failing_test or traced_path"],
     ["evidence of another shape", { priority: "P1", bucket: "act_on", evidence: { note: "x" } }, "evidence must be"],
     ["an unknown bucket", { bucket: "maybe" }, "bucket must be one of"],
     ["a missing reason", { reason: "" }, "reason must be a non-empty string"],
@@ -206,7 +209,7 @@ describe("ARK-108-AC5", () => {
 
   test("act_on P0 and P1 are accepted with a traced path; act_on P2 needs no evidence; ids are unique across records", () => {
     toJudging();
-    expect(ark(["findings", "record", run(), tmp("f.json", [finding({ priority: "P0", bucket: "act_on", evidence: { trace_path: "a.ts:3 -> b.ts:9" } }), finding({ id: "F2", priority: "P2", bucket: "act_on" })])]).code).toBe(0);
+    expect(ark(["findings", "record", run(), tmp("f.json", [finding({ priority: "P0", bucket: "act_on", evidence: { traced_path: "a.ts:3 -> b.ts:9" } }), finding({ id: "F2", priority: "P2", bucket: "act_on" })])]).code).toBe(0);
     const dup = ark(["findings", "record", run(), tmp("g.json", [finding()])]);
     expect(dup.err).toContain("id 'F1' is already recorded");
   });

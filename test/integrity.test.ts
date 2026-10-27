@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
+import { spawnArk } from "./tty";
 
 setDefaultTimeout(120_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
@@ -31,7 +33,7 @@ let proj: string;
 let agentDir: string; // the global OMP config dir (PI_CODING_AGENT_DIR); empty unless a test writes a config.yml into it
 const env = (extra: Record<string, string> = {}) => ({ ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PI_CODING_AGENT_DIR: agentDir, ...extra });
 const ark = (...args: string[]) => {
-  const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env: env() });
+  const r = spawnArk(["bun", CLI, ...args], { cwd: proj, env: env() });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const git = (cwd: string, ...args: string[]) => {
@@ -80,6 +82,7 @@ function fixture() {
 const toBuilding = () => {
   ok(ark("advance", run(), "analysis.completed"));
   writeFileSync(runFile("plan.md"), "# Plan\n");
+  setKinds(runFile(""));
   const h = ark("gate", "packet", run(), "G1").out.trim();
   ok(ark("gate", "answer", run(), "G1", "approve", "--packet", h));
   ok(ark("ws", "create", run()));
@@ -89,10 +92,10 @@ const step = (files: Record<string, string>) => {
   commitAll(wt(), files);
   ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'));
 };
-// The validator's work: commit tagged tests, then record the head through `ark test` (the exit code is the test verdict, not what is under test here).
+// The validator's work: commit tagged tests, then record the head through `ark test --as validator` (the exit code is the test verdict, not what is under test here).
 const validate = (files: Record<string, string>, ac = "DEMO-1-AC1") => {
   commitAll(wt(), files);
-  expect(ark("test", run(), "--acs", ac).err).toBe("");
+  expect(ark("test", run(), "--acs", ac, "--as", "validator").err).toBe("");
 };
 
 beforeEach(fixture);
@@ -101,7 +104,7 @@ describe("ARK-115-AC1", () => {
   // [event type, the command that owns it]
   const owned: [string, string][] = [
     ["ws.created", "ws"], ["test.result", "test"], ["test.red_green", "test"], ["trace.checked", "trace-check"],
-    ["gate.packet", "gate"], ["gate.answered", "gate"], ["mr.opened", "mr"], ["run.closed", "mr"],
+    ["gate.packet", "gate"], ["gate.answered", "gate"], ["mr.opened", "mr"], ["run.closed", "run close"], ["test.preservation", "test"],
     ["route.chosen", "log route"], ["findings.recorded", "findings record"], ["artifact.recorded", "artifact record"],
     ["ac.updated", "ac update"], ["ge.opened", "gate"], ["ge.answered", "gate"],
   ];
@@ -121,6 +124,8 @@ describe("ARK-115-AC1", () => {
   test("escalation goes through ark gate: a GE packet from premise.md and the latest findings, answered by a human answer", () => {
     toBuilding();
     ok(ark("advance", run(), "build.completed"));
+    expect(ark("gate", "packet", run(), "GE").err).toContain("0 of 2 rounds used"); // escalation opens only once the round budget is spent
+    spendRounds(2);
     expect(ark("gate", "packet", run(), "GE").err).toContain("premise.md"); // the packet needs the shared premise
     writeFileSync(runFile("premise.md"), "Both fixes assumed the cache is cold.\n");
     const h = ark("gate", "packet", run(), "GE").out.trim();
@@ -201,7 +206,7 @@ describe("ARK-115-AC2", () => {
 // Every AC manual and signed, so trace-check passes without a test run; returns the G2 packet hash. Needs building state.
 const toG2Packet = () => {
   ok(ark("advance", run(), "build.completed"));
-  writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: t\n  level: manual\n- id: DEMO-1-AC2\n  text: t\n  level: manual\n");
+  writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: t\n  level: manual\n  kind: new\n- id: DEMO-1-AC2\n  text: t\n  level: manual\n  kind: new\n");
   mkdirSync(runFile("manual"), { recursive: true });
   for (const id of ["DEMO-1-AC1", "DEMO-1-AC2"]) writeFileSync(runFile(`manual/${id}.md`), "signed-by: P\nat: 2026-10-26\n");
   mkdirSync(runFile("artifacts"), { recursive: true });
@@ -356,7 +361,7 @@ describe("ARK-115-AC4", () => {
     refused(ark("advance", run(), "build.completed"), "test/f.test.ts");
     expect(slurp("state.json")).toContain('"state": "building"');
 
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1").err).toBe(""); // the validator's run records the head, and with it the commit
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe(""); // the validator step records the head, and with it the commit
     ok(ark("advance", run(), "build.completed"));
     commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") }); // an edit after the newest recorded head
     refused(ark("advance", run(), "fix_round.started"), "test/f.test.ts");
@@ -462,6 +467,7 @@ describe("ARK-115-AC5 forged step start", () => {
   test("--data heads is refused on any event, so a tagged-test edit made before build.started still reaches the guard", () => {
     ok(ark("advance", run(), "analysis.completed"));
     writeFileSync(runFile("plan.md"), "# Plan\n");
+    setKinds(runFile(""));
     ok(ark("gate", "answer", run(), "G1", "approve", "--packet", ark("gate", "packet", run(), "G1").out.trim()));
     ok(ark("ws", "create", run()));
     commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") }); // a tagged test the step will have to answer for
@@ -482,6 +488,7 @@ describe("ARK-115-AC8", () => {
   test("a G1 packet embeds each source's sha256, is stored by hash, and an answer after a source changed is refused", () => {
     ok(ark("advance", run(), "analysis.completed"));
     writeFileSync(runFile("plan.md"), "# Plan v1\n");
+    setKinds(runFile(""));
     const h = ark("gate", "packet", run(), "G1").out.trim();
     const body = slurp(`gates/G1.${h.slice("sha256:".length)}.packet.md`);
     expect(body).toContain(sha("# Plan v1\n"));
@@ -742,5 +749,146 @@ describe("ARK-115-AC1 user-facing wording follows CONTEXT.md", () => {
   test("help and gate errors say escalation for GE", () => {
     expect(ark("--help").out).toContain("GE is the escalation gate");
     expect(ark("gate", "packet", run(), "G9").err).toContain("GE (escalation)");
+  });
+});
+
+// Round-budget fixtures: one round is a recorded step's worth of failure sent back (fix_round.started), then the build is closed again.
+const spendRounds = (n: number) => {
+  for (let i = 0; i < n; i++) {
+    ok(ark("advance", run(), "fix_round.started"));
+    ok(ark("advance", run(), "build.completed"));
+  }
+};
+const escalate = (answer: string) => {
+  writeFileSync(runFile("premise.md"), "Every round assumed the cache is cold.\n");
+  const h = ark("gate", "packet", run(), "GE").out.trim();
+  return ark("gate", "answer", run(), "GE", answer, "--packet", h);
+};
+const stateNow = () => JSON.parse(slurp("state.json"));
+
+describe("ARK-117-AC3", () => {
+  beforeEach(toBuilding);
+
+  test("every return to implementation increments state.round; with the default budget of two, the third failure is refused and escalation opens", () => {
+    step({ "src/a.ts": "export const a = 1;\n" });
+    ok(ark("advance", run(), "build.completed"));
+    expect(stateNow().round).toBe(0);
+    spendRounds(1);
+    expect(stateNow().round).toBe(1);
+    spendRounds(1);
+    expect(stateNow().round).toBe(2);
+    const third = ark("advance", run(), "fix_round.started");
+    expect(third.code).toBe(1);
+    expect(third.err).toContain("round budget spent (2 of 2 rounds used)");
+    expect(stateNow()).toMatchObject({ state: "judging", round: 2 });
+    expect(ark("gate", "packet", run(), "GE").err).toContain("premise.md"); // escalation is open: only the premise is missing
+  });
+
+  test("ark.yml loop.max_rounds sets the budget", () => {
+    writeFileSync(join(proj, "ark.yml"), "project: demo\nloop:\n  max_rounds: 1\n");
+    step({ "src/a.ts": "export const a = 1;\n" });
+    ok(ark("advance", run(), "build.completed"));
+    spendRounds(1);
+    expect(ark("advance", run(), "fix_round.started").err).toContain("round budget spent (1 of 1 rounds used)");
+    writeFileSync(join(proj, "ark.yml"), "project: demo\nloop:\n  max_rounds: many\n");
+    expect(ark("advance", run(), "fix_round.started").err).toContain("loop.max_rounds must be a whole number");
+  });
+});
+
+describe("ARK-117-AC4", () => {
+  beforeEach(() => {
+    toBuilding();
+    step({ "src/a.ts": "export const a = 1;\n" });
+    ok(ark("advance", run(), "build.completed"));
+    spendRounds(2);
+  });
+
+  test("abort aborts the run", () => {
+    ok(escalate("abort"));
+    expect(stateNow()).toMatchObject({ state: "aborted", status: "aborted", outcome: "aborted", round: 2 });
+  });
+
+  test("one_more_round grants exactly one round: the next failure escalates again", () => {
+    ok(escalate("one_more_round"));
+    expect(stateNow()).toMatchObject({ state: "building", round: 3, implementer: "agent" });
+    step({ "src/a.ts": "export const a = 2;\n" });
+    ok(ark("advance", run(), "build.completed"));
+    expect(ark("advance", run(), "fix_round.started").err).toContain("round budget spent (3 of 2 rounds used)");
+    ok(escalate("abort"));
+  });
+
+  test("take_over records the human as the implementer; the run continues through validation to judging, where the budget is still spent", () => {
+    ok(escalate("take_over"));
+    expect(stateNow()).toMatchObject({ state: "building", implementer: "human", next_action: { kind: "implement", agent: "human", repo: "demo" } });
+    step({ "src/a.ts": "export const a = 3;\n" }); // the human commits, then the step is recorded
+    expect(events().findLast((e) => e.type === "implementer.completed").data.by).toMatch(/^t <t@t> \(/); // the identity of the human who answered, not "agent"
+    expect(stateNow().next_action).toMatchObject({ kind: "continue_build", agent: "orchestrator" });
+    validate({ "test/f.test.ts": tagged("DEMO-1-AC1") });
+    ok(ark("advance", run(), "build.completed"));
+    expect(stateNow()).toMatchObject({ state: "judging", implementer: "human", round: 2 });
+    expect(ark("advance", run(), "fix_round.started").code).toBe(1); // still escalates, not a free round
+  });
+
+  test("the human implementer is held to the same guard: touching an AC-tagged test is refused", () => {
+    ok(escalate("take_over"));
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
+    expect(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}').err).toContain("AC-tagged test");
+  });
+});
+
+describe("ARK-117-AC11", () => {
+  beforeEach(toBuilding);
+  const weakenAfterRefusal = () => {
+    step({ "src/a.ts": "export const a = 1;\n" });
+    ok(ark("advance", run(), "build.completed"));
+    ok(ark("advance", run(), "fix_round.started"));
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1)") }); // the implementer weakens a tagged test
+    const refused = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("test/f.test.ts");
+  };
+
+  test("after a refused implementer step, a plain ark test run does not vouch for the tagged-test commit", () => {
+    weakenAfterRefusal();
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1").err).toBe("");
+    const r = ark("advance", run(), "build.completed");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("test/f.test.ts");
+    expect(ark("trace-check", run()).err).toContain("test/f.test.ts");
+  });
+
+  test("a validator step, recorded by role, does vouch for it", () => {
+    weakenAfterRefusal();
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe("");
+    expect(events().findLast((e) => e.type === "test.result").data.role).toBe("validator");
+    ok(ark("advance", run(), "build.completed"));
+  });
+
+  test("--as takes only 'validator'", () => {
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "implementer").err).toContain("--as takes 'validator'");
+  });
+});
+
+describe("ARK-117-AC6 failing tests", () => {
+  beforeEach(toBuilding);
+  const finding = (test: string) => ({ id: "F1", reviewer: "reviewer-x", model: "m", priority: "P1", file: "src/a.ts", line: 3, claim: "c", bucket: "act_on", reason: "r", evidence: { failing_test: test } });
+  const record = (list: unknown[]) => {
+    const file = join(dirname(proj), "findings.json");
+    writeFileSync(file, JSON.stringify(list));
+    return ark("findings", "record", run(), file);
+  };
+
+  test("a failing_test is verified only while the latest ark test at the current head recorded it as failing", () => {
+    step({ "src/a.ts": "export const a = 1;\n" });
+    validate({ "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") }); // fails
+    ok(ark("advance", run(), "build.completed"));
+    ok(record([finding("DEMO-1-AC1 fixture")]));
+
+    const rerun = JSON.parse(JSON.stringify([finding("DEMO-1-AC1 fixture")]));
+    rerun[0].id = "F2";
+    commitAll(wt(), { "test/other.test.ts": tagged("DEMO-1-AC2") }); // a new head the test was not run at
+    const stale = record(rerun);
+    expect(stale.code).toBe(1);
+    expect(stale.err).toContain("none failing now");
   });
 });

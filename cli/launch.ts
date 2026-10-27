@@ -8,7 +8,7 @@ import { join } from "node:path";
 //      `-e <package dir>` (a directory: omp scans only a directory's tools/, skills/ and agents/) loads the tools and, through package.json, the hook, in any project, plugin installed or not.
 // AC2: subagents run inside this process and share its environment, so the whole process starts with git and gh holding no credentials;
 //      the ark_mr tool alone gives its child the human's values back (humanEnv).
-export const ARK_TOOLS = ["ark_run_start", "ark_log_route", "ark_advance", "ark_ws_create", "ark_gate_packet", "ark_findings_record", "ark_artifact_record", "ark_trace_check", "ark_mr"];
+export const ARK_TOOLS = ["ark_run_start", "ark_log_route", "ark_advance", "ark_ws_create", "ark_gate_packet", "ark_ac_update", "ark_findings_record", "ark_artifact_record", "ark_trace_check", "ark_mr"];
 // No gate-answer tool: a gate answer comes only from the human's own terminal (ADR 0002), never from the orchestrator.
 // `find` (semantic search) is left out: omp refuses to start when it is unavailable, as on a fresh install; the scout agents do the wide searching.
 const BUILTIN = ["read", "grep", "glob", "ask", "task", "wait", "todo", "write", "edit"];
@@ -32,7 +32,9 @@ export function credentialFreeEnv(base: Env, ghConfigDir: string): Env {
     GH_CONFIG_DIR: ghConfigDir, // empty: no hosts.yml, so gh is logged out
   };
   const env: Env = { ...base, ...set, GIT_TERMINAL_PROMPT: "0" }; // a push without credentials fails instead of asking
-  env[SAVED] = JSON.stringify(Object.fromEntries(Object.keys(set).map((k) => [k, base[k] ?? null])));
+  // GIT_CONFIG_PARAMETERS (what `git -c` sets) is read after GIT_CONFIG_COUNT, so a helper in it would survive the reset: drop it and restore it for ark_mr.
+  env[SAVED] = JSON.stringify(Object.fromEntries([...Object.keys(set), "GIT_CONFIG_PARAMETERS"].map((k) => [k, base[k] ?? null])));
+  delete env.GIT_CONFIG_PARAMETERS;
   for (const t of TOKENS) delete env[t];
   return env;
 }

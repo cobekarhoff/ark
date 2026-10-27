@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
+import { spawnArk } from "./tty";
 setDefaultTimeout(60_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
 // Git identity as config, passed only to ark itself so `ark gate answer` records an approver on CI machines without a global user.
@@ -57,9 +59,10 @@ const commitAll = (dir: string, files: Record<string, string>, msg = "change") =
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", msg);
 };
+// Every `ark test` in this file is the validator's step, so it says so; a plain run is tested in integrity.test.ts.
 const arkWith = (extra: Record<string, string>, ...args: string[]) => {
   const env = { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`, ...extra };
-  const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env });
+  const r = spawnArk(["bun", CLI, ...(args[0] === "test" && !args.includes("--as") ? [...args, "--as", "validator"] : args)], { cwd: proj, env });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const ark = (...args: string[]) => arkWith({}, ...args);
@@ -130,6 +133,7 @@ function fixture(up = "echo up >> $ARK_OUT/order", suiteOver: Record<string, unk
 const toApproved = () => {
   expect(ark("advance", run(), "analysis.completed").code).toBe(0);
   writeFileSync(join(home, "projects", "demo", "runs", run(), "plan.md"), "# Plan\n");
+  setKinds(join(home, "projects", "demo", "runs", run()));
   const h = ark("gate", "packet", run(), "G1").out.trim();
   expect(ark("gate", "answer", run(), "G1", "approve", "--packet", h).err).toBe("");
 };
@@ -457,9 +461,10 @@ describe("ARK-115-AC6", () => {
   test("a one-letter project prefix is an AC tag", () => {
     writeFileSync(join(home, "projects", "demo", "tickets", "X-1.md"), ticket.replaceAll("DEMO-1", "X-1"));
     expect(ark("run", "start", "X-1").err).toBe("");
-    const rid = readdirSync(runsDir()).find((r) => r.endsWith("-X-1"))!;
+    const rid = readdirSync(runsDir()).find((r) => r.includes("-X-1-"))!;
     expect(ark("advance", rid, "analysis.completed").code).toBe(0);
     writeFileSync(join(runsDir(), rid, "plan.md"), "# Plan\n");
+    setKinds(join(runsDir(), rid));
     const h = ark("gate", "packet", rid, "G1").out.trim();
     expect(ark("gate", "answer", rid, "G1", "approve", "--packet", h).err).toBe("");
     expect(ark("ws", "create", rid).err).toBe("");

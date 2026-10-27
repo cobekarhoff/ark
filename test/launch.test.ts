@@ -107,6 +107,14 @@ describe("ARK-118-AC2 real omp", () => {
     expect(r["0"].data.output).toContain("terminal prompts disabled");
   });
 
+  test("a helper passed through GIT_CONFIG_PARAMETERS (what `git -c` sets) is dropped too: git reads it after the command-line reset", async () => {
+    const { repo, env } = fixture([]);
+    env.GIT_CONFIG_PARAMETERS = `'credential.helper'='${helper("SECRET_PARAMS").slice(1, -1)}'`;
+    const r = await rpc(LAUNCH, [bash(FILL)], { cwd: repo, env });
+    expect(r["0"].data.output).not.toContain("SECRET");
+    expect(r["0"].data.exitCode).not.toBe(0);
+  });
+
   test("with a helper in every layer git yields nothing, reads no system config at all, and no token or logged-in gh reaches the session", async () => {
     const { repo, env } = fixture(["system", "global", "local", "worktree"]);
     const r = await rpc(LAUNCH, [bash(FILL), bash("git config --show-scope --get-all credential.helper"), bash("env | grep -E '^(GH_TOKEN|GITHUB_TOKEN)=' ; ls \"$GH_CONFIG_DIR\" | wc -l; gh auth status 2>&1")], { cwd: repo, env });
@@ -264,18 +272,19 @@ describe("ARK-118-AC1 tools against the real CLI", () => {
 
   test("ark_run_start starts the run and binds the session, so the tool_call hook sees it", async () => {
     const res = await (await tool("ark_run_start")).execute("id", { ticket: "DEMO-1" }, undefined, ctx);
-    expect(res.content[0].text).toMatch(/^started \d{4}-\d{2}-\d{2}-DEMO-1\n/);
+    expect(res.content[0].text).toMatch(/^started \d{4}-\d{2}-\d{2}-DEMO-1-1\n/);
     const runId = res.content[0].text.split("\n")[0].split(" ")[1];
     expect(readFileSync(join(root, "ark-home", "bindings", "session-118"), "utf8").trim()).toBe(join(root, "ark-home", "projects", "demo", "runs", runId));
   });
 
   test("every ark tool builds a command line the CLI accepts (never 'unknown command or bad arguments')", async () => {
-    const run = "2026-10-27-DEMO-9";
+    const run = "2026-10-27-DEMO-9-1";
     const params: Record<string, object> = {
       ark_log_route: { run_id: run, playbook: "ticket", why: "w" },
       ark_advance: { run_id: run, event: "analysis.completed", data: { repo: "demo" } },
       ark_ws_create: { run_id: run, repo: "." },
       ark_gate_packet: { run_id: run, gate: "G1" },
+      ark_ac_update: { run_id: run },
       ark_findings_record: { run_id: run, file: "f.json" },
       ark_artifact_record: { run_id: run, agent: "implementer", file: "f.json" },
       ark_trace_check: { run_id: run },

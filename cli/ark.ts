@@ -1,15 +1,16 @@
 #!/usr/bin/env bun
 import { readFileSync } from "node:fs";
 import pkg from "../package.json" with { type: "json" };
+import { acUpdate } from "./ac";
 import { doctor } from "./doctor";
 import { gateAnswer, gatePacket } from "./gate";
-import { mr } from "./mr";
+import { closeRun, mr } from "./mr";
 import { hookToolCall } from "./hook";
 import { launch } from "./launch";
 import { preflight } from "./preflight";
 import { artifactRecord, findingsRecord, logRoute } from "./record";
 import { advance, replay, start } from "./run";
-import { runTest } from "./test";
+import { runTest, type TestMode } from "./test";
 import { traceCheck } from "./trace";
 import { wsCreate } from "./ws";
 
@@ -18,17 +19,19 @@ const usage = `ark ${pkg.version}
 Usage: ark <command> [options]
 
 Commands:
-  run start <ID>                          Start the run for a local ticket, or show the existing one
+  run start <ID>                          Start the next run for a local ticket, or show the open one (run ids are <date>-<ticket>-<n>)
+  run close <run_id> <merged|abandoned>   Record how a run with open MRs ended; you type the outcome on the terminal (/dev/tty)
   run replay <run_id> [--check]           Rebuild state.json from the ledger (--check: exit 1 if it differs)
   advance <run_id> <event> [--data json]  Move the run along a legal transition
   ws create <run_id> [--repo path]        Create the run's worktree for a repo (default: the project root), push disabled
-  test <run_id> --acs ID,.. [--red-green] [--repo name]
-                                          Run the AC-tagged tests in the worktree; --red-green proves them on base then head
+  test <run_id> --acs ID,.. [--red-green|--preservation] [--as validator] [--repo name]
+                                          Run the AC-tagged tests in the worktree; --red-green proves new behavior (fails on base, passes on head), --preservation preserved behavior (passes on both); --as validator records a validator step
   trace-check <run_id>                    Build trace-matrix.md from ac.yml and the recorded test evidence; exit 1 listing why it fails
   gate packet <run_id> <G0|G1|G2|GE>      Build the gate packet from run artifacts and print its sha256 (GE is the escalation gate)
   gate answer <run_id> <gate> <answer> --packet <sha256>
-                                          Record a gate answer (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort, GE escalation: one_more_round|take_over|abort)
-  mr <run_id>                             Push the run branches and open a GitHub PR per repo (ark.yml mr: false closes the run at the ready branch instead)
+                                          Record your answer, confirmed by typing the gate name on the terminal (/dev/tty); refused without one (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort, GE escalation: one_more_round|take_over|abort)
+  ac update <run_id>                      After a G0 edit, re-read the ticket's acceptance criteria into the run (then build a new G0 packet)
+  mr <run_id>                             Push the run branches and open a merge request (a GitHub pull request) per repo (ark.yml mr: false hands the ready branches off instead)
   preflight                               Refuse (exit 1) unless every model validate and review-x can reach (comma candidates, retry.fallbackChains, global and project OMP config) is on another vendor than implement, and every review-s model on the same one
   log route [<run_id>] <playbook> "<why>" Record route.chosen, the first event after run.started (no run_id: the active run)
   findings record <run_id> <file.json>    Validate the judged findings and record them (judging state)
@@ -67,6 +70,10 @@ if (args[0] === "--version") {
 } else if (args[0] === "gate" && args[1] === "answer") {
   const packet = flag("--packet");
   if (packet && args.length === 5) run = () => gateAnswer(args[2], args[3], args[4], packet);
+} else if (args[0] === "ac" && args[1] === "update" && args.length === 3) {
+  run = () => acUpdate(args[2]);
+} else if (args[0] === "run" && args[1] === "close" && args.length === 4) {
+  run = () => closeRun(args[2], args[3]);
 } else if (args[0] === "advance") {
   const i = args.indexOf("--data");
   const data = i < 0 ? undefined : args[i + 1];
@@ -80,9 +87,11 @@ if (args[0] === "--version") {
 } else if (args[0] === "test") {
   const acs = flag("--acs");
   const repo = flag("--repo");
-  const rg = args.indexOf("--red-green");
-  if (rg >= 0) args.splice(rg, 1);
-  if (args.length === 2 && acs) run = () => runTest(args[1], acs.split(","), repo, rg >= 0);
+  const as = flag("--as");
+  const proofs = args.filter((a) => a === "--red-green" || a === "--preservation");
+  const rest = args.filter((a) => !proofs.includes(a));
+  const mode: TestMode = proofs[0] === "--red-green" ? "red-green" : proofs[0] ? "preservation" : "green";
+  if (rest.length === 2 && acs && proofs.length <= 1) run = () => runTest(rest[1], acs.split(","), repo, mode, as);
 } else if (args[0] === "preflight" && args.length === 1) {
   run = preflight;
 } else if (args[0] === "log" && args[1] === "route" && (args.length === 4 || args.length === 5)) {
