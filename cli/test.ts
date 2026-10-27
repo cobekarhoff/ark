@@ -49,7 +49,7 @@ function runOnce(name: string, s: Suite, cwd: string, out: string, ids: string[]
   const exit = sh(s.run.replaceAll("{tags}", parsers[s.format].tags(ids)), cwd, out, name, s.env?.vars);
   const { bad: failed, ...junit } = readJunit(s, out, ids);
   const output = ["stdout", "stderr"].map((k) => readFileSync(join(out, `${name}.${k}.log`), "utf8")).join("\n");
-  return { exit, ...junit, noMatch: exit !== 0 && !failed && parsers[s.format].matchedNothing(output, ids) };
+  return { exit, ...junit, noMatch: exit !== 0 && !failed && parsers[s.format].matchedNothing(output, ids, exit) };
 }
 
 // env.up, run, (on head) rerun each failing test once, env.down: down always runs.

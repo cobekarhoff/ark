@@ -568,6 +568,16 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(r.out).toContain("suite 'empty' exited 127");
   });
 
+  test("bun's no-match message only excuses the exit status bun uses for it: a failing step after the no-match run still fails the run", () => {
+    const e2e = { format: "bun-test", level: "e2e", run: 'bun test ./e2e -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml; ./missing-postprocess-command', junit: "$ARK_OUT/e2e.xml" };
+    fixture(undefined, {}, { suites: { e2e }, files: { "e2e/e.test.ts": bunTest(`test("DEMO-1-AC2 only in e2e", () => { expect(1).toBe(1); });`) } });
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 in unit only", () => { expect(1).toBe(1); });`) });
+    const r = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("suite 'e2e' exited 127");
+  });
+
   test("a second suite that produces no JUnit and exits non-zero fails the run, on green; on red it makes the AC inconclusive", () => {
     const ghost = { format: "bun-test", level: "e2e", run: "test -f ghost.txt # {tags}", junit: "$ARK_OUT/ghost.xml" }; // exits 1 without a report until ghost.txt exists
     fixture(undefined, {}, { suites: { ghost } });
