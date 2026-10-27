@@ -19,10 +19,12 @@ Copy these ten lines into the todo list verbatim.
 
 ## Calls per step
 
-Run each command through bash. A non-zero exit is a refusal: read its message, fix the cause, never work around it.
+Every `ark ...` call below is the typed tool named after it (`ark advance` is `ark_advance`, `ark gate packet` is `ark_gate_packet`, `ark trace-check` is `ark_trace_check`); you have no bash. A tool error is a refusal: read its message, fix the cause, never work around it.
+
+**Gate answers (every `ark gate answer` below).** There is no tool for it and you never run it: an answer comes only from the human typing it in their own terminal (ADR 0002). After `ark_gate_packet`, `ask` the human with the fixed answers; the question carries the exact command for each answer, e.g. `ark gate answer <run> G1 approve --packet <sha256>`, to type in their terminal. Wait for them to say it is done, then read `<dir>/state.json` and go on only if its `gates` entry for the gate shows the answer; if it does not, say so and wait. If `ask` is not available (print mode), print the question and the commands and stop.
 
 ### 1. Intake
-- State `awaiting_g0` (no ACs): `ark gate packet <run> G0` prints the packet sha256. Show the human the packet; they answer `accept`, `edit` or `abort` with `ark gate answer <run> G0 <answer> --packet <sha256>` in their terminal. `abort`: stop. On `edit` the run stays at G0 and no later step is legal: the human adds the ACs to the ticket file, you run `ark ac update <run>` (it re-reads the ticket's ACs into `ac.yml` and records `ac.updated`), build a new G0 packet and the human answers again; only `accept` lets the run continue.
+- State `awaiting_g0` (no ACs): `ark gate packet <run> G0` prints the packet sha256. `ask` the human with the packet and Accept / Edit / Abort; they answer with `ark gate answer <run> G0 <answer> --packet <sha256>` in their terminal. `abort`: stop. On `edit` the run stays at G0 and no later step is legal: the human adds the ACs to the ticket file, you run `ark ac update <run>` (it re-reads the ticket's ACs into `ac.yml` and records `ac.updated`), build a new G0 packet and the human answers again; only `accept` lets the run continue.
 - Otherwise: read `<dir>/ticket.md` and `<dir>/ac.yml`; the AC IDs are final. `skip: ACs present, G0 not needed` for the G0 part.
 
 ### 2. Analyze
@@ -33,7 +35,7 @@ Run each command through bash. A non-zero exit is a refusal: read its message, f
 - Write `<dir>/plan.md`: approach, the contract, one test per AC at the strongest practical boundary, and a risk tier.
 - Add `kind: new` (behavior absent before the change) or `kind: preserved` (present before and after) to every AC in `<dir>/ac.yml`: you propose it, the human confirms it by approving G1, and the answer `approve` is refused while any AC has no kind. The G1 packet lists the ACs that lack one.
 - `ark gate packet <run> G1` (prints `sha256:...`).
-- Show the human the packet; the fixed answers are Approve / Request changes / Abort: `ark gate answer <run> G1 approve|change|abort --packet <sha256>` in their terminal. On `change`, revise `plan.md` and repeat from the packet. On `abort`, stop.
+- `ask` the human with the packet and the fixed answers Approve / Request changes / Abort: `ark gate answer <run> G1 approve|change|abort --packet <sha256>` in their terminal. On `change`, revise `plan.md` and repeat from the packet. On `abort`, stop.
 
 ### 4. Implement
 - `ark advance <run> build.started`
@@ -60,11 +62,11 @@ Run each command through bash. A non-zero exit is a refusal: read its message, f
 ### 8. Rounds
 - Exit when there is no open `act_on` P0/P1 and every AC passes: `skip: clean` and go to step 9.
 - Otherwise, while the round budget lasts (`loop.max_rounds` in `ark.yml`, default two; `state.json` `round` counts the rounds used): write `<dir>/premise.md` first (the premise this round shares with the last; check it directly before the last round). `ark advance <run> fix_round.started` (back to `building`; refused once the budget is spent). Respawn the implementer with the Act-on findings, failing tests and their evidence in the brief; repeat steps 4 (record + `implementer.completed`), 5, 6 and 7 on the new head.
-- Once the budget is spent and a check still fails: write `<dir>/premise.md` (the premise the rounds shared, and your diagnosis), `ark gate packet <run> GE` (rounds used, premise and the latest findings; prints `sha256:...`). Show the human the packet; the answers are One more round (exactly one more; fold any guidance the human gives into the next brief) / Take over (the human becomes the implementer) / Abort: `ark gate answer <run> GE one_more_round|take_over|abort --packet <sha256>` in their terminal. `ark advance` refuses `ge.*`: escalation is a gate. One more round and take over return to `building`; abort ends the run. A G2 send-back is a round too.
+- Once the budget is spent and a check still fails: write `<dir>/premise.md` (the premise the rounds shared, and your diagnosis), `ark gate packet <run> GE` (rounds used, premise and the latest findings; prints `sha256:...`). `ask` the human with the packet; the answers are One more round (exactly one more; fold any guidance the human gives into the next brief) / Take over (the human becomes the implementer) / Abort: `ark gate answer <run> GE one_more_round|take_over|abort --packet <sha256>` in their terminal. `ark advance` refuses `ge.*`: escalation is a gate. One more round and take over return to `building`; abort ends the run. A G2 send-back is a round too.
 
 ### 9. Evidence pack
 - `ark trace-check <run>` writes `<dir>/trace-matrix.md` and exits 0 when it passes. Exit 1 prints why: fix it through step 8.
-- `ark gate packet <run> G2` (refuses unless the latest trace-check passed; lists the verified findings, with traced paths marked as weaker evidence). Show the human the packet; the answers are Approve to open MRs / Send back / Abort: `ark gate answer <run> G2 approve|send_back|abort --packet <sha256>` in their terminal. With `mr: false` in `ark.yml`, approval ends the run as handed off.
+- `ark gate packet <run> G2` (refuses unless the latest trace-check passed; lists the verified findings, with traced paths marked as weaker evidence). `ask` the human with the packet; the answers are Approve to open MRs / Send back / Abort: `ark gate answer <run> G2 approve|send_back|abort --packet <sha256>` in their terminal. With `mr: false` in `ark.yml`, approval ends the run as handed off.
 
 ### 10. MRs
 - `ark mr <run>` opens one MR per repo and never merges. After the human merges or closes them on the host, they record the outcome in their terminal: `ark run close <run> merged` (every MR merged) or `ark run close <run> abandoned` (closed unmerged). A run stopped before any MR existed is aborted; the next `ark run start <ID>` starts run n+1 once every earlier run is closed.

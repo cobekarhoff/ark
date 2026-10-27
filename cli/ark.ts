@@ -2,9 +2,11 @@
 import { readFileSync } from "node:fs";
 import pkg from "../package.json" with { type: "json" };
 import { acUpdate } from "./ac";
+import { doctor } from "./doctor";
 import { gateAnswer, gatePacket } from "./gate";
 import { closeRun, mr } from "./mr";
 import { hookToolCall } from "./hook";
+import { launch } from "./launch";
 import { preflight } from "./preflight";
 import { artifactRecord, findingsRecord, logRoute } from "./record";
 import { advance, replay, start } from "./run";
@@ -35,6 +37,8 @@ Commands:
   findings record <run_id> <file.json>    Validate the judged findings and record them (judging state)
   artifact record <run_id> <implementer|validator|reviewer> <file.json>
                                           Schema-check an agent's output and keep it as artifacts/<agent>/<n>.json
+  doctor                                  Check the git host: the default branch must include admins, require a PR and passing checks, and forbid force pushes (exit 1 otherwise)
+  launch [omp args]                       Start omp as the orchestrator: no bash, eval or lsp, typed ark_* tools, git and gh without credentials (only ark_mr has them)
   hook tool_call                          Read {tool,input,cwd} JSON on stdin; exit 1 with the reason when the main session may not make the call
   --version                               Print the version
   --help                                  Print this help
@@ -96,6 +100,10 @@ if (args[0] === "--version") {
   run = () => findingsRecord(args[2], args[3]);
 } else if (args[0] === "artifact" && args[1] === "record" && args.length === 5) {
   run = () => artifactRecord(args[2], args[3], args[4]);
+} else if (args[0] === "doctor" && args.length === 1) {
+  run = doctor;
+} else if (args[0] === "launch") {
+  run = () => (process.exitCode = launch(args.slice(1)), "");
 } else if (args[0] === "hook" && args[1] === "tool_call" && args.length === 2) {
   run = () => (hookToolCall(readFileSync(0, "utf8")), "");
 }
