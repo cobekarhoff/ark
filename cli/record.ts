@@ -44,10 +44,13 @@ export function artifactRecord(runId: string, agent: string, file: string): stri
   const value = readJson(file);
   const check = ajv.compile(schema);
   if (!check(value)) throw new Error(`${file} fails the ${agent} schema: ${ajv.errorsText(check.errors)}`);
-  const out = nextFile(join(dir, "artifacts", agent));
-  const bytes = `${JSON.stringify(value, null, 2)}\n`;
-  writeFileSync(out, bytes);
-  return `${out.slice(dir.length + 1)} ${sha256(bytes)}\n`;
+  return locked(dir, () => { // reading the ledger first refuses a broken chain; the lock keeps the artifact numbering unique
+    readLedger(dir);
+    const out = nextFile(join(dir, "artifacts", agent));
+    const bytes = `${JSON.stringify(value, null, 2)}\n`;
+    writeFileSync(out, bytes);
+    return `${out.slice(dir.length + 1)} ${sha256(bytes)}\n`;
+  });
 }
 
 // FR-14: every finding is bucketed with a reason; an Act-on P0 or P1 goes back only with a failing test or a traced path.

@@ -10,7 +10,7 @@ export type RepoConfig = { commands?: { build?: string }; suites: Record<string,
 
 // Untrimmed stdout, for NUL-separated (-z) output where a path may begin or end in whitespace.
 export function gitRaw(cwd: string, ...args: string[]): string {
-  const r = Bun.spawnSync(["git", "-C", cwd, ...args]);
+  const r = Bun.spawnSync(["git", "--no-replace-objects", "-C", cwd, ...args]);
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${r.stderr.toString().trim()}`);
   return r.stdout.toString();
 }
@@ -20,7 +20,8 @@ export const git = (cwd: string, ...args: string[]) => gitRaw(cwd, ...args).trim
 // so moving a tagged test out of the test globs still shows the test as touched.
 export const diffFiles = (cwd: string, ...args: string[]) => gitRaw(cwd, "diff", "-z", "--name-only", "--no-renames", ...args).split("\0").filter(Boolean);
 
-// Uncommitted paths (tracked edits and untracked, non-ignored files), from `git status -z` so names stay literal; a rename lists its source as a second entry.
+// Uncommitted paths: tracked edits and untracked, non-ignored files from `git status -z` (names stay literal; a rename lists its source as a second entry),
+// plus tracked files flagged assume-unchanged (lowercase tag) or skip-worktree (`S`) in `git ls-files -v`, which `git status` then never reports.
 export function dirtyFiles(cwd: string): string[] {
   const parts = gitRaw(cwd, "status", "--porcelain", "-z", "--untracked-files=all").split("\0");
   const paths: string[] = [];
@@ -28,6 +29,9 @@ export function dirtyFiles(cwd: string): string[] {
     if (!parts[i]) continue;
     paths.push(parts[i].slice(3));
     if (/[RC]/.test(parts[i].slice(0, 2))) i++;
+  }
+  for (const entry of gitRaw(cwd, "ls-files", "-v", "-z").split("\0")) {
+    if (/^[a-zS] /.test(entry)) paths.push(`${entry.slice(2)} (hidden from git status by assume-unchanged or skip-worktree)`);
   }
   return paths;
 }
@@ -53,7 +57,7 @@ const testGlobs = (s: Suite) => s.tests ?? ["**/*.test.ts", "test/**"];
 const isTest = (s: Suite, f: string) => testGlobs(s).some((g) => new Bun.Glob(g).match(f));
 export const isTestFile = (cfg: RepoConfig, f: string) => Object.values(cfg.suites).some((s) => isTest(s, f));
 const show = (wt: string, ref: string, f: string) => {
-  const r = Bun.spawnSync(["git", "-C", wt, "show", `${ref}:${f}`]);
+  const r = Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "show", `${ref}:${f}`]);
   return r.exitCode === 0 ? r.stdout.toString() : "";
 };
 

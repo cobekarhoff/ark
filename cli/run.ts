@@ -81,8 +81,10 @@ export function activeRunDir(): string | undefined {
   if (!existsSync(ptr)) return undefined;
   const dir = join(root, "runs", readFileSync(ptr, "utf8").trim());
   if (!existsSync(dir)) return undefined;
-  const st = join(dir, "state.json");
-  const status = existsSync(st) ? (JSON.parse(readFileSync(st, "utf8")) as { status: string }).status : "active";
+  // The ledger decides whether the run is open, not the cached state.json: editing state.json must not lift the hook's protection.
+  // A ledger that cannot be replayed (broken chain, bad line) keeps the run guarded.
+  let status = "active";
+  try { status = project(readLedger(dir)).status; } catch { /* guarded */ }
   return status === "done" || status === "aborted" ? undefined : dir;
 }
 
@@ -138,32 +140,67 @@ export function project(events: LedgerEvent[]): RunState {
 }
 
 // The ledger is a hash chain: every line is the canonical JSON of its event, and `prev` is the sha256 of the previous line ("" before the first),
-// so an edited, removed, reordered or truncated line breaks it. A line's edit shows in the next line's `prev`; the newest line and a cut-off tail are
-// anchored by state.json (`ledger_seq`, `ledger_head`), which is always at most one event behind the ledger.
-// ponytail: with state.json also deleted, a removed tail is undetectable; gate answers and packets hash earlier history, an external anchor would close it.
+// so an edited, removed, reordered or cut-off line breaks it. The newest line and a removed tail are anchored by state.json (`ledger_seq`, `ledger_head`),
+// which is always at most one event behind the ledger.
+// What this is: a detector of accidental corruption and truncation (a crash mid-write, a bad merge, an editor, a half-run script), relative to the cached head.
+// What it is not: protection against deliberate tampering. A process running as the same user can recompute every `prev`, rewrite state.json and pass the check.
+// v1 accepts same-user trust; see docs/adr/0003-same-user-trust-for-v1.md for the decision and what would close it (an anchor outside the user's reach).
 const line = (e: LedgerEvent) => JSON.stringify(e);
 function chainHash(e?: LedgerEvent) {
   return sha256(e ? line(e) : "");
 }
 const broken = (seq: number, why: string) => new Error(`ledger chain broken at seq ${seq}: ${why}`);
 
-// An O_EXCL lock file is the mutex: one process at a time reads and appends. A holder that died leaves it behind, so a lock older than LOCK_STALE_MS is taken over.
-// ponytail: two waiters can both see one stale lock, and one then deletes the other's fresh lock; takeover only follows a crash. A pid-liveness check would close it.
-const LOCK_STALE_MS = 30_000;
-const LOCK_WAIT_MS = 60_000;
+// An O_EXCL lock file is the mutex: one process at a time reads and appends. The file names its owner ({ pid, started, token }).
+// A lock is taken over only when its owner is gone (the pid no longer exists), never because it is old: a holder may legitimately be slow.
+// Takeover runs under a second O_EXCL guard, so two waiters cannot both delete a lock and one of them then delete the other's fresh one,
+// and a holder deletes its own lock only if the file still carries its token.
+// ponytail: a pid reused by an unrelated process keeps a crashed holder's lock alive; the wait error names the pid and says to delete the file.
+const LOCK_WAIT_MS = Number(process.env.ARK_LOCK_WAIT_MS) || 60_000;
+const LOCK_UNWRITTEN_MS = 5_000; // a lock file with no owner in it is a holder that died between creating and writing it
 const held = new Set<string>();
+const started = new Date(Date.now() - process.uptime() * 1000).toISOString();
+
+const alive = (pid: number) => {
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
+};
+function lockOwner(file: string): { pid: number; started: string; token: string } | undefined {
+  try {
+    const o = JSON.parse(readFileSync(file, "utf8"));
+    return typeof o?.pid === "number" && typeof o.token === "string" ? o : undefined;
+  } catch { return undefined; }
+}
+function abandoned(lock: string): boolean {
+  const o = lockOwner(lock);
+  if (o) return !alive(o.pid);
+  try { return Date.now() - statSync(lock).mtimeMs > LOCK_UNWRITTEN_MS; } catch { return false; }
+}
+function reap(lock: string) {
+  const guard = `${lock}.reap`;
+  try { writeFileSync(guard, "", { flag: "wx" }); } catch {
+    try { if (Date.now() - statSync(guard).mtimeMs > 10_000) rmSync(guard, { force: true }); } catch { /* gone */ }
+    Bun.sleepSync(2);
+    return;
+  }
+  try { if (abandoned(lock)) rmSync(lock, { force: true }); } finally { rmSync(guard, { force: true }); } // re-checked under the guard
+}
+
 export function locked<T>(dir: string, fn: () => T): T {
   if (held.has(dir)) return fn();
   const lock = join(dir, "ledger.lock");
+  const token = crypto.randomUUID();
   const t0 = Date.now();
   for (;;) {
-    try { closeSync(openSync(lock, "wx")); break; } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
-    try { if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) { rmSync(lock, { force: true }); continue; } } catch { continue; } // vanished between open and stat: retry
-    if (Date.now() - t0 > LOCK_WAIT_MS) throw new Error(`${lock} is held by another ark process; delete it if none is running`);
+    try { writeFileSync(lock, JSON.stringify({ pid: process.pid, started, token }), { flag: "wx" }); break; } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
+    if (abandoned(lock)) { reap(lock); continue; }
+    if (Date.now() - t0 > LOCK_WAIT_MS) {
+      const o = lockOwner(lock);
+      throw new Error(`${lock} is held by ${o ? `pid ${o.pid} (started ${o.started})` : "another ark process"}; delete it if that process is not running`);
+    }
     Bun.sleepSync(5);
   }
   held.add(dir);
-  try { return fn(); } finally { held.delete(dir); rmSync(lock, { force: true }); }
+  try { return fn(); } finally { held.delete(dir); if (lockOwner(lock)?.token === token) rmSync(lock, { force: true }); }
 }
 
 const anchor = (dir: string): { ledger_seq?: unknown; ledger_head?: unknown } => {
@@ -255,21 +292,29 @@ export function open(runId: string, type: string, via?: string) {
 export const record = (dir: string, type: string, data: Record<string, unknown>) =>
   locked(dir, () => commit(dir, append(dir, readLedger(dir), type, data)));
 
-// AC4: product changes count only through recorded implementer steps. A worktree has changes no step vouches for when HEAD moved past its last
-// recorded head_sha (base_sha before the first step) with non-test files, when history was rewritten, or when it holds uncommitted files.
-// Commits of test files alone are the validator's and pass.
-export function unattributed(dir: string, state: RunState): string[] {
+// AC4: product changes count only through recorded implementer steps. Per repo, from `impl` (the last implementer head, or the heads a round start recorded; base_sha before any):
+// - a non-test file changed in impl..HEAD is unattributed, whatever ran since (an `ark test` run records a head but never vouches for product code);
+// - an AC-tagged test changed after the newest recorded head is unattributed. The validator's tagged tests count once `ark test` ran on them: that run records its head `test`,
+//   accepted as a start for tagged tests only when impl..test changed test files alone;
+// - HEAD must descend from the newest recorded head (history rewritten, a reset that drops recorded work), and the worktree must hold no uncommitted file.
+// Untagged test files are free.
+export function unattributed(dir: string, state: RunState, events: LedgerEvent[]): string[] {
   return state.repos.flatMap((r) => {
     const wt = join(dir, "ws", r.name);
-    const from = r.head_sha ?? r.base_sha;
+    const { impl, test } = stepPoints(events, r);
+    const descends = (from: string) => Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "merge-base", "--is-ancestor", from, "HEAD"]).exitCode === 0;
     try {
       const out: string[] = [];
-      if (Bun.spawnSync(["git", "-C", wt, "merge-base", "--is-ancestor", from, "HEAD"]).exitCode !== 0) {
-        out.push(`${r.name}: HEAD is not a descendant of the recorded ${from.slice(0, 12)}; history was rewritten after a recorded step`);
+      const newest = test ?? impl;
+      if (!descends(newest)) {
+        out.push(`${r.name}: HEAD is not a descendant of the recorded ${newest.slice(0, 12)}; history was rewritten after a recorded step`);
       } else {
         const cfg = loadRepo(wt, r.base_sha);
-        const files = diffFiles(wt, `${from}..HEAD`).filter((f) => !isTestFile(cfg, f));
-        if (files.length) out.push(`${r.name}: commits after ${from.slice(0, 12)} changed ${files.join(", ")}, which no implementer step recorded`);
+        const files = diffFiles(wt, `${impl}..HEAD`).filter((f) => !isTestFile(cfg, f));
+        if (files.length) out.push(`${r.name}: commits after ${impl.slice(0, 12)} changed ${files.join(", ")}, which no implementer step recorded`);
+        const testsOnly = test !== undefined && diffFiles(wt, `${impl}..${test}`).every((f) => isTestFile(cfg, f));
+        const tests = touchedTaggedTests(wt, testsOnly ? test : impl, cfg);
+        if (tests.length) out.push(`${r.name}: commits after ${(testsOnly ? test : impl).slice(0, 12)} changed AC-tagged tests ${tests.join(", ")}, which neither an implementer step nor an 'ark test' run recorded`);
       }
       const dirty = dirtyFiles(wt);
       if (dirty.length) out.push(`${r.name}: uncommitted files ${dirty.join(", ")}, which no implementer step recorded`);
@@ -285,14 +330,18 @@ export function unattributed(dir: string, state: RunState): string[] {
 export const worktreeHeads = (dir: string, state: RunState): Record<string, string> =>
   Object.fromEntries(state.repos.map((r) => [r.name, git(join(dir, "ws", r.name), "rev-parse", "HEAD")]));
 
-// Where the implementer step in progress began: the newest of the repo's last implementer head and the heads recorded when a round started; base_sha before both.
-function stepStart(events: LedgerEvent[], repo: RunState["repos"][number]): string {
+// `impl`: where the implementer step in progress began (the newest `implementer.completed` head or round-start head; base_sha before both).
+// `test`: the newest head an `ark test` / red-green run recorded since then, if any. The implementer guard measures from `impl` alone.
+function stepPoints(events: LedgerEvent[], repo: RunState["repos"][number]): { impl: string; test?: string } {
+  let test: string | undefined;
   for (const e of events.toReversed()) {
     const heads = e.type === "fix_round.started" || e.type === "gate.answered" ? (e.data.heads as Record<string, string> | undefined) : undefined; // written by worktreeHeads
-    const head = e.type === "implementer.completed" && e.data.repo === repo.name ? e.data.head_sha : heads?.[repo.name];
-    if (typeof head === "string") return head;
+    const mine = e.data.repo === repo.name;
+    if (mine && (e.type === "test.result" || e.type === "test.red_green") && typeof e.data.head_sha === "string") test ??= e.data.head_sha;
+    const impl = mine && e.type === "implementer.completed" ? e.data.head_sha : heads?.[repo.name];
+    if (typeof impl === "string") return { impl, test };
   }
-  return repo.base_sha;
+  return { impl: repo.base_sha, test };
 }
 
 export function summary(s: RunState): string {
@@ -358,7 +407,7 @@ export function advance(runId: string, type: string, rawData?: string): string {
     if (Object.hasOwn(data, "heads")) throw new Error("--data may not set 'heads': the CLI records the worktree heads itself when a round starts");
   }
   if (type === "build.completed" || type === "fix_round.started") { // AC4: nothing leaves building, or opens a round, that no recorded step vouches for
-    const bad = unattributed(dir, state);
+    const bad = unattributed(dir, state, readLedger(dir));
     if (bad.length) throw new Error(`${type} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
     if (type === "fix_round.started") data = { ...data, heads: worktreeHeads(dir, state) };
   }
@@ -368,8 +417,8 @@ export function advance(runId: string, type: string, rawData?: string): string {
     const wt = join(dir, "ws", repo.name);
     const dirty = dirtyFiles(wt);
     if (dirty.length) throw new Error(`${wt} has uncommitted changes (${dirty.join(", ")}); commit them so the check sees the whole step`);
-    const from = stepStart(readLedger(dir), repo);
-    if (Bun.spawnSync(["git", "-C", wt, "merge-base", "--is-ancestor", from, "HEAD"]).exitCode !== 0) throw new Error(`${wt} HEAD is not a descendant of the recorded ${from}; history was rewritten`);
+    const from = stepPoints(readLedger(dir), repo).impl;
+    if (Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "merge-base", "--is-ancestor", from, "HEAD"]).exitCode !== 0) throw new Error(`${wt} HEAD is not a descendant of the recorded ${from}; history was rewritten`);
     const hit = touchedTaggedTests(wt, from, loadRepo(wt, repo.base_sha)); // base config: the implementer cannot widen its own exemptions
     if (hit.length) throw new Error(`implementer step touches AC-tagged test files: ${hit.join(", ")}`);
     data = { repo: repo.name, head_sha: git(wt, "rev-parse", "HEAD") };

@@ -13,7 +13,7 @@ Copy these ten lines into the todo list verbatim.
 5. Validate: spawn the validator and prove the ACs red then green
 6. Review: spawn reviewer-x on the change
 7. Judge: bucket every finding and record the judgment
-8. Fix loop: send Act-on findings and failures back, at most two rounds, then GE
+8. Fix loop: send Act-on findings and failures back, at most two rounds, then escalation (`ark gate ... GE`)
 9. Evidence pack: pass trace-check and get G2 approval
 10. MRs: open the PRs with ark mr; the human merges
 
