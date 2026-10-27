@@ -34,3 +34,8 @@ export const tags = (ids: string[]) => `(?<![A-Za-z0-9-])(${ids.join("|")})(?!\\
 
 // Static check for AC7: does this source file carry an AC tag?
 export const taggedFile = (source: string) => (source.match(AC_ID) ?? []).length > 0;
+
+// bun's own signature for "the selector matched nothing": a lone `error: regex "<selector>" matched 0 tests.` line (exit 1). A file that fails to load
+// prints fail/error counts instead, and a runner that never started prints nothing of the kind. Other formats define their own signature.
+export const matchedNothing = (output: string, ids: string[]) =>
+  output.split("\n").some((l) => l.startsWith(`error: regex "${tags(ids)}" matched 0 tests`)) && !/^\s*[1-9]\d* (fail|error)\b/m.test(output);

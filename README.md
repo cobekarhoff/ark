@@ -59,7 +59,7 @@ Events owned by a command (`gate.*`, `ws.created`, `test.*`, `trace.checked`; th
 
 `--red-green` also refuses until `implementer.completed` is recorded for every repo of the run.
 
-Two testcases with the same identity in one report (a test registered in a loop) are ambiguous: the AC is `inconclusive`. A suite with no selected record is ignored only when it wrote a JUnit report with no failure or error (`bun test -t` exits 1 when nothing matched); one that exits non-zero without such a report fails a green run and makes red `inconclusive`.
+Two testcases with the same identity in one report (a test registered in a loop) are ambiguous: the AC is `inconclusive`. A suite with no selected record is ignored only when its runner said the selector matched nothing and reported no failure (the format parser owns that signature; for `bun-test`, bun's `error: regex "…" matched 0 tests` line with no fail/error counts, since `bun test -t` exits 1 then); any other non-zero exit, a file that fails to load or an empty report included, fails a green run and makes red `inconclusive`.
 
 Red needs a JUnit record per selected test with a failure or error; tests are told apart by file, describe path, name and line. A selected test with no record (a file that fails to load, a runner that did not start), or one that was skipped (on either side), makes the AC `inconclusive`, not red; a selected test that passes on base makes it `no-red` even when it is skipped on head; a head suite that has selected records and exits non-zero with no failing selected test fails the run (`fail` / `green-failed`). To prove a missing module, load it inside the test (`await import(...)`) so the failure is a recorded result.
 

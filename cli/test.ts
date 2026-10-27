@@ -33,21 +33,23 @@ function sh(cmd: string, cwd: string, out: string, log: string, vars?: Record<st
 // ponytail: the glob may only be in the last path segment of `junit`; widen if a runner needs more.
 // `cases`: every test tagged with a selected AC, skipped ones included (a skipped test is "selected, not run", which red-green must tell from "no record").
 // `tags`: every AC-shaped ID in the report, so trace-check can spot a typo'd tag no selected AC reaches.
-// `quiet`: the suite wrote a report and nothing in it failed or errored, so a non-zero exit with no selected record is just "matched no tests".
-function readJunit(s: Suite, out: string, ids: string[]): { cases: Case[]; tags: string[]; quiet: boolean } {
+function readJunit(s: Suite, out: string, ids: string[]): { cases: Case[]; tags: string[]; bad: boolean } {
   const pat = s.junit.replace(/\$\{?ARK_OUT\}?/g, out);
   const files = [...new Bun.Glob(basename(pat)).scanSync({ cwd: dirname(pat), absolute: true })].sort();
   const all = files.flatMap((f) => parsers[s.format].parse(readFileSync(f, "utf8")));
   return {
     cases: all.filter((c) => c.acs.some((a) => ids.includes(a))),
     tags: all.flatMap((c) => c.acs),
-    quiet: files.length > 0 && !all.some((c) => bad(c.status)),
+    bad: all.some((c) => bad(c.status)),
   };
 }
 
+// `noMatch`: the runner said its selector matched nothing (format-specific evidence) and reported no failure, so a non-zero exit is no breakage.
 function runOnce(name: string, s: Suite, cwd: string, out: string, ids: string[]) {
   const exit = sh(s.run.replaceAll("{tags}", parsers[s.format].tags(ids)), cwd, out, name, s.env?.vars);
-  return { exit, ...readJunit(s, out, ids) };
+  const { bad: failed, ...junit } = readJunit(s, out, ids);
+  const output = ["stdout", "stderr"].map((k) => readFileSync(join(out, `${name}.${k}.log`), "utf8")).join("\n");
+  return { exit, ...junit, noMatch: exit !== 0 && !failed && parsers[s.format].matchedNothing(output, ids) };
 }
 
 // env.up, run, (on head) rerun each failing test once, env.down: down always runs.
@@ -68,7 +70,7 @@ function runSuite(name: string, s: Suite, cwd: string, out: string, ids: string[
       ? new Map(rerun ? runOnce(name, s, cwd, join(out, "rerun"), [...new Set(failing.flatMap((c) => c.acs.filter((a) => ids.includes(a))))]).cases.map((c) => [key(c), c]) : [])
       : new Map<string, Case>();
     const cases: Tc[] = first.cases.map((c) => ({ ...c, suite: name, status: bad(c.status) && again.get(key(c))?.status === "pass" ? "flaky" : c.status }));
-    return { exit: first.exit, cases, tags: first.tags, quiet: first.quiet };
+    return { exit: first.exit, cases, tags: first.tags, noMatch: first.noMatch };
   } finally {
     if (s.env?.down) sh(s.env.down, cwd, out, `${name}.env-down`, s.env.vars);
   }
@@ -77,7 +79,7 @@ function runSuite(name: string, s: Suite, cwd: string, out: string, ids: string[
 // ponytail: every suite runs for every AC set; add `collect`-based suite selection when env.up cost bites.
 function tagged(cfg: RepoConfig, cwd: string, out: string, ids: string[], rerun: boolean, fp: Fp) {
   const runs = Object.entries(cfg.suites).map(([name, s]) => ({ name, ...runSuite(name, s, cwd, out, ids, rerun, fp) }));
-  return { cases: runs.flatMap((r) => r.cases), tags: runs.flatMap((r) => r.tags), exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])), quiet: Object.fromEntries(runs.map((r) => [r.name, r.quiet])) };
+  return { cases: runs.flatMap((r) => r.cases), tags: runs.flatMap((r) => r.tags), exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])), noMatch: Object.fromEntries(runs.map((r) => [r.name, r.noMatch])) };
 }
 
 function prepare(runId: string, type: string, ids: string[], repoName?: string) {
@@ -195,17 +197,17 @@ function proveGreen(runId: string, ids: string[], repoName?: string): string {
 }
 
 // A suite that exits non-zero without a failing selected test broke somewhere the tags do not show: a file that fails to load, a runner that never started.
-// One exception: a suite with no selected record that wrote a clean report only matched no tests (`bun test -t` exits 1 then), which is no breakage.
+// One exception: a suite with no selected record whose runner said the selector matched nothing (bun test -t exits 1 then), which is no breakage.
 // ponytail: when a selected test also failed, the exit code is not told apart from that failure; per-file results would be needed.
-type Ran = { cases: Tc[]; exits: Record<string, number>; quiet: Record<string, boolean> };
+type Ran = { cases: Tc[]; exits: Record<string, number>; noMatch: Record<string, boolean> };
 const brokenSuites = (r: Ran) =>
   Object.entries(r.exits).filter(([s, c]) => {
     if (!c) return false;
     const mine = r.cases.filter((t) => t.suite === s);
-    return mine.length ? !mine.some((t) => bad(t.status) || t.status === "flaky") : !r.quiet[s];
+    return mine.length ? !mine.some((t) => bad(t.status) || t.status === "flaky") : !r.noMatch[s];
   }).map(([s]) => s);
 const broken = (r: Ran) => brokenSuites(r).length > 0;
-const exitNote = (r: Ran, side = "") => brokenSuites(r).map((s) => `suite '${s}' exited ${r.exits[s]}${side} and left no failing selected test or clean report\n`).join("");
+const exitNote = (r: Ran, side = "") => brokenSuites(r).map((s) => `suite '${s}' exited ${r.exits[s]}${side} and left no failing selected test and did not report that nothing matched\n`).join("");
 
 // Per AC, over every selected test (identified by suite, file, describe path, name and line, on either side):
 // a test passing on red is `no-red`, even when it is skipped (or absent) on green; a test failing or erroring on green is `green-failed`;

@@ -544,6 +544,30 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(r.code).toBe(0);
   });
 
+  test("a second suite is ignored only when bun said its selector matched nothing: a selected file that fails to load, or an empty report with exit 127, still fails the run", () => {
+    const other = { format: "bun-test", level: "e2e", run: 'bun test ./other -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/other.xml', junit: "$ARK_OUT/other.xml" };
+    const files = {
+      "other/ok.test.ts": bunTest(`test("DEMO-1-AC2 fine", () => { expect(1).toBe(1); });`),
+      "other/bad.test.ts": bunTest(`test("DEMO-1-AC1 never loads", () => { expect(missing).toBe(1); });`, `import { missing } from "./not-there";`),
+    };
+    fixture(undefined, { run: 'bun test ./test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { other }, files }); // the unit suite stays out of other/
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
+    const load = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(load.code).toBe(1);
+    expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("fail");
+    expect(load.out).toContain("suite 'other' exited 1");
+
+    const empty = { format: "bun-test", level: "e2e", run: "touch $ARK_OUT/empty.xml; exit 127 # {tags}", junit: "$ARK_OUT/empty.xml" };
+    fixture(undefined, {}, { suites: { empty } });
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
+    const r = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("fail");
+    expect(r.out).toContain("suite 'empty' exited 127");
+  });
+
   test("a second suite that produces no JUnit and exits non-zero fails the run, on green; on red it makes the AC inconclusive", () => {
     const ghost = { format: "bun-test", level: "e2e", run: "test -f ghost.txt # {tags}", junit: "$ARK_OUT/ghost.xml" }; // exits 1 without a report until ghost.txt exists
     fixture(undefined, {}, { suites: { ghost } });
