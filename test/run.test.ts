@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +8,7 @@ import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
 import { spawnArk } from "./tty";
 
+setDefaultTimeout(60_000); // run start preflights through a subprocess of OMP's resolver; the multi-run tests make several calls
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 const FIXTURES = join(import.meta.dir, "fixtures", "ledgers");
 const schema = (name: string) => Bun.file(join(import.meta.dir, "..", "schemas", `${name}.schema.json`)).json();
