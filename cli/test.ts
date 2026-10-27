@@ -91,14 +91,14 @@ function tagged(cfg: RepoConfig, cwd: string, out: string, ids: string[], rerun:
   };
 }
 
-function prepare(runId: string, type: string, ids: string[], repoName?: string) {
+function prepare(runId: string, type: string, ids: string[], repoName?: string, role?: "validator") {
   const { dir, state } = open(runId, type, "test");
   const unknown = ids.filter((id) => !(id in state.acs));
   if (!ids.length || unknown.length) throw new Error(`--acs must name ACs of this run${unknown.length ? `; unknown: ${unknown.join(", ")}` : ""}`);
   const repo = repoName ? state.repos.find((r) => r.name === repoName) : state.repos.length === 1 ? state.repos[0] : undefined;
   if (!repo) throw new Error(`pick a worktree with --repo <name> (have: ${state.repos.map((r) => r.name).join(", ") || "none, run ark ws create"})`);
   const pending = state.repos.filter((r) => r.step !== "implemented").map((r) => r.name);
-  if (type === "test.red_green" && pending.length) throw new Error(`red-green runs only after every repo is implemented; no implementer.completed yet for: ${pending.join(", ")}`);
+  if (type !== "test.result" && pending.length) throw new Error(`${type === "test.red_green" ? "red-green" : "preservation"} runs only after every repo is implemented; no implementer.completed yet for: ${pending.join(", ")}`);
 
   const wt = join(dir, "ws", repo.name);
   if (git(wt, "status", "--porcelain", "--untracked-files=no")) throw new Error(`${wt} has uncommitted changes; commit them so the run proves a SHA`);
@@ -115,7 +115,7 @@ function prepare(runId: string, type: string, ids: string[], repoName?: string) 
   mkdirSync(out);
   const fp: Fp = { git_sha: head, bun: Bun.version, os: `${process.platform} ${release()} ${arch()}`, images: [] };
   const unknownTags = (tags: string[]) => [...new Set(tags)].filter((t) => t.startsWith(`${state.ticket}-AC`) && !(t in state.acs)).sort();
-  return { dir, repo, wt, head, unknownTags, attempt, out, fp, cfg, where: relative(dir, out) };
+  return { dir, repo, wt, head, unknownTags, attempt, out, fp, cfg, where: relative(dir, out), stamp: role ? { role } : {} }; // `role` is recorded: only a validator step vouches for tagged-test commits (cli/run.ts unattributed)
 }
 
 const finish = (ok: boolean, text: string) => {
@@ -123,8 +123,12 @@ const finish = (ok: boolean, text: string) => {
   return text;
 };
 
-export function runTest(runId: string, ids: string[], repoName?: string, redGreen = false): string {
-  return redGreen ? proveRedGreen(runId, ids, repoName) : proveGreen(runId, ids, repoName);
+export type TestMode = "green" | "red-green" | "preservation";
+
+// `role: "validator"` marks the run as a validator step. A plain run proves its result and records it, but never vouches for AC-tagged test commits.
+export function runTest(runId: string, ids: string[], repoName: string | undefined, mode: TestMode, role?: string): string {
+  if (role !== undefined && role !== "validator") throw new Error(`--as takes 'validator', not '${role}'`);
+  return mode === "green" ? proveGreen(runId, ids, repoName, role) : proveBoth(runId, ids, repoName, mode, role);
 }
 
 // Why a run proves nothing: a symlink of the recorded tree reaches outside its checkout.
@@ -191,17 +195,17 @@ function inCheckout<T>(wt: string, sha: string, cfg: RepoConfig, out: string, wh
 // Records a run that cannot prove anything (every selected AC inconclusive, with the reason) and fails.
 function refused(dir: string, type: string, ids: string[], reason: string, extra: Record<string, unknown>, text: string): string {
   const acs = Object.fromEntries(ids.map((id) => [id, "inconclusive"]));
-  record(dir, type, { ...extra, acs, tests: [], reason, unknown_tags: [], ...(type === "test.red_green" ? { ok: false } : {}) });
+  record(dir, type, { ...extra, acs, tests: [], reason, unknown_tags: [], ...(type !== "test.result" ? { ok: false } : {}) });
   return finish(false, `${text}${ids.map((id) => `${id}: inconclusive\n`).join("")}  ${reason}\n`);
 }
 
-function proveGreen(runId: string, ids: string[], repoName?: string): string {
-  const { dir, repo, wt, head, attempt, out, fp, cfg, where, unknownTags } = prepare(runId, "test.result", ids, repoName);
+function proveGreen(runId: string, ids: string[], repoName?: string, role?: "validator"): string {
+  const { dir, repo, wt, head, attempt, out, fp, cfg, where, unknownTags, stamp } = prepare(runId, "test.result", ids, repoName, role);
   let res;
   try {
     res = inCheckout(wt, head, cfg, out, where, (d) => tagged(cfg, d, out, ids, true, fp));
   } catch (e) {
-    if (e instanceof Refused) return refused(dir, "test.result", ids, e.message, { repo: repo.name, head_sha: head, attempt, out: where }, `test attempt ${attempt} on ${head.slice(0, 12)}\n`);
+    if (e instanceof Refused) return refused(dir, "test.result", ids, e.message, { repo: repo.name, head_sha: head, attempt, out: where, ...stamp }, `test attempt ${attempt} on ${head.slice(0, 12)}\n`);
     throw e;
   } finally { writeFileSync(join(out, "fingerprint.json"), `${JSON.stringify(fp, null, 2)}\n`); }
   const cases = res.cases.filter((c) => c.status !== "skipped");
@@ -210,7 +214,7 @@ function proveGreen(runId: string, ids: string[], repoName?: string): string {
     return [id, res.silent.some((x) => x.ac === id) ? "fail" : !ts.length ? "missing" : ts.some((c) => bad(c.status)) ? "fail" : ts.some((c) => c.status === "flaky") ? "flaky" : broken(res) ? "fail" : "pass"];
   }));
   const tests = cases.map((c) => ({ suite: c.suite, test: label(c), acs: c.acs, status: c.status }));
-  record(dir, "test.result", { repo: repo.name, head_sha: head, attempt, out: where, acs, tests, exits: res.exits, unknown_tags: unknownTags(res.tags) });
+  record(dir, "test.result", { repo: repo.name, head_sha: head, attempt, out: where, acs, tests, exits: res.exits, unknown_tags: unknownTags(res.tags), ...stamp });
   return finish(Object.values(acs).every((v) => v === "pass"), `test attempt ${attempt} on ${head.slice(0, 12)}\n${Object.entries(acs).map(([id, v]) => `${id}: ${v}\n`).join("")}${exitNote(res)}`);
 }
 
@@ -226,21 +230,25 @@ const exitNote = (r: Ran, side = "") =>
   silentSuites(r).map((s) => `suite '${s}' holds tagged tests for ${r.silent.filter((x) => x.suite === s).map((x) => x.ac).join(", ")} but reported none${side}\n`).join("");
 
 // Per AC, over every selected test (identified by suite, file, describe path, name and line, on either side):
-// a test passing on red is `no-red`, even when it is skipped (or absent) on green; a test failing or erroring on green is `green-failed`;
-// `proven` needs every selected test to fail or error on red AND pass on green; anything else (no red record, skipped on either side) is `inconclusive`.
-function verdict(id: string, red: Map<string, Tc["status"]>, green: Map<string, Tc["status"]>, acsOf: Map<string, string[]>, ambiguous: Set<string>): string {
+// red-green: a test passing on red is `no-red`, even when it is skipped (or absent) on green; `proven` needs every selected test to fail or error on red AND pass on green.
+// preservation: a test failing or erroring on base is `not-preserved` (the behavior was not there before: the AC is new); `preserved` needs every selected test to pass on base AND on head.
+// Either way a test failing or erroring on green is `green-failed`, and anything else (no record on a side, skipped on either side) is `inconclusive`.
+function verdict(id: string, red: Map<string, Tc["status"]>, green: Map<string, Tc["status"]>, acsOf: Map<string, string[]>, ambiguous: Set<string>, preservation: boolean): string {
   const mine = [...acsOf].filter(([, acs]) => acs.includes(id)).map(([k]) => k);
   if (!mine.length) return "missing";
   const [r, g] = [red, green].map((m) => mine.map((k) => m.get(k) ?? "missing"));
   if (g.some((x) => x !== "pass" && x !== "skipped" && x !== "missing")) return "green-failed";
-  if (r.some((x) => x === "pass")) return "no-red";
+  if (r.some((x) => (preservation ? bad(x) : x === "pass"))) return preservation ? "not-preserved" : "no-red";
   if (!g.includes("pass")) return "missing";
   if (mine.some((k) => ambiguous.has(k))) return "inconclusive";
-  return mine.every((_, i) => bad(r[i]) && g[i] === "pass") ? "proven" : "inconclusive";
+  return mine.every((_, i) => (preservation ? r[i] === "pass" : bad(r[i])) && g[i] === "pass") ? (preservation ? "preserved" : "proven") : "inconclusive";
 }
 
-function proveRedGreen(runId: string, ids: string[], repoName?: string): string {
-  const { dir, repo, wt, head, attempt, out, fp, cfg, where, unknownTags } = prepare(runId, "test.red_green", ids, repoName);
+// Red-green proves a new-behavior AC (fails on base, passes on head); preservation proves a preserved-behavior AC (passes on base and on head). Both run the head's tests on the base source, then on head.
+function proveBoth(runId: string, ids: string[], repoName: string | undefined, mode: "red-green" | "preservation", role?: "validator"): string {
+  const preservation = mode === "preservation";
+  const type = preservation ? "test.preservation" : "test.red_green";
+  const { dir, repo, wt, head, attempt, out, fp, cfg, where, unknownTags, stamp } = prepare(runId, type, ids, repoName, role);
   fp.base_sha = repo.base_sha;
   const overlay = changedTestFiles(wt, repo.base_sha, cfg, head);
   let red, green;
@@ -248,7 +256,7 @@ function proveRedGreen(runId: string, ids: string[], repoName?: string): string 
     red = inCheckout(wt, repo.base_sha, cfg, join(out, "red"), join(where, "red"), (d) => tagged(cfg, d, join(out, "red"), ids, false, fp), overlay, head);
     green = inCheckout(wt, head, cfg, join(out, "green"), join(where, "green"), (d) => tagged(cfg, d, join(out, "green"), ids, true, fp));
   } catch (e) {
-    if (e instanceof Refused) return refused(dir, "test.red_green", ids, e.message, { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay }, `red-green attempt ${attempt}: base ${repo.base_sha.slice(0, 12)} head ${head.slice(0, 12)}\n`);
+    if (e instanceof Refused) return refused(dir, type, ids, e.message, { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay, ...stamp }, `${mode} attempt ${attempt}: base ${repo.base_sha.slice(0, 12)} head ${head.slice(0, 12)}\n`);
     throw e;
   } finally {
     writeFileSync(join(out, "fingerprint.json"), `${JSON.stringify(fp, null, 2)}\n`);
@@ -261,13 +269,14 @@ function proveRedGreen(runId: string, ids: string[], repoName?: string): string 
   const byId = new Map([...green.cases, ...red.cases].map((c) => [id(c), c]));
   const tests = [...byId.values()].map((c) => ({ suite: c.suite, test: label(c), line: c.line, acs: c.acs, red: redOf.get(id(c)) ?? "missing", green: greenOf.get(id(c)) ?? "missing" }));
   const acsOf = new Map([...byId].map(([k, c]) => [k, c.acs]));
+  const [good, off] = preservation ? ["preserved", "not-preserved"] : ["proven", "no-red"];
   const acs = Object.fromEntries(ids.map((ac) => {
-    const v = verdict(ac, redOf, greenOf, acsOf, ambiguous);
+    const v = verdict(ac, redOf, greenOf, acsOf, ambiguous, preservation);
     const silent = (r: Ran) => r.silent.some((x) => x.ac === ac);
-    if (silent(green) || (v === "proven" && broken(green))) return [ac, "green-failed"];
-    return [ac, (v === "proven" && broken(red)) || (v !== "no-red" && silent(red)) ? "inconclusive" : v];
+    if (silent(green) || (v === good && broken(green))) return [ac, "green-failed"];
+    return [ac, (v === good && broken(red)) || (v !== off && silent(red)) ? "inconclusive" : v];
   }));
-  const ok = Object.values(acs).every((v) => v === "proven");
-  record(dir, "test.red_green", { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay, acs, tests, ambiguous: [...ambiguous].map((k) => k.replaceAll("\0", " > ")), exits: { red: red.exits, green: green.exits }, unknown_tags: unknownTags(green.tags), ok });
-  return finish(ok, `red-green attempt ${attempt}: base ${repo.base_sha.slice(0, 12)} head ${head.slice(0, 12)}\n${Object.entries(acs).map(([id, v]) => `${id}: ${v}\n`).join("")}${tests.map((t) => `  red=${t.red} green=${t.green}  ${t.test}\n`).join("")}${[...ambiguous].map((k) => `  ambiguous duplicate test identity: ${k.replaceAll("\0", " > ")}\n`).join("")}${exitNote(red, " on red")}${exitNote(green)}`);
+  const ok = Object.values(acs).every((v) => v === good);
+  record(dir, type, { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay, acs, tests, ambiguous: [...ambiguous].map((k) => k.replaceAll("\0", " > ")), exits: { red: red.exits, green: green.exits }, unknown_tags: unknownTags(green.tags), ok, ...stamp });
+  return finish(ok, `${mode} attempt ${attempt}: base ${repo.base_sha.slice(0, 12)} head ${head.slice(0, 12)}\n${Object.entries(acs).map(([id, v]) => `${id}: ${v}\n`).join("")}${tests.map((t) => `  red=${t.red} green=${t.green}  ${t.test}\n`).join("")}${[...ambiguous].map((k) => `  ambiguous duplicate test identity: ${k.replaceAll("\0", " > ")}\n`).join("")}${exitNote(red, " on red")}${exitNote(green)}`);
 }

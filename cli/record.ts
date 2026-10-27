@@ -4,7 +4,8 @@ import { basename, join } from "node:path";
 import implementerSchema from "../schemas/implementer.schema.json";
 import reviewerSchema from "../schemas/reviewer.schema.json";
 import validatorSchema from "../schemas/validator.schema.json";
-import { activeRunDir, locked, open, readLedger, record, runDir, sha256, summary } from "./run";
+import { git } from "./repo";
+import { activeRunDir, type LedgerEvent, locked, open, readLedger, record, runDir, type RunState, sha256, summary } from "./run";
 
 const PLAYBOOKS = ["setup", "ticket", "bugfix", "investigate", "review", "resume"];
 
@@ -53,13 +54,28 @@ export function artifactRecord(runId: string, agent: string, file: string): stri
   });
 }
 
-// FR-14: every finding is bucketed with a reason; an Act-on P0 or P1 goes back only with a failing test or a traced path.
+// FR-14: every finding is bucketed with a reason. Only a verified finding sends work back (CONTEXT.md): an act-on P0 or P1 backed by a tagged test that the latest
+// `ark test` at the current head recorded as failing, or, where no test can reach it, by a traced path, which the G2 packet marks as weaker evidence.
 const PRIORITY = ["P0", "P1", "P2", "P3"];
 const BUCKET = ["act_on", "consider", "noted", "dismissed"];
 const KEYS = ["id", "reviewer", "model", "priority", "file", "line", "claim", "bucket", "reason", "evidence"];
 const text = (v: unknown) => typeof v === "string" && v.trim() !== "";
 
-function checkFinding(f: unknown, at: string): string[] {
+// The tagged tests `ark test` recorded as failing at each repo's current HEAD (the newest record of a test at that HEAD decides); a result at an older head says nothing about this one.
+function failingAtHead(dir: string, repos: RunState["repos"], events: LedgerEvent[]): string[] {
+  return repos.flatMap((r) => {
+    let head: string;
+    try { head = git(join(dir, "ws", r.name), "rev-parse", "HEAD"); } catch { return []; }
+    const status = new Map<string, string>();
+    for (const e of events) {
+      if (e.type !== "test.result" || e.data.repo !== r.name || e.data.head_sha !== head) continue;
+      for (const t of e.data.tests as { test: string; status: string }[]) status.set(t.test, t.status);
+    }
+    return [...status].filter(([, s]) => s === "failure" || s === "error").map(([t]) => t);
+  });
+}
+
+function checkFinding(f: unknown, at: string, failing: string[]): string[] {
   if (typeof f !== "object" || f === null || Array.isArray(f)) return [`${at}: not an object`];
   const o = f as Record<string, unknown>;
   const bad = Object.keys(o).filter((k) => !KEYS.includes(k)).map((k) => `${at}: unknown key '${k}'`);
@@ -69,25 +85,33 @@ function checkFinding(f: unknown, at: string): string[] {
   if (!BUCKET.includes(o.bucket as string)) bad.push(`${at}: bucket must be one of ${BUCKET.join(", ")}`);
   const ev = o.evidence;
   const proof = typeof ev === "object" && ev !== null && !Array.isArray(ev) ? (ev as Record<string, unknown>) : undefined;
-  if (ev !== undefined && (!proof || Object.keys(proof).some((k) => k !== "failing_test" && k !== "trace_path"))) bad.push(`${at}: evidence must be {failing_test} or {trace_path}`);
-  const proven = text(proof?.failing_test) || text(proof?.trace_path);
-  if (ev !== undefined && proof && !proven) bad.push(`${at}: evidence needs a non-empty failing_test or trace_path`);
-  if (o.bucket === "act_on" && (o.priority === "P0" || o.priority === "P1") && !proven) bad.push(`${at}: act_on ${o.priority} goes back only with evidence {failing_test} or {trace_path}`);
+  if (ev !== undefined && (!proof || Object.keys(proof).some((k) => k !== "failing_test" && k !== "traced_path"))) bad.push(`${at}: evidence must be {failing_test} or {traced_path}`);
+  const proven = text(proof?.failing_test) || text(proof?.traced_path);
+  if (ev !== undefined && proof && !proven) bad.push(`${at}: evidence needs a non-empty failing_test or traced_path`);
+  if (o.bucket === "act_on" && (o.priority === "P0" || o.priority === "P1")) {
+    if (!proven) bad.push(`${at}: act_on ${o.priority} goes back only with evidence {failing_test} or {traced_path}`);
+    const named = proof?.failing_test;
+    if (text(named) && !failing.some((t) => t === named || t.endsWith(` > ${named}`))) {
+      bad.push(`${at}: failing_test '${named}' is not a test that the latest 'ark test' at the current head recorded as failing (${failing.length ? `failing now: ${failing.join("; ")}` : "none failing now"}); run it with 'ark test', or give {traced_path} (weaker evidence)`);
+    }
+  }
   return bad;
 }
 
 export function findingsRecord(runId: string, file: string): string {
-  const { dir } = open(runId, "findings.recorded", "findings record");
+  const { dir, state } = open(runId, "findings.recorded", "findings record");
   return locked(dir, () => { // numbering the artifact and recording it are one step, or parallel records overwrite each other's file
     const list = readJson(file);
+    const events = readLedger(dir);
+    const failing = failingAtHead(dir, state.repos, events);
     if (!Array.isArray(list) || !list.length) throw new Error(`${file} must be a non-empty JSON array of findings`);
-    const prior = readLedger(dir).filter((e) => e.type === "findings.recorded");
+    const prior = events.filter((e) => e.type === "findings.recorded");
     const seen = new Set(prior.flatMap((e) => e.data.ids as string[]));
     const bad = list.flatMap((f, i) => {
       const id = (f as { id?: unknown })?.id;
       const dup = typeof id === "string" && seen.has(id) ? [`finding ${i + 1}: id '${id}' is already recorded in this run`] : [];
       if (typeof id === "string") seen.add(id);
-      return [...checkFinding(f, `finding ${i + 1}`), ...dup];
+      return [...checkFinding(f, `finding ${i + 1}`, failing), ...dup];
     });
     if (bad.length) throw new Error(`${file} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
 

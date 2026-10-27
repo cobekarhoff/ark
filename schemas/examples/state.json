@@ -1,12 +1,14 @@
 {
   "schema": 1,
-  "run_id": "2026-10-21-ABC-123",
+  "run_id": "2026-10-21-ABC-123-1",
   "ticket": "ABC-123",
   "playbook": "ticket",
   "state": "approved",
   "status": "active",
+  "outcome": null,
   "tier": "T2",
   "round": 0,
+  "implementer": "agent",
   "next_action": { "kind": "spawn", "agent": "implementer", "repo": "core-lib" },
   "gates": {
     "G1": { "answer": "approve", "by": "cobe", "at": "2026-10-21T20:41:07Z", "packet_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }

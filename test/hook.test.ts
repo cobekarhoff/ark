@@ -21,7 +21,7 @@ const ark = (args: string[], stdin?: string, env: Record<string, string> = {}) =
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const runsDir = () => join(home, "projects", "demo", "runs");
-const runOf = (id: string) => readdirSync(runsDir()).find((r) => r.endsWith(`-${id}`))!;
+const runOf = (id: string) => readdirSync(runsDir()).find((r) => r.includes(`-${id}-`))!;
 const dirOf = (id: string) => join(runsDir(), runOf(id));
 // `session`: the id of the OMP session the extension reports with the call (ctx.sessionManager.getSessionId()).
 const call = (tool: string, input: Record<string, unknown>, o: { session?: string; cwd?: string } = {}) => ark(["hook", "tool_call"], JSON.stringify({ tool, input, cwd: o.cwd ?? proj, session: o.session }));

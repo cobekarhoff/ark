@@ -56,7 +56,7 @@
                   "error",
                   "pass"
                 ],
-                "description": "pass means the test asserts nothing; the verdict must then be fail"
+                "description": "For a new AC, pass means the test asserts nothing and the verdict must then be fail. For a preserved AC (preservation proof), pass on the base is the expected outcome."
               },
               "evidence": {
                 "type": "string",
