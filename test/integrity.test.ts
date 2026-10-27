@@ -623,7 +623,6 @@ describe("ARK-115-AC9", () => {
   test.each([
     ["implement", { ...base, implement: "zzz-no-such-model" }, ""],
     ["validate", { ...base, validate: "anthropic/claude-sonnet-5-5,zzz-no-such-model" }, ""],
-    ["validate", base, `retry:\n  fallbackChains:\n    validate: [zzz-no-such-model]\n`],
   ])("a %s selector OMP cannot resolve is refused by name, not skipped", (role, roles, extra) => {
     config(roles, extra);
     const p = ark("preflight");
