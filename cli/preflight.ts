@@ -24,7 +24,8 @@ function ompPackage(): string {
   throw new Error(`preflight refused: ${bin} is not inside an @oh-my-pi/pi-coding-agent package; set ARK_OMP_PACKAGE`);
 }
 
-function reachable(): Record<string, Reach[] | null> {
+type Roles = Record<string, { models: Reach[]; unresolved: string[] } | null>;
+function reachable(): Roles {
   const r = Bun.spawnSync([process.execPath, join(import.meta.dir, "omp-models.ts"), ompPackage(), ...ROLES], { cwd: projectDir() });
   if (r.exitCode !== 0) throw new Error(`preflight refused: OMP's model resolver failed to load or run:\n${r.stderr.toString().trim()}`);
   return JSON.parse(r.stdout.toString());
@@ -45,10 +46,16 @@ function origin(via: Reach["via"], projectFile: string): string {
 
 export function preflight(): string {
   const file = join(projectDir(), ".omp", "config.yml");
-  const reach = reachable();
-  if (!existsSync(file) && !reach.implement) throw new Error(`preflight: no ${file}; write modelRoles for ${ROLES.join(", ")}`);
-  for (const r of ROLES) if (!reach[r]) throw new Error(`modelRoles.${r} is not set in the OMP config`);
-  const model = reach as Record<(typeof ROLES)[number], Reach[]>;
+  const roles = reachable();
+  if (!existsSync(file) && !roles.implement) throw new Error(`preflight: no ${file}; write modelRoles for ${ROLES.join(", ")}`);
+  for (const r of ROLES) {
+    const got = roles[r];
+    if (!got) throw new Error(`modelRoles.${r} is not set in the OMP config`);
+    // A selector OMP cannot resolve is not "unreachable": the catalog may differ at runtime (omp models refresh), so refuse instead of skipping it.
+    if (got.unresolved.length) throw new Error(`preflight refused: ${r} names no model OMP knows: ${got.unresolved.map((s) => `'${s}'`).join(", ")}`);
+    if (!got.models.length) throw new Error(`preflight refused: ${r} resolves to no model`);
+  }
+  const model = Object.fromEntries(ROLES.map((r) => [r, roles[r]!.models])) as Record<(typeof ROLES)[number], Reach[]>;
   const vendor = (m: Reach) => m.selector.split("/")[0];
   const implementers = new Set(model.implement.map(vendor));
   const how = (m: Reach) => (m.via.kind === "chain" ? ` via retry.fallbackChains.${m.via.key} (${origin(m.via, file)})` : "");

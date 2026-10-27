@@ -620,6 +620,17 @@ describe("ARK-115-AC9", () => {
     expect(p.err).toMatch(/shares the implementer's vendor/);
   });
 
+  test.each([
+    ["implement", { ...base, implement: "zzz-no-such-model" }, ""],
+    ["validate", { ...base, validate: "anthropic/claude-sonnet-5-5,zzz-no-such-model" }, ""],
+    ["validate", base, `retry:\n  fallbackChains:\n    validate: [zzz-no-such-model]\n`],
+  ])("a %s selector OMP cannot resolve is refused by name, not skipped", (role, roles, extra) => {
+    config(roles, extra);
+    const p = ark("preflight");
+    expect(p.code).toBe(1);
+    expect(p.err).toContain(`${role} names no model OMP knows: 'zzz-no-such-model'`);
+  });
+
   test("when OMP cannot be loaded, preflight refuses instead of guessing", () => {
     config(base);
     const r = Bun.spawnSync(["bun", CLI, "preflight"], { cwd: proj, env: env({ ARK_OMP_PACKAGE: join(agentDir, "no-such-omp") }) });
