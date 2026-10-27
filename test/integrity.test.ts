@@ -683,7 +683,7 @@ describe("ARK-115-AC9", () => {
     ok(ark("preflight"));
   });
 
-  // Auth fallback to the parent model cannot be satisfied by any static config for every role (two vendors), so it is audited at runtime (ARK-113).
+  // Auth fallback to the parent model cannot be satisfied by any static config for every role (two vendors), so it is not checked yet (a runtime audit of the answering model is planned under ARK-113).
   // What preflight can demand is that the parent is named: with `default` unset OMP picks a parent on its own.
   test("an unset default role is refused: the parent model must be named", () => {
     const { default: _unset, ...withoutDefault } = base as Record<string, string>;
