@@ -15,7 +15,9 @@ import { eventKey, nextActions, ownerOf, type State, transitions } from "./trans
 export type LedgerEvent = { seq: number; ts: string; type: string; data: Record<string, unknown>; prev: string };
 type Ac = { id: string; text: string };
 type Frontmatter = { id: string; title: string; status: string; milestone?: string; traces?: string[]; depends_on?: string[]; acceptance_criteria?: Ac[] };
-type RunStarted = { ticket: string; playbook: string; acs: string[]; artifacts: Record<string, string> };
+type RunStarted = { ticket: string; n?: number; playbook: string; acs: string[]; artifacts: Record<string, string> };
+type AcUpdated = { acs: string[]; artifacts: Record<string, string> };
+export type Outcome = "merged" | "abandoned" | "aborted" | "handed_off";
 
 export interface RunState {
   schema: 1;
@@ -24,9 +26,11 @@ export interface RunState {
   playbook: string;
   state: State;
   status: "active" | "waiting_human" | "done" | "aborted";
+  outcome: Outcome | null; // how a closed run ended; null while it is open
   tier: null;
-  round: number;
-  next_action: (typeof nextActions)[State];
+  round: number; // returns to implementation so far: fix rounds, G2 send-backs, escalations that granted one more round
+  implementer: "agent" | "human"; // a human takes over at an escalation, and stays the implementer until one more round is granted
+  next_action: { kind: string; agent: "orchestrator" | "human"; repo?: string } | null;
   gates: Record<string, { answer: string; by: string; at: string; packet_sha256: string }>;
   repos: { name: string; order: number; branch: string; base_sha: string; head_sha: string | null; step: string }[];
   acs: Record<string, string>;
@@ -65,8 +69,11 @@ export function projectRoot(): string {
   if (typeof name !== "string" || !name) throw new Error(`${f} has no 'project:' key`);
   return join(process.env.ARK_HOME ?? join(homedir(), ".ark"), "projects", name);
 }
+// <date>-<ticket>-<n>: the nth run of a ticket. A folder without -<n> is a run from before runs were numbered, and counts as n = 1.
+const RUN_ID = /^(\d{4}-\d{2}-\d{2})-([A-Z][A-Z0-9]*-[0-9]+)(?:-([0-9]+))?$/;
+const runNumber = (runId: string) => Number(runId.match(RUN_ID)?.[3] ?? 1);
 export function runDir(runId: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}-[A-Z][A-Z0-9]*-[0-9]+$/.test(runId)) throw new Error(`invalid run id '${runId}'`);
+  if (!RUN_ID.test(runId)) throw new Error(`invalid run id '${runId}'`);
   const dir = join(projectRoot(), "runs", runId);
   if (!existsSync(dir)) throw new Error(`no such run '${runId}'`);
   return dir;
@@ -96,10 +103,17 @@ export function activeRunDir(): string | undefined {
 export function project(events: LedgerEvent[]): RunState {
   const first = events[0];
   if (first?.type !== "run.started") throw new Error("ledger must begin with run.started");
-  const { ticket, playbook, acs, artifacts } = first.data as RunStarted;
+  const { ticket, n = 1, playbook, acs: runAcs, artifacts: runArtifacts } = first.data as RunStarted;
+  let acs = runAcs;
+  let artifacts = runArtifacts;
   let state: State = "intake";
   const repos: RunState["repos"] = [];
   const gates: RunState["gates"] = {};
+  let round = 0;
+  let implementer: RunState["implementer"] = "agent";
+  let outcome: Outcome | null = null;
+  let roundStart = 0; // seq of the newest event that sent the run back to building; a human implementer has a step to record per repo after it
+  const stepAt: Record<string, number> = {};
   for (const [i, e] of events.entries()) {
     if (e.seq !== i + 1) throw new Error(`ledger seq ${e.seq} at position ${i + 1}`);
     if (i === 0) continue;
@@ -113,24 +127,42 @@ export function project(events: LedgerEvent[]): RunState {
       const r = repos.find((r) => r.name === d.repo);
       if (!r) throw new Error(`ledger event ${e.seq} names unknown repo '${d.repo}'`);
       Object.assign(r, { head_sha: d.head_sha, step: "implemented" });
+      stepAt[d.repo] = e.seq;
+    }
+    if (e.type === "fix_round.started") {
+      round++;
+      roundStart = e.seq;
+    }
+    if (e.type === "ac.updated") ({ acs, artifacts } = e.data as AcUpdated);
+    if (e.type === "run.closed") {
+      outcome = (e.data as { outcome: Outcome }).outcome;
+      if (!["merged", "abandoned", "handed_off"].includes(outcome)) throw new Error(`ledger event ${e.seq} 'run.closed' needs an outcome of merged, abandoned or handed_off`);
     }
     if (e.type === "gate.answered") {
       const { gate, answer, by, packet_sha256 } = e.data as Record<string, string>;
       gates[gate] = { answer, by, at: e.ts, packet_sha256 };
+      const sendsBack = (gate === "G2" && answer === "send_back") || (gate === "GE" && answer === "one_more_round");
+      if (sendsBack) round++;
+      if (sendsBack || (gate === "GE" && answer === "take_over")) roundStart = e.seq;
+      if (gate === "GE" && answer !== "abort") implementer = answer === "take_over" ? "human" : "agent";
     }
   }
+  if (state === "aborted") outcome = "aborted";
   // In mrs_open the orchestrator has to open the MRs (ark mr) until every repo has one; only then does a human merge.
   const mrsPending = state === "mrs_open" && !repos.every((r) => events.some((e) => e.type === "mr.opened" && e.data.repo === r.name));
-  const next_action = mrsPending ? { kind: "open_mrs", agent: "orchestrator" as const } : nextActions[state];
+  const taken = state === "building" && implementer === "human" ? repos.find((r) => (stepAt[r.name] ?? 0) < roundStart) : undefined; // the human implements until every repo has a recorded step
+  const next_action = mrsPending ? { kind: "open_mrs", agent: "orchestrator" as const } : taken ? { kind: "implement", agent: "human" as const, repo: taken.name } : nextActions[state];
   return {
     schema: 1,
-    run_id: `${first.ts.slice(0, 10)}-${ticket}`,
+    run_id: `${first.ts.slice(0, 10)}-${ticket}-${n}`,
     ticket,
     playbook,
     state,
     status: next_action === null ? (state as "done" | "aborted") : next_action.agent === "human" ? "waiting_human" : "active",
+    outcome,
     tier: null,
-    round: 0,
+    round,
+    implementer,
     next_action,
     gates,
     repos,
@@ -266,11 +298,21 @@ export function commit(dir: string, events: LedgerEvent[]) {
   return state;
 }
 
-// ark.yml `mr:` (default true); false ends the run at G2 approval with ready branches.
+const arkYml = () => (Bun.YAML.parse(readFileSync(join(projectDir(), "ark.yml"), "utf8")) ?? {}) as { mr?: unknown; loop?: { max_rounds?: unknown } };
+
+// ark.yml `mr:` (default true); false ends the run at G2 approval with ready branches, handed off.
 export function mrEnabled(): boolean {
-  const mr = (Bun.YAML.parse(readFileSync(join(projectDir(), "ark.yml"), "utf8")) as { mr?: unknown } | null)?.mr;
+  const { mr } = arkYml();
   if (mr !== undefined && typeof mr !== "boolean") throw new Error("ark.yml: mr must be true or false");
   return mr !== false;
+}
+
+// ark.yml `loop.max_rounds` (default 2): the round budget. Once state.round reaches it, the next failure opens escalation.
+export function maxRounds(): number {
+  const n = arkYml().loop?.max_rounds;
+  if (n === undefined) return 2;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 0) throw new Error("ark.yml: loop.max_rounds must be a whole number, 0 or more");
+  return n;
 }
 
 // The run folder and state, refusing (before anything is written) an event type that is illegal in the current state,
@@ -298,8 +340,8 @@ export const record = (dir: string, type: string, data: Record<string, unknown>)
 
 // AC4: product changes count only through recorded implementer steps. Per repo, from `impl` (the last implementer head, or the heads a round start recorded; base_sha before any):
 // - a non-test file changed in impl..HEAD is unattributed, whatever ran since (an `ark test` run records a head but never vouches for product code);
-// - an AC-tagged test changed after the newest recorded head is unattributed. The validator's tagged tests count once `ark test` ran on them: that run records its head `test`,
-//   accepted as a start for tagged tests only when impl..test changed test files alone;
+// - an AC-tagged test changed after the newest recorded head is unattributed. The validator's tagged tests count once a validator step (`ark test --as validator`) ran on them:
+//   that run records its head `test` and its role, and is accepted as a start for tagged tests only when impl..test changed test files alone. A plain `ark test` run vouches for nothing;
 // - HEAD must descend from the newest recorded head (history rewritten, a reset that drops recorded work), and the worktree must hold no uncommitted file.
 // Untagged test files are free.
 export function unattributed(dir: string, state: RunState, events: LedgerEvent[]): string[] {
@@ -318,7 +360,7 @@ export function unattributed(dir: string, state: RunState, events: LedgerEvent[]
         if (files.length) out.push(`${r.name}: commits after ${impl.slice(0, 12)} changed ${files.join(", ")}, which no implementer step recorded`);
         const testsOnly = test !== undefined && diffFiles(wt, `${impl}..${test}`).every((f) => isTestFile(cfg, f));
         const tests = touchedTaggedTests(wt, testsOnly ? test : impl, cfg);
-        if (tests.length) out.push(`${r.name}: commits after ${(testsOnly ? test : impl).slice(0, 12)} changed AC-tagged tests ${tests.join(", ")}, which neither an implementer step nor an 'ark test' run recorded`);
+        if (tests.length) out.push(`${r.name}: commits after ${(testsOnly ? test : impl).slice(0, 12)} changed AC-tagged tests ${tests.join(", ")}, which neither an implementer step nor a validator step ('ark test --as validator') recorded`);
       }
       const dirty = dirtyFiles(wt);
       if (dirty.length) out.push(`${r.name}: uncommitted files ${dirty.join(", ")}, which no implementer step recorded`);
@@ -335,13 +377,13 @@ export const worktreeHeads = (dir: string, state: RunState): Record<string, stri
   Object.fromEntries(state.repos.map((r) => [r.name, git(join(dir, "ws", r.name), "rev-parse", "HEAD")]));
 
 // `impl`: where the implementer step in progress began (the newest `implementer.completed` head or round-start head; base_sha before both).
-// `test`: the newest head an `ark test` / red-green run recorded since then, if any. The implementer guard measures from `impl` alone.
+// `test`: the newest head a validator step (an `ark test` / red-green / preservation run with `--as validator`) recorded since then, if any. The implementer guard measures from `impl` alone.
 function stepPoints(events: LedgerEvent[], repo: RunState["repos"][number]): { impl: string; test?: string } {
   let test: string | undefined;
   for (const e of events.toReversed()) {
     const heads = e.type === "fix_round.started" || e.type === "gate.answered" ? (e.data.heads as Record<string, string> | undefined) : undefined; // written by worktreeHeads
     const mine = e.data.repo === repo.name;
-    if (mine && (e.type === "test.result" || e.type === "test.red_green") && typeof e.data.head_sha === "string") test ??= e.data.head_sha;
+    if (mine && e.type.startsWith("test.") && e.data.role === "validator" && typeof e.data.head_sha === "string") test ??= e.data.head_sha;
     const impl = mine && e.type === "implementer.completed" ? e.data.head_sha : heads?.[repo.name];
     if (typeof impl === "string") return { impl, test };
   }
@@ -350,21 +392,14 @@ function stepPoints(events: LedgerEvent[], repo: RunState["repos"][number]): { i
 
 export function summary(s: RunState): string {
   const n = s.next_action;
-  return `${s.run_id}\nstate: ${s.state}\nstatus: ${s.status}\nnext_action: ${n ? `${n.kind} (${n.agent})` : "none"}\n`;
+  return `${s.run_id}\nstate: ${s.state}\nstatus: ${s.status}\n${s.outcome ? `outcome: ${s.outcome}\n` : ""}next_action: ${n ? `${n.kind} (${n.agent})` : "none"}\n`;
 }
 
-export function start(id: string): string {
-  if (!TICKET_ID.test(id ?? "")) throw new Error(`invalid ticket id '${id}'`);
-  preflight();
-  const root = projectRoot();
-  const runs = join(root, "runs");
-  const existing = existsSync(runs) && readdirSync(runs).find((r) => new RegExp(`^\\d{4}-\\d{2}-\\d{2}-${id}$`).test(r));
-  if (existing) {
-    setActive(existing);
-    return `resumed ${summary(refresh(join(runs, existing)))}`;
-  }
+export interface TicketFiles { src: string; raw: string; acs: Ac[]; ticketJson: string }
 
-  const src = join(root, "tickets", `${id}.md`);
+// The ticket as `ark run start` and `ark ac update` read it from the project's tickets folder.
+export function readTicket(id: string): TicketFiles {
+  const src = join(projectRoot(), "tickets", `${id}.md`);
   if (!existsSync(src)) throw new Error(`no ticket file ${src}`);
   const raw = readFileSync(src, "utf8");
   const m = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
@@ -380,13 +415,31 @@ export function start(id: string): string {
   };
   check("ticket", ticket, "ticket.json");
   check("ac", acs, "ac.yml");
+  return { src, raw, acs, ticketJson: json(ticket) };
+}
 
-  const ticketJson = json(ticket);
-  const acYml = acs.length ? Bun.YAML.stringify(acs, null, 2) : "[]\n";
+export const acYaml = (acs: unknown[]) => (acs.length ? Bun.YAML.stringify(acs, null, 2) : "[]\n");
+
+export function start(id: string): string {
+  if (!TICKET_ID.test(id ?? "")) throw new Error(`invalid ticket id '${id}'`);
+  preflight();
+  const runs = join(projectRoot(), "runs");
+  // A ticket has many runs and at most one is open: resume it, or start run n+1 when every earlier run is closed.
+  const mine = (existsSync(runs) ? readdirSync(runs) : []).filter((r) => RUN_ID.exec(r)?.[2] === id).sort((a, b) => runNumber(b) - runNumber(a));
+  for (const r of mine) {
+    const s = refresh(join(runs, r));
+    if (s.status === "done" || s.status === "aborted") continue;
+    setActive(r);
+    return `resumed ${summary(s)}${routeLine(join(runs, r), s.run_id)}`;
+  }
+
+  const { src, raw, acs, ticketJson } = readTicket(id);
+  const acYml = acYaml(acs);
   const artifacts = { "ticket.md": sha256(raw), "ticket.json": sha256(ticketJson), "ac.yml": sha256(acYml) };
 
   const ts = new Date().toISOString();
-  const dir = join(runs, `${ts.slice(0, 10)}-${id}`);
+  const n = mine.length ? runNumber(mine[0]) + 1 : 1;
+  const dir = join(runs, `${ts.slice(0, 10)}-${id}-${n}`);
   mkdirSync(runs, { recursive: true });
   mkdirSync(dir); // not recursive: a concurrent start of the same ticket fails here
   copyFileSync(src, join(dir, "ticket.md"));
@@ -394,12 +447,18 @@ export function start(id: string): string {
   writeFileSync(join(dir, "ac.yml"), acYml);
   writeFileSync(join(dir, "ledger.ndjson"), "");
   const state = locked(dir, () => {
-    let events = append(dir, [], "run.started", { ticket: id, playbook: "ticket", acs: acs.map((a) => a.id), artifacts }, ts); // same ts as the folder name, so run_id matches it
+    let events = append(dir, [], "run.started", { ticket: id, n, playbook: "ticket", acs: acs.map((a) => a.id), artifacts }, ts); // same ts as the folder name, so run_id matches it
     if (!acs.length) events = append(dir, events, "g0.opened", { reason: "ticket has no acceptance criteria" });
     return commit(dir, events);
   });
   setActive(basename(dir));
-  return `started ${summary(state)}`;
+  return `started ${summary(state)}${routeLine(dir, state.run_id)}`;
+}
+
+// The route is the first event after run.started; a run interrupted before it was logged still lacks it when resumed.
+function routeLine(dir: string, runId: string): string {
+  const route = readLedger(dir).find((e) => e.type === "route.chosen");
+  return route ? `route: ${route.data.playbook}\n` : `route: none (log it: ark log route ${runId} <playbook> "<why>")\n`;
 }
 
 export function advance(runId: string, type: string, rawData?: string): string {
@@ -410,22 +469,28 @@ export function advance(runId: string, type: string, rawData?: string): string {
     if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("--data must be a JSON object");
     if (Object.hasOwn(data, "heads")) throw new Error("--data may not set 'heads': the CLI records the worktree heads itself when a round starts");
   }
+  if (type === "fix_round.started" && state.round >= maxRounds()) {
+    throw new Error(`round budget spent (${state.round} of ${maxRounds()} rounds used): the next failure opens escalation; run 'ark gate packet ${runId} GE'`);
+  }
   if (type === "build.completed" || type === "fix_round.started") { // AC4: nothing leaves building, or opens a round, that no recorded step vouches for
     const bad = unattributed(dir, state, readLedger(dir));
     if (bad.length) throw new Error(`${type} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
     if (type === "fix_round.started") data = { ...data, heads: worktreeHeads(dir, state) };
   }
-  if (type === "implementer.completed") { // AC7: implementers never edit AC-tagged tests
+  if (type === "implementer.completed") { // AC7: implementers never edit AC-tagged tests, whoever fills the role
     const repo = state.repos.find((r) => r.name === data.repo);
     if (!repo) throw new Error(`implementer.completed needs --data '{"repo":"<name>"}' naming a worktree of this run`);
     const wt = join(dir, "ws", repo.name);
     const dirty = dirtyFiles(wt);
     if (dirty.length) throw new Error(`${wt} has uncommitted changes (${dirty.join(", ")}); commit them so the check sees the whole step`);
-    const from = stepPoints(readLedger(dir), repo).impl;
+    const events = readLedger(dir);
+    const from = stepPoints(events, repo).impl;
     if (Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "merge-base", "--is-ancestor", from, "HEAD"]).exitCode !== 0) throw new Error(`${wt} HEAD is not a descendant of the recorded ${from}; history was rewritten`);
     const hit = touchedTaggedTests(wt, from, loadRepo(wt, repo.base_sha)); // base config: the implementer cannot widen its own exemptions
     if (hit.length) throw new Error(`implementer step touches AC-tagged test files: ${hit.join(", ")}`);
-    data = { repo: repo.name, head_sha: git(wt, "rev-parse", "HEAD") };
+    // After a take-over the human is the implementer: the step is theirs, under the identity of their escalation answer.
+    const takeOver = state.implementer === "human" ? events.findLast((e) => e.type === "gate.answered" && e.data.gate === "GE" && e.data.answer === "take_over") : undefined;
+    data = { repo: repo.name, head_sha: git(wt, "rev-parse", "HEAD"), by: takeOver ? String(takeOver.data.by) : "agent" };
   }
   return `advanced ${summary(record(dir, type, data))}`;
 }

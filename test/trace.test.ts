@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeF
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { rechain } from "./ledger";
+import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
+import { spawnArk } from "./tty";
 
 setDefaultTimeout(60_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
@@ -54,9 +56,10 @@ const commitAll = (dir: string, files: Record<string, string>) => {
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", "change");
 };
+// Every `ark test` in this file is the validator's step (it commits the tagged tests and then runs them), so it says so; a plain run is tested in integrity.test.ts.
 const ark = (...args: string[]) => {
   const env = { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, FLAKY_COUNTER: counter };
-  const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env });
+  const r = spawnArk(["bun", CLI, ...(args[0] === "test" && !args.includes("--as") ? [...args, "--as", "validator"] : args)], { cwd: proj, env });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const runsDir = () => join(home, "projects", "demo", "runs");
@@ -72,10 +75,10 @@ const sign = (id: string, body = "signed-by: Pat Reviewer\nat: 2026-10-21T10:00:
   mkdirSync(runFile("manual"), { recursive: true });
   writeFileSync(runFile(`manual/DEMO-1-${id}.md`), body);
 };
-const writeAcs = (acs: [id: string, level?: string][]) =>
-  writeFileSync(runFile("ac.yml"), acs.map(([id, level]) => `- id: DEMO-1-${id}\n  text: t${level ? `\n  level: ${level}` : ""}\n`).join(""));
+const writeAcs = (acs: [id: string, level?: string, kind?: string][]) =>
+  writeFileSync(runFile("ac.yml"), acs.map(([id, level, kind = "new"]) => `- id: DEMO-1-${id}\n  text: t${level ? `\n  level: ${level}` : ""}\n  kind: ${kind}\n`).join(""));
 // ac.yml must list exactly the run's ACs, so the ones a test does not care about are signed manual ACs.
-const acYml = (...acs: [id: string, level?: string][]) => {
+const acYml = (...acs: [id: string, level?: string, kind?: string][]) => {
   const rest = RUN_ACS.filter((id) => !acs.some(([a]) => a === id));
   writeAcs([...acs, ...rest.map((id): [string, string] => [id, "manual"])]);
   for (const id of rest) sign(id);
@@ -132,6 +135,7 @@ const ok = (r: { code: number; err: string }) => expect(r.err === "" ? r.code : 
 const toBuilding = () => {
   ok(ark("advance", run(), "analysis.completed"));
   writeFileSync(runFile("plan.md"), "# Plan\n");
+  setKinds(runFile(""));
   const h = ark("gate", "packet", run(), "G1").out.trim();
   ok(ark("gate", "answer", run(), "G1", "approve", "--packet", h));
   ok(ark("ws", "create", run()));
@@ -174,9 +178,9 @@ describe("ARK-106-AC1", () => {
     expect(r.code).toBe(0);
     const [rg] = events("test.red_green");
     const [base, head] = [rg.data.base_sha.slice(0, 12), rg.data.head_sha.slice(0, 12)];
-    expect(row("DEMO-1-AC1")).toBe(`| DEMO-1-AC1 | e2e | test/feature.test.ts > DEMO-1-AC1 new feature | ${base} failure | ${head} pass | artifacts/test/1 | pass |`);
-    expect(row("DEMO-1-AC2")).toBe("| DEMO-1-AC2 | manual | signed-by Pat Reviewer at 2026-10-21T10:00:00Z | - | - | manual/DEMO-1-AC2.md | pass |");
-    expect(row("DEMO-1-AC4")).toBe(`| DEMO-1-AC4 | integration | test/added.test.ts > DEMO-1-AC4 added module answers | ${base} error | ${head} pass | artifacts/test/1 | pass |`);
+    expect(row("DEMO-1-AC1")).toBe(`| DEMO-1-AC1 | new | e2e | test/feature.test.ts > DEMO-1-AC1 new feature | ${base} failure | ${head} pass | artifacts/test/1 | - | pass |`);
+    expect(row("DEMO-1-AC2")).toBe("| DEMO-1-AC2 | new | manual | signed-by Pat Reviewer at 2026-10-21T10:00:00Z | - | - | manual/DEMO-1-AC2.md | - | pass |");
+    expect(row("DEMO-1-AC4")).toBe(`| DEMO-1-AC4 | new | integration | test/added.test.ts > DEMO-1-AC4 added module answers | ${base} error | ${head} pass | artifacts/test/1 | - | pass |`);
     expect(matrix().split("\n").slice(4, -1).map((l) => l.split(" | ")[0])).toEqual(["| DEMO-1-AC1", "| DEMO-1-AC2", "| DEMO-1-AC3", "| DEMO-1-AC4", "| DEMO-1-AC5", "| DEMO-1-AC10"]);
     expect(matrix().split("\n")[0]).toContain(run());
     expect(events("trace.checked")[0].data).toEqual({
@@ -382,7 +386,7 @@ describe("ARK-106-AC4", () => {
     r = ark("gate", "packet", run(), "G2");
     expect(r.err).toBe("");
     expect(r.out.trim()).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(slurp(`gates/G2.${r.out.trim().slice("sha256:".length)}.packet.md`)).toContain("| DEMO-1-AC2 | manual |");
+    expect(slurp(`gates/G2.${r.out.trim().slice("sha256:".length)}.packet.md`)).toContain("| DEMO-1-AC2 | new | manual |");
     expect(JSON.parse(slurp("state.json")).state).toBe("awaiting_g2");
   });
 
@@ -458,5 +462,63 @@ describe("ARK-106 event ownership", () => {
     expect(slurp("ledger.ndjson")).toBe(ledgerBefore);
     writeFileSync(runFile("trace-matrix.md"), "| AC | Level |\n");
     expect(ark("gate", "packet", run(), "G2").code).toBe(1);
+  });
+});
+
+describe("ARK-117-AC5", () => {
+  test("a preserved AC needs preservation proof: a green run alone fails, and a passing preservation run (pass on base and on head) satisfies it", () => {
+    toBuilding();
+    implement(HEAD_FILES);
+    ok(ark("test", run(), "--acs", "DEMO-1-AC2")); // AC2 passes on base and on head
+    acYml(["AC2", "integration", "preserved"]);
+    const refused = trace();
+    expect(refused.code).toBe(1);
+    expect(refused.err).toMatch(/DEMO-1-AC2: demo: no preservation proof at \w{12}/);
+
+    ok(ark("test", run(), "--acs", "DEMO-1-AC2", "--preservation"));
+    expect(events("test.preservation")[0].data).toMatchObject({ acs: { "DEMO-1-AC2": "preserved" }, ok: true });
+    const passed = trace();
+    expect(passed.err).toBe("");
+    const base = events("test.preservation")[0].data.base_sha.slice(0, 12);
+    expect(row("DEMO-1-AC2")).toMatch(new RegExp(`^\\| DEMO-1-AC2 \\| preserved \\| integration \\| .*\\| ${base} pass \\| \\w{12} pass \\|.*\\| pass \\|$`));
+  });
+
+  test("a test that fails on the base is not preserved behavior, and a new AC is not satisfied by preservation proof", () => {
+    toBuilding();
+    implement(HEAD_FILES);
+    const failing = ark("test", run(), "--acs", "DEMO-1-AC1", "--preservation"); // AC1 fails on base
+    expect(failing.code).toBe(1);
+    expect(failing.out).toContain("DEMO-1-AC1: not-preserved");
+    ok(ark("test", run(), "--acs", "DEMO-1-AC2", "--preservation"));
+    acYml(["AC1", "e2e", "preserved"], ["AC2", "integration", "new"]);
+    const r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/DEMO-1-AC1: .*no preservation proof/);
+    expect(r.err).toMatch(/DEMO-1-AC2: demo: no red-green proof/);
+  });
+
+  test("an AC with no kind fails trace-check, naming it", () => {
+    toBuilding();
+    writeFileSync(runFile("ac.yml"), RUN_ACS.map((id) => `- id: DEMO-1-${id}\n  text: t\n  level: manual\n`).join(""));
+    for (const id of RUN_ACS) sign(id);
+    const r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("DEMO-1-AC1: no kind (new or preserved) in ac.yml");
+  });
+});
+
+describe("ARK-117-AC9", () => {
+  test("screenshots saved under artifacts/screenshots/<AC-ID>/ are listed in that AC's row, and only there", () => {
+    toBuilding();
+    implement(HEAD_FILES);
+    ok(ark("test", run(), "--acs", "DEMO-1-AC1,DEMO-1-AC4", "--red-green"));
+    acYml(["AC1"], ["AC4", "integration"]);
+    mkdirSync(runFile("artifacts/screenshots/DEMO-1-AC1"), { recursive: true });
+    writeFileSync(runFile("artifacts/screenshots/DEMO-1-AC1/b-after.png"), "png");
+    writeFileSync(runFile("artifacts/screenshots/DEMO-1-AC1/a-before.png"), "png");
+    expect(trace().err).toBe("");
+    expect(row("DEMO-1-AC1")).toContain("| artifacts/screenshots/DEMO-1-AC1/a-before.png, artifacts/screenshots/DEMO-1-AC1/b-after.png | pass |");
+    expect(row("DEMO-1-AC4")).toEndWith("| artifacts/test/1 | - | pass |");
+    expect(matrix()).toContain("| Screenshots | Status |");
   });
 });

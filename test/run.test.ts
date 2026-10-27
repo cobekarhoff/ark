@@ -4,7 +4,9 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rechain } from "./ledger";
+import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
+import { spawnArk } from "./tty";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 const FIXTURES = join(import.meta.dir, "fixtures", "ledgers");
@@ -34,13 +36,13 @@ const writeTicket = (id: string, acs: string[]) => {
   writeFileSync(join(home, "projects", "demo", "tickets", `${id}.md`), ticketMd(id, acs));
 };
 const ark = (...args: string[]) => {
-  const r = Bun.spawnSync(["bun", CLI, ...args], {
+  const r = spawnArk(["bun", CLI, ...args], {
     cwd: proj,
     env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1" },
   });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
-const runId = (id: string) => readdirSync(runsDir()).find((r) => r.endsWith(`-${id}`))!;
+const runId = (id: string) => readdirSync(runsDir()).find((r) => r.includes(`-${id}-`))!;
 const runFile = (id: string, f: string) => readFileSync(join(runsDir(), runId(id), f), "utf8");
 const state = (id: string) => JSON.parse(runFile(id, "state.json"));
 
@@ -56,15 +58,19 @@ const packetHash = (id: string, gate: string): string =>
   readFileSync(join(runsDir(), id, "ledger.ndjson"), "utf8").trim().split("\n").map((l) => JSON.parse(l))
     .findLast((e) => e.type === "gate.packet" && e.data.gate === gate).data.packet_sha256;
 const go = (id: string, event: string, data?: string) => {
+  if (event === "run.closed") return ark("run", "close", id, "merged"); // a human records the outcome (typed on the terminal)
   const [gate, answer] = gated[event] ?? [];
   if (gate === "GE" && !answer) writeFileSync(join(runsDir(), id, "premise.md"), "# premise\n"); // the packet's required input
   if (!gate) return ark("advance", id, event, ...(data ? ["--data", data] : []));
   if (answer) return ark("gate", "answer", id, gate, answer, "--packet", packetHash(id, gate));
-  if (gate === "G1" && !existsSync(join(runsDir(), id, "plan.md"))) writeFileSync(join(runsDir(), id, "plan.md"), "# plan.md\n");
+  if (gate === "G1") {
+    if (!existsSync(join(runsDir(), id, "plan.md"))) writeFileSync(join(runsDir(), id, "plan.md"), "# plan.md\n");
+    setKinds(join(runsDir(), id));
+  }
   if (gate === "G2") { // every AC is manual and signed, so the real trace-check passes
     const dir = join(runsDir(), id);
     const ids = (Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) as { id: string; text: string }[]).map((a) => a.id);
-    writeFileSync(join(dir, "ac.yml"), ids.map((i) => `- id: ${i}\n  text: t\n  level: manual\n`).join("") || "[]\n");
+    writeFileSync(join(dir, "ac.yml"), ids.map((i) => `- id: ${i}\n  text: t\n  level: manual\n  kind: new\n`).join("") || "[]\n");
     mkdirSync(join(dir, "manual"), { recursive: true });
     for (const i of ids) writeFileSync(join(dir, "manual", `${i}.md`), "signed-by: Gate Tester\nat: 2026-10-21\n");
     const t = ark("trace-check", id);
@@ -94,7 +100,7 @@ describe("ARK-103-AC1", () => {
 
     const dir = runId("ARK-901");
     const ledger = runFile("ARK-901", "ledger.ndjson").trim().split("\n").map((l) => JSON.parse(l));
-    expect(dir).toBe(`${ledger[0].ts.slice(0, 10)}-ARK-901`);
+    expect(dir).toBe(`${ledger[0].ts.slice(0, 10)}-ARK-901-1`);
     expect(readdirSync(join(runsDir(), dir)).sort()).toEqual(["ac.yml", "ledger.ndjson", "state.json", "ticket.json", "ticket.md"]);
     expect(runFile("ARK-901", "ticket.md")).toBe(ticketMd("ARK-901", ["First", "Second"]));
     expect(JSON.parse(runFile("ARK-901", "ticket.json"))).toEqual({
@@ -173,7 +179,7 @@ describe("ARK-103-AC3", () => {
   const place = (name: string) => {
     const ledger = readFileSync(join(FIXTURES, name, "ledger.ndjson"), "utf8");
     const first = JSON.parse(ledger.split("\n")[0]);
-    const id = `${first.ts.slice(0, 10)}-${first.data.ticket}`;
+    const id = `${first.ts.slice(0, 10)}-${first.data.ticket}-${first.data.n}`;
     mkdirSync(join(runsDir(), id), { recursive: true });
     cpSync(join(FIXTURES, name, "ledger.ndjson"), join(runsDir(), id, "ledger.ndjson"));
     return id;
@@ -184,11 +190,11 @@ describe("ARK-103-AC3", () => {
   // no-ac opened G0 straight from run.started.
   const expected: Record<string, object> = {
     lifecycle: {
-      run_id: "2026-10-21-ARK-901", state: "done", status: "done", next_action: null, ledger_seq: 9,
+      run_id: "2026-10-21-ARK-901-1", state: "done", status: "done", outcome: "merged", next_action: null, ledger_seq: 9,
       gates: { G1: { answer: "approve", at: "2026-10-21T20:41:07Z" }, G2: { answer: "approve", at: "2026-10-22T08:00:00Z" } },
     },
-    "fix-round": { run_id: "2026-10-21-ARK-902", state: "building", status: "active", next_action: { kind: "continue_build", agent: "orchestrator" }, ledger_seq: 10 },
-    "no-ac": { run_id: "2026-10-21-ARK-903", state: "awaiting_g0", status: "waiting_human", next_action: { kind: "answer_g0", agent: "human" }, acs: {}, ledger_seq: 2 },
+    "fix-round": { run_id: "2026-10-21-ARK-902-1", state: "building", status: "active", round: 2, next_action: { kind: "continue_build", agent: "orchestrator" }, ledger_seq: 10 },
+    "no-ac": { run_id: "2026-10-21-ARK-903-1", state: "awaiting_g0", status: "waiting_human", next_action: { kind: "answer_g0", agent: "human" }, acs: {}, ledger_seq: 2 },
   };
 
   for (const name of fixtures) {
@@ -253,10 +259,10 @@ describe("ARK-103-AC4", () => {
     ["approved", ["a"], ["analysis.completed", "g1.opened", "g1.approved"], "g1.approved"],
     ["building", ["a"], toBuilding, "build.started"],
     ["judging", ["a"], toJudging, "build.completed"],
-    ["awaiting_ge", ["a"], [...toJudging, "ge.opened"], "g2.approved"],
+    ["awaiting_ge", ["a"], [...toJudging, "fix_round.started", "build.completed", "fix_round.started", "build.completed", "ge.opened"], "g2.approved"], // escalation opens only once the two-round budget is spent
     ["awaiting_g2", ["a"], toG2, "build.completed"],
     ["mrs_open", ["a"], [...toG2, "g2.approved"], "build.started"],
-    ["done", ["a"], [...toG2, "g2.approved", "run.completed"], "abort"],
+    ["done", ["a"], [...toG2, "g2.approved", "run.closed"], "abort"],
     ["aborted", ["a"], ["abort"], "abort"],
   ];
 
@@ -286,7 +292,7 @@ describe("ARK-103-AC4", () => {
     });
   }
 
-  for (const [name, acs, path] of cases.filter((c) => !["done", "aborted"].includes(c[0]))) {
+  for (const [name, acs, path] of cases.filter((c) => !["mrs_open", "done", "aborted"].includes(c[0]))) { // aborted is the outcome before any MR exists: mrs_open has its own exit
     test(`${name}: abort is legal, closes the run, and a closed run accepts nothing`, () => {
       writeTicket("ARK-901", acs);
       ark("run", "start", "ARK-901");
@@ -294,7 +300,7 @@ describe("ARK-103-AC4", () => {
       for (const e of path) go(id, e);
       const out = ark("advance", id, "abort", "--data", '{"reason":"stop"}');
       expect(out.code, out.err).toBe(0);
-      expect(state("ARK-901")).toMatchObject({ state: "aborted", status: "aborted", next_action: null });
+      expect(state("ARK-901")).toMatchObject({ state: "aborted", status: "aborted", outcome: "aborted", next_action: null });
       expect(ark("advance", id, "analysis.completed").err).toContain("closed");
     });
   }
@@ -315,6 +321,8 @@ describe("ARK-103-AC4", () => {
       ["build.completed", "judging"],
       ["fix_round.started", "building"],
       ["build.completed", "judging"],
+      ["fix_round.started", "building"],
+      ["build.completed", "judging"],
       ["ge.opened", "awaiting_ge"],
       ["ge.answered", "building"],
       ["build.completed", "judging"],
@@ -323,7 +331,7 @@ describe("ARK-103-AC4", () => {
       ["build.completed", "judging"],
       ["g2.opened", "awaiting_g2"],
       ["g2.approved", "mrs_open"],
-      ["run.completed", "done"],
+      ["run.closed", "done"],
     ];
     for (const [event, to] of walk) {
       expect(go(id, event).code, event).toBe(0);
@@ -346,12 +354,16 @@ describe("ARK-103-AC5", () => {
       ["g1.approved", "approved", "orchestrator"],
       ["build.started", "building", "orchestrator"],
       ["build.completed", "judging", "orchestrator"],
+      ["fix_round.started", "building", "orchestrator"],
+      ["build.completed", "judging", "orchestrator"],
+      ["fix_round.started", "building", "orchestrator"],
+      ["build.completed", "judging", "orchestrator"],
       ["ge.opened", "awaiting_ge", "human"],
       ["ge.answered", "building", "orchestrator"],
       ["build.completed", "judging", "orchestrator"],
       ["g2.opened", "awaiting_g2", "human"],
       ["g2.approved", "mrs_open", "human"],
-      ["run.completed", "done", null],
+      ["run.closed", "done", null],
     ];
     expect(state("ARK-901").next_action).toMatchObject({ kind: expect.any(String), agent: "orchestrator" });
     for (const [event, to, who] of steps) {
@@ -388,5 +400,81 @@ describe("ARK-103-AC6", () => {
     ark("run", "start", "ARK-901");
     expect(ark("run", "start", "ARK-91").out).toStartWith("started ");
     expect(readdirSync(runsDir()).length).toBe(2);
+  });
+});
+
+describe("ARK-117-AC1", () => {
+  const folders = () => readdirSync(runsDir()).sort();
+
+  test("run ids are <date>-<ticket>-<n>; start resumes the open run and starts run n+1 once every earlier run is closed", () => {
+    writeTicket("ARK-901", ["a"]);
+    expect(ark("run", "start", "ARK-901").out).toMatch(/^started \d{4}-\d{2}-\d{2}-ARK-901-1\n/);
+    const [first] = folders();
+    expect(first).toMatch(/^\d{4}-\d{2}-\d{2}-ARK-901-1$/);
+    expect(state("ARK-901").run_id).toBe(first);
+
+    expect(ark("run", "start", "ARK-901").out).toContain(`resumed ${first}`); // run 1 is open
+    expect(folders()).toEqual([first]);
+
+    expect(ark("advance", first, "abort").code).toBe(0);
+    const again = ark("run", "start", "ARK-901");
+    expect(again.out).toMatch(/^started \d{4}-\d{2}-\d{2}-ARK-901-2\n/);
+    const second = folders().find((f) => f !== first)!;
+    expect(second).toEndWith("-ARK-901-2");
+    expect(JSON.parse(readFileSync(join(runsDir(), second, "state.json"), "utf8"))).toMatchObject({ run_id: second, state: "intake" });
+    expect(JSON.parse(readFileSync(join(runsDir(), first, "state.json"), "utf8"))).toMatchObject({ state: "aborted", outcome: "aborted" });
+
+    expect(ark("run", "start", "ARK-901").out).toContain(`resumed ${second}`); // the newest run is the open one
+    expect(folders().length).toBe(2);
+  });
+
+  test("a run folder from before runs were numbered is read as run 1", () => {
+    writeTicket("ARK-901", ["a"]);
+    const legacy = "2026-10-21-ARK-901";
+    const dir = join(runsDir(), legacy);
+    mkdirSync(dir, { recursive: true });
+    const lines = readFileSync(join(FIXTURES, "lifecycle", "ledger.ndjson"), "utf8").trim().split("\n");
+    const { n, ...first } = JSON.parse(lines[0]).data; // the ledger of a run that never recorded its number
+    writeFileSync(join(dir, "ledger.ndjson"), `${[JSON.stringify({ ...JSON.parse(lines[0]), data: first }), ...lines.slice(1)].join("\n")}\n`);
+    rechain(dir);
+    expect(n).toBe(1);
+
+    expect(ark("run", "replay", legacy).code).toBe(0);
+    expect(JSON.parse(readFileSync(join(dir, "state.json"), "utf8"))).toMatchObject({ run_id: `${legacy}-1`, state: "done", outcome: "merged" });
+    const r = ark("run", "start", "ARK-901"); // the legacy run is closed: the next one is run 2
+    expect(r.out).toMatch(/^started \d{4}-\d{2}-\d{2}-ARK-901-2\n/);
+    expect(folders()).toHaveLength(2);
+    expect(folders()).toContain(legacy);
+  });
+});
+
+describe("ARK-117-AC2", () => {
+  test("a run in mrs_open cannot be aborted: after an MR exists, the outcome is a human's to record", () => {
+    writeTicket("ARK-901", ["a"]);
+    ark("run", "start", "ARK-901");
+    const id = runId("ARK-901");
+    for (const e of ["analysis.completed", "g1.opened", "g1.approved", "build.started", "build.completed", "g2.opened", "g2.approved"]) expect(go(id, e).code, e).toBe(0);
+    expect(state("ARK-901")).toMatchObject({ state: "mrs_open", outcome: null });
+    const r = ark("advance", id, "abort");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("illegal event 'abort' in state 'mrs_open'");
+    expect(go(id, "run.closed").code).toBe(0);
+    expect(state("ARK-901")).toMatchObject({ state: "done", outcome: "merged" });
+  });
+});
+
+describe("ARK-117-AC10", () => {
+  test("run start says whether the route is logged: route: none until ark log route, on a new run and on a resumed one", () => {
+    writeTicket("ARK-901", ["a"]);
+    const fresh = ark("run", "start", "ARK-901");
+    const id = runId("ARK-901");
+    expect(fresh.out).toContain(`route: none (log it: ark log route ${id} <playbook> "<why>")`);
+    expect(ark("run", "start", "ARK-901").out).toContain("route: none"); // resumed before the route was logged
+
+    expect(ark("log", "route", id, "ticket", "new behavior").code).toBe(0);
+    const resumed = ark("run", "start", "ARK-901");
+    expect(resumed.out).toContain("resumed ");
+    expect(resumed.out).toContain("route: ticket");
+    expect(resumed.out).not.toContain("route: none");
   });
 });

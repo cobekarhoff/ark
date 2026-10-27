@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./repo";
 import { check, locked, open, project, readLedger, record, type RunState, sha256, type LedgerEvent, unattributed } from "./run";
@@ -6,7 +6,7 @@ import { check, locked, open, project, readLedger, record, type RunState, sha256
 type TestRow = { test: string; acs: string[]; red?: string; green?: string };
 type Ev = LedgerEvent & { data: { repo: string; head_sha: string; base_sha?: string; out: string; acs: Record<string, string>; tests: TestRow[]; unknown_tags?: string[] } };
 
-const NEW_BEHAVIOR = ["e2e", "integration", "unit"]; // red-green proof applies to these; manual ACs need a signed record instead
+const AC_KINDS = ["new", "preserved"]; // new needs red-green proof, preserved needs preservation proof; a manual AC needs a signed record either way
 const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim() || "-";
 // Locale-independent natural order: digit runs compare as integers, everything else by code unit, so AC2 < AC10 on every machine.
 const cmp = (a: string, b: string): number => {
@@ -18,11 +18,12 @@ const cmp = (a: string, b: string): number => {
   return x.length - y.length;
 };
 const uniq = (xs: string[]) => [...new Set(xs)].sort();
-// ark test records "pass"|"fail"|"flaky"|"missing"|"inconclusive"; ark test --red-green records "proven"|"no-red"|"inconclusive"|"green-failed"|"missing".
-// A red-green verdict says whether the red side held up, not how green went, so the green outcome of such an event is read from its test rows.
+// ark test records "pass"|"fail"|"flaky"|"missing"|"inconclusive"; ark test --red-green records "proven"|"no-red"|"inconclusive"|"green-failed"|"missing";
+// ark test --preservation records "preserved"|"not-preserved"|"inconclusive"|"green-failed"|"missing".
+// A red-green or preservation verdict says whether the base side held up, not how green went, so the green outcome of such an event is read from its test rows.
 function green(e: Ev, id: string): string {
   const v = e.data.acs[id];
-  if (e.type !== "test.red_green") return v;
+  if (e.type === "test.result") return v;
   if (v === "green-failed") return "fail";
   const rows = e.data.tests.filter((t) => t.acs.includes(id) && t.green !== "missing");
   if (!rows.length) return "missing";
@@ -33,7 +34,7 @@ function green(e: Ev, id: string): string {
 // The matrix and the reasons it fails, as a pure function of ac.yml, manual/<AC>.md, the ledger and the run worktrees' HEADs.
 // `ark trace-check` writes it; `ark gate packet G2` recomputes it instead of trusting a stored verdict.
 export function buildMatrix(dir: string, runId: string, state: RunState, events: LedgerEvent[]): { matrix: string; failures: string[] } {
-  const acs = (Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) ?? []) as { id: string; level?: string }[];
+  const acs = (Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) ?? []) as { id: string; level?: string; kind?: string }[];
   check("ac", acs, "ac.yml");
   const failures: string[] = unattributed(dir, state, events); // changes no recorded implementer step vouches for
   const listed = new Set(acs.map((a) => a.id));
@@ -52,23 +53,26 @@ export function buildMatrix(dir: string, runId: string, state: RunState, events:
   }));
   const bases = new Map(state.repos.map((r) => [r.name, r.base_sha]));
   const stale = new Set<string>(); // ACs that have evidence which does not count
-  // latest[id][repo] = the newest counting result and red-green event that name the AC; the later of the two is the green evidence.
-  const latest: Record<string, Record<string, { res?: Ev; rg?: Ev }>> = {};
+  // latest[id][repo] = the newest counting result, red-green and preservation event that name the AC; the latest of them is the green evidence.
+  const latest: Record<string, Record<string, { res?: Ev; rg?: Ev; pv?: Ev }>> = {};
   const unknown = new Set<string>();
   for (const e of events as Ev[]) {
-    if (e.type !== "test.result" && e.type !== "test.red_green") continue;
+    if (!["test.result", "test.red_green", "test.preservation"].includes(e.type)) continue;
     const counts = !!e.data.head_sha && heads.get(e.data.repo) === e.data.head_sha && (e.type === "test.result" || bases.get(e.data.repo) === e.data.base_sha);
     for (const id of Object.keys(e.data.acs)) {
       if (!counts) stale.add(id);
-      else ((latest[id] ??= {})[e.data.repo] ??= {})[e.type === "test.result" ? "res" : "rg"] = e;
+      else ((latest[id] ??= {})[e.data.repo] ??= {})[e.type === "test.result" ? "res" : e.type === "test.red_green" ? "rg" : "pv"] = e;
     }
     if (counts) for (const t of e.data.unknown_tags ?? []) unknown.add(t);
   }
 
-  const rows = acs.map(({ id, level = "e2e" }) => {
+  const rows = acs.map(({ id, level = "e2e", kind }) => {
     const row = (tests: string, red: string, grn: string, evidence: string, why?: string) => {
-      if (why) failures.push(`${id}: ${why}`);
-      return { id, line: `| ${[id, level, tests, red, grn, evidence].map(cell).join(" | ")} | ${why ? "fail" : "pass"} |` };
+      const flaw = [!AC_KINDS.includes(kind as string) && "no kind (new or preserved) in ac.yml", why].filter(Boolean).join("; ");
+      if (flaw) failures.push(`${id}: ${flaw}`);
+      const shots = join(dir, "artifacts", "screenshots", id); // UI or system behavior: screenshots the validator saved per AC, listed, never counted as proof
+      const screenshots = existsSync(shots) ? (readdirSync(shots, { recursive: true }) as string[]).filter((f) => statSync(join(shots, f)).isFile()).sort().map((f) => `artifacts/screenshots/${id}/${f}`) : [];
+      return { id, line: `| ${[id, kind ?? "-", level, tests, red, grn, evidence, screenshots.join(", ")].map(cell).join(" | ")} | ${flaw ? "fail" : "pass"} |` };
     };
     if (level === "manual") {
       const file = `manual/${id}.md`;
@@ -80,22 +84,25 @@ export function buildMatrix(dir: string, runId: string, state: RunState, events:
     const tests: string[] = [], red: string[] = [], grn: string[] = [], evidence: string[] = [];
     const bad: string[] = [];
     let passing = 0;
-    for (const [repo, { res, rg }] of Object.entries(latest[id] ?? {}).sort(([a], [b]) => cmp(a, b))) {
-      const g = !res || (rg && rg.seq > res.seq) ? rg! : res;
+    for (const [repo, { res, rg, pv }] of Object.entries(latest[id] ?? {}).sort(([a], [b]) => cmp(a, b))) {
+      const g = [res, rg, pv].filter((x): x is Ev => !!x).sort((a, b) => a.seq - b.seq).at(-1)!;
       const outcome = green(g, id);
       const mine = g.data.tests.filter((t) => t.acs.includes(id));
       tests.push(...mine.map((t) => t.test));
       grn.push(`${g.data.head_sha.slice(0, 12)} ${outcome}`);
       evidence.push(g.data.out);
-      if (rg) {
-        red.push(`${rg.data.base_sha?.slice(0, 12)} ${uniq(rg.data.tests.filter((t) => t.acs.includes(id)).map((t) => t.red ?? "missing")).join("/") || "missing"}`);
-        evidence.push(rg.data.out);
+      const proof = kind === "preserved" ? pv : rg; // the base-side record the AC's kind asks for
+      if (proof) {
+        red.push(`${proof.data.base_sha?.slice(0, 12)} ${uniq(proof.data.tests.filter((t) => t.acs.includes(id)).map((t) => t.red ?? "missing")).join("/") || "missing"}`);
+        evidence.push(proof.data.out);
       }
       if (outcome === "missing") continue; // the repo has no tagged test for this AC; another repo may
       if (outcome !== "pass") { bad.push(`${repo}: ${outcome}`); continue; }
       passing++;
-      if (NEW_BEHAVIOR.includes(level) && rg?.data.acs[id] !== "proven") {
+      if (kind === "new" && rg?.data.acs[id] !== "proven") {
         bad.push(`${repo}: no red-green proof at ${g.data.head_sha.slice(0, 12)} (red must fail or error on base, green must pass on head)`);
+      } else if (kind === "preserved" && pv?.data.acs[id] !== "preserved") {
+        bad.push(`${repo}: no preservation proof at ${g.data.head_sha.slice(0, 12)} (the tagged tests must pass on base and on head)`);
       }
     }
     const none = `no passing tagged test${stale.has(id) ? " at the current HEAD" : bad.length ? "" : " recorded"}`;
@@ -107,11 +114,11 @@ export function buildMatrix(dir: string, runId: string, state: RunState, events:
   // Unknown tags: AC IDs of this ticket found in a test report that the run does not have (other tickets' IDs are not unknown).
   for (const tag of [...unknown].sort(cmp)) {
     failures.push(`${tag}: unknown AC tag, not an AC of this run`);
-    rows.push({ id: tag, line: `| ${cell(tag)} | - | - | - | - | - | fail |` });
+    rows.push({ id: tag, line: `| ${cell(tag)} | - | - | - | - | - | - | - | fail |` });
   }
 
   rows.sort((a, b) => cmp(a.id, b.id));
-  const matrix = `# Trace matrix: ${runId}\n\n| AC | Level | Tests | Red (SHA, outcome) | Green (SHA, outcome) | Evidence | Status |\n| --- | --- | --- | --- | --- | --- | --- |\n${rows.map((r) => `${r.line}\n`).join("")}`;
+  const matrix = `# Trace matrix: ${runId}\n\n| AC | Kind | Level | Tests | Red (SHA, outcome) | Green (SHA, outcome) | Evidence | Screenshots | Status |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.map((r) => `${r.line}\n`).join("")}`;
   return { matrix, failures };
 }
 

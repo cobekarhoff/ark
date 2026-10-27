@@ -6,7 +6,8 @@ export const transitions = {
     "route.chosen": "awaiting_g0",
     "gate.packet:G0": "awaiting_g0",
     "gate.answered:G0:accept": "intake",
-    "gate.answered:G0:edit": "intake",
+    "gate.answered:G0:edit": "awaiting_g0", // nothing past G0 is legal until G0 accept: the ACs are re-read (ark ac update) and a new packet answered
+    "ac.updated": "awaiting_g0",
     "gate.answered:G0:abort": "aborted",
     abort: "aborted",
   },
@@ -24,6 +25,7 @@ export const transitions = {
     "implementer.completed": "building",
     "test.result": "building",
     "test.red_green": "building",
+    "test.preservation": "building",
     "trace.checked": "building",
     abort: "aborted",
   },
@@ -34,6 +36,7 @@ export const transitions = {
     "gate.packet:G2": "awaiting_g2",
     "test.result": "judging",
     "test.red_green": "judging",
+    "test.preservation": "judging",
     "trace.checked": "judging",
     abort: "aborted",
   },
@@ -49,18 +52,18 @@ export const transitions = {
     "gate.answered:G2:abort": "aborted",
     abort: "aborted",
   },
-  mrs_open: { "mr.opened": "mrs_open", "run.closed": "done", "run.completed": "done", abort: "aborted" },
+  mrs_open: { "mr.opened": "mrs_open", "run.closed": "done" }, // aborted is the outcome before any MR exists; from here a human closes the run (ark run close, or ark mr when mr: false)
   done: {},
   aborted: {},
 } as const satisfies Record<string, Record<string, string>>;
 
 // Event types written by a dedicated command, which `ark advance` refuses: the owner is what makes the ledger evidence trustworthy.
 // A key ending in "." owns the whole family (test.* ...), any other key one type. Ownership holds in every state, before legality is asked.
-// ge.* is retired: escalation is the GE gate, so a stray `advance ge.opened` is pointed at `ark gate`. `ark ac update` (ac.updated) arrives with ARK-117.
+// ge.* is retired: escalation is the GE gate, so a stray `advance ge.opened` is pointed at `ark gate`.
 const owners: [prefix: string, command: string][] = [
   ["gate.", "gate"], ["ge.", "gate"], ["ws.", "ws"], ["test.", "test"], ["trace.", "trace-check"], ["mr.", "mr"],
   ["artifact.", "artifact record"], ["ac.", "ac update"],
-  ["run.closed", "mr"], ["route.chosen", "log route"], ["findings.recorded", "findings record"],
+  ["run.closed", "run close"], ["route.chosen", "log route"], ["findings.recorded", "findings record"],
 ];
 export const ownerOf = (type: string) => owners.find(([p]) => (p.endsWith(".") ? type.startsWith(p) : type === p))?.[1];
 

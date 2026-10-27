@@ -1,12 +1,14 @@
 {
   "schema": 1,
-  "run_id": "2026-10-21-ARK-901",
+  "run_id": "2026-10-21-ARK-901-1",
   "ticket": "ARK-901",
   "playbook": "ticket",
   "state": "done",
   "status": "done",
+  "outcome": "merged",
   "tier": null,
   "round": 0,
+  "implementer": "agent",
   "next_action": null,
   "gates": {
     "G1": {
@@ -35,5 +37,5 @@
   "sessions": [],
   "lock": null,
   "ledger_seq": 9,
-  "ledger_head": "sha256:75499a4bf7fc95be6d125c2cc025b5b19eaf83b9a78593c04eacdc9959222bf5"
+  "ledger_head": "sha256:876390af97bfd2113d7f2ce2e06e82b9963fd6f6fc9dd9eded5b60a504462baf"
 }
