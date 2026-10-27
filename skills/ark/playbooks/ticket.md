@@ -19,7 +19,7 @@ Copy these ten lines into the todo list verbatim.
 
 ## Calls per step
 
-Run each command through bash. A non-zero exit is a refusal: read its message, fix the cause, never work around it.
+Every `ark ...` call below is the typed tool named after it (`ark advance` is `ark_advance`, `ark gate packet` is `ark_gate_packet`, `ark trace-check` is `ark_trace_check`); you have no bash. A tool error is a refusal: read its message, fix the cause, never work around it.
 
 ### 1. Intake
 - State `awaiting_g0` (no ACs): `ark gate packet <run> G0` prints the packet sha256. `ask` with Accept / Edit / Abort, then `ark gate answer <run> G0 accept|edit|abort --packet <sha256>`. (`abort`: stop.) Drafting ACs into the run is not wired yet: on accept or edit, tell the human to add the ACs to the ticket file and start a fresh run.

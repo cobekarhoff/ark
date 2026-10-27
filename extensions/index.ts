@@ -11,6 +11,8 @@ type Ctx = { cwd: string; agent: { kind: string }; sessionManager: { getSessionI
 
 export default function (pi: { on: (event: "tool_call", handler: (event: { toolName: string; input: unknown }, ctx: Ctx) => unknown) => void }) {
   pi.on("tool_call", (event, ctx) => {
+    // The typed ark_* tools are the orchestrator's: omp hands every subagent the session's custom tools too, and ark_mr runs with the human's credentials (ARK-118).
+    if (ctx.agent.kind !== "main" && event.toolName.startsWith("ark_")) return { block: true, reason: `blocked: ${event.toolName} is the orchestrator's tool; subagents never call the ark CLI that way` };
     if (ctx.agent.kind !== "main" || !GUARDED.includes(event.toolName)) return; // other tools never reach a file; no need to spawn the CLI for them
     const r = Bun.spawnSync(["bun", CLI, "hook", "tool_call"], {
       cwd: ctx.cwd,

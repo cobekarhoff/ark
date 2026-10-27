@@ -157,6 +157,8 @@ describe("ARK-115-AC10", () => {
       expect(handler({ toolName: "write", input: { path: product() } }, ctx("main", "S1"))).toMatchObject({ block: true }); // bound by the session id alone
       expect(handler({ toolName: "write", input: { path: product() } }, ctx("main", "S3"))).toBeUndefined(); // another session, nothing bound
       expect(handler({ toolName: "eval", input: { code: "1" } }, ctx("sub", "S1"))).toBeUndefined();
+      expect(handler({ toolName: "ark_mr", input: { run_id: "r" } }, ctx("sub", "S1"))).toMatchObject({ block: true, reason: expect.stringContaining("ark_mr") }); // ARK-118: ark_mr carries the human's credentials
+      expect(handler({ toolName: "ark_mr", input: { run_id: "r" } }, ctx("main", "S1"))).toBeUndefined();
     } finally {
       if (saved === undefined) delete process.env.ARK_HOME; else process.env.ARK_HOME = saved;
     }

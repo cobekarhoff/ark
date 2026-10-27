@@ -45,6 +45,17 @@ ark mr <run_id>   # in mrs_open: push each run branch with the CLI's own credent
 
 Per repo it pushes the approved `head_sha` to `ark/*` branches only (refusing if the worktree HEAD moved since), using the origin URL from the main checkout's config, with credentials redacted from errors. The PR description carries the ticket's ACs, `trace-matrix.md` and the evidence paths relative to the run folder. An open PR from this repo into the default branch is adopted instead of opening a second; a closed or merged one is refused by name. Until every repo has an MR the run's next action is `open_mrs` (orchestrator). `mr: false` in `ark.yml` makes the G2 approval itself record `run.closed` (`mr disabled`), leaving ready branches. `ark advance` refuses `mr.opened`, `run.closed` and `ws.created`. There is no merge command, and `ark mr` only ever calls `gh pr list` and `gh pr create`; agents get no gh or merge tool (ARK-108 owns agent tool lists).
 
+## Launch and doctor (ARK-118)
+
+```sh
+ark launch [omp args]   # the orchestrator session: omp with --tools <read-only built-ins, write, edit, task, wait, ask, todo, ark_*> --no-lsp
+ark doctor              # exit 1 unless the host's default branch includes admins, requires a PR and a status check, and forbids force pushes
+```
+
+`ark launch` is how the router skill runs. The session has no `bash`, `eval` or `lsp` (omp offers only what `--tools` names, so the `xd://bash` device is gone too), and every `ark` call is a typed `ark_*` tool (`tools/ark.ts`; they export `PI_SESSION_ID` the way omp's bash tool does, so the hook finds the run). `write` and `edit` stay, confined to the run folder by the `tool_call` hook, which `ark launch` loads itself (`-e extensions/index.ts`) so the confinement does not depend on the plugin being installed; the hook applies once the session is bound, i.e. after `ark_run_start`. Use `--tools`, not `bash.enabled: false`: that setting is global and takes bash from the subagents, which need it. Subagents keep the tools their agent files name, but omp also hands them every custom tool of the session, so the extension blocks any `ark_*` call from a non-main agent (`ctx.agent.kind`); the tool context itself does not say which agent calls.
+
+Subagents run inside the orchestrator's process, so they share its environment; omp has no per-agent environment. `ark launch` therefore starts the whole process without git or gh credentials: `GIT_CONFIG_GLOBAL` is a generated file under `$ARK_HOME/credential-free/` holding only the user's name and email and an empty `credential.helper`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`, `GH_CONFIG_DIR` is an empty directory, and `GH_TOKEN`, `GITHUB_TOKEN` and the enterprise variants are unset. Only the `ark_mr` tool runs its child without those variables, so `ark mr` uses the human's own login: it needs `gh auth login` (keyring) or a git credential helper, not a token in the environment. https remotes only: ssh keys and the ssh agent are not touched. This stops an honest agent's `git push` and `gh` calls. It does not stop a deliberate one: `gh auth token` still reads the keyring, and `~/.gitconfig` is readable (ADR 0003).
+
 ## Worktrees and tests
 
 ```sh
