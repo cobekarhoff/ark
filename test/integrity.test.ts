@@ -620,6 +620,32 @@ describe("ARK-115-AC9", () => {
     expect(p.err).toMatch(/shares the implementer's vendor/);
   });
 
+  // OMP runs a role against the models it has credentials for, not the whole catalog: `gpt-5` is openai/gpt-5 with no Copilot login and
+  // github-copilot/gpt-5 with one (an isolated agent dir, credentials from the environment, no network).
+  const copilotLogin = { ANTHROPIC_API_KEY: "x", COPILOT_GITHUB_TOKEN: "y" };
+  const preflightWith = (login: Record<string, string>) => {
+    const r = Bun.spawnSync(["bun", CLI, "preflight"], { cwd: proj, env: env(login) });
+    return { code: r.exitCode, err: r.stderr.toString(), out: r.stdout.toString() };
+  };
+  const onCopilot = { implement: "github-copilot/gpt-5", validate: "anthropic/claude-sonnet-5-5", "review-x": "anthropic/claude-opus-5-5", "review-s": "github-copilot/gpt-5" };
+
+  test.each([
+    ["a bare primary selector", "gpt-5"],
+    ["a bare selector in a comma list", "anthropic/claude-sonnet-5-5,gpt-5"],
+  ])("%s runs on the available provider and shares the implementer's vendor with it", (_n, validate) => {
+    config({ ...onCopilot, validate });
+    const p = preflightWith(copilotLogin);
+    expect(p.code).toBe(1);
+    expect(p.err).toContain("validate (github-copilot/gpt-5) shares the implementer's vendor 'github-copilot'");
+  });
+
+  test("without a Copilot login the same bare selector is openai/gpt-5, and preflight accepts", () => {
+    config({ ...onCopilot, validate: "gpt-5" });
+    const p = preflightWith({ ANTHROPIC_API_KEY: "x" });
+    expect(p.err).toBe("");
+    expect(p.out).toContain("validate: openai/gpt-5");
+  });
+
   test.each([
     ["implement", { ...base, implement: "zzz-no-such-model" }, ""],
     ["validate", { ...base, validate: "anthropic/claude-sonnet-5-5,zzz-no-such-model" }, ""],
