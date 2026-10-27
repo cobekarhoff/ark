@@ -548,7 +548,7 @@ describe("ARK-115-AC9", () => {
     ["a provider wildcard chain", base, `retry:\n  fallbackChains:\n    "anthropic/*": [${CODEX}]\n`, `validate (${CODEX}) shares`],
     ["a chain reached through another chain", base, `retry:\n  fallbackChains:\n    validate: [anthropic/claude-haiku-5]\n    anthropic/claude-haiku-5: [${CODEX}]\n`, `validate (${CODEX}) shares`],
     ["an implementer chain that lands on the validator's provider", base, `retry:\n  fallbackChains:\n    implement: [anthropic/claude-sonnet-5-5]\n`, "validate (anthropic/claude-sonnet-5-5) shares"],
-    ["a review-s chain that leaves the implementer's provider", base, `retry:\n  fallbackChains:\n    review-s: [anthropic/claude-opus-5-5]\n`, "review-s (anthropic/claude-opus-5-5) is not on"],
+    ["a review-s chain that leaves the implementer's provider", { ...base, "review-s": "openai-codex/gpt-6-sol" }, `retry:\n  fallbackChains:\n    review-s: [anthropic/claude-opus-5-5]\n`, "review-s (anthropic/claude-opus-5-5) is not on"],
   ])("preflight refuses %s", (_n, roles, extra, msg) => {
     config(roles, extra);
     const p = ark("preflight");
@@ -574,6 +574,12 @@ describe("ARK-115-AC9", () => {
     const p = ark("preflight");
     expect(p.code).toBe(1);
     expect(p.err).toContain(`validate (${CODEX}) shares`);
+    expect(p.err).toContain(`via retry.fallbackChains.anthropic/claude-sonnet-5-5 (global config ${join(agentDir, "config.yml")})`);
+  });
+
+  test("a chain the project defines is named as the project's", () => {
+    config(base, `retry:\n  fallbackChains:\n    validate: [${CODEX}]\n`);
+    expect(ark("preflight").err).toContain("via retry.fallbackChains.validate (project config");
   });
 
   test("a role only the global OMP config defines counts, and the project's roles win over it", () => {
@@ -599,6 +605,26 @@ describe("ARK-115-AC9", () => {
     const p = ark("preflight");
     expect(p.err).toContain("vendor 'openai-codex'");
     expect(p.err).not.toContain("provider");
+  });
+
+  // The three selector shapes OMP resolves that a text comparison missed (panel re-review of PR #12).
+  test.each([
+    ["a fuzzy primary selector is resolved to its concrete model before its chain is looked up", { ...base, validate: "anthropic/sonnet-5-5" }, `retry:\n  fallbackChains:\n    anthropic/claude-sonnet-5-5: [${CODEX}]\n`],
+    ["a wildcard entry keeps a nested id prefix, so the exact model it names is found", { ...base, validate: "openrouter/anthropic/claude-sonnet-5.5" }, `retry:\n  fallbackChains:\n    openrouter/anthropic/claude-sonnet-5.5: ["vercel-ai-gateway/*"]\n    vercel-ai-gateway/anthropic/claude-sonnet-5.5: [${CODEX}]\n`],
+    ["an effort-specific chain key is not hidden by dropping the thinking suffix", { ...base, validate: "anthropic/claude-sonnet-5-5:high" }, `retry:\n  fallbackChains:\n    "anthropic/claude-sonnet-5-5:high": [${CODEX}]\n`],
+    ["a role that shares the implementer's model owns the implementer's fallback (OMP matches role chains by assigned model)", base, `retry:\n  fallbackChains:\n    review-s: [anthropic/claude-opus-5-5]\n`],
+  ])("preflight refuses: %s", (_n, roles, extra) => {
+    config(roles, extra);
+    const p = ark("preflight");
+    expect(p.code).toBe(1);
+    expect(p.err).toMatch(/shares the implementer's vendor/);
+  });
+
+  test("when OMP cannot be loaded, preflight refuses instead of guessing", () => {
+    config(base);
+    const r = Bun.spawnSync(["bun", CLI, "preflight"], { cwd: proj, env: env({ ARK_OMP_PACKAGE: join(agentDir, "no-such-omp") }) });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr.toString()).toContain("preflight refused: OMP's model resolver failed");
   });
 });
 
