@@ -103,7 +103,7 @@ function fixture(up = "echo up >> $ARK_OUT/order", suiteOver: Record<string, unk
   const suite = {
     format: "bun-test",
     level: "integration",
-    run: 'echo run >> $ARK_OUT/order; bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml',
+    run: 'echo run >> $ARK_OUT/order; bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml',
     junit: "$ARK_OUT/bun.xml",
     env: { up, down: "echo down >> $ARK_OUT/order", vars: { FLAKY_COUNTER: counter } }, // the suite's own environment: nothing else of the caller's reaches it
     ...suiteOver,
@@ -487,7 +487,7 @@ describe("ARK-115-AC7", () => {
   });
 
   test("a runner that did not start on base is inconclusive", () => {
-    const run = 'if [ -f runner.txt ]; then bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml; else echo runner missing >&2; exit 127; fi';
+    const run = 'if [ -f runner.txt ]; then bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml; else echo runner missing >&2; exit 127; fi';
     fixture(undefined, { run, env: undefined });
     toBuilding();
     withSrc({ ...NEW_FEATURE, "runner.txt": "x\n" }, { "test/vacuous.test.ts": bunTest(`test("DEMO-1-AC1 asserts nothing", () => { expect(1).toBe(1); });`) });
@@ -534,25 +534,24 @@ describe("ARK-115-AC7", () => {
 });
 
 describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
-  test("a suite none of whose test files carries a selected AC is not run, so its runner's no-match exit cannot fail the run", () => {
-    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml', junit: "$ARK_OUT/e2e.xml" };
+  test("a suite with no test for the selected AC passes via --pass-with-no-tests, so it cannot fail the run", () => {
+    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml', junit: "$ARK_OUT/e2e.xml" };
     fixture(undefined, { tests: ["test/**"] }, { suites: { e2e }, files: { "e2e/e.test.ts": bunTest(`test("DEMO-1-AC2 only in e2e", () => { expect(1).toBe(1); });`) } });
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 in unit only", () => { expect(1).toBe(1); });`) });
     const r = ark("test", run(), "--acs", "DEMO-1-AC1");
     expect(r.out).toContain("DEMO-1-AC1: pass");
-    expect(r.out).not.toContain("e2e"); // not run: none of its files carries the selected AC
     expect(r.code).toBe(0);
-    expect(existsSync(runFile("artifacts/test/1/e2e.stdout.log"))).toBe(false);
+    expect(slurp(runFile("artifacts/test/1/e2e.stderr.log"))).toContain("matched 0 tests"); // it did run, selected nothing and exited 0
   });
 
-  test("every suite that runs must exit 0: a selected file that fails to load, or an empty report with exit 127, fails the run", () => {
-    const other = { format: "bun-test", level: "e2e", tests: ["other/**"], run: 'bun test ./other -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/other.xml', junit: "$ARK_OUT/other.xml" };
+  test("every suite must exit 0: a selected file that fails to load, or an empty report with exit 127, fails the run", () => {
+    const other = { format: "bun-test", level: "e2e", tests: ["other/**"], run: 'bun test ./other -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/other.xml', junit: "$ARK_OUT/other.xml" };
     const files = {
       "other/ok.test.ts": bunTest(`test("DEMO-1-AC2 fine", () => { expect(1).toBe(1); });`),
       "other/bad.test.ts": bunTest(`test("DEMO-1-AC1 never loads", () => { expect(missing).toBe(1); });`, `import { missing } from "./not-there";`),
     };
-    fixture(undefined, { tests: ["test/**"], run: 'bun test ./test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { other }, files }); // the unit suite stays out of other/
+    fixture(undefined, { tests: ["test/**"], run: 'bun test ./test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { other }, files }); // the unit suite stays out of other/
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
     const load = ark("test", run(), "--acs", "DEMO-1-AC1");
@@ -560,7 +559,7 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("fail");
     expect(load.out).toContain("suite 'other' exited 1");
 
-    const empty = { format: "bun-test", level: "e2e", run: "touch $ARK_OUT/empty.xml; exit 127 # {tags}", junit: "$ARK_OUT/empty.xml" };
+    const empty = { format: "bun-test", level: "e2e", run: "touch $ARK_OUT/empty.xml; exit 127 # --pass-with-no-tests {tags}", junit: "$ARK_OUT/empty.xml" };
     fixture(undefined, {}, { suites: { empty } });
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
@@ -570,9 +569,9 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(r.out).toContain("suite 'empty' exited 127");
   });
 
-  test("a suite that holds the selected AC fails the run when its command exits non-zero, even after bun's no-match: there is no output signature to excuse a failing step", () => {
+  test("a suite fails the run when its command exits non-zero, even after bun's no-match: there is no output signature to excuse a failing step", () => {
     // The suite's files carry DEMO-1-AC2, but its command runs a directory without it (bun: no-match, exit 1), then a post-step that exits 1 as well.
-    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e/runme -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml; test -f missing.json', junit: "$ARK_OUT/e2e.xml" };
+    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e/runme -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml; test -f missing.json', junit: "$ARK_OUT/e2e.xml" };
     fixture(undefined, { tests: ["test/**"] }, { suites: { e2e }, files: {
       "e2e/e.test.ts": bunTest(`test("DEMO-1-AC2 outside the run directory", () => { expect(1).toBe(1); });`),
       "e2e/runme/x.test.ts": bunTest(`test("DEMO-1-AC9 elsewhere", () => { expect(1).toBe(1); });`),
@@ -585,7 +584,7 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
   });
 
   test("a suite that holds tagged tests for a selected AC but reports none (a command that runs nothing) fails green and makes red inconclusive", () => {
-    const silent = { format: "bun-test", level: "e2e", run: "true # {tags}", junit: "$ARK_OUT/silent.xml" };
+    const silent = { format: "bun-test", level: "e2e", run: "true # --pass-with-no-tests {tags}", junit: "$ARK_OUT/silent.xml" };
     fixture(undefined, {}, { suites: { silent } });
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
@@ -595,7 +594,7 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(g.out).toContain("suite 'silent' holds tagged tests for DEMO-1-AC1 but reported none");
 
     // the second suite does its job on head only: on base it runs nothing
-    const late = { format: "bun-test", level: "e2e", run: 'if [ -f late.txt ]; then bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/late.xml; fi', junit: "$ARK_OUT/late.xml" };
+    const late = { format: "bun-test", level: "e2e", run: 'if [ -f late.txt ]; then bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/late.xml; fi', junit: "$ARK_OUT/late.xml" };
     fixture(undefined, {}, { suites: { late } });
     toBuilding();
     withSrc({ ...NEW_FEATURE, "late.txt": "x\n" }, { "test/feature.test.ts": FEATURE_TEST });
@@ -606,15 +605,15 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
   });
 
   test("a mistyped tag in a file of a suite that holds no selected AC still reaches unknown_tags", () => {
-    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml', junit: "$ARK_OUT/e2e.xml" };
-    fixture(undefined, { tests: ["test/**"], run: 'bun test ./test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { e2e }, files: { "e2e/typo.test.ts": bunTest(`test("DEMO-1-AC11 typo", () => { expect(1).toBe(1); });`) } });
+    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml', junit: "$ARK_OUT/e2e.xml" };
+    fixture(undefined, { tests: ["test/**"], run: 'bun test ./test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { e2e }, files: { "e2e/typo.test.ts": bunTest(`test("DEMO-1-AC11 typo", () => { expect(1).toBe(1); });`) } });
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
     expect(ark("test", run(), "--acs", "DEMO-1-AC1").code).toBe(0);
     expect(events("test.result")[0].data.unknown_tags).toEqual(["DEMO-1-AC11"]);
   });
 
-  test("a recorded tree with a submodule (gitlink) cannot be proven: green and red-green are inconclusive, naming the path", () => {
+  test("a recorded tree with a submodule (gitlink) cannot be proven: the run is inconclusive, naming the path", () => {
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
     const lib = join(root, "lib-sub"); // a local repository holding a failing tagged test that bun would run from inside the worktree
@@ -630,8 +629,30 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(g.out).toContain("submodules are not supported by ark test yet: vendor/lib");
   });
 
+  test("every suite runs, so a selected test whose name is built at run time still counts: its failure fails the run", () => {
+    const gen = { format: "bun-test", level: "e2e", tests: ["gen/**"], run: 'bun test ./gen -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/gen.xml', junit: "$ARK_OUT/gen.xml" };
+    const files = { "gen/g.test.ts": bunTest("const ticket = \"DEMO-1\";\ntest(`${ticket}-AC1 name built at run time`, () => { expect(1).toBe(2); });") };
+    fixture(undefined, { tests: ["test/**"], run: 'bun test ./test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { gen }, files });
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
+    const r = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("fail");
+  });
+
+  test("a bun-test suite whose run lacks --pass-with-no-tests is refused before anything runs, naming the suite", () => {
+    fixture(undefined, { run: 'bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' });
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
+    const r = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("suite 'unit': bun-test suites must pass --pass-with-no-tests so a suite without the selected ACs exits 0");
+    expect(events("test.result")).toEqual([]);
+    expect(existsSync(runFile("artifacts/test"))).toBe(false);
+  });
+
   test("a second suite that produces no JUnit and exits non-zero fails the run, on green; on red it makes the AC inconclusive", () => {
-    const ghost = { format: "bun-test", level: "e2e", run: 'test -f ghost.txt && bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/ghost.xml', junit: "$ARK_OUT/ghost.xml" }; // exits 1 without a report until ghost.txt exists
+    const ghost = { format: "bun-test", level: "e2e", run: 'test -f ghost.txt && bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/ghost.xml', junit: "$ARK_OUT/ghost.xml" }; // exits 1 without a report until ghost.txt exists
     fixture(undefined, {}, { suites: { ghost } });
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });

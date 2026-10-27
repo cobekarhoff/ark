@@ -72,18 +72,20 @@ function runSuite(name: string, s: Suite, cwd: string, out: string, ids: string[
   }
 }
 
-// Only a suite with a test file (its globs, in this checkout) that carries a selected AC runs; every suite that runs must then exit 0
-// and report, in its own JUnit, a record for each selected AC its files carry (`silent`: it did not, e.g. a command that runs nothing).
+// Every suite runs for every selection (selecting by tag text in the files would miss a test whose name is built at run time), and each must exit 0
+// and, for each selected AC its files statically carry, report a record in its own JUnit (`silent`: it did not, e.g. a command that runs nothing).
 // No runner output is read to excuse a non-zero exit: a suite's `run` is a shell command, and nothing in its output says which step failed.
-// `tags` also holds every tag found in the suites' files, run or not, so a mistyped tag in an unselected suite still reaches trace-check.
-// ponytail: selection is by tag text in the files, not by what the runner collects; add `collect`-based selection when a runner needs it.
+// `tags` also holds every tag found in the suites' files, so a mistyped tag in a suite that holds no selected AC still reaches trace-check.
 function tagged(cfg: RepoConfig, cwd: string, out: string, ids: string[], rerun: boolean, fp: Fp) {
-  const found = Object.entries(cfg.suites).map(([name, s]) => ({ name, s, held: [...new Set(suiteTestFiles(s, cwd).flatMap((f) => parsers[s.format].tagsIn(readFileSync(join(cwd, f), "utf8"))))] }));
-  const runs = found.filter((f) => f.held.some((t) => ids.includes(t))).map((f) => ({ ...f, ...runSuite(f.name, f.s, cwd, out, ids, rerun, fp) }));
+  const runs = Object.entries(cfg.suites).map(([name, s]) => ({
+    name,
+    held: [...new Set(suiteTestFiles(s, cwd).flatMap((f) => parsers[s.format].tagsIn(readFileSync(join(cwd, f), "utf8"))))],
+    ...runSuite(name, s, cwd, out, ids, rerun, fp),
+  }));
   const silent = runs.flatMap((r) => r.held.filter((t) => ids.includes(t) && !r.cases.some((c) => c.acs.includes(t))).map((ac) => ({ suite: r.name, ac })));
   return {
     cases: runs.flatMap((r) => r.cases),
-    tags: [...runs.flatMap((r) => r.tags), ...found.flatMap((f) => f.held)],
+    tags: [...runs.flatMap((r) => r.tags), ...runs.flatMap((r) => r.held)],
     exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])),
     silent,
   };
@@ -101,6 +103,11 @@ function prepare(runId: string, type: string, ids: string[], repoName?: string) 
   const wt = join(dir, "ws", repo.name);
   if (git(wt, "status", "--porcelain", "--untracked-files=no")) throw new Error(`${wt} has uncommitted changes; commit them so the run proves a SHA`);
   const head = git(wt, "rev-parse", "HEAD");
+  const cfg = loadRepo(wt, repo.base_sha); // suite commands and test globs as committed at base_sha: the implementer cannot edit its own proof rules
+  for (const [name, suite] of Object.entries(cfg.suites)) {
+    const problem = parsers[suite.format].runProblem(suite.run);
+    if (problem) throw new Error(`suite '${name}': ${problem}`);
+  }
   const root = join(dir, "artifacts", "test");
   mkdirSync(root, { recursive: true });
   const attempt = Math.max(0, ...readdirSync(root).map(Number).filter(Number.isInteger)) + 1;
@@ -108,7 +115,7 @@ function prepare(runId: string, type: string, ids: string[], repoName?: string) 
   mkdirSync(out);
   const fp: Fp = { git_sha: head, bun: Bun.version, os: `${process.platform} ${release()} ${arch()}`, images: [] };
   const unknownTags = (tags: string[]) => [...new Set(tags)].filter((t) => t.startsWith(`${state.ticket}-AC`) && !(t in state.acs)).sort();
-  return { dir, repo, wt, head, unknownTags, attempt, out, fp, cfg: loadRepo(wt, repo.base_sha), where: relative(dir, out) }; // suite commands and test globs as committed at base_sha: the implementer cannot edit its own proof rules
+  return { dir, repo, wt, head, unknownTags, attempt, out, fp, cfg, where: relative(dir, out) };
 }
 
 const finish = (ok: boolean, text: string) => {

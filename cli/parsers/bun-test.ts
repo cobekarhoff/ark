@@ -38,3 +38,7 @@ export const tagsIn = (source: string): string[] => [...new Set(source.match(AC_
 // Static check for AC7: does this source file carry an AC tag?
 export const taggedFile = (source: string) => tagsIn(source).length > 0;
 
+
+// Every suite runs for every selection, so a suite that holds none of the selected ACs must exit 0: bun exits 1 when `-t` matches nothing unless told otherwise.
+export const runProblem = (run: string): string | undefined =>
+  run.includes("--pass-with-no-tests") ? undefined : "bun-test suites must pass --pass-with-no-tests so a suite without the selected ACs exits 0";

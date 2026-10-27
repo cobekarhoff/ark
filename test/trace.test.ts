@@ -30,7 +30,7 @@ const SHARED = bunTest(`test("DEMO-1-AC1 and DEMO-1-AC9 share one test", () => {
 
 // The suite's own environment: only PATH, HOME and the like of the caller's reach a suite.
 const repoYml = () => JSON.stringify({
-  suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml", env: { vars: { FLAKY_COUNTER: counter } } } },
+  suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml", env: { vars: { FLAKY_COUNTER: counter } } } },
 });
 
 let home: string;
