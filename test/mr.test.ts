@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { rechain } from "./ledger";
 import { OMP_CONFIG } from "./omp-config";
+import { credentialFreeEnv } from "../cli/launch";
 
 setDefaultTimeout(60_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
@@ -310,5 +311,58 @@ describe("ARK-107-AC3", () => {
       expect(r.err).toContain(`written by '${owner}'`);
     }
     expect(readFileSync(runFile("ledger.ndjson"), "utf8")).toBe(before);
+  });
+});
+
+// The typed ark_mr tool as an `ark launch` session runs it: the process is credential-free, and only this tool's child gets the human's values back.
+const ARK_MR_DRIVER = `
+const z: any = new Proxy(function () {}, { get: () => z, apply: () => z });
+const tools = (await import(${JSON.stringify(join(import.meta.dir, "..", "tools", "ark.ts"))})).default({ zod: z });
+const res = await tools.find((t: any) => t.name === "ark_mr").execute("id", { run_id: process.argv[2] }, undefined, { sessionManager: { getSessionId: () => "s" } });
+console.log(res.content[0].text);
+`;
+const arkMrTool = () => {
+  const driver = join(root, "driver.ts");
+  writeFileSync(driver, ARK_MR_DRIVER);
+  const env = {
+    ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`,
+    GH_LOG: join(root, "gh.log"), GH_STATE: join(root, "gh.state"), GH_BODY: join(root, "gh.body"),
+  };
+  const r = Bun.spawnSync(["bun", driver, run()], { cwd: proj, env: credentialFreeEnv(env, join(root, "empty-gh")) });
+  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+};
+
+describe("ARK-118-AC2", () => {
+  let mark: string;
+  beforeEach(() => {
+    atG2Approved();
+    // The human's login: a credential helper in the source repo's own config. `ark launch` resets it for the agents; the ark_mr tool gets it back.
+    git(proj, "config", "credential.helper", "!f() { echo username=human; echo password=HUMAN_SECRET; }; f");
+    mark = join(root, "hook-mark");
+  });
+  // A pre-push hook that, if it ever runs, asks git for the credential the push carries.
+  const plant = (dir: string) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "pre-push"), `#!/bin/sh\nprintf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill > ${mark}\n`);
+    chmodSync(join(dir, "pre-push"), 0o755);
+  };
+  const pushed = (r: { code: number; err: string; out: string }) => {
+    expect(r.err).toBe("");
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(PR_URL);
+    expect(onRemote(`refs/heads/${branch()}`)).toBe(runState().repos[0].head_sha); // the push itself went through
+  };
+
+  test("the ark_mr tool's push runs no pre-push hook from the source repository's hooks/", () => {
+    plant(join(proj, ".git", "hooks"));
+    pushed(arkMrTool());
+    expect(existsSync(mark)).toBe(false); // otherwise it holds username=human password=HUMAN_SECRET
+  });
+
+  test("nor one behind a core.hooksPath in the source repository's config", () => {
+    plant(join(root, "source-hooks"));
+    git(proj, "config", "core.hooksPath", join(root, "source-hooks"));
+    pushed(arkMrTool());
+    expect(existsSync(mark)).toBe(false);
   });
 });

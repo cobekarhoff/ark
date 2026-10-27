@@ -16,12 +16,16 @@ export function doctor(): string {
   const branch: string = gh(`repos/${slug}`).default_branch;
   const p = gh(`repos/${slug}/branches/${branch}/protection`);
   const checks: string[] = p.required_status_checks?.contexts ?? [];
+  const allow = p.required_pull_request_reviews?.bypass_pull_request_allowances ?? {};
+  const bypass: string[] = [...(allow.users ?? []).map((u: { login: string }) => `user ${u.login}`), ...(allow.teams ?? []).map((t: { slug: string }) => `team ${t.slug}`), ...(allow.apps ?? []).map((a: { slug: string }) => `app ${a.slug}`)];
   const missing = [
     p.enforce_admins?.enabled !== true && "administrators are not included (enforce_admins is off)",
     !p.required_pull_request_reviews && "pull requests are not required",
+    bypass.length > 0 && `these may bypass the pull request requirement: ${bypass.join(", ")}`,
     !checks.length && "no status check is required",
     p.allow_force_pushes?.enabled !== false && "force pushes are allowed",
+    p.allow_deletions?.enabled !== false && "deleting the branch is allowed",
   ].filter(Boolean);
   if (missing.length) throw new Error(`${slug} ${branch} is not protected enough: ${missing.join("; ")}`);
-  return `ok: ${slug} ${branch} protected (administrators included, pull request required, checks: ${checks.join(", ")}, no force pushes)\n`;
+  return `ok: ${slug} ${branch} protected (administrators included, pull request required with no bypass allowances, checks: ${checks.join(", ")}, no force pushes, no deletion)\n`;
 }

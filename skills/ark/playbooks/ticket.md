@@ -21,8 +21,10 @@ Copy these ten lines into the todo list verbatim.
 
 Every `ark ...` call below is the typed tool named after it (`ark advance` is `ark_advance`, `ark gate packet` is `ark_gate_packet`, `ark trace-check` is `ark_trace_check`); you have no bash. A tool error is a refusal: read its message, fix the cause, never work around it.
 
+**Gate answers (every `ark gate answer` below).** There is no tool for it and you never run it: an answer comes only from the human typing it in their own terminal (ADR 0002). After `ark_gate_packet`, `ask` the human with the fixed answers; the question carries the exact command for each answer, e.g. `ark gate answer <run> G1 approve --packet <sha256>`, to type in their terminal. Wait for them to say it is done, then read `<dir>/state.json` and go on only if its `gates` entry for the gate shows the answer; if it does not, say so and wait. If `ask` is not available (print mode), print the question and the commands and stop.
+
 ### 1. Intake
-- State `awaiting_g0` (no ACs): `ark gate packet <run> G0` prints the packet sha256. `ask` with Accept / Edit / Abort, then `ark gate answer <run> G0 accept|edit|abort --packet <sha256>`. (`abort`: stop.) Drafting ACs into the run is not wired yet: on accept or edit, tell the human to add the ACs to the ticket file and start a fresh run.
+- State `awaiting_g0` (no ACs): `ark gate packet <run> G0` prints the packet sha256. `ask` with Accept / Edit / Abort; the human answers `ark gate answer <run> G0 accept|edit|abort --packet <sha256>` in their terminal. (`abort`: stop.) Drafting ACs into the run is not wired yet: on accept or edit, tell the human to add the ACs to the ticket file and start a fresh run.
 - Otherwise: read `<dir>/ticket.md` and `<dir>/ac.yml`; the AC IDs are final. `skip: ACs present, G0 not needed` for the G0 part.
 
 ### 2. Analyze
@@ -33,7 +35,7 @@ Every `ark ...` call below is the typed tool named after it (`ark advance` is `a
 - Write `<dir>/plan.md`: approach, the contract, one test per AC at the strongest practical boundary, and a risk tier.
 - `ark gate packet <run> G1` (prints `sha256:...`).
 - `ask` with the fixed answers: Approve / Request changes / Abort.
-- `ark gate answer <run> G1 approve|change|abort --packet <sha256>`. On `change`, revise `plan.md` and repeat from the packet. On `abort`, stop.
+- The human answers `ark gate answer <run> G1 approve|change|abort --packet <sha256>` in their terminal. On `change`, revise `plan.md` and repeat from the packet. On `abort`, stop.
 
 ### 4. Implement
 - `ark advance <run> build.started`
@@ -60,11 +62,11 @@ Every `ark ...` call below is the typed tool named after it (`ark advance` is `a
 ### 8. Fix loop
 - Exit when there is no open `act_on` P0/P1 and every AC passes: `skip: clean` and go to step 9.
 - Otherwise, round 1 or 2: write `<dir>/premise.md` first (the premise this fix shares with the last; check it directly before round 2). `ark advance <run> fix_round.started` (back to `building`). Respawn the implementer with the Act-on findings, failing tests and their evidence in the brief; repeat steps 4 (record + `implementer.completed`), 5, 6 and 7 on the new head.
-- After the second round still fails: write `<dir>/premise.md` (the premise both fixes shared, and your diagnosis), `ark gate packet <run> GE` (premise plus the latest findings; prints `sha256:...`). `ask` with One more round (fold any guidance the human gives into the next brief) / Take over / Abort, then `ark gate answer <run> GE one_more_round|take_over|abort --packet <sha256>`. `ark advance` refuses `ge.*`: escalation is a gate. One more round and take over return to `building`; abort ends the run.
+- After the second round still fails: write `<dir>/premise.md` (the premise both fixes shared, and your diagnosis), `ark gate packet <run> GE` (premise plus the latest findings; prints `sha256:...`). `ask` with One more round (fold any guidance the human gives into the next brief) / Take over / Abort; the human answers `ark gate answer <run> GE one_more_round|take_over|abort --packet <sha256>` in their terminal. `ark advance` refuses `ge.*`: escalation is a gate. One more round and take over return to `building`; abort ends the run.
 
 ### 9. Evidence pack
 - `ark trace-check <run>` writes `<dir>/trace-matrix.md` and exits 0 when it passes. Exit 1 prints why: fix it through step 8.
-- `ark gate packet <run> G2` (refuses unless the latest trace-check passed). `ask` with Approve to open MRs / Send back / Abort. `ark gate answer <run> G2 approve|send_back|abort --packet <sha256>`.
+- `ark gate packet <run> G2` (refuses unless the latest trace-check passed). `ask` with Approve to open MRs / Send back / Abort; the human answers `ark gate answer <run> G2 approve|send_back|abort --packet <sha256>` in their terminal.
 
 ### 10. MRs
 - `ark mr <run>` opens one PR per repo and never merges. After the human merges on the host: `ark advance <run> run.completed`.

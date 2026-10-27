@@ -68,7 +68,8 @@ export function mr(runId: string): string {
 
     // The worktree's pushurl is DISABLED for agents; an explicit URL bypasses it with the CLI's own credentials.
     // Pushed from the shared git dir, so the agent's per-worktree config (insteadOf, hooksPath) is never loaded; the SHA resolves in the shared object store.
-    const push = Bun.spawnSync(["git", "--git-dir", common, "push", url, `${repo.head_sha}:refs/heads/${repo.branch}`]);
+    // core.hooksPath on the command line outranks the source repo's hooks/ and any configured path: this push carries the human's credentials, so no hook of a repo an agent can write to runs in it.
+    const push = Bun.spawnSync(["git", "--git-dir", common, "-c", "core.hooksPath=/dev/null", "push", url, `${repo.head_sha}:refs/heads/${repo.branch}`]);
     if (push.exitCode !== 0) throw new Error(redact(`git push ${url} failed: ${push.stderr.toString().trim()}`));
 
     const bodyFile = join(dir, "mr", `${repo.name}.md`);

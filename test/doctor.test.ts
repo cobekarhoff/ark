@@ -21,7 +21,7 @@ esac
 // What GitHub returns for a branch with every protection on (the shape the real cobekarhoff/ark main returns).
 const PROTECTED = {
   required_status_checks: { strict: false, contexts: ["test"], checks: [{ context: "test", app_id: 15368 }] },
-  required_pull_request_reviews: { required_approving_review_count: 0 },
+  required_pull_request_reviews: { required_approving_review_count: 0, bypass_pull_request_allowances: { users: [], teams: [], apps: [] } },
   enforce_admins: { enabled: true },
   allow_force_pushes: { enabled: false },
   allow_deletions: { enabled: false },
@@ -55,6 +55,7 @@ describe("ARK-118-AC3", () => {
     expect(r.err).toBe("");
     expect(r.code).toBe(0);
     expect(r.out).toContain("acme/demo trunk protected");
+    expect(r.out).toContain("no bypass allowances"); // the success line claims only what was checked
     // the default branch is read from the host (here 'trunk', not the local 'main'), and its protection from the documented endpoint
     expect(readFileSync(join(root, "gh.log"), "utf8").trim().split("\n")).toEqual(["api repos/acme/demo", "api repos/acme/demo/branches/trunk/protection"]);
   });
@@ -64,6 +65,10 @@ describe("ARK-118-AC3", () => {
     ["no PR is required", ({ required_pull_request_reviews, ...p }) => p, "pull requests are not required"],
     ["no check is required", (p) => ({ ...p, required_status_checks: { strict: false, contexts: [], checks: [] } }), "no status check is required"],
     ["status checks are absent", ({ required_status_checks, ...p }) => p, "no status check is required"],
+    ["a user may bypass the PR requirement", (p) => ({ ...p, required_pull_request_reviews: { ...p.required_pull_request_reviews, bypass_pull_request_allowances: { users: [{ login: "operator" }], teams: [], apps: [] } } }), "bypass the pull request requirement: user operator"],
+    ["a team may bypass the PR requirement", (p) => ({ ...p, required_pull_request_reviews: { ...p.required_pull_request_reviews, bypass_pull_request_allowances: { users: [], teams: [{ slug: "admins" }], apps: [] } } }), "team admins"],
+    ["an app may bypass the PR requirement", (p) => ({ ...p, required_pull_request_reviews: { ...p.required_pull_request_reviews, bypass_pull_request_allowances: { users: [], teams: [], apps: [{ slug: "release-bot" }] } } }), "app release-bot"],
+    ["deleting the branch is allowed", (p) => ({ ...p, allow_deletions: { enabled: true } }), "deleting the branch is allowed"],
     ["force pushes are allowed", (p) => ({ ...p, allow_force_pushes: { enabled: true } }), "force pushes are allowed"],
   ];
   for (const [name, weaken, reason] of weakened) {
