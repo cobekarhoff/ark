@@ -39,6 +39,9 @@ export function loadRepo(dir: string, ref?: string): RepoConfig {
 
 // Without `tests`: the files bun test discovers, plus everything under the usual test directories (helpers and fixtures a test imports).
 const testGlobs = (s: Suite) => s.tests ?? ["**/*{.test,_test,.spec,_spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}", "**/{test,tests,__tests__}/**"];
+// The suite's test files in a checkout: its globs (default: bun's discovery) against `cwd`, dependencies excluded.
+export const suiteTestFiles = (s: Suite, cwd: string): string[] =>
+  testGlobs(s).flatMap((g) => [...new Bun.Glob(g).scanSync({ cwd, onlyFiles: true })]).filter((f) => !f.split("/").includes("node_modules"));
 const isTest = (s: Suite, f: string) => testGlobs(s).some((g) => new Bun.Glob(g).match(f));
 export const isTestFile = (cfg: RepoConfig, f: string) => Object.values(cfg.suites).some((s) => isTest(s, f));
 const show = (wt: string, ref: string, f: string) => {

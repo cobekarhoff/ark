@@ -32,11 +32,9 @@ export function parse(xml: string): Case[] {
 // Selector for `-t`: a regex over the full describe path, bounded like AC_ID so AC1 selects neither AC10 nor BA-1-AC1.
 export const tags = (ids: string[]) => `(?<![A-Za-z0-9-])(${ids.join("|")})(?!\\d)`;
 
-// Static check for AC7: does this source file carry an AC tag?
-export const taggedFile = (source: string) => (source.match(AC_ID) ?? []).length > 0;
+// The AC IDs a source file carries.
+export const tagsIn = (source: string): string[] => [...new Set(source.match(AC_ID) ?? [])];
 
-// bun's own signature for "the selector matched nothing": a lone `error: regex "<selector>" matched 0 tests.` line (exit 1). A file that fails to load
-// prints fail/error counts instead, and a runner that never started prints nothing of the kind. Bun exits 1 then; any other status
-// means something else failed after (or instead of) the run. Other formats define their own signature.
-export const matchedNothing = (output: string, ids: string[], exit: number) =>
-  exit === 1 && output.split("\n").some((l) => l.startsWith(`error: regex "${tags(ids)}" matched 0 tests`)) && !/^\s*[1-9]\d* (fail|error)\b/m.test(output);
+// Static check for AC7: does this source file carry an AC tag?
+export const taggedFile = (source: string) => tagsIn(source).length > 0;
+

@@ -534,23 +534,25 @@ describe("ARK-115-AC7", () => {
 });
 
 describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
-  test("a repo with a second suite that has no record for the selected AC is not broken by that suite's non-zero exit", () => {
-    const e2e = { format: "bun-test", level: "e2e", run: 'bun test ./e2e -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml', junit: "$ARK_OUT/e2e.xml" };
-    fixture(undefined, {}, { suites: { e2e }, files: { "e2e/e.test.ts": bunTest(`test("DEMO-1-AC2 only in e2e", () => { expect(1).toBe(1); });`) } });
+  test("a suite none of whose test files carries a selected AC is not run, so its runner's no-match exit cannot fail the run", () => {
+    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml', junit: "$ARK_OUT/e2e.xml" };
+    fixture(undefined, { tests: ["test/**"] }, { suites: { e2e }, files: { "e2e/e.test.ts": bunTest(`test("DEMO-1-AC2 only in e2e", () => { expect(1).toBe(1); });`) } });
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 in unit only", () => { expect(1).toBe(1); });`) });
     const r = ark("test", run(), "--acs", "DEMO-1-AC1");
     expect(r.out).toContain("DEMO-1-AC1: pass");
+    expect(r.out).not.toContain("e2e"); // not run: none of its files carries the selected AC
     expect(r.code).toBe(0);
+    expect(existsSync(runFile("artifacts/test/1/e2e.stdout.log"))).toBe(false);
   });
 
-  test("a second suite is ignored only when bun said its selector matched nothing: a selected file that fails to load, or an empty report with exit 127, still fails the run", () => {
-    const other = { format: "bun-test", level: "e2e", run: 'bun test ./other -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/other.xml', junit: "$ARK_OUT/other.xml" };
+  test("every suite that runs must exit 0: a selected file that fails to load, or an empty report with exit 127, fails the run", () => {
+    const other = { format: "bun-test", level: "e2e", tests: ["other/**"], run: 'bun test ./other -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/other.xml', junit: "$ARK_OUT/other.xml" };
     const files = {
       "other/ok.test.ts": bunTest(`test("DEMO-1-AC2 fine", () => { expect(1).toBe(1); });`),
       "other/bad.test.ts": bunTest(`test("DEMO-1-AC1 never loads", () => { expect(missing).toBe(1); });`, `import { missing } from "./not-there";`),
     };
-    fixture(undefined, { run: 'bun test ./test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { other }, files }); // the unit suite stays out of other/
+    fixture(undefined, { tests: ["test/**"], run: 'bun test ./test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml' }, { suites: { other }, files }); // the unit suite stays out of other/
     toBuilding();
     commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
     const load = ark("test", run(), "--acs", "DEMO-1-AC1");
@@ -568,14 +570,18 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(r.out).toContain("suite 'empty' exited 127");
   });
 
-  test("bun's no-match message only excuses the exit status bun uses for it: a failing step after the no-match run still fails the run", () => {
-    const e2e = { format: "bun-test", level: "e2e", run: 'bun test ./e2e -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml; ./missing-postprocess-command', junit: "$ARK_OUT/e2e.xml" };
-    fixture(undefined, {}, { suites: { e2e }, files: { "e2e/e.test.ts": bunTest(`test("DEMO-1-AC2 only in e2e", () => { expect(1).toBe(1); });`) } });
+  test("a suite that holds the selected AC fails the run when its command exits non-zero, even after bun's no-match: there is no output signature to excuse a failing step", () => {
+    // The suite's files carry DEMO-1-AC2, but its command runs a directory without it (bun: no-match, exit 1), then a post-step that exits 1 as well.
+    const e2e = { format: "bun-test", level: "e2e", tests: ["e2e/**"], run: 'bun test ./e2e/runme -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/e2e.xml; test -f missing.json', junit: "$ARK_OUT/e2e.xml" };
+    fixture(undefined, { tests: ["test/**"] }, { suites: { e2e }, files: {
+      "e2e/e.test.ts": bunTest(`test("DEMO-1-AC2 outside the run directory", () => { expect(1).toBe(1); });`),
+      "e2e/runme/x.test.ts": bunTest(`test("DEMO-1-AC9 elsewhere", () => { expect(1).toBe(1); });`),
+    } });
     toBuilding();
-    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 in unit only", () => { expect(1).toBe(1); });`) });
-    const r = ark("test", run(), "--acs", "DEMO-1-AC1");
+    const r = ark("test", run(), "--acs", "DEMO-1-AC2");
     expect(r.code).toBe(1);
-    expect(r.out).toContain("suite 'e2e' exited 127");
+    expect(r.out).toContain("suite 'e2e' exited 1");
+    expect(acsOf("test.result")["DEMO-1-AC2"]).toBe("fail");
   });
 
   test("a second suite that produces no JUnit and exits non-zero fails the run, on green; on red it makes the AC inconclusive", () => {
