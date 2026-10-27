@@ -26,7 +26,7 @@ const green = (v: string) => (v === "proven" || v === "no-red" ? "pass" : v === 
 export function buildMatrix(dir: string, runId: string, state: RunState, events: LedgerEvent[]): { matrix: string; failures: string[] } {
   const acs = (Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) ?? []) as { id: string; level?: string }[];
   check("ac", acs, "ac.yml");
-  const failures: string[] = unattributed(dir, state); // changes no recorded implementer step vouches for
+  const failures: string[] = unattributed(dir, state, events); // changes no recorded implementer step vouches for
   const listed = new Set(acs.map((a) => a.id));
   for (const id of Object.keys(state.acs)) if (!listed.has(id)) failures.push(`${id}: in the run but missing from ac.yml`);
   for (const id of listed) if (!(id in state.acs)) failures.push(`${id}: in ac.yml but not an AC of this run`);

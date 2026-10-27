@@ -7,7 +7,7 @@ import { transitions } from "./transitions";
 
 // Gate packets (PRD "Gates and loop policy"): built from run-folder artifacts, no model involved.
 // Every source artifact is listed with its sha256 (`## file (sha256:..)`, `- file (sha256:..)`), so the packet's own hash covers what it was built from.
-const REQUIRED: Record<string, string[]> = { G0: ["ticket.md", "ac.yml"], G1: ["plan.md", "ac.yml"], G2: ["trace-matrix.md"], GE: ["premise.md"] };
+const REQUIRED: Record<string, string[]> = { G0: ["ticket.md", "ac.yml"], G1: ["plan.md", "ac.yml"], G2: ["trace-matrix.md", "ac.yml"], GE: ["premise.md"] };
 
 function buildPacket(dir: string, runId: string, gate: string): string {
   const sections = REQUIRED[gate].map((f) => {
@@ -23,6 +23,9 @@ function buildPacket(dir: string, runId: string, gate: string): string {
     const art = join(dir, "artifacts");
     const files = existsSync(art) ? (readdirSync(art, { recursive: true }) as string[]).filter((f) => statSync(join(art, f)).isFile()).sort() : [];
     sections.push(`## Test evidence\n\n${files.length ? files.map((f) => `- artifacts/${f} (${sha256(readFileSync(join(art, f)))})`).join("\n") : "- none"}\n`);
+    const man = join(dir, "manual");
+    const signed = existsSync(man) ? (readdirSync(man, { recursive: true }) as string[]).filter((f) => statSync(join(man, f)).isFile()).sort() : [];
+    sections.push(`## Manual records\n\n${signed.length ? signed.map((f) => `- manual/${f} (${sha256(readFileSync(join(man, f)))})`).join("\n") : "- none"}\n`);
   }
   if (gate === "GE") { // the escalation packet: the shared premise and the newest recorded findings
     const dirF = join(dir, "artifacts", "findings");
@@ -39,16 +42,16 @@ function buildPacket(dir: string, runId: string, gate: string): string {
 // file -> sha256 for every source line of a packet body.
 const sources = (body: string) => new Map([...body.matchAll(/^(?:## |- )(.+?) \((sha256:[0-9a-f]{64})\)$/gm)].map((m) => [m[1], m[2]]));
 
-// G2 is built only when the matrix recomputed now passes and is byte-identical to trace-matrix.md; no stored verdict is trusted.
-function requireTrace(dir: string, runId: string, events: LedgerEvent[]) {
+// G2 is built, and approved, only when the matrix recomputed now passes and is byte-identical to trace-matrix.md; no stored verdict is trusted.
+function requireTrace(dir: string, runId: string, events: LedgerEvent[], what: string) {
   const { matrix, failures } = buildMatrix(dir, runId, project(events), events);
-  if (failures.length) throw new Error(`G2 packet refused: trace-matrix.md would fail trace-check:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
+  if (failures.length) throw new Error(`${what} refused: trace-matrix.md would fail trace-check:\n${failures.map((f) => `  - ${f}`).join("\n")}`);
   const file = join(dir, "trace-matrix.md");
-  if (!existsSync(file) || readFileSync(file, "utf8") !== matrix) throw new Error("G2 packet refused: trace-matrix.md is out of date; run 'ark trace-check'");
+  if (!existsSync(file) || readFileSync(file, "utf8") !== matrix) throw new Error(`${what} refused: trace-matrix.md is out of date; run 'ark trace-check'`);
 }
 
 const checkGate = (gate: string) => {
-  if (!Object.hasOwn(REQUIRED, gate)) throw new Error(`unknown gate '${gate}'; expected G0, G1, G2 or GE`);
+  if (!Object.hasOwn(REQUIRED, gate)) throw new Error(`unknown gate '${gate}'; expected G0, G1, G2 or GE (escalation)`);
 };
 
 export function gatePacket(runId: string, gate: string): string {
@@ -58,7 +61,7 @@ export function gatePacket(runId: string, gate: string): string {
     const events = readLedger(dir);
     const state = project(events).state;
     if (!Object.hasOwn(transitions[state], `gate.packet:${gate}`)) throw new Error(`cannot build the ${gate} packet in state '${state}'`);
-    if (gate === "G2") requireTrace(dir, runId, events);
+    if (gate === "G2") requireTrace(dir, runId, events, "G2 packet");
     const body = buildPacket(dir, runId, gate);
     const hash = sha256(body);
     const path = `gates/${gate}.${hash.slice("sha256:".length)}.packet.md`; // by hash: a rebuilt packet never overwrites the one an earlier answer recorded
@@ -101,13 +104,14 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
         const changed = [...new Set([...was.keys(), ...now.keys()])].filter((f) => was.get(f) !== now.get(f));
         throw new Error(`${gate} packet is stale: ${changed.join(", ") || "its sources"} changed since it was built; answer change (or edit, send_back) and rebuild the packet`);
       }
+      if (gate === "G2" && answer === "approve") requireTrace(dir, runId, events, "G2 approval");
     }
     // An answer that approves or starts a round vouches for the worktrees as they are now; one that starts a round also marks where the next implementer step begins.
     const run = project(events);
     const startsRound = (transitions[awaiting] as Record<string, string>)[`gate.answered:${gate}:${answer}`] === "building"; // answer is one of `allowed`
     let heads = {};
     if ((gate === "G2" || gate === "GE") && answer !== "abort") {
-      const bad = unattributed(dir, run);
+      const bad = unattributed(dir, run, events);
       if (bad.length) throw new Error(`${gate} ${answer} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
       if (startsRound) heads = { heads: worktreeHeads(dir, run) };
     }
