@@ -170,6 +170,19 @@ describe("ARK-105-AC1", () => {
     expect(git(bare, "branch", "--list", "probe")).toContain("probe");
   });
 
+  test("git push from the worktree fails before anything is sent, to the remote name and to an explicit URL, even when the main checkout already has a pushurl", () => {
+    git(proj, "config", "remote.origin.pushurl", bare); // Git appends the worktree's DISABLED to this one: the real URL is tried first
+    toApproved();
+    expect(ark("ws", "create", run()).err).toBe("");
+    commitAll(wt(), { "x.txt": "x" });
+    for (const target of ["origin", bare]) {
+      const push = Bun.spawnSync(["git", "push", target, "HEAD:refs/heads/ark/probe"], { cwd: wt() });
+      expect(push.exitCode).not.toBe(0);
+      expect(push.stderr.toString()).toContain("agents never push; ark mr pushes for you");
+      expect(git(bare, "branch", "--list")).not.toContain("ark/");
+    }
+  });
+
   test("ws create is refused before the run is approved, and twice for the same repo", () => {
     const early = ark("ws", "create", run());
     expect(early.code).toBe(1);
@@ -531,6 +544,25 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
     expect(r.code).toBe(0);
   });
 
+  test("a second suite that produces no JUnit and exits non-zero fails the run, on green; on red it makes the AC inconclusive", () => {
+    const ghost = { format: "bun-test", level: "e2e", run: "test -f ghost.txt # {tags}", junit: "$ARK_OUT/ghost.xml" }; // exits 1 without a report until ghost.txt exists
+    fixture(undefined, {}, { suites: { ghost } });
+    toBuilding();
+    commitAll(wt(), { "test/ok.test.ts": bunTest(`test("DEMO-1-AC1 fine", () => { expect(1).toBe(1); });`) });
+    const g = ark("test", run(), "--acs", "DEMO-1-AC1");
+    expect(g.code).toBe(1);
+    expect(acsOf("test.result")["DEMO-1-AC1"]).toBe("fail");
+    expect(g.out).toContain("suite 'ghost' exited 1");
+
+    fixture(undefined, {}, { suites: { ghost } });
+    toBuilding();
+    withSrc({ ...NEW_FEATURE, "ghost.txt": "x\n" }, { "test/feature.test.ts": FEATURE_TEST }); // the suite runs on head, not on base
+    const rg = redGreen("DEMO-1-AC1");
+    expect(rg.code).toBe(1);
+    expect(acsOf("test.red_green")["DEMO-1-AC1"]).toBe("inconclusive");
+    expect(rg.out).toContain("suite 'ghost' exited 1");
+  });
+
   test("files under test/, tests/ and __tests__/ that are not themselves tests (helpers) are overlaid on red, so a test importing one still gets a red record", () => {
     toBuilding();
     withSrc(NEW_FEATURE, {
@@ -609,6 +641,19 @@ describe("ARK-115-AC6 (checkout and environment fidelity)", () => {
 });
 
 describe("ARK-115-AC7 (per selected test)", () => {
+  test("two testcases with one file, describe path, name and line (a loop) are an ambiguous identity: inconclusive, never proven", () => {
+    toBuilding();
+    withSrc(NEW_FEATURE, {
+      "test/loop.test.ts": bunTest(`for (const i of [0, 1]) {
+  (feature() === "old" && i === 0 ? test.skip : test)("DEMO-1-AC1 duplicate", () => { expect(i === 0 ? "new" : feature()).toBe("new"); });
+}`, `import { feature } from "../src/feature";`),
+    });
+    const r = redGreen("DEMO-1-AC1");
+    expect(r.code).toBe(1);
+    expect(acsOf("test.red_green")["DEMO-1-AC1"]).toBe("inconclusive");
+    expect(r.out).toContain("ambiguous duplicate test identity");
+  });
+
   test("a second selected test that is skipped on both sides makes the AC inconclusive, not proven", () => {
     toBuilding();
     withSrc(NEW_FEATURE, {

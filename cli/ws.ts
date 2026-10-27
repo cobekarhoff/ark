@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { git } from "./repo";
 import { open, projectDir, record } from "./run";
@@ -22,6 +22,14 @@ export function wsCreate(runId: string, repoPath?: string): string {
   git(top, "config", "extensions.worktreeConfig", "true");
   git(top, "worktree", "add", "-b", branch, wt, base_sha);
   for (const remote of git(top, "remote").split("\n").filter(Boolean)) git(wt, "config", "--worktree", `remote.${remote}.pushurl`, "DISABLED");
+
+  // Pushing is also stopped by a pre-push hook of the run's own: `pushurl` entries accumulate across config files, so a remote that already has one
+  // is still tried first, and an explicit URL ignores them all. A hook runs before anything is sent. (`ark mr` pushes from the shared git dir, where this config is not loaded.)
+  const hooks = join(dir, "hooks");
+  mkdirSync(hooks, { recursive: true });
+  writeFileSync(join(hooks, "pre-push"), '#!/bin/sh\necho "ark: agents never push; ark mr pushes for you" >&2\nexit 1\n');
+  chmodSync(join(hooks, "pre-push"), 0o755);
+  git(wt, "config", "--worktree", "core.hooksPath", hooks);
 
   record(dir, "ws.created", { repo, branch, base_sha });
   return `created ${wt}\nbranch: ${branch}\nbase_sha: ${base_sha}\n`;

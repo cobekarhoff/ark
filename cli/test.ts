@@ -33,13 +33,15 @@ function sh(cmd: string, cwd: string, out: string, log: string, vars?: Record<st
 // ponytail: the glob may only be in the last path segment of `junit`; widen if a runner needs more.
 // `cases`: every test tagged with a selected AC, skipped ones included (a skipped test is "selected, not run", which red-green must tell from "no record").
 // `tags`: every AC-shaped ID in the report, so trace-check can spot a typo'd tag no selected AC reaches.
-function readJunit(s: Suite, out: string, ids: string[]): { cases: Case[]; tags: string[] } {
+// `quiet`: the suite wrote a report and nothing in it failed or errored, so a non-zero exit with no selected record is just "matched no tests".
+function readJunit(s: Suite, out: string, ids: string[]): { cases: Case[]; tags: string[]; quiet: boolean } {
   const pat = s.junit.replace(/\$\{?ARK_OUT\}?/g, out);
   const files = [...new Bun.Glob(basename(pat)).scanSync({ cwd: dirname(pat), absolute: true })].sort();
   const all = files.flatMap((f) => parsers[s.format].parse(readFileSync(f, "utf8")));
   return {
     cases: all.filter((c) => c.acs.some((a) => ids.includes(a))),
     tags: all.flatMap((c) => c.acs),
+    quiet: files.length > 0 && !all.some((c) => bad(c.status)),
   };
 }
 
@@ -66,7 +68,7 @@ function runSuite(name: string, s: Suite, cwd: string, out: string, ids: string[
       ? new Map(rerun ? runOnce(name, s, cwd, join(out, "rerun"), [...new Set(failing.flatMap((c) => c.acs.filter((a) => ids.includes(a))))]).cases.map((c) => [key(c), c]) : [])
       : new Map<string, Case>();
     const cases: Tc[] = first.cases.map((c) => ({ ...c, suite: name, status: bad(c.status) && again.get(key(c))?.status === "pass" ? "flaky" : c.status }));
-    return { exit: first.exit, cases, tags: first.tags };
+    return { exit: first.exit, cases, tags: first.tags, quiet: first.quiet };
   } finally {
     if (s.env?.down) sh(s.env.down, cwd, out, `${name}.env-down`, s.env.vars);
   }
@@ -75,7 +77,7 @@ function runSuite(name: string, s: Suite, cwd: string, out: string, ids: string[
 // ponytail: every suite runs for every AC set; add `collect`-based suite selection when env.up cost bites.
 function tagged(cfg: RepoConfig, cwd: string, out: string, ids: string[], rerun: boolean, fp: Fp) {
   const runs = Object.entries(cfg.suites).map(([name, s]) => ({ name, ...runSuite(name, s, cwd, out, ids, rerun, fp) }));
-  return { cases: runs.flatMap((r) => r.cases), tags: runs.flatMap((r) => r.tags), exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])) };
+  return { cases: runs.flatMap((r) => r.cases), tags: runs.flatMap((r) => r.tags), exits: Object.fromEntries(runs.map((r) => [r.name, r.exit])), quiet: Object.fromEntries(runs.map((r) => [r.name, r.quiet])) };
 }
 
 function prepare(runId: string, type: string, ids: string[], repoName?: string) {
@@ -192,24 +194,30 @@ function proveGreen(runId: string, ids: string[], repoName?: string): string {
   return finish(Object.values(acs).every((v) => v === "pass"), `test attempt ${attempt} on ${head.slice(0, 12)}\n${Object.entries(acs).map(([id, v]) => `${id}: ${v}\n`).join("")}${exitNote(res)}`);
 }
 
-// A suite that exits non-zero while none of its selected tests failed broke somewhere the tags do not show (a file that fails to load).
-// Only a suite with at least one selected record counts: `bun test -t` exits 1 when the pattern matches nothing, which is no breakage.
+// A suite that exits non-zero without a failing selected test broke somewhere the tags do not show: a file that fails to load, a runner that never started.
+// One exception: a suite with no selected record that wrote a clean report only matched no tests (`bun test -t` exits 1 then), which is no breakage.
 // ponytail: when a selected test also failed, the exit code is not told apart from that failure; per-file results would be needed.
-const brokenSuites = (r: { cases: Tc[]; exits: Record<string, number> }) =>
-  Object.entries(r.exits).filter(([s, c]) => c && r.cases.some((t) => t.suite === s) && !r.cases.some((t) => t.suite === s && (bad(t.status) || t.status === "flaky"))).map(([s]) => s);
-const broken = (r: Parameters<typeof brokenSuites>[0]) => brokenSuites(r).length > 0;
-const exitNote = (r: Parameters<typeof brokenSuites>[0]) => brokenSuites(r).map((s) => `suite '${s}' exited ${r.exits[s]} with no failing selected test\n`).join("");
+type Ran = { cases: Tc[]; exits: Record<string, number>; quiet: Record<string, boolean> };
+const brokenSuites = (r: Ran) =>
+  Object.entries(r.exits).filter(([s, c]) => {
+    if (!c) return false;
+    const mine = r.cases.filter((t) => t.suite === s);
+    return mine.length ? !mine.some((t) => bad(t.status) || t.status === "flaky") : !r.quiet[s];
+  }).map(([s]) => s);
+const broken = (r: Ran) => brokenSuites(r).length > 0;
+const exitNote = (r: Ran, side = "") => brokenSuites(r).map((s) => `suite '${s}' exited ${r.exits[s]}${side} and left no failing selected test or clean report\n`).join("");
 
 // Per AC, over every selected test (identified by suite, file, describe path, name and line, on either side):
 // a test passing on red is `no-red`, even when it is skipped (or absent) on green; a test failing or erroring on green is `green-failed`;
 // `proven` needs every selected test to fail or error on red AND pass on green; anything else (no red record, skipped on either side) is `inconclusive`.
-function verdict(id: string, red: Map<string, Tc["status"]>, green: Map<string, Tc["status"]>, acsOf: Map<string, string[]>): string {
+function verdict(id: string, red: Map<string, Tc["status"]>, green: Map<string, Tc["status"]>, acsOf: Map<string, string[]>, ambiguous: Set<string>): string {
   const mine = [...acsOf].filter(([, acs]) => acs.includes(id)).map(([k]) => k);
   if (!mine.length) return "missing";
   const [r, g] = [red, green].map((m) => mine.map((k) => m.get(k) ?? "missing"));
   if (g.some((x) => x !== "pass" && x !== "skipped" && x !== "missing")) return "green-failed";
   if (r.some((x) => x === "pass")) return "no-red";
   if (!g.includes("pass")) return "missing";
+  if (mine.some((k) => ambiguous.has(k))) return "inconclusive";
   return mine.every((_, i) => bad(r[i]) && g[i] === "pass") ? "proven" : "inconclusive";
 }
 
@@ -230,14 +238,16 @@ function proveRedGreen(runId: string, ids: string[], repoName?: string): string 
 
   const id = (c: Tc) => `${c.suite}\0${key(c)}`;
   const [redOf, greenOf] = [red, green].map((r) => new Map(r.cases.map((c) => [id(c), c.status])));
+  const dupes = (r: typeof red) => r.cases.map(id).filter((k, i, all) => all.indexOf(k) !== i); // identical identity twice in one report: results cannot be told apart
+  const ambiguous = new Set([...dupes(red), ...dupes(green)]);
   const byId = new Map([...green.cases, ...red.cases].map((c) => [id(c), c]));
   const tests = [...byId.values()].map((c) => ({ suite: c.suite, test: label(c), line: c.line, acs: c.acs, red: redOf.get(id(c)) ?? "missing", green: greenOf.get(id(c)) ?? "missing" }));
   const acsOf = new Map([...byId].map(([k, c]) => [k, c.acs]));
   const acs = Object.fromEntries(ids.map((ac) => {
-    const v = verdict(ac, redOf, greenOf, acsOf);
-    return [ac, v === "proven" && broken(green) ? "green-failed" : v];
+    const v = verdict(ac, redOf, greenOf, acsOf, ambiguous);
+    return [ac, v === "proven" ? (broken(green) ? "green-failed" : broken(red) ? "inconclusive" : v) : v];
   }));
   const ok = Object.values(acs).every((v) => v === "proven");
-  record(dir, "test.red_green", { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay, acs, tests, exits: { red: red.exits, green: green.exits }, unknown_tags: unknownTags(green.tags), ok });
-  return finish(ok, `red-green attempt ${attempt}: base ${repo.base_sha.slice(0, 12)} head ${head.slice(0, 12)}\n${Object.entries(acs).map(([id, v]) => `${id}: ${v}\n`).join("")}${tests.map((t) => `  red=${t.red} green=${t.green}  ${t.test}\n`).join("")}${exitNote(green)}`);
+  record(dir, "test.red_green", { repo: repo.name, base_sha: repo.base_sha, head_sha: head, attempt, out: where, overlay, acs, tests, ambiguous: [...ambiguous].map((k) => k.replaceAll("\0", " > ")), exits: { red: red.exits, green: green.exits }, unknown_tags: unknownTags(green.tags), ok });
+  return finish(ok, `red-green attempt ${attempt}: base ${repo.base_sha.slice(0, 12)} head ${head.slice(0, 12)}\n${Object.entries(acs).map(([id, v]) => `${id}: ${v}\n`).join("")}${tests.map((t) => `  red=${t.red} green=${t.green}  ${t.test}\n`).join("")}${[...ambiguous].map((k) => `  ambiguous duplicate test identity: ${k.replaceAll("\0", " > ")}\n`).join("")}${exitNote(red, " on red")}${exitNote(green)}`);
 }

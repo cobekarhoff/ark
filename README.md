@@ -38,7 +38,7 @@ Per repo it pushes the approved `head_sha` to `ark/*` branches only (refusing if
 ## Worktrees and tests
 
 ```sh
-ark ws create <run_id> [--repo path]   # worktree at <run>/ws/<repo> on ark/<ticket>-<slug>, push URL disabled
+ark ws create <run_id> [--repo path]   # worktree at <run>/ws/<repo> on ark/<ticket>-<slug>, push URL disabled and a pre-push hook that refuses every push (an accident guard: `--no-verify` or editing the worktree config is same-user tampering, see ADR 0003)
 ark test <run_id> --acs ID,.. [--repo name]              # run the AC-tagged tests in the worktree
 ark test <run_id> --acs ID,.. --red-green [--repo name]  # base source + head tests must fail, head must pass
 ```
@@ -58,6 +58,8 @@ Events owned by a command (`gate.*`, `ws.created`, `test.*`, `trace.checked`; th
 `ark advance <run_id> implementer.completed --data '{"repo":"<name>"}'` refuses when base..HEAD of that worktree touches a test file carrying an AC ID, and otherwise records the head SHA.
 
 `--red-green` also refuses until `implementer.completed` is recorded for every repo of the run.
+
+Two testcases with the same identity in one report (a test registered in a loop) are ambiguous: the AC is `inconclusive`. A suite with no selected record is ignored only when it wrote a JUnit report with no failure or error (`bun test -t` exits 1 when nothing matched); one that exits non-zero without such a report fails a green run and makes red `inconclusive`.
 
 Red needs a JUnit record per selected test with a failure or error; tests are told apart by file, describe path, name and line. A selected test with no record (a file that fails to load, a runner that did not start), or one that was skipped (on either side), makes the AC `inconclusive`, not red; a selected test that passes on base makes it `no-red` even when it is skipped on head; a head suite that has selected records and exits non-zero with no failing selected test fails the run (`fail` / `green-failed`). To prove a missing module, load it inside the test (`await import(...)`) so the failure is a recorded result.
 
