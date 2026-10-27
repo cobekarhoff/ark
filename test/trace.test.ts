@@ -18,7 +18,8 @@ const HEAD_FILES = {
   "src/feature.ts": `export const feature = () => "new";\n`,
   "src/added.ts": `export const added = () => 42;\n`,
   "test/feature.test.ts": bunTest(`test("DEMO-1-AC1 new feature", () => { expect(feature()).toBe("new"); });`, `import { feature } from "../src/feature";`),
-  "test/added.test.ts": bunTest(`test("DEMO-1-AC4 added module answers", () => { expect(added()).toBe(42); });`, `import { added } from "../src/added";`),
+  // loaded inside the test: on base the failure is a JUnit record (a failing top-level import leaves none, and red then is inconclusive)
+  "test/added.test.ts": bunTest(`test("DEMO-1-AC4 added module answers", async () => { const { added } = await import("../src/added"); expect(added()).toBe(42); });`),
 };
 const FLAKY = bunTest(
   `test("DEMO-1-AC3 fails on its first run only", () => { appendFileSync(process.env.FLAKY_COUNTER!, "x"); expect(readFileSync(process.env.FLAKY_COUNTER!, "utf8").length).toBeGreaterThan(1); });`,
@@ -28,8 +29,9 @@ const FLAKY = bunTest(
 const TYPO = bunTest(`test("DEMO-1-AC9 typo tag", () => { expect(1).toBe(1); });`);
 const SHARED = bunTest(`test("DEMO-1-AC1 and DEMO-1-AC9 share one test", () => { expect(feature()).toBe("new"); });`, `import { feature } from "../src/feature";`);
 
-const REPO_YML = JSON.stringify({
-  suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml" } },
+// The suite's own environment: only PATH, HOME and the like of the caller's reach a suite.
+const repoYml = () => JSON.stringify({
+  suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml", env: { vars: { FLAKY_COUNTER: counter } } } },
 });
 
 let home: string;
@@ -113,7 +115,7 @@ function fixture() {
     "ark.yml": "project: demo\n",
     ".omp/config.yml": OMP_CONFIG,
     ".gitignore": "node_modules\n",
-    ".ark/repo.yml": REPO_YML,
+    ".ark/repo.yml": repoYml(),
     "src/feature.ts": `export const feature = () => "old";\n`,
     "test/stable.test.ts": bunTest(`test("DEMO-1-AC2 stays green", () => { expect(typeof feature()).toBe("string"); });`, `import { feature } from "../src/feature";`),
   });
@@ -155,7 +157,7 @@ const addOtherRepo = () => {
   const other = join(dirname(proj), "other");
   mkdirSync(other);
   git(other, "init", "-q", "-b", "main");
-  commitAll(other, { ".ark/repo.yml": REPO_YML, "test/untagged.test.ts": bunTest(`test("nothing tagged here", () => { expect(1).toBe(1); });`) });
+  commitAll(other, { ".ark/repo.yml": repoYml(), "test/untagged.test.ts": bunTest(`test("nothing tagged here", () => { expect(1).toBe(1); });`) });
   return other;
 };
 
@@ -230,6 +232,17 @@ describe("ARK-106-AC2", () => {
     expect(r.err).toMatch(/DEMO-1-AC2: demo: no red-green proof at \w{12}/);
     expect(row("DEMO-1-AC2")).toContain(" pass |"); // green outcome is shown, status is not
     expect(row("DEMO-1-AC2")).toEndWith("| fail |");
+  });
+
+  test("a green run that passed shows as pass in the matrix even when its red was inconclusive", () => {
+    toBuilding();
+    implement({ ...HEAD_FILES, "test/static.test.ts": bunTest(`test("DEMO-1-AC5 static import", () => { expect(added()).toBe(42); });`, `import { added } from "../src/added";`) });
+    expect(ark("test", run(), "--acs", "DEMO-1-AC5", "--red-green").code).toBe(1); // base has no src/added: the file fails to load, no red record
+    acYml(["AC5", "unit"]);
+    const r = trace();
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/DEMO-1-AC5: demo: no red-green proof at \w{12}/);
+    expect(row("DEMO-1-AC5")).toMatch(/\| \w{12} pass \| artifacts/);
   });
 
   test("a flaky test is not a passing test", () => {

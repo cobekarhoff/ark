@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { git } from "./repo";
 import { check, locked, open, project, readLedger, record, type RunState, sha256, type LedgerEvent, unattributed } from "./run";
 
-type TestRow = { test: string; acs: string[]; red?: string };
+type TestRow = { test: string; acs: string[]; red?: string; green?: string };
 type Ev = LedgerEvent & { data: { repo: string; head_sha: string; base_sha?: string; out: string; acs: Record<string, string>; tests: TestRow[]; unknown_tags?: string[] } };
 
 const NEW_BEHAVIOR = ["e2e", "integration", "unit"]; // red-green proof applies to these; manual ACs need a signed record instead
@@ -18,8 +18,17 @@ const cmp = (a: string, b: string): number => {
   return x.length - y.length;
 };
 const uniq = (xs: string[]) => [...new Set(xs)].sort();
-// ark test records "pass"|"fail"|"flaky"|"missing"; ark test --red-green records "proven"|"no-red" (green passed) or "green-failed"|"missing".
-const green = (v: string) => (v === "proven" || v === "no-red" ? "pass" : v === "green-failed" ? "fail" : v);
+// ark test records "pass"|"fail"|"flaky"|"missing"|"inconclusive"; ark test --red-green records "proven"|"no-red"|"inconclusive"|"green-failed"|"missing".
+// A red-green verdict says whether the red side held up, not how green went, so the green outcome of such an event is read from its test rows.
+function green(e: Ev, id: string): string {
+  const v = e.data.acs[id];
+  if (e.type !== "test.red_green") return v;
+  if (v === "green-failed") return "fail";
+  const rows = e.data.tests.filter((t) => t.acs.includes(id) && t.green !== "missing");
+  if (!rows.length) return "missing";
+  if (rows.some((t) => t.green !== "pass" && t.green !== "skipped")) return "fail";
+  return rows.some((t) => t.green === "pass") ? "pass" : "missing";
+}
 
 // The matrix and the reasons it fails, as a pure function of ac.yml, manual/<AC>.md, the ledger and the run worktrees' HEADs.
 // `ark trace-check` writes it; `ark gate packet G2` recomputes it instead of trusting a stored verdict.
@@ -73,7 +82,7 @@ export function buildMatrix(dir: string, runId: string, state: RunState, events:
     let passing = 0;
     for (const [repo, { res, rg }] of Object.entries(latest[id] ?? {}).sort(([a], [b]) => cmp(a, b))) {
       const g = !res || (rg && rg.seq > res.seq) ? rg! : res;
-      const outcome = green(g.data.acs[id]);
+      const outcome = green(g, id);
       const mine = g.data.tests.filter((t) => t.acs.includes(id));
       tests.push(...mine.map((t) => t.test));
       grn.push(`${g.data.head_sha.slice(0, 12)} ${outcome}`);

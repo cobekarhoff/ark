@@ -7,6 +7,7 @@ import frontmatterSchema from "../schemas/ticket-frontmatter.schema.json";
 import ledgerSchema from "../schemas/ledger-event.schema.json";
 import stateSchema from "../schemas/state.schema.json";
 import ticketSchema from "../schemas/ticket.schema.json";
+import { bindSession } from "./binding";
 import { preflight } from "./preflight";
 import { diffFiles, dirtyFiles, git, isTestFile, loadRepo, touchedTaggedTests } from "./repo";
 import { eventKey, nextActions, ownerOf, type State, transitions } from "./transitions";
@@ -72,7 +73,10 @@ export function runDir(runId: string): string {
 }
 
 // Active run = the run id in <project>/active-run, written by `ark run start`; a done or aborted run no longer binds the session (ARK-108 hook).
-export const setActive = (runId: string) => writeFileSync(join(projectRoot(), "active-run"), `${runId}\n`);
+export function setActive(runId: string) {
+  writeFileSync(join(projectRoot(), "active-run"), `${runId}\n`);
+  bindSession(join(projectRoot(), "runs", runId)); // the session that starts or resumes a run is bound to it (ARK-115 AC10)
+}
 
 export function activeRunDir(): string | undefined {
   let root: string;

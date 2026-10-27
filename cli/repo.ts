@@ -5,7 +5,7 @@ import * as bunTest from "./parsers/bun-test";
 // One parser per `format`; a new framework is one more entry (PRD "Setup and configuration").
 export const parsers = { "bun-test": bunTest } as const;
 
-export type Suite = { format: keyof typeof parsers; level: string; collect?: string; run: string; junit: string; tests?: string[]; env?: { up?: string; down?: string } };
+export type Suite = { format: keyof typeof parsers; level: string; collect?: string; run: string; junit: string; tests?: string[]; env?: { up?: string; down?: string; vars?: Record<string, string> } };
 export type RepoConfig = { commands?: { build?: string }; suites: Record<string, Suite> };
 
 // Untrimmed stdout, for NUL-separated (-z) output where a path may begin or end in whitespace.
@@ -35,7 +35,6 @@ export function dirtyFiles(cwd: string): string[] {
   }
   return paths;
 }
-
 // `ref`: read the config as committed at that ref instead of from disk (the AC7 guard trusts the base config, not the implementer's edit of it).
 export function loadRepo(dir: string, ref?: string): RepoConfig {
   const file = ref ? `${ref}:.ark/repo.yml` : join(dir, ".ark", "repo.yml");
@@ -49,11 +48,16 @@ export function loadRepo(dir: string, ref?: string): RepoConfig {
     if (!(s.format in parsers)) throw new Error(`${at}.format '${s.format}' has no parser (known: ${Object.keys(parsers).join(", ")})`);
     if (!s.run.includes("{tags}")) throw new Error(`${at}.run must contain {tags}`);
     for (const k of ["up", "down"] as const) if (s.env?.[k] !== undefined && typeof s.env[k] !== "string") throw new Error(`${at}.env.${k} must be a string`);
+    if (s.env?.vars !== undefined && (typeof s.env.vars !== "object" || s.env.vars === null || Object.values(s.env.vars).some((v) => typeof v !== "string"))) throw new Error(`${at}.env.vars must map names to strings`);
   }
   return cfg as RepoConfig;
 }
 
-const testGlobs = (s: Suite) => s.tests ?? ["**/*.test.ts", "test/**"];
+// Without `tests`: the files bun test discovers, plus everything under the usual test directories (helpers and fixtures a test imports).
+const testGlobs = (s: Suite) => s.tests ?? ["**/*{.test,_test,.spec,_spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}", "**/{test,tests,__tests__}/**"];
+// The suite's test files in a checkout: its globs (default: bun's discovery) against `cwd`, dependencies excluded.
+export const suiteTestFiles = (s: Suite, cwd: string): string[] =>
+  testGlobs(s).flatMap((g) => [...new Bun.Glob(g).scanSync({ cwd, onlyFiles: true })]).filter((f) => !f.split("/").includes("node_modules"));
 const isTest = (s: Suite, f: string) => testGlobs(s).some((g) => new Bun.Glob(g).match(f));
 export const isTestFile = (cfg: RepoConfig, f: string) => Object.values(cfg.suites).some((s) => isTest(s, f));
 const show = (wt: string, ref: string, f: string) => {
@@ -62,8 +66,8 @@ const show = (wt: string, ref: string, f: string) => {
 };
 
 // Test files changed between base and head that still exist at head (what red-green overlays).
-export function changedTestFiles(wt: string, base: string, cfg: RepoConfig): string[] {
-  return diffFiles(wt, "--diff-filter=d", `${base}..HEAD`).filter((f) => isTestFile(cfg, f));
+export function changedTestFiles(wt: string, base: string, cfg: RepoConfig, head = "HEAD"): string[] {
+  return diffFiles(wt, "--diff-filter=d", `${base}..${head}`).filter((f) => isTestFile(cfg, f));
 }
 
 // AC7: files in from..HEAD that are test files carrying an AC tag, before or after the change.
