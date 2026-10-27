@@ -27,7 +27,7 @@ ark gate packet <run_id> <G0|G1|G2|GE> # build gates/<gate>.<hash>.packet.md fro
 ark gate answer <run_id> <gate> <answer> --packet <sha256>   # G0 accept|edit|abort, G1 approve|change|abort, G2 approve|send_back|abort, GE one_more_round|take_over|abort
 ```
 
-Guardrail integrity (ARK-115). Trust model: v1 trusts the user's own processes (agents run as the user), so none of this stops a deliberate forger; it catches mistakes and bugs and makes honest runs auditable. See [docs/adr/0003](docs/adr/) for the decision.
+Guardrail integrity (ARK-115). Trust model: v1 trusts the user's own processes (agents run as the user), so none of this stops a deliberate forger; it catches mistakes and bugs and makes honest runs auditable. See [docs/adr/0003-same-user-trust-for-v1.md](docs/adr/0003-same-user-trust-for-v1.md) for the decision.
 
 - **Owned events.** `ark advance` refuses every event a command owns (`ws.created`, `test.*`, `trace.checked`, `gate.*`, `ge.*`, `mr.*`, `run.closed`, `route.chosen`, `findings.recorded`, `artifact.*`, `ac.*`), naming the command.
 - **Hash chain.** Each ledger line carries `prev`, the sha256 of the previous line, and `state.json` records `ledger_seq` and `ledger_head`. Replay and every command refuse an edited, removed, reordered or cut-off line, naming the first bad seq. This detects accidental corruption and truncation relative to the cached head; it does **not** detect deliberate same-user tampering (anyone who can write the files can recompute the chain and the head).

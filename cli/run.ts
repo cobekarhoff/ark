@@ -144,7 +144,7 @@ export function project(events: LedgerEvent[]): RunState {
 // which is always at most one event behind the ledger.
 // What this is: a detector of accidental corruption and truncation (a crash mid-write, a bad merge, an editor, a half-run script), relative to the cached head.
 // What it is not: protection against deliberate tampering. A process running as the same user can recompute every `prev`, rewrite state.json and pass the check.
-// v1 accepts same-user trust; see docs/adr/0003 for the decision and what would close it (an anchor outside the user's reach).
+// v1 accepts same-user trust; see docs/adr/0003-same-user-trust-for-v1.md for the decision and what would close it (an anchor outside the user's reach).
 const line = (e: LedgerEvent) => JSON.stringify(e);
 function chainHash(e?: LedgerEvent) {
   return sha256(e ? line(e) : "");
