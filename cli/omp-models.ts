@@ -7,7 +7,7 @@
 // Any failure to load OMP exits non-zero with the reason on stderr; the caller refuses.
 import { join } from "node:path";
 
-export type Reach = { selector: string; via: { kind: "role" | "chain"; key: string } };
+export type Reach = { selector: string; via: { kind: "role" | "chain" | "parent"; key: string } };
 
 const [pkg, ...roles] = process.argv.slice(2);
 if (!pkg || !roles.length) throw new Error("usage: omp-models.ts <omp package dir> <role>...");

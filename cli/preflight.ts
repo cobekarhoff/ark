@@ -26,7 +26,7 @@ function ompPackage(): string {
 
 type Roles = Record<string, { models: Reach[]; unresolved: string[] } | null>;
 function reachable(): Roles {
-  const r = Bun.spawnSync([process.execPath, join(import.meta.dir, "omp-models.ts"), ompPackage(), ...ROLES], { cwd: projectDir() });
+  const r = Bun.spawnSync([process.execPath, join(import.meta.dir, "omp-models.ts"), ompPackage(), ...ROLES, "default"], { cwd: projectDir() });
   if (r.exitCode !== 0) throw new Error(`preflight refused: OMP's model resolver failed to load or run:\n${r.stderr.toString().trim()}`);
   return JSON.parse(r.stdout.toString());
 }
@@ -56,9 +56,15 @@ export function preflight(): string {
     if (!got.models.length) throw new Error(`preflight refused: ${r} resolves to no model`);
   }
   const model = Object.fromEntries(ROLES.map((r) => [r, roles[r]!.models])) as Record<(typeof ROLES)[number], Reach[]>;
+  // A subagent whose role has no working credential runs on the parent session's model, whatever retry.modelFallback says
+  // (OMP: resolveModelOverrideWithAuthFallback, src/config/model-resolver.ts). Ark's parent is the orchestrator, the `default` role, so what `default` can reach
+  // (its model and that model's own chain) is reachable by every model-calling subagent whose vendor must differ from the implementer's.
+  // ponytail: the implement and review-s roles are not widened this way; doing so would refuse the PRD default (default on the validator's vendor).
+  const parent = (roles.default?.models ?? []).map((m): Reach => ({ selector: m.selector, via: { kind: "parent", key: "default" } }));
+  for (const r of ["validate", "review-x"] as const) for (const m of parent) if (!model[r].some((x) => x.selector === m.selector)) model[r] = [...model[r], m];
   const vendor = (m: Reach) => m.selector.split("/")[0];
   const implementers = new Set(model.implement.map(vendor));
-  const how = (m: Reach) => (m.via.kind === "chain" ? ` via retry.fallbackChains.${m.via.key} (${origin(m.via, file)})` : "");
+  const how = (m: Reach) => (m.via.kind === "parent" ? " via the parent session model (the default role)" : m.via.kind === "chain" ? ` via retry.fallbackChains.${m.via.key} (${origin(m.via, file)})` : "");
   const bad = [
     ...(["validate", "review-x"] as const).flatMap((r) =>
       model[r].filter((m) => implementers.has(vendor(m))).map((m) => `${r} (${m.selector}) shares the implementer's vendor '${vendor(m)}'${how(m)}`)),
