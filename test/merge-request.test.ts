@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, unlinkSync, watch, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, watch, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { rechain } from "./ledger";
@@ -304,43 +304,29 @@ describe("ARK-145-AC1", () => {
   test("evidence approval cannot authorize or push a concurrent commit made after proof checks", async () => {
     const packetHash = atEvidenceApproved("project: demo\n", true, false);
     const provenHead = git(worktree(), "rev-parse", "HEAD");
-    appendAskProof(mainSessionFile(home), { action: "gate.answered:evidence", runId: run(), answer: "approve", packetHash, choices: ["approve", "send_back", "abort"] });
-    const transcriptFile = mainSessionFile(home);
-    const transcript = readFileSync(transcriptFile, "utf8");
-    unlinkSync(transcriptFile);
-    expect(Bun.spawnSync(["mkfifo", transcriptFile]).exitCode).toBe(0);
-    const writer = Bun.spawn(["bun", join(import.meta.dir, "approval-race.ts"), transcriptFile, transcript, worktree()], { stdout: "ignore", stderr: "pipe" });
+    const counterFile = join(root, "race-counter");
+    git(worktree(), "config", "--worktree", "core.fsmonitor", join(import.meta.dir, "approval-race.ts"));
     const approval = Bun.spawn(["bun", COMMAND_LINE_FILE, "gate", "answer", run(), "evidence", "approve", "--packet", packetHash], {
       cwd: projectDirectory,
-      env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PI_SESSION_ID: "ark-main-session", PI_SESSION_FILE: transcriptFile },
+      env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PI_SESSION_ID: "ark-main-session", PI_SESSION_FILE: mainSessionFile(home), ARK_RACE_COUNTER: counterFile, ARK_RACE_WORKTREE: worktree() },
       stdout: "pipe", stderr: "pipe",
     });
-    try {
-      const [approvalCode, writerCode] = await Promise.race([
-        Promise.all([approval.exited, writer.exited]),
-        // A real child-process rendezvous cannot use fake time; this deadline never schedules the commit.
-        Bun.sleep(20_000).then(() => { throw new Error("transcript rendezvous did not complete"); }),
-      ]);
-      expect(writerCode, await new Response(writer.stderr).text()).toBe(0);
-      const unprovenHead = git(worktree(), "rev-parse", "HEAD");
-      expect(unprovenHead).not.toBe(provenHead);
-      expect(events("test.red_green").at(-1)?.data.head_sha).toBe(provenHead);
-      const opened = ark("merge-request", "open", run());
-      // Observe the actual remote before checking the receipt: this must never push the new commit.
-      expect(onRemote(`refs/heads/${branch()}`)).toBeNull();
-      expect(opened.code).toBe(1);
-      expect(ghLog()).toEqual([]);
-      if (approvalCode === 0) {
-        expect(events("gate.answered").findLast((event) => event.data.gate === "evidence")?.data.approved_heads).toEqual({ demo: provenHead });
-        expect(opened.err).toContain(`differs from the approved ${provenHead}`);
-      } else {
-        expect(events("gate.answered").filter((event) => event.data.gate === "evidence")).toEqual([]);
-      }
-    } finally {
-      approval.kill();
-      writer.kill();
-      if (existsSync(transcriptFile)) unlinkSync(transcriptFile);
-      writeFileSync(transcriptFile, transcript);
+    const approvalCode = await approval.exited;
+    const observedChecks = Number(readFileSync(counterFile, "utf8"));
+    expect(observedChecks, await new Response(approval.stderr).text()).toBeGreaterThanOrEqual(3);
+    const unprovenHead = git(worktree(), "rev-parse", "HEAD");
+    expect(unprovenHead).not.toBe(provenHead);
+    expect(events("test.red_green").at(-1)?.data.head_sha).toBe(provenHead);
+    git(worktree(), "config", "--worktree", "--unset", "core.fsmonitor");
+    const opened = ark("merge-request", "open", run());
+    expect(onRemote(`refs/heads/${branch()}`)).toBeNull();
+    expect(opened.code).toBe(1);
+    expect(ghLog()).toEqual([]);
+    if (approvalCode === 0) {
+      expect(events("gate.answered").findLast((event) => event.data.gate === "evidence")?.data.approved_heads).toEqual({ demo: provenHead });
+      expect(opened.err).toContain(`differs from the approved ${provenHead}`);
+    } else {
+      expect(events("gate.answered").filter((event) => event.data.gate === "evidence")).toEqual([]);
     }
   });
 });
