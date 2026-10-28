@@ -74,7 +74,8 @@ const ok = (result: { code: number; err: string }) => {
 };
 
 // A project whose origin looks like GitHub, a run with one implemented worktree commit, and evidence approved.
-function atEvidenceApproved(arkYaml = "project: demo\n") {
+// `validatorCommit` lands an untagged test file on top of the implementer's head before trace-check, as the validator's test commit does.
+function atEvidenceApproved(arkYaml = "project: demo\n", validatorCommit = false) {
   home = mkdtempSync(join(tmpdir(), "ark-home-"));
   root = realpathSync(mkdtempSync(join(tmpdir(), "ark-fx-")));
   binaryDirectory = join(root, "bin");
@@ -114,6 +115,12 @@ function atEvidenceApproved(arkYaml = "project: demo\n") {
   git(worktree(), "add", "-A");
   git(worktree(), "commit", "-qm", "feature");
   ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'));
+  if (validatorCommit) {
+    mkdirSync(join(worktree(), "test"));
+    writeFileSync(join(worktree(), "test", "validator-helper.test.ts"), "// no acceptance criterion tag\n");
+    git(worktree(), "add", "-A");
+    git(worktree(), "commit", "-qm", "validator test commit");
+  }
   ok(ark("advance", run(), "build.completed"));
   writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: criterion one\n  level: manual\n  kind: new\n");
   mkdirSync(runFile("manual"));
@@ -268,6 +275,38 @@ describe("ARK-107-AC1", () => {
     ok(ark("merge-request", "open", run()));
     expect(runState().next_action).toMatchObject({ kind: "merge", agent: "human" });
     expect(runState().status).toBe("waiting_human");
+  });
+});
+
+describe("ARK-145-AC1", () => {
+  beforeEach(() => atEvidenceApproved("project: demo\n", true));
+
+  test("ark merge-request open pushes the head the evidence gate approved, a validator test commit above the implementer's head, not the implementer's head", () => {
+    const implementerHead = runState().repos[0].head_sha;
+    const approvedHead = git(worktree(), "rev-parse", "HEAD");
+    expect(approvedHead).not.toBe(implementerHead);
+    expect(events("gate.answered").find((event) => event.data.gate === "evidence")?.data.approved_heads).toEqual({ demo: approvedHead });
+
+    ok(ark("merge-request", "open", run()));
+    expect(onRemote(`refs/heads/${branch()}`)).toBe(approvedHead);
+    expect(onRemote(`refs/heads/${branch()}`)).not.toBe(implementerHead);
+    expect(events("merge_request.opened")).toHaveLength(1);
+  });
+});
+
+describe("ARK-145-AC2", () => {
+  beforeEach(() => atEvidenceApproved("project: demo\n", true));
+
+  test("a commit made after evidence approval is still refused and nothing is pushed, even when a validator test commit preceded approval", () => {
+    writeFileSync(join(worktree(), "late.txt"), "late\n");
+    git(worktree(), "add", "-A");
+    git(worktree(), "commit", "-qm", "late");
+    const result = ark("merge-request", "open", run());
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("differs from the approved");
+    expect(onRemote(`refs/heads/${branch()}`)).toBeNull();
+    expect(ghLog()).toEqual([]);
+    expect(events("merge_request.opened")).toEqual([]);
   });
 });
 
