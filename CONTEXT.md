@@ -47,7 +47,7 @@ The number of rounds a run may use before a human must decide; two by default. O
 _Avoid_: Retry limit, max attempts
 
 **Escalation**:
-The point where a run stops for a human decision because its round budget is spent; the human grants exactly one more round, takes over, or aborts. Its gate id in the CLI is `GE`; in prose say escalation.
+The point where a run stops for a human decision because its round budget is spent; the human grants exactly one more round, takes over, or aborts. Its gate id in the command-line interface (CLI) is `GE`; in prose say escalation.
 _Avoid_: GE (in prose), failure, stuck run
 
 ## Roles
@@ -66,7 +66,7 @@ _Avoid_: Coder, developer, builder
 
 **Validator**:
 The role that writes and fixes the tests that prove a run's acceptance criteria, on a different vendor from the implementer.
-_Avoid_: Tester, QA agent
+_Avoid_: Tester, quality assurance (QA) agent
 
 **Reviewer**:
 The role that hunts for defects in a run's changes and reports findings; never edits.
@@ -83,7 +83,7 @@ _Avoid_: Cross-model check
 ## Gates
 
 **Gate**:
-A point in a run where only a human decision lets it continue: setup, AC clarity, plan, escalation and evidence. Merging an MR is the git host's approval, not a gate.
+A point in a run where only a human decision lets it continue: setup, acceptance criterion (AC) clarity, plan, escalation and evidence. Merging an MR is the git host's approval, not a gate.
 _Avoid_: Checkpoint, approval step, G3
 
 **Packet**:
@@ -141,5 +141,72 @@ A run's private checkout of one repo, where the implementer and validator work a
 _Avoid_: Workspace, checkout, sandbox
 
 **Evidence**:
-The recorded proofs for each AC at the current head (red-green proof, preservation proof, or a signed manual record) and the artifacts they point to: test reports, logs, environment fingerprints and, for UI or system behavior, screenshots. Findings and diffs sit beside evidence, not in it.
+The recorded proofs for each AC at the current head (red-green proof, preservation proof, or a signed manual record) and the artifacts they point to: test reports, logs, environment fingerprints and, for user interface (UI) or system behavior, screenshots. Findings and diffs sit beside evidence, not in it.
 _Avoid_: Proof bundle, test output, results
+
+## Abbreviations
+
+**AC**:
+Acceptance criterion. AC IDs such as `ARK-013-AC2` are a data format and stay as they are.
+
+**ADR**:
+Architecture decision record, kept in `docs/adr/`.
+
+**CI**:
+Continuous integration: the automated build and test runs a git host performs on every change.
+
+**CLI**:
+Command-line interface; here the `ark` command.
+
+**DAG**:
+Directed acyclic graph; the shape of a run's plan, shown at the plan gate.
+
+**E2E**:
+End-to-end: a test that exercises the real system from its outside edge.
+
+**FDA**:
+United States Food and Drug Administration, whose rules for medical-device software shape Ark's audit trail.
+
+**FR**, **NFR**:
+Functional requirement, non-functional requirement: numbered lines of `docs/prd.md`, such as FR-24.
+
+**MR**:
+Merge request.
+
+**OMP**:
+Oh My Pi, the agent harness Ark installs into as a plugin.
+
+**OS**:
+Operating system.
+
+**PHI**:
+Protected health information.
+
+**PRD**:
+Product requirements document, `docs/prd.md`.
+
+**PTY**:
+Pseudo-terminal: a terminal a program allocates without a person at it.
+
+**QA**, **RA**:
+Quality assurance, regulatory affairs: the people who audit runs after the fact.
+
+**SHA**, **SHA-256**:
+Secure hash algorithm. A commit SHA names one git commit; SHA-256 is the 256-bit variant that hashes packets and run manifests.
+
+**UI**:
+User interface.
+
+### Scales and names
+
+**Priorities P0 to P3**:
+P0 breaks an AC, loses or corrupts data or opens a security hole (must fix); P1 is a likely defect or missing proof for an AC; P2 is worth fixing but never blocks; P3 is minor.
+
+**Tiers T1 to T3**:
+The risk tier of a run, proposed at the plan gate, that sets how many reviewers read it: T1 light (one repo, small diff, no risk tags; one reviewer), T2 standard (the default; two reviewers), T3 high (any risk tag such as authentication, patient data or a data migration; two reviewers plus a security reviewer).
+
+**Milestones M0 to M5, M1a**:
+M0 the harness spikes that confirm how OMP behaves before building (ARK-101); not a row of the PRD's milestone table. M1a the thin loop: a local ticket reaches a pull request through the plan and evidence gates on Ark's own repo. M1 single repo, complete: setup, resume, the console, Jira and GitLab. M2 multi-repo. M3 review tiers, metrics and merge-request watch. M4 retention and audit outputs: closed runs shipped to write-once storage on Amazon Simple Storage Service (S3). M5 a remote procedure call (RPC) runner, built only if needed.
+
+**Gates**:
+Setup (one-time fit of Ark to a repo or project); AC clarity (only when a ticket lacks testable acceptance criteria); plan (before any code); escalation (round budget spent); evidence (loop exits clean, before MRs open). The PRD and the CLI still shorten them to `GS`, `G0`, `G1`, `GE` and `G2` until ARK-119 renames them.
