@@ -1,0 +1,52 @@
+<!-- PROTOTYPE (throwaway, branch prototype/board, never merged): read-only Ark board, layout evidence for ARK-122 AC8.
+
+Plan: one question, "which layout lets an operator see backlog readiness and live runs fastest?", answered with three
+structurally different variants on one route, switched by ?variant=A|B|C and the floating bar (arrow keys too).
+  A Queue    backlog as ordered lanes (ready, running, blocked, done) beside a runs column.
+  B Lanes    dependency flow left to right with edges, a ticket detail strip, runs docked below.
+  C Run page three columns: run list, one run in depth (the ARK-122 run page shape), dense backlog.
+
+Design decisions (impeccable's questions could not be asked; decided from the brief):
+- Mode: Operate. Scene: an engineer glancing at a second monitor between Oh My Pi sessions, any hour, so light and dark both
+  follow the system and a bar toggle overrides. Scanability and stable density beat expression.
+- Color: restrained cool-slate neutrals plus state colors that each do one job: amber = waiting on you, blue = running,
+  green = ready, red = failed, grey = done or blocked. State is always also written as text or an icon.
+- Type: system sans for text, system monospace only for ids, branches and ledger event types. No web fonts, no dependencies.
+- Motion: only what changed. New nodes fade in 200ms, changed text gets a one-time outline flash, nothing loops, nothing
+  animates on first paint or on a variant switch. prefers-reduced-motion drops the movement and keeps the flash.
+- Read-only: the only action is a copy button; nothing writes state.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ark board (prototype)</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3L13 4.5"/></symbol>
+		<symbol id="i-copy" viewBox="0 0 16 16"><path d="M5.5 5.5h7v8h-7z"/><path d="M3.5 10.5v-8h7"/></symbol>
+		<symbol id="i-lock" viewBox="0 0 16 16"><path d="M4.5 7h7v6h-7z"/><path d="M6 7V5a2 2 0 014 0v2"/></symbol>
+		<symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></symbol>
+		<symbol id="i-dot" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5"/></symbol>
+		<symbol id="i-chevron-left" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>
+		<symbol id="i-chevron-right" viewBox="0 0 16 16"><path d="M6 3.5L10.5 8 6 12.5"/></symbol>
+		<symbol id="i-chevron-down" viewBox="0 0 16 16"><path d="M3.5 6L8 10.5 12.5 6"/></symbol>
+	</defs>
+</svg>
+
+<div id="app"></div>
+
+<div id="bar" class="bar" role="toolbar" aria-label="Prototype variants">
+	<button data-bar-prev aria-label="Previous variant"><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
+	<span class="bar-label" data-bar-label>A</span>
+	<button data-bar-next aria-label="Next variant"><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+	<button class="bar-theme" data-bar-theme>Theme: system</button>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
