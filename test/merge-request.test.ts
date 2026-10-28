@@ -33,7 +33,7 @@ case "$1 $2" in
   *) echo "fake gh: unexpected $*" >&2; exit 1 ;;
 esac
 `;
-const REPOSITORY_YAML = JSON.stringify({ suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml" } } });
+const REPOSITORY_YAML = JSON.stringify({ suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml" } } });
 const pullRequest = (number: number, options: { owner?: string; base?: string; state?: string } = {}) =>
   ({ url: `https://github.com/acme/demo/pull/${number}`, number: number, state: options.state ?? "OPEN", baseRefName: options.base ?? "main", headRepositoryOwner: { login: options.owner ?? "acme" } });
 
