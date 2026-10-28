@@ -151,7 +151,7 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
       ? Object.fromEntries((Bun.YAML.parse(readFileSync(join(directory, "ac.yml"), "utf8")) as { id: string; kind: string }[]).map((criterion) => [criterion.id, criterion.kind]))
       : undefined;
     const closing = gate === "evidence" && answer === "approve" && !mergeRequestsEnabled() && !events.some((event) => event.type === "merge_request.opened");
-    const answered = append(directory, events, "gate.answered", { gate, answer, ...identity, packet_sha256: packetHash, ...(acceptanceCriteriaKinds ? { ac_kinds: acceptanceCriteriaKinds } : {}), ...(escalated ? { escalated: true } : {}), ...heads });
+    const answered = append(directory, events, "gate.answered", { gate, answer, ...identity, packet_sha256: packetHash, ...(acceptanceCriteriaKinds ? { ac_kinds: acceptanceCriteriaKinds } : {}), ...(escalated ? { escalated: true } : {}), ...heads, ...(gate === "evidence" && answer === "approve" ? { approved_heads: worktreeHeads(directory, run) } : {}) });
     commit(directory, closing ? append(directory, answered, "run.closed", { outcome: "handed_off", reason: "merge requests disabled" }) : answered);
     return `${gate} ${answer} recorded by ${identity.by}\n${closing ? "merge requests are disabled in ark.yml; run closed at ready branches, handed off\n" : ""}`;
   });
