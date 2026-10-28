@@ -33,7 +33,7 @@ function green(event: TestEvent, id: string): string {
 
 // The matrix and the reasons it fails, as a pure function of ac.yml, manual/<AC>.md, the ledger and the run worktrees' HEADs.
 // `ark trace-check` writes it; `ark gate packet evidence` recomputes it instead of trusting a stored verdict.
-export function buildMatrix(directory: string, runId: string, state: RunState, events: LedgerEvent[]): { matrix: string; failures: string[] } {
+export function buildMatrix(directory: string, runId: string, state: RunState, events: LedgerEvent[]): { matrix: string; failures: string[]; heads: Map<string, string | undefined> } {
   const acceptanceCriteria = (Bun.YAML.parse(readFileSync(join(directory, "ac.yml"), "utf8")) ?? []) as { id: string; level?: string; kind?: string }[];
   check("ac", acceptanceCriteria, "ac.yml");
   const failures: string[] = unattributed(directory, state, events); // changes no recorded implementer step vouches for
@@ -131,7 +131,7 @@ export function buildMatrix(directory: string, runId: string, state: RunState, e
 
   rows.sort((leftRow, rightRow) => compare(leftRow.id, rightRow.id));
   const matrix = `# Trace matrix: ${runId}\n\nAcceptance criterion (AC) evidence, with commit hashes for each test run.\n\n| AC | Kind | Level | Tests | Red (commit, outcome) | Green (commit, outcome) | Evidence | Screenshots | Status |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n${rows.map((row) => `${row.line}\n`).join("")}`;
-  return { matrix, failures };
+  return { matrix, failures, heads };
 }
 
 export function traceCheck(runId: string): string {
