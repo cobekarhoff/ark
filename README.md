@@ -51,6 +51,10 @@ bun run docs:build
 bun run docs:preview
 ```
 
+The build command installs the site's dependencies from `site/bun.lock` automatically;
+no separate site install is needed. The root install uses its own lockfile and does
+not install Astro, Starlight or Playwright.
+
 Open the address printed by preview. The static site in `site/dist/` includes the newcomer path, interactive explorers and local search. Pages are authored in `site/src/content/docs/`; build-time generation reads the actual CLI help, lifecycle table and ticket playbook into ignored `site/.generated/`. Rebuild after changing those sources. No server runtime, hosted search or deployment credentials are needed.
 
 The [framework decision](docs/adr/0004-documentation-site.md) compares seven alternatives. Deep operational detail previously in this README is now in the site's [implementation reference](site/src/content/docs/reference/implementation.md).
@@ -58,13 +62,24 @@ The [framework decision](docs/adr/0004-documentation-site.md) compares seven alt
 ## Development
 
 ```sh
-bun test
+bun test --path-ignore-patterns '**/documentation-site.test.ts'
 bun run docs:build
+bun run --cwd site playwright install chromium
+bun test test/documentation-site.test.ts
 ```
 
-Browser tests use Playwright Chromium. Install it locally with
-`bunx playwright install chromium`; on Linux, use
-`bunx playwright install --with-deps chromium` to include system dependencies,
-as CI does.
+Browser tests use Playwright Chromium from the isolated site install. On Linux, use
+`bun run --cwd site playwright install --with-deps chromium` to include system
+dependencies. The TypeScript path mapping resolves `@playwright/test` from
+`site/node_modules` without adding it to the root install. Plain `bun test` includes
+the browser tests; use the exclusion above to run only the main suite.
 
-Continuous integration (CI) installs with the frozen Bun lockfile, builds the docs with the same command and runs `bun test`. The CLI tests resolve models through OMP's own code; CI pins `@oh-my-pi/pi-coding-agent@18.12.6`. There is no separate lint script. See the [implementation reference](site/src/content/docs/reference/implementation.md) for guardrails and the [product requirements document](docs/prd.md) for the full contract.
+Continuous integration (CI) runs the main suite and documentation checks in parallel
+jobs. Both install the root frozen lockfile; only the documentation job builds the
+site (installing its frozen lockfile), installs Chromium and runs the documentation
+tests. `.ark/repo.yml` keeps unfiltered test discovery so `ark test --criteria` can
+still select the documentation acceptance criteria locally after browser setup.
+The CLI tests resolve models through OMP's own code; CI pins
+`@oh-my-pi/pi-coding-agent@18.12.6`. There is no separate lint script. See the
+[implementation reference](site/src/content/docs/reference/implementation.md) for
+guardrails and the [product requirements document](docs/prd.md) for the full contract.

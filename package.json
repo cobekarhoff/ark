@@ -13,15 +13,10 @@
   },
   "scripts": {
     "test": "bun test",
-    "docs:build": "bun site/generate.ts && bun --bun astro build --root site",
-    "docs:preview": "bun --bun astro preview --root site"
+    "docs:build": "bun install --cwd site --frozen-lockfile && bun run --cwd site build",
+    "docs:preview": "bun run --cwd site preview"
   },
   "dependencies": {
     "ajv": "^8.17.1"
-  },
-  "devDependencies": {
-    "@astrojs/starlight": "^0.42.7",
-    "@playwright/test": "^1.64.1",
-    "astro": "^7.4.3"
   }
 }

@@ -7,6 +7,9 @@
     "resolveJsonModule": true,
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@playwright/test": ["./site/node_modules/@playwright/test"]
+    }
   }
 }

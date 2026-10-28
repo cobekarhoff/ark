@@ -11,10 +11,19 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
-      - run: bun run docs:build
-      - run: bunx playwright install --with-deps chromium
       # `ark preflight` resolves models with OMP's own code (cli/omp-models.ts), so the suite needs OMP installed; pin the version the resolver was written against.
       - run: bun add -g @oh-my-pi/pi-coding-agent@18.12.6
       - run: echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
       - run: omp --version
-      - run: bun test
+      - run: bun test --path-ignore-patterns '**/documentation-site.test.ts'
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run docs:build
+      - run: bun run --cwd site playwright install --with-deps chromium
+      - run: bun test test/documentation-site.test.ts
