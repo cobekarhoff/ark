@@ -12,9 +12,15 @@
     ]
   },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "docs:build": "bun site/generate.ts && bun --bun astro build --root site",
+    "docs:preview": "bun --bun astro preview --root site"
   },
   "dependencies": {
     "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "@astrojs/starlight": "^0.42.7",
+    "astro": "^7.4.3"
   }
 }

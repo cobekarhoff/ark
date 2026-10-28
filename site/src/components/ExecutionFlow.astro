@@ -1,0 +1,135 @@
+---
+import flow from '../../.generated/flow.json';
+import { walkthrough } from '../walkthrough';
+const states = Object.entries(flow.transitions);
+---
+<h2 id="run-lifecycle">Run lifecycle</h2>
+<p>Choose a starting state, then follow an event. Every branch below comes from <code>cli/transitions.ts</code>. Self-loops keep the same state; terminal states have no outgoing events. This explorer does not execute commands or bypass their guards.</p>
+<section class="flow-widget" aria-label="Run lifecycle explorer" data-lifecycle>
+  <label for="lifecycle-state">Explore state</label>
+  <select id="lifecycle-state" data-state-select>
+    {states.map(([state]) => <option value={state}>{state}</option>)}
+  </select>
+  <p class="current-state" role="status" aria-live="polite" aria-atomic="true">Current state: <strong data-current-state>intake</strong><span data-last-event></span></p>
+  <div class="state-map" aria-label="Lifecycle states">
+    {states.map(([state]) => <button type="button" data-state-node={state} aria-pressed={state === 'intake'}>{state}</button>)}
+  </div>
+  <h3>Available events and branches</h3>
+  {states.map(([state, events]) => <div data-events-for={state} hidden={state !== 'intake'}>
+    {Object.keys(events).length ? <ul class="event-list">{Object.entries(events).map(([event, destination]) => <li>
+      <button type="button" data-event={event} data-from={state} data-destination={destination}>
+        <code>{event}</code><span aria-hidden="true"> → </span><span>{destination}</span>{state === destination && <span> (self-loop)</span>}
+      </button>
+    </li>)}</ul> : <p>Terminal state. Reset to explore another path.</p>}
+  </div>)}
+  <div class="flow-controls"><button type="button" data-lifecycle-back disabled>Previous state</button><button type="button" data-lifecycle-reset>Reset lifecycle</button></div>
+  <details><summary>Read the complete transition table without interaction</summary>
+    <ul>{states.map(([state, events]) => <li><strong>{state}</strong><ul>{Object.entries(events).map(([event, destination]) => <li><code>{event}</code> → <code>{destination}</code></li>)}</ul>{!Object.keys(events).length && 'Terminal state'}</li>)}</ul>
+  </details>
+</section>
+
+<h2 id="execution-dag">Execution dependency diagram</h2>
+<p>A directed acyclic graph (DAG) can be a chain: these ten nodes show one ordered pass through the ticket playbook, not parallel work invented by the site. Each arrow means “precedes”. The rounds step may send work back through the lifecycle above; that loop is deliberately not an acyclic dependency edge.</p>
+<section class="flow-widget" aria-label="Execution DAG" data-execution-dag>
+  <ol class="execution-chain" aria-label="Ticket playbook steps">
+    {flow.steps.map((step, index) => <li>
+      <button type="button" data-dag-node={step.number} aria-controls="execution-detail" aria-pressed={index === 0}><span>{step.number}</span> {step.title}</button>
+      {index < flow.steps.length - 1 && <span class="dependency-arrow" aria-hidden="true">↓</span>}
+    </li>)}
+  </ol>
+  <div id="execution-detail" class="detail-panel" role="region" aria-label="Execution step details" aria-live="polite" aria-atomic="true">
+    {flow.steps.map((step, index) => <div data-dag-detail={step.number} hidden={index !== 0}>
+      <h3>{step.number}. {step.title}</h3><p>{step.description}</p>
+      <p>{index === 0 ? 'Entry point: the ticket arrives here.' : `Depends on step ${flow.steps[index - 1].number}: ${flow.steps[index - 1].title}.`}</p>
+      <p>{index === flow.steps.length - 1 ? 'Exit: the human merges or closes the requests and records the outcome.' : `Next dependency: step ${flow.steps[index + 1].number}, ${flow.steps[index + 1].title}.`}</p>
+    </div>)}
+  </div>
+  <details><summary>Read all ten source steps</summary><ol>{flow.steps.map((step) => <li>{step.label}</li>)}</ol></details>
+</section>
+
+<h2 id="illustrative-walkthrough">One ticket, step by step</h2>
+<p><strong>Illustrative example, not a completed run.</strong> ARK-200 is a hypothetical empty-state change. This path includes criteria clarification and escalation so you can see every implemented gate and each agent handoff; real runs skip conditional gates when not needed.</p>
+<section class="flow-widget" aria-label="Illustrative ticket walkthrough" data-walkthrough>
+  <p role="status" aria-live="polite" data-walkthrough-progress>Step 1 of {walkthrough.length}</p>
+  <div class="detail-panel" role="region" aria-label="Walkthrough step" aria-live="polite" aria-atomic="true">
+    {walkthrough.map((step, index) => <article data-walkthrough-step={index} hidden={index !== 0}>
+      <h3>{step.title}</h3><p><strong>Handoff: {step.actor}</strong></p><p>{step.detail}</p>
+    </article>)}
+  </div>
+  <div class="flow-controls"><button type="button" data-walkthrough-back disabled>Previous step</button><button type="button" data-walkthrough-next>Next step</button><button type="button" data-walkthrough-reset>Restart walkthrough</button></div>
+  <details><summary>Read the entire illustrative walkthrough</summary><ol>{walkthrough.map((step) => <li><strong>{step.title} — {step.actor}.</strong> {step.detail}</li>)}</ol></details>
+</section>
+
+<script>
+  // Only rendered data attributes cross into the browser, never CLI modules.
+  const lifecycle = document.querySelector<HTMLElement>('[data-lifecycle]')!;
+  const stateSelect = lifecycle.querySelector<HTMLSelectElement>('[data-state-select]')!;
+  const currentState = lifecycle.querySelector<HTMLElement>('[data-current-state]')!;
+  const lastEvent = lifecycle.querySelector<HTMLElement>('[data-last-event]')!;
+  const previousState = lifecycle.querySelector<HTMLButtonElement>('[data-lifecycle-back]')!;
+  const history: string[] = [];
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const animate = (element: HTMLElement, event: MouseEvent) => {
+    if (event.detail > 0 && !reducedMotion.matches) {
+      element.getAnimations().forEach((animation) => animation.cancel());
+      element.animate([{ opacity: 0.5, transform: 'translateY(4px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 240, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });
+    }
+  };
+  const showState = (state: string, event = '') => {
+    currentState.textContent = state;
+    lastEvent.textContent = event ? ` · ${event}` : '';
+    stateSelect.value = state;
+    lifecycle.querySelectorAll<HTMLElement>('[data-events-for]').forEach((panel) => { panel.hidden = panel.dataset.eventsFor !== state; });
+    lifecycle.querySelectorAll<HTMLButtonElement>('[data-state-node]').forEach((button) => { button.setAttribute('aria-pressed', String(button.dataset.stateNode === state)); });
+    previousState.disabled = !history.length;
+  };
+  stateSelect.addEventListener('change', () => { history.push(currentState.textContent!); showState(stateSelect.value); });
+  lifecycle.addEventListener('click', (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>('button');
+    if (!button) return;
+    if (button.dataset.destination) {
+      history.push(currentState.textContent!);
+      showState(button.dataset.destination, button.dataset.event);
+      stateSelect.focus();
+      animate(currentState, event);
+    } else if (button.dataset.stateNode) {
+      history.push(currentState.textContent!);
+      showState(button.dataset.stateNode);
+      animate(currentState, event);
+    } else if (button.hasAttribute('data-lifecycle-back')) {
+      showState(history.pop()!);
+      if (previousState.disabled) stateSelect.focus();
+    } else if (button.hasAttribute('data-lifecycle-reset')) {
+      history.length = 0;
+      showState('intake');
+    }
+  });
+
+  const diagram = document.querySelector<HTMLElement>('[data-execution-dag]')!;
+  diagram.addEventListener('click', (event) => {
+    const node = (event.target as Element).closest<HTMLButtonElement>('[data-dag-node]');
+    if (!node) return;
+    diagram.querySelectorAll<HTMLButtonElement>('[data-dag-node]').forEach((button) => button.setAttribute('aria-pressed', String(button === node)));
+    diagram.querySelectorAll<HTMLElement>('[data-dag-detail]').forEach((panel) => { panel.hidden = panel.dataset.dagDetail !== node.dataset.dagNode; });
+  });
+
+  const walkthrough = document.querySelector<HTMLElement>('[data-walkthrough]')!;
+  const stages = [...walkthrough.querySelectorAll<HTMLElement>('[data-walkthrough-step]')];
+  const previousStep = walkthrough.querySelector<HTMLButtonElement>('[data-walkthrough-back]')!;
+  const nextStep = walkthrough.querySelector<HTMLButtonElement>('[data-walkthrough-next]')!;
+  let position = 0;
+  walkthrough.addEventListener('click', (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>('button');
+    if (!button) return;
+    if (button.hasAttribute('data-walkthrough-next')) position = Math.min(position + 1, stages.length - 1);
+    else if (button.hasAttribute('data-walkthrough-back')) position = Math.max(position - 1, 0);
+    else if (button.hasAttribute('data-walkthrough-reset')) position = 0;
+    else return;
+    stages.forEach((stage, index) => { stage.hidden = index !== position; });
+    previousStep.disabled = position === 0;
+    nextStep.disabled = position === stages.length - 1;
+    if (button.disabled) (position === 0 ? nextStep : previousStep).focus();
+    walkthrough.querySelector('[data-walkthrough-progress]')!.textContent = `Step ${position + 1} of ${stages.length}`;
+    animate(stages[position], event);
+  });
+</script>

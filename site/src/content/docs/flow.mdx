@@ -1,0 +1,32 @@
+---
+title: Explore a run
+description: An animated lifecycle, source-derived execution dependencies, and an illustrative ticket walkthrough.
+tableOfContents: false
+---
+
+import ExecutionFlow from '../../components/ExecutionFlow.astro';
+
+Learn the control flow without running a real ticket. These are teaching tools,
+not approval controls: no action here writes a ledger, runs tests or opens a merge request.
+
+- [Run lifecycle](#run-lifecycle): choose any state and follow its real events.
+- [Execution dependency diagram](#execution-dag): select any of the ten playbook steps.
+- [Illustrative walkthrough](#illustrative-walkthrough): move forward and back through one hypothetical ticket.
+
+Use Tab to reach controls and Enter or Space to activate buttons. The state selector
+also supports your browser's native arrow-key navigation. Motion explains pointer-triggered
+changes; keyboard changes are immediate and reduced-motion preferences disable movement.
+Each explorer includes a full readable version in its disclosure, also available without JavaScript.
+
+<ExecutionFlow />
+
+## From exploration to evidence
+
+The state table is generated from `cli/transitions.ts`, and the execution node labels
+and descriptions come from the numbered list in `skills/ark/playbooks/ticket.md`.
+The build fails if that list no longer has ten ordered steps. Production modules
+never enter the browser bundle. Rebuild with `bun run docs:build` after changing sources.
+
+The table describes legal events, not every handler guard. Read [lifecycle and gates](/lifecycle/)
+for round budgets and outcomes, [agents](/agents/) for attribution and
+[tests and trace matrix](/evidence/) for what counts as proof.

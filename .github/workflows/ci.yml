@@ -11,6 +11,7 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+      - run: bun run docs:build
       # `ark preflight` resolves models with OMP's own code (cli/omp-models.ts), so the suite needs OMP installed; pin the version the resolver was written against.
       - run: bun add -g @oh-my-pi/pi-coding-agent@18.12.6
       - run: echo "$HOME/.bun/bin" >> "$GITHUB_PATH"

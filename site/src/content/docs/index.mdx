@@ -1,0 +1,50 @@
+---
+title: From ticket to human merge
+description: Understand Ark's core rule, follow a run, and find the evidence behind a change.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+**Agents plan, implement, validate and review. Humans approve the gates and merge.**
+Ark is an Oh My Pi (OMP) plugin plus a deterministic command-line interface (CLI)
+for taking a ticket across one or several dependent repositories to merge-ready changes.
+It produces a merge request (MR) per repository and a replayable record, not an autonomous merge.
+
+## The boundary that matters
+
+The orchestrator reads the ticket, coordinates specialist agents, judges their findings
+and asks the human to decide. It does **not** implement product code or write the
+acceptance tests. Implementers own product changes; validators own tests tagged with
+an acceptance criterion (AC). The CLI owns mechanical operations and refuses illegal
+transitions. An agent cannot turn its own opinion into a human gate answer.
+
+A gate is a decision about a specific packet of artifacts, bound to its hash. Changing
+the packet invalidates an old approval. Passing tests alone is not permission to merge.
+
+## Follow the evidence
+
+A ticket becomes a run: intake → analysis → approved plan → implementation →
+validation and review → evidence approval → merge requests → human merge.
+This is a reading path, not the complete state machine: edits, failed checks,
+rounds, escalation and aborts introduce branches and loops.
+
+| You want to know… | Read next |
+| --- | --- |
+| How do I start? | [Setup and first ticket](/setup/) |
+| When do I decide? | [Lifecycle and gates](/lifecycle/) |
+| Who does what? | [Agents and models](/agents/) |
+| What proves the change? | [Tests and trace matrix](/evidence/) |
+| What command do I need? | [Generated CLI reference](/reference/commands/) |
+
+<LinkCard title="Explore one run" description="Choose events, inspect the execution dependencies, and step through an illustrative ticket." href="/flow/" />
+
+## Sources, not a second implementation
+
+The explorers are built from `cli/transitions.ts` and the ten numbered steps in
+`skills/ark/playbooks/ticket.md`. CLI help comes from executing the CLI itself.
+Guides describe the current checkout, not every released version. Detailed storage,
+attribution and guardrail contracts live in [the implementation reference](/reference/implementation/).
+
+The [product requirements](https://github.com/cobekarhoff/ark/blob/main/docs/prd.md)
+and [architecture decisions](https://github.com/cobekarhoff/ark/tree/main/docs/adr)
+remain in the repository. This site is static, with local Pagefind search and no hosted search service.

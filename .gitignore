@@ -1,1 +1,4 @@
 node_modules
+site/.generated/
+site/.astro/
+site/dist/
