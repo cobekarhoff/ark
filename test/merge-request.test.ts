@@ -306,6 +306,9 @@ describe("ARK-145-AC1", () => {
     const provenHead = git(worktree(), "rev-parse", "HEAD");
     const counterFile = join(root, "race-counter");
     git(worktree(), "config", "--worktree", "core.fsmonitor", join(import.meta.dir, "approval-race.ts"));
+    const enabled = Bun.spawnSync(["git", "-C", worktree(), "update-index", "--fsmonitor"], { env: { ...process.env, ARK_RACE_COUNTER: counterFile, ARK_RACE_WORKTREE: worktree() } });
+    expect(enabled.exitCode, enabled.stderr.toString()).toBe(0);
+    writeFileSync(counterFile, "0");
     const approval = Bun.spawn(["bun", COMMAND_LINE_FILE, "gate", "answer", run(), "evidence", "approve", "--packet", packetHash], {
       cwd: projectDirectory,
       env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PI_SESSION_ID: "ark-main-session", PI_SESSION_FILE: mainSessionFile(home), ARK_RACE_COUNTER: counterFile, ARK_RACE_WORKTREE: worktree() },
