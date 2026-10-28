@@ -53,10 +53,16 @@ const sources = (body: string) => new Map([...body.matchAll(/^(?:## |- )(.+?) \(
 
 // Evidence is built, and approved, only when the matrix recomputed now passes and is byte-identical to trace-matrix.md; no stored verdict is trusted.
 function requireTrace(directory: string, runId: string, events: LedgerEvent[], what: string) {
-  const { matrix, failures } = buildMatrix(directory, runId, project(events), events);
+  const { matrix, failures, heads } = buildMatrix(directory, runId, project(events), events);
   if (failures.length) throw new Error(`${what} refused: trace-matrix.md would fail trace-check:\n${failures.map((artifactFile) => `  - ${artifactFile}`).join("\n")}`);
   const file = join(directory, "trace-matrix.md");
   if (!existsSync(file) || readFileSync(file, "utf8") !== matrix) throw new Error(`${what} refused: trace-matrix.md is out of date; run 'ark trace-check'`);
+  const approvedHeads: Record<string, string> = {};
+  for (const [repositoryName, head] of heads) {
+    if (!head) throw new Error(`${what} refused: ${repositoryName} has no clean worktree head`);
+    approvedHeads[repositoryName] = head;
+  }
+  return approvedHeads;
 }
 
 const checkGate = (gate: string) => {
@@ -117,6 +123,7 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
     const file = join(directory, packet.data.path as string);
     if (!existsSync(file) || sha256(readFileSync(file)) !== packetHash) throw new Error(`${packet.data.path} changed since it was hashed; rebuild the packet`);
 
+    let approvedHeads: Record<string, string> | undefined;
     // An approving answer binds what was shown: rebuilding the packet from the run folder now must give the same bytes.
     if (answer === "accept" || answer === "approve" || (gate === "escalation" && answer !== "abort")) {
       const rebuilt = buildPacket(directory, runId, gate);
@@ -126,7 +133,7 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
         const changed = [...new Set([...was.keys(), ...now.keys()])].filter((artifactFile) => was.get(artifactFile) !== now.get(artifactFile));
         throw new Error(`${gate} packet is stale: ${changed.join(", ") || "its sources"} changed since it was built; answer change (or edit, send_back) and rebuild the packet`);
       }
-      if (gate === "evidence" && answer === "approve") requireTrace(directory, runId, events, "evidence approval");
+      if (gate === "evidence" && answer === "approve") approvedHeads = requireTrace(directory, runId, events, "evidence approval");
       // The AC kind is proposed at intake and confirmed by the human at the plan gate: no approval while one is missing.
       const unkinded = gate === "plan" ? withoutKind(Bun.YAML.parse(readFileSync(join(directory, "ac.yml"), "utf8")) as { id: string; kind?: string }[]) : [];
       if (unkinded.length) throw new Error(`plan approve refused: ${unkinded.join(", ")} ${unkinded.length > 1 ? "have" : "has"} no kind; set 'kind: new' or 'kind: preserved' in ac.yml and rebuild the packet`);
@@ -151,7 +158,7 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
       ? Object.fromEntries((Bun.YAML.parse(readFileSync(join(directory, "ac.yml"), "utf8")) as { id: string; kind: string }[]).map((criterion) => [criterion.id, criterion.kind]))
       : undefined;
     const closing = gate === "evidence" && answer === "approve" && !mergeRequestsEnabled() && !events.some((event) => event.type === "merge_request.opened");
-    const answered = append(directory, events, "gate.answered", { gate, answer, ...identity, packet_sha256: packetHash, ...(acceptanceCriteriaKinds ? { ac_kinds: acceptanceCriteriaKinds } : {}), ...(escalated ? { escalated: true } : {}), ...heads });
+    const answered = append(directory, events, "gate.answered", { gate, answer, ...identity, packet_sha256: packetHash, ...(acceptanceCriteriaKinds ? { ac_kinds: acceptanceCriteriaKinds } : {}), ...(escalated ? { escalated: true } : {}), ...heads, ...(approvedHeads ? { approved_heads: approvedHeads } : {}) });
     commit(directory, closing ? append(directory, answered, "run.closed", { outcome: "handed_off", reason: "merge requests disabled" }) : answered);
     return `${gate} ${answer} recorded by ${identity.by}\n${closing ? "merge requests are disabled in ark.yml; run closed at ready branches, handed off\n" : ""}`;
   });

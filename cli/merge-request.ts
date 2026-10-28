@@ -34,6 +34,7 @@ export function mergeRequestOpen(runId: string): string {
     return `merge requests are disabled in ark.yml; run closed at ready branches: ${state.repos.map((repository) => repository.branch).join(", ")}\n`;
   }
   if (state.state !== "merge_requests_open") throw illegal();
+  const approvedHeads = events.findLast((event) => event.type === "gate.answered" && event.data.gate === "evidence" && event.data.answer === "approve")?.data.approved_heads as Record<string, string> | undefined;
 
   const ticket = JSON.parse(readFileSync(join(directory, "ticket.json"), "utf8")) as { title: string; acceptance_criteria: { id: string; text: string }[] };
   const matrixFile = join(directory, "trace-matrix.md");
@@ -57,15 +58,16 @@ export function mergeRequestOpen(runId: string): string {
     const worktree = join(directory, "worktrees", repository.name);
     // Only ark/* branches, and only the SHA that was approved: an agent must not steer the CLI's credentials at another branch or at later commits.
     if (!repository.branch.startsWith("ark/")) throw new Error(`refusing to push '${repository.branch}': not an ark/ branch`);
-    if (!repository.head_sha) throw new Error(`${repository.name} has no recorded head_sha; record implementer.completed before ark merge-request open`);
-    if (git(worktree, "rev-parse", "HEAD") !== repository.head_sha) throw new Error(`${worktree} HEAD differs from the approved ${repository.head_sha}; commits made after approval are not pushed`);
+    const approvedHead = approvedHeads?.[repository.name];
+    if (!approvedHead) throw new Error(`${repository.name} has no recorded head from evidence approval; approve the evidence gate before ark merge-request open`);
+    if (git(worktree, "rev-parse", "HEAD") !== approvedHead) throw new Error(`${worktree} HEAD differs from the approved ${approvedHead}; commits made after approval are not pushed`);
 
     // The trusted git dir comes from the source checkout recorded by ark worktree create (an event advance cannot forge), never from the
     // worktree's .git file, which an agent can repoint at another repository with its own origin and hooks.
     const sourceCheckout = events.find((event) => event.type === "worktree.created" && event.data.repo === repository.name)?.data.source;
     if (typeof sourceCheckout !== "string") throw new Error(`${repository.name} has no recorded source checkout; recreate its worktree with ark worktree create`);
     const commonGitDirectory = git(sourceCheckout, "rev-parse", "--path-format=absolute", "--git-common-dir");
-    if (!Bun.spawnSync(["git", "--git-dir", commonGitDirectory, "cat-file", "-e", `${repository.head_sha}^{commit}`]).success) throw new Error(`approved ${repository.head_sha} is not in ${sourceCheckout}`);
+    if (!Bun.spawnSync(["git", "--git-dir", commonGitDirectory, "cat-file", "-e", `${approvedHead}^{commit}`]).success) throw new Error(`approved ${approvedHead} is not in ${sourceCheckout}`);
     const url = git(sourceCheckout, "config", "--file", join(commonGitDirectory, "config"), "--get", "remote.origin.url");
     const slug = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/)?.[1];
     if (!slug) throw new Error(`cannot read owner/repo from remote.origin.url '${redact(url)}'`);
@@ -76,7 +78,7 @@ export function mergeRequestOpen(runId: string): string {
     // The worktree's pushurl is DISABLED for agents; an explicit URL bypasses it with the CLI's own credentials.
     // Pushed from the shared git dir, so the agent's per-worktree config (insteadOf, hooksPath) is never loaded; the SHA resolves in the shared object store.
     // core.hooksPath on the command line outranks the source repo's hooks/ and any configured path: this push carries the human's credentials, so no hook of a repo an agent can write to runs in it.
-    const push = Bun.spawnSync(["git", "--git-dir", commonGitDirectory, "-c", "core.hooksPath=/dev/null", "push", url, `${repository.head_sha}:refs/heads/${repository.branch}`]);
+    const push = Bun.spawnSync(["git", "--git-dir", commonGitDirectory, "-c", "core.hooksPath=/dev/null", "push", url, `${approvedHead}:refs/heads/${repository.branch}`]);
     if (push.exitCode !== 0) throw new Error(redact(`git push ${url} failed: ${push.stderr.toString().trim()}`));
 
     const bodyFile = join(directory, "merge-requests", `${repository.name}.md`);
