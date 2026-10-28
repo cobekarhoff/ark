@@ -41,7 +41,19 @@ export function buildMatrix(dir: string, runId: string, state: RunState, events:
   for (const id of Object.keys(state.acs)) if (!listed.has(id)) failures.push(`${id}: in the run but missing from ac.yml`);
   for (const id of listed) if (!(id in state.acs)) failures.push(`${id}: in ac.yml but not an AC of this run`);
 
-  // Evidence counts only for a repo of the run, at that repo's worktree HEAD, and red only from the repo's recorded base.
+  const approved = events.findLast((e) => e.type === "gate.answered" && e.data.gate === "G1" && e.data.answer === "approve");
+  const approvedKinds = approved?.data.ac_kinds;
+  const currentKinds = Object.fromEntries(acs.map(({ id, kind }) => [id, kind]));
+  if (!approved || typeof approvedKinds !== "object" || approvedKinds === null || Array.isArray(approvedKinds)) {
+    failures.push("ac.yml kinds do not match an approved G1 packet");
+  } else {
+    const bound = approvedKinds as Record<string, unknown>;
+    for (const id of new Set([...Object.keys(bound), ...Object.keys(currentKinds)])) {
+      if (!(id in bound)) failures.push(`${id}: kind is missing from approved G1 packet`);
+      else if (!(id in currentKinds)) failures.push(`${id}: kind is extra in approved G1 packet`);
+      else if (bound[id] !== currentKinds[id]) failures.push(`${id}: kind changed since G1 approval (approved ${String(bound[id])}, current ${String(currentKinds[id])})`);
+    }
+  }
   // A worktree with tracked edits or untracked, non-ignored files is not the HEAD it was proven at, so it has no current HEAD.
   const dirty = new Set<string>();
   const heads = new Map(state.repos.map((r) => {

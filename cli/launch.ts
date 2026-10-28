@@ -8,8 +8,8 @@ import { join } from "node:path";
 //      `-e <package dir>` (a directory: omp scans only a directory's tools/, skills/ and agents/) loads the tools and, through package.json, the hook, in any project, plugin installed or not.
 // AC2: subagents run inside this process and share its environment, so the whole process starts with git and gh holding no credentials;
 //      the ark_mr tool alone gives its child the human's values back (humanEnv).
-export const ARK_TOOLS = ["ark_run_start", "ark_log_route", "ark_advance", "ark_ws_create", "ark_gate_packet", "ark_ac_update", "ark_findings_record", "ark_artifact_record", "ark_trace_check", "ark_mr"];
-// No gate-answer tool: a gate answer comes only from the human's own terminal (ADR 0002), never from the orchestrator.
+export const ARK_TOOLS = ["ark_run_start", "ark_log_route", "ark_advance", "ark_ws_create", "ark_gate_packet", "ark_gate_answer", "ark_run_close", "ark_ac_update", "ark_findings_record", "ark_artifact_record", "ark_trace_check", "ark_mr"];
+// Gate answers and run closes are hidden tools, but their CLI calls still require the matching human ask proof.
 // `find` (semantic search) is left out: omp refuses to start when it is unavailable, as on a fresh install; the scout agents do the wide searching.
 const BUILTIN = ["read", "grep", "glob", "ask", "task", "wait", "todo", "write", "edit"];
 const PACKAGE = join(import.meta.dir, "..");

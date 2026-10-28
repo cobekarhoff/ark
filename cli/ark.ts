@@ -20,7 +20,7 @@ Usage: ark <command> [options]
 
 Commands:
   run start <ID>                          Start the next run for a local ticket, or show the open one (run ids are <date>-<ticket>-<n>)
-  run close <run_id> <merged|abandoned>   Record how a run with open MRs ended; you type the outcome on the terminal (/dev/tty)
+  run close <run_id> <merged|abandoned>   Record the outcome of opened MRs; needs the human's matching ask answer in the main OMP session (outside OMP also typed on /dev/tty)
   run replay <run_id> [--check]           Rebuild state.json from the ledger (--check: exit 1 if it differs)
   advance <run_id> <event> [--data json]  Move the run along a legal transition
   ws create <run_id> [--repo path]        Create the run's worktree for a repo (default: the project root), push disabled
@@ -29,9 +29,9 @@ Commands:
   trace-check <run_id>                    Build trace-matrix.md from ac.yml and the recorded test evidence; exit 1 listing why it fails
   gate packet <run_id> <G0|G1|G2|GE>      Build the gate packet from run artifacts and print its sha256 (GE is the escalation gate)
   gate answer <run_id> <gate> <answer> --packet <sha256>
-                                          Record your answer, confirmed by typing the gate name on the terminal (/dev/tty); refused without one (G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort, GE escalation: one_more_round|take_over|abort)
+                                          G0: accept|edit|abort, G1: approve|change|abort, G2: approve|send_back|abort, GE: one_more_round|take_over|abort; needs the human's matching ask answer in the main OMP session (outside OMP also typed on /dev/tty)
   ac update <run_id>                      After a G0 edit, re-read the ticket's acceptance criteria into the run (then build a new G0 packet)
-  mr <run_id>                             Push the run branches and open a merge request (a GitHub pull request) per repo (ark.yml mr: false hands the ready branches off instead)
+  mr <run_id>                             Push the run branches and open a merge request (a GitHub pull request) per repo; prints close_packet: <sha256> once an MR is open (ark.yml mr: false hands the ready branches off instead, never after an MR was opened)
   preflight                               Refuse (exit 1) unless every model validate and review-x can reach (comma candidates, retry.fallbackChains, global and project OMP config) is on another vendor than implement, and every review-s model on the same one
   log route [<run_id>] <playbook> "<why>" Record route.chosen, the first event after run.started (no run_id: the active run)
   findings record <run_id> <file.json>    Validate the judged findings and record them (judging state)
@@ -88,7 +88,7 @@ if (args[0] === "--version") {
   const acs = flag("--acs");
   const repo = flag("--repo");
   const as = flag("--as");
-  const proofs = args.filter((a) => a === "--red-green" || a === "--preservation");
+  const proofs: string[] = args.filter((a) => a === "--red-green" || a === "--preservation");
   const rest = args.filter((a) => !proofs.includes(a));
   const mode: TestMode = proofs[0] === "--red-green" ? "red-green" : proofs[0] ? "preservation" : "green";
   if (rest.length === 2 && acs && proofs.length <= 1) run = () => runTest(rest[1], acs.split(","), repo, mode, as);

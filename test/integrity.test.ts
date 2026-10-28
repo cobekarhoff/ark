@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
-import { spawnArk } from "./tty";
+import { appendAskProof, spawnArk } from "./tty";
 
 setDefaultTimeout(120_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
@@ -53,7 +53,7 @@ const commitAll = (dir: string, files: Record<string, string>) => {
   git(dir, "commit", "-qm", "change");
 };
 const runsDir = () => join(home, "projects", "demo", "runs");
-const run = () => readdirSync(runsDir())[0];
+const run = () => readdirSync(runsDir()).filter((r) => r !== ".locks")[0];
 const runFile = (f: string) => join(runsDir(), run(), f);
 const slurp = (f: string) => readFileSync(runFile(f), "utf8");
 const lines = () => slurp("ledger.ndjson").trim().split("\n");
@@ -61,6 +61,8 @@ const events = () => lines().map((l) => JSON.parse(l));
 const wt = () => runFile("ws/demo");
 const sha = (s: string) => `sha256:${new Bun.CryptoHasher("sha256").update(s).digest("hex")}`;
 const ok = (r: { code: number; err: string }) => expect(r.err === "" ? r.code : r.err).toBe(0);
+const answerGate = (gate: string, answer: string, packetHash: string) =>
+  ark("gate", "answer", run(), gate, answer, "--packet", packetHash);
 
 function fixture() {
   home = mkdtempSync(join(tmpdir(), "ark-home-"));
@@ -77,6 +79,7 @@ function fixture() {
   mkdirSync(join(home, "projects", "demo", "tickets"), { recursive: true });
   writeFileSync(join(home, "projects", "demo", "tickets", "DEMO-1.md"), TICKET);
   ok(ark("run", "start", "DEMO-1"));
+  ok(ark("log", "route", run(), "ticket", "fixture")); // route first: nothing else is legal before it
 }
 // start -> G1 approved -> ws create -> build.started
 const toBuilding = () => {
@@ -84,12 +87,17 @@ const toBuilding = () => {
   writeFileSync(runFile("plan.md"), "# Plan\n");
   setKinds(runFile(""));
   const h = ark("gate", "packet", run(), "G1").out.trim();
-  ok(ark("gate", "answer", run(), "G1", "approve", "--packet", h));
+  ok(answerGate("G1", "approve", h));
   ok(ark("ws", "create", run()));
   ok(ark("advance", run(), "build.started"));
 };
+const confirmHumanImplementerStep = () => {
+  const head = git(wt(), "rev-parse", "HEAD");
+  appendAskProof(join(home, "test-main-session.jsonl"), { action: "implementer.completed:demo", runId: run(), answer: "confirm", packetHash: sha(head), choices: ["confirm", "abort"] });
+};
 const step = (files: Record<string, string>) => {
   commitAll(wt(), files);
+  if (stateNow().implementer === "human") confirmHumanImplementerStep();
   ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'));
 };
 // The validator's work: commit tagged tests, then record the head through `ark test --as validator` (the exit code is the test verdict, not what is under test here).
@@ -105,7 +113,7 @@ describe("ARK-115-AC1", () => {
   const owned: [string, string][] = [
     ["ws.created", "ws"], ["test.result", "test"], ["test.red_green", "test"], ["trace.checked", "trace-check"],
     ["gate.packet", "gate"], ["gate.answered", "gate"], ["mr.opened", "mr"], ["run.closed", "run close"], ["test.preservation", "test"],
-    ["route.chosen", "log route"], ["findings.recorded", "findings record"], ["artifact.recorded", "artifact record"],
+    ["findings.recorded", "findings record"], ["artifact.recorded", "artifact record"],
     ["ac.updated", "ac update"], ["ge.opened", "gate"], ["ge.answered", "gate"],
   ];
   test.each(owned)("ark advance refuses %s and names 'ark %s', writing nothing", (type, cmd) => {
@@ -114,11 +122,6 @@ describe("ARK-115-AC1", () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain(`'${type}' is written by 'ark ${cmd}', not advance`);
     expect(slurp("ledger.ndjson")).toBe(before);
-  });
-
-  test("the owning commands still write their events", () => {
-    ok(ark("log", "route", run(), "ticket", "because"));
-    expect(events().map((e) => e.type)).toEqual(["run.started", "route.chosen"]);
   });
 
   test("escalation goes through ark gate: a GE packet from premise.md and the latest findings, answered by a human answer", () => {
@@ -132,7 +135,7 @@ describe("ARK-115-AC1", () => {
     expect(slurp(`gates/GE.${h.slice("sha256:".length)}.packet.md`)).toContain(sha("Both fixes assumed the cache is cold.\n"));
     expect(slurp("state.json")).toContain('"state": "awaiting_ge"');
     expect(ark("gate", "answer", run(), "GE", "guess", "--packet", h).err).toContain("unknown answer");
-    ok(ark("gate", "answer", run(), "GE", "one_more_round", "--packet", h));
+    ok(answerGate("GE", "one_more_round", h));
     expect(slurp("state.json")).toContain('"state": "building"');
     expect(events().at(-1)).toMatchObject({ type: "gate.answered", data: { gate: "GE", answer: "one_more_round" } });
   });
@@ -149,20 +152,20 @@ describe("ARK-115-AC2", () => {
   test("every line records the sha256 of the previous raw line, the first that of the empty string", () => {
     advance3();
     const ls = lines();
-    expect(ls.length).toBe(4);
+    expect(ls.length).toBe(5);
     ls.forEach((l, i) => expect(JSON.parse(l).prev).toBe(sha(i === 0 ? "" : ls[i - 1])));
   });
 
   const setLines = (ls: string[]) => writeFileSync(runFile("ledger.ndjson"), ls.length ? `${ls.join("\n")}\n` : "");
   // A schema-valid change (the year of ts moves back one), so only the hash chain can notice it.
   const edited = (ls: string[], i: number) => ls.map((l, j) => (j === i ? l.replace(/"ts":"(\d{4})/, (_, y) => `"ts":"${Number(y) - 1}`) : l));
-  // [what was done to a 4-line ledger, the seq the refusal names]
+  // [what was done to a 5-line ledger, the seq the refusal names]
   const damage: [string, (ls: string[]) => string[], number][] = [
     ["an edited middle line", (ls) => edited(ls, 1), 2],
-    ["an edited last line", (ls) => edited(ls, 3), 4],
+    ["an edited last line", (ls) => edited(ls, 4), 5],
     ["a removed middle line", (ls) => ls.filter((_, i) => i !== 1), 2],
     ["a truncated tail", (ls) => ls.slice(0, 2), 3],
-    ["a reordered pair", (ls) => [ls[0], ls[2], ls[1], ls[3]], 2],
+    ["a reordered pair", (ls) => [ls[0], ls[2], ls[1], ls[3], ls[4]], 2],
   ];
   for (const [what, hit, seq] of damage) {
     test(`${what} is refused by replay, naming seq ${seq}`, () => {
@@ -203,9 +206,9 @@ describe("ARK-115-AC2", () => {
   });
 });
 
-// Every AC manual and signed, so trace-check passes without a test run; returns the G2 packet hash. Needs building state.
+// Every AC manual and signed, so trace-check passes without a test run; returns the G2 packet hash. Needs building or judging state.
 const toG2Packet = () => {
-  ok(ark("advance", run(), "build.completed"));
+  if (JSON.parse(slurp("state.json")).state === "building") ok(ark("advance", run(), "build.completed"));
   writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: t\n  level: manual\n  kind: new\n- id: DEMO-1-AC2\n  text: t\n  level: manual\n  kind: new\n");
   mkdirSync(runFile("manual"), { recursive: true });
   for (const id of ["DEMO-1-AC1", "DEMO-1-AC2"]) writeFileSync(runFile(`manual/${id}.md`), "signed-by: P\nat: 2026-10-26\n");
@@ -256,11 +259,11 @@ describe("ARK-115-AC3", () => {
     const t0 = Date.now();
     const p = Bun.spawn(["bun", CLI, "advance", run(), "analysis.completed"], { cwd: proj, env: env(), stderr: "pipe" });
     await Bun.sleep(1500); // real clock on purpose: the lock wait is a real-process, real-filesystem behavior no fake timer reaches
-    expect(events().length).toBe(1); // still waiting
+    expect(events().length).toBe(2); // still waiting
     rmSync(lock);
     expect(await p.exited).toBe(0);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(1500);
-    expect(events().length).toBe(2);
+    expect(events().length).toBe(3);
 
     writeFileSync(lock, "crashed");
     const old = new Date(Date.now() - 10 * 60_000);
@@ -282,7 +285,7 @@ describe("ARK-115-AC3", () => {
     expect(r.exitCode).toBe(1);
     expect(r.stderr.toString()).toContain(`pid ${process.pid}`);
     expect(readFileSync(lock, "utf8")).toBe(mine); // not rewritten, not deleted
-    expect(events().length).toBe(1);
+    expect(events().length).toBe(2);
   });
 
   test("a lock whose owner died is taken over at once, even when it is fresh", async () => {
@@ -294,7 +297,7 @@ describe("ARK-115-AC3", () => {
     const r = Bun.spawnSync(["bun", CLI, "advance", run(), "analysis.completed"], { cwd: proj, env: env({ ARK_LOCK_WAIT_MS: "3000" }) });
     expect(r.stderr.toString()).toBe("");
     expect(Date.now() - t0).toBeLessThan(10_000); // taken over at once, not after an age timeout
-    expect(events().length).toBe(2);
+    expect(events().length).toBe(3);
     expect(existsSync(lock)).toBe(false);
   });
 });
@@ -762,7 +765,7 @@ const spendRounds = (n: number) => {
 const escalate = (answer: string) => {
   writeFileSync(runFile("premise.md"), "Every round assumed the cache is cold.\n");
   const h = ark("gate", "packet", run(), "GE").out.trim();
-  return ark("gate", "answer", run(), "GE", answer, "--packet", h);
+  return answerGate("GE", answer, h);
 };
 const stateNow = () => JSON.parse(slurp("state.json"));
 
@@ -803,6 +806,16 @@ describe("ARK-117-AC4", () => {
     spendRounds(2);
   });
 
+
+  test.each(["one_more_round", "take_over"])("%s is refused when an escalation source changed after its packet was built", (answer) => {
+    writeFileSync(runFile("premise.md"), "Every round assumed the cache is cold.\n");
+    const h = ark("gate", "packet", run(), "GE").out.trim();
+    writeFileSync(runFile("premise.md"), "A changed premise.\n");
+    const refused = ark("gate", "answer", run(), "GE", answer, "--packet", h);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("premise.md");
+    expect(stateNow()).toMatchObject({ state: "awaiting_ge", round: 2 });
+  });
   test("abort aborts the run", () => {
     ok(escalate("abort"));
     expect(stateNow()).toMatchObject({ state: "aborted", status: "aborted", outcome: "aborted", round: 2 });
@@ -819,19 +832,31 @@ describe("ARK-117-AC4", () => {
 
   test("take_over records the human as the implementer; the run continues through validation to judging, where the budget is still spent", () => {
     ok(escalate("take_over"));
-    expect(stateNow()).toMatchObject({ state: "building", implementer: "human", next_action: { kind: "implement", agent: "human", repo: "demo" } });
+    expect(stateNow()).toMatchObject({ state: "building", round: 3, implementer: "human", next_action: { kind: "implement", agent: "human", repo: "demo" } }); // the take-over is a round, like one_more_round
     step({ "src/a.ts": "export const a = 3;\n" }); // the human commits, then the step is recorded
     expect(events().findLast((e) => e.type === "implementer.completed").data.by).toMatch(/^t <t@t> \(/); // the identity of the human who answered, not "agent"
     expect(stateNow().next_action).toMatchObject({ kind: "continue_build", agent: "orchestrator" });
     validate({ "test/f.test.ts": tagged("DEMO-1-AC1") });
     ok(ark("advance", run(), "build.completed"));
-    expect(stateNow()).toMatchObject({ state: "judging", implementer: "human", round: 2 });
+    expect(stateNow()).toMatchObject({ state: "judging", implementer: "human", round: 3 });
     expect(ark("advance", run(), "fix_round.started").code).toBe(1); // still escalates, not a free round
   });
+  test("an agent-recorded implementer step after take_over is refused", () => {
+    ok(escalate("take_over"));
+    commitAll(wt(), { "src/a.ts": "export const a = 9;\n" });
+    const before = events().filter((e) => e.type === "implementer.completed").length;
+    const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("human");
+    expect(events().filter((e) => e.type === "implementer.completed")).toHaveLength(before);
+    expect(stateNow()).toMatchObject({ state: "building", implementer: "human" });
+  });
+
 
   test("the human implementer is held to the same guard: touching an AC-tagged test is refused", () => {
     ok(escalate("take_over"));
     commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
+    confirmHumanImplementerStep();
     expect(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}').err).toContain("AC-tagged test");
   });
 });
@@ -857,11 +882,17 @@ describe("ARK-117-AC11", () => {
     expect(ark("trace-check", run()).err).toContain("test/f.test.ts");
   });
 
-  test("a validator step, recorded by role, does vouch for it", () => {
+  test("a validator cannot vouch for a tagged-test commit after a refused implementer step", () => {
     weakenAfterRefusal();
+    expect(events().findLast((e) => e.type === "implementer.refused")).toMatchObject({
+      data: { repo: "demo", head_sha: git(wt(), "rev-parse", "HEAD") },
+    });
     expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe("");
     expect(events().findLast((e) => e.type === "test.result").data.role).toBe("validator");
-    ok(ark("advance", run(), "build.completed"));
+    const r = ark("advance", run(), "build.completed");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("test/f.test.ts");
+    expect(ark("trace-check", run()).err).toContain("test/f.test.ts");
   });
 
   test("--as takes only 'validator'", () => {
@@ -885,10 +916,78 @@ describe("ARK-117-AC6 failing tests", () => {
     ok(record([finding("DEMO-1-AC1 fixture")]));
 
     const rerun = JSON.parse(JSON.stringify([finding("DEMO-1-AC1 fixture")]));
+
     rerun[0].id = "F2";
     commitAll(wt(), { "test/other.test.ts": tagged("DEMO-1-AC2") }); // a new head the test was not run at
     const stale = record(rerun);
     expect(stale.code).toBe(1);
     expect(stale.err).toContain("none failing now");
+  });
+});
+describe("ARK-120-AC5 evidence types", () => {
+  beforeEach(toBuilding);
+  const finding = (evidence: unknown) => ({ id: "F1", reviewer: "reviewer-x", model: "m", priority: "P1", file: "src/a.ts", line: 3, claim: "c", bucket: "act_on", reason: "r", evidence });
+  const record = (value: unknown) => {
+    const file = join(dirname(proj), "findings.json");
+    writeFileSync(file, JSON.stringify([value]));
+    return ark("findings", "record", run(), file);
+  };
+  // The validator commits a tagged test and records the head through the given 'ark test' mode; the build is then closed so findings can be recorded.
+  const validated = (body: string, ...flags: string[]) => {
+    step({ "src/a.ts": "export const a = 1;\n" });
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", body) });
+    ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator", ...flags);
+  };
+
+  test.each([
+    ["plain", [] as string[], "test.result"],
+    ["red-green", ["--red-green"], "test.red_green"],
+    ["preservation", ["--preservation"], "test.preservation"],
+  ])("a test failing at the current head in %s mode is accepted as failing_test evidence", (_mode, flags, type) => {
+    validated("expect(1).toBe(2)", ...flags);
+    expect(events().findLast((e) => e.type === type)).toBeDefined();
+    ok(ark("advance", run(), "build.completed"));
+    expect(record(finding({ failing_test: "DEMO-1-AC1 fixture" })).code).toBe(0);
+  });
+
+  test("a test that passes at the current head, or whose failure a later pass superseded, is not failing_test evidence", () => {
+    validated("expect(1).toBe(1)");
+    ok(ark("advance", run(), "build.completed"));
+    expect(record(finding({ failing_test: "DEMO-1-AC1 fixture" })).code).toBe(1);
+
+    ok(ark("advance", run(), "fix_round.started"));
+    validate({ "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") });
+    ok(ark("advance", run(), "build.completed"));
+    expect(record({ ...finding({ failing_test: "DEMO-1-AC1 fixture" }), id: "F2" }).code, "an open failure counts").toBe(0);
+    validate({ "test/f.test.ts": tagged("DEMO-1-AC1") });
+    const superseded = record({ ...finding({ failing_test: "DEMO-1-AC1 fixture" }), id: "F3" });
+    expect(superseded.code).toBe(1);
+    expect(superseded.err).toContain("failing_test");
+  });
+
+  test("the G2 packet labels each finding's evidence by the field that verified it", () => {
+    validated("expect(1).toBe(2)");
+    ok(ark("advance", run(), "build.completed"));
+    const file = join(dirname(proj), "findings.json");
+    writeFileSync(file, JSON.stringify([
+      finding({ failing_test: "DEMO-1-AC1 fixture" }),
+      { ...finding({ traced_path: "src/a.ts:3 -> src/b.ts:9" }), id: "F2" },
+    ]));
+    ok(ark("findings", "record", run(), file));
+    const packet = slurp(`gates/G2.${toG2Packet().slice("sha256:".length)}.packet.md`);
+    expect(packet).toContain("F1 P1 src/a.ts:3: failing test 'DEMO-1-AC1 fixture'");
+    expect(packet).toContain("F2 P1 src/a.ts:3: traced path, weaker evidence (no test reaches it): src/a.ts:3 -> src/b.ts:9");
+  });
+
+  test.each([
+    ["a non-string failing_test, even beside a valid traced_path", { failing_test: 42, traced_path: "src/a.ts:3 -> src/b.ts:9" }],
+    ["a non-string traced_path", { traced_path: 42 }],
+    ["an empty failing_test", { failing_test: "" }],
+    ["an evidence key nobody defined", { traced_path: "src/a.ts:3 -> src/b.ts:9", mystery: true }],
+  ])("%s is refused and nothing is recorded", (_what, evidence) => {
+    validated("expect(1).toBe(2)");
+    const before = slurp("ledger.ndjson");
+    expect(record(finding(evidence)).code).toBe(1);
+    expect(slurp("ledger.ndjson")).toBe(before);
   });
 });

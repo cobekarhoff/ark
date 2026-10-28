@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, watch, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { rechain } from "./ledger";
 import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
 import { credentialFreeEnv } from "../cli/launch";
-import { spawnArk } from "./tty";
+import { appendAskProof, mainSessionFile, spawnArk } from "./tty";
 
 setDefaultTimeout(60_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
@@ -57,7 +57,7 @@ const ark = (...args: string[]) => {
   const r = spawnArk(["bun", CLI, ...args], { cwd: proj, env });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
-const run = () => readdirSync(join(home, "projects", "demo", "runs"))[0];
+const run = () => readdirSync(join(home, "projects", "demo", "runs")).filter((r) => r !== ".locks")[0];
 const runFile = (f: string) => join(home, "projects", "demo", "runs", run(), f);
 const events = (type: string) =>
   readFileSync(runFile("ledger.ndjson"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.type === type);
@@ -102,10 +102,12 @@ function atG2Approved(arkYml = "project: demo\n") {
   writeFileSync(join(home, "projects", "demo", "tickets", "DEMO-1.md"),
     `---\nid: DEMO-1\ntitle: "Add the feature"\nstatus: ready\nacceptance_criteria:\n  - id: DEMO-1-AC1\n    text: "criterion one"\n---\nBody.\n`);
   ok(ark("run", "start", "DEMO-1"));
+  ok(ark("log", "route", run(), "ticket", "fixture"));
   ok(ark("advance", run(), "analysis.completed"));
   writeFileSync(runFile("plan.md"), "# Plan\n");
   setKinds(runFile(""));
-  ok(ark("gate", "answer", run(), "G1", "approve", "--packet", ark("gate", "packet", run(), "G1").out.trim()));
+  const g1 = ark("gate", "packet", run(), "G1").out.trim();
+  ok(ark("gate", "answer", run(), "G1", "approve", "--packet", g1));
   ok(ark("ws", "create", run()));
   ok(ark("advance", run(), "build.started"));
   writeFileSync(join(wt(), "feature.txt"), "feature\n");
@@ -119,7 +121,8 @@ function atG2Approved(arkYml = "project: demo\n") {
   ok(ark("trace-check", run()));
   mkdirSync(runFile("artifacts"), { recursive: true });
   writeFileSync(runFile("artifacts/evidence.txt"), "evidence\n");
-  ok(ark("gate", "answer", run(), "G2", "approve", "--packet", ark("gate", "packet", run(), "G2").out.trim()));
+  const g2 = ark("gate", "packet", run(), "G2").out.trim();
+  ok(ark("gate", "answer", run(), "G2", "approve", "--packet", g2));
 }
 
 describe("ARK-107-AC1", () => {
@@ -177,7 +180,7 @@ describe("ARK-107-AC1", () => {
   });
 
   test("ark mr outside mrs_open is refused before anything is pushed or called", () => {
-    ok(ark("run", "close", run(), "abandoned"));
+    ok(ark("advance", run(), "abort"));
     const r = ark("mr", run());
     expect(r.code).toBe(1);
     expect(r.err).toContain("mrs_open");
@@ -321,7 +324,7 @@ describe("ARK-107-AC3", () => {
 const ARK_MR_DRIVER = `
 const z: any = new Proxy(function () {}, { get: () => z, apply: () => z });
 const tools = (await import(${JSON.stringify(join(import.meta.dir, "..", "tools", "ark.ts"))})).default({ zod: z });
-const res = await tools.find((t: any) => t.name === "ark_mr").execute("id", { run_id: process.argv[2] }, undefined, { sessionManager: { getSessionId: () => "s" } });
+const res = await tools.find((t: any) => t.name === "ark_mr").execute("id", { run_id: process.argv[2] }, undefined, { agent: { kind: "main" }, sessionManager: { getSessionId: () => "s", getSessionFile: () => undefined } });
 console.log(res.content[0].text);
 `;
 const arkMrTool = () => {
@@ -370,11 +373,18 @@ describe("ARK-118-AC2", () => {
   });
 });
 
-// `ark run close` as a person (typed on a terminal) or as an agent's shell (typed = null: no controlling terminal).
+// The close packet the human is shown: the opened MRs, which `ark mr` prints as close_packet.
+const closePacket = () => {
+  const opened = events("mr.opened").map((e) => ({ repo: e.data.repo, url: e.data.url, number: e.data.number }));
+  return `sha256:${new Bun.CryptoHasher("sha256").update(JSON.stringify(opened)).digest("hex")}`;
+};
+const proveClose = (outcome: string) =>
+  appendAskProof(mainSessionFile(home), { action: "run.closed", runId: run(), answer: outcome, packetHash: closePacket(), choices: ["merged", "abandoned"] });
+// `ark run close` outside OMP, as a person: the ask answer in the main session, then the outcome typed on a terminal. typed = null is an agent's shell (no controlling terminal).
 const closeTyped = (typed: string | null, outcome: string) =>
   spawnArk(["bun", CLI, "run", "close", run(), outcome], {
     cwd: proj,
-    env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`, GH_LOG: join(root, "gh.log"), GH_STATE: join(root, "gh.state"), GH_BODY: join(root, "gh.body") },
+    env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`, GH_LOG: join(root, "gh.log"), GH_STATE: join(root, "gh.state"), GH_BODY: join(root, "gh.body"), PI_SESSION_ID: "", PI_SESSION_FILE: "" },
   }, typed);
 
 describe("ARK-117-AC2", () => {
@@ -383,13 +393,14 @@ describe("ARK-117-AC2", () => {
     expect(runState()).toMatchObject({ state: "done", status: "done", outcome: "handed_off" });
   });
 
-  test("a run with open MRs stays open; a human records merged, once every repo has an MR", () => {
+  test("a run with open MRs stays open until a human records merged", () => {
     atG2Approved();
     const early = closeTyped("merged", "merged");
     expect(early.exitCode).toBe(1);
-    expect(early.stderr.toString()).toContain("no MR was opened for demo");
+    expect(early.stderr.toString()).toContain("no MR has been opened");
 
     ok(ark("mr", run()));
+    proveClose("merged");
     expect(runState()).toMatchObject({ state: "mrs_open", status: "waiting_human", outcome: null });
     const r = closeTyped("merged", "merged");
     expect(r.exitCode, r.stderr.toString()).toBe(0);
@@ -400,6 +411,7 @@ describe("ARK-117-AC2", () => {
   test("an MR closed unmerged after G2 is recorded as abandoned by a human", () => {
     atG2Approved();
     ok(ark("mr", run()));
+    proveClose("abandoned");
     const r = closeTyped("abandoned", "abandoned");
     expect(r.exitCode, r.stderr.toString()).toBe(0);
     expect(runState()).toMatchObject({ state: "done", outcome: "abandoned" });
@@ -408,6 +420,7 @@ describe("ARK-117-AC2", () => {
   test("ark run close needs the outcome typed on a terminal: without one, or with another word, nothing is recorded", () => {
     atG2Approved();
     ok(ark("mr", run()));
+    proveClose("merged");
     const before = readFileSync(runFile("ledger.ndjson"), "utf8");
     const agent = closeTyped(null, "merged");
     expect(agent.exitCode).toBe(1);
@@ -417,5 +430,96 @@ describe("ARK-117-AC2", () => {
     expect(wrong.stderr.toString()).toContain("expected 'merged'");
     expect(readFileSync(runFile("ledger.ndjson"), "utf8")).toBe(before);
     expect(ark("run", "close", run(), "aborted").err).toContain("unknown outcome");
+  });
+});
+
+describe("ARK-120-AC6", () => {
+  test("mr: false refuses to hand off a run that already opened an MR", () => {
+    atG2Approved();
+    ok(ark("mr", run()));
+    writeFileSync(join(proj, "ark.yml"), "project: demo\nmr: false\n");
+    const r = ark("mr", run());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("already has an opened MR");
+    expect(runState()).toMatchObject({ state: "mrs_open", outcome: null });
+  });
+
+  test("before any MR exists a run can be aborted, but cannot be abandoned", () => {
+    atG2Approved();
+    const before = readFileSync(runFile("ledger.ndjson"), "utf8");
+    const abandoned = closeTyped("abandoned", "abandoned");
+    expect(abandoned.exitCode).toBe(1);
+    expect(abandoned.stderr.toString()).toContain("no MR has been opened");
+    expect(readFileSync(runFile("ledger.ndjson"), "utf8")).toBe(before);
+    ok(ark("advance", run(), "abort"));
+    expect(runState()).toMatchObject({ state: "aborted", outcome: "aborted" });
+  });
+
+  test("once an MR is open the run cannot be aborted: its outcome is a human's to record", () => {
+    atG2Approved();
+    ok(ark("mr", run()));
+    const r = ark("advance", run(), "abort");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("cannot abort after an MR was opened");
+    expect(runState()).toMatchObject({ state: "mrs_open", outcome: null });
+  });
+
+  test("in OMP a close ask answers only the MR list it was shown; the matching one records its ask call id", () => {
+    atG2Approved();
+    ok(ark("mr", run()));
+    appendAskProof(mainSessionFile(home), { action: "run.closed", runId: run(), answer: "merged", packetHash: `sha256:${"0".repeat(64)}`, choices: ["merged", "abandoned"] });
+    const before = readFileSync(runFile("ledger.ndjson"), "utf8");
+    expect(ark("run", "close", run(), "merged").code).toBe(1);
+    expect(readFileSync(runFile("ledger.ndjson"), "utf8")).toBe(before);
+
+    appendAskProof(mainSessionFile(home), { action: "run.closed", runId: run(), answer: "merged", packetHash: closePacket(), choices: ["merged", "abandoned"], toolCallId: "ask-close" });
+    const r = ark("run", "close", run(), "merged");
+    expect(r.code, r.err).toBe(0);
+    expect(runState()).toMatchObject({ state: "done", outcome: "merged" });
+    expect(events("run.closed")[0].data).toMatchObject({ outcome: "merged", channel: "omp", ask_call_id: "ask-close" });
+  });
+});
+
+describe("ARK-120-AC2", () => {
+  test("another close can acquire the ledger lock while the terminal confirmation is waiting", async () => {
+    atG2Approved();
+    ok(ark("mr", run()));
+    proveClose("merged"); // the human answered the ask; the terminal confirmation is what the first close waits on
+    const waiting = join(root, "close.waiting");
+    const release = join(root, "close.release");
+    const out = join(root, "close.out");
+    const err = join(root, "close.err");
+    const first = Bun.spawn(["bun", join(import.meta.dir, "pty.ts"), "merged", out, err, "bun", CLI, "run", "close", run(), "merged"], {
+      cwd: proj,
+      env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`, PI_SESSION_ID: "", PI_SESSION_FILE: "", ARK_PTY_WAIT_FILE: waiting, ARK_PTY_RELEASE_FILE: release },
+    });
+    const waitingSignal = Promise.withResolvers<boolean>();
+    const watcher = watch(root, () => {
+      if (existsSync(waiting)) {
+        watcher.close();
+        waitingSignal.resolve(true);
+      }
+    });
+    if (existsSync(waiting)) {
+      watcher.close();
+      waitingSignal.resolve(true);
+    }
+    // The subprocess uses a real PTY and filesystem signals; fake timers cannot advance either.
+    const signaled = await Promise.race([waitingSignal.promise, Bun.sleep(10_000).then(() => false)]);
+    if (!signaled) writeFileSync(release, "continue\n");
+    expect(signaled).toBe(true);
+
+    const second = Bun.spawn(["bun", CLI, "run", "close", run(), "merged"], {
+      cwd: proj,
+      env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PATH: `${bin}:${process.env.PATH}`, PI_SESSION_ID: "ark-main-session", PI_SESSION_FILE: mainSessionFile(home) },
+      stdin: "ignore",
+    });
+    const completed = await Promise.race([second.exited, Bun.sleep(10_000).then(() => -1)]);
+    writeFileSync(release, "continue\n");
+    expect(completed).not.toBe(-1);
+    expect(completed).toBe(0);
+    expect(await first.exited).toBe(1);
+    expect(readFileSync(err, "utf8")).toContain("state 'done'");
+    expect(runState()).toMatchObject({ state: "done", outcome: "merged" });
   });
 });

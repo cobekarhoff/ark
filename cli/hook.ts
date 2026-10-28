@@ -100,7 +100,7 @@ function guard(run: string, tool: string, input: Record<string, unknown>, cwd: s
       const rel = relative(runReal, real(resolve(cwd, literal.replace(/^~(?=\/|$)/, homedir()))));
       if (rel === "" && (glob || tool === "ast_edit")) throw new Error(`blocked: ${tool} on ${p} reaches the run folder's ledger and worktrees; name files under ${run} instead`);
       if (rel === ".." || rel.startsWith("../")) throw new Error(`blocked: ${tool} outside the active run folder ${run} (${p}); product code goes to the implementer`);
-      if (rel === "state.json" || rel === "ledger.ndjson") throw new Error(`blocked: ${rel} is written only by the ark CLI`);
+      if (rel === "state.json" || rel === "ledger.ndjson" || rel === ".main-session") throw new Error(`blocked: ${rel} is written only by the ark CLI`);
       if (rel === "ws" || rel.startsWith("ws/")) throw new Error(`blocked: ${tool} in ${rel}; the worktrees belong to the implementer and validator`);
     }
   }
