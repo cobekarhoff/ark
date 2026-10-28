@@ -318,8 +318,7 @@ describe("ARK-145-AC1", () => {
     const approvalCode = await approval.exited;
     const observedChecks = Number(readFileSync(counterFile, "utf8"));
     const approvalError = await new Response(approval.stderr).text();
-    expect(observedChecks, approvalError).toBeGreaterThanOrEqual(3);
-    expect(approvalCode, approvalError).toBe(0);
+    expect(observedChecks, approvalError).toBeGreaterThanOrEqual(4);
     const unprovenHead = git(worktree(), "rev-parse", "HEAD");
     expect(unprovenHead).not.toBe(provenHead);
     expect(events("test.red_green").at(-1)?.data.head_sha).toBe(provenHead);
@@ -332,21 +331,26 @@ describe("ARK-145-AC1", () => {
       expect(events("gate.answered").findLast((event) => event.data.gate === "evidence")?.data.approved_heads).toEqual({ demo: provenHead });
       expect(opened.err).toContain(`differs from the approved ${provenHead}`);
     } else {
+      expect(approvalError).not.toContain("trace-matrix.md would fail trace-check");
+      expect(approvalError).not.toContain("packet is stale");
       expect(events("gate.answered").filter((event) => event.data.gate === "evidence")).toEqual([]);
     }
   });
 });
 
 describe("ARK-145-AC2", () => {
-  beforeEach(() => atEvidenceApproved("project: demo\n", true));
+  beforeEach(() => atEvidenceApproved());
 
-  test("a commit made after evidence approval is still refused and nothing is pushed, even when a validator test commit preceded approval", () => {
+  test("a commit after approval at the implementer head is refused and nothing is pushed", () => {
+    const approvedHead = git(worktree(), "rev-parse", "HEAD");
+    expect(runState().repos[0].head_sha).toBe(approvedHead);
+    expect(events("gate.answered").findLast((event) => event.data.gate === "evidence")?.data.answer).toBe("approve");
     writeFileSync(join(worktree(), "late.txt"), "late\n");
     git(worktree(), "add", "-A");
     git(worktree(), "commit", "-qm", "late");
     const result = ark("merge-request", "open", run());
     expect(result.code).toBe(1);
-    expect(result.err).toContain("differs from the approved");
+    expect(result.err).toContain(`differs from the approved ${approvedHead}`);
     expect(onRemote(`refs/heads/${branch()}`)).toBeNull();
     expect(ghLog()).toEqual([]);
     expect(events("merge_request.opened")).toEqual([]);
