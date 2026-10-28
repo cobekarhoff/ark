@@ -269,6 +269,7 @@ describe("ARK-103-AC4", () => {
     ["building", ["a"], toBuilding, "build.started"],
     ["judging", ["a"], toJudging, "build.completed"],
     ["awaiting_ge", ["a"], [...toJudging, "fix_round.started", "build.completed", "fix_round.started", "build.completed", "ge.opened"], "g2.approved"], // escalation opens only once the two-round budget is spent
+    ["escalating", ["a"], [...toJudging, "fix_round.started", "build.completed", "fix_round.started", "build.completed", "g2.opened", "g2.rejected"], "g2.opened"], // a send-back past the budget: only the GE packet or abort follows
     ["awaiting_g2", ["a"], toG2, "build.completed"],
     ["mrs_open", ["a"], [...toG2, "g2.approved"], "build.started"],
     ["aborted", ["a"], ["abort"], "abort"],
@@ -332,7 +333,7 @@ describe("ARK-103-AC4", () => {
       ["ge.answered", "building"],
       ["build.completed", "judging"],
       ["g2.opened", "awaiting_g2"],
-      ["g2.rejected", "judging"], // the budget is spent: a send-back opens escalation
+      ["g2.rejected", "escalating"], // the budget is spent: a send-back leads only to escalation
       ["ge.opened", "awaiting_ge"],
       ["ge.answered", "building"],
       ["build.completed", "judging"],

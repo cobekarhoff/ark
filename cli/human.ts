@@ -1,11 +1,11 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, writeSync } from "node:fs";
 import { userInfo } from "node:os";
-import { boundMainSession } from "./binding";
+import { boundMainSession, hasSessionInit } from "./binding";
 // `/dev/tty` is only the outside-OMP path; an active OMP session must supply its bound ask transcript.
 export function withTerminal<T>(what: string, fn: (confirm: (prompt: string, expected: string) => void) => T): T {
   let fd: number;
   try { fd = openSync("/dev/tty", "r+"); } catch {
-    throw new Error(`${what} needs a human at a terminal to type the requested answer; this process has no controlling terminal, so nothing was recorded (ADR 0002)`);
+    throw new Error(`${what} needs a human at a terminal to type the requested answer; this process has no controlling terminal, so no answer was recorded (ADR 0002)`);
   }
   try {
     return fn((prompt, expected) => {
@@ -13,7 +13,7 @@ export function withTerminal<T>(what: string, fn: (confirm: (prompt: string, exp
       const byte = Buffer.alloc(1);
       let typed = "";
       while (readSync(fd, byte, 0, 1, null) === 1 && byte[0] !== 10) typed += String.fromCharCode(byte[0]);
-      if (typed.trim() !== expected) throw new Error(`typed '${typed.trim()}', expected '${expected}'; nothing was recorded`);
+      if (typed.trim() !== expected) throw new Error(`typed '${typed.trim()}', expected '${expected}'; no answer was recorded`);
     });
   } finally { closeSync(fd); }
 }
@@ -36,6 +36,33 @@ type JsonObject = Record<string, unknown>;
 const object = (value: unknown): JsonObject | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : undefined;
 
+// The active branch of an OMP transcript: the transcript is a tree, and /tree navigation, a re-answered ask and a branch summary leave abandoned or superseded
+// entries in the file. The leaf is replayed as OMP does (session-entries.ts `sessionEntryLeafId`, `resolveSessionLeafId`, `lastSelfSelectedLeafId`): the newest entry
+// selects itself unless it carries the `activeLeafId` it interrupted; a captured leaf that no longer exists falls back to the newest self-selecting entry.
+// Then the path is walked from the leaf to the root through `parentId`, stopping at a repeated id.
+function activePath(entries: JsonObject[]): JsonObject[] | undefined {
+  const byId = new Map<string, JsonObject>();
+  for (const entry of entries) {
+    if (typeof entry.id !== "string") return undefined;
+    byId.set(entry.id, entry);
+  }
+  const leafOf = (entry: JsonObject) => entry.activeLeafId !== undefined ? entry.activeLeafId : entry.id;
+  const last = entries.at(-1);
+  if (!last) return undefined;
+  let leaf = leafOf(last);
+  if (leaf !== null && leaf !== last.id && !(typeof leaf === "string" && byId.has(leaf))) leaf = entries.findLast((entry) => leafOf(entry) === entry.id)?.id ?? null;
+  const path: JsonObject[] = [];
+  const seen = new Set<string>();
+  for (let entry = typeof leaf === "string" ? byId.get(leaf) : undefined; entry && !seen.has(entry.id as string); entry = typeof entry.parentId === "string" ? byId.get(entry.parentId) : undefined) {
+    seen.add(entry.id as string);
+    path.push(entry);
+  }
+  return path.reverse();
+}
+
+// The newest ask call on the active branch for this exact question must have exactly one successful result selecting the submitted answer. The call is the anchor, not
+// its result: a cancelled ask (ToolAbortError, an error result with no details) or a chat redirect (details without `question`) carries no question text, but it is still
+// the human's latest word, so it refuses and an older answer on the path never counts.
 function askProof(dir: string, runId: string, action: string, answer: string, packetHash: string, choices: string[]) {
   const bound = boundMainSession(dir);
   if (!bound || !existsSync(bound.file)) return undefined;
@@ -44,53 +71,43 @@ function askProof(dir: string, runId: string, action: string, answer: string, pa
   });
   if (parsed.some((entry) => !entry)) return undefined;
   const records = parsed as JsonObject[];
+  if (hasSessionInit(readFileSync(bound.file, "utf8").split("\n"))) return undefined; // a subagent's transcript, bound while it was not on disk yet, proves nothing
   const headers = records.filter((entry) => entry.type === "session");
   if (headers.length !== 1 || headers[0].id !== bound.id) return undefined;
+  const path = activePath(records.filter((entry) => entry.type !== "session" && entry.type !== "title")); // the header and the title slot are not tree entries
+  if (!path) return undefined;
   const question = questionFor(action, runId, packetHash, choices);
-  for (let i = records.length - 1; i >= 0; i--) {
-    const resultEntry = records[i];
-    const result = object(resultEntry.message);
-    const details = object(result?.details);
-    if (resultEntry.type !== "message" || result?.role !== "toolResult" || result.toolName !== "ask" ||
-        !Array.isArray(result.content) || !result.content.some((part) => object(part)?.type === "text" && typeof object(part)?.text === "string") ||
-        result.isError !== false || result.cancelled === true || details?.cancelled === true ||
-        details?.question !== question || details.multi !== false || details.timedOut === true ||
-        details.customInput !== undefined || details.note !== undefined ||
-        JSON.stringify(details.options) !== JSON.stringify(choices) ||
-        JSON.stringify(details.selectedOptions) !== JSON.stringify([answer])) continue;
-    const callId = result.toolCallId;
-    if (typeof callId !== "string") continue;
-    const callIndex = records.findLastIndex((entry, index) => {
-      const message = object(entry.message);
-      const content = message?.content;
-      return index < i && entry.type === "message" && message?.role === "assistant" && Array.isArray(content) &&
-        content.some((part) => {
-          const toolCall = object(part);
-          const args = object(toolCall?.arguments);
-          const questions = Array.isArray(args?.questions) ? args.questions : undefined;
-          const question = object(questions?.[0]);
-          const options = question?.options;
-          return toolCall?.type === "toolCall" && toolCall.id === callId && toolCall.name === "ask" &&
-            Array.isArray(questions) && questions.length === 1 && typeof question?.id === "string" &&
-            question.question === questionFor(action, runId, packetHash, choices) &&
-            (question.multi === false || question.multi === undefined) && question.recommended === undefined &&
-            Array.isArray(options) && JSON.stringify(options.map((option) => object(option)?.label)) === JSON.stringify(choices);
-        });
-    });
-    if (callIndex < 0 || records.slice(callIndex + 1, i).some((entry) => {
-      const message = object(entry.message);
-      const content = message?.content;
-      return entry.type === "message" && (
-        (message?.role === "toolResult" && message.toolCallId === callId) ||
-        (message?.role === "assistant" && Array.isArray(content) && content.some((part) => {
-          const toolCall = object(part);
-          return toolCall?.type === "toolCall" && toolCall.id === callId;
-        }))
-      );
-    })) continue;
-    return { session_id: bound.id, ask_call_id: callId, question };
-  }
-  return undefined;
+  const messages = path.map((entry) => entry.type === "message" ? object(entry.message) : undefined);
+  const askCalls = messages.flatMap((message, index) =>
+    message?.role === "assistant" && Array.isArray(message.content)
+      ? message.content.flatMap((part) => { const call = object(part); return call?.type === "toolCall" && call.name === "ask" ? [{ index, call }] : []; })
+      : []);
+  const asked = askCalls.findLast(({ call }) => {
+    const questions = object(call.arguments)?.questions;
+    return Array.isArray(questions) && questions.some((q) => object(q)?.question === question);
+  });
+  if (!asked) return undefined;
+  const { call } = asked;
+  const callId = call.id;
+  const questions = object(call.arguments)?.questions as unknown[];
+  const first = object(questions[0]);
+  const options = first?.options;
+  if (typeof callId !== "string" || questions.length !== 1 || typeof first?.id !== "string" || first.question !== question ||
+      !(first.multi === false || first.multi === undefined) || first.recommended !== undefined ||
+      !Array.isArray(options) || JSON.stringify(options.map((option) => object(option)?.label)) !== JSON.stringify(choices)) return undefined;
+  // One call and one result under this id on the whole active branch, the result after the call.
+  if (askCalls.filter((c) => c.call.id === callId).length !== 1) return undefined;
+  const results = messages.flatMap((message, index) => message?.role === "toolResult" && message.toolCallId === callId ? [{ index, result: message }] : []);
+  if (results.length !== 1 || results[0].index <= asked.index) return undefined;
+  const result = results[0].result;
+  const details = object(result.details);
+  if (result.toolName !== "ask" || !Array.isArray(result.content) || !result.content.some((part) => object(part)?.type === "text" && typeof object(part)?.text === "string") ||
+      result.isError !== false || result.cancelled === true || details?.cancelled === true ||
+      details?.question !== question || details.multi !== false || details.timedOut === true ||
+      details.customInput !== undefined || details.note !== undefined ||
+      JSON.stringify(details.options) !== JSON.stringify(choices) ||
+      JSON.stringify(details.selectedOptions) !== JSON.stringify([answer])) return undefined;
+  return { session_id: bound.id, ask_call_id: callId, question };
 }
 
 export function confirmHuman(dir: string, runId: string, action: string, answer: string, packetHash: string, choices: string[]): HumanIdentity {
@@ -101,7 +118,7 @@ export function confirmHuman(dir: string, runId: string, action: string, answer:
   }
   if (!choices.length || !choices.includes(answer)) throw new Error(`invalid human confirmation choices for ${action}`);
   const proof = askProof(dir, runId, action, answer, packetHash, choices);
-  if (!proof) throw new Error(`no matching successful ask result for ${action} in the bound main OMP session; nothing was recorded. Ask the human exactly this question, single choice, options ${choices.join(", ")}, no recommended option, then retry:\n${questionFor(action, runId, packetHash, choices)}`);
+  if (!proof) throw new Error(`no matching successful ask result for ${action} in the bound main OMP session; no answer was recorded. Ask the human exactly this question, single choice, options ${choices.join(", ")}, no recommended option, then retry:\n${questionFor(action, runId, packetHash, choices)}`);
   const who = approver();
   if (activeSession) return { ...who, channel: "omp", ...proof };
   return withTerminal("a human confirmation", (confirm) => {

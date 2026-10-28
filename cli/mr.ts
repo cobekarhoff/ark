@@ -122,7 +122,7 @@ export function closeRun(runId: string, outcome: string): string {
     if (!verifyHumanProof(dir, runId, "run.closed", outcome, packetHash, choices, who)) {
       throw new Error("run-close confirmation is no longer valid; ask the human again");
     }
-    if (!who.session_id || !who.ask_call_id || !claimHumanAsk(who.session_id, who.ask_call_id)) {
+    if (!who.question || !who.ask_call_id || !claimHumanAsk(who.question, who.ask_call_id)) {
       throw new Error(`ask confirmation ${who.ask_call_id} was already used; ask the human again`);
     }
     commit(dir, append(dir, events, "run.closed", { outcome, packet_sha256: packetHash, ...who }));

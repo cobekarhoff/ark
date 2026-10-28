@@ -32,8 +32,7 @@ export default function (pi: { zod: any }) {
     loadMode: "essential", // top-level functions, not xd:// devices: the orchestrator has nothing else to run the CLI with
     hidden: true, // exists only where --tools or an agent's tools names it: a subagent or a session started without ark launch never gets one
     parameters: z.object(shape),
-    async execute(_id: string, params: unknown, _update: unknown, ctx: { agent: { kind: string }; sessionManager: { getSessionId(): string; getSessionFile(): string | undefined } }, signal?: AbortSignal) {
-      if (ctx.agent.kind !== "main") throw new Error("ark tools are available only in the main session");
+    async execute(_id: string, params: unknown, _update: unknown, ctx: { sessionManager: { getSessionId(): string; getSessionFile(): string | undefined } }, signal?: AbortSignal) {
       const base: Record<string, string | undefined> = { ...process.env, PI_SESSION_ID: ctx.sessionManager.getSessionId(), PI_SESSION_FILE: ctx.sessionManager.getSessionFile() };
       const env = name === "ark_mr" ? humanEnv(base) : base;
       const p = Bun.spawn(["bun", CLI, ...argv(params)], { env, stdout: "pipe", stderr: "pipe", signal });

@@ -4,9 +4,17 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 
 // Bind the run to the session id and transcript path exported by OMP's bash or typed-tool context.
-// `.main-session` is write-once per run so a resumed subagent cannot replace the original main transcript.
+// Every `ark run start` and resume from a main session rebinds `.main-session` (a restarted or relaunched OMP is a new session id).
+// OMP writes a `session_init` entry only into a subagent's transcript (task/executor.ts) or a `/tan` clone's, or after reviving one; a fork neutralizes the ones it inherits.
+// A transcript with one is not the orchestrator's, so it never takes the binding, and `askProof` refuses a bound transcript that has one. `parentSession` in the header tells nothing: forks have it too.
+// OMP creates a transcript lazily, with the first assistant message, so one that does not exist yet cannot be classified: it may bind only while nothing is bound.
 const SESSION_ID = /^[\w.-]+$/;
 const file = (session: string) => join(process.env.ARK_HOME ?? join(homedir(), ".ark"), "bindings", session);
+
+export const hasSessionInit = (lines: string[]) => lines.some((line) => {
+  if (!line.includes('"session_init"')) return false;
+  try { return JSON.parse(line)?.type === "session_init"; } catch { return false; }
+});
 
 export function bindSession(runDir: string): void {
   const session = process.env.PI_SESSION_ID;
@@ -15,8 +23,12 @@ export function bindSession(runDir: string): void {
   mkdirSync(join(file(session), ".."), { recursive: true });
   writeFileSync(file(session), `${runDir}\n`);
   const main = join(runDir, ".main-session");
-  try { writeFileSync(main, JSON.stringify({ id: session, file: transcript }), { flag: "wx" }); }
-  catch (error) {
+  const binding = JSON.stringify({ id: session, file: transcript });
+  if (existsSync(transcript)) {
+    if (!hasSessionInit(readFileSync(transcript, "utf8").split("\n"))) writeFileSync(main, binding);
+    return;
+  }
+  try { writeFileSync(main, binding, { flag: "wx" }); } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
   }
 }
@@ -35,10 +47,12 @@ export function boundMainSession(runDir: string): { id: string; file: string } |
   } catch { return undefined; }
 }
 
-export function claimHumanAsk(session: string, callId: string): boolean {
+// One ask result answers once. The key is the question (run, action, packet) with the call id, not the session: a fork or relaunched session replays the same entries
+// under a new session id, and the answer must still be spent.
+export function claimHumanAsk(question: string, callId: string): boolean {
   const used = join(process.env.ARK_HOME ?? join(homedir(), ".ark"), "bindings", "used");
   mkdirSync(used, { recursive: true });
-  const key = createHash("sha256").update(`${session}\n${callId}`).digest("hex");
+  const key = createHash("sha256").update(`${question}\n${callId}`).digest("hex");
   try { writeFileSync(join(used, key), "", { flag: "wx" }); return true; }
   catch (error) {
     if (error instanceof Error && "code" in error && error.code === "EEXIST") return false;
