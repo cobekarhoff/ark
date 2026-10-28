@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
-// Git invokes this real filesystem-monitor hook for each status check. The first
-// two checks validate attribution and capture the trace head. The third is the
-// final attribution status check, after the trace has already validated its head.
+// Git invokes this real filesystem-monitor hook for status checks. The first
+// checks validate trace evidence and attribution. The later check occurs after
+// those checks, before the approved worktree head is recorded.
 const counterFile = process.env.ARK_RACE_COUNTER!;
 const worktree = process.env.ARK_RACE_WORKTREE!;
 const count = Number(existsSync(counterFile) ? readFileSync(counterFile, "utf8") : "0") + 1;
 writeFileSync(counterFile, String(count));
-if (count === 3) {
+if (count === 4) {
   const git = (...argumentsList: string[]) => {
     const result = Bun.spawnSync(["git", "-c", "core.fsmonitor=false", "-C", worktree, ...argumentsList]);
     if (result.exitCode !== 0) throw new Error(result.stderr.toString());
