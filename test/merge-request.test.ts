@@ -304,6 +304,7 @@ describe("ARK-145-AC1", () => {
   test("evidence approval cannot authorize or push a concurrent commit made after proof checks", async () => {
     const packetHash = atEvidenceApproved("project: demo\n", true, false);
     const provenHead = git(worktree(), "rev-parse", "HEAD");
+    appendAskProof(mainSessionFile(home), { action: "gate.answered:evidence", runId: run(), answer: "approve", packetHash, choices: ["approve", "send_back", "abort"] });
     const counterFile = join(root, "race-counter");
     git(worktree(), "config", "--worktree", "core.fsmonitor", join(import.meta.dir, "approval-race.ts"));
     const enabled = Bun.spawnSync(["git", "-C", worktree(), "update-index", "--fsmonitor"], { env: { ...process.env, ARK_RACE_COUNTER: counterFile, ARK_RACE_WORKTREE: worktree() } });
