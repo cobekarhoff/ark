@@ -337,6 +337,27 @@ describe("ARK-120-AC1", () => {
     refusedUnchanged("no matching successful ask result", () => asHuman(OUTSIDE_OMP, "approve", ...answerArguments("plan", "approve", packetHash)));
   });
 
+  test("a successful ask selection accepts recommended null but rejects recommended options", () => {
+    const packetHash = atPlan();
+    const choices = GATE_CHOICES.plan;
+    const question = `Ark gate.answered:plan for run ${id}; packet ${packetHash}. Choose exactly one: ${choices.join(", ")}.`;
+    for (const recommended of [0, 1, 2, null]) {
+      const toolCallId = `ask-recommended-${recommended}`;
+      const call = askCall(toolCallId, question, choices);
+      Object.assign(call.message.content[0].arguments.questions[0], { recommended });
+      const callEntryId = appendEntry(mainSessionFile(home), call);
+      appendEntry(mainSessionFile(home), askResult(toolCallId, question, { answer: "approve", choices }), { parentId: callEntryId });
+      if (recommended !== null) {
+        refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArguments("plan", "approve", packetHash)));
+      } else {
+        const result = asHuman({}, null, ...answerArguments("plan", "approve", packetHash));
+        expect(result.code, result.err).toBe(0);
+        expect(state().state).toBe("approved");
+        expect(ledger().at(-1)).toMatchObject({ type: "gate.answered", data: { gate: "plan", answer: "approve", ask_call_id: toolCallId, packet_sha256: packetHash } });
+      }
+    }
+  });
+
   test("an ask result OMP selected on timeout is not a human answer", () => {
     const packetHash = atPlan();
     prove("plan", "approve", packetHash, { timedOut: true });

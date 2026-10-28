@@ -93,7 +93,7 @@ function askProof(directory: string, runId: string, action: string, answer: stri
   const first = object(questions[0]);
   const options = first?.options;
   if (typeof callId !== "string" || questions.length !== 1 || typeof first?.id !== "string" || first.question !== question ||
-      !(first.multi === false || first.multi === undefined) || first.recommended !== undefined ||
+      !(first.multi === false || first.multi === undefined) || (first.recommended !== undefined && first.recommended !== null) ||
       !Array.isArray(options) || JSON.stringify(options.map((option) => object(option)?.label)) !== JSON.stringify(choices)) return undefined;
   // One call and one result under this id on the whole active branch, the result after the call.
   if (askCalls.filter((askCall) => askCall.call.id === callId).length !== 1) return undefined;
