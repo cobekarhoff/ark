@@ -61,11 +61,11 @@ beforeEach(() => {
 });
 
 describe("ARK-118-AC1 real omp", () => {
-  test("ark launch from an empty folder starts omp with the typed ark tools and without bash, eval, lsp, find and any gate-answer tool", async () => {
+  test("ark launch from an empty folder starts omp with the typed ark tools and without bash, eval, lsp and find", async () => {
     const r = await rpc([process.execPath, CLI, "launch", "--mode", "rpc", ...MODEL], [{ type: "get_state" }], { cwd: join(root, "empty"), env: HERE() });
     const names = toolNames(r["0"]);
-    for (const wanted of ["read", "write", "edit", "task", "ark_run_start", "ark_advance", "ark_mr"]) expect(names).toContain(wanted);
-    for (const banned of ["bash", "eval", "lsp", "find", "ark_gate_answer"]) expect(names).not.toContain(banned);
+    for (const wanted of ["read", "write", "edit", "task", "ark_run_start", "ark_advance", "ark_mr", "ark_gate_answer", "ark_run_close"]) expect(names).toContain(wanted);
+    for (const banned of ["bash", "eval", "lsp", "find"]) expect(names).not.toContain(banned);
   });
 
   test("an ark_* tool exists only where --tools names it: unlisted ones are absent from a session that loads the same package", async () => {
@@ -190,7 +190,7 @@ writeFileSync(out + "/omp.rc", String(probe.exitCode));
 const z: any = new Proxy(function () {}, { get: () => z, apply: () => z }); // the schema builder omp injects; the argument shapes are not under test here
 const tools = (await import(${JSON.stringify(join(ROOT, "tools", "ark.ts"))})).default({ zod: z });
 writeFileSync(out + "/tools", tools.map((t: any) => t.name).join("\\n"));
-const ctx = { sessionManager: { getSessionId: () => "session-118" } };
+const ctx = { agent: { kind: "main" }, sessionManager: { getSessionId: () => "session-118", getSessionFile: () => undefined } };
 const call = (name: string, params: object) => tools.find((t: any) => t.name === name).execute("id", params, undefined, ctx);
 await call("ark_advance", { run_id: "2026-10-27-DEMO-1", event: "analysis.completed" });
 await call("ark_mr", { run_id: "2026-10-27-DEMO-1" });
@@ -341,8 +341,8 @@ describe("ARK-118-AC1 tools against the real CLI", () => {
   });
 
   const z: any = new Proxy(function () {}, { get: () => z, apply: () => z });
-  const tool = async (name: string) => (await import("../tools/ark")).default({ zod: z }).find((t: { name: string }) => t.name === name);
-  const ctx = { sessionManager: { getSessionId: () => "session-118" } };
+  const tool = async (name: string) => (await import("../tools/ark")).default({ zod: z }).find((t: { name: string }) => t.name === name)!;
+  const ctx = { agent: { kind: "main" }, sessionManager: { getSessionId: () => "session-118", getSessionFile: () => join(root, "session-118.jsonl") } };
 
   test("ark_run_start starts the run and binds the session, so the tool_call hook sees it", async () => {
     const res = await (await tool("ark_run_start")).execute("id", { ticket: "DEMO-1" }, undefined, ctx);

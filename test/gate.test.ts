@@ -4,7 +4,7 @@ import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
-import { spawnArk } from "./tty";
+import { type AskProof, appendAskProof, GATE_CHOICES, mainSessionFile, spawnArk } from "./tty";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 
@@ -30,10 +30,21 @@ const startRun = (acs: string[]) => {
   const list = acs.length ? `acceptance_criteria:\n${acs.map((t, i) => `  - id: ARK-950-AC${i + 1}\n    text: "${t}"`).join("\n")}` : "acceptance_criteria: []";
   writeFileSync(join(home, "projects", "demo", "tickets", "ARK-950.md"), `---\nid: ARK-950\ntitle: "Gate fixture"\nstatus: ready\n${list}\n---\nTicket body marker.\n`);
   expect(ark("run", "start", "ARK-950").code).toBe(0);
-  id = readdirSync(join(home, "projects", "demo", "runs"))[0];
+  id = readdirSync(join(home, "projects", "demo", "runs")).filter((r) => r !== ".locks")[0];
+  expect(ark("log", "route", id, "ticket", "test fixture").code).toBe(0);
 };
 const advance = (event: string) => expect(ark("advance", id, event).code, event).toBe(0);
 const packet = (gate: string) => ark("gate", "packet", id, gate);
+
+// `answer` is the human in the main session: spawnArk appends the matching `ask` answer first. `asHuman` runs the same command with a transcript the test controls.
+const asHuman = (env: Record<string, string>, typed: string | null, ...args: string[]) => {
+  const r = spawnArk(["bun", CLI, ...args], {
+    cwd: proj,
+    env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1", ...env },
+    noProof: true,
+  }, typed);
+  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+};
 const answer = (gate: string, a: string, hash: string) => ark("gate", "answer", id, gate, a, "--packet", hash);
 const hashOf = (r: { out: string }) => r.out.trim();
 
@@ -242,8 +253,7 @@ describe("ARK-104-AC3", () => {
     const h2 = hashOf(packet("G2"));
     expect(h2).toBe(h);
     expect(answer("G2", "approve", h2).code).toBe(0);
-    expect(ark("run", "close", id, "merged").code).toBe(0);
-    expect(state()).toMatchObject({ state: "done", status: "done", outcome: "merged" });
+    expect(state()).toMatchObject({ state: "mrs_open", status: "waiting_human" });
   });
 });
 
@@ -293,33 +303,104 @@ describe("ARK-104-AC4", () => {
   });
 });
 
-const typedAnswer = (typed: string | null, gate: string, a: string, hash: string) =>
-  spawnArk(["bun", CLI, "gate", "answer", id, gate, a, "--packet", hash], { cwd: proj, env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1" } }, typed);
+// What an agent's shell sees outside OMP: no session of its own, so the human's answer also has to be typed on a terminal.
+const OUTSIDE_OMP = { PI_SESSION_ID: "", PI_SESSION_FILE: "" };
+const prove = (gate: string, a: string, hash: string, extra: Partial<AskProof> = {}) =>
+  appendAskProof(mainSessionFile(home), { action: `gate.answered:${gate}`, runId: id, answer: a, packetHash: hash, choices: GATE_CHOICES[gate], ...extra });
+const refusedUnchanged = (message: string, run: () => { code: number; err: string }) => {
+  const before = snapshot();
+  const r = run();
+  expect(r.code).toBe(1);
+  expect(r.err).toContain(message);
+  expect(snapshot()).toEqual(before);
+};
+const answerArgs = (gate: string, a: string, hash: string) => ["gate", "answer", id, gate, a, "--packet", hash];
 
 describe("ARK-117-AC7", () => {
-  test("without a controlling terminal an answer is refused and nothing is recorded", () => {
+  test("outside OMP the ask answer is not enough: without a controlling terminal it is refused and nothing is recorded", () => {
     const h = atG1();
-    const before = snapshot();
-    const r = typedAnswer(null, "G1", "approve", h); // a session of its own, the way an agent's shell runs
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr.toString()).toContain("no controlling terminal");
-    expect(snapshot()).toEqual(before);
+    prove("G1", "approve", h);
+    refusedUnchanged("no controlling terminal", () => asHuman(OUTSIDE_OMP, null, ...answerArgs("G1", "approve", h)));
   });
 
-  test("typing a different gate name is refused and nothing is recorded", () => {
+  test("outside OMP, typing a different gate name is refused and nothing is recorded", () => {
     const h = atG1();
-    const before = snapshot();
-    const r = typedAnswer("G2", "G1", "approve", h);
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr.toString()).toContain("expected 'G1'");
-    expect(snapshot()).toEqual(before);
+    prove("G1", "approve", h);
+    refusedUnchanged("expected 'approve'", () => asHuman(OUTSIDE_OMP, "G2", ...answerArgs("G1", "approve", h)));
+  });
+});
+
+describe("ARK-120-AC1", () => {
+  test("an answer with no ask result in the main session is refused, in OMP and as a terminal-only answer outside it", () => {
+    const h = atG1();
+    refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArgs("G1", "approve", h)));
+    refusedUnchanged("no matching successful ask result", () => asHuman(OUTSIDE_OMP, "approve", ...answerArgs("G1", "approve", h)));
   });
 
-  test("the gate name typed on the terminal records the answer with its channel", () => {
+  test("an ask result OMP selected on timeout is not a human answer", () => {
     const h = atG1();
-    const r = typedAnswer("G1", "G1", "approve", h);
-    expect(r.exitCode, r.stderr.toString()).toBe(0);
-    expect(ledger().at(-1)).toMatchObject({ type: "gate.answered", data: { gate: "G1", answer: "approve", channel: "tty" } });
+    prove("G1", "approve", h, { timedOut: true });
+    refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArgs("G1", "approve", h)));
+  });
+
+  test("an ask result with custom input is not the human choosing a listed answer", () => {
+    const h = atG1();
+    prove("G1", "approve", h, { customInput: "approve, and also skip the checks" });
+    refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArgs("G1", "approve", h)));
+  });
+
+  test("an ask result tied to a stale packet hash cannot answer the rebuilt packet", () => {
+    const old = atG1();
+    expect(answer("G1", "change", old).code).toBe(0);
+    writeFileSync(runPath("plan.md"), "# Revised plan\n");
+    const current = hashOf(packet("G1"));
+    expect(current).not.toBe(old);
+    prove("G1", "approve", old);
+    refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArgs("G1", "approve", current)));
+  });
+
+  test("a session other than the bound main session cannot answer, even with a matching ask result of its own", () => {
+    const h = atG1();
+    const child = join(home, "child-session.jsonl");
+    appendAskProof(child, { action: "gate.answered:G1", runId: id, answer: "approve", packetHash: h, choices: GATE_CHOICES.G1, sessionId: "child-session" });
+    refusedUnchanged("bound main OMP session", () => asHuman({ PI_SESSION_ID: "child-session", PI_SESSION_FILE: child }, null, ...answerArgs("G1", "approve", h)));
+  });
+
+  test("one ask result answers once: the same packet cannot be answered again from it", () => {
+    const h = atG1();
+    prove("G1", "change", h);
+    expect(asHuman({}, null, ...answerArgs("G1", "change", h)).code).toBe(0);
+    expect(hashOf(packet("G1"))).toBe(h); // the same artifacts, so the same question
+    refusedUnchanged("already used", () => asHuman({}, null, ...answerArgs("G1", "change", h)));
+  });
+
+  test("an honest ask result records its session and call id, with the channel that carried it", () => {
+    const h = atG1();
+    prove("G1", "change", h, { toolCallId: "ask-in-omp" });
+    expect(asHuman({}, null, ...answerArgs("G1", "change", h)).code).toBe(0);
+    expect(ledger().at(-1).data).toMatchObject({ gate: "G1", answer: "change", channel: "omp", session_id: "ark-main-session", ask_call_id: "ask-in-omp" });
+
+    const second = hashOf(packet("G1"));
+    prove("G1", "approve", second, { toolCallId: "ask-outside-omp" });
+    const typed = asHuman(OUTSIDE_OMP, "approve", ...answerArgs("G1", "approve", second));
+    expect(typed.code, typed.err).toBe(0);
+    expect(ledger().at(-1).data).toMatchObject({ gate: "G1", answer: "approve", channel: "tty", ask_call_id: "ask-outside-omp" });
+  });
+});
+
+describe("ARK-120-AC3", () => {
+  test("a G2 send-back once the round budget is spent opens escalation instead of returning to building, and still counts a round", () => {
+    writeFileSync(join(proj, "ark.yml"), "project: demo\nloop:\n  max_rounds: 1\n");
+    const h = atG2();
+    expect(answer("G2", "send_back", h).code).toBe(0);
+    expect(state()).toMatchObject({ state: "building", round: 1 });
+    advance("build.completed");
+    expect(answer("G2", "send_back", hashOf(packet("G2"))).code).toBe(0);
+    expect(state()).toMatchObject({ state: "judging", round: 2 });
+    expect(ledger().at(-1)).toMatchObject({ type: "gate.answered", data: { gate: "G2", answer: "send_back", escalated: true } });
+    writeFileSync(runPath("premise.md"), "The same source premise remains.\n");
+    expect(packet("GE").code).toBe(0);
+    expect(state().state).toBe("awaiting_ge");
   });
 });
 

@@ -5,11 +5,11 @@ import implementerSchema from "../schemas/implementer.schema.json";
 import reviewerSchema from "../schemas/reviewer.schema.json";
 import validatorSchema from "../schemas/validator.schema.json";
 import { git } from "./repo";
-import { activeRunDir, type LedgerEvent, locked, open, readLedger, record, runDir, type RunState, sha256, summary } from "./run";
+import { activeRunDir, append, commit, type LedgerEvent, locked, open, project, readLedger, record, runDir, type RunState, sha256, summary } from "./run";
 
 const PLAYBOOKS = ["setup", "ticket", "bugfix", "investigate", "review", "resume"];
 
-// FR-02 AC1: the route and its reason are the first ledger event. `ark run start` writes run.started (and g0.opened for a ticket with no ACs); nothing else may precede this.
+// FR-02 AC1: route and reason are the first ledger event. Empty-AC runs open G0 only after routing.
 // With no run_id the active run (see cli/hook.ts) is used, matching the router's `ark log route <playbook> "<why>"`.
 export function logRoute(args: string[]): string {
   const active = activeRunDir();
@@ -20,10 +20,13 @@ export function logRoute(args: string[]): string {
   if (!why?.trim()) throw new Error("route needs a reason");
   const { dir } = open(runId, "route.chosen", "log route");
   return locked(dir, () => {
-    const events = readLedger(dir);
+    let events = readLedger(dir);
     if (events.some((e) => e.type === "route.chosen")) throw new Error("the route is already logged for this run");
     if (events.some((e) => e.type !== "run.started" && e.type !== "g0.opened")) throw new Error("route.chosen must be the first event after run.started");
-    return `routed ${summary(record(dir, "route.chosen", { playbook, reason: why.trim() }))}`;
+    events = append(dir, events, "route.chosen", { playbook, reason: why.trim() });
+    if (!Object.keys(project(events).acs).length) events = append(dir, events, "g0.opened", {});
+    const state = commit(dir, events);
+    return `routed ${summary(state)}`;
   });
 }
 
@@ -61,17 +64,20 @@ const BUCKET = ["act_on", "consider", "noted", "dismissed"];
 const KEYS = ["id", "reviewer", "model", "priority", "file", "line", "claim", "bucket", "reason", "evidence"];
 const text = (v: unknown) => typeof v === "string" && v.trim() !== "";
 
-// The tagged tests `ark test` recorded as failing at each repo's current HEAD (the newest record of a test at that HEAD decides); a result at an older head says nothing about this one.
+// The latest recorded green-side outcome for each test at the repo's current HEAD wins across ark test modes.
 function failingAtHead(dir: string, repos: RunState["repos"], events: LedgerEvent[]): string[] {
   return repos.flatMap((r) => {
     let head: string;
     try { head = git(join(dir, "ws", r.name), "rev-parse", "HEAD"); } catch { return []; }
-    const status = new Map<string, string>();
+    const status = new Map<string, { test: string; outcome: string }>();
     for (const e of events) {
-      if (e.type !== "test.result" || e.data.repo !== r.name || e.data.head_sha !== head) continue;
-      for (const t of e.data.tests as { test: string; status: string }[]) status.set(t.test, t.status);
+      if (!["test.result", "test.red_green", "test.preservation"].includes(e.type) || e.data.repo !== r.name || e.data.head_sha !== head) continue;
+      for (const t of e.data.tests as { suite?: string; test: string; status?: string; green?: string }[]) {
+        const outcome = e.type === "test.result" ? t.status : t.green;
+        if (typeof outcome === "string" && outcome !== "missing") status.set(`${t.suite ?? ""}\0${t.test}`, { test: t.test, outcome });
+      }
     }
-    return [...status].filter(([, s]) => s === "failure" || s === "error").map(([t]) => t);
+    return [...status.values()].filter(({ outcome }) => outcome === "failure" || outcome === "error").map(({ test }) => test);
   });
 }
 
@@ -85,15 +91,17 @@ function checkFinding(f: unknown, at: string, failing: string[]): string[] {
   if (!BUCKET.includes(o.bucket as string)) bad.push(`${at}: bucket must be one of ${BUCKET.join(", ")}`);
   const ev = o.evidence;
   const proof = typeof ev === "object" && ev !== null && !Array.isArray(ev) ? (ev as Record<string, unknown>) : undefined;
-  if (ev !== undefined && (!proof || Object.keys(proof).some((k) => k !== "failing_test" && k !== "traced_path"))) bad.push(`${at}: evidence must be {failing_test} or {traced_path}`);
-  const proven = text(proof?.failing_test) || text(proof?.traced_path);
-  if (ev !== undefined && proof && !proven) bad.push(`${at}: evidence needs a non-empty failing_test or traced_path`);
-  if (o.bucket === "act_on" && (o.priority === "P0" || o.priority === "P1")) {
-    if (!proven) bad.push(`${at}: act_on ${o.priority} goes back only with evidence {failing_test} or {traced_path}`);
-    const named = proof?.failing_test;
-    if (text(named) && !failing.some((t) => t === named || t.endsWith(` > ${named}`))) {
-      bad.push(`${at}: failing_test '${named}' is not a test that the latest 'ark test' at the current head recorded as failing (${failing.length ? `failing now: ${failing.join("; ")}` : "none failing now"}); run it with 'ark test', or give {traced_path} (weaker evidence)`);
-    }
+  const fields = ["failing_test", "traced_path"];
+  if (ev !== undefined && (!proof || !Object.keys(proof).length || Object.keys(proof).some((k) => !fields.includes(k)))) bad.push(`${at}: evidence must be {failing_test} or {traced_path}`);
+  for (const field of fields) if (proof && field in proof && !text(proof[field])) bad.push(`${at}: evidence.${field} must be a non-empty string`);
+  const named = proof?.failing_test;
+  const validTest = text(named) && failing.some((t) => t === named || t.endsWith(` > ${named}`));
+  const validPath = text(proof?.traced_path);
+  if (text(named) && !validTest) {
+    bad.push(`${at}: failing_test '${named}' is not a test that the latest 'ark test' at the current head recorded as failing (${failing.length ? `failing now: ${failing.join("; ")}` : "none failing now"}); run it with 'ark test', or give {traced_path} (weaker evidence)`);
+  }
+  if (o.bucket === "act_on" && (o.priority === "P0" || o.priority === "P1") && !validTest && !validPath) {
+    bad.push(`${at}: act_on ${o.priority} goes back only with evidence {failing_test} or {traced_path}`);
   }
   return bad;
 }

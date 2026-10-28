@@ -30,9 +30,13 @@ const ark = (args: string[], stdin?: string) => {
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const runsDir = () => join(home, "projects", "demo", "runs");
-const run = () => readdirSync(runsDir())[0];
+const run = () => readdirSync(runsDir()).filter((r) => r !== ".locks")[0];
 const dir = () => join(runsDir(), run());
 const ledger = () => readFileSync(join(dir(), "ledger.ndjson"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+const startRun = () => {
+  expect(ark(["run", "start", "DEMO-7"]).code).toBe(0);
+  expect(ark(["log", "route", run(), "ticket", "fixture"]).code).toBe(0);
+};
 const setConfig = (text: string) => writeFileSync(join(proj, ".omp", "config.yml"), text);
 const tmp = (name: string, value: unknown) => {
   const f = join(proj, name);
@@ -51,7 +55,7 @@ beforeEach(() => {
 });
 
 const toJudging = () => {
-  expect(ark(["run", "start", "DEMO-7"]).code).toBe(0);
+  startRun();
   expect(ark(["advance", run(), "analysis.completed"]).code).toBe(0);
   writeFileSync(join(dir(), "plan.md"), "# Plan\n");
   setKinds(dir());
@@ -79,14 +83,14 @@ describe("ARK-108-AC1", () => {
     expect(ledger()[1].type).toBe("route.chosen");
   });
 
-  test("a route logged after other events is refused and changes nothing", () => {
+  test("no event after run.started is legal until route.chosen is logged", () => {
     ark(["run", "start", "DEMO-7"]);
-    ark(["advance", run(), "analysis.completed"]);
     const before = readFileSync(join(dir(), "ledger.ndjson"), "utf8");
-    const r = ark(["log", "route", run(), "ticket", "late"]);
+    const r = ark(["advance", run(), "analysis.completed"]);
     expect(r.code).toBe(1);
-    expect(r.err).toContain("illegal event 'route.chosen'");
+    expect(r.err).toContain("route");
     expect(readFileSync(join(dir(), "ledger.ndjson"), "utf8")).toBe(before);
+    expect(ark(["log", "route", run(), "ticket", "late"]).code).toBe(0);
   });
 });
 
@@ -123,7 +127,7 @@ describe("ARK-108-AC3", () => {
   const impl = { repo: "demo", branch: "ark/DEMO-7-x", head_sha: "abc123", ac_addressed: ["DEMO-7-AC1"], status: "done" };
 
   test("a schema-valid agent result is kept under artifacts/<agent>/<n>.json and numbered per attempt", () => {
-    ark(["run", "start", "DEMO-7"]);
+    startRun();
     const first = ark(["artifact", "record", run(), "implementer", tmp("i.json", impl)]);
     expect(first.code).toBe(0);
     expect(first.out).toStartWith("artifacts/implementer/1.json sha256:");
@@ -132,7 +136,7 @@ describe("ARK-108-AC3", () => {
   });
 
   test("a result that violates its schema is refused and nothing is kept", () => {
-    ark(["run", "start", "DEMO-7"]);
+    startRun();
     const r = ark(["artifact", "record", run(), "implementer", tmp("bad.json", { ...impl, status: "maybe", extra: 1 })]);
     expect(r.code).toBe(1);
     expect(r.err).toContain("fails the implementer schema");
@@ -192,7 +196,7 @@ describe("ARK-108-AC5", () => {
 
   test.each([
     ["act_on P0 without evidence", { priority: "P0", bucket: "act_on" }, "act_on P0 goes back only with evidence"],
-    ["act_on P1 with empty evidence", { priority: "P1", bucket: "act_on", evidence: { traced_path: " " } }, "non-empty failing_test or traced_path"],
+    ["act_on P1 with empty evidence", { priority: "P1", bucket: "act_on", evidence: { traced_path: " " } }, "evidence.traced_path"],
     ["evidence of another shape", { priority: "P1", bucket: "act_on", evidence: { note: "x" } }, "evidence must be"],
     ["an unknown bucket", { bucket: "maybe" }, "bucket must be one of"],
     ["a missing reason", { reason: "" }, "reason must be a non-empty string"],
@@ -215,7 +219,7 @@ describe("ARK-108-AC5", () => {
   });
 
   test("findings can be recorded only while judging", () => {
-    ark(["run", "start", "DEMO-7"]);
+    startRun();
     expect(ark(["findings", "record", run(), tmp("f.json", [finding()])]).err).toContain("illegal event 'findings.recorded' in state 'intake'");
   });
 });
@@ -225,7 +229,7 @@ describe("ARK-108-AC6", () => {
   const inRun = (f: string) => join(dir(), f);
 
   test("writes inside the run folder pass; writes outside it, and to state.json or ledger.ndjson, are blocked", () => {
-    ark(["run", "start", "DEMO-7"]);
+    startRun();
     expect(call("write", { path: inRun("plan.md") }).code).toBe(0);
     expect(call("edit", { path: inRun("inbox/x.json") }).code).toBe(0);
     expect(call("edit", { paths: [inRun("plan.md"), join(proj, "src.ts")] }).err).toContain("outside the active run folder");
@@ -237,7 +241,7 @@ describe("ARK-108-AC6", () => {
   });
 
   test("worktrees under ws/ are blocked, and an edit or write that names no checkable path fails closed", () => {
-    ark(["run", "start", "DEMO-7"]);
+    startRun();
     expect(call("write", { path: inRun("ws/demo/src/a.ts") }).err).toContain("worktrees belong to the implementer");
     expect(call("edit", { paths: [inRun("plan.md"), inRun("ws")] }).code).toBe(1);
     expect(call("write", { path: inRun("wsx.md") }).code).toBe(0);
@@ -247,7 +251,7 @@ describe("ARK-108-AC6", () => {
   });
 
   test("bash redirects onto state.json or ledger.ndjson are blocked; reads and ark calls are not", () => {
-    ark(["run", "start", "DEMO-7"]);
+    startRun();
     expect(call("bash", { command: `echo x >> ${inRun("ledger.ndjson")}` }).code).toBe(1);
     expect(call("bash", { command: "sed -i s/a/b/ state.json" }).code).toBe(1);
     expect(call("bash", { command: `cat ${inRun("ledger.ndjson")} | head` }).code).toBe(0);

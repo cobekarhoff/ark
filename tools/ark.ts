@@ -9,6 +9,7 @@ export default function (pi: { zod: any }) {
   const z = pi.zod;
   const gate = z.enum(["G0", "G1", "G2", "GE"]);
   const run_id = z.string().describe("run id printed by ark_run_start");
+  const outcome = z.enum(["merged", "abandoned"]);
   // [name, what it does, parameters, argv]
   const verbs: [string, string, Record<string, unknown>, (a: any) => string[]][] = [
     ["ark_run_start", "Start the run for a local ticket (or resume it), bind this session to it, and print `started|resumed <run_id>`. Runs the model preflight first.", { ticket: z.string().describe("ticket ID, e.g. ARK-108") }, (a) => ["run", "start", a.ticket]],
@@ -20,7 +21,9 @@ export default function (pi: { zod: any }) {
     ["ark_findings_record", "Validate the judged findings file and record it (judging state).", { run_id, file: z.string().describe("absolute path of the findings JSON") }, (a) => ["findings", "record", a.run_id, a.file]],
     ["ark_artifact_record", "Schema-check an agent's typed result and keep it as artifacts/<agent>/<n>.json.", { run_id, agent: z.enum(["implementer", "validator", "reviewer"]), file: z.string().describe("absolute path of the result JSON") }, (a) => ["artifact", "record", a.run_id, a.agent, a.file]],
     ["ark_trace_check", "Build trace-matrix.md from ac.yml and the recorded test evidence; an error lists why it fails.", { run_id }, (a) => ["trace-check", a.run_id]],
-    ["ark_mr", "Push the run branches with the human's credentials and open a GitHub merge request (PR) per repo. Never merges.", { run_id }, (a) => ["mr", a.run_id]],
+    ["ark_gate_answer", "Record a human gate answer only when the main session's matching ask answer is present.", { run_id, gate, answer: z.string(), packet: z.string() }, (a) => ["gate", "answer", a.run_id, a.gate, a.answer, "--packet", a.packet]],
+    ["ark_run_close", "Record a human-confirmed run outcome using the close_packet hash printed by ark_mr and the main session's matching ask result.", { run_id, outcome }, (a) => ["run", "close", a.run_id, a.outcome]],
+    ["ark_mr", "Push the run branches with the human's credentials and open a GitHub merge request (PR) per repo; prints close_packet when all are open. Never merges.", { run_id }, (a) => ["mr", a.run_id]],
   ];
   return verbs.map(([name, description, shape, argv]) => ({
     name,
@@ -29,10 +32,9 @@ export default function (pi: { zod: any }) {
     loadMode: "essential", // top-level functions, not xd:// devices: the orchestrator has nothing else to run the CLI with
     hidden: true, // exists only where --tools or an agent's tools names it: a subagent or a session started without ark launch never gets one
     parameters: z.object(shape),
-    async execute(_id: string, params: unknown, _update: unknown, ctx: { sessionManager: { getSessionId(): string } }, signal?: AbortSignal) {
-      // The bash tool exports PI_SESSION_ID; without it `ark run start` cannot bind the session and the hook never sees the run.
-      // `ark launch` starts omp without git or gh credentials, for the subagents' sake; only `ark mr` gets the human's own values back.
-      const base: Record<string, string | undefined> = { ...process.env, PI_SESSION_ID: ctx.sessionManager.getSessionId() };
+    async execute(_id: string, params: unknown, _update: unknown, ctx: { agent: { kind: string }; sessionManager: { getSessionId(): string; getSessionFile(): string | undefined } }, signal?: AbortSignal) {
+      if (ctx.agent.kind !== "main") throw new Error("ark tools are available only in the main session");
+      const base: Record<string, string | undefined> = { ...process.env, PI_SESSION_ID: ctx.sessionManager.getSessionId(), PI_SESSION_FILE: ctx.sessionManager.getSessionFile() };
       const env = name === "ark_mr" ? humanEnv(base) : base;
       const p = Bun.spawn(["bun", CLI, ...argv(params)], { env, stdout: "pipe", stderr: "pipe", signal });
       const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);

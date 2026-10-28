@@ -25,7 +25,12 @@ const runOf = (id: string) => readdirSync(runsDir()).find((r) => r.includes(`-${
 const dirOf = (id: string) => join(runsDir(), runOf(id));
 // `session`: the id of the OMP session the extension reports with the call (ctx.sessionManager.getSessionId()).
 const call = (tool: string, input: Record<string, unknown>, o: { session?: string; cwd?: string } = {}) => ark(["hook", "tool_call"], JSON.stringify({ tool, input, cwd: o.cwd ?? proj, session: o.session }));
-const asSession = (id: string) => ({ PI_SESSION_ID: id }); // what a bash tool call of that session exports, and so what `ark run start` sees
+const asSession = (id: string) => ({ PI_SESSION_ID: id, PI_SESSION_FILE: join(home, `${id}.jsonl`) }); // what a bash tool call of that session exports, and so what `ark run start` sees
+// The route comes first on any run; only then can it be aborted.
+const abort = (id: string) => {
+  expect(ark(["log", "route", runOf(id), "ticket", "fixture"]).code).toBe(0);
+  return ark(["advance", runOf(id), "abort"]);
+};
 const product = () => join(proj, "src.ts");
 
 beforeEach(() => {
@@ -86,11 +91,11 @@ describe("ARK-115-AC10", () => {
     const pointer = join(home, "projects", "demo", "active-run");
     expect(call("write", { path: product() }, { session: "S1" }).err).toContain("outside the active run folder");
 
-    writeFileSync(pointer, "2026-01-01-NOPE-1\n"); // stale pointer
+    writeFileSync(pointer, "2026-01-01-NOPE-1-1\n"); // stale pointer
     expect(call("write", { path: product() }, { session: "S1" }).code).toBe(1);
 
     expect(ark(["run", "start", "DEMO-8"], undefined, asSession("S2")).code).toBe(0); // another session starts and aborts a run: the pointer follows it
-    expect(ark(["advance", runOf("DEMO-8"), "abort"]).code).toBe(0);
+    expect(abort("DEMO-8").code).toBe(0);
     expect(call("write", { path: product() }, { session: "S1" }).code).toBe(1); // pointer names a closed run
 
     rmSync(pointer);
@@ -103,13 +108,22 @@ describe("ARK-115-AC10", () => {
     expect(call("write", { path: product() }, { session: "S3", cwd: elsewhere }).code).toBe(0);
   });
 
+  test("the main-session binding in the run folder is not writable by the agent: it is what a gate answer is checked against", () => {
+    const binding = join(dirOf("DEMO-7"), ".main-session");
+    for (const tool of ["write", "edit"]) {
+      const r = call(tool, { path: binding }, { session: "S1" });
+      expect(r.code, tool).toBe(1);
+      expect(r.err, tool).toContain(".main-session");
+    }
+  });
+
   test("a binding whose run is missing or has an unreadable state fails closed; a closed run frees the session until it starts another", () => {
     writeFileSync(join(dirOf("DEMO-7"), "state.json"), "{not json");
     expect(call("write", { path: product() }, { session: "S1" }).code).toBe(1);
     expect(ark(["run", "replay", runOf("DEMO-7")]).code).toBe(0); // repair the projection
 
     expect(ark(["run", "start", "DEMO-8"], undefined, asSession("S2")).code).toBe(0); // the pointer now names an open run of another session
-    expect(ark(["advance", runOf("DEMO-7"), "abort"]).code).toBe(0);
+    expect(abort("DEMO-7").code).toBe(0);
     expect(call("write", { path: product() }, { session: "S1" }).code).toBe(0); // S1's run is closed; the pointer is not S1's
     expect(ark(["run", "start", "DEMO-8"], undefined, asSession("S1")).out).toContain("resumed"); // S1 takes DEMO-8
     expect(call("write", { path: product() }, { session: "S1" }).err).toContain("outside the active run folder");
@@ -120,14 +134,14 @@ describe("ARK-115-AC10", () => {
 
   test("with no session binding, a pointer to a missing run fails closed but still lets bash repair it; a closed run frees the session", () => {
     const pointer = join(home, "projects", "demo", "active-run");
-    writeFileSync(pointer, "2026-01-01-NOPE-1\n");
+    writeFileSync(pointer, "2026-01-01-NOPE-1-1\n");
     expect(call("write", { path: product() }).err).toContain("no such run");
     expect(call("eval", { code: "1" }).code).toBe(1);
     expect(call("bash", { command: "ark run start DEMO-7" }).code).toBe(0);
     expect(call("bash", { command: `echo x >> ${join(dirOf("DEMO-7"), "ledger.ndjson")}` }).code).toBe(1);
 
     writeFileSync(pointer, `${runOf("DEMO-7")}\n`);
-    expect(ark(["advance", runOf("DEMO-7"), "abort"]).code).toBe(0);
+    expect(abort("DEMO-7").code).toBe(0);
     expect(call("write", { path: product() }).code).toBe(0);
   });
 

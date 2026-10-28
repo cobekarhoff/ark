@@ -63,7 +63,7 @@ const ark = (...args: string[]) => {
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 const runsDir = () => join(home, "projects", "demo", "runs");
-const run = () => readdirSync(runsDir())[0];
+const run = () => readdirSync(runsDir()).filter((r) => r !== ".locks")[0];
 const runFile = (f: string) => join(runsDir(), run(), f);
 const slurp = (f: string) => readFileSync(runFile(f), "utf8");
 const events = (type: string) => slurp("ledger.ndjson").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.type === type);
@@ -79,8 +79,13 @@ const writeAcs = (acs: [id: string, level?: string, kind?: string][]) =>
   writeFileSync(runFile("ac.yml"), acs.map(([id, level, kind = "new"]) => `- id: DEMO-1-${id}\n  text: t${level ? `\n  level: ${level}` : ""}\n  kind: ${kind}\n`).join(""));
 // ac.yml must list exactly the run's ACs, so the ones a test does not care about are signed manual ACs.
 const acYml = (...acs: [id: string, level?: string, kind?: string][]) => {
+  const old = Bun.YAML.parse(slurp("ac.yml")) as { id: string; kind?: string }[];
+  const kinds = Object.fromEntries(old.map((a) => [a.id, a.kind]));
   const rest = RUN_ACS.filter((id) => !acs.some(([a]) => a === id));
-  writeAcs([...acs, ...rest.map((id): [string, string] => [id, "manual"])]);
+  writeAcs([
+    ...acs.map(([id, level, kind]) => [id, level, kind ?? kinds[`DEMO-1-${id}`]] as [string, string?, string?]),
+    ...rest.map((id) => [id, "manual", kinds[`DEMO-1-${id}`]] as [string, string?, string?]),
+  ]);
   for (const id of rest) sign(id);
 };
 // Rewrites the ledger line of the newest event of `type` (the tests' way to present evidence the CLI itself would never record).
@@ -132,10 +137,11 @@ function fixture() {
 }
 const ok = (r: { code: number; err: string }) => expect(r.err === "" ? r.code : r.err).toBe(0);
 // start -> G1 approved -> ws create -> build.started
-const toBuilding = () => {
+const toBuilding = (kinds: "new" | "preserved" | Record<string, "new" | "preserved"> = "new") => {
+  ok(ark("log", "route", run(), "ticket", "fixture"));
   ok(ark("advance", run(), "analysis.completed"));
   writeFileSync(runFile("plan.md"), "# Plan\n");
-  setKinds(runFile(""));
+  setKinds(runFile(""), kinds);
   const h = ark("gate", "packet", run(), "G1").out.trim();
   ok(ark("gate", "answer", run(), "G1", "approve", "--packet", h));
   ok(ark("ws", "create", run()));
@@ -467,10 +473,10 @@ describe("ARK-106 event ownership", () => {
 
 describe("ARK-117-AC5", () => {
   test("a preserved AC needs preservation proof: a green run alone fails, and a passing preservation run (pass on base and on head) satisfies it", () => {
-    toBuilding();
+    toBuilding({ "DEMO-1-AC2": "preserved" });
     implement(HEAD_FILES);
     ok(ark("test", run(), "--acs", "DEMO-1-AC2")); // AC2 passes on base and on head
-    acYml(["AC2", "integration", "preserved"]);
+    acYml(["AC2", "integration"]);
     const refused = trace();
     expect(refused.code).toBe(1);
     expect(refused.err).toMatch(/DEMO-1-AC2: demo: no preservation proof at \w{12}/);
@@ -484,28 +490,29 @@ describe("ARK-117-AC5", () => {
   });
 
   test("a test that fails on the base is not preserved behavior, and a new AC is not satisfied by preservation proof", () => {
-    toBuilding();
+    toBuilding({ "DEMO-1-AC1": "preserved", "DEMO-1-AC2": "new" });
     implement(HEAD_FILES);
     const failing = ark("test", run(), "--acs", "DEMO-1-AC1", "--preservation"); // AC1 fails on base
     expect(failing.code).toBe(1);
     expect(failing.out).toContain("DEMO-1-AC1: not-preserved");
     ok(ark("test", run(), "--acs", "DEMO-1-AC2", "--preservation"));
-    acYml(["AC1", "e2e", "preserved"], ["AC2", "integration", "new"]);
+    acYml(["AC1", "e2e"], ["AC2", "integration"]);
     const r = trace();
     expect(r.code).toBe(1);
     expect(r.err).toMatch(/DEMO-1-AC1: .*no preservation proof/);
     expect(r.err).toMatch(/DEMO-1-AC2: demo: no red-green proof/);
   });
 
-  test("an AC with no kind fails trace-check, naming it", () => {
-    toBuilding();
-    writeFileSync(runFile("ac.yml"), RUN_ACS.map((id) => `- id: DEMO-1-${id}\n  text: t\n  level: manual\n`).join(""));
+  test("trace-check rejects an ac.yml kind changed after G1 approved it", () => {
+    toBuilding({ "DEMO-1-AC1": "preserved" });
+    writeAcs(RUN_ACS.map((id): [string, string, string] => [id, "manual", "new"]));
     for (const id of RUN_ACS) sign(id);
     const r = trace();
     expect(r.code).toBe(1);
-    expect(r.err).toContain("DEMO-1-AC1: no kind (new or preserved) in ac.yml");
+    expect(r.err).toMatch(/DEMO-1-AC1.*kind/i);
   });
 });
+
 
 describe("ARK-117-AC9", () => {
   test("screenshots saved under artifacts/screenshots/<AC-ID>/ are listed in that AC's row, and only there", () => {

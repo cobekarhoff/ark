@@ -67,7 +67,7 @@ const arkWith = (extra: Record<string, string>, ...args: string[]) => {
 };
 const ark = (...args: string[]) => arkWith({}, ...args);
 const runsDir = () => join(home, "projects", "demo", "runs");
-const run = () => readdirSync(runsDir())[0];
+const run = () => readdirSync(runsDir()).filter((r) => r !== ".locks")[0];
 const runFile = (f: string) => join(runsDir(), run(), f);
 const state = () => JSON.parse(readFileSync(runFile("state.json"), "utf8"));
 const events = (type: string) =>
@@ -129,6 +129,7 @@ function fixture(up = "echo up >> $ARK_OUT/order", suiteOver: Record<string, unk
   mkdirSync(join(home, "projects", "demo", "tickets"), { recursive: true });
   writeFileSync(join(home, "projects", "demo", "tickets", "DEMO-1.md"), ticket);
   ark("run", "start", "DEMO-1");
+  expect(ark("log", "route", run(), "ticket", "fixture").code).toBe(0);
 }
 const toApproved = () => {
   expect(ark("advance", run(), "analysis.completed").code).toBe(0);
@@ -354,7 +355,6 @@ test("untagged tests are ignored", () => { expect(1).toBe(2); });`),
 describe("ARK-105-AC7", () => {
   test("advance refuses an implementer step whose diff touches an AC-tagged test, and records the head SHA when it does not", () => {
     toBuilding();
-    const before = state().ledger_seq;
     const done = () => ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
 
     commitAll(wt(), { "src/feature.ts": `export const feature = () => "new";\n`, "test/stable.test.ts": "// edited\n" });
@@ -366,7 +366,7 @@ describe("ARK-105-AC7", () => {
     commitAll(wt(), { "test/new.test.ts": FEATURE_TEST });
     expect(done().err).toContain("test/new.test.ts"); // a new tagged test counts too
     git(wt(), "reset", "-q", "--hard", "HEAD~1");
-    expect(state().ledger_seq).toBe(before);
+    expect(events("implementer.completed")).toEqual([]); // refused steps are audited as implementer.refused, never as completed
 
     commitAll(wt(), { "src/feature.ts": `export const feature = () => "new";\n`, "test/plain.test.ts": bunTest(`test("untagged helper check", () => { expect(2).toBe(2); });`) });
     expect(done().code).toBe(0);
@@ -462,6 +462,7 @@ describe("ARK-115-AC6", () => {
     writeFileSync(join(home, "projects", "demo", "tickets", "X-1.md"), ticket.replaceAll("DEMO-1", "X-1"));
     expect(ark("run", "start", "X-1").err).toBe("");
     const rid = readdirSync(runsDir()).find((r) => r.includes("-X-1-"))!;
+    expect(ark("log", "route", rid, "ticket", "fixture").code).toBe(0);
     expect(ark("advance", rid, "analysis.completed").code).toBe(0);
     writeFileSync(join(runsDir(), rid, "plan.md"), "# Plan\n");
     setKinds(join(runsDir(), rid));

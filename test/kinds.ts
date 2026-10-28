@@ -5,5 +5,5 @@ import { join } from "node:path";
 export function setKinds(runDir: string, kind: "new" | "preserved" | Record<string, "new" | "preserved"> = "new") {
   const file = join(runDir, "ac.yml");
   const acs = Bun.YAML.parse(readFileSync(file, "utf8")) as { id: string }[];
-  writeFileSync(file, Bun.YAML.stringify(acs.map((a) => ({ ...a, kind: typeof kind === "string" ? kind : kind[a.id] })), null, 2));
+  writeFileSync(file, Bun.YAML.stringify(acs.map((a) => ({ ...a, kind: typeof kind === "string" ? kind : (kind[a.id] ?? "new") })), null, 2));
 }

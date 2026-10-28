@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { approver, withTerminal } from "./human";
+import { claimHumanAsk } from "./binding";
+import { confirmHuman, verifyHumanProof } from "./human";
 import { append, commit, type LedgerEvent, locked, maxRounds, mrEnabled, project, readLedger, runDir, sha256, unattributed, worktreeHeads } from "./run";
 import { buildMatrix } from "./trace";
 import { transitions } from "./transitions";
@@ -97,12 +98,13 @@ function verifiedFindings(dir: string): string[] {
 export function gateAnswer(runId: string, gate: string, answer: string, packetHash: string): string {
   checkGate(gate);
   const awaiting = `awaiting_${gate.toLowerCase()}` as keyof typeof transitions;
-  const allowed = Object.keys(transitions[awaiting]).filter((k) => k.startsWith(`gate.answered:${gate}:`)).map((k) => k.split(":")[2]);
+  const allowed = [...new Set(Object.keys(transitions[awaiting]).filter((k) => k.startsWith(`gate.answered:${gate}:`)).map((k) => k.split(":")[2]))]; // the G2 escalated variant shares its answer name
   if (!allowed.includes(answer)) throw new Error(`unknown answer '${answer}' for ${gate}; expected ${allowed.join(", ")}`);
 
   const dir = runDir(runId);
-  // ADR 0002: an answer is the gate name typed on /dev/tty, which a process without a controlling terminal (an agent's shell) cannot do. Checked first, confirmed last.
-  return withTerminal("a gate answer", (confirm) => locked(dir, () => {
+  const action = `gate.answered:${gate}`;
+  const who = confirmHuman(dir, runId, action, answer, packetHash, allowed);
+  return locked(dir, () => {
     const events = readLedger(dir);
     const packet = events.findLast((e) => e.type === "gate.packet" && e.data.gate === gate);
     if (!packet) throw new Error(`${gate} has no packet; run 'ark gate packet ${runId} ${gate}' first`);
@@ -116,8 +118,7 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
     if (!existsSync(file) || sha256(readFileSync(file)) !== packetHash) throw new Error(`${packet.data.path} changed since it was hashed; rebuild the packet`);
 
     // An approving answer binds what was shown: rebuilding the packet from the run folder now must give the same bytes.
-    // Change, edit, send-back and abort stay possible on a stale packet, since the way out of a changed source is to answer and rebuild.
-    if (answer === "accept" || answer === "approve") {
+    if (answer === "accept" || answer === "approve" || (gate === "GE" && answer !== "abort")) {
       const rebuilt = buildPacket(dir, runId, gate);
       if (sha256(rebuilt) !== packetHash) {
         const was = sources(readFileSync(file, "utf8"));
@@ -132,19 +133,26 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
     }
     // An answer that approves or starts a round vouches for the worktrees as they are now; one that starts a round also marks where the next implementer step begins.
     const run = project(events);
-    const startsRound = (transitions[awaiting] as Record<string, string>)[`gate.answered:${gate}:${answer}`] === "building"; // answer is one of `allowed`
+    const escalated = gate === "G2" && answer === "send_back" && run.round >= maxRounds();
+    const startsRound = !escalated && (transitions[awaiting] as Record<string, string>)[`gate.answered:${gate}:${answer}`] === "building"; // answer is one of `allowed`
     let heads = {};
     if ((gate === "G2" || gate === "GE") && answer !== "abort") {
       const bad = unattributed(dir, run, events);
       if (bad.length) throw new Error(`${gate} ${answer} refused:\n${bad.map((b) => `  - ${b}`).join("\n")}`);
       if (startsRound) heads = { heads: worktreeHeads(dir, run) };
     }
-    const who = approver();
-    // ark.yml mr: false: approval ends the run at ready branches, handed off, with no ark mr. Read before anything is written.
-    const closing = gate === "G2" && answer === "approve" && !mrEnabled();
-    confirm(`${runId}: answer ${gate} '${answer}' to packet ${packetHash}\nType ${gate} to confirm: `, gate);
-    const answered = append(dir, events, "gate.answered", { gate, answer, ...who, packet_sha256: packetHash, channel: "tty", ...heads });
+    if (!verifyHumanProof(dir, runId, action, answer, packetHash, allowed, who)) {
+      throw new Error(`human confirmation for ${action} is no longer valid; ask the human again`);
+    }
+    if (!who.session_id || !who.ask_call_id || !claimHumanAsk(who.session_id, who.ask_call_id)) {
+      throw new Error(`ask confirmation ${who.ask_call_id} was already used; ask the human again`);
+    }
+    const acKinds = gate === "G1" && answer === "approve"
+      ? Object.fromEntries((Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) as { id: string; kind: string }[]).map((ac) => [ac.id, ac.kind]))
+      : undefined;
+    const closing = gate === "G2" && answer === "approve" && !mrEnabled() && !events.some((e) => e.type === "mr.opened");
+    const answered = append(dir, events, "gate.answered", { gate, answer, ...who, packet_sha256: packetHash, ...(acKinds ? { ac_kinds: acKinds } : {}), ...(escalated ? { escalated: true } : {}), ...heads });
     commit(dir, closing ? append(dir, answered, "run.closed", { outcome: "handed_off", reason: "mr disabled" }) : answered);
     return `${gate} ${answer} recorded by ${who.by}\n${closing ? "MRs are disabled in ark.yml; run closed at ready branches, handed off\n" : ""}`;
-  }));
+  });
 }

@@ -1,10 +1,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { approver, withTerminal } from "./human";
+import { claimHumanAsk } from "./binding";
+import { confirmHuman, verifyHumanProof } from "./human";
 import { git } from "./repo";
-import { commit, append, locked, mrEnabled, project, readLedger, record, runDir } from "./run";
+import { commit, append, locked, mrEnabled, project, readLedger, record, runDir, sha256, type LedgerEvent } from "./run";
 
 type Pr = { url: string; number: number; state: string; baseRefName: string; headRepositoryOwner: { login: string } | null };
+
+const closePacket = (events: LedgerEvent[]) =>
+  events.filter((e) => e.type === "mr.opened").map((e) => ({ repo: e.data.repo, url: e.data.url, number: e.data.number }));
 
 // Remote URLs may carry credentials (https://user:token@host/..): no error or ledger line may show them.
 const redact = (s: string) => s.replace(/(\/\/)[^/@\s]+@/g, "$1***@");
@@ -22,8 +26,10 @@ export function mr(runId: string): string {
   const state = project(events);
   const illegal = () => new Error(`ark mr is legal only in state 'mrs_open' (state '${state.state}')`);
 
-  if (!mrEnabled()) { // normally G2 approval already closed the run; this covers a config flipped after approval
-    if (state.state === "mrs_open") record(dir, "run.closed", { outcome: "handed_off", reason: "mr disabled" });
+  if (!mrEnabled()) {
+    const opened = events.some((e) => e.type === "mr.opened");
+    if (state.state === "mrs_open" && !opened) record(dir, "run.closed", { outcome: "handed_off", reason: "mr disabled" });
+    else if (state.state === "mrs_open") throw new Error("MRs are disabled but this run already has an opened MR; close it as merged or abandoned with 'ark run close'");
     else if (state.state !== "done") throw illegal();
     return `MRs are disabled in ark.yml; run closed at ready branches: ${state.repos.map((r) => r.branch).join(", ")}\n`;
   }
@@ -89,23 +95,37 @@ export function mr(runId: string): string {
     record(dir, "mr.opened", { repo: repo.name, url: prUrl, number });
     out.push(`${repo.name}: ${prUrl}`);
   }
-  return `${out.join("\n")}\n`;
+  const opened = closePacket(readLedger(dir));
+  return `${out.join("\n")}\n${opened.length ? `close_packet: ${sha256(JSON.stringify(opened))}\n` : ""}`;
 }
 
-// The outcome of a run whose MRs are open is a human's to record: merged (every MR merged) or abandoned (the MRs closed unmerged).
-// Typed on /dev/tty like a gate answer (ADR 0002), because nothing else tells Ark what happened on the git host.
+// The outcome of a run whose MRs are open is a human's to record. Returns the close packet hash: sha256 of the opened MR list.
+function closePacketHash(events: LedgerEvent[], outcome: string): string {
+  const state = project(events);
+  if (state.state !== "mrs_open") throw new Error(`ark run close is legal only in state 'mrs_open' (state '${state.state}')`);
+  const opened = closePacket(events);
+  if (!opened.length) throw new Error(`cannot record ${outcome}: no MR has been opened`);
+  const unopened = state.repos.filter((r) => !opened.some((o) => o.repo === r.name)).map((r) => r.name);
+  if (outcome === "merged" && unopened.length) throw new Error(`cannot record merged: no MR was opened for ${unopened.join(", ")}`);
+  return sha256(JSON.stringify(opened));
+}
+
 export function closeRun(runId: string, outcome: string): string {
   if (outcome !== "merged" && outcome !== "abandoned") throw new Error(`unknown outcome '${outcome}'; a human records merged or abandoned (aborted and handed off are recorded by Ark)`);
   const dir = runDir(runId);
-  return withTerminal("closing a run", (confirm) => locked(dir, () => {
+  const choices = ["merged", "abandoned"];
+  const packetHash = closePacketHash(readLedger(dir), outcome);
+  const who = confirmHuman(dir, runId, "run.closed", outcome, packetHash, choices);
+  return locked(dir, () => {
     const events = readLedger(dir);
-    const state = project(events);
-    if (state.state !== "mrs_open") throw new Error(`ark run close is legal only in state 'mrs_open' (state '${state.state}')`);
-    const unopened = state.repos.filter((r) => !events.some((e) => e.type === "mr.opened" && e.data.repo === r.name)).map((r) => r.name);
-    if (outcome === "merged" && unopened.length) throw new Error(`cannot record merged: no MR was opened for ${unopened.join(", ")}`);
-    const who = approver();
-    confirm(`${runId}: close the run as ${outcome}\nType ${outcome} to confirm: `, outcome);
-    commit(dir, append(dir, events, "run.closed", { outcome, ...who, channel: "tty" }));
+    if (closePacketHash(events, outcome) !== packetHash) throw new Error("MR state changed after confirmation; ask the human again");
+    if (!verifyHumanProof(dir, runId, "run.closed", outcome, packetHash, choices, who)) {
+      throw new Error("run-close confirmation is no longer valid; ask the human again");
+    }
+    if (!who.session_id || !who.ask_call_id || !claimHumanAsk(who.session_id, who.ask_call_id)) {
+      throw new Error(`ask confirmation ${who.ask_call_id} was already used; ask the human again`);
+    }
+    commit(dir, append(dir, events, "run.closed", { outcome, packet_sha256: packetHash, ...who }));
     return `closed ${runId}: ${outcome}, recorded by ${who.by}\n`;
-  }));
+  });
 }

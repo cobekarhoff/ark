@@ -21,6 +21,7 @@ export const transitions = {
   approved: { "build.started": "building", "ws.created": "approved", abort: "aborted" },
   building: {
     "build.completed": "judging",
+    "implementer.refused": "building",
     "ws.created": "building",
     "implementer.completed": "building",
     "test.result": "building",
@@ -49,10 +50,11 @@ export const transitions = {
   awaiting_g2: {
     "gate.answered:G2:approve": "mrs_open",
     "gate.answered:G2:send_back": "building",
+    "gate.answered:G2:send_back:escalated": "judging",
     "gate.answered:G2:abort": "aborted",
     abort: "aborted",
   },
-  mrs_open: { "mr.opened": "mrs_open", "run.closed": "done" }, // aborted is the outcome before any MR exists; from here a human closes the run (ark run close, or ark mr when mr: false)
+  mrs_open: { "mr.opened": "mrs_open", "run.closed": "done", abort: "aborted" }, // abort before any MR; after one opens, close it as merged or abandoned
   done: {},
   aborted: {},
 } as const satisfies Record<string, Record<string, string>>;
@@ -62,7 +64,7 @@ export const transitions = {
 // ge.* is retired: escalation is the GE gate, so a stray `advance ge.opened` is pointed at `ark gate`.
 const owners: [prefix: string, command: string][] = [
   ["gate.", "gate"], ["ge.", "gate"], ["ws.", "ws"], ["test.", "test"], ["trace.", "trace-check"], ["mr.", "mr"],
-  ["artifact.", "artifact record"], ["ac.", "ac update"],
+  ["artifact.", "artifact record"], ["ac.", "ac update"], ["implementer.refused", "implementer record"],
   ["run.closed", "run close"], ["route.chosen", "log route"], ["findings.recorded", "findings record"],
 ];
 export const ownerOf = (type: string) => owners.find(([p]) => (p.endsWith(".") ? type.startsWith(p) : type === p))?.[1];
@@ -87,4 +89,4 @@ export const nextActions: Record<State, { kind: string; agent: "orchestrator" | 
 
 // The table key of a ledger event: gate events are keyed by gate and answer, everything else by type.
 export const eventKey = (e: { type: string; data: Record<string, unknown> }) =>
-  e.type.startsWith("gate.") ? `${e.type}:${e.data.gate}${e.type === "gate.answered" ? `:${e.data.answer}` : ""}` : e.type;
+  e.type.startsWith("gate.") ? `${e.type}:${e.data.gate}${e.type === "gate.answered" ? `:${e.data.answer}${e.data.gate === "G2" && e.data.answer === "send_back" && e.data.escalated === true ? ":escalated" : ""}` : ""}` : e.type;
