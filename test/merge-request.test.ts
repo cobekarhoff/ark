@@ -317,7 +317,9 @@ describe("ARK-145-AC1", () => {
     });
     const approvalCode = await approval.exited;
     const observedChecks = Number(readFileSync(counterFile, "utf8"));
-    expect(observedChecks, await new Response(approval.stderr).text()).toBeGreaterThanOrEqual(3);
+    const approvalError = await new Response(approval.stderr).text();
+    expect(observedChecks, approvalError).toBeGreaterThanOrEqual(3);
+    expect(approvalCode, approvalError).toBe(0);
     const unprovenHead = git(worktree(), "rev-parse", "HEAD");
     expect(unprovenHead).not.toBe(provenHead);
     expect(events("test.red_green").at(-1)?.data.head_sha).toBe(provenHead);
