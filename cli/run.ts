@@ -153,7 +153,8 @@ export function project(events: LedgerEvent[]): RunState {
     if (e.type === "gate.answered") {
       const { gate, answer, by, packet_sha256 } = e.data as Record<string, string>;
       gates[gate] = { answer, by, at: e.ts, packet_sha256 };
-      const sendsBack = (gate === "G2" && answer === "send_back") || (gate === "GE" && answer === "one_more_round");
+      // An escalated G2 send-back (round budget spent) leads only to the escalation packet: it is not a return to implementation, so it is no round.
+      const sendsBack = (gate === "G2" && answer === "send_back" && e.data.escalated !== true) || (gate === "GE" && answer === "one_more_round");
       if (sendsBack || (gate === "GE" && answer === "take_over")) round++;
       if (sendsBack || (gate === "GE" && answer === "take_over")) roundStart = e.seq;
       if (gate === "GE" && answer !== "abort") implementer = answer === "take_over" ? "human" : "agent";
@@ -505,38 +506,38 @@ export function advance(runId: string, type: string, rawData?: string): string {
     if (!repo) throw new Error(`implementer.completed needs --data '{"repo":"<name>"}' naming a worktree of this run`);
     const wt = join(dir, "ws", repo.name);
     const head = git(wt, "rev-parse", "HEAD");
-    const identity = state.implementer === "human"
-      ? confirmHuman(dir, runId, `implementer.completed:${repo.name}`, "confirm", sha256(head), ["confirm", "abort"])
-      : undefined;
-    return locked(dir, () => {
-      const events = readLedger(dir);
-      const current = project(events);
-      if (current.state !== "building" || current.implementer !== state.implementer) throw new Error("implementer step refused: run state or implementer changed during confirmation");
-      if (identity?.channel === "omp" &&
-          (!identity.session_id || !identity.ask_call_id || identity.question !== `Ark implementer.completed:${repo.name} for run ${runId}; packet ${sha256(head)}. Choose exactly one: confirm, abort.`)) {
-        throw new Error("human confirmation provenance is incomplete or does not match this implementer step");
-      }
-      if (identity?.ask_call_id && events.some((e) => e.data.ask_call_id === identity.ask_call_id)) throw new Error("human confirmation was already used for a ledger event");
-      if (git(wt, "rev-parse", "HEAD") !== head) throw new Error(`${wt} HEAD changed during human confirmation; confirm the current step again`);
-      const dirty = dirtyFiles(wt);
-      if (dirty.length) throw new Error(`${wt} has uncommitted changes (${dirty.join(", ")}); commit them so the check sees the whole step`);
-      const from = stepPoints(events, repo).impl;
-      if (Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "merge-base", "--is-ancestor", from, head]).exitCode !== 0) throw new Error(`${wt} HEAD is not a descendant of the recorded ${from}; history was rewritten`);
-      const action = `implementer.completed:${repo.name}`;
-      if (identity && !verifyHumanProof(dir, runId, action, "confirm", sha256(head), ["confirm", "abort"], identity)) {
-        throw new Error("human confirmation proof is no longer valid for this implementer step");
-      }
-      if (identity?.ask_call_id && (!identity.session_id || !claimHumanAsk(identity.session_id, identity.ask_call_id))) {
-        throw new Error("human confirmation was already used for a ledger event");
-      }
-      const hit = touchedTaggedTests(wt, from, loadRepo(wt, repo.base_sha));
-      if (hit.length) {
-        commit(dir, append(dir, events, "implementer.refused", { repo: repo.name, head_sha: head, packet_sha256: sha256(head), action, ...(identity ?? {}) }));
-        throw new Error(`implementer step touches AC-tagged test files: ${hit.join(", ")}`);
-      }
-      const recorded = append(dir, events, type, { repo: repo.name, head_sha: head, packet_sha256: sha256(head), action, ...(identity ?? { by: "agent" }) });
-      return `advanced ${summary(commit(dir, recorded))}`;
-    });
+    const action = `implementer.completed:${repo.name}`;
+    const packet = sha256(head);
+    try {
+      const identity = state.implementer === "human" ? confirmHuman(dir, runId, action, "confirm", packet, ["confirm", "abort"]) : undefined;
+      return locked(dir, () => {
+        const events = readLedger(dir);
+        const current = project(events);
+        if (current.state !== "building" || current.implementer !== state.implementer) throw new Error("implementer step refused: run state or implementer changed during confirmation");
+        if (git(wt, "rev-parse", "HEAD") !== head) throw new Error(`${wt} HEAD changed during human confirmation; confirm the current step again`);
+        const dirty = dirtyFiles(wt);
+        if (dirty.length) throw new Error(`${wt} has uncommitted changes (${dirty.join(", ")}); commit them so the check sees the whole step`);
+        const from = stepPoints(events, repo).impl;
+        if (Bun.spawnSync(["git", "--no-replace-objects", "-C", wt, "merge-base", "--is-ancestor", from, head]).exitCode !== 0) throw new Error(`${wt} HEAD is not a descendant of the recorded ${from}; history was rewritten`);
+        if (identity && !verifyHumanProof(dir, runId, action, "confirm", packet, ["confirm", "abort"], identity)) {
+          throw new Error("human confirmation proof is no longer valid for this implementer step");
+        }
+        if (identity && (!identity.question || !identity.ask_call_id || !claimHumanAsk(identity.question, identity.ask_call_id))) {
+          throw new Error("human confirmation was already used for a ledger event");
+        }
+        const hit = touchedTaggedTests(wt, from, loadRepo(wt, repo.base_sha));
+        if (hit.length) throw new Error(`implementer step touches AC-tagged test files: ${hit.join(", ")}`);
+        const recorded = append(dir, events, type, { repo: repo.name, head_sha: head, packet_sha256: packet, action, ...(identity ?? { by: "agent" }) });
+        return `advanced ${summary(commit(dir, recorded))}`;
+      });
+    } catch (error) {
+      // A refused step stays on the ledger: stepPoints keeps the validator attribution barrier up until a later accepted step (AC10), whatever the refusal was.
+      locked(dir, () => {
+        const events = readLedger(dir);
+        if (project(events).state === "building") commit(dir, append(dir, events, "implementer.refused", { repo: repo.name, head_sha: head, packet_sha256: packet, action, reason: (error as Error).message }));
+      });
+      throw error;
+    }
   }
   return `advanced ${summary(record(dir, type, data))}`;
 }

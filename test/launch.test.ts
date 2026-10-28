@@ -190,7 +190,7 @@ writeFileSync(out + "/omp.rc", String(probe.exitCode));
 const z: any = new Proxy(function () {}, { get: () => z, apply: () => z }); // the schema builder omp injects; the argument shapes are not under test here
 const tools = (await import(${JSON.stringify(join(ROOT, "tools", "ark.ts"))})).default({ zod: z });
 writeFileSync(out + "/tools", tools.map((t: any) => t.name).join("\\n"));
-const ctx = { agent: { kind: "main" }, sessionManager: { getSessionId: () => "session-118", getSessionFile: () => undefined } };
+const ctx = { sessionManager: { getSessionId: () => "session-118", getSessionFile: () => undefined } };
 const call = (name: string, params: object) => tools.find((t: any) => t.name === name).execute("id", params, undefined, ctx);
 await call("ark_advance", { run_id: "2026-10-27-DEMO-1", event: "analysis.completed" });
 await call("ark_mr", { run_id: "2026-10-27-DEMO-1" });
@@ -342,7 +342,7 @@ describe("ARK-118-AC1 tools against the real CLI", () => {
 
   const z: any = new Proxy(function () {}, { get: () => z, apply: () => z });
   const tool = async (name: string) => (await import("../tools/ark")).default({ zod: z }).find((t: { name: string }) => t.name === name)!;
-  const ctx = { agent: { kind: "main" }, sessionManager: { getSessionId: () => "session-118", getSessionFile: () => join(root, "session-118.jsonl") } };
+  const ctx = { sessionManager: { getSessionId: () => "session-118", getSessionFile: () => join(root, "session-118.jsonl") } };
 
   test("ark_run_start starts the run and binds the session, so the tool_call hook sees it", async () => {
     const res = await (await tool("ark_run_start")).execute("id", { ticket: "DEMO-1" }, undefined, ctx);

@@ -607,6 +607,7 @@ Every ticket's run has one `state.json` that only the `ark` CLI writes, so any f
 | `approved` | G1 approved | Create worktrees, spawn the implementer for the first repo in order | Orchestrator |
 | `building` | Per-repo implement, validate and review steps in progress | The next unfinished step for the next repo in order | Orchestrator |
 | `judging` | All findings and test results in | Exit, or start a fix round | Orchestrator |
+| `escalating` | G2 send-back after the round budget was spent | Build the GE packet, or abort | Orchestrator |
 | `awaiting_ge` | Second fix round failed | Guide, take over, one more round, or abort | You |
 | `awaiting_g2` | Evidence packet hashed | Approve MRs or send back | You |
 | `mrs_open` | MRs open in dependency order | Merge in order; from M3, ark watch handles pipelines, rebases and pins until each MR merges | You |

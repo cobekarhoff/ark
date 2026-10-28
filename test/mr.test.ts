@@ -324,7 +324,7 @@ describe("ARK-107-AC3", () => {
 const ARK_MR_DRIVER = `
 const z: any = new Proxy(function () {}, { get: () => z, apply: () => z });
 const tools = (await import(${JSON.stringify(join(import.meta.dir, "..", "tools", "ark.ts"))})).default({ zod: z });
-const res = await tools.find((t: any) => t.name === "ark_mr").execute("id", { run_id: process.argv[2] }, undefined, { agent: { kind: "main" }, sessionManager: { getSessionId: () => "s", getSessionFile: () => undefined } });
+const res = await tools.find((t: any) => t.name === "ark_mr").execute("id", { run_id: process.argv[2] }, undefined, { sessionManager: { getSessionId: () => "s", getSessionFile: () => undefined } });
 console.log(res.content[0].text);
 `;
 const arkMrTool = () => {

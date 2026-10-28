@@ -144,7 +144,7 @@ export function gateAnswer(runId: string, gate: string, answer: string, packetHa
     if (!verifyHumanProof(dir, runId, action, answer, packetHash, allowed, who)) {
       throw new Error(`human confirmation for ${action} is no longer valid; ask the human again`);
     }
-    if (!who.session_id || !who.ask_call_id || !claimHumanAsk(who.session_id, who.ask_call_id)) {
+    if (!who.question || !who.ask_call_id || !claimHumanAsk(who.question, who.ask_call_id)) {
       throw new Error(`ask confirmation ${who.ask_call_id} was already used; ask the human again`);
     }
     const acKinds = gate === "G1" && answer === "approve"

@@ -4,7 +4,7 @@ import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { setKinds } from "./kinds";
 import { OMP_CONFIG } from "./omp-config";
-import { type AskProof, appendAskProof, GATE_CHOICES, mainSessionFile, spawnArk } from "./tty";
+import { type AskProof, appendAskProof, appendEntry, askCall, askResult, activeLeaf, ensureTranscript, GATE_CHOICES, mainSessionFile, spawnArk } from "./tty";
 
 const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
 
@@ -388,19 +388,179 @@ describe("ARK-120-AC1", () => {
   });
 });
 
+// The transcript is a tree: only the entries on the path from the active leaf to the root can be what the human answered (round 1 of PR 16).
+describe("ARK-120-AC1 the active branch", () => {
+  const transcript = () => mainSessionFile(home);
+  const questionOf = (gate: string, hash: string) => `Ark gate.answered:${gate} for run ${id}; packet ${hash}. Choose exactly one: ${GATE_CHOICES[gate].join(", ")}.`;
+  const base = () => appendEntry(transcript(), { type: "message", message: { role: "user", content: "go", timestamp: 0 } });
+
+  test("a re-answered ask: the newer sibling result on the active branch decides, and the superseded answer never counts", () => {
+    const h = atG1();
+    const { call } = prove("G1", "approve", h, { toolCallId: "ask-reanswered" });
+    appendEntry(transcript(), askResult("ask-reanswered", questionOf("G1", h), { answer: "abort", choices: GATE_CHOICES.G1 }), { parentId: call });
+    refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArgs("G1", "approve", h)));
+    expect(asHuman({}, null, ...answerArgs("G1", "abort", h)).code).toBe(0);
+    expect(state().state).toBe("aborted");
+  });
+
+  test("an answer on a branch the human navigated away from is not an answer", () => {
+    const h = atG1();
+    const root = base();
+    prove("G1", "approve", h);
+    appendEntry(transcript(), { type: "branch_summary", fromId: root, summary: "" }, { parentId: root }); // /tree back to before the ask
+    refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArgs("G1", "approve", h)));
+  });
+
+  test("the newest answer to the same question decides: an older, unclaimed answer cannot outrank it", () => {
+    const h = atG1();
+    prove("G1", "approve", h);
+    prove("G1", "change", h);
+    refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArgs("G1", "approve", h)));
+    expect(asHuman({}, null, ...answerArgs("G1", "change", h)).code).toBe(0);
+  });
+
+  // The newest ask for the question is the human's latest word even when its result names no question: a cancelled ask is an error result (ToolAbortError) with no details,
+  // a chat redirect carries `chatRedirect` and the question list, and a pending ask has no result yet. An older approve must not come back.
+  const newestAsk = (toolCallId: string, h: string) => appendEntry(transcript(), askCall(toolCallId, questionOf("G1", h), GATE_CHOICES.G1));
+  const result = (toolCallId: string, over: Record<string, unknown>) => ({ type: "message", message: { role: "toolResult", toolName: "ask", toolCallId, content: [{ type: "text", text: "x" }], ...over } });
+  test.each([
+    ["cancelled (error result, no details)", (h: string) => ({ isError: true, details: {} })],
+    ["redirected to chat", (h: string) => ({ isError: false, details: { chatRedirect: true, questions: [questionOf("G1", h)] } })],
+    ["still pending", undefined],
+  ])("a newer ask that was %s refuses, and the older unclaimed approve does not count", (_what, over) => {
+    const h = atG1();
+    prove("G1", "approve", h);
+    const call = newestAsk("ask-newest", h);
+    if (over) appendEntry(transcript(), result("ask-newest", over(h)), { parentId: call });
+    refusedUnchanged("no matching successful ask result", () => asHuman({}, null, ...answerArgs("G1", "approve", h)));
+  });
+
+  test("an entry written off the active branch (late usage) restores the leaf it captured, as OMP replays it", () => {
+    const h = atG1();
+    const root = base();
+    prove("G1", "approve", h);
+    appendEntry(transcript(), { type: "model_usage", activeLeafId: activeLeaf(transcript()) }, { parentId: root });
+    expect(asHuman({}, null, ...answerArgs("G1", "approve", h)).code).toBe(0);
+  });
+});
+
+// `.main-session` follows the main session that starts or resumes the run; a subagent's transcript, which OMP marks with a session_init entry, never takes it.
+describe("ARK-120-AC1 the bound main session", () => {
+  const bound = () => JSON.parse(read(".main-session")).id;
+  const asSession = (sessionId: string, file: string) => ({ PI_SESSION_ID: sessionId, PI_SESSION_FILE: file });
+
+  test("a main session started after a restart takes over the binding and can answer; the earlier session no longer can", () => {
+    const h = atG1();
+    const next = join(home, "restarted.jsonl");
+    const env = asSession("restarted", next);
+    ensureTranscript(next, "restarted"); // on disk by the time its tools run
+    expect(asHuman(env, null, "run", "start", "ARK-950").out).toContain("resumed");
+    expect(bound()).toBe("restarted");
+    prove("G1", "approve", h);
+    refusedUnchanged("bound main OMP session", () => asHuman({}, null, ...answerArgs("G1", "approve", h)));
+    appendAskProof(next, { action: "gate.answered:G1", runId: id, answer: "approve", packetHash: h, choices: GATE_CHOICES.G1, sessionId: "restarted" });
+    expect(asHuman(env, null, ...answerArgs("G1", "approve", h)).code).toBe(0);
+    expect(ledger().at(-1).data).toMatchObject({ gate: "G1", answer: "approve", session_id: "restarted" });
+  });
+
+  test("a subagent resuming the run does not become the main session, and its own ask result answers nothing", () => {
+    const h = atG1();
+    const child = join(home, "child.jsonl");
+    appendEntry(child, { type: "session_init", systemPrompt: ["Implementer"], task: "t", tools: ["bash", "ask"], agent: "implementer", modelRole: "implement" }, { sessionId: "child" });
+    appendAskProof(child, { action: "gate.answered:G1", runId: id, answer: "approve", packetHash: h, choices: GATE_CHOICES.G1, sessionId: "child" });
+    const env = asSession("child", child);
+    expect(asHuman(env, null, "run", "start", "ARK-950").code).toBe(0);
+    expect(bound()).toBe("ark-main-session");
+    refusedUnchanged("bound main OMP session", () => asHuman(env, null, ...answerArgs("G1", "approve", h)));
+  });
+
+  // OMP writes a transcript lazily, so `ark run start` may run before it exists: such a session cannot be classified, and binds only while nothing is bound.
+  const startFrom = (sessionId: string, file: string) =>
+    Bun.spawnSync(["bun", CLI, "run", "start", "ARK-950"], { cwd: proj, env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1", PI_SESSION_ID: sessionId, PI_SESSION_FILE: file } });
+
+  test("a session whose transcript is not on disk yet cannot take over an existing binding", () => {
+    atG1();
+    expect(startFrom("ghost", join(home, "not-written-yet.jsonl")).exitCode).toBe(0);
+    expect(bound()).toBe("ark-main-session");
+  });
+
+  test("a subagent bound while its transcript was not on disk yet proves nothing once it is, and the main session's next run start takes the binding back", () => {
+    mkdirSync(join(home, "projects", "demo", "tickets"), { recursive: true });
+    writeFileSync(join(home, "projects", "demo", "tickets", "ARK-950.md"), `---\nid: ARK-950\ntitle: "Gate fixture"\nstatus: ready\nacceptance_criteria:\n  - id: ARK-950-AC1\n    text: "First"\n---\nBody.\n`);
+    const child = join(home, "child.jsonl");
+    expect(startFrom("child", child).exitCode).toBe(0);
+    id = readdirSync(join(home, "projects", "demo", "runs")).filter((r) => r !== ".locks")[0];
+    expect(bound()).toBe("child");
+    expect(ark("log", "route", id, "ticket", "fixture").code).toBe(0);
+    advance("analysis.completed");
+    writeFileSync(runPath("plan.md"), "# Plan marker\n");
+    setKinds(runPath());
+    const h = hashOf(packet("G1"));
+    appendEntry(child, { type: "session_init", systemPrompt: ["Implementer"], task: "t", tools: ["bash", "ask"], agent: "implementer" }, { sessionId: "child" });
+    appendAskProof(child, { action: "gate.answered:G1", runId: id, answer: "approve", packetHash: h, choices: GATE_CHOICES.G1, sessionId: "child" });
+    refusedUnchanged("no matching successful ask result", () => asHuman(asSession("child", child), null, ...answerArgs("G1", "approve", h)));
+
+    prove("G1", "approve", h);
+    expect(asHuman({}, null, "run", "start", "ARK-950").out).toContain("resumed"); // the main session's transcript exists by now
+    expect(bound()).toBe("ark-main-session");
+    expect(asHuman({}, null, ...answerArgs("G1", "approve", h)).code).toBe(0);
+  });
+
+  test("an ask result answers once across sessions: a relaunched session replaying the same entries cannot spend it again", () => {
+    const h = atG1();
+    prove("G1", "change", h, { toolCallId: "ask-shared" });
+    expect(asHuman({}, null, ...answerArgs("G1", "change", h)).code).toBe(0);
+    expect(hashOf(packet("G1"))).toBe(h); // the same artifacts, so the same question
+    const next = join(home, "relaunched.jsonl");
+    const env = asSession("relaunched", next);
+    ensureTranscript(next, "relaunched");
+    expect(asHuman(env, null, "run", "start", "ARK-950").code).toBe(0);
+    appendAskProof(next, { action: "gate.answered:G1", runId: id, answer: "change", packetHash: h, choices: GATE_CHOICES.G1, sessionId: "relaunched", toolCallId: "ask-shared" }); // same call id, same question
+    refusedUnchanged("already used", () => asHuman(env, null, ...answerArgs("G1", "change", h)));
+  });
+
+  test("a subagent that starts the run binds nothing, and a fork (parentSession, no session_init) is a main session", () => {
+    mkdirSync(join(home, "projects", "demo", "tickets"), { recursive: true });
+    writeFileSync(join(home, "projects", "demo", "tickets", "ARK-950.md"), `---\nid: ARK-950\ntitle: "Gate fixture"\nstatus: ready\nacceptance_criteria: []\n---\nBody.\n`);
+    const child = join(home, "child.jsonl");
+    appendEntry(child, { type: "session_init", systemPrompt: ["Implementer"], task: "t", tools: ["bash"], agent: "implementer" }, { sessionId: "child" });
+    expect(asHuman(asSession("child", child), null, "run", "start", "ARK-950").out).toContain("started");
+    id = readdirSync(join(home, "projects", "demo", "runs")).filter((r) => r !== ".locks")[0];
+    expect(() => read(".main-session")).toThrow();
+
+    const fork = join(home, "fork.jsonl");
+    writeFileSync(fork, `${JSON.stringify({ type: "session", version: 3, id: "fork", timestamp: new Date().toISOString(), cwd: proj, parentSession: join(home, "parent.jsonl") })}\n`);
+    expect(asHuman(asSession("fork", fork), null, "run", "start", "ARK-950").code).toBe(0);
+    expect(bound()).toBe("fork");
+  });
+});
+
 describe("ARK-120-AC3", () => {
-  test("a G2 send-back once the round budget is spent opens escalation instead of returning to building, and still counts a round", () => {
+  test("a G2 send-back once the round budget is spent leads only to escalation: no round counted, no way back to G2 or building, and the GE packet reads the true budget", () => {
     writeFileSync(join(proj, "ark.yml"), "project: demo\nloop:\n  max_rounds: 1\n");
     const h = atG2();
     expect(answer("G2", "send_back", h).code).toBe(0);
     expect(state()).toMatchObject({ state: "building", round: 1 });
     advance("build.completed");
     expect(answer("G2", "send_back", hashOf(packet("G2"))).code).toBe(0);
-    expect(state()).toMatchObject({ state: "judging", round: 2 });
+    expect(state()).toMatchObject({ state: "escalating", round: 1, status: "active", next_action: { kind: "open_escalation", agent: "orchestrator" } });
     expect(ledger().at(-1)).toMatchObject({ type: "gate.answered", data: { gate: "G2", answer: "send_back", escalated: true } });
+    for (const refused of [packet("G2"), ark("advance", id, "fix_round.started"), ark("advance", id, "build.completed"), ark("advance", id, "findings.recorded")]) expect(refused.code).toBe(1);
+    expect(state().state).toBe("escalating");
+
     writeFileSync(runPath("premise.md"), "The same source premise remains.\n");
-    expect(packet("GE").code).toBe(0);
+    const ge = packet("GE");
+    expect(ge.code).toBe(0);
     expect(state().state).toBe("awaiting_ge");
+    expect(read(packetFile("GE", hashOf(ge)))).toContain("rounds used: 1 of 1");
+  });
+
+  test("the only other way out of an escalated send-back is abort", () => {
+    writeFileSync(join(proj, "ark.yml"), "project: demo\nloop:\n  max_rounds: 0\n");
+    expect(answer("G2", "send_back", atG2()).code).toBe(0);
+    expect(state()).toMatchObject({ state: "escalating", round: 0 });
+    expect(ark("advance", id, "abort").code).toBe(0);
+    expect(state().state).toBe("aborted");
   });
 });
 

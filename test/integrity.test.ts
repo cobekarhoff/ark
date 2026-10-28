@@ -114,7 +114,7 @@ describe("ARK-115-AC1", () => {
     ["ws.created", "ws"], ["test.result", "test"], ["test.red_green", "test"], ["trace.checked", "trace-check"],
     ["gate.packet", "gate"], ["gate.answered", "gate"], ["mr.opened", "mr"], ["run.closed", "run close"], ["test.preservation", "test"],
     ["findings.recorded", "findings record"], ["artifact.recorded", "artifact record"],
-    ["ac.updated", "ac update"], ["ge.opened", "gate"], ["ge.answered", "gate"],
+    ["ac.updated", "ac update"], ["ge.opened", "gate"], ["ge.answered", "gate"], ["implementer.refused", "advance implementer.completed"],
   ];
   test.each(owned)("ark advance refuses %s and names 'ark %s', writing nothing", (type, cmd) => {
     const before = slurp("ledger.ndjson");
@@ -847,9 +847,33 @@ describe("ARK-117-AC4", () => {
     const before = events().filter((e) => e.type === "implementer.completed").length;
     const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
     expect(r.code).toBe(1);
-    expect(r.err).toContain("human");
+    expect(r.err).toContain("no matching successful ask result for implementer.completed:demo");
     expect(events().filter((e) => e.type === "implementer.completed")).toHaveLength(before);
     expect(stateNow()).toMatchObject({ state: "building", implementer: "human" });
+  });
+
+  test("a human-implementer step refused for missing proof is recorded, so a validator cannot then vouch for the tagged test committed after it", () => {
+    ok(escalate("take_over"));
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
+    const refused = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'); // no confirmation from the human
+    expect(refused.err).toContain("no matching successful ask result");
+    expect(events().at(-1)).toMatchObject({ type: "implementer.refused", data: { repo: "demo", head_sha: git(wt(), "rev-parse", "HEAD") } });
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1); expect(2).toBe(2)") }); // weakened after the refusal
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe("");
+    const built = ark("advance", run(), "build.completed");
+    expect(built.code).toBe(1);
+    expect(built.err).toContain("test/f.test.ts");
+  });
+
+  test("an agent-implementer step refused for a dirty worktree is recorded the same way", () => {
+    ok(escalate("one_more_round"));
+    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
+    writeFileSync(join(wt(), "src/scratch.ts"), "export const scratch = 1;\n");
+    expect(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}').err).toContain("uncommitted changes");
+    expect(events().at(-1).type).toBe("implementer.refused");
+    commitAll(wt(), {});
+    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe("");
+    expect(ark("advance", run(), "build.completed").err).toContain("test/f.test.ts");
   });
 
 
