@@ -62,4 +62,9 @@ bun test
 bun run docs:build
 ```
 
+Browser tests use Playwright Chromium. Install it locally with
+`bunx playwright install chromium`; on Linux, use
+`bunx playwright install --with-deps chromium` to include system dependencies,
+as CI does.
+
 Continuous integration (CI) installs with the frozen Bun lockfile, builds the docs with the same command and runs `bun test`. The CLI tests resolve models through OMP's own code; CI pins `@oh-my-pi/pi-coding-agent@18.12.6`. There is no separate lint script. See the [implementation reference](site/src/content/docs/reference/implementation.md) for guardrails and the [product requirements document](docs/prd.md) for the full contract.
