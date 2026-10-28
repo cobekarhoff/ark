@@ -2,20 +2,20 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, writeSync } fr
 import { userInfo } from "node:os";
 import { boundMainSession, hasSessionInit } from "./binding";
 // `/dev/tty` is only the outside-OMP path; an active OMP session must supply its bound ask transcript.
-export function withTerminal<T>(what: string, fn: (confirm: (prompt: string, expected: string) => void) => T): T {
-  let fd: number;
-  try { fd = openSync("/dev/tty", "r+"); } catch {
-    throw new Error(`${what} needs a human at a terminal to type the requested answer; this process has no controlling terminal, so no answer was recorded (ADR 0002)`);
+export function withTerminal<T>(what: string, operation: (confirm: (prompt: string, expected: string) => void) => T): T {
+  let fileDescriptor: number;
+  try { fileDescriptor = openSync("/dev/tty", "r+"); } catch {
+    throw new Error(`${what} needs a human at a terminal to type the requested answer; this process has no controlling terminal, so no answer was recorded (Architecture Decision Record (ADR) 0002)`);
   }
   try {
-    return fn((prompt, expected) => {
-      writeSync(fd, prompt);
+    return operation((prompt, expected) => {
+      writeSync(fileDescriptor, prompt);
       const byte = Buffer.alloc(1);
       let typed = "";
-      while (readSync(fd, byte, 0, 1, null) === 1 && byte[0] !== 10) typed += String.fromCharCode(byte[0]);
+      while (readSync(fileDescriptor, byte, 0, 1, null) === 1 && byte[0] !== 10) typed += String.fromCharCode(byte[0]);
       if (typed.trim() !== expected) throw new Error(`typed '${typed.trim()}', expected '${expected}'; no answer was recorded`);
     });
-  } finally { closeSync(fd); }
+  } finally { closeSync(fileDescriptor); }
 }
 
 export type HumanIdentity = {
@@ -63,8 +63,8 @@ function activePath(entries: JsonObject[]): JsonObject[] | undefined {
 // The newest ask call on the active branch for this exact question must have exactly one successful result selecting the submitted answer. The call is the anchor, not
 // its result: a cancelled ask (ToolAbortError, an error result with no details) or a chat redirect (details without `question`) carries no question text, but it is still
 // the human's latest word, so it refuses and an older answer on the path never counts.
-function askProof(dir: string, runId: string, action: string, answer: string, packetHash: string, choices: string[]) {
-  const bound = boundMainSession(dir);
+function askProof(directory: string, runId: string, action: string, answer: string, packetHash: string, choices: string[]) {
+  const bound = boundMainSession(directory);
   if (!bound || !existsSync(bound.file)) return undefined;
   const parsed = readFileSync(bound.file, "utf8").split("\n").filter(Boolean).map((line) => {
     try { return object(JSON.parse(line)); } catch { return undefined; }
@@ -84,7 +84,7 @@ function askProof(dir: string, runId: string, action: string, answer: string, pa
       : []);
   const asked = askCalls.findLast(({ call }) => {
     const questions = object(call.arguments)?.questions;
-    return Array.isArray(questions) && questions.some((q) => object(q)?.question === question);
+    return Array.isArray(questions) && questions.some((questionEntry) => object(questionEntry)?.question === question);
   });
   if (!asked) return undefined;
   const { call } = asked;
@@ -96,7 +96,7 @@ function askProof(dir: string, runId: string, action: string, answer: string, pa
       !(first.multi === false || first.multi === undefined) || first.recommended !== undefined ||
       !Array.isArray(options) || JSON.stringify(options.map((option) => object(option)?.label)) !== JSON.stringify(choices)) return undefined;
   // One call and one result under this id on the whole active branch, the result after the call.
-  if (askCalls.filter((c) => c.call.id === callId).length !== 1) return undefined;
+  if (askCalls.filter((askCall) => askCall.call.id === callId).length !== 1) return undefined;
   const results = messages.flatMap((message, index) => message?.role === "toolResult" && message.toolCallId === callId ? [{ index, result: message }] : []);
   if (results.length !== 1 || results[0].index <= asked.index) return undefined;
   const result = results[0].result;
@@ -110,15 +110,15 @@ function askProof(dir: string, runId: string, action: string, answer: string, pa
   return { session_id: bound.id, ask_call_id: callId, question };
 }
 
-export function confirmHuman(dir: string, runId: string, action: string, answer: string, packetHash: string, choices: string[]): HumanIdentity {
-  const bound = boundMainSession(dir);
+export function confirmHuman(directory: string, runId: string, action: string, answer: string, packetHash: string, choices: string[]): HumanIdentity {
+  const bound = boundMainSession(directory);
   const activeSession = process.env.PI_SESSION_ID;
   if (activeSession && activeSession !== bound?.id) {
-    throw new Error("human confirmation must be submitted from the bound main OMP session or outside OMP");
+    throw new Error("human confirmation must be submitted from the bound main Oh My Pi (OMP) session or outside Oh My Pi (OMP)");
   }
   if (!choices.length || !choices.includes(answer)) throw new Error(`invalid human confirmation choices for ${action}`);
-  const proof = askProof(dir, runId, action, answer, packetHash, choices);
-  if (!proof) throw new Error(`no matching successful ask result for ${action} in the bound main OMP session; no answer was recorded. Ask the human exactly this question, single choice, options ${choices.join(", ")}, no recommended option, then retry:\n${questionFor(action, runId, packetHash, choices)}`);
+  const proof = askProof(directory, runId, action, answer, packetHash, choices);
+  if (!proof) throw new Error(`no matching successful ask result for ${action} in the bound main Oh My Pi (OMP) session; no answer was recorded. Ask the human exactly this question, single choice, options ${choices.join(", ")}, no recommended option, then retry:\n${questionFor(action, runId, packetHash, choices)}`);
   const who = approver();
   if (activeSession) return { ...who, channel: "omp", ...proof };
   return withTerminal("a human confirmation", (confirm) => {
@@ -127,9 +127,9 @@ export function confirmHuman(dir: string, runId: string, action: string, answer:
   });
 }
 
-export function verifyHumanProof(dir: string, runId: string, action: string, answer: string, packetHash: string, choices: string[], identity: HumanIdentity): boolean {
+export function verifyHumanProof(directory: string, runId: string, action: string, answer: string, packetHash: string, choices: string[], identity: HumanIdentity): boolean {
   if (identity.channel === "omp" && process.env.PI_SESSION_ID !== identity.session_id) return false;
-  const proof = askProof(dir, runId, action, answer, packetHash, choices);
+  const proof = askProof(directory, runId, action, answer, packetHash, choices);
   return !!proof && proof.session_id === identity.session_id && proof.ask_call_id === identity.ask_call_id && proof.question === identity.question;
 }
 

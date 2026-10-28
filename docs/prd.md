@@ -2,7 +2,7 @@
 
 Oct 21, 2026 · @Cobe Karhoff
 
-This PRD specifies Ark, a software factory built as an OMP plugin that configures itself to a repo's stack and takes a ticket through planning, implementation, real-test validation and cross-vendor review across one or more GitLab repos, with human gates and an audit trail fit for FDA-regulated work. It is written to be handed off and built from, including by Ark itself.
+This product requirements document (PRD) specifies Ark, a software factory built as an Oh My Pi (OMP) plugin that configures itself to a repo's stack and takes a ticket through planning, implementation, real-test validation and cross-vendor review across one or more GitLab repos, with human gates and an audit trail fit for work regulated by the United States Food and Drug Administration (FDA). It is written to be handed off and built from, including by Ark itself.
 
 **How to read it.** Part 1 is the product: the problem, goals, the core rule, numbered requirements with acceptance criteria, packaging, dogfooding, milestones and risks. Part 2 is the technical design that meets those requirements. Part 3 is the research behind the review design, and the sources. An engineer can start from the milestones in Part 1; each requirement names the Part 2 section that explains it.
 
@@ -21,12 +21,12 @@ The Ark turns that into a defined pipeline: deterministic tooling for everything
 
 ## Goals and non-goals
 
-v1 succeeds when a real ticket spanning several repos reaches merge-ready MRs with a complete, replayable record, in either harness.
+v1 succeeds when a real ticket spanning several repos reaches merge-ready changes through a merge request (MR) per repo with a complete, replayable record, in either harness.
 
 **Goals.**
 
 1. A ticket goes from intake to merge-ready MRs across one or more repos, with humans approving the plan, the evidence and the merge.
-2. Every acceptance criterion is traced to a passing real test, with proof the test fails without the change.
+2. Every acceptance criterion (AC) is traced to a passing real test, with proof the test fails without the change.
 3. Every agent action, the model that took it, and every human decision is recorded and can be reconstructed from the run folder alone.
 4. A run can be stopped at any point and resumed from deterministic state in a fresh session.
 5. Review is adversarial across vendors, and no finding sends work back without proof.
@@ -36,12 +36,12 @@ v1 succeeds when a real ticket spanning several repos reaches merge-ready MRs wi
 **Non-goals for v1.**
 
 - Auto-merge or deploy. Agents never merge.
-- Replacing GitLab approvals or the QMS's formal sign-off.
+- Replacing GitLab approvals or the quality management system's (QMS's) formal sign-off.
 - Generating unit tests or heavily mocked integration tests for coverage's sake.
 - Unattended runs with no human gates.
-- A hosted multi-user service. v1 runs on an engineer's machine or a CI runner.
+- A hosted multi-user service. v1 runs on an engineer's machine or a continuous integration (CI) runner.
 - Hard token caps. Cost is measured, not capped.
-- Claude Code and other harnesses such as herdr. Claude Code subagents run only Anthropic models, and the review design needs Codex. Keeping logic in the CLI keeps a later port cheap.
+- Claude Code and other harnesses such as herdr. Claude Code subagents run only Anthropic models, and the review design needs Codex. Keeping logic in the command-line interface (CLI) keeps a later port cheap.
 
 ## Users
 
@@ -49,9 +49,9 @@ Four roles touch the Ark; the operator and approver may be the same person on sm
 
 | Role | Who | What they do | What they need from the Ark |
 | --- | --- | --- | --- |
-| Operator | The engineer who owns the ticket | Starts runs; answers G0, G1 and escalations; reviews evidence at G2 | Clear gate packets, the execution diagram, one-command resume, a needs-you queue |
+| Operator | The engineer who owns the ticket | Starts runs; answers criteria, plan and escalation gates; reviews evidence at the evidence gate | Clear gate packets, the execution diagram, one-command resume, a needs-you queue |
 | Approver | Code owners on the git host | Approves and merges MRs under the host's approval rules | MRs with the trace matrix, evidence links and upstream MR order |
-| QA and RA | Quality and regulatory | Audit runs after the fact | Immutable run records, approvals with identity and packet hash, the trace matrix |
+| Quality assurance (QA) and regulatory affairs (RA) | Quality and regulatory | Audit runs after the fact | Immutable run records, approvals with identity and packet hash, the trace matrix |
 | Maintainer | Whoever owns the Ark | Changes skills, agents, the CLI and models | CLI tests, golden-ticket evals, per-reviewer metrics, setup, doctor and format parsers |
 
 ## The core rule: agents think, the CLI does
@@ -64,7 +64,7 @@ The test for any step: given the same inputs, should two runs produce the same o
 | --- | --- |
 | Read and understand the ticket and the code | Fetch the ticket and save it untouched |
 | Draft acceptance criteria and spot ambiguity | Create the run folder, worktrees and branches from `repos.yml` |
-| Design the plan and write `run-plan.json` | Check the plan (cycles, repo order, AC coverage, fail routes, vendor rule) and render the DAG diagram |
+| Design the plan and write `run-plan.json` | Check the plan (cycles, repo order, AC coverage, fail routes, vendor rule) and render the directed acyclic graph (DAG) diagram |
 | Write product code | Move the state machine, write the ledger, hash every artifact |
 | Write and fix tests | Run builds and test suites, capture JUnit, logs and the environment fingerprint |
 | Hunt for bugs in review | Run the red-green proof: base branch, then feature branch, tagged tests only |
@@ -77,13 +77,13 @@ The test for any step: given the same inputs, should two runs produce the same o
 **How the rule is enforced, not just stated.**
 
 - **Agents call the CLI; they never do its job by hand.** The validator writes tests, then runs `ark test`; it does not invent its own test command. The orchestrator runs `ark advance`; it never edits `state.json`.
-- **Agents cannot reach what only the CLI should touch.** Worktrees are created with the push URL disabled, so an agent's `git push` fails. MRs open only through `ark mr`. The `tool_call` hook blocks writes to `state.json`, the ledger and `run-plan.json` after G1.
+- **Agents cannot reach what only the CLI should touch.** Worktrees are created with the push URL disabled, so an agent's `git push` fails. MRs open only through `ark merge-request open`. The `tool_call` hook blocks writes to `state.json`, the ledger and `run-plan.json` after plan approval.
 - **Each command is small, tested and boring.** A CLI step gets ordinary tests with fixed inputs. That is what makes the orchestration evaluable: the deterministic half is tested like any software, and only the agent half needs evals, run against a set of golden tickets.
 - **A later port stays cheap.** Any other harness would only have to run agents that call one CLI. The more that lives in the CLI, the less there is to port.
 
 ## Requirements
 
-Thirty-eight functional and five non-functional requirements, each with numbered acceptance criteria. IDs are stable: when the Ark builds itself, criterion 3 of FR-08 becomes `FR-08-AC3` in its own `ac.yml`.
+Thirty-eight functional requirements (FRs) and five non-functional requirements (NFRs), each with numbered acceptance criteria. IDs are stable: when the Ark builds itself, criterion 3 of FR-08 becomes `FR-08-AC3` in its own `ac.yml`.
 
 **Functional.**
 
@@ -94,38 +94,38 @@ Thirty-eight functional and five non-functional requirements, each with numbered
 | FR-03 | Run state is event-sourced | AC1 replaying the ledger rebuilds `state.json` byte for byte. AC2 an illegal transition is refused and changes nothing. AC3 every state has a computed next action | M1 | Run state and resume |
 | FR-04 | Any run resumes from any state in a fresh session | AC1 killing the session in each non-terminal state, then running resume, continues at the recorded next action with no completed step repeated. AC2 `context.md` is identical for identical inputs | M1 | Run state and resume |
 | FR-05 | Early stops are caught | AC1 ending a session while status is `active` triggers one continuation naming the next action | M2 | Run state and resume |
-| FR-06 | One writer per run, and drift is detected | AC1 a second session cannot advance a locked run. AC2 a worktree HEAD that differs from the recorded SHA sets status `blocked` and shows the diff | M2 | Run state and resume |
-| FR-07 | Acceptance criteria are normalized at intake | AC1 every AC gets a stable ID. AC2 missing or untestable AC opens G0. AC3 the ticket is stored unchanged | M1 | Acceptance criteria to tests |
-| FR-08 | The plan is executable and drawn as a DAG | AC1 `run-plan.json` passes `plan check` (cycles, repo order, AC coverage, fail routes, vendor rule). AC2 the Mermaid render is deterministic. AC3 `advance` refuses nodes not in the approved plan. AC4 a change after G1 reopens G1 with old and new diagrams | M1 single repo, M2 multi-repo | The execution DAG at G1 |
+| FR-06 | One writer per run, and drift is detected | AC1 a second session cannot advance a locked run. AC2 a worktree HEAD that differs from the recorded secure hash algorithm (SHA) identifier sets status `blocked` and shows the diff | M2 | Run state and resume |
+| FR-07 | Acceptance criteria are normalized at intake | AC1 every AC gets a stable ID. AC2 missing or untestable AC opens criteria. AC3 the ticket is stored unchanged | M1 | Acceptance criteria to tests |
+| FR-08 | The plan is executable and drawn as a DAG | AC1 `run-plan.json` passes `plan check` (cycles, repo order, AC coverage, fail routes, vendor rule). AC2 the Mermaid render is deterministic. AC3 `advance` refuses nodes not in the approved plan. AC4 a change after plan approval reopens plan with old and new diagrams | M1 single repo, M2 multi-repo | The execution DAG at the plan gate |
 | FR-09 | Implementers work per repo in isolated worktrees and cannot push | AC1 one worktree per repo on a `ark/*` branch. AC2 the push URL is disabled. AC3 implementer output passes its schema. AC4 implementers never edit AC-tagged tests | M1 | Agents and models; Multi-repo |
 | FR-10 | Real tests, tagged by AC, run by the CLI | AC1 `ark test` runs the repo's configured commands and captures JUnit, logs and the environment fingerprint. AC2 owned services are not mocked | M1 | Acceptance criteria to tests |
 | FR-11 | New behavior has red-green proof | AC1 each new-behavior AC's tagged tests fail on the base source with the head test files overlaid, and pass on the head SHA. AC2 a missing proof fails the gate. AC3 red records whether each test failed an assertion or errored | M1 | Acceptance criteria to tests |
 | FR-12 | The trace matrix gates the loop | AC1 `trace-check` fails on an AC without a passing tagged test, an unknown AC tag, missing red-green proof, or an unsigned manual AC. AC2 a flaky test is not green | M1 | Acceptance criteria to tests |
 | FR-13 | Review uses a two-vendor panel sized by tier | AC1 preflight refuses a run where `validate` or `reviewer-x` shares the implementer's vendor, or `reviewer-s` does not. AC2 T1 runs one reviewer, T2 two, T3 two plus security. AC3 the model that actually answered is recorded. AC4 fallbacks stay inside a vendor | M1 one reviewer, M3 tiers | Agents and models; Token economy |
-| FR-14 | Findings are verified and judged | AC1 every finding is bucketed Act on, Consider, Noted or Dismissed, with a reason. AC2 no Act-on P0 or P1 goes back without a failing test or traced path. AC3 P2 and P3 never block | M1 | Adversarial review research; Gates and loop policy |
-| FR-15 | Human gates use fixed packets and answers | AC1 GS, G0, G1, GE and G2 each record answer, approver, time and packet sha256. AC2 no step after a gate runs without its approval | M1 | Gates and loop policy |
-| FR-16 | The fix loop is bounded | AC1 at most the configured number of fix rounds per run, two by default. AC2 one more failure opens GE with a diagnosis. AC3 the shared premise is checked and logged before the last round | M1 | Gates and loop policy |
-| FR-17 | Dangerous actions always pause | AC1 push to non-ark branches, force-push, merge, CI/CD or secrets edits, dependency changes and shared-environment writes are blocked by hook and routed to a human | M2 | Gates and loop policy |
-| FR-18 | Repos are ordered by a manifest | AC1 `repos.yml` validates. AC2 `impact.json` gives a topological order. AC3 each edge's contract is approved at G1 and diffed after implementation. AC4 siblings run in parallel | M2 | Multi-repo |
-| FR-19 | The composed stack is validated | AC1 downstream repos test against local upstream builds. AC2 stack E2E covers cross-repo ACs | M2 | Multi-repo |
+| FR-14 | Findings are verified and judged | AC1 every finding is bucketed Act on, Consider, Noted or Dismissed, with a reason. AC2 no Act-on P0 (must fix) or P1 (likely defect or missing proof) goes back without a failing test or traced path. AC3 P2 (worth fixing) and P3 (minor) never block | M1 | Adversarial review research; Gates and loop policy |
+| FR-15 | Human gates use fixed packets and answers | AC1 setup, criteria, plan, escalation and evidence each record answer, approver, time and packet secure hash algorithm 256-bit (SHA-256) hash. AC2 no step after a gate runs without its approval | M1 | Gates and loop policy |
+| FR-16 | The fix loop is bounded | AC1 at most the configured number of fix rounds per run, two by default. AC2 one more failure opens escalation with a diagnosis. AC3 the shared premise is checked and logged before the last round | M1 | Gates and loop policy |
+| FR-17 | Dangerous actions always pause | AC1 push to non-ark branches, force-push, merge, CI/continuous delivery (CD) or secrets edits, dependency changes and shared-environment writes are blocked by hook and routed to a human | M2 | Gates and loop policy |
+| FR-18 | Repos are ordered by a manifest | AC1 `repos.yml` validates. AC2 `impact.json` gives a topological order. AC3 each edge's contract is approved at plan and diffed after implementation. AC4 siblings run in parallel | M2 | Multi-repo |
+| FR-19 | The composed stack is validated | AC1 downstream repos test against local upstream builds. AC2 stack end-to-end (E2E) testing covers cross-repo ACs | M2 | Multi-repo |
 | FR-20 | MRs open in order through the CLI | AC1 MRs open in topological order with upstream links and merge order. AC2 GitLab MR dependencies are set where supported. AC3 agents cannot merge | M2 | Multi-repo |
 | FR-21 | Each run has a complete record | AC1 the run folder holds ticket, AC, plans, state, ledger, events, all session files (main and subagent), stage outputs, test evidence and a verified `MANIFEST.sha256`. AC2 a QA reviewer can say who did what, on which model, from the folder alone | M1 main session, M2 subagents | Observability, audit, and the dashboard |
 | FR-22 | A local Ark Console serves live run views | AC1 ark console serves on localhost only and reads only run folders, session files and CLI output. AC2 views update within seconds of a ledger or session write. AC3 a runs list with stage, waiting gate, rounds and cost, and a desktop alert when a run enters a gate. AC4 the console never writes run state; every action goes through the CLI | M1 | Observability, audit, and the dashboard |
 | FR-23 | Cost and reviewer value are measured | AC1 tokens and cost per run and per stage come from session usage. AC2 a report lists each reviewer's unique accepted findings | M3 | Token economy |
 | FR-24 | The Ark ships as one OMP plugin package | AC1 it installs with `omp plugin install` from the internal catalog or Git. AC2 it provides the router skill, playbooks, agents, the hooks extension, format parsers, schemas and the CLI. AC3 CI installs it into a clean OMP and runs a golden smoke ticket | M1 | Packaging (OMP) |
-| FR-25 | First-run setup fits the plugin to a repo or project | AC1 setup detects each repo's stack deterministically and records each value as detected, inferred or confirmed. AC2 you are asked only about inferred or unknown values and policy choices. AC3 every command is proven by doctor before config is written. AC4 config lands as an MR through gate GS. AC5 it works for a single repo and for a multi-repo project | M1 single repo, M2 multi-repo project | Setup and configuration |
+| FR-25 | First-run setup fits the plugin to a repo or project | AC1 setup detects each repo's stack deterministically and records each value as detected, inferred or confirmed. AC2 you are asked only about inferred or unknown values and policy choices. AC3 every command is proven by doctor before config is written. AC4 config lands as an MR through gate setup. AC5 it works for a single repo and for a multi-repo project | M1 single repo, M2 multi-repo project | Setup and configuration |
 | FR-26 | Configuration is layered and inspectable | AC1 plugin defaults, project, repo and user layers merge deterministically. AC2 `config show --resolved` names the layer behind each value. AC3 schema validation refuses unknown keys. AC4 model roles are written to the project's OMP config from `ark.yml` | M1 | Setup and configuration |
 | FR-27 | Doctor keeps the setup honest | AC1 a quick doctor runs before every run (schema, tools, auth, clean worktree base, plugin version). AC2 a full doctor proves commands, tag selection, JUnit capture, environment up and down, and `link_cmd`. AC3 manifest changes since setup mark the config stale | M1 | Setup and configuration |
 | FR-28 | Test frameworks plug in as format parsers | AC1 each suite in `.ark/repo.yml` is plain commands plus a `format`. AC2 a new framework needs only one parser (collect-only output to tag-to-test map, JUnit to results) and its fixture tests. AC3 parsers are added when a repo that needs them is onboarded | M1a `bun-test`, M1 `pytest` and `behave` | Setup and configuration |
 | FR-29 | The run DAG and swim lanes are live | AC1 the DAG from run-plan.json shows each node as pending, running, passed, failed or waiting on a gate. AC2 swim lanes show one lane per repo plus one for gates, over time, with agent spans, gate waits and fix rounds. AC3 clicking a node or span opens its transcript, artifacts and evidence | M1 DAG, M2 swim lanes | Observability (Ark Console) |
 | FR-30 | Agent cards show live stats | AC1 each running agent shows role, repo, the model that is answering, current tool, context use, tokens, cost, retries and fallbacks. AC2 stats come from tailing session files, so they need no hooks. AC3 a subagent appears as soon as its session file exists | M1 main session, M2 subagents | Observability (Ark Console) |
-| FR-31 | Gates can be answered in the console | AC1 the gate inbox shows each waiting gate's packet, with the DAG for G1 and the evidence for G2. AC2 an answer runs ark gate with your identity and the packet hash. AC3 a gate answered in the terminal cannot also be answered in the console, and the reverse | M1 | Observability (Ark Console) |
+| FR-31 | Gates can be answered in the console | AC1 the gate inbox shows each waiting gate's packet, with the DAG for plan and the evidence for evidence. AC2 an answer runs ark gate with your identity and the packet hash. AC3 a gate answered in the terminal cannot also be answered in the console, and the reverse | M1 | Observability (Ark Console) |
 | FR-32 | The ticket view shows AC status and evidence | AC1 each AC shows its tests, red and green SHAs and evidence links, updating as tests run. AC2 diffs per repo, findings with dispositions, and transcripts are one click away | M1 | Observability (Ark Console) |
 | FR-33 | Open MRs are watched until they merge | AC1 ark watch follows each MR's pipeline and starts a fix round on failure, within the run's round budget. AC2 when an upstream MR merges, the CLI rebases downstream branches and updates version pins. AC3 a rebase conflict goes to an agent, then to you. AC4 a run closes only when every MR is merged or abandoned | M3 | Multi-repo |
 | FR-34 | Integrations plug in through adapters | AC1 each integration point has one interface with contract tests. AC2 ark.yml selects one adapter per point. AC3 doctor checks each selected adapter's auth and reachability. AC4 adding an adapter needs no change outside its module | M1a interfaces; adapters per milestone | Integrations |
 | FR-35 | Tickets from any source normalize to one shape | AC1 local files, GitLab issues, GitHub issues and Jira all produce the same ticket.json and ac.yml. AC2 acceptance criteria come from the configured field or description section. AC3 the raw source payload is stored unchanged. AC4 status sync is optional per source | M1a local, M1 Jira, later GitLab and GitHub issues | Integrations |
 | FR-36 | GitLab and GitHub both work as git hosts | AC1 opening, describing, linking and watching MRs goes through one interface. AC2 the host is detected from the git remote and confirmed at setup. AC3 merge order uses native MR dependencies where available and the description otherwise | M1a GitHub, M1 GitLab | Integrations |
-| FR-37 | Setup learns each repo, including existing ones | AC1 setup writes .ark/repo.md (purpose, architecture, entry points, build and test, conventions, risk areas) for review at GS. AC2 the CLI collects the test inventory with the runner's collect-only mode, and an agent classifies each suite as E2E, real integration, mocked integration or unit. AC3 existing CI, CODEOWNERS, MR templates and agent context files are adopted, not overwritten. AC4 existing tests are never retro-tagged; only new and changed ACs need tagged tests | M1 | Setup and configuration |
+| FR-37 | Setup learns each repo, including existing ones | AC1 setup writes .ark/repo.md (purpose, architecture, entry points, build and test, conventions, risk areas) for review at setup. AC2 the CLI collects the test inventory with the runner's collect-only mode, and an agent classifies each suite as E2E, real integration, mocked integration or unit. AC3 existing CI, CODEOWNERS, MR templates and agent context files are adopted, not overwritten. AC4 existing tests are never retro-tagged; only new and changed ACs need tagged tests | M1 | Setup and configuration |
 | FR-38 | One install manages many projects, each one repo or several | AC1 setup asks whether a project is one repo or several and records the shape in its config. AC2 \~/.ark/projects.yml registers every project, and ark project list shows them. AC3 each project keeps its own config, adapters, models, run folders and cost totals, and every run belongs to exactly one project. AC4 the console opens on all projects with their active runs and needs-you items, and every view filters by project. AC5 run folders live outside product repos by default | M1 registry and console, M2 multi-repo projects | Projects |
 
 **Non-functional.**
@@ -145,9 +145,9 @@ One metric has a fixed target from day one; the rest get baselines over the firs
 | Metric | How it is measured | Target |
 | --- | --- | --- |
 | Audit completeness | Share of closed runs whose manifest verifies and whose ledger replays to the same state | 100%, always |
-| Plan first-pass rate | Share of runs approved at G1 without changes | Set after baseline |
-| Evidence first-pass rate | Share of runs approved at G2 without being sent back | Set after baseline |
-| Escalation rate | Share of runs that reach GE, by tier | Set after baseline |
+| Plan first-pass rate | Share of runs approved at plan without changes | Set after baseline |
+| Evidence first-pass rate | Share of runs approved at evidence without being sent back | Set after baseline |
+| Escalation rate | Share of runs that reach escalation, by tier | Set after baseline |
 | Escaped defects | Bugs traced to Ark MRs after merge, against the team's pre-Ark rate | Below the pre-Ark rate |
 | Reviewer value | Unique accepted findings per reviewer, per tier | A reviewer with none at a tier is dropped from that tier |
 | Human time per gate | Minutes from gate open to answer | Set after baseline |
@@ -189,6 +189,8 @@ ark/
 
 ## Setup and configuration
 
+The setup behavior below is the product design, not a shipped gate: `setup` is reserved and unimplemented in the thin-loop CLI.
+
 Installing the plugin changes nothing in a repo until `setup` runs. Setup detects the stack, asks you only what it cannot detect, proves every command by running it, and lands the config as an MR you review.
 
 **Setup flow.** Each step names who does it, per the core rule.
@@ -198,11 +200,11 @@ Installing the plugin changes nothing in a repo until `setup` runs. Setup detect
 3. **Propose (agent).** The `setup` playbook reads `detect.json`, the CI config, READMEs and the knowledge base. It proposes each repo's commands, environment bring-up, AC tag syntax, `link_cmd`, dependency edges and risk paths. Every value is marked detected, inferred or unknown.
 4. **Ask (you).** Through OMP's `ask`, only for inferred or unknown values and for policy: ticket system, implementer vendor, tier thresholds, which paths are safety-relevant, approvers, the alert webhook. Each question comes with concrete options.
 5. **Prove (CLI).** `ark doctor` runs everything for real: build, a tagged test selection against a probe test on a scratch branch (which proves tag filtering and JUnit capture), environment up and down, and a `link_cmd` round trip. A failure goes back to step 3 with the error, twice at most, then to you.
-6. **Approve (you, gate GS).** You review the config diff and the doctor report. The CLI commits the files on a `ark/setup` branch and opens an MR, so config changes go through normal change control.
+6. **Approve (you, gate setup).** You review the config diff and the doctor report. The CLI commits the files on a `ark/setup` branch and opens an MR, so config changes go through normal change control.
 
 **Retrofitting existing repos.** Most repos Ark meets already have history, tests and conventions. Setup is built for that case, not for greenfield.
 
-- **Learn before configuring.** An agent writes `.ark/repo.md`: purpose, architecture, entry points, how to build and test, conventions, and risk areas. You review it at GS, and every later run uses it as context. Where the knowledge base already describes the repo, the brief links to it rather than repeating it.
+- **Learn before configuring.** An agent writes `.ark/repo.md`: purpose, architecture, entry points, how to build and test, conventions, and risk areas. You review it at setup, and every later run uses it as context. Where the knowledge base already describes the repo, the brief links to it rather than repeating it.
 - **Inventory the tests.** The CLI lists every test with the runner's collect-only mode. An agent classifies each suite as E2E, real integration, mocked integration or unit, and setup reports what real-test coverage exists. Your planned test-audit skill fits here.
 - **Adopt, don't overwrite.** Existing CI jobs, CODEOWNERS, MR templates and agent context files (such as AGENTS.md) are read and respected. Setup only adds files under `.ark/`.
 - **No retro-tagging.** Old tests keep their names. Only acceptance criteria from new tickets need tagged tests, so onboarding a large repo does not start with a rewrite.
@@ -240,7 +242,7 @@ suites:
     run: uv run behave --tags="{tags}" --junit --junit-directory $ARK_OUT/e2e
     junit: $ARK_OUT/e2e/*.xml
     env:
-      up: docker compose up -d --wait   # floci (AWS emulator) + services
+      up: docker compose up -d --wait   # floci (Amazon Web Services (AWS) emulator) + services
       down: docker compose down -v
 link_cmd: uv pip install -e {upstream_path}
 risk_paths:
@@ -287,8 +289,8 @@ One Ark install manages many projects. A project is the unit you onboard, config
 
 - **What a project holds.** A name, its repos with their dependency edges, its ticket-source and git-host adapters, models, tiers, gates and alert settings. Every run belongs to exactly one project, and ticket IDs are namespaced by it.
 - **Shape is decided at onboarding.** `ark setup` asks whether this is a single-repo or multi-repo project. A single-repo project keeps its config in that repo's `.ark/` folder. A multi-repo project keeps `ark.yml` and `repos.yml` in a project root repo (the knowledge-base repo, or a small config repo), and each member repo has its own `.ark/repo.yml`. `ark project add-repo` turns a single-repo project into a multi-repo one later.
-- **A local registry.** `~/.ark/projects.yml` lists every project on the machine with its name, root path and shape. Setup registers a project when GS is approved; `ark project list` and `ark project remove` manage the rest.
-- **Runs live outside repos.** Run folders default to `~/.ark/projects/<project>/runs/`, so run records never land in product repos. The location is configurable, for example to a shared drive or, later, S3.
+- **A local registry.** `~/.ark/projects.yml` lists every project on the machine with its name, root path and shape. Setup registers a project when setup is approved; `ark project list` and `ark project remove` manage the rest.
+- **Runs live outside repos.** Run folders default to `~/.ark/projects/<project>/runs/`, so run records never land in product repos. The location is configurable, for example to a shared drive or, later, Amazon Simple Storage Service (S3).
 - **Separate by default.** Each project has its own config, models, adapters, locks and cost totals. Nothing crosses projects except the plugin itself and your user settings.
 - **The console spans projects.** It opens on a home view of every registered project with active runs, needs-you items and cost, and every other view filters to one project.
 
@@ -299,7 +301,7 @@ One Ark install manages many projects. A project is the unit you onboard, config
 
 ## Integrations
 
-Everything that differs between teams sits behind an adapter: a small, deterministic CLI module with one interface, chosen in `ark.yml` and checked by doctor. The core never knows which tracker or host it is talking to. This doc says MR throughout; on GitHub, read PR.
+Everything that differs between teams sits behind an adapter: a small, deterministic CLI module with one interface, chosen in `ark.yml` and checked by doctor. The core never knows which tracker or host it is talking to. This doc says MR throughout; on GitHub, read pull request (PR).
 
 | Integration point | v1 adapters | Later | What Ark uses it for |
 | --- | --- | --- | --- |
@@ -308,7 +310,7 @@ Everything that differs between teams sits behind an adapter: a small, determini
 | CI | GitHub Actions, GitLab CI | Jenkins | Finding the commands a repo really runs at setup; watching pipelines |
 | Review gate | Arbiter, read-only, on GitLab projects | Other review bots, or none | Optional fix round on Arbiter findings (open question 2) |
 | Notifications | Desktop | Slack, Teams, email | Gate alerts and stalled runs |
-| Test environment | Docker Compose | Ephemeral AWS environments (CDK or Terraform), local Kubernetes (kind), Testcontainers | Bringing the real stack up and down for E2E |
+| Test environment | Docker Compose | Ephemeral AWS environments (Cloud Development Kit (CDK) or Terraform), local Kubernetes (kind), Testcontainers | Bringing the real stack up and down for E2E |
 | Package registry | Per-repo `link_cmd` | npm, PyPI or CodeArtifact, Maven, Go modules | Local linking, and version pins after upstream merges |
 | Test secrets | Environment variables | AWS Secrets Manager, Vault | Credentials the CLI injects into test runs; never shown to agents |
 | Run record storage | Local folder | S3 with Object Lock | Retention and audit |
@@ -328,12 +330,12 @@ traces: [FR-10, FR-11]
 depends_on: [ARK-011]
 acceptance_criteria:
   - id: ARK-013-AC1
-    text: ark test runs a repo's tagged-test command for a set of AC IDs and saves JUnit XML and logs to the run folder
+    text: ark test runs a repo's tagged-test command for a set of AC IDs and saves JUnit reports in Extensible Markup Language (XML) and logs to the run folder
 ---
 Context and notes for the implementer.
 ```
 
-**Where acceptance criteria come from.** Local tickets use frontmatter. GitLab and GitHub issues use a section headed "Acceptance criteria", usually a checklist. Jira uses a configured custom field, or the same description section. `ark.yml` sets this per source (`tickets.ac_from`), and anything missing opens G0.
+**Where acceptance criteria come from.** Local tickets use frontmatter. GitLab and GitHub issues use a section headed "Acceptance criteria", usually a checklist. Jira uses a configured custom field, or the same description section. `ark.yml` sets this per source (`tickets.ac_from`), and anything missing opens criteria.
 
 **How setup picks adapters.** The git host comes from the remote URL and the CI from files present (`.gitlab-ci.yml`, `.github/workflows/`). The ticket source is asked (local files or Jira in v1); Jira keys in recent commit messages are a signal setup surfaces when it asks. Everything else defaults to the v1 adapter unless a signal suggests otherwise.
 
@@ -355,9 +357,9 @@ Build a thin deterministic CLI and agent loop by hand, run Ark's first ticket on
 1. **The backlog is local tickets.** Tickets are written in Ark's local ticket format with acceptance criteria traced to this PRD, and live outside the repo in `~/.ark/projects/<project>/tickets/`, next to the runs. Later requirements become tickets the same way.
 2. **One spike upfront.** Only ARK-101 (plugin install, CLI on PATH, runtime) blocks building. The other harness questions are answered by the ticket that first uses the feature, as a "record observed behavior" criterion. Hooks and session files inside subagents are settled right before the tickets that depend on them (ARK-112, ARK-113).
 3. **Built directly in OMP.** No pstack bootstrap; the thin loop is built by hand in OMP sessions, as tickets with tagged tests and GitHub PRs you review and merge.
-4. **Deterministic CLI first, thin.** `run start`, `advance`, `gate`, `ws create`, `test --red-green`, `trace-check` and `mr`. Plan check and render, context render, session capture, manifest and the console are deferred to dogfooded tickets.
+4. **Deterministic CLI first, thin.** `run start`, `advance`, `gate`, `worktree create`, `test --red-green`, `trace-check` and `merge-request open`. Plan check and render, context render, session capture, manifest and the console are deferred to dogfooded tickets.
 5. **Agent layer on top.** Router skill, `ticket` playbook, implementer, validator and `reviewer-x`, lead judgment by the orchestrator, a main-session write-block hook and the vendor preflight.
-6. **Thin loop, then dogfood.** ARK-109 (`ark context`) is the first ticket Ark runs on itself, from local ticket to PR through G1 and G2. Every later ticket runs through Ark.
+6. **Thin loop, then dogfood.** ARK-109 (`ark context`) is the first ticket Ark runs on itself, from local ticket to PR through plan and evidence. Every later ticket runs through Ark.
 7. **Onboarding right after.** Ark's own config is hand-written to start. The first dogfood ticket after the thin loop is the `setup` playbook with a thin doctor (ARK-110), then the pytest and behave parsers with CLARA as the first real onboarding (ARK-111). CLARA runs use local tickets and stop at a ready branch with no MR until the GitLab and Jira adapters exist.
 8. **Console after the loop.** It only reads files, so it can be dogfooded once the run folder shape settles.
 
@@ -366,12 +368,12 @@ Build a thin deterministic CLI and agent loop by hand, run Ark's first ticket on
 | ID | Ticket | Traces | Depends on |
 | --- | --- | --- | --- |
 | ARK-101 | Spike: plugin install from Git, CLI on PATH, typed tools, runtime | FR-24, NFR-03 | None |
-| ARK-102 | Scaffold: Bun/TS package, `ark` bin, skills, agents, extensions, schemas, CI | FR-01, FR-24 | ARK-101 |
+| ARK-102 | Scaffold: Bun/TypeScript package, `ark` bin, skills, agents, extensions, schemas, CI | FR-01, FR-24 | ARK-101 |
 | ARK-103 | Run core: `run start`, ledger, state replay, `ark advance` | FR-01 to 03, FR-07, FR-35 | ARK-102 |
-| ARK-104 | Gates: `ark gate` packet and answer for G0, G1, G2 | FR-15 | ARK-103 |
+| ARK-104 | Gates: `ark gate` packet and answer for criteria, plan, evidence | FR-15 | ARK-103 |
 | ARK-105 | Worktrees and `ark test` with red-green proof | FR-09 to 12, FR-28 | ARK-103 |
-| ARK-106 | `trace-check` builds the matrix and gates G2 | FR-12 | ARK-105 |
-| ARK-107 | `ark mr` through `gh`, optional per project | FR-20, FR-36 | ARK-106 |
+| ARK-106 | `trace-check` builds the matrix and gates evidence | FR-12 | ARK-105 |
+| ARK-107 | `ark merge-request open` through `gh`, optional per project | FR-20, FR-36 | ARK-106 |
 | ARK-108 | Router skill, `ticket` playbook, agents, lead judgment, write-block hook | FR-02, 09, 13, 14, 17 | ARK-104 to 106 |
 | ARK-109 | `ark context` renders the resume brief, as the first Ark run | FR-04 | ARK-107, ARK-108 |
 | ARK-110 | Setup playbook and thin doctor, on Ark | FR-25, 27, 37 | ARK-109 |
@@ -386,12 +388,12 @@ Milestones are closed by exit criteria a reviewer can check; no dates yet.
 
 | Milestone | Scope | Exit criteria | Built by |
 | --- | --- | --- | --- |
-| M1a Thin loop | FR-01 (thin command set), 02 (`ticket`), 03, 07, 09 to 12, 13 (one reviewer), 14, 15 (G0, G1, G2), 20 (one PR), 35 (local tickets), 36 (GitHub) | ARK-109 runs through Ark on its own repo from local ticket to PR through G1 and G2, with hand-written config, and its ledger replays to the same state | OMP by hand |
-| M1 Single repo, complete | FR-02 (`setup`, `resume`), 04, 16, 22, 25 (single repo), 26 to 28, 29 (DAG), 30 (main session), 31, 32, 35 (Jira), 36 (GitLab), 37, 38 (registry, console across projects) | Setup and full doctor pass on the Ark project and one team project on Jira and GitLab. Three real team tickets reach merge-ready MRs, with G1 and G2 answered in the console. Ledger replay is byte-identical. Resume works from every state | The Ark |
+| M1a Thin loop | FR-01 (thin command set), 02 (`ticket`), 03, 07, 09 to 12, 13 (one reviewer), 14, 15 (criteria, plan, evidence), 20 (one PR), 35 (local tickets), 36 (GitHub) | ARK-109 runs through Ark on its own repo from local ticket to PR through plan and evidence, with hand-written config, and its ledger replays to the same state | OMP by hand |
+| M1 Single repo, complete | FR-02 (`setup`, `resume`), 04, 16, 22, 25 (single repo), 26 to 28, 29 (DAG), 30 (main session), 31, 32, 35 (Jira), 36 (GitLab), 37, 38 (registry, console across projects) | Setup and full doctor pass on the Ark project and one team project on Jira and GitLab. Three real team tickets reach merge-ready MRs, with plan and evidence answered in the console. Ledger replay is byte-identical. Resume works from every state | The Ark |
 | M2 Multi-repo | FR-05, 06, 08 (multi-repo), 17 to 20, 21 (subagents), 25 (multi-repo project), 29 (swim lanes), 30 (subagents), 38 (multi-repo projects) | Multi-repo project setup over the knowledge-base repo succeeds. One three-repo ticket runs end to end, watched live in the console | The Ark |
 | M3 Review tiers, metrics and MR watch | FR-02 (remaining playbooks), 13 (tiers), 23, 33 | 20 runs completed; reviewer value report produced; one multi-repo run watched through to merge | The Ark |
 | M4 Retention and audit outputs | Closed runs shipped to write-once S3; the audit outputs QA and RA choose | A closed run verifies from S3 | The Ark |
-| M5 RPC runner (only if needed) | Live subagent capture, a deterministic outer state machine | Triggered if ARK-112 shows hooks do not fire inside subagents | The Ark |
+| M5 Remote procedure call (RPC) runner (only if needed) | Live subagent capture, a deterministic outer state machine | Triggered if ARK-112 shows hooks do not fire inside subagents | The Ark |
 
 **Harness questions and where they are answered.**
 
@@ -428,8 +430,8 @@ Ideas raised during design and deliberately left out of v1, kept here so nobody 
 | --- | --- | --- |
 | Label-driven intake | An `ark:ready` label on a GitLab issue queues a run | Runs start by hand until the flow has earned trust |
 | Knowledge-base write-back | After merge, update the Markdown knowledge base through a reviewed MR | Useful once multi-repo runs are routine |
-| Refine mode | Draft ACs and a test plan for a ticket before work is scheduled | G0 covers the gap for now |
-| Plan-only dry run | Produce the G1 packet and a cost estimate without implementing | Needs cost data from real runs first |
+| Refine mode | Draft ACs and a test plan for a ticket before work is scheduled | The criteria gate covers the gap for now |
+| Plan-only dry run | Produce the plan packet and a cost estimate without implementing | Needs cost data from real runs first |
 | Run replay | Step through a past run's ledger in the console | Follows once the console exists |
 | Model A/B runs | Rerun a golden ticket on different models and compare | Part of the eval work after M3 |
 | Run handoff and queue | Hand a run to a teammate; limit concurrent runs | v1 is single-operator |
@@ -443,7 +445,7 @@ Settled on 2026-10-21 in two design grillings. The second cut the walking skelet
 2. **Arbiter.** Humans handle Arbiter findings until M3. In M3, a read-only Arbiter adapter arrives with `ark watch`, and its findings follow the same verify-before-bounce rule and round budget.
 3. **Implementer vendor.** Configurable per project. `ark.yml` names every role's model explicitly, and preflight enforces the vendor invariants (FR-13). The default is chosen during ARK-108.
 4. **Real test environment.** A suite may declare `env.up` and `env.down` commands, such as Docker Compose with floci for AWS services. `ark test` brings the environment up and down around both the red and green runs and fingerprints image digests. Local emulators of owned dependencies count as real, not mocks. Ephemeral AWS environments stay parked.
-5. **QA and RA.** G1 and G2 are engineering records: approver from OS and git identity, time and packet hash. Formal sign-off is the host's MR approval. Ark ships a per-run audit bundle (the run folder with a verified manifest). Production use waits for QA and RA to review this mapping (NFR-05).
+5. **QA and RA.** Plan and evidence gates are engineering records: approver from operating system (OS) and git identity, time and packet hash. Formal sign-off is the host's MR approval. Ark ships a per-run audit bundle (the run folder with a verified manifest). Production use waits for QA and RA to review this mapping (NFR-05).
 6. **Where runs execute.** Laptops only in v1. CI installs the plugin and runs the golden smoke ticket. A shared runner waits for S3 storage (M4).
 7. **Plugin catalog.** Install from the GitHub Git URL for now; `plugin_version` is a git tag. The internal target is chosen when Ark moves to GitLab.
 8. **Codename.** Ark, after the Forerunner installation that builds the Halo rings. It names the plugin, the router skill and the CLI. Arbiter keeps its role as the GitLab MR review gate.
@@ -458,7 +460,7 @@ Agents think and write code; a deterministic Ark CLI does everything else, and O
 - **Opus orchestrates and judges.** It never writes product code. Implementation goes to Codex, validation to a Claude model, review to a two-vendor pair.
 - **Adversarial review = two generalists on different vendors, same rubric, plus a verify step.** Specialists are added only by risk tag. Research basis is in the next section.
 - **Acceptance criteria get IDs at intake.** Every AC maps to an E2E or real integration test, tagged with its ID. A script, not a model, builds the trace matrix and fails the gate on gaps.
-- **Ark gates:** GS setup, G0 AC clarity, G1 plan, GE escalation, G2 evidence. Merge is the git host's own approval, not an Ark gate. Agents never merge.
+- **Ark gate ids:** `criteria` for AC clarity, `plan`, `escalation`, and `evidence`; `setup` is reserved for the one-time setup design, not yet implemented. Merge is the git host's own approval, not an Ark gate. Agents never merge.
 - **Two fix rounds max,** then escalate to a human with a diagnosis.
 - **Multi-repo from day one.** A repo manifest declares dependencies. Work runs in topological order; a single repo is a graph of one.
 - **Every run gets a folder** with a CLI-written state.json, an append-only ledger, raw OMP session files (main and subagents), typed stage outputs and hashes. The dashboard reads that folder.
@@ -466,7 +468,7 @@ Agents think and write code; a deterministic Ark CLI does everything else, and O
 
 ## The flow
 
-&#91;embedded content: factory flow · 10 stages, Ark gates G1 and G2 plus host merge, 1 fix loop\]
+&#91;embedded content: factory flow · 10 stages, Ark gates plan and evidence plus host merge, 1 fix loop\]
 
 A failed exit check sends work back to a fresh implementer; after the second fix round it comes to you instead. Every step writes to the run folder described under Observability.
 
@@ -478,7 +480,7 @@ One skill is the front door; it picks a playbook, logs why, and copies the playb
 
 **Rules the router enforces.**
 
-- Input is a ticket ID or free text. A ticket is pulled through the tracker's CLI or MCP and saved to the run folder untouched.
+- Input is a ticket ID or free text. A ticket is pulled through the tracker's CLI or Model Context Protocol (MCP) and saved to the run folder untouched.
 - The playbook choice and its reason are the first ledger entry.
 - Every playbook step stays in the todo list. A skipped step reads `skip: <reason>`, which a reviewer can audit later.
 - Follow-ups such as "continue" stay in the same playbook. "new task" re-routes.
@@ -487,13 +489,13 @@ One skill is the front door; it picks a playbook, logs why, and copies the playb
 
 | Playbook | When | Steps | Human gates |
 | --- | --- | --- | --- |
-| `ticket` | A ticket with new or changed behavior | Intake, analyze, plan, implement, validate, review, judge, fix loop, evidence pack, MRs | G1 plan, G2 evidence; then host merge |
-| `bugfix` | A reported defect | Intake, reproduce with a failing E2E test on the base branch, plan, fix, validate, review, MRs | G1 (plan plus repro), G2; then host merge |
+| `ticket` | A ticket with new or changed behavior | Intake, analyze, plan, implement, validate, review, judge, fix loop, evidence pack, MRs | plan, evidence; then host merge |
+| `bugfix` | A reported defect | Intake, reproduce with a failing E2E test on the base branch, plan, fix, validate, review, MRs | plan (plus reproduction), evidence; then host merge |
 | `investigate` | A read-only question about the system | Explore, cite, report | None |
 | `review` | An existing branch or MR | Review panel, lead judgment, report | None; nothing is changed |
 | `resume` | Picking up a run | Read the ledger, show state, continue from the last open step | Whatever gate is open |
 
-Later candidates: `spike` for throwaway prototypes, `refactor`, and `dependency-change` for third-party (SOUP) updates.
+Later candidates: `spike` for throwaway prototypes, `refactor`, and `dependency-change` for third-party software of unknown provenance (SOUP) updates.
 
 ## Agents and models
 
@@ -520,15 +522,15 @@ Seven roles, each bound to a role alias so a model swap is a one-line config cha
 
 ## Gates and loop policy
 
-Five Ark gates: one-time setup (GS), plan (G1) and evidence (G2) on every run, and two conditional gates, AC clarity (G0) and escalation (GE). Each gate is a fixed packet plus a fixed set of answers, so every decision lands in the ledger the same way. Merge happens afterwards under the git host's own approval rules and is not an Ark gate.
+The design names five Ark gates: one-time `setup` (reserved, not yet implemented), `plan` and `evidence` on every run, and two conditional gates, AC clarity (`criteria`) and `escalation`. Each implemented gate is a fixed packet plus a fixed set of answers, so every decision lands in the ledger the same way. Merge happens afterwards under the git host's own approval rules and is not an Ark gate.
 
 | Gate | When | Packet the human sees | Answers |
 | --- | --- | --- | --- |
-| GS Setup | First install in a repo or project, or re-onboarding a repo | Config diff with each value marked detected, inferred or confirmed, and the full doctor report | Approve and open the setup MR, change values, abort |
-| G0 AC clarity | Only if the ticket lacks testable acceptance criteria | Drafted AC candidates with IDs, and what is ambiguous | Accept, edit, abort |
-| G1 Plan | Before any code | `plan.md`, the execution DAG diagram, AC-to-test plan, risk tier | Approve, request changes, abort |
-| GE Escalation | Second fix round still fails | What failed, attempts so far, hypotheses, the orchestrator's recommendation | Give guidance, take over, one more round, abort |
-| G2 Evidence | Loop exits clean, before MRs open | Diff per repo, trace matrix, red-green test evidence, findings with dispositions (dismissed ones with reasons), plan deviations, cost | Approve to open MRs, send back, abort |
+| `setup` (reserved, not implemented) | First install in a repo or project, or re-onboarding a repo | Config diff with each value marked detected, inferred or confirmed, and the full doctor report | Approve and open the setup MR, change values, abort (product design only) |
+| `criteria` — AC clarity | Only if the ticket lacks testable acceptance criteria | Drafted AC candidates with IDs, and what is ambiguous | Accept, edit, abort |
+| `plan` | Before any code | `plan.md`, the execution DAG diagram, AC-to-test plan, risk tier | Approve, request changes, abort |
+| `escalation` | Second fix round still fails | What failed, attempts so far, hypotheses, the orchestrator's recommendation | `one_more_round`, `take_over`, `abort` |
+| `evidence` | Loop exits clean, before MRs open | Diff per repo, trace matrix, red-green test evidence, findings with dispositions (dismissed ones with reasons), plan deviations, cost | Approve to open MRs, send back, abort |
 | Merge (host, not an Ark gate) | In GitLab or GitHub | The MRs themselves | Arbiter's review where present, plus your normal approval rules; agents never merge |
 
 **Loop exit criteria.** All must hold:
@@ -538,9 +540,9 @@ Five Ark gates: one-time setup (GS), plan (G1) and evidence (G2) on every run, a
 - Build and lint are green in every touched repo.
 - No open Act-on finding at P0 or P1.
 
-P2 and P3 findings never block the loop. They go to G2 as Consider items for you to call.
+P2 and P3 findings never block the loop. They go to evidence as Consider items for you to call.
 
-**Round budget.** A round is one implementer pass after a failure. Two rounds, then GE. Before round two the orchestrator writes down the premise both fixes share and checks it directly (pstack's Attack the Premise principle), because a second fix on the same wrong premise burns tokens for nothing.
+**Round budget.** A round is one implementer pass after a failure. Two rounds, then escalation. Before round two the orchestrator writes down the premise both fixes share and checks it directly (pstack's Attack the Premise principle), because a second fix on the same wrong premise burns tokens for nothing.
 
 **Always-pause list, enforced by a hook.** A `tool_call` hook blocks these and routes them to a human, whatever the prompt says:
 
@@ -549,19 +551,28 @@ P2 and P3 findings never block the loop. They go to G2 as Consider items for you
 - Adding or changing a third-party dependency, since each is a SOUP item.
 - Migrations or writes against shared environments.
 
-**How a gate is captured.** The orchestrator calls OMP's `ask` tool with the fixed answers. The question and answer land in the session file. It then calls a small `ark gate` CLI that writes the ledger entry: gate, answer, approver from the OS and git identity, timestamp, and the sha256 of the packet approved. For G1 in the terminal, OMP's plan mode is worth a trial: its Plan Review screen lets you annotate and edit sections before approving.
+**How a gate is captured.** The orchestrator calls OMP's `ask` tool with the fixed answers. The question and answer land in the session file. It then calls `ark gate answer`, which writes the ledger entry: gate, answer, approver from the OS and git identity, timestamp, and the SHA-256 hash of the packet approved. For plan in the terminal, OMP's plan mode is worth a trial: its Plan Review screen lets you annotate and edit sections before approving.
+
+The implemented command uses exact, single-choice questions, with no recommended option:
+
+- `Ark gate.answered:criteria for run <run_id>; packet <sha256>. Choose exactly one: accept, edit, abort.`
+- `Ark gate.answered:plan for run <run_id>; packet <sha256>. Choose exactly one: approve, change, abort.`
+- `Ark gate.answered:escalation for run <run_id>; packet <sha256>. Choose exactly one: one_more_round, take_over, abort.`
+- `Ark gate.answered:evidence for run <run_id>; packet <sha256>. Choose exactly one: approve, send_back, abort.`
+
+Packets use `gates/<gate>.<sha256>.packet.md`; the gate id also appears in ledger gate data and answer actions. `setup` has no implemented packet or answer.
 
 **Regulatory note.** These gates are engineering checkpoints. How they map to your design controls and electronic-signature rules is for QA and RA to decide; I'm not a regulatory advisor. Keeping the formal approval in GitLab, which you already validate, is the conservative default.
 
-## The execution DAG at G1
+## The execution DAG at the plan gate
 
-At G1 you approve a picture of exactly what will run, drawn by the CLI from the same file the state machine executes, so the diagram cannot drift from the run.
+At plan you approve a picture of exactly what will run, drawn by the CLI from the same file the state machine executes, so the diagram cannot drift from the run.
 
 **`run-plan.json` is the executable plan.** The orchestrator writes it alongside `plan.md`. Each node has an ID, a kind (implement, validate, review, stack E2E, gate), a repo, the agent and role alias, the nodes it waits on, the ACs it covers, and where it goes on pass and on fail. The plan also carries the tier and the reviewer panel.
 
 **The CLI checks it before drawing it.** `ark plan check` refuses a plan with a cycle, a repo order that contradicts `repos.yml`, an AC no node covers, a node with no fail route, or a reviewer on the implementer's vendor.
 
-**The CLI draws it.** `ark plan render` turns the plan into Mermaid, with no model involved. The diagram goes in the G1 packet, the dashboard, and the ticket comment; GitLab renders Mermaid in Markdown. It shows:
+**The CLI draws it.** `ark plan render` turns the plan into Mermaid, with no model involved. The diagram goes in the plan packet, the dashboard, and the ticket comment; GitLab renders Mermaid in Markdown. It shows:
 
 - Which repos change, in what order, and which run in parallel.
 - The contract on each repo edge, and what must be green before downstream work starts.
@@ -572,7 +583,7 @@ An example for a three-repo ticket:
 
 ```mermaid
 flowchart LR
-  G1{{G1 plan approved}} --> L1[core-lib: implement]
+  plan{{plan approved}} --> L1[core-lib: implement]
   L1 --> L2[core-lib: validate] --> L3[core-lib: review]
   L3 -->|contract v2 green| A1[api: implement]
   L3 -->|contract v2 green| W1[web: implement]
@@ -581,15 +592,15 @@ flowchart LR
   A3 --> E[stack E2E: AC1 to AC4]
   W3 --> E
   E --> J{exit criteria met}
-  J -->|yes| G2{{G2 evidence}}
+  J -->|yes| evidence{{evidence}}
   J -->|no, rounds left| F[fix in the owning repo]
   F --> E
-  J -->|no, round 2 used| GE{{GE escalation}}
+  J -->|no, round 2 used| escalation{{escalation}}
 ```
 
-**Approval binds execution.** G1 records the hash of `run-plan.json`. `ark advance` refuses to start any node that is not in the approved plan or whose upstream nodes have not passed. Changing the plan after G1 (a repo added, an edge reordered, the tier raised) is an amendment: the CLI renders the old and new graphs side by side and reopens G1 for just that change.
+**Approval binds execution.** Plan records the hash of `run-plan.json`. `ark advance` refuses to start any node that is not in the approved plan or whose upstream nodes have not passed. Changing the plan after plan approval (a repo added, an edge reordered, the tier raised) is an amendment: the CLI renders the old and new graphs side by side and reopens plan for just that change.
 
-**Why it is not overkill.** It costs nothing to produce, because the CLI draws it from data the run needs anyway. It catches the expensive mistake early: a wrong repo order or a missing downstream repo found at G1 costs a comment, while the same mistake found at G2 costs a full build and review cycle. What would be overkill is a model drawing the diagram by hand, or a separate approval step just for it. For a single-repo T1 ticket the graph is a straight line, and the packet shows it as one line of text instead of a picture.
+**Why it is not overkill.** It costs nothing to produce, because the CLI draws it from data the run needs anyway. It catches the expensive mistake early: a wrong repo order or a missing downstream repo found at plan costs a comment, while the same mistake found at evidence costs a full build and review cycle. What would be overkill is a model drawing the diagram by hand, or a separate approval step just for it. For a single-repo T1 ticket the graph is a straight line, and the packet shows it as one line of text instead of a picture.
 
 ## Run state and resume
 
@@ -601,16 +612,17 @@ Every ticket's run has one `state.json` that only the `ark` CLI writes, so any f
 
 | State | Means | Next action (computed by the CLI) | Who acts |
 | --- | --- | --- | --- |
-| `intake` | Ticket saved untouched | Write `ac.yml`, or open G0 | Orchestrator |
-| `analyzed` | `ac.yml` and `impact.json` valid | Write `plan.md` and the G1 packet | Orchestrator |
-| `awaiting_g1` | Plan packet hashed | Approve, change or abort | You |
-| `approved` | G1 approved | Create worktrees, spawn the implementer for the first repo in order | Orchestrator |
+| `intake` | Ticket saved untouched | Write `ac.yml`, or open criteria | Orchestrator |
+| `awaiting_criteria` | AC clarity needs a human decision | `accept` returns to intake; `edit` keeps the gate open for ticket edits and `ark acceptance-criteria update`; `abort` stops the run | You |
+| `analyzed` | `ac.yml` and `impact.json` valid | Write `plan.md` and the plan packet | Orchestrator |
+| `awaiting_plan` | Plan packet hashed | Approve, change or abort | You |
+| `approved` | Plan approved | Create worktrees, spawn the implementer for the first repo in order | Orchestrator |
 | `building` | Per-repo implement, validate and review steps in progress | The next unfinished step for the next repo in order | Orchestrator |
 | `judging` | All findings and test results in | Exit, or start a fix round | Orchestrator |
-| `escalating` | G2 send-back after the round budget was spent | Build the GE packet, or abort | Orchestrator |
-| `awaiting_ge` | Second fix round failed | Guide, take over, one more round, or abort | You |
-| `awaiting_g2` | Evidence packet hashed | Approve MRs or send back | You |
-| `mrs_open` | MRs open in dependency order | Merge in order; from M3, ark watch handles pipelines, rebases and pins until each MR merges | You |
+| `escalating` | Evidence send-back after the round budget was spent | Build the escalation packet, or abort | Orchestrator |
+| `awaiting_escalation` | Round budget spent; escalation packet hashed | `one_more_round`, `take_over` or `abort` | You |
+| `awaiting_evidence` | Evidence packet hashed | `approve`, `send_back` or `abort` | You |
+| `merge_requests_open` | MRs open in dependency order | Merge in order; from M3, ark watch handles pipelines, rebases and pins until each MR merges | You |
 | `done` or `aborted` | Closed | None | None |
 
 **What the file holds.**
@@ -627,7 +639,7 @@ Every ticket's run has one `state.json` that only the `ark` CLI writes, so any f
   "round": 0,
   "next_action": {"kind": "spawn", "agent": "implementer", "repo": "core-lib"},
   "gates": {
-    "G1": {"answer": "approve", "by": "cobe", "at": "2026-10-21T20:41:07Z", "packet_sha256": "9f2c..."}
+    "plan": {"answer": "approve", "by": "cobe", "at": "2026-10-21T20:41:07Z", "packet_sha256": "9f2c..."}
   },
   "repos": [
     {"name": "core-lib", "order": 1, "branch": "ark/ABC-123-retry-policy", "base_sha": "a41e...", "head_sha": null, "step": "pending"},
@@ -657,15 +669,15 @@ Every ticket's run has one `state.json` that only the `ark` CLI writes, so any f
 
 Every AC gets an ID at intake, every test names the AC it proves, and a script, not a model, decides whether the matrix is complete.
 
-1. **Intake writes `ac.yml`.** One entry per AC: ID such as `ABC-123-AC2`, the ticket text verbatim, a testable restatement, verification level (e2e, integration, manual, or unit by exception), repos, and risk tags. Missing or untestable AC triggers G0; the orchestrator never invents criteria silently.
+1. **Intake writes `ac.yml`.** One entry per AC: ID such as `ABC-123-AC2`, the ticket text verbatim, a testable restatement, verification level (e2e, integration, manual, or unit by exception), repos, and risk tags. Missing or untestable AC triggers criteria; the orchestrator never invents criteria silently.
 2. **The plan maps each AC to planned tests.** A unit test is allowed only for pure logic with no integration surface, and the plan says why.
 3. **Tests carry the AC ID** through the framework's native tag (Behave `@ID`, pytest marker) or, where none exists, in the test or describe name. The suite's format parser maps tags to test IDs from collect-only output.
 4. **The CLI runs the real stack; the validator writes and fixes tests.** E2E and integration suites run against real services in containers or an ephemeral environment. Owned services are never mocked; outside vendors may use their sandboxes. The environment fingerprint (image digests, versions, commit SHAs) goes into the evidence.
-5. **Red-green proof for new behavior.** `ark test --red-green` checks out the base source, overlays the test files changed on the feature branch, and runs only the tagged tests, which must fail. It then runs them on the head SHA, where they must pass. Any failure or error counts as red, and the matrix records which it was, so G2 can spot a weak red (such as an import error). This catches tests that assert nothing.
+5. **Red-green proof for new behavior.** `ark test --red-green` checks out the base source, overlays the test files changed on the feature branch, and runs only the tagged tests, which must fail. It then runs them on the head SHA, where they must pass. Any failure or error counts as red, and the matrix records which it was, so evidence review can spot a weak red (such as an import error). This catches tests that assert nothing.
 6. **`trace-check` builds the matrix** from `ac.yml` and the JUnit XML the runners emit. It fails when an AC has no passing tagged test, a test names an unknown AC, red-green proof is missing, or a manual AC lacks a signed human record.
-7. **Flakes are not green.** On head, each failing tagged test is rerun once; a fail followed by a pass is marked flaky and shown at G2.
+7. **Flakes are not green.** On head, each failing tagged test is rerun once; a fail followed by a pass is marked flaky and shown at evidence.
 
-The matrix (AC, tests, red and green SHAs, evidence paths) goes into the G2 packet and the MR description. Your planned test-audit skill fits as the validator's last step, checking that each tagged test asserts the behavior its AC names.
+The matrix (AC, tests, red and green SHAs, evidence paths) goes into the evidence packet and the MR description. Your planned test-audit skill fits as the validator's last step, checking that each tagged test asserts the behavior its AC names.
 
 ## Multi-repo
 
@@ -673,11 +685,11 @@ Every run is a dependency graph of repos; a single-repo task is a graph of one, 
 
 **Repo manifest.** `repos.yml` at the project root lists each repo's path on the git host, default branch and `depends_on` edges. Each repo's own commands, AC tag convention and `link_cmd` live in its `.ark/repo.yml`, so they version with the code. Setup writes both; see Setup and configuration in Part 1.
 
-**Analyze.** Scouts read the knowledge base and code; the orchestrator writes `impact.json`: affected repos with the docs or code that justify each, the interface change on each edge, and the topological order. A cycle is flagged at G1.
+**Analyze.** Scouts read the knowledge base and code; the orchestrator writes `impact.json`: affected repos with the docs or code that justify each, the interface change on each edge, and the topological order. A cycle is flagged at plan.
 
-**Worktrees.** A deterministic `ark ws create` script makes one git worktree per affected repo under the run folder, on branch `ark/<ticket>-<slug>`. I'm not relying on OMP's `task.isolation` here: its docs describe isolating the session's own repo, and multi-repo behavior is unverified.
+**Worktrees.** A deterministic `ark worktree create` script makes one git worktree per affected repo under the run folder, on branch `ark/<ticket>-<slug>`. I'm not relying on OMP's `task.isolation` here: its docs describe isolating the session's own repo, and multi-repo behavior is unverified.
 
-**Contract first.** When an edge changes an interface, the plan states the contract (types, API schema, event shape) and you approve it at G1. The upstream implementer must ship exactly that contract, and a script diffs it.
+**Contract first.** When an edge changes an interface, the plan states the contract (types, application programming interface (API) schema, event shape) and you approve it at plan. The upstream implementer must ship exactly that contract, and a script diffs it.
 
 **Implement in order.** Upstream repos go first; siblings with no edge between them run in parallel. A downstream implementer's brief carries the upstream contract, a diff summary, and the upstream worktree path for local linking.
 
@@ -693,10 +705,10 @@ All agent communication runs through one hub: subagents never message each other
 
 | Layer | Source | What it captures | Status |
 | --- | --- | --- | --- |
-| Raw transcripts | OMP session JSONL under `~/.omp/agent/sessions`; subagent sessions as separate JSONL in the parent's artifact folder | Every message, tool call and result, the model that answered, token use and cost; `session_init` holds each subagent's system prompt, task and tools | Documented; subagent file location to confirm on a real run |
+| Raw transcripts | OMP session JavaScript Object Notation Lines (JSONL) under `~/.omp/agent/sessions`; subagent sessions as separate JSONL in the parent's artifact folder | Every message, tool call and result, the model that answered, token use and cost; `session_init` holds each subagent's system prompt, task and tools | Documented; subagent file location to confirm on a real run |
 | Live events | A hook extension on the orchestrator writing `events.ndjson` | Agent start and end, turns, tool execution, fallbacks, goal updates | Works for the main session; firing inside subagents is unverified |
 | Ledger | The `ark` CLI, append-only, schema-checked | Route choice, state changes, gate decisions with packet hashes, rounds, finding dispositions, actual model per stage | To build |
-| Stage outputs | Each subagent's `output` JSON schema result | Typed handoffs the gates read as data | Documented |
+| Stage outputs | Each subagent's `output` JavaScript Object Notation (JSON) schema result | Typed handoffs the gates read as data | Documented |
 
 **Run folder.**
 
@@ -713,7 +725,7 @@ runs/2026-10-21-ABC-123/
   sessions/          copied OMP JSONL, main and subagents
   artifacts/         typed stage outputs, junit, logs, screenshots
   trace-matrix.md
-  ws/<repo>/         worktrees
+  worktrees/<repo>/  worktrees
   MANIFEST.sha256    hashes of everything above
 ```
 
@@ -735,7 +747,7 @@ runs/2026-10-21-ABC-123/
 | DAG | Plan nodes colored pending, running, passed, failed or waiting; contract edges labeled; a click opens the node's agent, transcript and artifacts | `run-plan.json`, ledger |
 | Swim lanes | One lane per repo plus a gates lane, over time: agent spans, gate waits, fix rounds, and a line at now. Parallel work and time spent waiting on you show at a glance | Ledger, events, session timestamps |
 | Agent cards | Role, repo, the model that is answering, status, current tool, context use, tokens, cost, retries, fallbacks, last message | Session file tail |
-| Gate inbox | Each waiting gate's packet with its fixed answers; G1 shows the DAG and AC-to-test plan, G2 the evidence | Gate packets |
+| Gate inbox | Each waiting gate's packet with its fixed answers; plan shows the DAG and AC-to-test plan, evidence the evidence | Gate packets |
 | Ticket and ACs | Ticket text; each AC turning red and green with its tests, SHAs and evidence; diffs per repo; findings with dispositions | `ac.yml`, trace matrix, artifacts |
 
 &#91;embedded content: Ark Console run page · wireframe\]
@@ -744,7 +756,7 @@ The DAG and agent cards answer "what is happening now"; the swim lanes answer "w
 
 ## Token economy
 
-The orchestrator proposes a risk tier at G1 and you can raise it; the tier sets reviewer count and effort. The size threshold below is a starting guess to tune after real runs.
+The orchestrator proposes a risk tier at plan and you can raise it; the tier sets reviewer count and effort. The size threshold below is a starting guess to tune after real runs.
 
 | Tier | Triggers | Review | Effort |
 | --- | --- | --- | --- |
@@ -859,19 +871,19 @@ The measured evidence favors a few strong generalists on different vendors plus 
 | [Anthropic Code Review](https://code.claude.com/docs/en/code-review) | Several agents search the diff in parallel, a verify step drops false positives, then dedupe and rank by severity. Agent count scales with PR size. | Under 1% of findings marked incorrect; 84% of PRs over 1,000 lines get findings, 7.5 issues on average ([blog](https://claude.com/de/blog/code-review)). Reads code, does not run it. |
 | [OpenAI Codex reviewer](https://alignment.openai.com/scaling-code-verification/) | One trained, agentic reviewer with repo-wide tools and code execution. Precision first. | Repo access plus execution raised recall and precision together. A verifier at a small fraction of the generator's tokens caught a large share of known high-severity bugs. 52.7% of comments led to a code change. |
 | [Cursor Bugbot](https://cursor.com/blog/building-bugbot) | v1: eight passes of the same prompt with shuffled diff order, majority vote, validator model. Later: one agentic loop with tools. | The agentic switch gave the largest gain. Agentic reviewers turned too cautious, so prompts became more aggressive. Resolution rate rose from 52% to over 70%. |
-| [Greptile model inversion](https://www.greptile.com/blog/model-inversion) | Route review to the vendor that did not write the code. | About 1,000 PRs. Each model caught more high-severity bugs in the other's code (Claude PRs: GPT 62.0% vs Opus 60.0%; Codex PRs: Opus 53.7% vs GPT 50.5%). A model misses the bug types it tends to write. |
+| [Greptile model inversion](https://www.greptile.com/blog/model-inversion) | Route review to the vendor that did not write the code. | About 1,000 PRs. Each model caught more high-severity bugs in the other's code (Claude PRs: generative pretrained transformer (GPT) 62.0% vs Opus 60.0%; Codex PRs: Opus 53.7% vs GPT 50.5%). A model misses the bug types it tends to write. |
 | [Cross-model review study](https://arxiv.org/html/2610.01471v1) | Same-model fresh-context review vs cross-model review. | One same-model plus one cross-model review found 56.7% of planted errors vs 42.7% for two same-model reviews. Overlap was only 41%. A lightweight cross-model reviewer added nothing. |
 | [Claude vs Codex study](https://arxiv.org/html/2607.21656v1) | Writer and static reviewer on LiveCodeBench. | Codex reviewing Opus drafts made results significantly worse than Opus alone. Unverified review can break correct code. |
 | [pstack interrogate](https://github.com/backnotprop/pstack) | One reviewer per model, identical prompt and rubric, lead judgment buckets findings into Act on, Consider, Noted, Dismissed. | Design rule stated outright: the adversarial signal comes from model diversity, not assigned personas. Findings raised by two models independently are the highest signal. |
-| [Codex-Verify paper](https://arxiv.org/pdf/2511.16708) | Four specialist agents. | Agent correlation of 0.05 to 0.25, so specialists do find different bugs. Partly static-analysis agents, not LLM personas. |
+| [Codex-Verify paper](https://arxiv.org/pdf/2511.16708) | Four specialist agents. | Agent correlation of 0.05 to 0.25, so specialists do find different bugs. Partly static-analysis agents, not large language model (LLM) personas. |
 
 **Verdict for the Ark.**
 
 1. **Default panel = two generalists, same rubric, different vendors.** One reviewer is the vendor that did not implement; the other is the implementer's vendor in a fresh context. That is the pairing the cross-model study measured as best.
 2. **Verify before anything bounces back.** No finding returns to the implementer on the reviewer's word. The orchestrator buckets findings, and every Act-on P0 or P1 needs a reproduction: a failing test or a concrete execution trace. The Claude-vs-Codex study is the warning for skipping this.
-3. **Specialists are lenses, not headcount.** Project invariants live in a rules file every reviewer reads. A security specialist joins only when the plan carries a risk tag such as auth, PHI or input boundaries.
+3. **Specialists are lenses, not headcount.** Project invariants live in a rules file every reviewer reads. A security specialist joins only when the plan carries a risk tag such as auth, protected health information (PHI) or input boundaries.
 4. **Tune per model.** GPT reviewers drop findings they noticed, so their prompt asks for every P0 and P1 with a confidence score. Opus reviewers over-comment, so theirs requires an evidence path and suppresses praise and style notes.
-5. **More thinking is not always better.** Qodo measured Opus 5.5 at 56.8% F1 on high vs 54.0% on xhigh ([benchmark](https://www.qodo.ai/blog/which-llm-should-review-your-code/)). Reviewers start at high.
+5. **More thinking is not always better.** Qodo measured Opus 5.5 at 56.8% F1 (the harmonic mean of precision and recall) on high vs 54.0% on xhigh ([benchmark](https://www.qodo.ai/blog/which-llm-should-review-your-code/)). Reviewers start at high.
 
 ## Sources
 

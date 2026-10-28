@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { readdirSync } from "node:fs";
 
-const dir = `${import.meta.dir}/../schemas`;
-const names = readdirSync(dir)
-  .filter((f) => f.endsWith(".schema.json"))
-  .map((f) => f.replace(".schema.json", ""));
-const load = (path: string) => Bun.file(`${dir}/${path}`).json();
+const directory = `${import.meta.dir}/../schemas`;
+const names = readdirSync(directory)
+  .filter((file) => file.endsWith(".schema.json"))
+  .map((file) => file.replace(".schema.json", ""));
+const load = (path: string) => Bun.file(`${directory}/${path}`).json();
 
 describe("ARK-102-AC3", () => {
   test("every planned schema exists", () => {

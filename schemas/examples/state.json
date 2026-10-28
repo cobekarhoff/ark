@@ -11,7 +11,7 @@
   "implementer": "agent",
   "next_action": { "kind": "spawn", "agent": "implementer", "repo": "core-lib" },
   "gates": {
-    "G1": { "answer": "approve", "by": "cobe", "at": "2026-10-21T20:41:07Z", "packet_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    "plan": { "answer": "approve", "by": "cobe", "at": "2026-10-21T20:41:07Z", "packet_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
   },
   "repos": [
     { "name": "core-lib", "order": 1, "branch": "ark/ABC-123-retry-policy", "base_sha": "a41e0000", "head_sha": null, "step": "pending" },

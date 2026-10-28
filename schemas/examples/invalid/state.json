@@ -13,7 +13,7 @@
     "repo": "core-lib"
   },
   "gates": {
-    "G1": {
+    "plan": {
       "answer": "approve",
       "by": "cobe",
       "at": "2026-10-21T20:41:07Z",

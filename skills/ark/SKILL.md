@@ -1,6 +1,6 @@
 ---
 name: ark
-description: Ark router. Routes a ticket to a playbook and runs it with human gates, deterministic CLI calls and cross-vendor agents. Invoke explicitly as /skill:ark ticket <ID>.
+description: Ark router. Routes a ticket to a playbook and runs it with human gates, deterministic command-line interface (CLI) calls and cross-vendor agents. Invoke explicitly as /skill:ark ticket <ID>.
 disable-model-invocation: true
 ---
 # Ark router
@@ -16,9 +16,9 @@ You are the orchestrator. Input is `ticket <ID>` (a ticket ID such as `ARK-108`)
 ## Hard rules
 
 - You never write product code. A hook blocks your edit and write calls outside the run folder (`ark hook tool_call`), and any write to `state.json` or `ledger.ndjson`. Product code goes to the `implementer` agent.
-- You never edit `state.json`, `ledger.ndjson` or a gate packet by hand. State moves only through `ark advance`, `ark gate`, `ark log`, `ark findings`, `ark test`, `ark ac update` and `ark ws`.
-- Subagents do not see this conversation. Every brief carries the spec, the AC IDs, the contract, prior findings and absolute paths.
-- Every human gate and the run close: `ask` one single-choice question whose options are exactly the fixed answers, worded as the playbook shows, with no `recommended` option (on a timeout OMP selects the recommended option, or the first one when none is; the protection is that the CLI refuses a `timedOut` result). On the selection, call `ark_gate_answer` or `ark_run_close`; they are transport only, and the CLI records the answer only when the matching successful ask result is in the bound main session (a custom answer, note, cancellation, timeout or an ask already used refuses). Outside OMP, the human runs the same CLI command and also types the answer on `/dev/tty`. Continue when `state.json` shows the gate answered.
-- Rounds: the round budget is `loop.max_rounds` in `ark.yml` (default two). `state.json` counts the rounds used. Once the budget is spent, the next failure opens escalation (gate id `GE`) with a diagnosis; the human grants exactly one more round, takes over as the implementer, or aborts.
-- Give every finding a disposition: Act on, Consider, Noted or Dismissed, each with a reason. An Act-on P0 or P1 goes back to the implementer only as a verified finding: a failing test that the latest `ark test` at the current head recorded, or a traced path, which the evidence gate shows as weaker evidence.
-- No agent merges. `ark mr` opens the merge requests; the human merges on the host and records the outcome with `ark run close`.
+- You never edit `state.json`, `ledger.ndjson` or a gate packet by hand. State moves only through `ark advance`, `ark gate`, `ark log`, `ark findings`, `ark test`, `ark acceptance-criteria update` and `ark worktree`.
+- Subagents do not see this conversation. Every brief carries the spec, the acceptance criterion (AC) IDs, the contract, prior findings and absolute paths.
+- Every human gate and the run close: `ask` one single-choice question whose options are exactly the fixed answers, worded as the playbook shows, with no `recommended` option (on a timeout Oh My Pi (OMP) selects the recommended option, or the first one when none is; the protection is that the CLI refuses a `timedOut` result). On the selection, call `ark_gate_answer` or `ark_run_close`; they are transport only, and the CLI records the answer only when the matching successful ask result is in the bound main session (a custom answer, note, cancellation, timeout or an ask already used refuses). Outside OMP, the human runs the same CLI command and also types the answer on `/dev/tty`. Continue when `state.json` shows the gate answered.
+- Rounds: the round budget is `loop.max_rounds` in `ark.yml` (default two). `state.json` counts the rounds used. Once the budget is spent, the next failure opens escalation (gate id `escalation`) with a diagnosis; the human grants exactly one more round, takes over as the implementer, or aborts.
+- Give every finding a disposition: Act on, Consider, Noted or Dismissed, each with a reason. Priorities: P0 (must fix: an AC violation, data loss or a security hole), P1 (likely defect or missing proof), P2 (worth fixing, never blocking), P3 (minor). An Act-on P0 or P1 goes back to the implementer only as a verified finding: a failing test that the latest `ark test` at the current head recorded, or a traced path, which the evidence gate shows as weaker evidence.
+- No agent merges. `ark merge-request open` opens the merge requests; the human merges on the host and records the outcome with `ark run close`.

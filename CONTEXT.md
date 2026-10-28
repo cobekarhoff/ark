@@ -34,7 +34,7 @@ _Avoid_: Done, delivered
 
 **Merge request (MR)**:
 The request Ark opens on a git host for a human to review and merge one repo's changes of a run; on GitHub it is a pull request.
-_Avoid_: PR, pull request, change request
+_Avoid_: Pull request (PR), change request
 
 ## Rework
 
@@ -47,8 +47,8 @@ The number of rounds a run may use before a human must decide; two by default. O
 _Avoid_: Retry limit, max attempts
 
 **Escalation**:
-The point where a run stops for a human decision because its round budget is spent; the human grants exactly one more round, takes over, or aborts. Its gate id in the command-line interface (CLI) is `GE`; in prose say escalation.
-_Avoid_: GE (in prose), failure, stuck run
+The point where a run stops for a human decision because its round budget is spent; the human grants exactly one more round, takes over, or aborts. Its gate id in the command-line interface (CLI) is `escalation`.
+_Avoid_: failure, stuck run
 
 ## Roles
 
@@ -83,8 +83,8 @@ _Avoid_: Cross-model check
 ## Gates
 
 **Gate**:
-A point in a run where only a human decision lets it continue: setup, acceptance criterion (AC) clarity, plan, escalation and evidence. Merging an MR is the git host's approval, not a gate.
-_Avoid_: Checkpoint, approval step, G3
+A point where only a human decision lets work continue: acceptance criterion (AC) clarity, plan, escalation and evidence are implemented run gates; the one-time setup gate is reserved, not yet implemented. Merging an MR is the git host's approval, not a gate.
+_Avoid_: Checkpoint, approval step
 
 **Packet**:
 The fixed, hashed bundle a human sees at a gate; an answer is bound to exactly one packet.
@@ -106,7 +106,7 @@ _Avoid_: AC type, category
 
 **Red-green proof**:
 Evidence that a new-behavior AC's tagged tests fail on the base and pass on the head.
-_Avoid_: TDD proof, before/after test
+_Avoid_: Test-driven development (TDD) proof, before/after test
 
 **Preservation proof**:
 Evidence that a preserved-behavior AC's tagged tests pass on both the base and the head.
@@ -149,50 +149,50 @@ _Avoid_: Proof bundle, test output, results
 **AC**:
 Acceptance criterion. AC IDs such as `ARK-013-AC2` are a data format and stay as they are.
 
-**ADR**:
-Architecture decision record, kept in `docs/adr/`.
+**Architecture decision record (ADR)**:
+Kept in `docs/adr/`.
 
-**CI**:
-Continuous integration: the automated build and test runs a git host performs on every change.
+**Continuous integration (CI)**:
+The automated build and test runs a git host performs on every change.
 
 **CLI**:
 Command-line interface; here the `ark` command.
 
-**DAG**:
-Directed acyclic graph; the shape of a run's plan, shown at the plan gate.
+**Directed acyclic graph (DAG)**:
+The shape of a run's plan, shown at the plan gate.
 
-**E2E**:
-End-to-end: a test that exercises the real system from its outside edge.
+**End-to-end (E2E)**:
+A test that exercises the real system from its outside edge.
 
-**FDA**:
-United States Food and Drug Administration, whose rules for medical-device software shape Ark's audit trail.
+**United States Food and Drug Administration (FDA)**:
+The agency whose rules for medical-device software shape Ark's audit trail.
 
-**FR**, **NFR**:
-Functional requirement, non-functional requirement: numbered lines of `docs/prd.md`, such as FR-24.
+**Functional requirement (FR), non-functional requirement (NFR)**:
+Numbered lines of `docs/prd.md`, such as FR-24.
 
 **MR**:
 Merge request.
 
-**OMP**:
-Oh My Pi, the agent harness Ark installs into as a plugin.
+**Oh My Pi (OMP)**:
+The agent harness Ark installs into as a plugin.
 
-**OS**:
-Operating system.
+**Operating system (OS)**:
+The system software that runs Ark and its tools.
 
-**PHI**:
-Protected health information.
+**Protected health information (PHI)**:
+Patient information protected by health-privacy rules.
 
-**PRD**:
-Product requirements document, `docs/prd.md`.
+**Product requirements document (PRD)**:
+`docs/prd.md`.
 
-**PTY**:
-Pseudo-terminal: a terminal a program allocates without a person at it.
+**Pseudo-terminal (PTY)**:
+A terminal a program allocates without a person at it.
 
-**QA**, **RA**:
-Quality assurance, regulatory affairs: the people who audit runs after the fact.
+**Quality assurance (QA), regulatory affairs (RA)**:
+The people who audit runs after the fact.
 
-**SHA**, **SHA-256**:
-Secure hash algorithm. A commit SHA names one git commit; SHA-256 is the 256-bit variant that hashes packets and run manifests.
+**Secure hash algorithm (SHA), secure hash algorithm 256-bit (SHA-256)**:
+A commit SHA names one git commit; SHA-256 hashes packets and run manifests.
 
 **UI**:
 User interface.
@@ -206,7 +206,7 @@ P0 breaks an AC, loses or corrupts data or opens a security hole (must fix); P1 
 The risk tier of a run, proposed at the plan gate, that sets how many reviewers read it: T1 light (one repo, small diff, no risk tags; one reviewer), T2 standard (the default; two reviewers), T3 high (any risk tag such as authentication, patient data or a data migration; two reviewers plus a security reviewer).
 
 **Milestones M0 to M5, M1a**:
-M0 the earliest checks of unverified OMP behavior, done by hand before Ark existed; it has no row in the PRD's milestone table. M1a the thin loop: a local ticket reaches a merge request through the plan and evidence gates on Ark's own repo. M1 single repo, complete: setup, resume, the console, Jira and GitLab. M2 multi-repo. M3 review tiers, metrics and merge-request watch. M4 retention and audit outputs: closed runs shipped to write-once storage on Amazon Simple Storage Service (S3). M5 a remote procedure call (RPC) runner, built only if needed.
+M0 the earliest checks of unverified Oh My Pi (OMP) behavior, done by hand before Ark existed; it has no row in the product requirements document's (PRD's) milestone table. M1a the thin loop: a local ticket reaches a merge request through the plan and evidence gates on Ark's own repo. M1 single repo, complete: setup, resume, the console, Jira and GitLab. M2 multi-repo. M3 review tiers, metrics and merge-request watch. M4 retention and audit outputs: closed runs shipped to write-once storage on Amazon Simple Storage Service (S3). M5 a remote procedure call (RPC) runner, built only if needed.
 
 **Gates**:
-Setup (one-time fit of Ark to a repo or project); AC clarity (only when a ticket lacks testable acceptance criteria); plan (before any code); escalation (round budget spent); evidence (loop exits clean, before MRs open). The PRD and the CLI still shorten them to `GS`, `G0`, `G1`, `GE` and `G2` until ARK-119 renames them.
+Setup (one-time fit of Ark to a repo or project; its CLI gate id `setup` is reserved, not yet implemented); AC clarity (`criteria`; only when a ticket lacks testable acceptance criteria); plan (`plan`; before any code); escalation (`escalation`; round budget spent); evidence (`evidence`; loop exits clean, before MRs open). The CLI uses these full names for gate ids, event keys, packet file names and answer actions.

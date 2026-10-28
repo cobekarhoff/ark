@@ -4,4 +4,4 @@ In v1, agents run as the operator's OS user, with shell access to every file tha
 
 What actually bounds a hostile agent in v1: GitHub branch protection on the default branch (pull requests only, continuous integration (CI) required, admins included, no force push), the cross-vendor review panel, and the human's review of diffs and evidence at the evidence gate and at merge.
 
-We considered an OS sandbox for agent tools (Seatbelt/bubblewrap, write access limited to the worktree) and a signed ledger with a Keychain key that needs Touch ID. Both are deferred. Revisit before Ark is used on regulated production tickets (non-functional requirement NFR-05) or on a shared runner; ARK-118's spikes are the starting point.
+We considered an OS sandbox for agent tools (Seatbelt/bubblewrap, write access limited to the worktree) and a signed ledger with a Keychain key that needs Touch ID. Both are deferred. Revisit before Ark is used on regulated production tickets (non-functional requirement (NFR) NFR-05) or on a shared runner; ARK-118's spikes are the starting point.

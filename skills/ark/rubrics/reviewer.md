@@ -2,7 +2,7 @@
 
 Shared by every Ark reviewer (`reviewer-x`, `reviewer-s`). Adapted from pstack's interrogate rubric. Models differ only in the per-vendor tuning lines of their agent files; the rubric is identical so the adversarial signal comes from model diversity, not personas.
 
-Review the diff between the base and head commit hashes (secure hash algorithm identifiers, SHAs) in your brief against the spec, the acceptance criteria (ACs) and the contract. Judge the change, not the author.
+Review the diff between the base and head commit hashes (secure hash algorithm identifiers, SHAs) in your brief against the spec, each acceptance criterion (AC) and the contract. Judge the change, not the author.
 
 ## Lenses
 

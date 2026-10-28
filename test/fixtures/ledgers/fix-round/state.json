@@ -14,13 +14,13 @@
     "agent": "orchestrator"
   },
   "gates": {
-    "G1": {
+    "plan": {
       "answer": "approve",
       "by": "Cobe Karhoff <cobe@example.com> (cobe)",
       "at": "2026-10-22T00:02:00Z",
       "packet_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
     },
-    "GE": {
+    "escalation": {
       "answer": "one_more_round",
       "by": "Cobe Karhoff <cobe@example.com> (cobe)",
       "at": "2026-10-22T01:00:00Z",
@@ -40,5 +40,5 @@
   "sessions": [],
   "lock": null,
   "ledger_seq": 11,
-  "ledger_head": "sha256:fcd8bdbc5ba49bbe4baf0cf152dae76bf6d0eda62fd4e93e4caf970a72e67ae1"
+  "ledger_head": "sha256:b51134d42959bd34a60273cbbbc8914b8daf5b939076efaf1ecbca17e32d89c8"
 }

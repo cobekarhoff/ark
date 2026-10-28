@@ -9,9 +9,9 @@ import { appendAskProof, spawnArk } from "./tty";
 setDefaultTimeout(120_000);
 Object.assign(process.env, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
 const GIT_IDENTITY = { GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "user.name", GIT_CONFIG_VALUE_0: "t", GIT_CONFIG_KEY_1: "user.email", GIT_CONFIG_VALUE_1: "t@t" };
-const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
+const COMMAND_LINE_FILE = join(import.meta.dir, "..", "cli", "ark.ts");
 
-const REPO_YML = JSON.stringify({
+const REPOSITORY_YAML = JSON.stringify({
   suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml" } },
 });
 const TICKET = `---
@@ -26,54 +26,54 @@ acceptance_criteria:
 ---
 Body.
 `;
-const tagged = (ac: string, body = "expect(1).toBe(1)") => `import { expect, test } from "bun:test";\ntest("${ac} fixture", () => { ${body}; });\n`;
+const tagged = (acceptanceCriterion: string, body = "expect(1).toBe(1)") => `import { expect, test } from "bun:test";\ntest("${acceptanceCriterion} fixture", () => { ${body}; });\n`;
 
 let home: string;
-let proj: string;
-let agentDir: string; // the global OMP config dir (PI_CODING_AGENT_DIR); empty unless a test writes a config.yml into it
-const env = (extra: Record<string, string> = {}) => ({ ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PI_CODING_AGENT_DIR: agentDir, ...extra });
-const ark = (...args: string[]) => {
-  const r = spawnArk(["bun", CLI, ...args], { cwd: proj, env: env() });
-  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+let projectDirectory: string;
+let agentDirectory: string; // the global OMP config dir (PI_CODING_AGENT_DIR); empty unless a test writes a config.yml into it
+const environment = (extra: Record<string, string> = {}) => ({ ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PI_CODING_AGENT_DIR: agentDirectory, ...extra });
+const ark = (...argumentsList: string[]) => {
+  const result = spawnArk(["bun", COMMAND_LINE_FILE, ...argumentsList], { cwd: projectDirectory, env: environment() });
+  return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
 };
-const git = (cwd: string, ...args: string[]) => {
-  const r = Bun.spawnSync(["git", ...args], { cwd, env: process.env });
-  if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.toString()}`);
-  return r.stdout.toString().trim();
+const git = (workingDirectory: string, ...argumentsList: string[]) => {
+  const result = Bun.spawnSync(["git", ...argumentsList], { cwd: workingDirectory, env: process.env });
+  if (result.exitCode !== 0) throw new Error(`git ${argumentsList.join(" ")}: ${result.stderr.toString()}`);
+  return result.stdout.toString().trim();
 };
-const write = (dir: string, files: Record<string, string>) => {
-  for (const [f, text] of Object.entries(files)) {
-    mkdirSync(dirname(join(dir, f)), { recursive: true });
-    writeFileSync(join(dir, f), text);
+const write = (directory: string, files: Record<string, string>) => {
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(directory, file)), { recursive: true });
+    writeFileSync(join(directory, file), text);
   }
 };
-const commitAll = (dir: string, files: Record<string, string>) => {
-  write(dir, files);
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "change");
+const commitAll = (directory: string, files: Record<string, string>) => {
+  write(directory, files);
+  git(directory, "add", "-A");
+  git(directory, "commit", "-qm", "change");
 };
-const runsDir = () => join(home, "projects", "demo", "runs");
-const run = () => readdirSync(runsDir()).filter((r) => r !== ".locks")[0];
-const runFile = (f: string) => join(runsDir(), run(), f);
-const slurp = (f: string) => readFileSync(runFile(f), "utf8");
+const runsDirectory = () => join(home, "projects", "demo", "runs");
+const run = () => readdirSync(runsDirectory()).filter((result) => result !== ".locks")[0];
+const runFile = (file: string) => join(runsDirectory(), run(), file);
+const slurp = (file: string) => readFileSync(runFile(file), "utf8");
 const lines = () => slurp("ledger.ndjson").trim().split("\n");
-const events = () => lines().map((l) => JSON.parse(l));
-const wt = () => runFile("ws/demo");
-const sha = (s: string) => `sha256:${new Bun.CryptoHasher("sha256").update(s).digest("hex")}`;
-const ok = (r: { code: number; err: string }) => expect(r.err === "" ? r.code : r.err).toBe(0);
+const events = () => lines().map((line) => JSON.parse(line));
+const worktree = () => runFile("worktrees/demo");
+const hash = (text: string) => `sha256:${new Bun.CryptoHasher("sha256").update(text).digest("hex")}`;
+const ok = (result: { code: number; err: string }) => expect(result.err === "" ? result.code : result.err).toBe(0);
 const answerGate = (gate: string, answer: string, packetHash: string) =>
   ark("gate", "answer", run(), gate, answer, "--packet", packetHash);
 
 function fixture() {
   home = mkdtempSync(join(tmpdir(), "ark-home-"));
-  agentDir = mkdtempSync(join(tmpdir(), "ark-omp-agent-"));
-  proj = join(realpathSync(mkdtempSync(join(tmpdir(), "ark-fx-"))), "demo");
-  mkdirSync(proj);
-  git(proj, "init", "-q", "-b", "main");
-  commitAll(proj, {
+  agentDirectory = mkdtempSync(join(tmpdir(), "ark-omp-agent-"));
+  projectDirectory = join(realpathSync(mkdtempSync(join(tmpdir(), "ark-fx-"))), "demo");
+  mkdirSync(projectDirectory);
+  git(projectDirectory, "init", "-q", "-b", "main");
+  commitAll(projectDirectory, {
     "ark.yml": "project: demo\n",
     ".omp/config.yml": OMP_CONFIG,
-    ".ark/repo.yml": REPO_YML,
+    ".ark/repo.yml": REPOSITORY_YAML,
     "src/base.ts": "export const base = 1;\n",
   });
   mkdirSync(join(home, "projects", "demo", "tickets"), { recursive: true });
@@ -81,29 +81,29 @@ function fixture() {
   ok(ark("run", "start", "DEMO-1"));
   ok(ark("log", "route", run(), "ticket", "fixture")); // route first: nothing else is legal before it
 }
-// start -> G1 approved -> ws create -> build.started
+// start -> plan approved -> worktree create -> build.started
 const toBuilding = () => {
   ok(ark("advance", run(), "analysis.completed"));
   writeFileSync(runFile("plan.md"), "# Plan\n");
   setKinds(runFile(""));
-  const h = ark("gate", "packet", run(), "G1").out.trim();
-  ok(answerGate("G1", "approve", h));
-  ok(ark("ws", "create", run()));
+  const packetHash = ark("gate", "packet", run(), "plan").out.trim();
+  ok(answerGate("plan", "approve", packetHash));
+  ok(ark("worktree", "create", run()));
   ok(ark("advance", run(), "build.started"));
 };
 const confirmHumanImplementerStep = () => {
-  const head = git(wt(), "rev-parse", "HEAD");
-  appendAskProof(join(home, "test-main-session.jsonl"), { action: "implementer.completed:demo", runId: run(), answer: "confirm", packetHash: sha(head), choices: ["confirm", "abort"] });
+  const head = git(worktree(), "rev-parse", "HEAD");
+  appendAskProof(join(home, "test-main-session.jsonl"), { action: "implementer.completed:demo", runId: run(), answer: "confirm", packetHash: hash(head), choices: ["confirm", "abort"] });
 };
 const step = (files: Record<string, string>) => {
-  commitAll(wt(), files);
+  commitAll(worktree(), files);
   if (stateNow().implementer === "human") confirmHumanImplementerStep();
   ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'));
 };
 // The validator's work: commit tagged tests, then record the head through `ark test --as validator` (the exit code is the test verdict, not what is under test here).
-const validate = (files: Record<string, string>, ac = "DEMO-1-AC1") => {
-  commitAll(wt(), files);
-  expect(ark("test", run(), "--acs", ac, "--as", "validator").err).toBe("");
+const validate = (files: Record<string, string>, acceptanceCriterion = "DEMO-1-AC1") => {
+  commitAll(worktree(), files);
+  expect(ark("test", run(), "--criteria", acceptanceCriterion, "--as", "validator").err).toBe("");
 };
 
 beforeEach(fixture);
@@ -111,33 +111,33 @@ beforeEach(fixture);
 describe("ARK-115-AC1", () => {
   // [event type, the command that owns it]
   const owned: [string, string][] = [
-    ["ws.created", "ws"], ["test.result", "test"], ["test.red_green", "test"], ["trace.checked", "trace-check"],
-    ["gate.packet", "gate"], ["gate.answered", "gate"], ["mr.opened", "mr"], ["run.closed", "run close"], ["test.preservation", "test"],
+    ["worktree.created", "worktree create"], ["test.result", "test"], ["test.red_green", "test"], ["trace.checked", "trace-check"],
+    ["gate.packet", "gate"], ["gate.answered", "gate"], ["merge_request.opened", "merge-request open"], ["run.closed", "run close"], ["test.preservation", "test"],
     ["findings.recorded", "findings record"], ["artifact.recorded", "artifact record"],
-    ["ac.updated", "ac update"], ["ge.opened", "gate"], ["ge.answered", "gate"], ["implementer.refused", "advance implementer.completed"],
+    ["acceptance_criteria.updated", "acceptance-criteria update"], ["implementer.refused", "advance implementer.completed"],
   ];
-  test.each(owned)("ark advance refuses %s and names 'ark %s', writing nothing", (type, cmd) => {
+  test.each(owned)("ark advance refuses %s and names 'ark %s', writing nothing", (type, command) => {
     const before = slurp("ledger.ndjson");
-    const r = ark("advance", run(), type, "--data", "{}");
-    expect(r.code).toBe(1);
-    expect(r.err).toContain(`'${type}' is written by 'ark ${cmd}', not advance`);
+    const result = ark("advance", run(), type, "--data", "{}");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain(`'${type}' is written by 'ark ${command}', not advance`);
     expect(slurp("ledger.ndjson")).toBe(before);
   });
 
-  test("escalation goes through ark gate: a GE packet from premise.md and the latest findings, answered by a human answer", () => {
+  test("escalation goes through ark gate: an escalation packet from premise.md and the latest findings, answered by a human answer", () => {
     toBuilding();
     ok(ark("advance", run(), "build.completed"));
-    expect(ark("gate", "packet", run(), "GE").err).toContain("0 of 2 rounds used"); // escalation opens only once the round budget is spent
+    expect(ark("gate", "packet", run(), "escalation").err).toContain("0 of 2 rounds used"); // escalation opens only once the round budget is spent
     spendRounds(2);
-    expect(ark("gate", "packet", run(), "GE").err).toContain("premise.md"); // the packet needs the shared premise
+    expect(ark("gate", "packet", run(), "escalation").err).toContain("premise.md"); // the packet needs the shared premise
     writeFileSync(runFile("premise.md"), "Both fixes assumed the cache is cold.\n");
-    const h = ark("gate", "packet", run(), "GE").out.trim();
-    expect(slurp(`gates/GE.${h.slice("sha256:".length)}.packet.md`)).toContain(sha("Both fixes assumed the cache is cold.\n"));
-    expect(slurp("state.json")).toContain('"state": "awaiting_ge"');
-    expect(ark("gate", "answer", run(), "GE", "guess", "--packet", h).err).toContain("unknown answer");
-    ok(answerGate("GE", "one_more_round", h));
+    const packetHash = ark("gate", "packet", run(), "escalation").out.trim();
+    expect(slurp(`gates/escalation.${packetHash.slice("sha256:".length)}.packet.md`)).toContain(hash("Both fixes assumed the cache is cold.\n"));
+    expect(slurp("state.json")).toContain('"state": "awaiting_escalation"');
+    expect(ark("gate", "answer", run(), "escalation", "guess", "--packet", packetHash).err).toContain("unknown answer");
+    ok(answerGate("escalation", "one_more_round", packetHash));
     expect(slurp("state.json")).toContain('"state": "building"');
-    expect(events().at(-1)).toMatchObject({ type: "gate.answered", data: { gate: "GE", answer: "one_more_round" } });
+    expect(events().at(-1)).toMatchObject({ type: "gate.answered", data: { gate: "escalation", answer: "one_more_round" } });
   });
 });
 
@@ -145,35 +145,35 @@ describe("ARK-115-AC2", () => {
   const advance3 = () => {
     ok(ark("advance", run(), "analysis.completed"));
     writeFileSync(runFile("plan.md"), "# Plan\n");
-    ok(ark("gate", "packet", run(), "G1"));
+    ok(ark("gate", "packet", run(), "plan"));
     ok(ark("advance", run(), "abort"));
   };
 
   test("every line records the sha256 of the previous raw line, the first that of the empty string", () => {
     advance3();
-    const ls = lines();
-    expect(ls.length).toBe(5);
-    ls.forEach((l, i) => expect(JSON.parse(l).prev).toBe(sha(i === 0 ? "" : ls[i - 1])));
+    const ledgerLines = lines();
+    expect(ledgerLines.length).toBe(5);
+    ledgerLines.forEach((line, i) => expect(JSON.parse(line).prev).toBe(hash(i === 0 ? "" : ledgerLines[i - 1])));
   });
 
-  const setLines = (ls: string[]) => writeFileSync(runFile("ledger.ndjson"), ls.length ? `${ls.join("\n")}\n` : "");
+  const setLines = (ledgerLines: string[]) => writeFileSync(runFile("ledger.ndjson"), ledgerLines.length ? `${ledgerLines.join("\n")}\n` : "");
   // A schema-valid change (the year of ts moves back one), so only the hash chain can notice it.
-  const edited = (ls: string[], i: number) => ls.map((l, j) => (j === i ? l.replace(/"ts":"(\d{4})/, (_, y) => `"ts":"${Number(y) - 1}`) : l));
+  const edited = (ledgerLines: string[], i: number) => ledgerLines.map((line, j) => (j === i ? line.replace(/"ts":"(\d{4})/, (_, year) => `"ts":"${Number(year) - 1}`) : line));
   // [what was done to a 5-line ledger, the seq the refusal names]
-  const damage: [string, (ls: string[]) => string[], number][] = [
-    ["an edited middle line", (ls) => edited(ls, 1), 2],
-    ["an edited last line", (ls) => edited(ls, 4), 5],
-    ["a removed middle line", (ls) => ls.filter((_, i) => i !== 1), 2],
-    ["a truncated tail", (ls) => ls.slice(0, 2), 3],
-    ["a reordered pair", (ls) => [ls[0], ls[2], ls[1], ls[3], ls[4]], 2],
+  const damage: [string, (ledgerLines: string[]) => string[], number][] = [
+    ["an edited middle line", (ledgerLines) => edited(ledgerLines, 1), 2],
+    ["an edited last line", (ledgerLines) => edited(ledgerLines, 4), 5],
+    ["a removed middle line", (ledgerLines) => ledgerLines.filter((_, i) => i !== 1), 2],
+    ["a truncated tail", (ledgerLines) => ledgerLines.slice(0, 2), 3],
+    ["a reordered pair", (ledgerLines) => [ledgerLines[0], ledgerLines[2], ledgerLines[1], ledgerLines[3], ledgerLines[4]], 2],
   ];
-  for (const [what, hit, seq] of damage) {
-    test(`${what} is refused by replay, naming seq ${seq}`, () => {
+  for (const [what, hit, sequence] of damage) {
+    test(`${what} is refused by replay, naming seq ${sequence}`, () => {
       advance3();
       setLines(hit(lines()));
-      const r = ark("run", "replay", run());
-      expect(r.code).toBe(1);
-      expect(r.err).toContain(`seq ${seq}`);
+      const result = ark("run", "replay", run());
+      expect(result.code).toBe(1);
+      expect(result.err).toContain(`seq ${sequence}`);
     });
   }
 
@@ -182,32 +182,32 @@ describe("ARK-115-AC2", () => {
     ["run replay --check", () => ark("run", "replay", run(), "--check")],
     ["run start", () => ark("run", "start", "DEMO-1")],
     ["trace-check", () => ark("trace-check", run())],
-    ["gate packet", () => ark("gate", "packet", run(), "G1")],
+    ["gate packet", () => ark("gate", "packet", run(), "plan")],
     ["log route", () => ark("log", "route", run(), "ticket", "why")],
-  ])("%s refuses a broken chain and writes nothing", (_c, cmd) => {
+  ])("%s refuses a broken chain and writes nothing", (_c, command) => {
     advance3();
     setLines(edited(lines(), 1));
     const before = slurp("ledger.ndjson");
-    const r = cmd();
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("seq 2");
+    const result = command();
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("seq 2");
     expect(slurp("ledger.ndjson")).toBe(before);
   });
 
   test("artifact record reads the ledger first: a broken chain refuses it and keeps no artifact", () => {
     advance3();
     setLines(edited(lines(), 1));
-    const file = join(dirname(proj), "impl.json");
+    const file = join(dirname(projectDirectory), "impl.json");
     writeFileSync(file, JSON.stringify({ repo: "demo", branch: "ark/DEMO-1-x", head_sha: "abc123", ac_addressed: ["DEMO-1-AC1"], status: "done" }));
-    const r = ark("artifact", "record", run(), "implementer", file);
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("seq 2");
+    const result = ark("artifact", "record", run(), "implementer", file);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("seq 2");
     expect(existsSync(runFile("artifacts/implementer"))).toBe(false);
   });
 });
 
-// Every AC manual and signed, so trace-check passes without a test run; returns the G2 packet hash. Needs building or judging state.
-const toG2Packet = () => {
+// Every AC manual and signed, so trace-check passes without a test run; returns the evidence packet hash. Needs building or judging state.
+const toEvidencePacket = () => {
   if (JSON.parse(slurp("state.json")).state === "building") ok(ark("advance", run(), "build.completed"));
   writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: t\n  level: manual\n  kind: new\n- id: DEMO-1-AC2\n  text: t\n  level: manual\n  kind: new\n");
   mkdirSync(runFile("manual"), { recursive: true });
@@ -215,39 +215,39 @@ const toG2Packet = () => {
   mkdirSync(runFile("artifacts"), { recursive: true });
   writeFileSync(runFile("artifacts/junit.xml"), "<testsuite/>");
   ok(ark("trace-check", run()));
-  return ark("gate", "packet", run(), "G2").out.trim();
+  return ark("gate", "packet", run(), "evidence").out.trim();
 };
 
 describe("ARK-115-AC3", () => {
-  const finding = (n: number) => [{ id: `F${n}`, reviewer: "r", model: "anthropic/claude-opus-5-5", priority: "P2", file: "src/a.ts", line: 1, claim: "c", bucket: "consider", reason: "r" }];
+  const finding = (number: number) => [{ id: `F${number}`, reviewer: "r", model: "anthropic/claude-opus-5-5", priority: "P2", file: "src/a.ts", line: 1, claim: "c", bucket: "consider", reason: "r" }];
 
   test("40 parallel advances leave a replayable chain with unique seq values", async () => {
     toBuilding();
-    const procs = Array.from({ length: 40 }, () => Bun.spawn(["bun", CLI, "advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'], { cwd: proj, env: env(), stderr: "pipe", stdout: "pipe" }));
-    const results = await Promise.all(procs.map(async (p) => ({ code: await p.exited, err: await new Response(p.stderr).text() })));
-    expect(results.filter((r) => r.code !== 0)).toEqual([]);
+    const processes = Array.from({ length: 40 }, () => Bun.spawn(["bun", COMMAND_LINE_FILE, "advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'], { cwd: projectDirectory, env: environment(), stderr: "pipe", stdout: "pipe" }));
+    const results = await Promise.all(processes.map(async (commandResult) => ({ code: await commandResult.exited, err: await new Response(commandResult.stderr).text() })));
+    expect(results.filter((result) => result.code !== 0)).toEqual([]);
 
-    const seqs = events().map((e) => e.seq);
-    expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => i + 1));
-    expect(events().filter((e) => e.type === "implementer.completed").length).toBe(40);
+    const sequences = events().map((event) => event.seq);
+    expect(sequences).toEqual(Array.from({ length: sequences.length }, (_, i) => i + 1));
+    expect(events().filter((event) => event.type === "implementer.completed").length).toBe(40);
     ok(ark("run", "replay", run(), "--check"));
   });
 
   test("40 parallel findings records leave a replayable chain with unique seq values and 40 distinct artifacts", async () => {
     toBuilding();
     ok(ark("advance", run(), "build.completed"));
-    const files = Array.from({ length: 40 }, (_, n) => {
-      const f = join(dirname(proj), `f${n}.json`);
-      writeFileSync(f, JSON.stringify(finding(n)));
-      return f;
+    const files = Array.from({ length: 40 }, (_, number) => {
+      const file = join(dirname(projectDirectory), `f${number}.json`);
+      writeFileSync(file, JSON.stringify(finding(number)));
+      return file;
     });
-    const procs = files.map((f) => Bun.spawn(["bun", CLI, "findings", "record", run(), f], { cwd: proj, env: env(), stderr: "pipe", stdout: "pipe" }));
-    const results = await Promise.all(procs.map(async (p) => ({ code: await p.exited, err: await new Response(p.stderr).text() })));
-    expect(results.filter((r) => r.code !== 0)).toEqual([]);
+    const processes = files.map((file) => Bun.spawn(["bun", COMMAND_LINE_FILE, "findings", "record", run(), file], { cwd: projectDirectory, env: environment(), stderr: "pipe", stdout: "pipe" }));
+    const results = await Promise.all(processes.map(async (commandResult) => ({ code: await commandResult.exited, err: await new Response(commandResult.stderr).text() })));
+    expect(results.filter((result) => result.code !== 0)).toEqual([]);
 
-    const seqs = events().map((e) => e.seq);
-    expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, i) => i + 1));
-    expect(events().filter((e) => e.type === "findings.recorded").length).toBe(40);
+    const sequences = events().map((event) => event.seq);
+    expect(sequences).toEqual(Array.from({ length: sequences.length }, (_, i) => i + 1));
+    expect(events().filter((event) => event.type === "findings.recorded").length).toBe(40);
     expect(readdirSync(runFile("artifacts/findings")).length).toBe(40);
     ok(ark("run", "replay", run(), "--check"));
     expect(existsSync(runFile("ledger.lock"))).toBe(false);
@@ -256,13 +256,13 @@ describe("ARK-115-AC3", () => {
   test("a live lock holds a writer until it is released; a stale lock does not", async () => {
     const lock = runFile("ledger.lock");
     writeFileSync(lock, "held");
-    const t0 = Date.now();
-    const p = Bun.spawn(["bun", CLI, "advance", run(), "analysis.completed"], { cwd: proj, env: env(), stderr: "pipe" });
+    const startedAt = Date.now();
+    const commandResult = Bun.spawn(["bun", COMMAND_LINE_FILE, "advance", run(), "analysis.completed"], { cwd: projectDirectory, env: environment(), stderr: "pipe" });
     await Bun.sleep(1500); // real clock on purpose: the lock wait is a real-process, real-filesystem behavior no fake timer reaches
     expect(events().length).toBe(2); // still waiting
     rmSync(lock);
-    expect(await p.exited).toBe(0);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(1500);
+    expect(await commandResult.exited).toBe(0);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1500);
     expect(events().length).toBe(3);
 
     writeFileSync(lock, "crashed");
@@ -281,9 +281,9 @@ describe("ARK-115-AC3", () => {
     const mine = lockOf(process.pid); // this test process is alive
     writeFileSync(lock, mine);
     aged(lock);
-    const r = Bun.spawnSync(["bun", CLI, "advance", run(), "analysis.completed"], { cwd: proj, env: env({ ARK_LOCK_WAIT_MS: "1500" }) });
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr.toString()).toContain(`pid ${process.pid}`);
+    const result = Bun.spawnSync(["bun", COMMAND_LINE_FILE, "advance", run(), "analysis.completed"], { cwd: projectDirectory, env: environment({ ARK_LOCK_WAIT_MS: "1500" }) });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(`pid ${process.pid}`);
     expect(readFileSync(lock, "utf8")).toBe(mine); // not rewritten, not deleted
     expect(events().length).toBe(2);
   });
@@ -293,10 +293,10 @@ describe("ARK-115-AC3", () => {
     await dead.exited;
     const lock = runFile("ledger.lock");
     writeFileSync(lock, lockOf(dead.pid));
-    const t0 = Date.now();
-    const r = Bun.spawnSync(["bun", CLI, "advance", run(), "analysis.completed"], { cwd: proj, env: env({ ARK_LOCK_WAIT_MS: "3000" }) });
-    expect(r.stderr.toString()).toBe("");
-    expect(Date.now() - t0).toBeLessThan(10_000); // taken over at once, not after an age timeout
+    const startedAt = Date.now();
+    const result = Bun.spawnSync(["bun", COMMAND_LINE_FILE, "advance", run(), "analysis.completed"], { cwd: projectDirectory, env: environment({ ARK_LOCK_WAIT_MS: "3000" }) });
+    expect(result.stderr.toString()).toBe("");
+    expect(Date.now() - startedAt).toBeLessThan(10_000); // taken over at once, not after an age timeout
     expect(events().length).toBe(3);
     expect(existsSync(lock)).toBe(false);
   });
@@ -304,19 +304,19 @@ describe("ARK-115-AC3", () => {
 
 describe("ARK-115-AC4", () => {
   beforeEach(toBuilding);
-  const refused = (r: { code: number; err: string }, ...named: string[]) => {
-    expect(r.code).toBe(1);
-    for (const n of named) expect(r.err).toContain(n);
+  const refused = (result: { code: number; err: string }, ...named: string[]) => {
+    expect(result.code).toBe(1);
+    for (const number of named) expect(result.err).toContain(number);
   };
 
   test("a worktree commit no implementer step recorded blocks build.completed, naming the file", () => {
-    commitAll(wt(), { "src/sneaky.ts": "export const s = 1;\n" });
+    commitAll(worktree(), { "src/sneaky.ts": "export const s = 1;\n" });
     refused(ark("advance", run(), "build.completed"), "src/sneaky.ts");
     expect(slurp("state.json")).toContain('"state": "building"');
   });
 
   test("a dirty file blocks build.completed, naming it", () => {
-    write(wt(), { "scratch.txt": "x" });
+    write(worktree(), { "scratch.txt": "x" });
     refused(ark("advance", run(), "build.completed"), "scratch.txt");
   });
 
@@ -326,97 +326,97 @@ describe("ARK-115-AC4", () => {
     ok(ark("advance", run(), "build.completed"));
   });
 
-  test("an unrecorded commit after build.completed blocks trace-check and the G2 packet, naming the file", () => {
+  test("an unrecorded commit after build.completed blocks trace-check and the evidence packet, naming the file", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
     ok(ark("advance", run(), "build.completed"));
-    commitAll(wt(), { "src/late.ts": "export const l = 1;\n" });
+    commitAll(worktree(), { "src/late.ts": "export const l = 1;\n" });
     refused(ark("trace-check", run()), "src/late.ts");
-    refused(ark("gate", "packet", run(), "G2"), "src/late.ts");
+    refused(ark("gate", "packet", run(), "evidence"), "src/late.ts");
   });
 
-  test("a G2 approval or send-back refuses an unrecorded commit; an abort vouches for nothing and goes through", () => {
+  test("a evidence approval or send-back refuses an unrecorded commit; an abort vouches for nothing and goes through", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
-    const h = toG2Packet();
-    commitAll(wt(), { "src/late.ts": "export const l = 1;\n" });
-    refused(ark("gate", "answer", run(), "G2", "approve", "--packet", h), "src/late.ts");
-    refused(ark("gate", "answer", run(), "G2", "send_back", "--packet", h), "src/late.ts");
-    expect(slurp("state.json")).toContain('"state": "awaiting_g2"');
-    ok(ark("gate", "answer", run(), "G2", "abort", "--packet", h)); // an abort vouches for nothing
+    const packetHash = toEvidencePacket();
+    commitAll(worktree(), { "src/late.ts": "export const l = 1;\n" });
+    refused(ark("gate", "answer", run(), "evidence", "approve", "--packet", packetHash), "src/late.ts");
+    refused(ark("gate", "answer", run(), "evidence", "send_back", "--packet", packetHash), "src/late.ts");
+    expect(slurp("state.json")).toContain('"state": "awaiting_evidence"');
+    ok(ark("gate", "answer", run(), "evidence", "abort", "--packet", packetHash)); // an abort vouches for nothing
   });
 
   test("fix_round.started refuses an unrecorded commit", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
     ok(ark("advance", run(), "build.completed"));
-    commitAll(wt(), { "src/late.ts": "export const l = 1;\n" });
+    commitAll(worktree(), { "src/late.ts": "export const l = 1;\n" });
     refused(ark("advance", run(), "fix_round.started"), "src/late.ts");
   });
 
   test("an unrecorded dirty file blocks trace-check, naming it", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
     ok(ark("advance", run(), "build.completed"));
-    write(wt(), { "src/dirty.ts": "export const d = 1;\n" });
+    write(worktree(), { "src/dirty.ts": "export const d = 1;\n" });
     refused(ark("trace-check", run()), "src/dirty.ts");
   });
 
   test("an AC-tagged test changed after the newest recorded head blocks build.completed and fix_round.started, naming it", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1)") }); // no step, no ark test: nobody vouches for it
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1)") }); // no step, no ark test: nobody vouches for it
     refused(ark("advance", run(), "build.completed"), "test/f.test.ts");
     expect(slurp("state.json")).toContain('"state": "building"');
 
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe(""); // the validator step records the head, and with it the commit
+    expect(ark("test", run(), "--criteria", "DEMO-1-AC1", "--as", "validator").err).toBe(""); // the validator step records the head, and with it the commit
     ok(ark("advance", run(), "build.completed"));
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") }); // an edit after the newest recorded head
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") }); // an edit after the newest recorded head
     refused(ark("advance", run(), "fix_round.started"), "test/f.test.ts");
   });
 
   test("an ark test run records a head but does not vouch for product code committed before it", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
     validate({ "test/f.test.ts": tagged("DEMO-1-AC1") });
-    commitAll(wt(), { "src/sneaky.ts": "export const s = 1;\n" }); // no implementer step
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1").err).toBe(""); // the validator runs the tests on that head
+    commitAll(worktree(), { "src/sneaky.ts": "export const s = 1;\n" }); // no implementer step
+    expect(ark("test", run(), "--criteria", "DEMO-1-AC1").err).toBe(""); // the validator runs the tests on that head
     refused(ark("advance", run(), "build.completed"), "src/sneaky.ts");
     refused(ark("trace-check", run()), "src/sneaky.ts");
   });
 
   test("an ark test run does not hide an unrecorded tagged-test edit from the next implementer step", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1)") }); // an edit nobody recorded
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1").err).toBe("");
-    commitAll(wt(), { "src/b.ts": "export const b = 1;\n" });
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1)") }); // an edit nobody recorded
+    expect(ark("test", run(), "--criteria", "DEMO-1-AC1").err).toBe("");
+    commitAll(worktree(), { "src/b.ts": "export const b = 1;\n" });
     refused(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'), "test/f.test.ts");
   });
 
   test("a reset that drops the validator's tests is refused, not read as a clean step", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
-    const implemented = git(wt(), "rev-parse", "HEAD");
+    const implemented = git(worktree(), "rev-parse", "HEAD");
     validate({ "test/f.test.ts": tagged("DEMO-1-AC1") });
     ok(ark("advance", run(), "build.completed"));
     ok(ark("advance", run(), "fix_round.started"));
-    git(wt(), "reset", "-q", "--hard", implemented);
+    git(worktree(), "reset", "-q", "--hard", implemented);
     refused(ark("advance", run(), "build.completed"), "not a descendant");
   });
 
   test("a tracked file hidden with assume-unchanged or skip-worktree still counts as dirty", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
-    write(wt(), { "src/a.ts": "export const a = 999;\n" });
-    git(wt(), "update-index", "--assume-unchanged", "src/a.ts");
-    expect(git(wt(), "status", "--porcelain")).toBe(""); // git itself reports clean
+    write(worktree(), { "src/a.ts": "export const a = 999;\n" });
+    git(worktree(), "update-index", "--assume-unchanged", "src/a.ts");
+    expect(git(worktree(), "status", "--porcelain")).toBe(""); // git itself reports clean
     refused(ark("advance", run(), "build.completed"), "src/a.ts");
-    git(wt(), "update-index", "--no-assume-unchanged", "src/a.ts");
-    git(wt(), "update-index", "--skip-worktree", "src/a.ts");
+    git(worktree(), "update-index", "--no-assume-unchanged", "src/a.ts");
+    git(worktree(), "update-index", "--skip-worktree", "src/a.ts");
     refused(ark("advance", run(), "build.completed"), "src/a.ts");
   });
 
   test("a replace ref cannot make an unrecorded commit look like the recorded SHA", () => {
     step({ "src/a.ts": "export const a = 2;\n" });
-    const recorded = git(wt(), "rev-parse", "HEAD");
-    commitAll(wt(), { "src/a.ts": "export const a = 999;\n" });
-    const unrecorded = git(wt(), "rev-parse", "HEAD");
-    git(wt(), "reset", "-q", "--hard", recorded);
-    git(wt(), "replace", recorded, unrecorded);
-    git(wt(), "reset", "-q", "--hard", recorded); // HEAD names the recorded SHA, the files are the unrecorded commit's
-    expect(readFileSync(join(wt(), "src/a.ts"), "utf8")).toContain("999");
+    const recorded = git(worktree(), "rev-parse", "HEAD");
+    commitAll(worktree(), { "src/a.ts": "export const a = 999;\n" });
+    const unrecorded = git(worktree(), "rev-parse", "HEAD");
+    git(worktree(), "reset", "-q", "--hard", recorded);
+    git(worktree(), "replace", recorded, unrecorded);
+    git(worktree(), "reset", "-q", "--hard", recorded); // HEAD names the recorded SHA, the files are the unrecorded commit's
+    expect(readFileSync(join(worktree(), "src/a.ts"), "utf8")).toContain("999");
     refused(ark("advance", run(), "build.completed"), "src/a.ts");
   });
 });
@@ -431,17 +431,17 @@ describe("ARK-115-AC5", () => {
     ok(ark("advance", run(), "fix_round.started"));
     step({ "src/f.ts": "export const f = 2;\n" });
 
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") });
-    const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("test/f.test.ts");
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") });
+    const result = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("test/f.test.ts");
   });
 
-  test("a G2 send-back starts the next step the same way", () => {
+  test("a evidence send-back starts the next step the same way", () => {
     step({ "src/f.ts": "export const f = 1;\n" });
     validate({ "test/f.test.ts": tagged("DEMO-1-AC1") });
-    const h = toG2Packet();
-    ok(ark("gate", "answer", run(), "G2", "send_back", "--packet", h));
+    const packetHash = toEvidencePacket();
+    ok(ark("gate", "answer", run(), "evidence", "send_back", "--packet", packetHash));
     step({ "src/f.ts": "export const f = 2;\n" });
   });
 
@@ -450,19 +450,19 @@ describe("ARK-115-AC5", () => {
     validate({ "test/f.test.ts": tagged("DEMO-1-AC1") });
     ok(ark("advance", run(), "build.completed"));
     ok(ark("advance", run(), "fix_round.started"));
-    mkdirSync(join(wt(), "notes"));
-    git(wt(), "mv", "test/f.test.ts", "notes/f.txt");
-    git(wt(), "commit", "-qm", "move");
-    const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("test/f.test.ts");
+    mkdirSync(join(worktree(), "notes"));
+    git(worktree(), "mv", "test/f.test.ts", "notes/f.txt");
+    git(worktree(), "commit", "-qm", "move");
+    const result = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("test/f.test.ts");
   });
 
   test("a tagged test whose name git would quote is still caught", () => {
-    commitAll(wt(), { "test/über.test.ts": tagged("DEMO-1-AC2") });
-    const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("test/über.test.ts");
+    commitAll(worktree(), { "test/über.test.ts": tagged("DEMO-1-AC2") });
+    const result = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("test/über.test.ts");
   });
 });
 
@@ -471,13 +471,13 @@ describe("ARK-115-AC5 forged step start", () => {
     ok(ark("advance", run(), "analysis.completed"));
     writeFileSync(runFile("plan.md"), "# Plan\n");
     setKinds(runFile(""));
-    ok(ark("gate", "answer", run(), "G1", "approve", "--packet", ark("gate", "packet", run(), "G1").out.trim()));
-    ok(ark("ws", "create", run()));
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") }); // a tagged test the step will have to answer for
-    const forged = JSON.stringify({ heads: { demo: git(wt(), "rev-parse", "HEAD") } });
-    const r = ark("advance", run(), "build.started", "--data", forged);
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("heads");
+    ok(ark("gate", "answer", run(), "plan", "approve", "--packet", ark("gate", "packet", run(), "plan").out.trim()));
+    ok(ark("worktree", "create", run()));
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(2)") }); // a tagged test the step will have to answer for
+    const forged = JSON.stringify({ heads: { demo: git(worktree(), "rev-parse", "HEAD") } });
+    const result = ark("advance", run(), "build.started", "--data", forged);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("heads");
     ok(ark("advance", run(), "build.started"));
     const done = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
     expect(done.code).toBe(1);
@@ -488,64 +488,64 @@ describe("ARK-115-AC5 forged step start", () => {
 describe("ARK-115-AC8", () => {
   const packetFiles = () => readdirSync(runFile("gates")).sort();
 
-  test("a G1 packet embeds each source's sha256, is stored by hash, and an answer after a source changed is refused", () => {
+  test("a plan packet embeds each source's sha256, is stored by hash, and an answer after a source changed is refused", () => {
     ok(ark("advance", run(), "analysis.completed"));
     writeFileSync(runFile("plan.md"), "# Plan v1\n");
     setKinds(runFile(""));
-    const h = ark("gate", "packet", run(), "G1").out.trim();
-    const body = slurp(`gates/G1.${h.slice("sha256:".length)}.packet.md`);
-    expect(body).toContain(sha("# Plan v1\n"));
-    expect(body).toContain(sha(slurp("ac.yml")));
-    expect(sha(body)).toBe(h);
+    const packetHash = ark("gate", "packet", run(), "plan").out.trim();
+    const body = slurp(`gates/plan.${packetHash.slice("sha256:".length)}.packet.md`);
+    expect(body).toContain(hash("# Plan v1\n"));
+    expect(body).toContain(hash(slurp("ac.yml")));
+    expect(hash(body)).toBe(packetHash);
 
     writeFileSync(runFile("plan.md"), "# Plan v2\n");
-    const r = ark("gate", "answer", run(), "G1", "approve", "--packet", h);
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("plan.md");
-    expect(slurp("state.json")).toContain('"state": "awaiting_g1"');
+    const result = ark("gate", "answer", run(), "plan", "approve", "--packet", packetHash);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("plan.md");
+    expect(slurp("state.json")).toContain('"state": "awaiting_plan"');
 
-    ok(ark("gate", "answer", run(), "G1", "change", "--packet", h)); // the way out of a changed source: answer, then rebuild
-    const h2 = ark("gate", "packet", run(), "G1").out.trim(); // rebuilding keeps the first packet on disk
-    expect(h2).not.toBe(h);
-    expect(packetFiles()).toEqual([`G1.${h.slice(7)}.packet.md`, `G1.${h2.slice(7)}.packet.md`].sort());
-    ok(ark("gate", "answer", run(), "G1", "approve", "--packet", h2));
+    ok(ark("gate", "answer", run(), "plan", "change", "--packet", packetHash)); // the way out of a changed source: answer, then rebuild
+    const updatedPacketHash = ark("gate", "packet", run(), "plan").out.trim(); // rebuilding keeps the first packet on disk
+    expect(updatedPacketHash).not.toBe(packetHash);
+    expect(packetFiles()).toEqual([`plan.${packetHash.slice(7)}.packet.md`, `plan.${updatedPacketHash.slice(7)}.packet.md`].sort());
+    ok(ark("gate", "answer", run(), "plan", "approve", "--packet", updatedPacketHash));
   });
 
-  test("a G2 packet covers the evidence files: changing one after the packet refuses the answer", () => {
+  test("a evidence packet covers the evidence files: changing one after the packet refuses the answer", () => {
     toBuilding();
-    const h = toG2Packet();
-    expect(slurp(`gates/G2.${h.slice(7)}.packet.md`)).toContain(sha("<testsuite/>"));
+    const packetHash = toEvidencePacket();
+    expect(slurp(`gates/evidence.${packetHash.slice(7)}.packet.md`)).toContain(hash("<testsuite/>"));
 
     writeFileSync(runFile("artifacts/junit.xml"), "<testsuite failures='1'/>");
-    const r = ark("gate", "answer", run(), "G2", "approve", "--packet", h);
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("artifacts/junit.xml");
+    const result = ark("gate", "answer", run(), "evidence", "approve", "--packet", packetHash);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("artifacts/junit.xml");
   });
 
-  test("a G2 packet binds ac.yml and the signed manual records: changing either after the packet refuses the approval", () => {
+  test("a evidence packet binds ac.yml and the signed manual records: changing either after the packet refuses the approval", () => {
     toBuilding();
-    const h = toG2Packet();
-    const body = slurp(`gates/G2.${h.slice(7)}.packet.md`);
-    expect(body).toContain(`manual/DEMO-1-AC1.md (${sha("signed-by: P\nat: 2026-10-26\n")})`);
-    expect(body).toContain(`ac.yml (${sha(slurp("ac.yml"))})`);
+    const packetHash = toEvidencePacket();
+    const body = slurp(`gates/evidence.${packetHash.slice(7)}.packet.md`);
+    expect(body).toContain(`manual/DEMO-1-AC1.md (${hash("signed-by: P\nat: 2026-10-26\n")})`);
+    expect(body).toContain(`ac.yml (${hash(slurp("ac.yml"))})`);
 
     writeFileSync(runFile("manual/DEMO-1-AC1.md"), "unsigned, withdrawn\n");
-    const withdrawn = ark("gate", "answer", run(), "G2", "approve", "--packet", h);
+    const withdrawn = ark("gate", "answer", run(), "evidence", "approve", "--packet", packetHash);
     expect(withdrawn.code).toBe(1);
     expect(withdrawn.err).toContain("manual/DEMO-1-AC1.md");
     writeFileSync(runFile("manual/DEMO-1-AC1.md"), "signed-by: P\nat: 2026-10-26\n");
 
     writeFileSync(runFile("ac.yml"), "[]\n");
-    const emptied = ark("gate", "answer", run(), "G2", "approve", "--packet", h);
+    const emptied = ark("gate", "answer", run(), "evidence", "approve", "--packet", packetHash);
     expect(emptied.code).toBe(1);
     expect(emptied.err).toContain("ac.yml");
-    expect(slurp("state.json")).toContain('"state": "awaiting_g2"');
+    expect(slurp("state.json")).toContain('"state": "awaiting_evidence"');
   });
 });
 
 describe("ARK-115-AC9", () => {
   const config = (roles: Record<string, string>, extra = "") =>
-    writeFileSync(join(proj, ".omp", "config.yml"), `modelRoles:\n${Object.entries(roles).map(([k, v]) => `  ${k}: ${JSON.stringify(v)}\n`).join("")}${extra}`);
+    writeFileSync(join(projectDirectory, ".omp", "config.yml"), `modelRoles:\n${Object.entries(roles).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}\n`).join("")}${extra}`);
   const CODEX = "openai-codex/gpt-6.1-sol";
   const base = { implement: CODEX, validate: "anthropic/claude-sonnet-5-5:high", "review-x": "anthropic/claude-opus-5-5:high", "review-s": CODEX };
 
@@ -559,11 +559,11 @@ describe("ARK-115-AC9", () => {
     ["a chain reached through another chain", base, `retry:\n  fallbackChains:\n    validate: [anthropic/claude-haiku-5]\n    anthropic/claude-haiku-5: [${CODEX}]\n`, `validate (${CODEX}) shares`],
     ["an implementer chain that lands on the validator's provider", base, `retry:\n  fallbackChains:\n    implement: [anthropic/claude-sonnet-5-5]\n`, "validate (anthropic/claude-sonnet-5-5) shares"],
     ["a review-s chain that leaves the implementer's provider", { ...base, "review-s": "openai-codex/gpt-6-sol" }, `retry:\n  fallbackChains:\n    review-s: [anthropic/claude-opus-5-5]\n`, "review-s (anthropic/claude-opus-5-5) is not on"],
-  ])("preflight refuses %s", (_n, roles, extra, msg) => {
+  ])("preflight refuses %s", (_n, roles, extra, message) => {
     config(roles, extra);
-    const p = ark("preflight");
-    expect(p.code).toBe(1);
-    expect(p.err).toContain(msg);
+    const commandResult = ark("preflight");
+    expect(commandResult.code).toBe(1);
+    expect(commandResult.err).toContain(message);
     expect(ark("run", "start", "DEMO-1").code).toBe(1); // run start preflights before it resumes
   });
 
@@ -576,15 +576,15 @@ describe("ARK-115-AC9", () => {
   });
 
   // The effective OMP config is the global config.yml merged with the project's (omp://settings.md, "Precedence"): preflight must read what OMP will run.
-  const globalConfig = (yml: string) => writeFileSync(join(agentDir, "config.yml"), yml);
+  const globalConfig = (yml: string) => writeFileSync(join(agentDirectory, "config.yml"), yml);
 
   test("a fallback chain that only the global OMP config defines is checked", () => {
     globalConfig(`retry:\n  fallbackChains:\n    anthropic/claude-sonnet-5-5: [${CODEX}]\n`);
     config(base);
-    const p = ark("preflight");
-    expect(p.code).toBe(1);
-    expect(p.err).toContain(`validate (${CODEX}) shares`);
-    expect(p.err).toContain(`via retry.fallbackChains.anthropic/claude-sonnet-5-5 (global config ${join(agentDir, "config.yml")})`);
+    const commandResult = ark("preflight");
+    expect(commandResult.code).toBe(1);
+    expect(commandResult.err).toContain(`validate (${CODEX}) shares`);
+    expect(commandResult.err).toContain(`via retry.fallbackChains.anthropic/claude-sonnet-5-5 (global config ${join(agentDirectory, "config.yml")})`);
   });
 
   test("a chain the project defines is named as the project's", () => {
@@ -600,9 +600,9 @@ describe("ARK-115-AC9", () => {
 
   test("a wildcard fallback entry keeps the failing model's id, and that exact model's own chain is followed (omp://settings.md:587-589)", () => {
     config({ ...base, validate: "google-antigravity/gemini-3-pro" }, `retry:\n  fallbackChains:\n    google-antigravity/gemini-3-pro: ["google/*"]\n    google/gemini-3-pro: [${CODEX}]\n`);
-    const p = ark("preflight");
-    expect(p.code).toBe(1);
-    expect(p.err).toContain(`validate (${CODEX}) shares`);
+    const commandResult = ark("preflight");
+    expect(commandResult.code).toBe(1);
+    expect(commandResult.err).toContain(`validate (${CODEX}) shares`);
   });
 
   test("an exact-model chain beats the role chain, so an exact empty chain means no fallback (omp://settings.md:579,587)", () => {
@@ -612,9 +612,9 @@ describe("ARK-115-AC9", () => {
 
   test("refusals say vendor, the glossary's word, not provider", () => {
     config({ ...base, validate: CODEX });
-    const p = ark("preflight");
-    expect(p.err).toContain("vendor 'openai-codex'");
-    expect(p.err).not.toContain("provider");
+    const commandResult = ark("preflight");
+    expect(commandResult.err).toContain("vendor 'openai-codex'");
+    expect(commandResult.err).not.toContain("provider");
   });
 
   // The three selector shapes OMP resolves that a text comparison missed (panel re-review of PR #12).
@@ -625,17 +625,17 @@ describe("ARK-115-AC9", () => {
     ["a role that shares the implementer's model owns the implementer's fallback (OMP matches role chains by assigned model)", base, `retry:\n  fallbackChains:\n    review-s: [anthropic/claude-opus-5-5]\n`],
   ])("preflight refuses: %s", (_n, roles, extra) => {
     config(roles, extra);
-    const p = ark("preflight");
-    expect(p.code).toBe(1);
-    expect(p.err).toMatch(/shares the implementer's vendor/);
+    const commandResult = ark("preflight");
+    expect(commandResult.code).toBe(1);
+    expect(commandResult.err).toMatch(/shares the implementer's vendor/);
   });
 
   // OMP runs a role against the models it has credentials for, not the whole catalog: `gpt-5` is openai/gpt-5 with no Copilot login and
   // github-copilot/gpt-5 with one (an isolated agent dir, credentials from the environment, no network).
   const copilotLogin = { ANTHROPIC_API_KEY: "x", COPILOT_GITHUB_TOKEN: "y" };
   const preflightWith = (login: Record<string, string>) => {
-    const r = Bun.spawnSync(["bun", CLI, "preflight"], { cwd: proj, env: env(login) });
-    return { code: r.exitCode, err: r.stderr.toString(), out: r.stdout.toString() };
+    const result = Bun.spawnSync(["bun", COMMAND_LINE_FILE, "preflight"], { cwd: projectDirectory, env: environment(login) });
+    return { code: result.exitCode, err: result.stderr.toString(), out: result.stdout.toString() };
   };
   const onCopilot = { implement: "github-copilot/gpt-5", validate: "anthropic/claude-sonnet-5-5", "review-x": "anthropic/claude-opus-5-5", "review-s": "github-copilot/gpt-5" };
 
@@ -644,16 +644,16 @@ describe("ARK-115-AC9", () => {
     ["a bare selector in a comma list", "anthropic/claude-sonnet-5-5,gpt-5"],
   ])("%s runs on the available provider and shares the implementer's vendor with it", (_n, validate) => {
     config({ ...onCopilot, validate });
-    const p = preflightWith(copilotLogin);
-    expect(p.code).toBe(1);
-    expect(p.err).toContain("validate (github-copilot/gpt-5) shares the implementer's vendor 'github-copilot'");
+    const commandResult = preflightWith(copilotLogin);
+    expect(commandResult.code).toBe(1);
+    expect(commandResult.err).toContain("validate (github-copilot/gpt-5) shares the implementer's vendor 'github-copilot'");
   });
 
   test("without a Copilot login the same bare selector is openai/gpt-5, and preflight accepts", () => {
     config({ ...onCopilot, validate: "gpt-5" });
-    const p = preflightWith({ ANTHROPIC_API_KEY: "x" });
-    expect(p.err).toBe("");
-    expect(p.out).toContain("validate: openai/gpt-5");
+    const commandResult = preflightWith({ ANTHROPIC_API_KEY: "x" });
+    expect(commandResult.err).toBe("");
+    expect(commandResult.out).toContain("validate: openai/gpt-5");
   });
 
   test.each([
@@ -661,14 +661,14 @@ describe("ARK-115-AC9", () => {
     ["validate", { ...base, validate: "anthropic/claude-sonnet-5-5,zzz-no-such-model" }, ""],
   ])("a %s selector OMP cannot resolve is refused by name, not skipped", (role, roles, extra) => {
     config(roles, extra);
-    const p = ark("preflight");
-    expect(p.code).toBe(1);
-    expect(p.err).toContain(`${role} names no model OMP knows: 'zzz-no-such-model'`);
+    const commandResult = ark("preflight");
+    expect(commandResult.code).toBe(1);
+    expect(commandResult.err).toContain(`${role} names no model Oh My Pi (OMP) knows: 'zzz-no-such-model'`);
   });
 
   // A subagent whose role has no working credential runs on the parent session's model (OMP's resolveModelOverrideWithAuthFallback), whatever retry.modelFallback says.
   // Ark's parent is the orchestrator, i.e. the `default` role. Isolated repro: anthropic has a key command that yields nothing, default is on the implementer's vendor.
-  const noAnthropicKey = () => writeFileSync(join(agentDir, "models.yml"), `providers:\n  anthropic:\n    apiKey: "!true"\n`);
+  const noAnthropicKey = () => writeFileSync(join(agentDirectory, "models.yml"), `providers:\n  anthropic:\n    apiKey: "!true"\n`);
 
   test.each([
     ["validate", { ...base, default: CODEX }],
@@ -676,16 +676,16 @@ describe("ARK-115-AC9", () => {
   ])("a default role on the implementer's vendor is reachable by %s through the parent fallback, and refused", (role, roles) => {
     noAnthropicKey();
     config(roles);
-    const p = ark("preflight");
-    expect(p.code).toBe(1);
-    expect(p.err).toContain(`${role} (${CODEX}) shares the implementer's vendor 'openai-codex' via the parent session model (the default role)`);
+    const commandResult = ark("preflight");
+    expect(commandResult.code).toBe(1);
+    expect(commandResult.err).toContain(`${role} (${CODEX}) shares the implementer's vendor 'openai-codex' via the parent session model (the default role)`);
   });
 
   test("the default role's own fallback chain is part of what the parent fallback reaches", () => {
     config({ ...base, default: "anthropic/claude-opus-5-5" }, `retry:\n  fallbackChains:\n    default: [${CODEX}]\n    validate: []\n    review-x: []\n`); // the roles' own empty chains keep them off the default chain
-    const p = ark("preflight");
-    expect(p.code).toBe(1);
-    expect(p.err).toContain(`via the parent session model`);
+    const commandResult = ark("preflight");
+    expect(commandResult.code).toBe(1);
+    expect(commandResult.err).toContain(`via the parent session model`);
   });
 
   test("the PRD default (default on the validator's vendor, implement on the implementer's) stays valid", () => {
@@ -695,9 +695,9 @@ describe("ARK-115-AC9", () => {
 
   test("when OMP cannot be loaded, preflight refuses instead of guessing", () => {
     config(base);
-    const r = Bun.spawnSync(["bun", CLI, "preflight"], { cwd: proj, env: env({ ARK_OMP_PACKAGE: join(agentDir, "no-such-omp") }) });
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr.toString()).toContain("preflight refused: OMP's model resolver failed");
+    const result = Bun.spawnSync(["bun", COMMAND_LINE_FILE, "preflight"], { cwd: projectDirectory, env: environment({ ARK_OMP_PACKAGE: join(agentDirectory, "no-such-omp") }) });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain("preflight refused: Oh My Pi (OMP)'s model resolver failed");
   });
 });
 
@@ -705,9 +705,9 @@ describe("ARK-115-AC11", () => {
   test("run start recovers a missing state.json from the ledger", () => {
     ok(ark("advance", run(), "analysis.completed"));
     rmSync(runFile("state.json"));
-    const r = ark("run", "start", "DEMO-1");
-    expect(r.err).toBe("");
-    expect(r.out).toContain("state: analyzed");
+    const result = ark("run", "start", "DEMO-1");
+    expect(result.err).toBe("");
+    expect(result.out).toContain("state: analyzed");
     ok(ark("run", "replay", run(), "--check"));
   });
 
@@ -715,27 +715,27 @@ describe("ARK-115-AC11", () => {
     const stale = slurp("state.json");
     ok(ark("advance", run(), "analysis.completed"));
     writeFileSync(runFile("state.json"), stale);
-    const r = ark("run", "start", "DEMO-1");
-    expect(r.out).toContain("state: analyzed");
+    const result = ark("run", "start", "DEMO-1");
+    expect(result.out).toContain("state: analyzed");
     ok(ark("run", "replay", run(), "--check"));
   });
 
   test.each([["packet", () => ark("gate", "packet", run(), "toString")], ["answer", () => ark("gate", "answer", run(), "toString", "approve", "--packet", "x")]])(
     "gate %s refuses an inherited property name as a gate",
-    (_n, cmd) => {
-      const r = cmd();
-      expect(r.code).toBe(1);
-      expect(r.err).toContain("unknown gate 'toString'");
+    (_n, command) => {
+      const result = command();
+      expect(result.code).toBe(1);
+      expect(result.err).toContain("unknown gate 'toString'");
     },
   );
 });
 
 describe("ARK-115-AC2 the ledger, not state.json, says whether a run is open", () => {
   const hook = (path: string) =>
-    Bun.spawnSync(["bun", CLI, "hook", "tool_call"], { cwd: proj, env: env(), stdin: Buffer.from(JSON.stringify({ tool: "write", input: { path }, cwd: proj })) });
+    Bun.spawnSync(["bun", COMMAND_LINE_FILE, "hook", "tool_call"], { cwd: projectDirectory, env: environment(), stdin: Buffer.from(JSON.stringify({ tool: "write", input: { path }, cwd: projectDirectory })) });
 
   test("a state.json edited to 'aborted' does not lift the product-write block of a run whose ledger is open", () => {
-    const product = join(proj, "src", "x.ts");
+    const product = join(projectDirectory, "src", "x.ts");
     expect(hook(product).exitCode).toBe(1); // the run is open: the orchestrator may not write product code
     const state = JSON.parse(slurp("state.json"));
     writeFileSync(runFile("state.json"), JSON.stringify({ ...state, status: "aborted" }));
@@ -744,28 +744,34 @@ describe("ARK-115-AC2 the ledger, not state.json, says whether a run is open", (
 
   test("a run the ledger closed no longer blocks", () => {
     ok(ark("advance", run(), "abort"));
-    expect(hook(join(proj, "src", "x.ts")).exitCode).toBe(0);
+    expect(hook(join(projectDirectory, "src", "x.ts")).exitCode).toBe(0);
   });
 });
 
-describe("ARK-115-AC1 user-facing wording follows CONTEXT.md", () => {
-  test("help and gate errors say escalation for GE", () => {
-    expect(ark("--help").out).toContain("GE is the escalation gate");
-    expect(ark("gate", "packet", run(), "G9").err).toContain("GE (escalation)");
+describe("ARK-119-AC2", () => {
+  test("retired gate names are rejected without changing the run", () => {
+    const before = slurp("ledger.ndjson");
+    for (const gate of ["G0", "GS", "G1", "G2", "GE"]) {
+      const result = ark("gate", "packet", run(), gate);
+      expect(result.code, gate).toBe(1);
+      expect(result.err).toContain(`unknown gate '${gate}'`);
+      expect(result.err).toContain("expected criteria, plan, evidence or escalation");
+    }
+    expect(slurp("ledger.ndjson")).toBe(before);
   });
 });
 
 // Round-budget fixtures: one round is a recorded step's worth of failure sent back (fix_round.started), then the build is closed again.
-const spendRounds = (n: number) => {
-  for (let i = 0; i < n; i++) {
+const spendRounds = (number: number) => {
+  for (let i = 0; i < number; i++) {
     ok(ark("advance", run(), "fix_round.started"));
     ok(ark("advance", run(), "build.completed"));
   }
 };
 const escalate = (answer: string) => {
   writeFileSync(runFile("premise.md"), "Every round assumed the cache is cold.\n");
-  const h = ark("gate", "packet", run(), "GE").out.trim();
-  return answerGate("GE", answer, h);
+  const packetHash = ark("gate", "packet", run(), "escalation").out.trim();
+  return answerGate("escalation", answer, packetHash);
 };
 const stateNow = () => JSON.parse(slurp("state.json"));
 
@@ -784,16 +790,16 @@ describe("ARK-117-AC3", () => {
     expect(third.code).toBe(1);
     expect(third.err).toContain("round budget spent (2 of 2 rounds used)");
     expect(stateNow()).toMatchObject({ state: "judging", round: 2 });
-    expect(ark("gate", "packet", run(), "GE").err).toContain("premise.md"); // escalation is open: only the premise is missing
+    expect(ark("gate", "packet", run(), "escalation").err).toContain("premise.md"); // escalation is open: only the premise is missing
   });
 
   test("ark.yml loop.max_rounds sets the budget", () => {
-    writeFileSync(join(proj, "ark.yml"), "project: demo\nloop:\n  max_rounds: 1\n");
+    writeFileSync(join(projectDirectory, "ark.yml"), "project: demo\nloop:\n  max_rounds: 1\n");
     step({ "src/a.ts": "export const a = 1;\n" });
     ok(ark("advance", run(), "build.completed"));
     spendRounds(1);
     expect(ark("advance", run(), "fix_round.started").err).toContain("round budget spent (1 of 1 rounds used)");
-    writeFileSync(join(proj, "ark.yml"), "project: demo\nloop:\n  max_rounds: many\n");
+    writeFileSync(join(projectDirectory, "ark.yml"), "project: demo\nloop:\n  max_rounds: many\n");
     expect(ark("advance", run(), "fix_round.started").err).toContain("loop.max_rounds must be a whole number");
   });
 });
@@ -809,12 +815,12 @@ describe("ARK-117-AC4", () => {
 
   test.each(["one_more_round", "take_over"])("%s is refused when an escalation source changed after its packet was built", (answer) => {
     writeFileSync(runFile("premise.md"), "Every round assumed the cache is cold.\n");
-    const h = ark("gate", "packet", run(), "GE").out.trim();
+    const packetHash = ark("gate", "packet", run(), "escalation").out.trim();
     writeFileSync(runFile("premise.md"), "A changed premise.\n");
-    const refused = ark("gate", "answer", run(), "GE", answer, "--packet", h);
+    const refused = ark("gate", "answer", run(), "escalation", answer, "--packet", packetHash);
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("premise.md");
-    expect(stateNow()).toMatchObject({ state: "awaiting_ge", round: 2 });
+    expect(stateNow()).toMatchObject({ state: "awaiting_escalation", round: 2 });
   });
   test("abort aborts the run", () => {
     ok(escalate("abort"));
@@ -834,7 +840,7 @@ describe("ARK-117-AC4", () => {
     ok(escalate("take_over"));
     expect(stateNow()).toMatchObject({ state: "building", round: 3, implementer: "human", next_action: { kind: "implement", agent: "human", repo: "demo" } }); // the take-over is a round, like one_more_round
     step({ "src/a.ts": "export const a = 3;\n" }); // the human commits, then the step is recorded
-    expect(events().findLast((e) => e.type === "implementer.completed").data.by).toMatch(/^t <t@t> \(/); // the identity of the human who answered, not "agent"
+    expect(events().findLast((event) => event.type === "implementer.completed").data.by).toMatch(/^t <t@t> \(/); // the identity of the human who answered, not "agent"
     expect(stateNow().next_action).toMatchObject({ kind: "continue_build", agent: "orchestrator" });
     validate({ "test/f.test.ts": tagged("DEMO-1-AC1") });
     ok(ark("advance", run(), "build.completed"));
@@ -843,23 +849,23 @@ describe("ARK-117-AC4", () => {
   });
   test("an agent-recorded implementer step after take_over is refused", () => {
     ok(escalate("take_over"));
-    commitAll(wt(), { "src/a.ts": "export const a = 9;\n" });
-    const before = events().filter((e) => e.type === "implementer.completed").length;
-    const r = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("no matching successful ask result for implementer.completed:demo");
-    expect(events().filter((e) => e.type === "implementer.completed")).toHaveLength(before);
+    commitAll(worktree(), { "src/a.ts": "export const a = 9;\n" });
+    const before = events().filter((event) => event.type === "implementer.completed").length;
+    const result = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("no matching successful ask result for implementer.completed:demo");
+    expect(events().filter((event) => event.type === "implementer.completed")).toHaveLength(before);
     expect(stateNow()).toMatchObject({ state: "building", implementer: "human" });
   });
 
   test("a human-implementer step refused for missing proof is recorded, so a validator cannot then vouch for the tagged test committed after it", () => {
     ok(escalate("take_over"));
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
     const refused = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'); // no confirmation from the human
     expect(refused.err).toContain("no matching successful ask result");
-    expect(events().at(-1)).toMatchObject({ type: "implementer.refused", data: { repo: "demo", head_sha: git(wt(), "rev-parse", "HEAD") } });
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1); expect(2).toBe(2)") }); // weakened after the refusal
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe("");
+    expect(events().at(-1)).toMatchObject({ type: "implementer.refused", data: { repo: "demo", head_sha: git(worktree(), "rev-parse", "HEAD") } });
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1); expect(2).toBe(2)") }); // weakened after the refusal
+    expect(ark("test", run(), "--criteria", "DEMO-1-AC1", "--as", "validator").err).toBe("");
     const built = ark("advance", run(), "build.completed");
     expect(built.code).toBe(1);
     expect(built.err).toContain("test/f.test.ts");
@@ -867,21 +873,21 @@ describe("ARK-117-AC4", () => {
 
   test("an agent-implementer step refused for a dirty worktree is recorded the same way", () => {
     ok(escalate("one_more_round"));
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
-    writeFileSync(join(wt(), "src/scratch.ts"), "export const scratch = 1;\n");
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
+    writeFileSync(join(worktree(), "src/scratch.ts"), "export const scratch = 1;\n");
     expect(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}').err).toContain("uncommitted changes");
     expect(events().at(-1).type).toBe("implementer.refused");
-    commitAll(wt(), {});
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe("");
+    commitAll(worktree(), {});
+    expect(ark("test", run(), "--criteria", "DEMO-1-AC1", "--as", "validator").err).toBe("");
     expect(ark("advance", run(), "build.completed").err).toContain("test/f.test.ts");
   });
 
 
   test("the human implementer is held to the same guard: touching an AC-tagged test is refused", () => {
     ok(escalate("take_over"));
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1") });
     confirmHumanImplementerStep();
-    expect(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}').err).toContain("AC-tagged test");
+    expect(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}').err).toContain("acceptance criterion (AC)-tagged test");
   });
 });
 
@@ -891,7 +897,7 @@ describe("ARK-117-AC11", () => {
     step({ "src/a.ts": "export const a = 1;\n" });
     ok(ark("advance", run(), "build.completed"));
     ok(ark("advance", run(), "fix_round.started"));
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1)") }); // the implementer weakens a tagged test
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1", "expect(1).toBe(1)") }); // the implementer weakens a tagged test
     const refused = ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}');
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("test/f.test.ts");
@@ -899,28 +905,28 @@ describe("ARK-117-AC11", () => {
 
   test("after a refused implementer step, a plain ark test run does not vouch for the tagged-test commit", () => {
     weakenAfterRefusal();
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1").err).toBe("");
-    const r = ark("advance", run(), "build.completed");
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("test/f.test.ts");
+    expect(ark("test", run(), "--criteria", "DEMO-1-AC1").err).toBe("");
+    const result = ark("advance", run(), "build.completed");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("test/f.test.ts");
     expect(ark("trace-check", run()).err).toContain("test/f.test.ts");
   });
 
   test("a validator cannot vouch for a tagged-test commit after a refused implementer step", () => {
     weakenAfterRefusal();
-    expect(events().findLast((e) => e.type === "implementer.refused")).toMatchObject({
-      data: { repo: "demo", head_sha: git(wt(), "rev-parse", "HEAD") },
+    expect(events().findLast((event) => event.type === "implementer.refused")).toMatchObject({
+      data: { repo: "demo", head_sha: git(worktree(), "rev-parse", "HEAD") },
     });
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator").err).toBe("");
-    expect(events().findLast((e) => e.type === "test.result").data.role).toBe("validator");
-    const r = ark("advance", run(), "build.completed");
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("test/f.test.ts");
+    expect(ark("test", run(), "--criteria", "DEMO-1-AC1", "--as", "validator").err).toBe("");
+    expect(events().findLast((event) => event.type === "test.result").data.role).toBe("validator");
+    const result = ark("advance", run(), "build.completed");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("test/f.test.ts");
     expect(ark("trace-check", run()).err).toContain("test/f.test.ts");
   });
 
   test("--as takes only 'validator'", () => {
-    expect(ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "implementer").err).toContain("--as takes 'validator'");
+    expect(ark("test", run(), "--criteria", "DEMO-1-AC1", "--as", "implementer").err).toContain("--as takes 'validator'");
   });
 });
 
@@ -928,7 +934,7 @@ describe("ARK-117-AC6 failing tests", () => {
   beforeEach(toBuilding);
   const finding = (test: string) => ({ id: "F1", reviewer: "reviewer-x", model: "m", priority: "P1", file: "src/a.ts", line: 3, claim: "c", bucket: "act_on", reason: "r", evidence: { failing_test: test } });
   const record = (list: unknown[]) => {
-    const file = join(dirname(proj), "findings.json");
+    const file = join(dirname(projectDirectory), "findings.json");
     writeFileSync(file, JSON.stringify(list));
     return ark("findings", "record", run(), file);
   };
@@ -942,7 +948,7 @@ describe("ARK-117-AC6 failing tests", () => {
     const rerun = JSON.parse(JSON.stringify([finding("DEMO-1-AC1 fixture")]));
 
     rerun[0].id = "F2";
-    commitAll(wt(), { "test/other.test.ts": tagged("DEMO-1-AC2") }); // a new head the test was not run at
+    commitAll(worktree(), { "test/other.test.ts": tagged("DEMO-1-AC2") }); // a new head the test was not run at
     const stale = record(rerun);
     expect(stale.code).toBe(1);
     expect(stale.err).toContain("none failing now");
@@ -952,15 +958,15 @@ describe("ARK-120-AC5 evidence types", () => {
   beforeEach(toBuilding);
   const finding = (evidence: unknown) => ({ id: "F1", reviewer: "reviewer-x", model: "m", priority: "P1", file: "src/a.ts", line: 3, claim: "c", bucket: "act_on", reason: "r", evidence });
   const record = (value: unknown) => {
-    const file = join(dirname(proj), "findings.json");
+    const file = join(dirname(projectDirectory), "findings.json");
     writeFileSync(file, JSON.stringify([value]));
     return ark("findings", "record", run(), file);
   };
   // The validator commits a tagged test and records the head through the given 'ark test' mode; the build is then closed so findings can be recorded.
   const validated = (body: string, ...flags: string[]) => {
     step({ "src/a.ts": "export const a = 1;\n" });
-    commitAll(wt(), { "test/f.test.ts": tagged("DEMO-1-AC1", body) });
-    ark("test", run(), "--acs", "DEMO-1-AC1", "--as", "validator", ...flags);
+    commitAll(worktree(), { "test/f.test.ts": tagged("DEMO-1-AC1", body) });
+    ark("test", run(), "--criteria", "DEMO-1-AC1", "--as", "validator", ...flags);
   };
 
   test.each([
@@ -969,7 +975,7 @@ describe("ARK-120-AC5 evidence types", () => {
     ["preservation", ["--preservation"], "test.preservation"],
   ])("a test failing at the current head in %s mode is accepted as failing_test evidence", (_mode, flags, type) => {
     validated("expect(1).toBe(2)", ...flags);
-    expect(events().findLast((e) => e.type === type)).toBeDefined();
+    expect(events().findLast((event) => event.type === type)).toBeDefined();
     ok(ark("advance", run(), "build.completed"));
     expect(record(finding({ failing_test: "DEMO-1-AC1 fixture" })).code).toBe(0);
   });
@@ -989,16 +995,16 @@ describe("ARK-120-AC5 evidence types", () => {
     expect(superseded.err).toContain("failing_test");
   });
 
-  test("the G2 packet labels each finding's evidence by the field that verified it", () => {
+  test("the evidence packet labels each finding's evidence by the field that verified it", () => {
     validated("expect(1).toBe(2)");
     ok(ark("advance", run(), "build.completed"));
-    const file = join(dirname(proj), "findings.json");
+    const file = join(dirname(projectDirectory), "findings.json");
     writeFileSync(file, JSON.stringify([
       finding({ failing_test: "DEMO-1-AC1 fixture" }),
       { ...finding({ traced_path: "src/a.ts:3 -> src/b.ts:9" }), id: "F2" },
     ]));
     ok(ark("findings", "record", run(), file));
-    const packet = slurp(`gates/G2.${toG2Packet().slice("sha256:".length)}.packet.md`);
+    const packet = slurp(`gates/evidence.${toEvidencePacket().slice("sha256:".length)}.packet.md`);
     expect(packet).toContain("F1 P1 src/a.ts:3: failing test 'DEMO-1-AC1 fixture'");
     expect(packet).toContain("F2 P1 src/a.ts:3: traced path, weaker evidence (no test reaches it): src/a.ts:3 -> src/b.ts:9");
   });

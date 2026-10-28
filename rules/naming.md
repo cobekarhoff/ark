@@ -11,7 +11,7 @@ Full words for anything that holds a domain object or lives beyond a few lines: 
 
 Short names stay for loop indexes (`i`, `j`), universal names (`id`, `url`, `json`) and a one-line `catch (err)`.
 
-Commands, flags, gate names and filenames carry full names with no aliases: `ark worktree create`, `ark merge-request open`, gates `setup`, `criteria`, `plan`, `escalation`, `evidence`. Not `ark ws create`, `ark mr open`, `G1`.
+Commands, flags, gate names and filenames carry full names with no aliases: `ark worktree create`, `ark merge-request open`, `ark acceptance-criteria update`, `--criteria`, gates `criteria`, `plan`, `escalation`, `evidence`. The `setup` gate id is reserved, not implemented.
 
 ## Prose, help, errors and prompts
 

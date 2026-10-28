@@ -2,16 +2,16 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-type Opts = { cwd: string; env: Record<string, string | undefined>; stdin?: Buffer; noProof?: boolean };
+type Options = { cwd: string; env: Record<string, string | undefined>; stdin?: Buffer; noProof?: boolean };
 let askProofSequence = 0;
 
 export type Result = { exitCode: number; stdout: Buffer; stderr: Buffer };
 
 export const GATE_CHOICES: Record<string, string[]> = {
-  G0: ["accept", "edit", "abort"],
-  G1: ["approve", "change", "abort"],
-  G2: ["approve", "send_back", "abort"],
-  GE: ["one_more_round", "take_over", "abort"],
+  criteria: ["accept", "edit", "abort"],
+  plan: ["approve", "change", "abort"],
+  evidence: ["approve", "send_back", "abort"],
+  escalation: ["one_more_round", "take_over", "abort"],
 };
 
 // Where the test run's main OMP session transcript lives: `ark run start` binds it through PI_SESSION_ID/PI_SESSION_FILE (spawnArk exports both).
@@ -35,7 +35,7 @@ export type AskProof = {
 // The id a new entry hangs from, as OMP replays it: the newest entry selects itself unless it carries the leaf it interrupted.
 export function activeLeaf(sessionFile: string): string | null {
   if (!existsSync(sessionFile)) return null;
-  const entries = readFileSync(sessionFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((e) => e.type !== "session" && e.type !== "title");
+  const entries = readFileSync(sessionFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((event) => event.type !== "session" && event.type !== "title");
   const last = entries.at(-1);
   return last ? (last.activeLeafId !== undefined ? last.activeLeafId : last.id) : null;
 }
@@ -49,10 +49,10 @@ export function ensureTranscript(sessionFile: string, sessionId: string = MAIN_S
 }
 
 // Appends one tree entry the way OMP writes it (id, parentId, and the header first): `parentId` defaults to the active leaf. Returns the entry's id.
-export function appendEntry(sessionFile: string, entry: Record<string, unknown>, opts: { parentId?: string | null; sessionId?: string } = {}): string {
-  ensureTranscript(sessionFile, opts.sessionId);
+export function appendEntry(sessionFile: string, entry: Record<string, unknown>, options: { parentId?: string | null; sessionId?: string } = {}): string {
+  ensureTranscript(sessionFile, options.sessionId);
   const id = `e${++entrySequence}-${crypto.randomUUID().slice(0, 8)}`;
-  const parentId = opts.parentId === undefined ? activeLeaf(sessionFile) : opts.parentId;
+  const parentId = options.parentId === undefined ? activeLeaf(sessionFile) : options.parentId;
   writeFileSync(sessionFile, `${JSON.stringify({ id, parentId, timestamp: new Date().toISOString(), ...entry })}\n`, { flag: "a" });
   return id;
 }
@@ -107,27 +107,27 @@ export const askResult = (toolCallId: string, question: string, proof: Pick<AskP
 // the typed line: `typed` defaults to the gate (or the outcome), which is what a human types. A gate answer also gets the human's matching `ask` answer appended to the
 // main session first (`noProof` skips it; `ark run close` and implementer steps need a packet hash, so their callers append the proof). typed = null is no human at all:
 // no proof, no terminal, as an agent's shell runs.
-export function spawnArk(cmd: string[], opts: Opts, typed?: string | null): Result {
-  const { noProof, ...spawnOpts } = opts;
-  const args = cmd.slice(2);
-  const gateAnswer = args[0] === "gate" && args[1] === "answer";
-  const human = gateAnswer || (args[0] === "run" && args[1] === "close");
-  const line = typed === undefined ? args[3] : typed;
-  const home = opts.env.ARK_HOME as string;
-  const env = {
-    ...opts.env,
-    PI_SESSION_ID: opts.env.PI_SESSION_ID ?? MAIN_SESSION_ID,
-    PI_SESSION_FILE: opts.env.PI_SESSION_FILE ?? mainSessionFile(home),
+export function spawnArk(command: string[], options: Options, typed?: string | null): Result {
+  const { noProof, ...spawnOptions } = options;
+  const argumentsList = command.slice(2);
+  const gateAnswer = argumentsList[0] === "gate" && argumentsList[1] === "answer";
+  const human = gateAnswer || (argumentsList[0] === "run" && argumentsList[1] === "close");
+  const line = typed === undefined ? argumentsList[3] : typed;
+  const home = options.env.ARK_HOME as string;
+  const environment = {
+    ...options.env,
+    PI_SESSION_ID: options.env.PI_SESSION_ID ?? MAIN_SESSION_ID,
+    PI_SESSION_FILE: options.env.PI_SESSION_FILE ?? mainSessionFile(home),
   };
-  if (human && line !== null && gateAnswer && !noProof && Object.hasOwn(GATE_CHOICES, args[3]) && GATE_CHOICES[args[3]].includes(args[4])) {
-    appendAskProof(mainSessionFile(home), { action: `gate.answered:${args[3]}`, runId: args[2], answer: args[4], packetHash: args[6], choices: GATE_CHOICES[args[3]] });
+  if (human && line !== null && gateAnswer && !noProof && Object.hasOwn(GATE_CHOICES, argumentsList[3]) && GATE_CHOICES[argumentsList[3]].includes(argumentsList[4])) {
+    appendAskProof(mainSessionFile(home), { action: `gate.answered:${argumentsList[3]}`, runId: argumentsList[2], answer: argumentsList[4], packetHash: argumentsList[6], choices: GATE_CHOICES[argumentsList[3]] });
   }
-  if (!human || line === null) return Bun.spawnSync(cmd, { ...spawnOpts, env, detached: true, stdin: opts.stdin ?? "ignore" });
-  const tmp = mkdtempSync(join(tmpdir(), "ark-pty-"));
+  if (!human || line === null) return Bun.spawnSync(command, { ...spawnOptions, env: environment, detached: true, stdin: options.stdin ?? "ignore" });
+  const temporaryPath = mkdtempSync(join(tmpdir(), "ark-pty-"));
   try {
-    const r = Bun.spawnSync(["bun", join(import.meta.dir, "pty.ts"), line, join(tmp, "out"), join(tmp, "err"), ...cmd], { cwd: opts.cwd, env });
-    return { exitCode: r.exitCode, stdout: readFileSync(join(tmp, "out")), stderr: readFileSync(join(tmp, "err")) };
+    const result = Bun.spawnSync(["bun", join(import.meta.dir, "pty.ts"), line, join(temporaryPath, "out"), join(temporaryPath, "err"), ...command], { cwd: options.cwd, env: environment });
+    return { exitCode: result.exitCode, stdout: readFileSync(join(temporaryPath, "out")), stderr: readFileSync(join(temporaryPath, "err")) };
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    rmSync(temporaryPath, { recursive: true, force: true });
   }
 }
