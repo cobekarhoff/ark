@@ -285,12 +285,12 @@ describe("ARK-145-AC1", () => {
     const implementerHead = runState().repos[0].head_sha;
     const approvedHead = git(worktree(), "rev-parse", "HEAD");
     expect(approvedHead).not.toBe(implementerHead);
-    expect(events("gate.answered").find((event) => event.data.gate === "evidence")?.data.approved_heads).toEqual({ demo: approvedHead });
 
     ok(ark("merge-request", "open", run()));
     expect(onRemote(`refs/heads/${branch()}`)).toBe(approvedHead);
     expect(onRemote(`refs/heads/${branch()}`)).not.toBe(implementerHead);
     expect(events("merge_request.opened")).toHaveLength(1);
+    expect(events("gate.answered").find((event) => event.data.gate === "evidence")?.data.approved_heads).toEqual({ demo: approvedHead });
   });
 });
 
