@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, watch, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { rechain } from "./ledger";
@@ -33,7 +33,7 @@ case "$1 $2" in
   *) echo "fake gh: unexpected $*" >&2; exit 1 ;;
 esac
 `;
-const REPOSITORY_YAML = JSON.stringify({ suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}"', junit: "$ARK_OUT/bun.xml" } } });
+const REPOSITORY_YAML = JSON.stringify({ suites: { unit: { format: "bun-test", level: "integration", run: 'bun test -t "{tags}" --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml', junit: "$ARK_OUT/bun.xml" } } });
 const pullRequest = (number: number, options: { owner?: string; base?: string; state?: string } = {}) =>
   ({ url: `https://github.com/acme/demo/pull/${number}`, number: number, state: options.state ?? "OPEN", baseRefName: options.base ?? "main", headRepositoryOwner: { login: options.owner ?? "acme" } });
 
@@ -74,8 +74,8 @@ const ok = (result: { code: number; err: string }) => {
 };
 
 // A project whose origin looks like GitHub, a run with one implemented worktree commit, and evidence approved.
-// `validatorCommit` lands an untagged test file on top of the implementer's head before trace-check, as the validator's test commit does.
-function atEvidenceApproved(arkYaml = "project: demo\n", validatorCommit = false) {
+// `validatorCommit` adds a tagged test and command-owned validator proof above the implementer's head.
+function atEvidenceApproved(arkYaml = "project: demo\n", validatorCommit = false, approve = true) {
   home = mkdtempSync(join(tmpdir(), "ark-home-"));
   root = realpathSync(mkdtempSync(join(tmpdir(), "ark-fx-")));
   binaryDirectory = join(root, "bin");
@@ -117,19 +117,28 @@ function atEvidenceApproved(arkYaml = "project: demo\n", validatorCommit = false
   ok(ark("advance", run(), "implementer.completed", "--data", '{"repo":"demo"}'));
   if (validatorCommit) {
     mkdirSync(join(worktree(), "test"));
-    writeFileSync(join(worktree(), "test", "validator-helper.test.ts"), "// no acceptance criterion tag\n");
+    writeFileSync(join(worktree(), "test", "feature.test.ts"), `import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+test("DEMO-1-AC1 the feature is delivered", () => {
+  expect(readFileSync("feature.txt", "utf8")).toBe("feature\\n");
+});
+`);
     git(worktree(), "add", "-A");
     git(worktree(), "commit", "-qm", "validator test commit");
+    ok(ark("test", run(), "--criteria", "DEMO-1-AC1", "--red-green", "--as", "validator"));
   }
   ok(ark("advance", run(), "build.completed"));
-  writeFileSync(runFile("ac.yml"), "- id: DEMO-1-AC1\n  text: criterion one\n  level: manual\n  kind: new\n");
-  mkdirSync(runFile("manual"));
-  writeFileSync(runFile("manual/DEMO-1-AC1.md"), "signed-by: MR Tester\nat: 2026-10-22\n");
+  writeFileSync(runFile("ac.yml"), `- id: DEMO-1-AC1\n  text: criterion one\n  level: ${validatorCommit ? "integration" : "manual"}\n  kind: new\n`);
+  if (!validatorCommit) {
+    mkdirSync(runFile("manual"));
+    writeFileSync(runFile("manual/DEMO-1-AC1.md"), "signed-by: MR Tester\nat: 2026-10-22\n");
+  }
   ok(ark("trace-check", run()));
   mkdirSync(runFile("artifacts"), { recursive: true });
   writeFileSync(runFile("artifacts/evidence.txt"), "evidence\n");
   const evidencePacketHash = ark("gate", "packet", run(), "evidence").out.trim();
-  ok(ark("gate", "answer", run(), "evidence", "approve", "--packet", evidencePacketHash));
+  if (approve) ok(ark("gate", "answer", run(), "evidence", "approve", "--packet", evidencePacketHash));
+  return evidencePacketHash;
 }
 
 describe("ARK-107-AC1", () => {
@@ -279,9 +288,8 @@ describe("ARK-107-AC1", () => {
 });
 
 describe("ARK-145-AC1", () => {
-  beforeEach(() => atEvidenceApproved("project: demo\n", true));
-
   test("ark merge-request open pushes the head the evidence gate approved, a validator test commit above the implementer's head, not the implementer's head", () => {
+    atEvidenceApproved("project: demo\n", true);
     const implementerHead = runState().repos[0].head_sha;
     const approvedHead = git(worktree(), "rev-parse", "HEAD");
     expect(approvedHead).not.toBe(implementerHead);
@@ -291,6 +299,49 @@ describe("ARK-145-AC1", () => {
     expect(onRemote(`refs/heads/${branch()}`)).not.toBe(implementerHead);
     expect(events("merge_request.opened")).toHaveLength(1);
     expect(events("gate.answered").find((event) => event.data.gate === "evidence")?.data.approved_heads).toEqual({ demo: approvedHead });
+  });
+
+  test("evidence approval cannot authorize or push a concurrent commit made after proof checks", async () => {
+    const packetHash = atEvidenceApproved("project: demo\n", true, false);
+    const provenHead = git(worktree(), "rev-parse", "HEAD");
+    appendAskProof(mainSessionFile(home), { action: "gate.answered:evidence", runId: run(), answer: "approve", packetHash, choices: ["approve", "send_back", "abort"] });
+    const transcriptFile = mainSessionFile(home);
+    const transcript = readFileSync(transcriptFile, "utf8");
+    unlinkSync(transcriptFile);
+    expect(Bun.spawnSync(["mkfifo", transcriptFile]).exitCode).toBe(0);
+    const writer = Bun.spawn(["bun", join(import.meta.dir, "approval-race.ts"), transcriptFile, transcript, worktree()], { stdout: "ignore", stderr: "pipe" });
+    const approval = Bun.spawn(["bun", COMMAND_LINE_FILE, "gate", "answer", run(), "evidence", "approve", "--packet", packetHash], {
+      cwd: projectDirectory,
+      env: { ...process.env, ...GIT_IDENTITY, ARK_HOME: home, PI_SESSION_ID: "ark-main-session", PI_SESSION_FILE: transcriptFile },
+      stdout: "pipe", stderr: "pipe",
+    });
+    try {
+      const [approvalCode, writerCode] = await Promise.race([
+        Promise.all([approval.exited, writer.exited]),
+        // A real child-process rendezvous cannot use fake time; this deadline never schedules the commit.
+        Bun.sleep(20_000).then(() => { throw new Error("transcript rendezvous did not complete"); }),
+      ]);
+      expect(writerCode, await new Response(writer.stderr).text()).toBe(0);
+      const unprovenHead = git(worktree(), "rev-parse", "HEAD");
+      expect(unprovenHead).not.toBe(provenHead);
+      expect(events("test.red_green").at(-1)?.data.head_sha).toBe(provenHead);
+      const opened = ark("merge-request", "open", run());
+      // Observe the actual remote before checking the receipt: this must never push the new commit.
+      expect(onRemote(`refs/heads/${branch()}`)).toBeNull();
+      expect(opened.code).toBe(1);
+      expect(ghLog()).toEqual([]);
+      if (approvalCode === 0) {
+        expect(events("gate.answered").findLast((event) => event.data.gate === "evidence")?.data.approved_heads).toEqual({ demo: provenHead });
+        expect(opened.err).toContain(`differs from the approved ${provenHead}`);
+      } else {
+        expect(events("gate.answered").filter((event) => event.data.gate === "evidence")).toEqual([]);
+      }
+    } finally {
+      approval.kill();
+      writer.kill();
+      if (existsSync(transcriptFile)) unlinkSync(transcriptFile);
+      writeFileSync(transcriptFile, transcript);
+    }
   });
 });
 
