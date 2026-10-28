@@ -28,7 +28,7 @@ function publishedHelp(directory: string) {
 }
 
 describe("Documentation site", () => {
-  // Contract: the documented build emits authored pages and is a CI step.
+  // Contract: the documented build emits authored pages and is a continuous integration (CI) step.
   // Removing the build command, content entry, or CI invocation must fail here.
   // No prior test exercises this new public build boundary; no product hook is needed.
   test("ARK-116-AC2 builds repository-authored pages with the single continuous integration command", () => {
@@ -39,12 +39,12 @@ describe("Documentation site", () => {
     expect(page).toContain('href="/setup/"');
     const workflow: unknown = Bun.YAML.parse(readFileSync(join(repository, ".github", "workflows", "ci.yml"), "utf8"));
     if (!workflow || typeof workflow !== "object" || !("jobs" in workflow) || !workflow.jobs || typeof workflow.jobs !== "object") throw new Error("Expected workflow jobs");
-    const steps = Object.values(workflow.jobs).flatMap((job: unknown) => {
-      if (!job || typeof job !== "object" || !("steps" in job) || !Array.isArray(job.steps)) throw new Error("Expected workflow steps");
-      return job.steps.map((step: unknown) => step && typeof step === "object" && "run" in step ? step.run : undefined);
-    });
+    const documentationJob: unknown = "docs" in workflow.jobs ? workflow.jobs.docs : undefined;
+    if (!documentationJob || typeof documentationJob !== "object" || !("steps" in documentationJob) || !Array.isArray(documentationJob.steps)) throw new Error("Expected documentation workflow steps");
+    const steps = documentationJob.steps.map((step: unknown) => step && typeof step === "object" && "run" in step ? step.run : undefined);
     expect(steps).toContain("bun install --frozen-lockfile");
     expect(steps).toContain("bun run docs:build");
+    expect(steps).toContain("bun test test/documentation-site.test.ts");
   }, 180_000);
 
   // Contract: real browser interaction teaches branching, dependencies and handoffs.
@@ -53,7 +53,7 @@ describe("Documentation site", () => {
   test("ARK-116-AC4 explores lifecycle branches, execution dependencies and the ticket walkthrough with keyboard and reduced motion", async () => {
     const output = build();
     // Load inside the test: base has no browser dependency and must still report a test result.
-    const { chromium, expect: browserExpect } = await import("@playwright/test");
+    const { chromium, expect: browserExpect } = await import(Bun.resolveSync("@playwright/test", join(repository, "site")));
     const server = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
@@ -151,13 +151,12 @@ describe("Documentation site", () => {
   }, 180_000);
 
   // Contract: published help follows the actual command-line interface (CLI), including test.
-  // A hardcoded reference or stale generated file fails the second build after a real help edit.
+  // A hardcoded reference or stale generated file fails a warm rebuild after a real help edit.
   // The CLI is an independent oracle for the documentation generator, not the generator itself.
   // Mutate only a disposable repository copy; no product hooks or service mocks are needed.
   test("ARK-116-AC5 publishes actual CLI help and refreshes it after the CLI help changes", () => {
     const help = command(["bun", "cli/ark.ts", "--help"]);
     expect(help).toContain("test <run_id> --criteria");
-    expect(publishedHelp(build())).toBe(help);
     const temporary = mkdtempSync(join(tmpdir(), "ark-documentation-help-"));
     try {
       copyDirectory(repository, temporary, {
@@ -165,6 +164,8 @@ describe("Documentation site", () => {
         filter: (source) => ![".git", "node_modules", "dist", ".astro", ".generated"].includes(basename(source)),
       });
       symlinkSync(join(repository, "node_modules"), join(temporary, "node_modules"), "dir");
+      const initialHelp = publishedHelp(build(temporary));
+      expect(initialHelp).toBe(help);
       const commandFile = join(temporary, "cli", "ark.ts");
       const source = readFileSync(commandFile, "utf8");
       const changed = source.replace("Print this help", "Print this help with the documentation freshness sentinel");
@@ -174,6 +175,7 @@ describe("Documentation site", () => {
       expect(changedHelp).toContain("documentation freshness sentinel");
       expect(changedHelp).not.toBe(help);
       const refreshed = publishedHelp(build(temporary));
+      expect(refreshed).not.toBe(initialHelp);
       expect(refreshed).toBe(changedHelp);
       expect(refreshed).toContain("documentation freshness sentinel");
     } finally {
