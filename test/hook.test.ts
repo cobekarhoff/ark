@@ -5,40 +5,40 @@ import { join } from "node:path";
 import extension from "../extensions/index";
 import { OMP_CONFIG } from "./omp-config";
 
-const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
+const COMMAND_LINE_FILE = join(import.meta.dir, "..", "cli", "ark.ts");
 const GIT_IDENTITY = { GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "user.name", GIT_CONFIG_VALUE_0: "t", GIT_CONFIG_KEY_1: "user.email", GIT_CONFIG_VALUE_1: "t@t" };
 const ticket = (id: string) => `---\nid: ${id}\ntitle: "Fixture"\nstatus: ready\nacceptance_criteria:\n  - id: ${id}-AC1\n    text: "one"\n---\nBody.\n`;
 
 let home: string;
-let proj: string;
-const baseEnv = () => {
-  const env: Record<string, string | undefined> = { ...process.env, ...GIT_IDENTITY, ARK_HOME: home };
-  delete env.PI_SESSION_ID; // the test process may itself run inside an OMP session
-  return env as Record<string, string>;
+let projectDirectory: string;
+const baseEnvironment = () => {
+  const environment: Record<string, string | undefined> = { ...process.env, ...GIT_IDENTITY, ARK_HOME: home };
+  delete environment.PI_SESSION_ID; // the test process may itself run inside an OMP session
+  return environment as Record<string, string>;
 };
-const ark = (args: string[], stdin?: string, env: Record<string, string> = {}) => {
-  const r = Bun.spawnSync(["bun", CLI, ...args], { cwd: proj, env: { ...baseEnv(), ...env }, stdin: stdin === undefined ? undefined : Buffer.from(stdin) });
-  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+const ark = (argumentsList: string[], stdin?: string, environment: Record<string, string> = {}) => {
+  const result = Bun.spawnSync(["bun", COMMAND_LINE_FILE, ...argumentsList], { cwd: projectDirectory, env: { ...baseEnvironment(), ...environment }, stdin: stdin === undefined ? undefined : Buffer.from(stdin) });
+  return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
 };
-const runsDir = () => join(home, "projects", "demo", "runs");
-const runOf = (id: string) => readdirSync(runsDir()).find((r) => r.includes(`-${id}-`))!;
-const dirOf = (id: string) => join(runsDir(), runOf(id));
-// `session`: the id of the OMP session the extension reports with the call (ctx.sessionManager.getSessionId()).
-const call = (tool: string, input: Record<string, unknown>, o: { session?: string; cwd?: string } = {}) => ark(["hook", "tool_call"], JSON.stringify({ tool, input, cwd: o.cwd ?? proj, session: o.session }));
+const runsDirectory = () => join(home, "projects", "demo", "runs");
+const runOf = (id: string) => readdirSync(runsDirectory()).find((result) => result.includes(`-${id}-`))!;
+const directoryOf = (id: string) => join(runsDirectory(), runOf(id));
+// `session`: the id of the Oh My Pi (OMP) session the extension reports with the call (context.sessionManager.getSessionId()).
+const call = (tool: string, input: Record<string, unknown>, options: { session?: string; cwd?: string } = {}) => ark(["hook", "tool_call"], JSON.stringify({ tool, input, cwd: options.cwd ?? projectDirectory, session: options.session }));
 const asSession = (id: string) => ({ PI_SESSION_ID: id, PI_SESSION_FILE: join(home, `${id}.jsonl`) }); // what a bash tool call of that session exports, and so what `ark run start` sees
 // The route comes first on any run; only then can it be aborted.
 const abort = (id: string) => {
   expect(ark(["log", "route", runOf(id), "ticket", "fixture"]).code).toBe(0);
   return ark(["advance", runOf(id), "abort"]);
 };
-const product = () => join(proj, "src.ts");
+const product = () => join(projectDirectory, "src.ts");
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "ark-home-"));
-  proj = mkdtempSync(join(tmpdir(), "ark-proj-"));
-  writeFileSync(join(proj, "ark.yml"), "project: demo\n");
-  mkdirSync(join(proj, ".omp"));
-  writeFileSync(join(proj, ".omp", "config.yml"), OMP_CONFIG);
+  projectDirectory = mkdtempSync(join(tmpdir(), "ark-proj-"));
+  writeFileSync(join(projectDirectory, "ark.yml"), "project: demo\n");
+  mkdirSync(join(projectDirectory, ".omp"));
+  writeFileSync(join(projectDirectory, ".omp", "config.yml"), OMP_CONFIG);
   mkdirSync(join(home, "projects", "demo", "tickets"), { recursive: true });
   for (const id of ["DEMO-7", "DEMO-8"]) writeFileSync(join(home, "projects", "demo", "tickets", `${id}.md`), ticket(id));
   expect(ark(["run", "start", "DEMO-7"], undefined, asSession("S1")).err).toBe("");
@@ -78,11 +78,11 @@ describe("ARK-115-AC10", () => {
   });
 
   test("an archive selector is resolved to its container: a symlink out of the run folder is caught, a plain container inside it is not", () => {
-    const outside = join(proj, "outside.zip");
+    const outside = join(projectDirectory, "outside.zip");
     writeFileSync(outside, "");
-    symlinkSync(outside, join(dirOf("DEMO-7"), "linked.zip"));
-    expect(call("write", { path: join(dirOf("DEMO-7"), "linked.zip:entry.txt"), content: "x" }).err).toContain("outside the active run folder");
-    expect(call("write", { path: join(dirOf("DEMO-7"), "notes.zip:entry.txt"), content: "x" }).code).toBe(0);
+    symlinkSync(outside, join(directoryOf("DEMO-7"), "linked.zip"));
+    expect(call("write", { path: join(directoryOf("DEMO-7"), "linked.zip:entry.txt"), content: "x" }).err).toContain("outside the active run folder");
+    expect(call("write", { path: join(directoryOf("DEMO-7"), "notes.zip:entry.txt"), content: "x" }).code).toBe(0);
     expect(call("edit", { path: `${product()}:10-20` }).code).toBe(1); // a line selector on a product file
     expect(call("write", { path: `[${product()}#AB12]`, content: "x" }).code).toBe(1); // hashline header around a product path
   });
@@ -100,7 +100,7 @@ describe("ARK-115-AC10", () => {
 
     rmSync(pointer);
     expect(call("write", { path: product() }, { session: "S1" }).code).toBe(1); // pointer missing
-    expect(call("write", { path: join(dirOf("DEMO-7"), "plan.md") }, { session: "S1" }).code).toBe(0);
+    expect(call("write", { path: join(directoryOf("DEMO-7"), "plan.md") }, { session: "S1" }).code).toBe(0);
     expect(call("write", { path: product() }, { session: "S3" }).code).toBe(0); // a session with no binding and no pointer is not an Ark session
 
     const elsewhere = mkdtempSync(join(tmpdir(), "ark-away-")); // cwd outside any Ark project does not free a bound session either
@@ -109,16 +109,16 @@ describe("ARK-115-AC10", () => {
   });
 
   test("the main-session binding in the run folder is not writable by the agent: it is what a gate answer is checked against", () => {
-    const binding = join(dirOf("DEMO-7"), ".main-session");
+    const binding = join(directoryOf("DEMO-7"), ".main-session");
     for (const tool of ["write", "edit"]) {
-      const r = call(tool, { path: binding }, { session: "S1" });
-      expect(r.code, tool).toBe(1);
-      expect(r.err, tool).toContain(".main-session");
+      const result = call(tool, { path: binding }, { session: "S1" });
+      expect(result.code, tool).toBe(1);
+      expect(result.err, tool).toContain(".main-session");
     }
   });
 
   test("a binding whose run is missing or has an unreadable state fails closed; a closed run frees the session until it starts another", () => {
-    writeFileSync(join(dirOf("DEMO-7"), "state.json"), "{not json");
+    writeFileSync(join(directoryOf("DEMO-7"), "state.json"), "{not json");
     expect(call("write", { path: product() }, { session: "S1" }).code).toBe(1);
     expect(ark(["run", "replay", runOf("DEMO-7")]).code).toBe(0); // repair the projection
 
@@ -128,7 +128,7 @@ describe("ARK-115-AC10", () => {
     expect(ark(["run", "start", "DEMO-8"], undefined, asSession("S1")).out).toContain("resumed"); // S1 takes DEMO-8
     expect(call("write", { path: product() }, { session: "S1" }).err).toContain("outside the active run folder");
 
-    rmSync(dirOf("DEMO-8"), { recursive: true });
+    rmSync(directoryOf("DEMO-8"), { recursive: true });
     expect(call("write", { path: product() }, { session: "S1" }).err).toContain("blocked");
   });
 
@@ -138,7 +138,7 @@ describe("ARK-115-AC10", () => {
     expect(call("write", { path: product() }).err).toContain("no such run");
     expect(call("eval", { code: "1" }).code).toBe(1);
     expect(call("bash", { command: "ark run start DEMO-7" }).code).toBe(0);
-    expect(call("bash", { command: `echo x >> ${join(dirOf("DEMO-7"), "ledger.ndjson")}` }).code).toBe(1);
+    expect(call("bash", { command: `echo x >> ${join(directoryOf("DEMO-7"), "ledger.ndjson")}` }).code).toBe(1);
 
     writeFileSync(pointer, `${runOf("DEMO-7")}\n`);
     expect(abort("DEMO-7").code).toBe(0);
@@ -146,33 +146,33 @@ describe("ARK-115-AC10", () => {
   });
 
   test("ast_edit and edit are checked for directories, globs and rename targets, not only literal file paths", () => {
-    const run = dirOf("DEMO-7");
-    expect(call("ast_edit", { paths: [run] }).code).toBe(1); // the run folder itself reaches ws/ and the ledger
+    const run = directoryOf("DEMO-7");
+    expect(call("ast_edit", { paths: [run] }).code).toBe(1); // the run folder itself reaches worktrees/ and the ledger
     expect(call("ast_edit", { paths: [join(run, "**/*.ts")] }).code).toBe(1);
     expect(call("ast_edit", { paths: [join(run, "*/demo/src/*.ts")] }).code).toBe(1);
-    expect(call("ast_edit", { paths: [join(proj, "src/**/*.ts")] }).code).toBe(1);
+    expect(call("ast_edit", { paths: [join(projectDirectory, "src/**/*.ts")] }).code).toBe(1);
     expect(call("ast_edit", { paths: [join(run, "inbox/*.json")] }).code).toBe(0); // a glob confined to a run subfolder
     expect(call("edit", { path: join(run, "plan.md"), edits: [{ rename: product() }] }).err).toContain("outside the active run folder");
-    expect(call("edit", { path: join(run, "plan.md"), edits: [{ rename: join(run, "ws/demo/a.ts") }] }).code).toBe(1);
+    expect(call("edit", { path: join(run, "plan.md"), edits: [{ rename: join(run, "worktrees/demo/a.ts") }] }).code).toBe(1);
     expect(call("edit", { path: join(run, "plan.md"), edits: [{ rename: join(run, "plan2.md") }] }).code).toBe(0);
   });
 
   test("the extension reports the session id with every main-session call, and leaves subagents alone", () => {
-    type Ctx = { cwd: string; agent: { kind: string }; sessionManager: { getSessionId(): string } };
-    let handler!: (e: { toolName: string; input: unknown }, c: Ctx) => unknown;
-    extension({ on: (_event, h) => { handler = h; } });
+    type Context = { cwd: string; agent: { kind: string }; sessionManager: { getSessionId(): string } };
+    let handler!: (event: { toolName: string; input: unknown }, context: Context) => unknown;
+    extension({ on: (_event, callback) => { handler = callback; } });
     const saved = process.env.ARK_HOME;
     process.env.ARK_HOME = home;
-    const ctx = (kind: string, id: string): Ctx => ({ cwd: proj, agent: { kind }, sessionManager: { getSessionId: () => id } });
+    const context = (kind: string, id: string): Context => ({ cwd: projectDirectory, agent: { kind }, sessionManager: { getSessionId: () => id } });
     try {
-      expect(handler({ toolName: "eval", input: { code: "1" } }, ctx("main", "S1"))).toMatchObject({ block: true, reason: expect.stringContaining("eval") });
-      expect(handler({ toolName: "lsp", input: { action: "rename", file: "src.ts" } }, ctx("main", "S1"))).toMatchObject({ block: true });
+      expect(handler({ toolName: "eval", input: { code: "1" } }, context("main", "S1"))).toMatchObject({ block: true, reason: expect.stringContaining("eval") });
+      expect(handler({ toolName: "lsp", input: { action: "rename", file: "src.ts" } }, context("main", "S1"))).toMatchObject({ block: true });
       rmSync(join(home, "projects", "demo", "active-run"));
-      expect(handler({ toolName: "write", input: { path: product() } }, ctx("main", "S1"))).toMatchObject({ block: true }); // bound by the session id alone
-      expect(handler({ toolName: "write", input: { path: product() } }, ctx("main", "S3"))).toBeUndefined(); // another session, nothing bound
-      expect(handler({ toolName: "eval", input: { code: "1" } }, ctx("sub", "S1"))).toBeUndefined();
-      expect(handler({ toolName: "ark_mr", input: { run_id: "r" } }, ctx("sub", "S1"))).toMatchObject({ block: true, reason: expect.stringContaining("ark_mr") }); // ARK-118: ark_mr carries the human's credentials
-      expect(handler({ toolName: "ark_mr", input: { run_id: "r" } }, ctx("main", "S1"))).toBeUndefined();
+      expect(handler({ toolName: "write", input: { path: product() } }, context("main", "S1"))).toMatchObject({ block: true }); // bound by the session id alone
+      expect(handler({ toolName: "write", input: { path: product() } }, context("main", "S3"))).toBeUndefined(); // another session, nothing bound
+      expect(handler({ toolName: "eval", input: { code: "1" } }, context("sub", "S1"))).toBeUndefined();
+      expect(handler({ toolName: "ark_merge_request_open", input: { run_id: "r" } }, context("sub", "S1"))).toMatchObject({ block: true, reason: expect.stringContaining("ark_merge_request_open") }); // ARK-118: ark_merge_request_open carries the human's credentials
+      expect(handler({ toolName: "ark_merge_request_open", input: { run_id: "r" } }, context("main", "S1"))).toBeUndefined();
     } finally {
       if (saved === undefined) delete process.env.ARK_HOME; else process.env.ARK_HOME = saved;
     }

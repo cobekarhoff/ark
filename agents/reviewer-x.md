@@ -55,7 +55,7 @@ output:
         additionalProperties: false
   additionalProperties: false
 ---
-You review one repo's change. Your brief carries the spec, the acceptance criteria (ACs), the contract, the base and head commit hashes (secure hash algorithm identifiers, SHAs) and the worktree path; you do not see the orchestrator's conversation.
+You review one repo's change. Your brief carries the spec, each acceptance criterion (AC), the contract, the base and head commit hashes (secure hash algorithm identifiers, SHAs) and the worktree path; you do not see the orchestrator's conversation.
 
 First read `skill://ark/rubrics/reviewer.md` and apply it exactly. It is the rubric every Ark reviewer shares.
 

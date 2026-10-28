@@ -11,7 +11,7 @@
       "text": { "type": "string", "minLength": 1, "description": "Ticket text, verbatim" },
       "restatement": { "type": "string", "minLength": 1, "description": "Testable restatement" },
       "level": { "enum": ["e2e", "integration", "manual", "unit"] },
-      "kind": { "enum": ["new", "preserved"], "description": "New behavior (absent before the change) or preserved behavior (present before and after); proposed at intake, confirmed by a human at G1" },
+      "kind": { "enum": ["new", "preserved"], "description": "New behavior (absent before the change) or preserved behavior (present before and after); proposed at intake, confirmed by a human at plan" },
       "repos": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
       "risk_tags": { "type": "array", "items": { "type": "string", "minLength": 1 } }
     },

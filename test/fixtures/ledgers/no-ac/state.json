@@ -3,14 +3,14 @@
   "run_id": "2026-10-21-ARK-903-1",
   "ticket": "ARK-903",
   "playbook": "ticket",
-  "state": "awaiting_g0",
+  "state": "awaiting_criteria",
   "status": "waiting_human",
   "outcome": null,
   "tier": null,
   "round": 0,
   "implementer": "agent",
   "next_action": {
-    "kind": "answer_g0",
+    "kind": "answer_criteria",
     "agent": "human"
   },
   "gates": {},
@@ -24,5 +24,5 @@
   "sessions": [],
   "lock": null,
   "ledger_seq": 3,
-  "ledger_head": "sha256:c9374ca7d596d78bae3b2e65f874ab517368ce0938f5c49a71b42d9ee6085780"
+  "ledger_head": "sha256:c629c5a7a4b959a334a950f327cc319500d8a6fb5355037925c427e30f44113e"
 }

@@ -11,13 +11,13 @@
   "implementer": "agent",
   "next_action": null,
   "gates": {
-    "G1": {
+    "plan": {
       "answer": "approve",
       "by": "Cobe Karhoff <cobe@example.com> (cobe)",
       "at": "2026-10-21T20:41:07Z",
       "packet_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
     },
-    "G2": {
+    "evidence": {
       "answer": "approve",
       "by": "Cobe Karhoff <cobe@example.com> (cobe)",
       "at": "2026-10-22T08:00:00Z",
@@ -37,5 +37,5 @@
   "sessions": [],
   "lock": null,
   "ledger_seq": 10,
-  "ledger_head": "sha256:0b1115b5959bb14f6276e9359852d43accf22bbe42e635d4c09dbd0ba268dab3"
+  "ledger_head": "sha256:f29bf259f4aa066325d83102294b1e43a6c56baff05ba82d77ff18556cf38c09"
 }

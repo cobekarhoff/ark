@@ -9,19 +9,19 @@ import { OMP_CONFIG } from "./omp-config";
 import { spawnArk } from "./tty";
 
 setDefaultTimeout(60_000); // run start preflights through a subprocess of OMP's resolver; the multi-run tests make several calls
-const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
+const COMMAND_LINE_FILE = join(import.meta.dir, "..", "cli", "ark.ts");
 const FIXTURES = join(import.meta.dir, "fixtures", "ledgers");
 const schema = (name: string) => Bun.file(join(import.meta.dir, "..", "schemas", `${name}.schema.json`)).json();
 
 const TRICKY = 'Quote "this": colons, # hash and \'apples\' stay verbatim';
-const ticketMd = (id: string, acs: string[]) => `---
+const ticketMarkdown = (id: string, acceptanceCriteria: string[]) => `---
 id: ${id}
 title: "Fixture ticket"
 status: ready
 milestone: M1a
 traces: [FR-01]
 depends_on: [ARK-102]
-${acs.length ? `acceptance_criteria:\n${acs.map((t, i) => `  - id: ${id}-AC${i + 1}\n    text: ${JSON.stringify(t)}`).join("\n")}` : "acceptance_criteria: []"}
+${acceptanceCriteria.length ? `acceptance_criteria:\n${acceptanceCriteria.map((criterionText, i) => `  - id: ${id}-AC${i + 1}\n    text: ${JSON.stringify(criterionText)}`).join("\n")}` : "acceptance_criteria: []"}
 ---
 Body line one.
 
@@ -29,23 +29,23 @@ Body line two.
 `;
 
 let home: string;
-let proj: string; // cwd: a project directory holding ark.yml
-let gitconfig: string; // the approver's git identity, via GIT_CONFIG_GLOBAL
-const runsDir = () => join(home, "projects", "demo", "runs");
-const writeTicket = (id: string, acs: string[]) => {
+let projectDirectory: string; // cwd: a project directory holding ark.yml
+let gitConfigFile: string; // the approver's git identity, via GIT_CONFIG_GLOBAL
+const runsDirectory = () => join(home, "projects", "demo", "runs");
+const writeTicket = (id: string, acceptanceCriteria: string[]) => {
   mkdirSync(join(home, "projects", "demo", "tickets"), { recursive: true });
-  writeFileSync(join(home, "projects", "demo", "tickets", `${id}.md`), ticketMd(id, acs));
+  writeFileSync(join(home, "projects", "demo", "tickets", `${id}.md`), ticketMarkdown(id, acceptanceCriteria));
 };
-const ark = (...args: string[]) => {
-  const r = spawnArk(["bun", CLI, ...args], {
-    cwd: proj,
-    env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1" },
+const ark = (...argumentsList: string[]) => {
+  const result = spawnArk(["bun", COMMAND_LINE_FILE, ...argumentsList], {
+    cwd: projectDirectory,
+    env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitConfigFile, GIT_CONFIG_NOSYSTEM: "1" },
   });
-  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+  return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
 };
-const runFolders = () => readdirSync(runsDir()).filter((r) => r !== ".locks");
-const runId = (id: string) => runFolders().find((r) => r.includes(`-${id}-`))!;
-const runFile = (id: string, f: string) => readFileSync(join(runsDir(), runId(id), f), "utf8");
+const runFolders = () => readdirSync(runsDirectory()).filter((result) => result !== ".locks");
+const runId = (id: string) => runFolders().find((result) => result.includes(`-${id}-`))!;
+const runFile = (id: string, file: string) => readFileSync(join(runsDirectory(), runId(id), file), "utf8");
 const state = (id: string) => JSON.parse(runFile(id, "state.json"));
 // A run past its start: the route is logged first, as the playbook requires.
 const begin = (ticket: string) => {
@@ -57,60 +57,60 @@ const begin = (ticket: string) => {
 
 // Gate events are written only by `ark gate`, so tests that walk the lifecycle drive them through it.
 const gated: Record<string, [gate: string, answer?: string]> = {
-  "g0.opened": ["G0"], "g0.answered": ["G0", "accept"],
-  "g1.opened": ["G1"], "g1.approved": ["G1", "approve"], "g1.changed": ["G1", "change"],
-  "g2.opened": ["G2"], "g2.approved": ["G2", "approve"], "g2.rejected": ["G2", "send_back"],
-  "ge.opened": ["GE"], "ge.answered": ["GE", "one_more_round"],
+  "criteria.opened": ["criteria"], "criteria.answered": ["criteria", "accept"],
+  "plan.opened": ["plan"], "plan.approved": ["plan", "approve"], "plan.changed": ["plan", "change"],
+  "evidence.opened": ["evidence"], "evidence.approved": ["evidence", "approve"], "evidence.rejected": ["evidence", "send_back"],
+  "escalation.opened": ["escalation"], "escalation.answered": ["escalation", "one_more_round"],
 };
 // The hash `ark gate packet` recorded for the gate's newest packet (gates/<gate>.<hash>.packet.md).
 const packetHash = (id: string, gate: string): string =>
-  readFileSync(join(runsDir(), id, "ledger.ndjson"), "utf8").trim().split("\n").map((l) => JSON.parse(l))
-    .findLast((e) => e.type === "gate.packet" && e.data.gate === gate).data.packet_sha256;
+  readFileSync(join(runsDirectory(), id, "ledger.ndjson"), "utf8").trim().split("\n").map((line) => JSON.parse(line))
+    .findLast((event) => event.type === "gate.packet" && event.data.gate === gate).data.packet_sha256;
 const go = (id: string, event: string, data?: string) => {
   const [gate, answer] = gated[event] ?? [];
-  if (gate === "GE" && !answer) writeFileSync(join(runsDir(), id, "premise.md"), "# premise\n"); // the packet's required input
+  if (gate === "escalation" && !answer) writeFileSync(join(runsDirectory(), id, "premise.md"), "# premise\n"); // the packet's required input
   if (!gate) return ark("advance", id, event, ...(data ? ["--data", data] : []));
   if (answer) return ark("gate", "answer", id, gate, answer, "--packet", packetHash(id, gate));
-  if (gate === "G1") {
-    if (!existsSync(join(runsDir(), id, "plan.md"))) writeFileSync(join(runsDir(), id, "plan.md"), "# plan.md\n");
-    setKinds(join(runsDir(), id));
+  if (gate === "plan") {
+    if (!existsSync(join(runsDirectory(), id, "plan.md"))) writeFileSync(join(runsDirectory(), id, "plan.md"), "# plan.md\n");
+    setKinds(join(runsDirectory(), id));
   }
-  if (gate === "G2") { // every AC is manual and signed, so the real trace-check passes
-    const dir = join(runsDir(), id);
-    const ids = (Bun.YAML.parse(readFileSync(join(dir, "ac.yml"), "utf8")) as { id: string; text: string }[]).map((a) => a.id);
-    writeFileSync(join(dir, "ac.yml"), ids.map((i) => `- id: ${i}\n  text: t\n  level: manual\n  kind: new\n`).join("") || "[]\n");
-    mkdirSync(join(dir, "manual"), { recursive: true });
-    for (const i of ids) writeFileSync(join(dir, "manual", `${i}.md`), "signed-by: Gate Tester\nat: 2026-10-21\n");
-    const t = ark("trace-check", id);
-    if (t.code !== 0) return t;
+  if (gate === "evidence") { // every AC is manual and signed, so the real trace-check passes
+    const directory = join(runsDirectory(), id);
+    const ids = (Bun.YAML.parse(readFileSync(join(directory, "ac.yml"), "utf8")) as { id: string; text: string }[]).map((acceptanceCriterion) => acceptanceCriterion.id);
+    writeFileSync(join(directory, "ac.yml"), ids.map((i) => `- id: ${i}\n  text: t\n  level: manual\n  kind: new\n`).join("") || "[]\n");
+    mkdirSync(join(directory, "manual"), { recursive: true });
+    for (const i of ids) writeFileSync(join(directory, "manual", `${i}.md`), "signed-by: Gate Tester\nat: 2026-10-21\n");
+    const traceResult = ark("trace-check", id);
+    if (traceResult.code !== 0) return traceResult;
   }
   return ark("gate", "packet", id, gate);
 };
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "ark-home-"));
-  proj = mkdtempSync(join(tmpdir(), "ark-proj-"));
-  gitconfig = join(mkdtempSync(join(tmpdir(), "ark-git-")), "config");
-  writeFileSync(gitconfig, "[user]\n\tname = Gate Tester\n\temail = gate@example.test\n");
-  writeFileSync(join(proj, "ark.yml"), "project: demo\n");
-  mkdirSync(join(proj, ".omp"));
-  writeFileSync(join(proj, ".omp", "config.yml"), OMP_CONFIG);
-  mkdirSync(join(proj, "sub", "deeper"), { recursive: true });
+  projectDirectory = mkdtempSync(join(tmpdir(), "ark-proj-"));
+  gitConfigFile = join(mkdtempSync(join(tmpdir(), "ark-git-")), "config");
+  writeFileSync(gitConfigFile, "[user]\n\tname = Gate Tester\n\temail = gate@example.test\n");
+  writeFileSync(join(projectDirectory, "ark.yml"), "project: demo\n");
+  mkdirSync(join(projectDirectory, ".omp"));
+  writeFileSync(join(projectDirectory, ".omp", "config.yml"), OMP_CONFIG);
+  mkdirSync(join(projectDirectory, "sub", "deeper"), { recursive: true });
 });
 
 describe("ARK-103-AC1", () => {
   test("run start stores the ticket unchanged and writes ticket.json, ac.yml, ledger.ndjson, state.json under the project's runs folder", async () => {
     writeTicket("ARK-901", ["First", "Second"]);
     // nested cwd: project is found by walking up to the nearest ark.yml
-    proj = join(proj, "sub", "deeper");
-    const r = ark("run", "start", "ARK-901");
-    expect(r.code).toBe(0);
+    projectDirectory = join(projectDirectory, "sub", "deeper");
+    const result = ark("run", "start", "ARK-901");
+    expect(result.code).toBe(0);
 
-    const dir = runId("ARK-901");
-    const ledger = runFile("ARK-901", "ledger.ndjson").trim().split("\n").map((l) => JSON.parse(l));
-    expect(dir).toBe(`${ledger[0].ts.slice(0, 10)}-ARK-901-1`);
-    expect(readdirSync(join(runsDir(), dir)).sort()).toEqual([".main-session", "ac.yml", "ledger.ndjson", "state.json", "ticket.json", "ticket.md"]);
-    expect(runFile("ARK-901", "ticket.md")).toBe(ticketMd("ARK-901", ["First", "Second"]));
+    const directory = runId("ARK-901");
+    const ledger = runFile("ARK-901", "ledger.ndjson").trim().split("\n").map((line) => JSON.parse(line));
+    expect(directory).toBe(`${ledger[0].ts.slice(0, 10)}-ARK-901-1`);
+    expect(readdirSync(join(runsDirectory(), directory)).sort()).toEqual([".main-session", "ac.yml", "ledger.ndjson", "state.json", "ticket.json", "ticket.md"]);
+    expect(runFile("ARK-901", "ticket.md")).toBe(ticketMarkdown("ARK-901", ["First", "Second"]));
     expect(JSON.parse(runFile("ARK-901", "ticket.json"))).toEqual({
       id: "ARK-901",
       title: "Fixture ticket",
@@ -130,10 +130,10 @@ describe("ARK-103-AC1", () => {
     expect(ajv.validate(await schema("ticket"), JSON.parse(runFile("ARK-901", "ticket.json"))), ajv.errorsText()).toBe(true);
     expect(ajv.validate(await schema("ac"), Bun.YAML.parse(runFile("ARK-901", "ac.yml"))), ajv.errorsText()).toBe(true);
     expect(ajv.validate(await schema("state"), state("ARK-901")), ajv.errorsText()).toBe(true);
-    for (const e of ledger) expect(ajv.validate(await schema("ledger-event"), e), ajv.errorsText()).toBe(true);
-    expect(ledger.map((e) => e.seq)).toEqual([1]);
+    for (const event of ledger) expect(ajv.validate(await schema("ledger-event"), event), ajv.errorsText()).toBe(true);
+    expect(ledger.map((event) => event.seq)).toEqual([1]);
     expect(ledger[0].type).toBe("run.started");
-    expect(state("ARK-901")).toMatchObject({ run_id: dir, ticket: "ARK-901", state: "intake", ledger_seq: 1 });
+    expect(state("ARK-901")).toMatchObject({ run_id: directory, ticket: "ARK-901", state: "intake", ledger_seq: 1 });
   });
 
   test("a missing ticket, a malformed ticket, or no ark.yml fails with exit 1 and creates no run", () => {
@@ -146,10 +146,10 @@ describe("ARK-103-AC1", () => {
     expect(runFolders()).toEqual([]);
 
     const lost = mkdtempSync(join(tmpdir(), "ark-noyml-"));
-    proj = lost;
-    const r = ark("run", "start", "ARK-902");
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("ark.yml");
+    projectDirectory = lost;
+    const result = ark("run", "start", "ARK-902");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("ark.yml");
   });
 });
 
@@ -166,19 +166,19 @@ describe("ARK-103-AC2", () => {
     expect(Object.keys(state("ARK-901").acs)).toEqual(["ARK-901-AC1", "ARK-901-AC2"]);
   });
 
-  test("a ticket with no acceptance criteria makes the run open G0 and wait for a human", () => {
+  test("a ticket with no acceptance criteria makes the run open criteria and wait for a human", () => {
     writeTicket("ARK-901", []);
-    const r = ark("run", "start", "ARK-901");
-    expect(r.code).toBe(0);
+    const result = ark("run", "start", "ARK-901");
+    expect(result.code).toBe(0);
     const id = runId("ARK-901");
     expect(ark("log", "route", id, "ticket", "empty ticket fixture").code).toBe(0);
     expect(state("ARK-901")).toMatchObject({
-      state: "awaiting_g0",
+      state: "awaiting_criteria",
       status: "waiting_human",
-      next_action: { kind: "answer_g0", agent: "human" },
+      next_action: { kind: "answer_criteria", agent: "human" },
       acs: {},
     });
-    expect(runFile("ARK-901", "ledger.ndjson").trim().split("\n").map((l) => JSON.parse(l).type)).toEqual(["run.started", "route.chosen", "g0.opened"]);
+    expect(runFile("ARK-901", "ledger.ndjson").trim().split("\n").map((line) => JSON.parse(line).type)).toEqual(["run.started", "route.chosen", "criteria.opened"]);
   });
 });
 
@@ -190,28 +190,28 @@ describe("ARK-103-AC3", () => {
     const ledger = readFileSync(join(FIXTURES, name, "ledger.ndjson"), "utf8");
     const first = JSON.parse(ledger.split("\n")[0]);
     const id = `${first.ts.slice(0, 10)}-${first.data.ticket}-${first.data.n}`;
-    mkdirSync(join(runsDir(), id), { recursive: true });
-    cpSync(join(FIXTURES, name, "ledger.ndjson"), join(runsDir(), id, "ledger.ndjson"));
+    mkdirSync(join(runsDirectory(), id), { recursive: true });
+    cpSync(join(FIXTURES, name, "ledger.ndjson"), join(runsDirectory(), id, "ledger.ndjson"));
     return id;
   };
 
   // Hand-reviewed expectations, so the recorded state.json files are not just the code's own output echoed back.
   // lifecycle ends closed; fix-round's first event is on the 21st UTC but later events are on the 22nd (run_id uses the first);
-  // no-ac opens G0 atomically with the route.
+  // no-ac opens criteria atomically with the route.
   const expected: Record<string, object> = {
     lifecycle: {
       run_id: "2026-10-21-ARK-901-1", state: "done", status: "done", outcome: "merged", next_action: null, ledger_seq: 10,
-      gates: { G1: { answer: "approve", at: "2026-10-21T20:41:07Z" }, G2: { answer: "approve", at: "2026-10-22T08:00:00Z" } },
+      gates: { plan: { answer: "approve", at: "2026-10-21T20:41:07Z" }, evidence: { answer: "approve", at: "2026-10-22T08:00:00Z" } },
     },
     "fix-round": { run_id: "2026-10-21-ARK-902-1", state: "building", status: "active", round: 2, next_action: { kind: "continue_build", agent: "orchestrator" }, ledger_seq: 11 },
-    "no-ac": { run_id: "2026-10-21-ARK-903-1", state: "awaiting_g0", status: "waiting_human", next_action: { kind: "answer_g0", agent: "human" }, acs: {}, ledger_seq: 3 },
+    "no-ac": { run_id: "2026-10-21-ARK-903-1", state: "awaiting_criteria", status: "waiting_human", next_action: { kind: "answer_criteria", agent: "human" }, acs: {}, ledger_seq: 3 },
   };
 
   for (const name of fixtures) {
     test(`fixture ledger '${name}' replays to the recorded state.json byte for byte`, () => {
       const id = place(name);
       expect(JSON.parse(readFileSync(join(FIXTURES, name, "state.json"), "utf8"))).toMatchObject(expected[name]);
-      const target = join(runsDir(), id, "state.json");
+      const target = join(runsDirectory(), id, "state.json");
       expect(ark("run", "replay", id).code).toBe(0);
       expect(readFileSync(target)).toEqual(readFileSync(join(FIXTURES, name, "state.json")));
       expect(ark("run", "replay", id, "--check").code).toBe(0);
@@ -219,7 +219,7 @@ describe("ARK-103-AC3", () => {
 
     test(`fixture ledger '${name}': --check exits 1 when state.json is stale or missing, and does not rewrite it`, () => {
       const id = place(name);
-      const target = join(runsDir(), id, "state.json");
+      const target = join(runsDirectory(), id, "state.json");
       expect(ark("run", "replay", id, "--check").code).toBe(1); // missing
       writeFileSync(target, readFileSync(join(FIXTURES, name, "state.json"), "utf8").replace("ledger_seq", "ledger_seqq"));
       const before = readFileSync(target);
@@ -231,8 +231,8 @@ describe("ARK-103-AC3", () => {
   test("a run driven through the CLI has a state.json identical to its replay", () => {
     writeTicket("ARK-901", ["First"]);
     const id = begin("ARK-901");
-    for (const e of ["analysis.completed", "g1.opened", "g1.approved", "build.started", "build.completed", "fix_round.started"]) {
-      expect(go(id, e, '{"n":1}').code).toBe(0);
+    for (const event of ["analysis.completed", "plan.opened", "plan.approved", "build.started", "build.completed", "fix_round.started"]) {
+      expect(go(id, event, '{"n":1}').code).toBe(0);
     }
     const written = runFile("ARK-901", "state.json");
     expect(ark("run", "replay", id, "--check").code).toBe(0);
@@ -243,70 +243,70 @@ describe("ARK-103-AC3", () => {
 
   test("a ledger with a gap in seq or an event illegal for its state is rejected by replay", () => {
     const id = place("lifecycle");
-    const path = join(runsDir(), id, "ledger.ndjson");
+    const path = join(runsDirectory(), id, "ledger.ndjson");
     const lines = readFileSync(path, "utf8").trim().split("\n");
     writeFileSync(path, `${[lines[0], lines[2]].join("\n")}\n`); // seq jumps 1 -> 3
     expect(ark("run", "replay", id).code).toBe(1);
     writeFileSync(path, `${[lines[0], lines[4].replace('"seq":5', '"seq":2')].join("\n")}\n`); // build.started in intake
-    rechain(join(runsDir(), id)); // a hand-built ledger whose chain holds, so replay reaches the state machine
-    const r = ark("run", "replay", id);
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("illegal");
+    rechain(join(runsDirectory(), id)); // a hand-built ledger whose chain holds, so replay reaches the state machine
+    const result = ark("run", "replay", id);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("illegal");
   });
 });
 
 describe("ARK-103-AC4", () => {
   // Hand-written path to each state and one event that is illegal there (from the PRD lifecycle, not from the code under test).
-  const toBuilding = ["analysis.completed", "g1.opened", "g1.approved", "build.started"];
+  const toBuilding = ["analysis.completed", "plan.opened", "plan.approved", "build.started"];
   const toJudging = [...toBuilding, "build.completed"];
-  const toG2 = [...toJudging, "g2.opened"];
-  const cases: [state: string, acs: string[], path: string[], illegal: string][] = [
+  const toEvidence = [...toJudging, "evidence.opened"];
+  const cases: [state: string, acceptanceCriteria: string[], path: string[], illegal: string][] = [
     ["intake", ["a"], [], "build.started"],
-    ["awaiting_g0", [], [], "g1.approved"],
-    ["analyzed", ["a"], ["analysis.completed"], "g1.approved"],
-    ["awaiting_g1", ["a"], ["analysis.completed", "g1.opened"], "build.started"],
-    ["approved", ["a"], ["analysis.completed", "g1.opened", "g1.approved"], "g1.approved"],
+    ["awaiting_criteria", [], [], "plan.approved"],
+    ["analyzed", ["a"], ["analysis.completed"], "plan.approved"],
+    ["awaiting_plan", ["a"], ["analysis.completed", "plan.opened"], "build.started"],
+    ["approved", ["a"], ["analysis.completed", "plan.opened", "plan.approved"], "plan.approved"],
     ["building", ["a"], toBuilding, "build.started"],
     ["judging", ["a"], toJudging, "build.completed"],
-    ["awaiting_ge", ["a"], [...toJudging, "fix_round.started", "build.completed", "fix_round.started", "build.completed", "ge.opened"], "g2.approved"], // escalation opens only once the two-round budget is spent
-    ["escalating", ["a"], [...toJudging, "fix_round.started", "build.completed", "fix_round.started", "build.completed", "g2.opened", "g2.rejected"], "g2.opened"], // a send-back past the budget: only the GE packet or abort follows
-    ["awaiting_g2", ["a"], toG2, "build.completed"],
-    ["mrs_open", ["a"], [...toG2, "g2.approved"], "build.started"],
+    ["awaiting_escalation", ["a"], [...toJudging, "fix_round.started", "build.completed", "fix_round.started", "build.completed", "escalation.opened"], "evidence.approved"], // escalation opens only once the two-round budget is spent
+    ["escalating", ["a"], [...toJudging, "fix_round.started", "build.completed", "fix_round.started", "build.completed", "evidence.opened", "evidence.rejected"], "evidence.opened"], // a send-back past the budget: only the escalation packet or abort follows
+    ["awaiting_evidence", ["a"], toEvidence, "build.completed"],
+    ["merge_requests_open", ["a"], [...toEvidence, "evidence.approved"], "build.started"],
     ["aborted", ["a"], ["abort"], "abort"],
   ];
 
   // Every file in the run folder with its bytes and mtime.
-  const snapshot = (dir: string) =>
-    (readdirSync(dir, { recursive: true }) as string[]).sort().filter((f) => statSync(join(dir, f)).isFile())
-      .map((f) => [f, readFileSync(join(dir, f), "utf8"), statSync(join(dir, f)).mtimeMs]);
+  const snapshot = (directory: string) =>
+    (readdirSync(directory, { recursive: true }) as string[]).sort().filter((file) => statSync(join(directory, file)).isFile())
+      .map((file) => [file, readFileSync(join(directory, file), "utf8"), statSync(join(directory, file)).mtimeMs]);
 
-  for (const [name, acs, path, illegal] of cases) {
+  for (const [name, acceptanceCriteria, path, illegal] of cases) {
     test(`${name}: '${illegal}' is refused with a reason and changes no file`, async () => {
-      writeTicket("ARK-901", acs);
+      writeTicket("ARK-901", acceptanceCriteria);
       const id = begin("ARK-901");
-      for (const e of path) expect(go(id, e).code, e).toBe(0);
+      for (const event of path) expect(go(id, event).code, event).toBe(0);
       expect(state("ARK-901").state).toBe(name);
 
-      const before = snapshot(join(runsDir(), id));
+      const before = snapshot(join(runsDirectory(), id));
       await Bun.sleep(20); // real clock on purpose: mtime is filesystem state a fake timer cannot move
       for (const bad of [illegal, "no.such.event"]) {
-        const r = ark("advance", id, bad);
-        expect(r.code).toBe(1);
-        expect(r.err).toContain(`'${bad}'`);
-        expect(r.err).toContain(`'${name}'`);
+        const result = ark("advance", id, bad);
+        expect(result.code).toBe(1);
+        expect(result.err).toContain(`'${bad}'`);
+        expect(result.err).toContain(`'${name}'`);
       }
-      expect(ark("advance", id, "g1.approved", "--data", "{oops").code).toBe(1);
-      expect(snapshot(join(runsDir(), id))).toEqual(before);
+      expect(ark("advance", id, "plan.approved", "--data", "{oops").code).toBe(1);
+      expect(snapshot(join(runsDirectory(), id))).toEqual(before);
     });
   }
 
-  for (const [name, acs, path] of cases.filter((c) => !["mrs_open", "aborted"].includes(c[0]))) { // aborted is the outcome before any MR exists: mrs_open has its own exit
+  for (const [name, acceptanceCriteria, path] of cases.filter((lifecycleCase) => !["merge_requests_open", "aborted"].includes(lifecycleCase[0]))) { // aborted is the outcome before any MR exists: merge_requests_open has its own exit
     test(`${name}: abort is legal, closes the run, and a closed run accepts nothing`, () => {
-      writeTicket("ARK-901", acs);
+      writeTicket("ARK-901", acceptanceCriteria);
       const id = begin("ARK-901");
-      for (const e of path) go(id, e);
-      const out = ark("advance", id, "abort", "--data", '{"reason":"stop"}');
-      expect(out.code, out.err).toBe(0);
+      for (const event of path) go(id, event);
+      const output = ark("advance", id, "abort", "--data", '{"reason":"stop"}');
+      expect(output.code, output.err).toBe(0);
       expect(state("ARK-901")).toMatchObject({ state: "aborted", status: "aborted", outcome: "aborted", next_action: null });
       expect(ark("advance", id, "analysis.completed").err).toContain("closed");
     });
@@ -316,29 +316,29 @@ describe("ARK-103-AC4", () => {
     writeTicket("ARK-901", ["a"]);
     const id = begin("ARK-901");
     const walk: [string, string][] = [
-      ["g0.opened", "awaiting_g0"],
-      ["g0.answered", "intake"],
+      ["criteria.opened", "awaiting_criteria"],
+      ["criteria.answered", "intake"],
       ["analysis.completed", "analyzed"],
-      ["g1.opened", "awaiting_g1"],
-      ["g1.changed", "analyzed"],
-      ["g1.opened", "awaiting_g1"],
-      ["g1.approved", "approved"],
+      ["plan.opened", "awaiting_plan"],
+      ["plan.changed", "analyzed"],
+      ["plan.opened", "awaiting_plan"],
+      ["plan.approved", "approved"],
       ["build.started", "building"],
       ["build.completed", "judging"],
       ["fix_round.started", "building"],
       ["build.completed", "judging"],
       ["fix_round.started", "building"],
       ["build.completed", "judging"],
-      ["ge.opened", "awaiting_ge"],
-      ["ge.answered", "building"],
+      ["escalation.opened", "awaiting_escalation"],
+      ["escalation.answered", "building"],
       ["build.completed", "judging"],
-      ["g2.opened", "awaiting_g2"],
-      ["g2.rejected", "escalating"], // the budget is spent: a send-back leads only to escalation
-      ["ge.opened", "awaiting_ge"],
-      ["ge.answered", "building"],
+      ["evidence.opened", "awaiting_evidence"],
+      ["evidence.rejected", "escalating"], // the budget is spent: a send-back leads only to escalation
+      ["escalation.opened", "awaiting_escalation"],
+      ["escalation.answered", "building"],
       ["build.completed", "judging"],
-      ["g2.opened", "awaiting_g2"],
-      ["g2.approved", "mrs_open"],
+      ["evidence.opened", "awaiting_evidence"],
+      ["evidence.approved", "merge_requests_open"],
     ];
     for (const [event, to] of walk) {
       expect(go(id, event).code, event).toBe(0);
@@ -353,30 +353,30 @@ describe("ARK-103-AC5", () => {
     const id = begin("ARK-901");
     // [event, state reached, who acts per the PRD state table]
     const steps: [string, string, string][] = [
-      ["g0.opened", "awaiting_g0", "human"],
-      ["g0.answered", "intake", "orchestrator"],
+      ["criteria.opened", "awaiting_criteria", "human"],
+      ["criteria.answered", "intake", "orchestrator"],
       ["analysis.completed", "analyzed", "orchestrator"],
-      ["g1.opened", "awaiting_g1", "human"],
-      ["g1.approved", "approved", "orchestrator"],
+      ["plan.opened", "awaiting_plan", "human"],
+      ["plan.approved", "approved", "orchestrator"],
       ["build.started", "building", "orchestrator"],
       ["build.completed", "judging", "orchestrator"],
       ["fix_round.started", "building", "orchestrator"],
       ["build.completed", "judging", "orchestrator"],
       ["fix_round.started", "building", "orchestrator"],
       ["build.completed", "judging", "orchestrator"],
-      ["ge.opened", "awaiting_ge", "human"],
-      ["ge.answered", "building", "orchestrator"],
+      ["escalation.opened", "awaiting_escalation", "human"],
+      ["escalation.answered", "building", "orchestrator"],
       ["build.completed", "judging", "orchestrator"],
-      ["g2.opened", "awaiting_g2", "human"],
-      ["g2.approved", "mrs_open", "human"],
+      ["evidence.opened", "awaiting_evidence", "human"],
+      ["evidence.approved", "merge_requests_open", "human"],
     ];
     expect(state("ARK-901").next_action).toMatchObject({ kind: expect.any(String), agent: "orchestrator" });
     for (const [event, to, who] of steps) {
       go(id, event);
-      const s = state("ARK-901");
-      expect(s.state).toBe(to);
-      expect(s.next_action).toMatchObject({ kind: expect.stringMatching(/\S/), agent: who });
-      expect(s.status).toBe(who === "human" ? "waiting_human" : "active");
+      const runState = state("ARK-901");
+      expect(runState.state).toBe(to);
+      expect(runState.next_action).toMatchObject({ kind: expect.stringMatching(/\S/), agent: who });
+      expect(runState.status).toBe(who === "human" ? "waiting_human" : "active");
     }
   });
 });
@@ -386,15 +386,15 @@ describe("ARK-103-AC6", () => {
     writeTicket("ARK-901", ["a"]);
     const id = begin("ARK-901");
     ark("advance", id, "analysis.completed");
-    const dir = join(runsDir(), id);
-    const before = readdirSync(dir).map((f) => [f, readFileSync(join(dir, f), "utf8")]);
+    const directory = join(runsDirectory(), id);
+    const before = readdirSync(directory).map((file) => [file, readFileSync(join(directory, file), "utf8")]);
 
     const again = ark("run", "start", "ARK-901");
     expect(again.code).toBe(0);
     expect(again.out).toContain(`resumed ${id}`);
     expect(again.out).toContain("state: analyzed");
     expect(runFolders()).toEqual([id]);
-    expect(readdirSync(dir).map((f) => [f, readFileSync(join(dir, f), "utf8")])).toEqual(before);
+    expect(readdirSync(directory).map((file) => [file, readFileSync(join(directory, file), "utf8")])).toEqual(before);
   });
 
   test("a run for a different ticket does not count as an existing run", () => {
@@ -423,10 +423,10 @@ describe("ARK-117-AC1", () => {
     expect(ark("advance", first, "abort").code).toBe(0);
     const again = ark("run", "start", "ARK-901");
     expect(again.out).toMatch(/^started \d{4}-\d{2}-\d{2}-ARK-901-2\n/);
-    const second = folders().find((f) => f !== first)!;
+    const second = folders().find((file) => file !== first)!;
     expect(second).toEndWith("-ARK-901-2");
-    expect(JSON.parse(readFileSync(join(runsDir(), second, "state.json"), "utf8"))).toMatchObject({ run_id: second, state: "intake" });
-    expect(JSON.parse(readFileSync(join(runsDir(), first, "state.json"), "utf8"))).toMatchObject({ state: "aborted", outcome: "aborted" });
+    expect(JSON.parse(readFileSync(join(runsDirectory(), second, "state.json"), "utf8"))).toMatchObject({ run_id: second, state: "intake" });
+    expect(JSON.parse(readFileSync(join(runsDirectory(), first, "state.json"), "utf8"))).toMatchObject({ state: "aborted", outcome: "aborted" });
 
     expect(ark("run", "start", "ARK-901").out).toContain(`resumed ${second}`); // the newest run is the open one
     expect(folders().length).toBe(2);
@@ -440,30 +440,30 @@ describe("ARK-120-AC8", () => {
     ark("run", "start", "ARK-901");
     const id = runId("ARK-901");
     const before = runFile("ARK-901", "ledger.ndjson");
-    for (const args of [["advance", id, "analysis.completed"], ["advance", id, "abort"], ["gate", "packet", id, "G0"]]) {
-      const r = ark(...args);
-      expect(r.code, args.join(" ")).toBe(1);
-      expect(r.err, args.join(" ")).toContain("route.chosen");
+    for (const argumentsList of [["advance", id, "analysis.completed"], ["advance", id, "abort"], ["gate", "packet", id, "criteria"]]) {
+      const result = ark(...argumentsList);
+      expect(result.code, argumentsList.join(" ")).toBe(1);
+      expect(result.err, argumentsList.join(" ")).toContain("route.chosen");
     }
     expect(runFile("ARK-901", "ledger.ndjson")).toBe(before);
     expect(ark("log", "route", id, "ticket", "fixture").code).toBe(0);
     expect(ark("advance", id, "analysis.completed").code).toBe(0);
   });
 
-  test("an empty-AC ticket opens G0 only once the route is logged", () => {
+  test("an empty-AC ticket opens criteria only once the route is logged", () => {
     writeTicket("ARK-902", []);
     ark("run", "start", "ARK-902");
     const id = runId("ARK-902");
     const before = runFile("ARK-902", "ledger.ndjson");
-    for (const args of [["gate", "packet", id, "G0"], ["advance", id, "g0.opened"]]) {
-      const r = ark(...args);
-      expect(r.code, args.join(" ")).toBe(1);
-      expect(r.err, args.join(" ")).toContain("route.chosen");
+    for (const argumentsList of [["gate", "packet", id, "criteria"], ["advance", id, "criteria.opened"]]) {
+      const result = ark(...argumentsList);
+      expect(result.code, argumentsList.join(" ")).toBe(1);
+      expect(result.err, argumentsList.join(" ")).toContain("route.chosen");
     }
     expect(runFile("ARK-902", "ledger.ndjson")).toBe(before);
     expect(ark("log", "route", id, "ticket", "fixture").code).toBe(0);
-    expect(state("ARK-902")).toMatchObject({ state: "awaiting_g0", status: "waiting_human" });
-    expect(ark("gate", "packet", id, "G0").code).toBe(0);
+    expect(state("ARK-902")).toMatchObject({ state: "awaiting_criteria", status: "waiting_human" });
+    expect(ark("gate", "packet", id, "criteria").code).toBe(0);
   });
 
   test("a ledger whose second event is not route.chosen is not a legal run", () => {
@@ -471,13 +471,13 @@ describe("ARK-120-AC8", () => {
     ark("run", "start", "ARK-901");
     const id = runId("ARK-901");
     ark("log", "route", id, "ticket", "fixture");
-    const path = join(runsDir(), id, "ledger.ndjson");
+    const path = join(runsDirectory(), id, "ledger.ndjson");
     const [started, route] = readFileSync(path, "utf8").trim().split("\n");
     writeFileSync(path, `${started}\n${route.replace("route.chosen", "analysis.completed")}\n`);
-    rechain(join(runsDir(), id));
-    const r = ark("run", "replay", id, "--check");
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("route.chosen");
+    rechain(join(runsDirectory(), id));
+    const result = ark("run", "replay", id, "--check");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("route.chosen");
   });
 });
 
@@ -486,20 +486,20 @@ describe("ARK-120-AC11", () => {
     writeTicket("ARK-901", ["a"]);
     const first = begin("ARK-901");
     expect(ark("advance", first, "abort").code).toBe(0);
-    const start = () => Bun.spawn(["bun", CLI, "run", "start", "ARK-901"], {
-      cwd: proj,
-      env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1", PI_SESSION_ID: "ark-main-session", PI_SESSION_FILE: join(home, "test-main-session.jsonl") },
+    const start = () => Bun.spawn(["bun", COMMAND_LINE_FILE, "run", "start", "ARK-901"], {
+      cwd: projectDirectory,
+      env: { ...process.env, ARK_HOME: home, GIT_CONFIG_GLOBAL: gitConfigFile, GIT_CONFIG_NOSYSTEM: "1", PI_SESSION_ID: "ark-main-session", PI_SESSION_FILE: join(home, "test-main-session.jsonl") },
       stdout: "pipe",
       stderr: "pipe",
     });
     const calls = [start(), start()];
-    const outputs = await Promise.all(calls.map(async (proc) => {
-      const [code, out, err] = await Promise.all([proc.exited, Bun.readableStreamToText(proc.stdout), Bun.readableStreamToText(proc.stderr)]);
-      return { code, out, err };
+    const outputs = await Promise.all(calls.map(async (childProcess) => {
+      const [code, output, error] = await Promise.all([childProcess.exited, Bun.readableStreamToText(childProcess.stdout), Bun.readableStreamToText(childProcess.stderr)]);
+      return { code, out: output, err: error };
     }));
-    expect(outputs.map((r) => r.code)).toEqual([0, 0]);
-    expect(outputs.map((r) => r.out).join("")).toMatch(/(?:started|resumed) \d{4}-\d{2}-\d{2}-ARK-901-2/);
-    expect(runFolders().filter((dir) => dir.endsWith("-ARK-901-2"))).toHaveLength(1);
+    expect(outputs.map((result) => result.code)).toEqual([0, 0]);
+    expect(outputs.map((result) => result.out).join("")).toMatch(/(?:started|resumed) \d{4}-\d{2}-\d{2}-ARK-901-2/);
+    expect(runFolders().filter((directory) => directory.endsWith("-ARK-901-2"))).toHaveLength(1);
     expect(runFolders()).toHaveLength(2); // no run 3
   });
 });

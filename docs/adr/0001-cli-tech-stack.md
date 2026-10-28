@@ -5,7 +5,7 @@ Evidence: ARK-101 spike (plugin install from Git, CLI on PATH, typed tools)
 
 ## Context
 
-Ark has four code surfaces: the `ark` CLI, the Oh My Pi (OMP) hook shim, typed OMP tools, and the Ark Console. They share the same JSON Schemas: ticket, acceptance criteria (`ac`), state, ledger event and agent outputs. Ark ships as one OMP plugin installed from Git (functional requirement, FR-24). The CLI must be deterministic (non-functional requirement, NFR-01) and must contain no harness-specific logic (NFR-03).
+Ark has four code surfaces: the `ark` CLI, the Oh My Pi (OMP) hook shim, typed OMP tools, and the Ark Console. They share the same JavaScript Object Notation (JSON) Schemas: ticket, acceptance criterion (AC) entries (`ac`), state, ledger event and agent outputs. Ark ships as one OMP plugin installed from Git (functional requirement (FR) FR-24). The CLI must be deterministic (non-functional requirement (NFR) NFR-01) and must contain no harness-specific logic (NFR-03).
 
 ## Decision
 

@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const CLI = join(import.meta.dir, "..", "cli", "ark.ts");
+const COMMAND_LINE_FILE = join(import.meta.dir, "..", "cli", "ark.ts");
 
 // A fake gh serving the two GitHub API reads `ark doctor` makes. The protection answer is the file the test wrote, or GitHub's 404 for an unprotected branch.
 const FAKE_GH = `#!/bin/sh
@@ -31,11 +31,11 @@ let root: string;
 const ark = (protection?: unknown) => {
   const file = join(root, "protection.json");
   if (protection !== undefined) writeFileSync(file, JSON.stringify(protection));
-  const r = Bun.spawnSync([process.execPath, CLI, "doctor"], {
+  const result = Bun.spawnSync([process.execPath, COMMAND_LINE_FILE, "doctor"], {
     cwd: join(root, "proj"),
     env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, GH_LOG: join(root, "gh.log"), GH_PROTECTION: file },
   });
-  return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+  return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
 };
 
 beforeEach(() => {
@@ -51,44 +51,44 @@ beforeEach(() => {
 
 describe("ARK-118-AC3", () => {
   test("passes when the host's default branch includes admins, requires a PR and checks, and forbids force pushes", () => {
-    const r = ark(PROTECTED);
-    expect(r.err).toBe("");
-    expect(r.code).toBe(0);
-    expect(r.out).toContain("acme/demo trunk protected");
-    expect(r.out).toContain("no bypass allowances"); // the success line claims only what was checked
+    const result = ark(PROTECTED);
+    expect(result.err).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("acme/demo trunk protected");
+    expect(result.out).toContain("no bypass allowances"); // the success line claims only what was checked
     // the default branch is read from the host (here 'trunk', not the local 'main'), and its protection from the documented endpoint
     expect(readFileSync(join(root, "gh.log"), "utf8").trim().split("\n")).toEqual(["api repos/acme/demo", "api repos/acme/demo/branches/trunk/protection"]);
   });
 
-  const weakened: [string, (p: typeof PROTECTED) => unknown, string][] = [
-    ["admins are not included", (p) => ({ ...p, enforce_admins: { enabled: false } }), "administrators are not included"],
-    ["no PR is required", ({ required_pull_request_reviews, ...p }) => p, "pull requests are not required"],
-    ["no check is required", (p) => ({ ...p, required_status_checks: { strict: false, contexts: [], checks: [] } }), "no status check is required"],
-    ["status checks are absent", ({ required_status_checks, ...p }) => p, "no status check is required"],
-    ["a user may bypass the PR requirement", (p) => ({ ...p, required_pull_request_reviews: { ...p.required_pull_request_reviews, bypass_pull_request_allowances: { users: [{ login: "operator" }], teams: [], apps: [] } } }), "bypass the pull request requirement: user operator"],
-    ["a team may bypass the PR requirement", (p) => ({ ...p, required_pull_request_reviews: { ...p.required_pull_request_reviews, bypass_pull_request_allowances: { users: [], teams: [{ slug: "admins" }], apps: [] } } }), "team admins"],
-    ["an app may bypass the PR requirement", (p) => ({ ...p, required_pull_request_reviews: { ...p.required_pull_request_reviews, bypass_pull_request_allowances: { users: [], teams: [], apps: [{ slug: "release-bot" }] } } }), "app release-bot"],
-    ["deleting the branch is allowed", (p) => ({ ...p, allow_deletions: { enabled: true } }), "deleting the branch is allowed"],
-    ["force pushes are allowed", (p) => ({ ...p, allow_force_pushes: { enabled: true } }), "force pushes are allowed"],
+  const weakened: [string, (protection: typeof PROTECTED) => unknown, string][] = [
+    ["admins are not included", (protection) => ({ ...protection, enforce_admins: { enabled: false } }), "administrators are not included"],
+    ["no PR is required", ({ required_pull_request_reviews, ...protection }) => protection, "pull requests are not required"],
+    ["no check is required", (protection) => ({ ...protection, required_status_checks: { strict: false, contexts: [], checks: [] } }), "no status check is required"],
+    ["status checks are absent", ({ required_status_checks, ...protection }) => protection, "no status check is required"],
+    ["a user may bypass the PR requirement", (protection) => ({ ...protection, required_pull_request_reviews: { ...protection.required_pull_request_reviews, bypass_pull_request_allowances: { users: [{ login: "operator" }], teams: [], apps: [] } } }), "bypass the pull request requirement: user operator"],
+    ["a team may bypass the PR requirement", (protection) => ({ ...protection, required_pull_request_reviews: { ...protection.required_pull_request_reviews, bypass_pull_request_allowances: { users: [], teams: [{ slug: "admins" }], apps: [] } } }), "team admins"],
+    ["an app may bypass the PR requirement", (protection) => ({ ...protection, required_pull_request_reviews: { ...protection.required_pull_request_reviews, bypass_pull_request_allowances: { users: [], teams: [], apps: [{ slug: "release-bot" }] } } }), "app release-bot"],
+    ["deleting the branch is allowed", (protection) => ({ ...protection, allow_deletions: { enabled: true } }), "deleting the branch is allowed"],
+    ["force pushes are allowed", (protection) => ({ ...protection, allow_force_pushes: { enabled: true } }), "force pushes are allowed"],
   ];
   for (const [name, weaken, reason] of weakened) {
     test(`fails when ${name}`, () => {
-      const r = ark(weaken(PROTECTED));
-      expect(r.code).toBe(1);
-      expect(r.err).toContain(reason);
-      expect(r.out).toBe("");
+      const result = ark(weaken(PROTECTED));
+      expect(result.code).toBe(1);
+      expect(result.err).toContain(reason);
+      expect(result.out).toBe("");
     });
   }
 
   test("names every missing protection at once", () => {
-    const r = ark({ enforce_admins: { enabled: false }, allow_force_pushes: { enabled: true } });
-    expect(r.code).toBe(1);
-    for (const reason of ["administrators", "pull requests", "status check", "force pushes"]) expect(r.err).toContain(reason);
+    const result = ark({ enforce_admins: { enabled: false }, allow_force_pushes: { enabled: true } });
+    expect(result.code).toBe(1);
+    for (const reason of ["administrators", "pull requests", "status check", "force pushes"]) expect(result.err).toContain(reason);
   });
 
   test("fails when the default branch has no protection at all (GitHub answers 404)", () => {
-    const r = ark(); // no protection file
-    expect(r.code).toBe(1);
-    expect(r.err).toContain("Branch not protected");
+    const result = ark(); // no protection file
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("Branch not protected");
   });
 });

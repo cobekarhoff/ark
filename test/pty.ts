@@ -3,11 +3,11 @@
 // Usage: bun test/pty.ts <typed> <stdout-file> <stderr-file> <command> [args...]
 import { existsSync, writeFileSync } from "node:fs";
 
-const [typed, out, err, ...cmd] = process.argv.slice(2);
+const [typed, output, error, ...command] = process.argv.slice(2);
 let seen = "";
 let sent = false;
-const proc = Bun.spawn(["sh", "-c", 'exec "$@" >"$ARK_PTY_OUT" 2>"$ARK_PTY_ERR"', "sh", ...cmd], {
-  env: { ...process.env, ARK_PTY_OUT: out, ARK_PTY_ERR: err },
+const childProcess = Bun.spawn(["sh", "-c", 'exec "$@" >"$ARK_PTY_OUT" 2>"$ARK_PTY_ERR"', "sh", ...command], {
+  env: { ...process.env, ARK_PTY_OUT: output, ARK_PTY_ERR: error },
   terminal: {
     cols: 120,
     rows: 24,
@@ -33,4 +33,4 @@ const proc = Bun.spawn(["sh", "-c", 'exec "$@" >"$ARK_PTY_OUT" 2>"$ARK_PTY_ERR"'
     },
   },
 });
-process.exit(await proc.exited);
+process.exit(await childProcess.exited);

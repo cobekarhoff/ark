@@ -16,30 +16,30 @@ export const hasSessionInit = (lines: string[]) => lines.some((line) => {
   try { return JSON.parse(line)?.type === "session_init"; } catch { return false; }
 });
 
-export function bindSession(runDir: string): void {
+export function bindSession(runDirectory: string): void {
   const session = process.env.PI_SESSION_ID;
   const transcript = process.env.PI_SESSION_FILE;
   if (!session || !SESSION_ID.test(session) || !transcript) return;
   mkdirSync(join(file(session), ".."), { recursive: true });
-  writeFileSync(file(session), `${runDir}\n`);
-  const main = join(runDir, ".main-session");
+  writeFileSync(file(session), `${runDirectory}\n`);
+  const mainSessionFile = join(runDirectory, ".main-session");
   const binding = JSON.stringify({ id: session, file: transcript });
   if (existsSync(transcript)) {
-    if (!hasSessionInit(readFileSync(transcript, "utf8").split("\n"))) writeFileSync(main, binding);
+    if (!hasSessionInit(readFileSync(transcript, "utf8").split("\n"))) writeFileSync(mainSessionFile, binding);
     return;
   }
-  try { writeFileSync(main, binding, { flag: "wx" }); } catch (error) {
+  try { writeFileSync(mainSessionFile, binding, { flag: "wx" }); } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
   }
 }
 
-export function boundMainSession(runDir: string): { id: string; file: string } | undefined {
-  const path = join(runDir, ".main-session");
+export function boundMainSession(runDirectory: string): { id: string; file: string } | undefined {
+  const path = join(runDirectory, ".main-session");
   if (!existsSync(path)) return undefined;
   try {
     const value = JSON.parse(readFileSync(path, "utf8"));
     // The orchestrator can write inside the run folder, so a transcript there could be forged: it must live outside.
-    const inside = (file: string) => { const rel = relative(realpathSync(runDir), file); return rel === "" || (rel !== ".." && !rel.startsWith("../")); };
+    const inside = (file: string) => { const relativePath = relative(realpathSync(runDirectory), file); return relativePath === "" || (relativePath !== ".." && !relativePath.startsWith("../")); };
     const outside = typeof value.file === "string" && isAbsolute(value.file) && !inside(existsSync(value.file) ? realpathSync(value.file) : value.file);
     return typeof value.id === "string" && SESSION_ID.test(value.id) && outside
       ? value as { id: string; file: string }
@@ -50,10 +50,10 @@ export function boundMainSession(runDir: string): { id: string; file: string } |
 // One ask result answers once. The key is the question (run, action, packet) with the call id, not the session: a fork or relaunched session replays the same entries
 // under a new session id, and the answer must still be spent.
 export function claimHumanAsk(question: string, callId: string): boolean {
-  const used = join(process.env.ARK_HOME ?? join(homedir(), ".ark"), "bindings", "used");
-  mkdirSync(used, { recursive: true });
+  const usedAnswersDirectory = join(process.env.ARK_HOME ?? join(homedir(), ".ark"), "bindings", "used");
+  mkdirSync(usedAnswersDirectory, { recursive: true });
   const key = createHash("sha256").update(`${question}\n${callId}`).digest("hex");
-  try { writeFileSync(join(used, key), "", { flag: "wx" }); return true; }
+  try { writeFileSync(join(usedAnswersDirectory, key), "", { flag: "wx" }); return true; }
   catch (error) {
     if (error instanceof Error && "code" in error && error.code === "EEXIST") return false;
     throw error;
@@ -61,7 +61,7 @@ export function claimHumanAsk(question: string, callId: string): boolean {
 }
 
 // The run folder the session is bound to, or undefined when it never started a run.
-export function boundRunDir(session: unknown): string | undefined {
+export function boundRunDirectory(session: unknown): string | undefined {
   if (typeof session !== "string" || !SESSION_ID.test(session) || !existsSync(file(session))) return undefined;
   return readFileSync(file(session), "utf8").trim();
 }

@@ -9,22 +9,22 @@ export const AC_ID = new RegExp(ID, "g");
 
 export type Status = "pass" | "failure" | "error" | "skipped";
 // `line`: where the test is declared, so same-named tests in one file stay distinct.
-export type Case = { file: string; name: string; classname: string; line: string; acs: string[]; status: Status };
+export type TestCase = { file: string; name: string; classname: string; line: string; acs: string[]; status: Status };
 
-const unescape = (s: string) =>
-  s.replace(/&(#\d+|lt|gt|amp|quot|apos);/g, (_, e: string) =>
-    e[0] === "#" ? String.fromCodePoint(+e.slice(1)) : ({ lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" } as Record<string, string>)[e]);
-const attrs = (s: string) => Object.fromEntries([...s.matchAll(/([\w:-]+)="([^"]*)"/g)].map((m) => [m[1], unescape(m[2])]));
+const unescape = (source: string) =>
+  source.replace(/&(#\d+|lt|gt|amp|quot|apos);/g, (_, entity: string) =>
+    entity[0] === "#" ? String.fromCodePoint(+entity.slice(1)) : ({ lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" } as Record<string, string>)[entity]);
+const attributes = (source: string) => Object.fromEntries([...source.matchAll(/([\w:-]+)="([^"]*)"/g)].map((match) => [match[1], unescape(match[2])]));
 
 // ponytail: regex over bun's flat, escaped JUnit; a real XML parser if another runner's output needs it.
-export function parse(xml: string): Case[] {
-  return [...xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)].map(([, a, body = ""]) => {
-    const { name = "", classname = "", file = "", line = "" } = attrs(a);
+export function parse(xml: string): TestCase[] {
+  return [...xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)].map(([, attributesText, body = ""]) => {
+    const { name = "", classname = "", file = "", line = "" } = attributes(attributesText);
     const acs = [...new Set(`${name} ${classname}`.match(AC_ID) ?? [])];
-    const bad = body.match(/<(failure|error)\b([^>]*)>/);
+    const failure = body.match(/<(failure|error)\b([^>]*)>/);
     let status: Status = "pass";
     if (/<skipped\b/.test(body)) status = "skipped";
-    else if (bad) status = bad[1] === "error" || (attrs(bad[2]).type && !/assert/i.test(attrs(bad[2]).type)) ? "error" : "failure";
+    else if (failure) status = failure[1] === "error" || (attributes(failure[2]).type && !/assert/i.test(attributes(failure[2]).type)) ? "error" : "failure";
     return { file, name, classname, line, acs, status };
   });
 }
@@ -41,4 +41,4 @@ export const taggedFile = (source: string) => tagsIn(source).length > 0;
 
 // Every suite runs for every selection, so a suite that holds none of the selected ACs must exit 0: bun exits 1 when `-t` matches nothing unless told otherwise.
 export const runProblem = (run: string): string | undefined =>
-  run.includes("--pass-with-no-tests") ? undefined : "bun-test suites must pass --pass-with-no-tests so a suite without the selected ACs exits 0";
+  run.includes("--pass-with-no-tests") ? undefined : "bun-test suites must pass --pass-with-no-tests so a suite without the selected acceptance criteria exits 0";
