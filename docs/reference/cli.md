@@ -36,9 +36,9 @@ Validates `plan.yml` and renders `plan.mmd`. The check fails on a cycle, an unkn
 ark worktree create <run> [<repo>...]
 ```
 
-Creates a worktree for each named repo, or for every repo the plan uses, side by side under `repos/<name>/` in the run folder.
+Builds the run folder as a mirror of the workspace. Each named repo, or every repo the plan uses, becomes a worktree at its usual path under `repos/`. Every other repo and every workspace root entry except `.git` is a symlink to the workspace.
 
-- **Writes:** `repos/<name>/` and a `worktree.created` event for each repo.
+- **Writes:** the worktrees, the symlinks, and a `worktree.created` event for each repo.
 - **Exit:** 0 when every worktree exists. 1 when a repo is unknown or git fails.
 - **Ticket:** ARK-154.
 
@@ -48,9 +48,9 @@ Creates a worktree for each named repo, or for every repo the plan uses, side by
 ark test <run>
 ```
 
-Runs the project's integration and end-to-end suites on the composed workspace. For a multi-repo run, it first writes a docker compose override that points at the run's worktrees. Each suite's parser maps native tags to results for each acceptance criterion.
+Runs the project's integration and end-to-end suites on the composed workspace. For a multi-repo run, it runs docker compose with `--project-directory` set to the run folder, so the compose file's paths resolve to the run's worktrees. Each suite's parser maps native tags to results for each acceptance criterion.
 
-- **Writes:** `results/`, the compose override, and test events.
+- **Writes:** `results/` and test events.
 - **Exit:** 0 when every criterion has a passing tagged test at head. 1 otherwise, with the failing criteria listed.
 - **Ticket:** ARK-154. The pytest and behave parsers come with ARK-158.
 

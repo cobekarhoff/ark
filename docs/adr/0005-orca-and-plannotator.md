@@ -15,6 +15,6 @@ Master Chief, run leads and workers need their own sessions, a way to message ea
 ## Consequences
 
 - The Orca app or `orca serve` must be running. Bootstrap checks for it.
-- Two spikes gate the decision: side-by-side worktrees in the Clara meta-repo (ARK-150), and Master Chief → run lead → worker within Orca's nesting limit (ARK-151). If either fails, fall back to a tmux host.
+- Two spikes tested the decision, and both passed (`docs/explanation/orca-spikes.md`). They showed that Orca's nesting depth must be set to 2, that Master Chief must run in an Orca terminal, and that a run folder must mirror its workspace.
 - The planned Ark Console is dropped unless Orca's UI falls short.
 - Each gate has one place it is answered. The plan gate goes through Plannotator or chat. Criteria and escalation go through Master Chief, using Orca's `ask`.

@@ -11,7 +11,7 @@ Ark has three kinds of agent and one human.
 - **A run lead** owns one ticket and every repo the ticket touches. It reads the workspace, writes the plan, starts workers, judges their findings, and opens merge requests.
 - **A worker** does one step: implementer, validator, or reviewer. A worker never starts another agent.
 
-The depth is 2: Master Chief starts run leads, and run leads start workers. [ARK-151](../prd.md#milestones) checks that Orca allows this nesting.
+The depth is 2: Master Chief starts run leads, and run leads start workers. Orca allows this once its nesting depth is set to 2 (Settings → Orchestration → Nested worker depth). Master Chief runs inside an Orca terminal. See [the spike findings](orca-spikes.md).
 
 ## Where each concern lives
 
@@ -80,7 +80,7 @@ The run lead picks review models. A plan defaults to a reviewer from a different
 
 A project is a workspace directory. It holds one repo, such as Ark, or a meta-repo that holds many, such as Clara. Ark keeps no repo manifest. The run lead finds the repos by reading the workspace.
 
-For a multi-repo ticket, `ark worktree create` makes one worktree per repo, side by side in the run folder. Downstream repos build against upstream changes through local paths. `ark test` writes a docker compose override that points at the run's worktrees, so the composed workspace under test contains every change in the run.
+For a multi-repo ticket, `ark worktree create` builds the run folder as a mirror of the workspace. Each repo the run touches is a worktree at its usual path under `repos/`. Every other repo and every root file (`AGENTS.md`, `knowledge/`, `docker-compose.yml` and so on) is a symlink to the workspace. Agents in a worktree find the workspace's context by walking up, and `ark test` runs docker compose from the run folder, so every `./repos/*` path in the compose file resolves to the run's changes.
 
 Here is a Clara example. A ticket changes the shared Python core package and a platform service that uses it.
 
@@ -90,7 +90,7 @@ runs/2026-10-29-CLARA-512-1/repos/
   platform/          worktree with the service change, built against ../shared/packages
 ```
 
-Today Clara's `docker-compose.yml` bind-mounts `repos/shared/packages/python/core` into the platform services. The compose override points that mount, and each service's build context, at the run's worktrees instead.
+Clara's `docker-compose.yml` bind-mounts `./repos/shared/packages/python/core` into the platform services. Run from the run folder, that mount and each service's build context resolve to the run's worktrees with no extra configuration.
 
 The plan has a step for `shared/packages` and a step for `platform` that needs it. The integration tests run against both worktrees together. Ark then opens a merge request for `shared/packages` first and one for `platform` second. On GitLab, Ark sets a merge request dependency where the tier allows it. Otherwise it writes `Depends on !N` in the description. On GitHub, it writes `Depends on #N`.
 

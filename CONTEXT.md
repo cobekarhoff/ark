@@ -133,7 +133,7 @@ A git repository in a project's workspace.
 _Avoid_: Package, component
 
 **Worktree**:
-A run's own checkout of one repo. A run's worktrees sit side by side so downstream repos build against upstream changes.
+A run's own checkout of one repo. A run folder mirrors its workspace: the repos the run touches are worktrees, and everything else links to the workspace.
 _Avoid_: Checkout, sandbox
 
 **Bootstrap**:

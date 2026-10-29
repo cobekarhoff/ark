@@ -55,9 +55,9 @@ Tickets are on the Ark backlog. Acceptance summaries are short. Each ticket hold
 | --- | --- | --- | --- |
 | R1 | Master Chief: one session that you talk to. It starts run leads, relays gate questions, and suggests and queues tickets as Orca Tasks. | You work with one session. A ticket you approve becomes a queued Orca Task. Gate questions reach you through Master Chief. | ARK-151, ARK-156 |
 | R2 | Runs: a run folder, a ticket snapshot, an event log with derived state, and resume at the first unfinished step. | `ark run start` creates the run folder. A new run lead resumes a stopped run at the first unfinished step. | ARK-152 |
-| R3 | Run leads and workers on Orca. Depth is 2. Any supported harness works per step. | Master Chief starts a run lead, and the run lead starts workers. Workers never start agents. A step can name any supported harness and model. | ARK-151, ARK-156 |
+| R3 | Run leads and workers on Orca. Depth is 2. Any supported harness works per step. | Master Chief runs in an Orca terminal, starts a run lead, and the run lead starts workers. Workers never start agents. A step can name any supported harness and model. | ARK-151, ARK-156 |
 | R4 | Plan gate: `plan.yml` holds a graph of steps and test cases. Ark validates and renders it. You review it in chat or Plannotator and you can edit it. | `ark plan check` rejects cycles, unknown `needs`, and criteria with no test case. No code is built before you approve. | ARK-153, ARK-156 |
-| R5 | Multi-repo by local composition: side-by-side worktrees and a compose override. | A Clara run has worktrees side by side. Docker compose resolves repos against them. | ARK-150, ARK-154, ARK-159 |
+| R5 | Multi-repo by local composition: the run folder mirrors the workspace, with worktrees for the repos the run touches. | A Clara run's agents see the workspace's context. Docker compose run from the run folder resolves repos against the run's worktrees. | ARK-150, ARK-154, ARK-159 |
 | R6 | Proof: integration or end-to-end tests tagged with an acceptance criterion pass at head. Each test runner has its own parser. | `ark test` maps native test tags to results per criterion. Unit tests never prove a criterion. | ARK-154, ARK-158 |
 | R7 | Merge requests per repo in dependency order. Only you merge. | `ark merge-request open` opens one request per repo in order and records dependencies. No Ark command merges. | ARK-155, ARK-159 |
 | R8 | Bootstrap per project. Config lives in `~/.ark/projects/<project>/ark.yml`. Each project names its ticket source. | The bootstrap playbook writes `ark.yml` and asks only what it cannot detect. | ARK-150, ARK-158 |
@@ -113,7 +113,7 @@ Usage parsers read OMP and Claude Code session files first. A Codex parser follo
 | ARK-151 | Spike: Master Chief, run lead, and worker on Orca, with gate relay | None | M1 |
 | ARK-152 | CLI core: `run start`, `status`, `run close`, event log, transition table, project config | None | M1 |
 | ARK-153 | Plan file: `plan check`, `plan.mmd`, `gate record` | ARK-152 | M1 |
-| ARK-154 | Worktrees and tests: `worktree create`, compose override, `ark test` with the bun parser | ARK-150, ARK-152 | M1 |
+| ARK-154 | Worktrees and tests: `worktree create` builds the workspace mirror, `ark test` with the bun parser | ARK-150, ARK-152 | M1 |
 | ARK-155 | Merge requests in dependency order on GitHub and GitLab | ARK-152 | M1 |
 | ARK-156 | Router skill and playbooks: chief, run-lead, worker, with Orca and Plannotator | ARK-151, ARK-153, ARK-154, ARK-155 | M1 |
 | ARK-157 | Cutover: delete the old design's code, tests, typed tools, and extension | ARK-156 | M1 |
@@ -135,12 +135,12 @@ ARK-109 is superseded by this redesign.
 
 ## Risks and open questions
 
-**Two spikes decide the base.** Neither is done.
+**Two spikes decided the base.** Both passed on 2026-10-29; see [the findings](explanation/orca-spikes.md).
 
-- ARK-150 checks that Ark-made worktrees at `<run>/repos/<name>` work for a Clara ticket. Orca must launch agents into them, and docker compose must resolve against them.
-- ARK-151 checks that Master Chief, a run lead's own Orca run, and a worker fit inside Orca's `nested_worker_depth_exceeded` limit. Gate questions must relay from the run lead to Master Chief to you.
+- ARK-150: Ark-made worktrees work with Orca and docker compose once the run folder mirrors the workspace.
+- ARK-151: Master Chief, run lead and worker fit once Orca's nesting depth is 2. Gate questions relay from the run lead to Master Chief to you and back. Master Chief must run in an Orca terminal.
 
-If either spike fails, Ark falls back to a tmux host.
+Still open: OMP doesn't load a workspace's `.claude/skills` from the mirror (ARK-158), and image builds from a worktree are untested (ARK-159).
 
 **Open questions.**
 
