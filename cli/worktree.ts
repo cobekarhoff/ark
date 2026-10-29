@@ -1,36 +1,78 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
-import { git } from "./repo";
-import { open, projectDirectory, record } from "./run";
+import { existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { loadConfig } from "./config.ts";
+import { ArkError } from "./errors.ts";
+import { appendEvent, deriveState, readEvents } from "./events.ts";
+import { findRun } from "./paths.ts";
+import { assertAllowed } from "./transitions.ts";
+import { discoverRepos, mirrorRoot } from "./workspace.ts";
 
-const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "").slice(0, 40).replace(/-+$/, "") || "work";
+const skippedRootEntries = new Set([".git", ".DS_Store", "repos"]);
 
-// One worktree per repo under <run>/worktrees/<repo>, on ark/<ticket>-<slug>, with pushing disabled.
-export function worktreeCreate(runId: string, repositoryPath?: string): string {
-  const { directory, state } = open(runId, "worktree.created", "worktree create");
-  const repositoryRoot = git(resolve(repositoryPath ?? projectDirectory()), "rev-parse", "--show-toplevel");
-  const repository = basename(repositoryRoot);
-  if (state.repos.some((recordedRepository) => recordedRepository.name === repository)) throw new Error(`run ${runId} already has a worktree for '${repository}'`);
+function git(directory: string, ...args: string[]): string {
+  const result = Bun.spawnSync(["git", "-C", directory, ...args]);
+  if (result.exitCode !== 0) throw new ArkError(`git ${args.join(" ")} failed in ${directory}: ${result.stderr.toString().trim()}`);
+  return result.stdout.toString().trim();
+}
 
-  const branch = `ark/${state.ticket}-${slug(JSON.parse(readFileSync(join(directory, "ticket.json"), "utf8")).title)}`;
-  // Default branch HEAD: origin/HEAD when the repo has a remote, else the checked-out HEAD.
-  const origin = Bun.spawnSync(["git", "-C", repositoryRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-  const baseCommit = git(repositoryRoot, "rev-parse", `${origin.exitCode === 0 ? origin.stdout.toString().trim() : "HEAD"}^{commit}`);
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  const worktree = join(directory, "worktrees", repository);
-  // Per-worktree config, so disabling the push URL does not touch the main checkout.
-  git(repositoryRoot, "config", "extensions.worktreeConfig", "true");
-  git(repositoryRoot, "worktree", "add", "-b", branch, worktree, baseCommit);
-  for (const remote of git(repositoryRoot, "remote").split("\n").filter(Boolean)) git(worktree, "config", "--worktree", `remote.${remote}.pushurl`, "DISABLED");
+function reposOfLastValidPlan(runDirectory: string): string[] {
+  const checked = readEvents(runDirectory).filter((event) => event.type === "plan.checked" && event.data.valid);
+  const steps: { repo: string }[] = checked.at(-1)?.data.steps ?? [];
+  return [...new Set(steps.map((step) => step.repo))];
+}
 
-  // Pushing is also stopped by a pre-push hook of the run's own: `pushurl` entries accumulate across config files, so a remote that already has one
-  // is still tried first, and an explicit URL ignores them all. A hook runs before anything is sent. (`ark merge-request open` pushes from the shared git dir, where this config is not loaded.)
-  const hooksDirectory = join(directory, "hooks");
-  mkdirSync(hooksDirectory, { recursive: true });
-  writeFileSync(join(hooksDirectory, "pre-push"), '#!/bin/sh\necho "ark: agents never push; ark merge-request open pushes for you" >&2\nexit 1\n');
-  chmodSync(join(hooksDirectory, "pre-push"), 0o755);
-  git(worktree, "config", "--worktree", "core.hooksPath", hooksDirectory);
+export function worktreeCreate(runId: string, repos: string[]): void {
+  const { project, directory } = findRun(runId);
+  const workspace = loadConfig(project).workspace;
+  const knownRepos = discoverRepos(workspace);
 
-  record(directory, "worktree.created", { repo: repository, branch, base_sha: baseCommit, source: repositoryRoot }); // source: the human's checkout; ark merge-request open trusts its git dir, never the worktree's .git file
-  return `created ${worktree}\nbranch: ${branch}\nbase_sha: ${baseCommit}\n`;
+  const touched = [...new Set(repos.length > 0 ? repos : reposOfLastValidPlan(directory))].sort();
+  if (touched.length === 0) throw new ArkError(`no repos named and ${runId} has no valid plan: name the repos or run ark plan check`);
+  for (const repo of touched) {
+    if (!knownRepos.includes(repo)) throw new ArkError(`repo ${repo} is not in workspace ${workspace} (found: ${knownRepos.join(", ") || "none"})`);
+  }
+
+  assertAllowed(deriveState(readEvents(directory)), "worktree.created", {}); // refuse before git changes anything
+
+  const mirror = mirrorRoot(directory);
+  mkdirSync(mirror, { recursive: true });
+
+  for (const repo of touched) {
+    const path = repo === "." ? mirror : join(mirror, repo);
+    const isSymlink = pathExists(path) && lstatSync(path).isSymbolicLink();
+    if (!isSymlink && existsSync(join(path, ".git"))) {
+      console.log(`exists   ${repo}`);
+      continue;
+    }
+    if (isSymlink) unlinkSync(path); // an earlier call left this repo untouched
+    mkdirSync(dirname(path), { recursive: true });
+    const source = join(workspace, repo);
+    const base = git(source, "rev-parse", "HEAD");
+    const branch = `ark/${runId}`;
+    git(source, "worktree", "add", "-b", branch, path, base);
+    appendEvent(directory, "worktree.created", { repo, path, branch, base });
+    console.log(`created  ${repo} -> ${path}`);
+  }
+
+  if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror
+
+  for (const entry of readdirSync(workspace)) {
+    const link = join(mirror, entry);
+    if (!skippedRootEntries.has(entry) && !pathExists(link)) symlinkSync(join(workspace, entry), link);
+  }
+  for (const repo of knownRepos) {
+    const link = join(mirror, repo);
+    if (repo === "." || pathExists(link)) continue;
+    mkdirSync(dirname(link), { recursive: true });
+    symlinkSync(join(workspace, repo), link);
+  }
 }

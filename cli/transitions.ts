@@ -1,94 +1,100 @@
-// Run lifecycle as data (PRD "Run state and resume"). Row: state -> { event -> next state }.
-// Gate events are `gate.packet` and `gate.answered`, written only by `ark gate`; their row key is `<type>:<gate>[:<answer>]` (see eventKey). Gates: criteria, plan, evidence and escalation.
-export const transitions = {
-  intake: { "route.chosen": "intake", "analysis.completed": "analyzed", "criteria.opened": "awaiting_criteria", "gate.packet:criteria": "awaiting_criteria", abort: "aborted" },
-  awaiting_criteria: {
-    "route.chosen": "awaiting_criteria",
-    "gate.packet:criteria": "awaiting_criteria",
-    "gate.answered:criteria:accept": "intake",
-    "gate.answered:criteria:edit": "awaiting_criteria", // nothing past criteria is legal until criteria accept: the ACs are re-read (ark acceptance-criteria update) and a new packet answered
-    "acceptance_criteria.updated": "awaiting_criteria",
-    "gate.answered:criteria:abort": "aborted",
-    abort: "aborted",
-  },
-  analyzed: { "gate.packet:plan": "awaiting_plan", abort: "aborted" },
-  awaiting_plan: {
-    "gate.answered:plan:approve": "approved",
-    "gate.answered:plan:change": "analyzed",
-    "gate.answered:plan:abort": "aborted",
-    abort: "aborted",
-  },
-  approved: { "build.started": "building", "worktree.created": "approved", abort: "aborted" },
-  building: {
-    "build.completed": "judging",
-    "implementer.refused": "building",
-    "worktree.created": "building",
-    "implementer.completed": "building",
-    "test.result": "building",
-    "test.red_green": "building",
-    "test.preservation": "building",
-    "trace.checked": "building",
-    abort: "aborted",
-  },
-  judging: {
-    "fix_round.started": "building",
-    "findings.recorded": "judging",
-    "gate.packet:escalation": "awaiting_escalation",
-    "gate.packet:evidence": "awaiting_evidence",
-    "test.result": "judging",
-    "test.red_green": "judging",
-    "test.preservation": "judging",
-    "trace.checked": "judging",
-    abort: "aborted",
-  },
-  escalating: { "gate.packet:escalation": "awaiting_escalation", abort: "aborted" }, // an evidence send-back past the round budget: only the escalation packet (or abort) is legal
-  awaiting_escalation: {
-    "gate.answered:escalation:one_more_round": "building",
-    "gate.answered:escalation:take_over": "building",
-    "gate.answered:escalation:abort": "aborted",
-    abort: "aborted",
-  },
-  awaiting_evidence: {
-    "gate.answered:evidence:approve": "merge_requests_open",
-    "gate.answered:evidence:send_back": "building",
-    "gate.answered:evidence:send_back:escalated": "escalating",
-    "gate.answered:evidence:abort": "aborted",
-    abort: "aborted",
-  },
-  merge_requests_open: { "merge_request.opened": "merge_requests_open", "run.closed": "done", abort: "aborted" }, // abort before any MR; after one opens, close it as merged or abandoned
-  done: {},
-  aborted: {},
-} as const satisfies Record<string, Record<string, string>>;
+import { ArkError } from "./errors.ts";
+import type { EventData, RunState } from "./events.ts";
 
-// Event types written by a dedicated command, which `ark advance` refuses: the owner is what makes the ledger evidence trustworthy.
-// A key ending in "." owns the whole family (test.* ...), any other key one type. Ownership holds in every state, before legality is asked.
-// Escalation uses gate events only; retired event families have no owner alias.
-const owners: [prefix: string, command: string][] = [
-  ["gate.", "gate"], ["worktree.", "worktree create"], ["test.", "test"], ["trace.", "trace-check"], ["merge_request.", "merge-request open"],
-  ["artifact.", "artifact record"], ["acceptance_criteria.", "acceptance-criteria update"], ["implementer.refused", "advance implementer.completed"],
-  ["run.closed", "run close"], ["route.chosen", "log route"], ["findings.recorded", "findings record"],
-];
-export const ownerOf = (type: string) => owners.find(([prefix]) => (prefix.endsWith(".") ? type.startsWith(prefix) : type === prefix))?.[1];
+export const outcomes = ["merged", "abandoned", "aborted", "handed_off"];
 
-export type State = keyof typeof transitions;
-
-// PRD state table: next action and who acts. Closed states have none.
-export const nextActions: Record<State, { kind: string; agent: "orchestrator" | "human" } | null> = {
-  intake: { kind: "write_acceptance_criteria", agent: "orchestrator" },
-  awaiting_criteria: { kind: "answer_criteria", agent: "human" },
-  analyzed: { kind: "write_plan", agent: "orchestrator" },
-  awaiting_plan: { kind: "answer_plan", agent: "human" },
-  approved: { kind: "spawn", agent: "orchestrator" },
-  building: { kind: "continue_build", agent: "orchestrator" },
-  judging: { kind: "judge", agent: "orchestrator" },
-  escalating: { kind: "open_escalation", agent: "orchestrator" },
-  awaiting_escalation: { kind: "answer_escalation", agent: "human" },
-  awaiting_evidence: { kind: "answer_evidence", agent: "human" },
-  merge_requests_open: { kind: "merge", agent: "human" },
-  done: null,
-  aborted: null,
+const gateAnswers: Record<string, string[]> = {
+  criteria: ["accept", "edit", "abort"],
+  plan: ["approve", "change", "abort"],
+  escalation: ["one_more_round", "take_over", "abort"],
 };
 
-// The table key of a ledger event: gate events are keyed by gate and answer, everything else by type.
-export const eventKey = (event: { type: string; data: Record<string, unknown> }) =>
-  event.type.startsWith("gate.") ? `${event.type}:${event.data.gate}${event.type === "gate.answered" ? `:${event.data.answer}${event.data.gate === "evidence" && event.data.answer === "send_back" && event.data.escalated === true ? ":escalated" : ""}` : ""}` : event.type;
+const buildPhases = ["building", "escalation"];
+
+/** The event that moves a run out of `phase`, named in refusals. */
+function missingEvent(state: RunState): string {
+  if (state.phase === "awaiting_criteria") return "gate.answered criteria accept";
+  if (state.phase === "planning") return state.plan?.valid ? "gate.answered plan approve" : "plan.checked valid, then gate.answered plan approve";
+  return `a run in phase ${state.phase}`;
+}
+
+function requirePhase(state: RunState, type: string, phases: string[]): void {
+  if (phases.includes(state.phase)) return;
+  throw new ArkError(`${type} refused: run is in phase ${state.phase}; missing ${missingEvent(state)}`);
+}
+
+/** Throws an ArkError naming the missing event when `type` is not allowed in `state`. */
+export function assertAllowed(state: RunState, type: string, data: EventData): void {
+  if (type === "run.started") {
+    if (state.events > 0) throw new ArkError("run.started refused: it must be the first event");
+    return;
+  }
+  if (state.events === 0) throw new ArkError(`${type} refused: the run has no run.started event`);
+  if (state.phase === "closed") throw new ArkError(`${type} refused: run is closed (${state.outcome})`);
+
+  switch (type) {
+    case "criteria.updated":
+      requirePhase(state, type, ["awaiting_criteria"]);
+      if (!Array.isArray(data.criteria) || data.criteria.length === 0) throw new ArkError("criteria.updated refused: the ticket has no criteria");
+      return;
+    case "plan.checked":
+      requirePhase(state, type, ["planning", "building", "escalation"]);
+      return;
+    case "gate.answered":
+      return assertGateAllowed(state, data);
+    case "worktree.created":
+      requirePhase(state, type, ["planning", ...buildPhases]);
+      return;
+    case "step.started":
+      requirePhase(state, type, buildPhases);
+      if (state.steps.find((step) => step.id === data.step)?.status === "running") throw new ArkError(`step.started refused: step ${data.step} is already running`);
+      if (data.role === "implementer" && data.round > 1 && data.round > state.round_budget && state.implementer !== "human") {
+        throw new ArkError("round budget spent: record gate escalation (one_more_round, take_over or abort)");
+      }
+      return;
+    case "step.finished":
+      requirePhase(state, type, buildPhases);
+      if (!["succeeded", "failed"].includes(data.outcome)) throw new ArkError(`step.finished refused: outcome must be succeeded or failed, not ${data.outcome}`);
+      if (state.steps.find((step) => step.id === data.step)?.status !== "running") throw new ArkError(`step.finished refused: missing step.started for ${data.step}`);
+      return;
+    case "test.completed":
+      requirePhase(state, type, buildPhases);
+      return;
+    case "merge_request.opened":
+      requirePhase(state, type, ["building", "merge_requests_open"]);
+      return;
+    case "run.closed":
+      return assertCloseAllowed(state, data);
+    default:
+      throw new ArkError(`unknown event type: ${type}`);
+  }
+}
+
+function assertGateAllowed(state: RunState, data: EventData): void {
+  if (!Object.hasOwn(gateAnswers, data.gate)) throw new ArkError(`unknown gate "${data.gate}": use ${Object.keys(gateAnswers).join(", ")}`);
+  if (!gateAnswers[data.gate].includes(data.answer)) {
+    throw new ArkError(`unknown answer "${data.answer}" for gate ${data.gate}: use ${gateAnswers[data.gate].join(", ")}`);
+  }
+  const phaseOfGate = { criteria: "awaiting_criteria", plan: "planning", escalation: "escalation" }[data.gate as "criteria" | "plan" | "escalation"];
+  if (state.phase !== phaseOfGate) {
+    throw new ArkError(`gate.answered ${data.gate} ${data.answer} refused: run is in phase ${state.phase}, the ${data.gate} gate opens in phase ${phaseOfGate}`);
+  }
+  if (data.gate === "criteria" && data.answer === "accept" && state.criteria.length === 0) {
+    throw new ArkError("gate.answered criteria accept refused: the ticket has no criteria (criteria.updated needs at least one)");
+  }
+  if (data.gate === "plan" && data.answer === "approve" && !state.plan?.valid) {
+    throw new ArkError("gate.answered plan approve refused: missing plan.checked valid");
+  }
+}
+
+function assertCloseAllowed(state: RunState, data: EventData): void {
+  if (!outcomes.includes(data.outcome)) throw new ArkError(`unknown outcome "${data.outcome}": use ${outcomes.join(", ")}`);
+  const hasMergeRequests = state.merge_requests.length > 0;
+  if ((data.outcome === "merged" || data.outcome === "abandoned") && !hasMergeRequests) {
+    throw new ArkError(`run.closed ${data.outcome} refused: missing merge_request.opened`);
+  }
+  if (data.outcome === "handed_off") {
+    if (hasMergeRequests) throw new ArkError("run.closed handed_off refused: the run has merge requests");
+    if (!state.last_test?.passed) throw new ArkError("run.closed handed_off refused: missing test.completed with passed true");
+  }
+}

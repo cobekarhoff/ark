@@ -1,122 +1,120 @@
 # Command reference
 
-This page becomes generated from `ark --help` in ARK-157. Until then, it is the planned interface, written by hand. The commands below are not built yet. The code in `cli/` still follows the old design. Command names, arguments, and field names are final when the ticket named under each command lands.
+This page describes the `ark` CLI. The command section is generated from `ark --help` by `scripts/cli-reference.ts`. Run `bun scripts/cli-reference.ts` after you change a help text. The sections after it are written by hand.
 
-Every command works on one project. `ark` finds the project from your workspace. Commands print one result and exit 0 on success. On failure, a command prints the reason and exits 1.
+Every command except `ark run start` takes a run id. `ark` finds the run by scanning `$ARK_HOME/projects/*/runs/<run>`. `ARK_HOME` defaults to `~/.ark`. A run id looks like `2026-10-29-CLARA-512-1`: the date, the ticket id, and the next free number for that ticket and date.
+
+`ark run start` finds the project in this order: the `--project <name>` flag, the `ARK_PROJECT` environment variable, then the project whose folder contains the ticket file.
+
+Every command prints a short result and exits 0 on success. On failure, a command prints `ark: <reason>` to stderr and exits 1. Every command rebuilds `state.json` from the event log before it runs.
 
 ## Commands
 
-### `ark run start`
+<!-- generated:commands:start -->
 
-```sh
-ark run start <ticket-file>
+### run start
+
+```text
+ark run start <ticket-file> [--project <name>]
+
+Starts a run from a ticket file. It creates the run folder, copies the ticket and records the first event. It prints the run ID.
 ```
 
-Starts a run. It copies the ticket file that an agent wrote into a new run folder, creates the event log and the derived state, and prints the run name. The command fetches nothing from a ticket source.
+### run step
 
-- **Writes:** `runs/<run>/ticket.md`, `events.ndjson`, `state.json`.
-- **Exit:** 0 when the run starts. 1 when the file is missing or the ticket already has an open run.
-- **Ticket:** ARK-152.
+```text
+ark run step <run> <step> start|finish [--failed]
 
-### `ark plan check`
-
-```sh
-ark plan check <run>
+Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan.
 ```
 
-Validates `plan.yml` and renders `plan.mmd`. The check fails on a cycle, an unknown `needs`, a step with no repo or role, and a criterion with no integration or end-to-end test case.
+### run close
 
-- **Writes:** `plan.mmd`.
-- **Exit:** 0 when the plan is valid. 1 with one line per problem.
-- **Ticket:** ARK-153.
-
-### `ark worktree create`
-
-```sh
-ark worktree create <run> [<repo>...]
-```
-
-Builds the run folder as a mirror of the workspace. Each named repo, or every repo the plan uses, becomes a worktree at its usual path under `repos/`. Every other repo and every workspace root entry except `.git` is a symlink to the workspace.
-
-- **Writes:** the worktrees, the symlinks, and a `worktree.created` event for each repo.
-- **Exit:** 0 when every worktree exists. 1 when a repo is unknown or git fails.
-- **Ticket:** ARK-154.
-
-### `ark test`
-
-```sh
-ark test <run>
-```
-
-Runs the project's integration and end-to-end suites on the composed workspace. For a multi-repo run, it runs docker compose with `--project-directory` set to the run folder, so the compose file's paths resolve to the run's worktrees. Each suite's parser maps native tags to results for each acceptance criterion.
-
-- **Writes:** `results/` and test events.
-- **Exit:** 0 when every criterion has a passing tagged test at head. 1 otherwise, with the failing criteria listed.
-- **Ticket:** ARK-154. The pytest and behave parsers come with ARK-158.
-
-### `ark gate record`
-
-```sh
-ark gate record <run> <gate> <answer>
-```
-
-Records your answer to a gate. `<gate>` is `criteria`, `plan`, or `escalation`. The run lead runs this command after you answer in Master Chief's session or in Plannotator. Escalation answers are `one_more_round`, `take_over`, and `abort`. The accepted answers for the other gates are final in ARK-153.
-
-- **Writes:** a gate event, and the state that follows it.
-- **Exit:** 0 when the answer is legal for the gate in the run's current state. 1 otherwise, for example for a plan answer before a plan exists.
-- **Ticket:** ARK-153.
-
-### `ark merge-request open`
-
-```sh
-ark merge-request open <run>
-```
-
-Pushes each repo's branch and opens one merge request per repo in dependency order. On GitHub, it opens a pull request. It records dependencies with a merge request dependency on GitLab where the tier allows it, and with `Depends on !N` in the description otherwise. On GitHub, it writes `Depends on #N`. No command merges.
-
-- **Writes:** merge request events with the URL for each repo.
-- **Exit:** 0 when every repo has a merge request. 1 when a push or an open fails.
-- **Ticket:** ARK-155.
-
-### `ark status`
-
-```sh
-ark status [<run>]
-```
-
-Prints the state of one run, or of every open run in the project. It shows the current step, the round, any gate that waits for you, and the cost so far.
-
-- **Writes:** nothing.
-- **Exit:** 0. 1 when the run is unknown.
-- **Ticket:** ARK-152.
-
-### `ark run close`
-
-```sh
+```text
 ark run close <run> <outcome>
+
+Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs.
 ```
 
-Closes a run with an outcome: `merged`, `abandoned`, `aborted`, or `handed_off`. Master Chief checks the state of the merge requests with `gh` or `glab` before it calls this command.
+### plan check
 
-- **Writes:** a `run.closed` event and the final state.
-- **Exit:** 0 when the run closes. 1 when the outcome does not fit the run, for example `merged` with no merge requests.
-- **Ticket:** ARK-152.
+```text
+ark plan check <run>
 
-### `ark retro`
+Checks plan.yml in the run folder and renders plan.mmd. It prints one line for each problem and exits 1 when the plan is invalid.
+```
 
-```sh
+### worktree create
+
+```text
+ark worktree create <run> [<repo>...]
+
+Builds the run's workspace mirror. Each named repo, or every repo the plan uses, gets a worktree. Every other path is a symlink to the workspace.
+```
+
+### test
+
+```text
+ark test <run>
+
+Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. It exits 1 unless every AC passes.
+```
+
+### gate record
+
+```text
+ark gate record <run> <gate> <answer> [--note <text>]
+
+Records your answer to a gate. The gates are criteria, plan and escalation. Ark refuses an answer that the run's state does not allow.
+```
+
+### merge-request open
+
+```text
+ark merge-request open <run>
+
+Pushes each repo's branch and opens one MR for each repo, in dependency order. No command merges.
+```
+
+### status
+
+```text
+ark status [<run>]
+
+Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run.
+```
+
+### retro
+
+```text
 ark retro <run>
+
+Computes the run's cost, time, rework and intervention metrics and writes metrics.json.
 ```
 
-Computes the run's cost, time, rework, human intervention, and orchestration health. It compares them with earlier runs of the same project.
+<!-- generated:commands:end -->
 
-- **Writes:** `metrics.json`. The run lead writes `retro.md` on top of it.
-- **Exit:** 0 when `metrics.json` is written. 1 when the run has no events or a session file cannot be read.
-- **Ticket:** ARK-160.
+## Run folder
+
+A run lives at `$ARK_HOME/projects/<project>/runs/<run>/`:
+
+```text
+ticket.md          copy of the ticket file
+events.ndjson      append-only event log
+state.json         derived from the events, rebuilt by any command
+plan.yml           written by the run lead
+plan.mmd           rendered by ark plan check
+workspace/         the workspace mirror
+results/           test output and test reports
+metrics.json       written by ark retro
+retro.md           written by the run lead
+```
+
+`workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<run>` at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace.
 
 ## `plan.yml` fields
 
-`plan.yml` lives in the run folder. The run lead writes it, and you can edit it at the plan gate. `ark plan check` validates it. ARK-153 makes these field names final.
+`plan.yml` lives in the run folder. The run lead writes it, and you can edit it at the plan gate. `ark plan check` validates it.
 
 Top level:
 
@@ -131,18 +129,18 @@ Each entry in `steps`:
 | --- | --- | --- |
 | `id` | string | Name of the step. Other steps refer to it in `needs`. |
 | `role` | string | `implementer`, `validator`, or `reviewer`. |
-| `repo` | string | The repo the step works in. |
+| `repo` | string | The repo the step works in, as a path relative to the workspace. |
 | `harness` | string | The agent harness, for example `claude`, `codex`, `omp`, or `pi`. |
 | `model` | string | The model the harness uses. |
 | `needs` | list of step ids | Steps that must finish first. An empty list means the step can start at once. |
-| `criteria` | list of strings | The acceptance criteria the step serves. |
+| `criteria` | list of strings | The AC the step serves. |
 
 Each entry in `test_cases`:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `id` | string | Name of the test case. |
-| `criterion` | string | The acceptance criterion the test case proves. |
+| `criterion` | string | The AC the test case proves. |
 | `level` | string | `integration` or `e2e`. |
 | `steps` | list of strings | What the test does, in order. |
 | `expected` | string | What must be true at the end. |
@@ -153,14 +151,14 @@ Example:
 steps:
   - id: core-package
     role: implementer
-    repo: shared/packages
+    repo: repos/shared/packages
     harness: claude
     model: claude-sonnet
     needs: []
     criteria: [CLARA-512-AC1]
   - id: core-package-review
     role: reviewer
-    repo: shared/packages
+    repo: repos/shared/packages
     harness: codex
     model: gpt-codex
     needs: [core-package]
@@ -176,14 +174,63 @@ test_cases:
 
 ## `ark.yml` fields
 
-`ark.yml` lives at `~/.ark/projects/<project>/ark.yml`. It is personal to you. The bootstrap playbook writes it in ARK-158, and ARK-152 reads it. These field names are final when ARK-152 lands.
+`ark.yml` lives at `~/.ark/projects/<project>/ark.yml`. It is personal to you. The bootstrap playbook writes it, and every command that needs the project reads it. When a field is wrong, the error names it, for example `ark.yml: suites[1].parser must be one of bun, pytest, behave`.
+
+| Field | Required | Type | Meaning |
+| --- | --- | --- | --- |
+| `workspace` | yes | path | The absolute path of the workspace directory. It must exist. It is one repo or a meta-repo. |
+| `ticket_source` | yes | string | Where agents fetch tickets: `local`, `github`, or `jira`. |
+| `compose` | no | string | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them. |
+| `suites` | yes | list | The test suites. You need at least one. |
+| `roles` | yes | map | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`. |
+| `concurrency` | no | integer | The most workers that run at once. It must be 1 or more. The default is 2. |
+| `round_budget` | no | integer | How many rounds an implementer step may restart before escalation. It must be 0 or more. The default is 2. |
+
+Each entry in `suites`:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `workspace` | path | The workspace directory. It is one repo or a meta-repo. |
-| `ticket_source` | string | Where agents fetch tickets: local markdown, GitHub issues, or Jira. |
-| `compose` | string | The docker compose command for multi-repo projects. |
-| `suites` | list | The integration and end-to-end suites. Each has a `name`, a `level`, a `command`, and a `parser`. |
-| `roles` | map | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`. |
-| `concurrency` | number | The most runs or workers that run at once. |
-| `round_budget` | number | How many rounds a run may use before escalation. The default is 2. |
+| `name` | string | Name of the suite. It must be unique. |
+| `level` | string | `unit`, `integration`, or `e2e`. A unit suite never proves an AC. |
+| `repo` | string | The repo the suite runs in: a path relative to the workspace, or `.`. The command runs in `<mirror>/<repo>`. |
+| `command` | string | The shell command. `{report}` is replaced with an absolute path under the run's `results/` folder. |
+| `parser` | string | `bun`, `pytest`, or `behave`. It reads the report file and the command output. |
+
+Example:
+
+```yaml
+workspace: /Users/you/Dev/clara
+ticket_source: local
+compose: docker compose
+suites:
+  - name: e2e
+    level: e2e
+    repo: repos/platform
+    command: bun test --reporter=junit --reporter-outfile={report}
+    parser: bun
+roles:
+  implementer: { harness: claude, model: claude-sonnet }
+  validator: { harness: codex, model: gpt-codex }
+  reviewer: { harness: codex, model: gpt-codex }
+concurrency: 2
+round_budget: 2
+```
+
+A test proves an AC when its name or tags contain the AC id, for example `CLARA-512-AC1`. For each AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran.
+
+## Events
+
+`events.ndjson` holds one JSON object for each line: `{ "seq": 1, "time": "<ISO time>", "type": "<type>", "data": { ... } }`. `seq` counts up from 1. Every command checks that an event is allowed in the run's current state before it appends the event, then rewrites `state.json`.
+
+| Type | Data | Written by |
+| --- | --- | --- |
+| `run.started` | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file` | `ark run start` |
+| `criteria.updated` | `criteria` (ids) | `ark gate record` for the `criteria` gate |
+| `plan.checked` | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`) | `ark plan check` |
+| `gate.answered` | `gate` (`criteria`, `plan`, or `escalation`), `answer`, optional `note` | `ark gate record` |
+| `worktree.created` | `repo`, `path`, `branch`, `base` | `ark worktree create` |
+| `step.started` | `step`, `role`, `repo`, `round` | `ark run step ... start` |
+| `step.finished` | `step`, `outcome` (`succeeded` or `failed`) | `ark run step ... finish` |
+| `test.completed` | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, or `missing`) | `ark test` |
+| `merge_request.opened` | `repo`, `url`, `number` | `ark merge-request open` |
+| `run.closed` | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`) | `ark run close` |

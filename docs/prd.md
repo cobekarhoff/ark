@@ -6,7 +6,7 @@ Owner: @Cobe Karhoff · Date: October 29, 2026 · Status: Draft, redesign in pro
 
 Ark takes a ticket to merge-ready changes in one repo or across several dependent repos. You talk to one session, Master Chief. Master Chief starts one run lead per ticket, and each run lead plans the work and starts workers to build, test, and review it. A small `ark` command handles the mechanical parts: run state, worktrees, tests, merge requests, and metrics. Skills hold the judgment. Every run ends in a retro, and you approve the improvements that come out of it.
 
-This document describes the planned product. The redesign is not built yet. The code in `cli/` still follows the old design until ARK-157 lands the cutover.
+This document describes the product and tracks the tickets that build it.
 
 ## Problem
 
@@ -43,7 +43,7 @@ Three facts make that machinery unnecessary:
 
 **You, on the Ark repo.** The workspace is one GitHub repo. You approve a ticket, Master Chief queues it, a run lead plans it, you review the plan, workers build and test it, and Ark opens one pull request. You merge it.
 
-**You, on Clara.** The workspace is the GitLab meta-repo `clara-agentic-environment`, with repos under `repos/*` cloned from a GitLab group. One ticket needs changes in two or more repos. The run lead plans steps per repo in dependency order. Ark creates side-by-side worktrees so downstream repos build against upstream changes through docker compose. Ark opens a merge request per repo in dependency order.
+**You, on Clara.** The workspace is the GitLab meta-repo `clara-agentic-environment`, with repos under `repos/*` cloned from a GitLab group. One ticket needs changes in two or more repos. The run lead plans steps per repo in dependency order. Ark builds the run folder as a mirror of the workspace, with a worktree for each repo the ticket touches, so downstream repos build against upstream changes through docker compose. Ark opens a merge request per repo in dependency order.
 
 **You, reviewing retros.** After a run closes, you read the retro. It shows cost, time, rework, your own interventions, and any escaped defects, compared with earlier runs. You answer three close questions and approve or reject each improvement proposal.
 
@@ -62,7 +62,7 @@ Tickets are on the Ark backlog. Acceptance summaries are short. Each ticket hold
 | R7 | Merge requests per repo in dependency order. Only you merge. | `ark merge-request open` opens one request per repo in order and records dependencies. No Ark command merges. | ARK-155, ARK-159 |
 | R8 | Bootstrap per project. Config lives in `~/.ark/projects/<project>/ark.yml`. Each project names its ticket source. | The bootstrap playbook writes `ark.yml` and asks only what it cannot detect. | ARK-150, ARK-158 |
 | R9 | Gates: criteria, plan, and escalation, with a round budget. | Escalation opens when the round budget is spent. You choose one more round, take over, or abort. | ARK-152 |
-| R10 | A small deterministic command line. Judgment lives in skills. | The `ark` command has nine commands. The old code, tests, typed tools, and extension are deleted. | ARK-152, ARK-153, ARK-154, ARK-155, ARK-157 |
+| R10 | A small deterministic command line. Judgment lives in skills. | The `ark` command has ten command lines, listed by `ark --help`. The old code, tests, typed tools, and extension are deleted. | ARK-152, ARK-153, ARK-154, ARK-155, ARK-157 |
 | R11 | A retro and metrics for each run, including orchestration health. | `ark retro` writes `metrics.json` and a comparison with earlier runs. The run lead writes `retro.md` from it. | ARK-160, ARK-161 |
 | R12 | Improvement proposals that you approve. They land by scope: project, Ark, or skill. | Nothing changes without your approval. An approved proposal lands in `ark.yml`, `learnings.md`, an Ark ticket, or a skill diff. | ARK-161 |
 
@@ -72,7 +72,7 @@ You talk to Master Chief. For each approved ticket, Master Chief starts a run le
 
 Orca hosts the agents, carries messages, and holds the queue. Plannotator shows the plan and the merge request review. The `ark` command keeps run state and runs the mechanical steps. Skills tell each agent what to do.
 
-[docs/explanation/architecture.md](explanation/architecture.md) explains the roles, the run lifecycle, the run folder, and multi-repo composition. [docs/reference/cli.md](reference/cli.md) lists the nine commands.
+[docs/explanation/architecture.md](explanation/architecture.md) explains the roles, the run lifecycle, the run folder, and multi-repo composition. [docs/reference/cli.md](reference/cli.md) lists the commands.
 
 ## Self-improvement
 
@@ -116,7 +116,7 @@ Usage parsers read OMP and Claude Code session files first. A Codex parser follo
 | ARK-154 | Worktrees and tests: `worktree create` builds the workspace mirror, `ark test` with the bun parser | ARK-150, ARK-152 | M1 |
 | ARK-155 | Merge requests in dependency order on GitHub and GitLab | ARK-152 | M1 |
 | ARK-156 | Router skill and playbooks: chief, run-lead, worker, with Orca and Plannotator | ARK-151, ARK-153, ARK-154, ARK-155 | M1 |
-| ARK-157 | Cutover: delete the old design's code, tests, typed tools, and extension | ARK-156 | M1 |
+| ARK-157 | Cutover: delete the old design's code, tests, typed tools, and extension; generate the command reference | none | M1 |
 | ARK-158 | Bootstrap playbook, pytest and behave parsers, onboard Clara | ARK-156 | M2 |
 | ARK-159 | First Clara ticket across repos to merge requests in dependency order | ARK-158 | M2 |
 | ARK-160 | `ark retro`, `metrics.json`, and session usage parsers | ARK-152 | M3 |

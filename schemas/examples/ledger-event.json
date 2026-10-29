@@ -1,7 +1,0 @@
-{
-  "seq": 2,
-  "ts": "2026-10-21T20:41:07Z",
-  "type": "gate.answered",
-  "data": { "gate": "plan", "answer": "approve", "by": "cobe" },
-  "prev": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-}

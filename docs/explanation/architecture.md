@@ -1,6 +1,6 @@
 # Ark architecture
 
-This page explains how Ark is designed and why. The redesign is not built yet. Everything here describes the planned design. The [product requirements](../prd.md) list the tickets that build it.
+This page explains how Ark is designed and why. The [product requirements](../prd.md) list the tickets that build it.
 
 ## Roles and depth
 
@@ -22,7 +22,7 @@ The depth is 2: Master Chief starts run leads, and run leads start workers. Orca
 | Run state, worktrees, tests, merge requests, metrics | `ark` command | These steps must give the same result every time, so no agent should do them by hand. |
 | Judgment: planning, writing tests, writing code, reviewing, retros | Skills | Judgment changes often, and a skill is easy to change and review. |
 
-The rule of thumb: if a step must be repeatable, it goes in the `ark` command. If a step needs judgment, it goes in a skill. The [command reference](../reference/cli.md) lists the nine commands.
+The rule of thumb: if a step must be repeatable, it goes in the `ark` command. If a step needs judgment, it goes in a skill. The [command reference](../reference/cli.md) lists the commands.
 
 ## Run lifecycle
 
@@ -80,12 +80,12 @@ The run lead picks review models. A plan defaults to a reviewer from a different
 
 A project is a workspace directory. It holds one repo, such as Ark, or a meta-repo that holds many, such as Clara. Ark keeps no repo manifest. The run lead finds the repos by reading the workspace.
 
-For a multi-repo ticket, `ark worktree create` builds the run folder as a mirror of the workspace. Each repo the run touches is a worktree at its usual path under `repos/`. Every other repo and every root file (`AGENTS.md`, `knowledge/`, `docker-compose.yml` and so on) is a symlink to the workspace. Agents in a worktree find the workspace's context by walking up, and `ark test` runs docker compose from the run folder, so every `./repos/*` path in the compose file resolves to the run's changes.
+For a multi-repo ticket, `ark worktree create` builds `<run>/workspace/` as a mirror of the workspace. Each repo the run touches is a worktree at its usual path, such as `workspace/repos/platform`. Every other repo and every root file (`AGENTS.md`, `knowledge/`, `docker-compose.yml` and so on) is a symlink to the workspace. Agents in a worktree find the workspace's context by walking up, and `ark test` runs docker compose with `--project-directory <run>/workspace`, so every `./repos/*` path in the compose file resolves to the run's changes. For a single-repo workspace, `<run>/workspace` is itself the worktree.
 
 Here is a Clara example. A ticket changes the shared Python core package and a platform service that uses it.
 
 ```text
-runs/2026-10-29-CLARA-512-1/repos/
+runs/2026-10-29-CLARA-512-1/workspace/repos/
   shared/packages/   worktree with the core package change
   platform/          worktree with the service change, built against ../shared/packages
 ```
@@ -111,7 +111,7 @@ Each project keeps its files under `~/.ark/projects/<project>/`.
     plan.mmd              diagram rendered from plan.yml
     events.ndjson         append-only event log
     state.json            state derived from the event log
-    repos/<name>/         one worktree per repo
+    workspace/            mirror of the workspace, with a worktree per touched repo
     results/              test results
     retro.md              the run lead's retro
     metrics.json          numbers from ark retro
