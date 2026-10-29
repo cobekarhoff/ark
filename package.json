@@ -6,6 +6,7 @@
   "bin": {
     "ark": "./cli/ark.ts"
   },
+  "omp": {},
   "scripts": {
     "test": "bun test"
   },
