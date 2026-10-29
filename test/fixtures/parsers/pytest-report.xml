@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="1" tests="4" time="0.013" timestamp="2026-10-29T13:49:39.951507-07:00" hostname="Cobes-MacBook-Air.local">
+<testcase classname="test_sample" name="test_passes" file="test_sample.py" line="3" time="0.000"><properties><property name="ac" value="CLARA-12-AC1" /></properties></testcase>
+<testcase classname="test_sample" name="test_fails" file="test_sample.py" line="8" time="0.000"><properties><property name="ac" value="CLARA-12-AC2" /><property name="ac" value="CLARA-12-AC3" /></properties><failure message="assert 1 == 2">@pytest.mark.ac("CLARA-12-AC2", "CLARA-12-AC3")
+    def test_fails():
+&gt;       assert 1 == 2
+E       assert 1 == 2
+
+test_sample.py:11: AssertionError</failure></testcase>
+<testcase classname="test_sample" name="test_skipped" file="test_sample.py" line="13" time="0.000"><skipped type="pytest.skip" message="not ready">test_sample.py:14: not ready</skipped></testcase>
+<testcase classname="test_sample" name="test_untagged" file="test_sample.py" line="19" time="0.000" /></testsuite></testsuites>

@@ -1,0 +1,25 @@
+#!/usr/bin/env bun
+// Fake `glab`: records argv as one JSON line. `mr create` prints a merge request URL,
+// `api` on a merge request prints its id, and the blocks call fails when FAKE_GLAB_BLOCK_FAIL is set.
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
+
+const logFile = process.env.FAKE_LOG!;
+const argv = process.argv.slice(2);
+const previous = existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter((line) => line.includes('"create"')) : [];
+appendFileSync(logFile, JSON.stringify({ tool: "glab", cwd: process.cwd(), argv }) + "\n");
+
+if (argv[0] === "mr" && argv[1] === "create") {
+  console.log(`https://gitlab.com/org/${basename(process.cwd())}/-/merge_requests/${previous.length + 1}`);
+} else if (argv[0] === "api") {
+  if (argv.join(" ").includes("/blocks")) {
+    if (process.env.FAKE_GLAB_BLOCK_FAIL) {
+      console.error("403 Forbidden: merge request dependencies need a paid tier");
+      process.exit(1);
+    }
+    console.log("{}");
+  } else {
+    const iid = Number(argv[1].match(/merge_requests\/(\d+)/)![1]);
+    console.log(JSON.stringify({ id: 9000 + iid, iid }));
+  }
+}

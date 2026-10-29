@@ -1,133 +1,183 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { claimHumanAsk } from "./binding";
-import { confirmHuman, verifyHumanProof } from "./human";
-import { git } from "./repo";
-import { commit, append, locked, mergeRequestsEnabled, project, readLedger, record, runDirectory, sha256, type LedgerEvent } from "./run";
+import { ArkError } from "./errors";
+import { appendEvent, deriveState, readEvents } from "./events";
+import { findRun } from "./paths";
+import { loadPlan } from "./plan";
 
-type PullRequest = { url: string; number: number; state: string; baseRefName: string; headRepositoryOwner: { login: string } | null };
+type PlanStep = { id: string; repo: string; needs: string[]; criteria: string[] };
+type PlanSteps = { steps: PlanStep[] };
+type Worktree = { repo: string; path: string; branch: string; base: string };
+type OpenedMergeRequest = { repo: string; url: string; number: number };
+type Host = "github" | "gitlab";
 
-const closePacket = (events: LedgerEvent[]) =>
-  events.filter((event) => event.type === "merge_request.opened").map((event) => ({ repo: event.data.repo, url: event.data.url, number: event.data.number }));
-
-// Remote URLs may carry credentials (https://user:token@host/..): no error or ledger line may show them.
-const redact = (text: string) => text.replace(/(\/\/)[^/@\s]+@/g, "$1***@");
-
-function gh(...argumentsList: string[]): string {
-  const result = Bun.spawnSync(["gh", ...argumentsList]);
-  if (result.exitCode !== 0) throw new Error(`gh ${argumentsList.slice(0, 2).join(" ")} failed: ${result.stderr.toString().trim()}`);
-  return result.stdout.toString().trim();
+function spawn(command: string[], cwd: string) {
+  const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" });
+  return { ok: result.exitCode === 0, stdout: result.stdout.toString().trim(), stderr: result.stderr.toString().trim() };
 }
 
-// Opens one merge request (a GitHub pull request) per repo worktree. The only gh subcommands used are `pr list` and `pr create`: nothing here, or anywhere in the CLI, merges.
-export function mergeRequestOpen(runId: string): string {
-  const directory = runDirectory(runId);
-  const events = readLedger(directory);
-  const state = project(events);
-  const illegal = () => new Error(`ark merge-request open is legal only in state 'merge_requests_open' (state '${state.state}')`);
+function run(command: string[], cwd: string): string {
+  const result = spawn(command, cwd);
+  if (!result.ok) throw new ArkError(`\`${command.slice(0, 3).join(" ")}\` failed in ${cwd}: ${result.stderr || result.stdout}`);
+  return result.stdout;
+}
 
-  if (!mergeRequestsEnabled()) {
-    const opened = events.some((event) => event.type === "merge_request.opened");
-    if (state.state === "merge_requests_open" && !opened) record(directory, "run.closed", { outcome: "handed_off", reason: "merge requests disabled" });
-    else if (state.state === "merge_requests_open") throw new Error("merge requests are disabled but this run already has an opened merge request; close it as merged or abandoned with 'ark run close'");
-    else if (state.state !== "done") throw illegal();
-    return `merge requests are disabled in ark.yml; run closed at ready branches: ${state.repos.map((repository) => repository.branch).join(", ")}\n`;
+// For each repo, the other repos whose steps it needs.
+function upstreamRepos(plan: PlanSteps): Map<string, Set<string>> {
+  const repoOfStep = new Map(plan.steps.map((step) => [step.id, step.repo]));
+  const upstream = new Map<string, Set<string>>();
+  for (const step of plan.steps) {
+    const dependencies = upstream.get(step.repo) ?? new Set<string>();
+    for (const needed of step.needs) {
+      const neededRepo = repoOfStep.get(needed);
+      if (neededRepo !== undefined && neededRepo !== step.repo) dependencies.add(neededRepo);
+    }
+    upstream.set(step.repo, dependencies);
   }
-  if (state.state !== "merge_requests_open") throw illegal();
-  const approvedHeads = events.findLast((event) => event.type === "gate.answered" && event.data.gate === "evidence" && event.data.answer === "approve")?.data.approved_heads as Record<string, string> | undefined;
+  return upstream;
+}
 
-  const ticket = JSON.parse(readFileSync(join(directory, "ticket.json"), "utf8")) as { title: string; acceptance_criteria: { id: string; text: string }[] };
-  const matrixFile = join(directory, "trace-matrix.md");
-  if (!existsSync(matrixFile)) throw new Error("trace-matrix.md is missing from the run folder");
-  const artifactsDirectory = join(directory, "artifacts");
-  const evidence = existsSync(artifactsDirectory) ? (readdirSync(artifactsDirectory, { recursive: true }) as string[]).filter((file) => statSync(join(artifactsDirectory, file)).isFile()).sort() : [];
-  const body = [
-    `# ${state.ticket}: ${ticket.title}`,
-    ticket.acceptance_criteria.map((criterion) => `- ${criterion.id}: ${criterion.text}`).join("\n"),
-    `## Trace matrix\n\n${readFileSync(matrixFile, "utf8").trimEnd()}`,
-    `## Evidence (paths relative to the run folder, run ${runId})\n\n${evidence.length ? evidence.map((file) => `- artifacts/${file}`).join("\n") : "- none"}`,
-  ].join("\n\n") + "\n";
+export function mergeOrder(plan: PlanSteps): string[] {
+  const upstream = upstreamRepos(plan);
+  const repos = [...upstream.keys()]; // first appearance in the plan file
+  const ordered: string[] = [];
+  while (ordered.length < repos.length) {
+    const next = repos.find(
+      (repo) => !ordered.includes(repo) && [...upstream.get(repo)!].every((dependency) => ordered.includes(dependency)),
+    );
+    if (next === undefined) {
+      const remaining = repos.filter((repo) => !ordered.includes(repo));
+      throw new ArkError(`the plan has a dependency cycle between repos: ${remaining.join(", ")}`);
+    }
+    ordered.push(next);
+  }
+  return ordered;
+}
 
-  const outputLines: string[] = [];
-  for (const repository of state.repos) {
-    const existingMergeRequestEvent = events.find((event) => event.type === "merge_request.opened" && event.data.repo === repository.name);
-    if (existingMergeRequestEvent) {
-      outputLines.push(`${repository.name}: ${existingMergeRequestEvent.data.url}`);
+function detectHost(remoteUrl: string): Host {
+  const lowered = remoteUrl.toLowerCase();
+  if (lowered.includes("github.com")) return "github";
+  if (lowered.includes("gitlab")) return "gitlab";
+  throw new ArkError(`cannot tell GitHub from GitLab for remote ${remoteUrl}`);
+}
+
+function criterionTexts(runDirectory: string): Map<string, string> {
+  const match = readFileSync(join(runDirectory, "ticket.md"), "utf8").match(/^---\n([\s\S]*?)\n---/);
+  const frontmatter = match ? (Bun.YAML.parse(match[1]) as { acceptance_criteria?: { id: string; text: string }[] }) : {};
+  const criteria = frontmatter.acceptance_criteria ?? [];
+  return new Map(criteria.map((criterion) => [criterion.id, criterion.text]));
+}
+
+function defaultBranch(worktree: Worktree): string {
+  const result = spawn(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], worktree.path);
+  return result.ok ? result.stdout.replace(/^origin\//, "") : worktree.base;
+}
+
+function description(
+  ticket: { id: string; title: string },
+  criteriaIds: string[],
+  texts: Map<string, string>,
+  dependencyLines: string[],
+): string {
+  const criteria = criteriaIds.map((id) => `- ${id}${texts.has(id) ? `: ${texts.get(id)}` : ""}`);
+  return [
+    `Ticket: ${ticket.id} ${ticket.title}`,
+    "",
+    "Acceptance criteria this repo serves:",
+    ...(criteria.length > 0 ? criteria : ["- none"]),
+    ...(dependencyLines.length > 0 ? ["", ...dependencyLines] : []),
+  ].join("\n");
+}
+
+function createMergeRequest(host: Host, worktree: Worktree, base: string, title: string, body: string): OpenedMergeRequest {
+  const command =
+    host === "github"
+      ? ["gh", "pr", "create", "--base", base, "--head", worktree.branch, "--title", title, "--body", body]
+      : ["glab", "mr", "create", "--source-branch", worktree.branch, "--target-branch", base, "--title", title, "--description", body, "--yes"];
+  const output = run(command, worktree.path);
+  const url = output.match(/https?:\/\/\S+/)?.[0];
+  const number = Number(url?.match(/\/(\d+)\/?$/)?.[1]);
+  if (url === undefined || !Number.isInteger(number)) {
+    throw new ArkError(`could not read the merge request URL for ${worktree.repo} from: ${output}`);
+  }
+  return { repo: worktree.repo, url, number };
+}
+
+// GitLab merge request dependencies need a paid tier. A failure is fine:
+// the `Depends on !N` line in the description still carries the dependency.
+function blockOnGitLab(downstream: OpenedMergeRequest, upstream: OpenedMergeRequest, downstreamPath: string, upstreamPath: string) {
+  const lookup = spawn(["glab", "api", `projects/:fullpath/merge_requests/${upstream.number}`], upstreamPath);
+  if (!lookup.ok) return;
+  try {
+    const upstreamId = JSON.parse(lookup.stdout).id;
+    spawn(
+      ["glab", "api", "--method", "POST", `projects/:fullpath/merge_requests/${downstream.number}/blocks?blocking_merge_request_id=${upstreamId}`],
+      downstreamPath,
+    );
+  } catch {
+    // unreadable response: skip the native dependency
+  }
+}
+
+export function mergeRequestOpen(runId: string): void {
+  const { directory } = findRun(runId);
+  const events = readEvents(directory);
+  const state = deriveState(events);
+  if (!["building", "escalation", "merge_requests_open"].includes(state.phase)) {
+    throw new ArkError(`cannot open merge requests while the run is in phase ${state.phase}`);
+  }
+
+  const worktrees = new Map<string, Worktree>();
+  for (const event of events) if (event.type === "worktree.created") worktrees.set(event.data.repo, event.data as Worktree);
+  const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
+  if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
+  if (!lastTest.data.passed) throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
+  for (const worktree of worktrees.values()) {
+    const head = run(["git", "rev-parse", "HEAD"], worktree.path);
+    const tested: string | undefined = lastTest.data.heads?.[worktree.repo];
+    if (tested !== head) {
+      throw new ArkError(
+        `repo ${worktree.repo} changed since the last test run (tested ${tested?.slice(0, 8) ?? "nothing"}, now ${head.slice(0, 8)}): run \`ark test\` again`,
+      );
+    }
+  }
+
+  const plan: PlanSteps = loadPlan(directory);
+  const upstream = upstreamRepos(plan);
+  const order = mergeOrder(plan);
+  const repos = [...order, ...[...worktrees.keys()].filter((repo) => !order.includes(repo))];
+  const texts = criterionTexts(directory);
+  const ticket = state.ticket;
+  const opened = new Map<string, OpenedMergeRequest>();
+  for (const event of events) if (event.type === "merge_request.opened") opened.set(event.data.repo, event.data as OpenedMergeRequest);
+
+  for (const repo of repos) {
+    const worktree = worktrees.get(repo);
+    if (worktree === undefined) continue;
+    if (opened.has(repo)) {
+      console.log(`${repo}  already open  ${opened.get(repo)!.url}`);
       continue;
     }
-    const worktree = join(directory, "worktrees", repository.name);
-    // Only ark/* branches, and only the SHA that was approved: an agent must not steer the CLI's credentials at another branch or at later commits.
-    if (!repository.branch.startsWith("ark/")) throw new Error(`refusing to push '${repository.branch}': not an ark/ branch`);
-    const approvedHead = approvedHeads?.[repository.name];
-    if (!approvedHead) throw new Error(`${repository.name} has no recorded head from evidence approval; approve the evidence gate before ark merge-request open`);
-    if (git(worktree, "rev-parse", "HEAD") !== approvedHead) throw new Error(`${worktree} HEAD differs from the approved ${approvedHead}; commits made after approval are not pushed`);
+    const ahead = Number(run(["git", "rev-list", "--count", `${worktree.base}..HEAD`], worktree.path));
+    if (ahead === 0) continue;
 
-    // The trusted git dir comes from the source checkout recorded by ark worktree create (an event advance cannot forge), never from the
-    // worktree's .git file, which an agent can repoint at another repository with its own origin and hooks.
-    const sourceCheckout = events.find((event) => event.type === "worktree.created" && event.data.repo === repository.name)?.data.source;
-    if (typeof sourceCheckout !== "string") throw new Error(`${repository.name} has no recorded source checkout; recreate its worktree with ark worktree create`);
-    const commonGitDirectory = git(sourceCheckout, "rev-parse", "--path-format=absolute", "--git-common-dir");
-    if (!Bun.spawnSync(["git", "--git-dir", commonGitDirectory, "cat-file", "-e", `${approvedHead}^{commit}`]).success) throw new Error(`approved ${approvedHead} is not in ${sourceCheckout}`);
-    const url = git(sourceCheckout, "config", "--file", join(commonGitDirectory, "config"), "--get", "remote.origin.url");
-    const slug = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?\/?$/)?.[1];
-    if (!slug) throw new Error(`cannot read owner/repo from remote.origin.url '${redact(url)}'`);
-    const defaultHeadResult = Bun.spawnSync(["git", "--git-dir", commonGitDirectory, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-    if (defaultHeadResult.exitCode !== 0) throw new Error(`${repository.name} has no origin/HEAD to read the default branch from; run 'git remote set-head origin -a'`);
-    const defaultBranch = defaultHeadResult.stdout.toString().trim().replace(/^origin\//, "");
-
-    // The worktree's pushurl is DISABLED for agents; an explicit URL bypasses it with the CLI's own credentials.
-    // Pushed from the shared git dir, so the agent's per-worktree config (insteadOf, hooksPath) is never loaded; the SHA resolves in the shared object store.
-    // core.hooksPath on the command line outranks the source repo's hooks/ and any configured path: this push carries the human's credentials, so no hook of a repo an agent can write to runs in it.
-    const push = Bun.spawnSync(["git", "--git-dir", commonGitDirectory, "-c", "core.hooksPath=/dev/null", "push", url, `${approvedHead}:refs/heads/${repository.branch}`]);
-    if (push.exitCode !== 0) throw new Error(redact(`git push ${url} failed: ${push.stderr.toString().trim()}`));
-
-    const bodyFile = join(directory, "merge-requests", `${repository.name}.md`);
-    mkdirSync(join(directory, "merge-requests"), { recursive: true });
-    writeFileSync(bodyFile, body);
-    // A merge request counts as ours only if it is from this repo (not a fork with the same branch name) into the default branch.
-    const owner = slug.split("/")[0].toLowerCase();
-    const pullRequests = JSON.parse(gh("pr", "list", "--repo", slug, "--head", repository.branch, "--state", "all", "--json", "url,number,state,baseRefName,headRepositoryOwner") || "[]") as PullRequest[];
-    const matchingPullRequests = pullRequests.filter((pullRequest) => pullRequest.baseRefName === defaultBranch && pullRequest.headRepositoryOwner?.login.toLowerCase() === owner);
-    const openPullRequest = matchingPullRequests.find((pullRequest) => pullRequest.state === "OPEN");
-    const closedPullRequest = matchingPullRequests.find((pullRequest) => pullRequest.state !== "OPEN");
-    if (!openPullRequest && closedPullRequest) throw new Error(`${repository.branch} already has a ${closedPullRequest.state.toLowerCase()} merge request ${closedPullRequest.url}; ark merge-request open will not reuse it`);
-    const pullRequestUrl = openPullRequest?.url ?? gh("pr", "create", "--repo", slug, "--head", repository.branch, "--base", defaultBranch, "--title", `${state.ticket}: ${ticket.title}`, "--body-file", bodyFile).split("\n").pop()!;
-    const number = openPullRequest?.number ?? Number(pullRequestUrl.match(/\/pull\/(\d+)/)?.[1]);
-    if (!Number.isInteger(number)) throw new Error(`cannot read a merge request number from '${pullRequestUrl}'`);
-    record(directory, "merge_request.opened", { repo: repository.name, url: pullRequestUrl, number });
-    outputLines.push(`${repository.name}: ${pullRequestUrl}`);
+    run(["git", "push", "-u", "origin", worktree.branch], worktree.path);
+    const host = detectHost(run(["git", "remote", "get-url", "origin"], worktree.path));
+    const upstreamOpened = [...(upstream.get(repo) ?? [])].flatMap((name) => opened.get(name) ?? []);
+    const dependencyLines = upstreamOpened.map((merge) => `Depends on ${host === "github" ? "#" : "!"}${merge.number}`);
+    const criteriaIds = [...new Set(plan.steps.filter((step) => step.repo === repo).flatMap((step) => step.criteria))];
+    const created = createMergeRequest(
+      host,
+      worktree,
+      defaultBranch(worktree),
+      `${ticket.id}: ${ticket.title}`,
+      description(ticket, criteriaIds, texts, dependencyLines),
+    );
+    if (host === "gitlab") {
+      for (const merge of upstreamOpened) blockOnGitLab(created, merge, worktree.path, worktrees.get(merge.repo)!.path);
+    }
+    appendEvent(directory, "merge_request.opened", created);
+    opened.set(repo, created);
+    console.log(`${repo}  ${created.url}`);
   }
-  const opened = closePacket(readLedger(directory));
-  return `${outputLines.join("\n")}\n${opened.length ? `close_packet: ${sha256(JSON.stringify(opened))}\n` : ""}`;
-}
-
-// The outcome of a run whose merge requests are open is a human's to record. Returns the close packet hash: sha256 of the opened merge request list.
-function closePacketHash(events: LedgerEvent[], outcome: string): string {
-  const state = project(events);
-  if (state.state !== "merge_requests_open") throw new Error(`ark run close is legal only in state 'merge_requests_open' (state '${state.state}')`);
-  const opened = closePacket(events);
-  if (!opened.length) throw new Error(`cannot record ${outcome}: no merge request has been opened`);
-  const unopened = state.repos.filter((repository) => !opened.some((o) => o.repo === repository.name)).map((repository) => repository.name);
-  if (outcome === "merged" && unopened.length) throw new Error(`cannot record merged: no merge request was opened for ${unopened.join(", ")}`);
-  return sha256(JSON.stringify(opened));
-}
-
-export function closeRun(runId: string, outcome: string): string {
-  if (outcome !== "merged" && outcome !== "abandoned") throw new Error(`unknown outcome '${outcome}'; a human records merged or abandoned (aborted and handed off are recorded by Ark)`);
-  const directory = runDirectory(runId);
-  const choices = ["merged", "abandoned"];
-  const packetHash = closePacketHash(readLedger(directory), outcome);
-  const identity = confirmHuman(directory, runId, "run.closed", outcome, packetHash, choices);
-  return locked(directory, () => {
-    const events = readLedger(directory);
-    if (closePacketHash(events, outcome) !== packetHash) throw new Error("merge request state changed after confirmation; ask the human again");
-    if (!verifyHumanProof(directory, runId, "run.closed", outcome, packetHash, choices, identity)) {
-      throw new Error("run-close confirmation is no longer valid; ask the human again");
-    }
-    if (!identity.question || !identity.ask_call_id || !claimHumanAsk(identity.question, identity.ask_call_id)) {
-      throw new Error(`ask confirmation ${identity.ask_call_id} was already used; ask the human again`);
-    }
-    commit(directory, append(directory, events, "run.closed", { outcome, packet_sha256: packetHash, ...identity }));
-    return `closed ${runId}: ${outcome}, recorded by ${identity.by}\n`;
-  });
 }

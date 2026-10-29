@@ -1,0 +1,9 @@
+#!/usr/bin/env bun
+// Fake `gh`: records argv as one JSON line and prints a plausible pull request URL.
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
+
+const logFile = process.env.FAKE_LOG!;
+const previous = existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter((line) => line.includes('"create"')) : [];
+appendFileSync(logFile, JSON.stringify({ tool: "gh", cwd: process.cwd(), argv: process.argv.slice(2) }) + "\n");
+console.log(`https://github.com/org/${basename(process.cwd())}/pull/${previous.length + 1}`);

@@ -6,7 +6,7 @@ A small `ark` command handles the mechanical parts: run state, worktrees, tests,
 
 ## Status
 
-The redesign is in progress on the branch `master-chief-redesign`. The code in `cli/` still follows the old design until [ARK-157](docs/prd.md#milestones) lands the cutover. The commands and playbooks in the docs describe the planned design, not what runs today.
+The redesign is being built. The commands are listed in the [command reference](docs/reference/cli.md), and the [product requirements](docs/prd.md) track which tickets are done.
 
 ## How it works
 
@@ -58,10 +58,10 @@ To undo the setup, run `bun unlink` and `omp plugin uninstall ark`.
 
 | Path | Contents |
 | --- | --- |
-| `cli/` | The `ark` command. This is still the old design until ARK-157. |
-| `skills/` | The router skill and its playbooks. ARK-156 rewrites them. |
-| `agents/`, `schemas/` | Old agent definitions and schemas. ARK-157 removes what the new design does not use. |
-| `extensions/`, `tools/` | The old extension and typed tools. ARK-157 deletes them. |
+| `cli/` | The `ark` command. |
+| `skills/` | The router skill, its playbooks and the reviewer rubric. |
+| `scripts/` | The generator for the command reference. |
+| `rules/` | The naming and test-authoring rules. |
 | `test/` | Tests. |
 | `docs/` | Requirements, architecture, reference, and decisions. |
 

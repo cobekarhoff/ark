@@ -1,9 +1,0 @@
-name: ark
-commands:
-  build: bun install --frozen-lockfile
-suites:
-  unit:
-    format: bun-test      # AC IDs live in describe/test names
-    level: integration
-    run: bun test -t "{tags}" --pass-with-no-tests --reporter=junit --reporter-outfile=$ARK_OUT/bun.xml
-    junit: $ARK_OUT/bun.xml
