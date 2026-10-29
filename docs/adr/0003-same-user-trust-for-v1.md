@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0004
+---
+
 # v1 trusts the operator's operating system (OS) user; integrity checks catch mistakes, not forgery
 
 In v1, agents run as the operator's OS user, with shell access to every file that user can write: run folders, the ledger, state.json, ~/.ark, ~/.bun and git config. A process with that access can rewrite any check's inputs: rechain the ledger, append a forged `gate.answered` line, edit the cached state, replace the `bun` binary, or record `implementer.completed` for code it wrote itself. No check that lives in the same files can stop that. So Ark's integrity mechanisms (owned events, the hash-chained ledger, attribution of worktree changes, clean-checkout proof, the tool-call hook, terminal-confirmed answers in architecture decision record (ADR) 0002) are designed to stop an honest-but-mistaken agent and to detect corruption. They are not designed to withstand an agent deliberately tampering as the same user.

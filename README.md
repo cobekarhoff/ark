@@ -1,120 +1,74 @@
 # Ark
 
-Ark is an Oh My Pi (OMP) plugin plus a deterministic `ark` command-line interface (CLI) that takes a ticket across one or several dependent repos to merge-ready changes through a merge request (MR) per repo, with a complete, replayable record. Agents do the judgment and write the code; the CLI does everything mechanical. See the [product requirements document (PRD)](docs/prd.md).
+Ark takes a ticket to merge-ready changes in one repo or across several dependent repos. You talk to one agent session, Master Chief. Master Chief starts a run lead for each ticket, and the run lead plans the work and starts workers to build, test, and review it.
 
-## Dev setup
+A small `ark` command handles the mechanical parts: run state, worktrees, tests, merge requests, and metrics. Skills hold the judgment. Only you merge.
 
-Requires [Bun](https://bun.sh) 1.4 and [OMP](https://omp.sh).
+## Status
 
-```sh
-bun install         # dependencies
-bun link            # puts `ark` on PATH (plugin install does not)
-omp plugin link .   # installs this repo as an OMP plugin
-bun test            # runs the tests
+The redesign is in progress on the branch `master-chief-redesign`. The code in `cli/` still follows the old design until [ARK-157](docs/prd.md#milestones) lands the cutover. The commands and playbooks in the docs describe the planned design, not what runs today.
+
+## How it works
+
+```mermaid
+flowchart TD
+  human([You]) --> chief[Master Chief]
+  chief --> lead1[Run lead, ticket A]
+  chief --> lead2[Run lead, ticket B]
+  lead1 --> worker1[Workers: implementer, validator, reviewer]
+  lead2 --> worker2[Workers: implementer, validator, reviewer]
+  orca[Orca: agents, messages, queue] -.hosts.-> chief
+  orca -.hosts.-> lead1
+  orca -.hosts.-> worker1
+  plannotator[Plannotator: plan and merge request review] -.shows.-> human
+  lead1 --> ark[ark command]
+  worker1 --> ark
+  ark --> folder[(Run folder)]
 ```
 
-Undo with `bun unlink` and `omp plugin uninstall ark`.
+- You talk only to Master Chief.
+- Each run lead owns one ticket and every repo the ticket touches.
+- Each worker does one step. Workers never start agents, so the depth is 2.
+- You approve the plan before any code is written.
+- Ark opens one merge request per repo, and you merge.
 
-## Run core
+[docs/explanation/architecture.md](docs/explanation/architecture.md) explains the roles, the run lifecycle, and the run folder.
 
-`ark` finds its project from the nearest `ark.yml` (`project:` key) above the current directory and keeps state under `$ARK_HOME` (default `~/.ark`): tickets in `projects/<project>/tickets/<ID>.md`, runs in `projects/<project>/runs/<date>-<ID>-<n>/`. A ticket has many runs over time and at most one is open: `ark run start` resumes the open run, or starts run n+1 once every earlier run is closed.
+## Requirements
 
-```sh
-ark run start ARK-109                  # resume the ticket's open run, or start the next one; prints its state and its route (`route: none` until `ark log route`)
-ark run close <run_id> <merged|abandoned>   # requires the matching main-session ask; outside OMP, also type the answer on /dev/tty
-ark acceptance-criteria update <run_id>                 # after an edit at the criteria gate: re-read the ticket's acceptance criteria into the run (acceptance_criteria.updated); nothing past the criteria gate is legal until it is accepted
-ark advance <run_id> <event> [--data json]   # legal transitions only (cli/transitions.ts)
-ark run replay <run_id> [--check]      # rebuild state.json from ledger.ndjson
-ark gate packet <run_id> <criteria|plan|evidence|escalation> # build gates/<gate>.<hash>.packet.md from run artifacts (each source listed with its secure hash algorithm 256-bit (SHA-256) hash), print the packet's SHA-256 hash
-ark gate answer <run_id> <gate> <answer> --packet <sha256>   # requires the matching main-session ask; outside OMP, also type the answer on /dev/tty (architecture decision record (ADR) 0002)
-```
+- [Bun](https://bun.sh)
+- [OMP](https://omp.sh)
+- Orca
+- Plannotator
+- `gh` for GitHub projects or `glab` for GitLab projects
+- docker, with docker compose, for multi-repo projects
 
-Implemented gate ids are `criteria` (acceptance criterion (AC) clarity), `plan`, `escalation` and `evidence`. `setup` is reserved, not implemented. After showing the packet, ask exactly one matching single-choice question, with no recommended option:
-
-- `Ark gate.answered:criteria for run <run_id>; packet <sha256>. Choose exactly one: accept, edit, abort.`
-- `Ark gate.answered:plan for run <run_id>; packet <sha256>. Choose exactly one: approve, change, abort.`
-- `Ark gate.answered:escalation for run <run_id>; packet <sha256>. Choose exactly one: one_more_round, take_over, abort.`
-- `Ark gate.answered:evidence for run <run_id>; packet <sha256>. Choose exactly one: approve, send_back, abort.`
-
-In the `ask` call, an absent `recommended` property or `recommended: null` means no default; any other value is rejected. Timeout, cancellation, custom-input, mismatched-answer and reused proofs remain invalid.
-
-Rounds and escalation. `state.round` counts the returns to implementation: each `fix_round.started`, each evidence `send_back` within the budget and each escalation answered `one_more_round` or `take_over`. The round budget is `loop.max_rounds` in `ark.yml` (default 2). Once `round` reaches it, `ark advance fix_round.started` refuses and the next failure opens escalation: `ark gate packet <run_id> escalation` (rounds used, premise, latest findings), answered `one_more_round` (exactly one more round), `take_over` or `abort`. An evidence `send_back` after the budget is spent is recorded with `escalated: true`, counts no round and moves to `escalating` instead of `building`: `next_action` is `open_escalation` (orchestrator) and the only legal moves are the escalation packet and abort. After `take_over`, `state.implementer` is `human` and `next_action` asks the human to implement; the human commits in the worktree and `ark advance <run_id> implementer.completed` records the step under their git identity only after the human answers the matching `ask` (`Ark implementer.completed:<repo> for run <run_id>; packet <sha256 of the worktree HEAD>. Choose exactly one: confirm, abort.`); the refusal prints that question. Validation and review go on as usual, and the vendor rule still binds the validator and the cross-vendor reviewer.
-
-Outcomes. A closed run records `state.outcome`: `aborted` (stopped before any MR existed), `handed_off` (evidence approved with `merge_requests: false`, ready branches given to a human), `merged` or `abandoned` (an MR was opened; a human records which with `ark run close`, `merged` only once every repo has an MR). A run with open MRs stays open until a human does.
-
-Acceptance criterion (AC) kinds. Each AC in `ac.yml` has a `kind`: `new` (absent before the change) or `preserved` (present before and after). The orchestrator proposes it at intake, the plan packet lists the ACs without one, and `ark gate answer ... plan approve` is refused until every AC has one. `trace-check` asks for red-green proof for a `new` AC and preservation proof for a `preserved` one.
-
-Guardrail integrity (ARK-115). Trust model: v1 trusts the user's own processes (agents run as the user), so none of this stops a deliberate forger; it catches mistakes and bugs and makes honest runs auditable. See [docs/adr/0003-same-user-trust-for-v1.md](docs/adr/0003-same-user-trust-for-v1.md) for the decision.
-
-- **Owned events.** `ark advance` refuses every event a command owns (`worktree.created`, `test.*`, `trace.checked`, `gate.*`, `merge_request.*`, `run.closed`, `route.chosen`, `findings.recorded`, `artifact.*`, `acceptance_criteria.*`), naming the command.
-- **Hash chain.** Each ledger line carries `prev`, the sha256 of the previous line, and `state.json` records `ledger_seq` and `ledger_head`. Replay and every command refuse an edited, removed, reordered or cut-off line, naming the first bad seq. This detects accidental corruption and truncation relative to the cached head; it does **not** detect deliberate same-user tampering (anyone who can write the files can recompute the chain and the head).
-- **Lock.** Writers hold `ledger.lock` (O_EXCL, naming its process ID (pid)) around read-and-append. A lock is taken over only when its owner process is gone, never because it is old.
-- **Resume.** `ark run start` on a ticket's open run replays the ledger, rewrites a missing or stale `state.json` and says whether the route was logged (`route: none` means log it); the hook decides whether a run is open from the ledger, not `state.json`.
-- **Attribution.** Product changes count only through recorded implementer steps: `build.completed`, `fix_round.started`, `ark trace-check`, the evidence packet and an evidence or escalation answer refuse a worktree with commits to non-test files after its last recorded step head, an AC-tagged test changed after the newest recorded head (the validator's tests count once a validator step, `ark test --as validator`, ran on them; a plain `ark test` run vouches for nothing), a HEAD that no longer descends from the recorded heads, or uncommitted files (including files hidden with `assume-unchanged`/`skip-worktree`), naming them. Git calls ignore `refs/replace`. The implementer guard diffs from the start of the step (the last recorded implementer head, or the HEADs recorded when a round started).
-- **Gates.** A packet lists each source with its sha256 and is stored by hash. An approving answer rebuilds the packet and refuses when any source changed; positive escalation answers also rebuild it, and evidence approval recomputes the trace matrix. Plan approval records the exact AC-id-to-kind map shown in its packet. Gate answers and run closes require the exact successful `ask` call/result bound to the main OMP session, run, action, packet hash and fixed choices, with no custom input, note, cancellation or timeout; a result is consumed once. The ask proof is required everywhere: an OMP process with no matching proof refuses, and outside OMP `/dev/tty` is a second factor on top of it, never a substitute. Confirmation happens before the ledger lock; Ark then rechecks state, packet and proof under the lock. A pseudo-terminal (PTY) is not proof because agents can allocate one (ADR 0002). The evidence packet lists verified findings, with a traced path marked weaker than a failing test.
-- **Preflight** checks every model a role can reach, using OMP's own resolver and fallback functions rather than a copy of them: `cli/omp-models.ts` (the only file that imports OMP, run as a subprocess; the CLI core stays free of OMP imports) loads the installed OMP package (`omp` on PATH, or `$ARK_OMP_PACKAGE`), reads the effective settings (global and project) and walks the real fallback chain from every comma candidate of each role, through every reached model's own chain, until it is exhausted. Fuzzy selectors, thinking suffixes, wildcard entries and chain ownership therefore resolve exactly as OMP resolves them. If OMP cannot be loaded, preflight refuses. A refusal names the offending chain and the config file (project or global) that defines it. A subagent whose role has no working credential runs on the parent session's model whatever `retry.modelFallback` says, so what the `default` role (the orchestrator) can reach, with that model's own chain, also counts as reachable by `validate` and `review-x`: a `default` on the implementer's vendor is refused. `implement` and `review-s` are not widened this way, which keeps the PRD default (default on Opus, implement on Codex) valid. The suite needs OMP installed (continuous integration (CI) installs the pinned version).
-
-## Merge requests
+## Developer setup
 
 ```sh
-ark merge-request open <run_id>   # push/open one MR per repo; prints close_packet <sha256> once an MR is open, for the human's run.closed ask
+bun install         # install dependencies
+bun link            # put `ark` on your PATH
+omp plugin link .   # install this repo as an OMP plugin
+bun test            # run the tests
 ```
 
-Per repo it pushes the proof-validated head recorded at evidence approval to `ark/*` branches only (refusing if the worktree head moved after that proof snapshot), using the origin URL from the main checkout's config, with credentials redacted from errors. The MR description carries the ticket's ACs, `trace-matrix.md` and evidence paths relative to the run folder. An open MR from this repo into the default branch is adopted instead of opening a second; a closed or merged one is refused by name. Until every repo has an MR the run's next action is `open_merge_requests` (orchestrator). Once an MR is open, `ark merge-request open` prints `close_packet: <sha256>` (SHA-256 of the JavaScript Object Notation (JSON) list of `{repo, url, number}` for the opened MRs); the human includes that value in the `run.closed` ask. `merge_requests: false` in `ark.yml` makes evidence approval hand off ready branches only before any MR opens; once one has opened, `ark merge-request open` refuses to hand off and the run cannot be aborted, so the human must close it as `merged` (every repo has an MR) or `abandoned` (at least one MR exists). `ark advance` refuses `merge_request.opened`, `run.closed` and `worktree.created`. There is no merge command, and `ark merge-request open` only ever calls the GitHub command-line tool (`gh`) with `gh pr list` and `gh pr create`; agents get no gh or merge tool (ARK-108 owns agent tool lists).
+To undo the setup, run `bun unlink` and `omp plugin uninstall ark`.
 
-## Launch and doctor (ARK-118)
+## Project layout
 
-```sh
-ark launch [omp args]   # the orchestrator session: omp --tools <read-only built-ins, write, edit, task, wait, ask, todo, ark_*> --no-lsp -e <this package>
-ark doctor              # exit 1 unless the host's default branch includes admins, requires a pull request with no bypass allowances and a status check, and forbids force pushes and deletion
-```
+| Path | Contents |
+| --- | --- |
+| `cli/` | The `ark` command. This is still the old design until ARK-157. |
+| `skills/` | The router skill and its playbooks. ARK-156 rewrites them. |
+| `agents/`, `schemas/` | Old agent definitions and schemas. ARK-157 removes what the new design does not use. |
+| `extensions/`, `tools/` | The old extension and typed tools. ARK-157 deletes them. |
+| `test/` | Tests. |
+| `docs/` | Requirements, architecture, reference, and decisions. |
 
-`ark launch` is the supported way to run the router skill; a plain `/skill:ark` session still has bash (step 0 of the skill tells it to stop). The session has no `bash`, `eval`, `lsp` or `find` (omp offers only what `--tools` names for built-ins, so the `xd://bash` device is gone too; `ask` only in an interactive session). Every `ark` call is a typed `ark_*` tool (`tools/ark.ts`; they export `PI_SESSION_ID` and `PI_SESSION_FILE` so the run binds the main transcript). The hidden gate-answer and run-close tools only submit actions; they still need the matching ask result. The launcher passes the package **directory** to `-e`: omp scans `tools/` (and `skills/`, `agents/`) only for a directory, and `package.json` brings the hook, so it works in any project with or without the plugin installed. `write` and `edit` stay, confined to the run folder by the `tool_call` hook once the session is bound (after `ark_run_start`). Use `--tools`, not `bash.enabled: false`: that setting is global and takes bash from the subagents, which need it.
+## Documentation
 
-The `ark_*` tools are `hidden`: they exist only where `--tools` or an agent's `tools` lists them, and the extension's `tool_call` hook (where OMP gives the context an `agent.kind`) additionally blocks a non-main agent's call; the tool itself reads no `agent` field, which OMP's custom-tool context does not carry. `ark_gate_answer` and `ark_run_close` are available in the main session but cannot self-approve: the CLI accepts them only with the exact main-session ask proof. The orchestrator asks the human with `Ark <action> for run <run_id>; packet <sha256>. Choose exactly one: <fixed answer values>.`, then submits that answer through the hidden tool; outside OMP, the human uses `ark gate answer` or `ark run close` in their own terminal.
-
-Subagents run inside the orchestrator's process, so they share its environment; omp has no per-agent environment. `ark launch` therefore starts the whole process without git or gh credentials: `credential.helper=` (empty) at command-line scope through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` (it outranks system, global, repository and worktree config and resets every helper read before it; your own `GIT_CONFIG_COUNT` entries are kept), `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`, `GH_CONFIG_DIR` an empty directory under `$ARK_HOME/credential-free/`, and `GH_TOKEN`, `GITHUB_TOKEN` and the enterprise variants unset. The same command-line reset empties `http.extraHeader` and every `http.<url>.extraHeader` your system, global and launch-directory repo config sets (an `Authorization` header there would otherwise be sent by any fetch). A credential inside a remote URL or a `url.<x>.insteadOf` rewrite (`https://user:token@host/`) cannot be reset, so such a config makes `ark launch` refuse to start, naming the key with the secret redacted. Only the launch directory's repo is scanned: a different repo an agent works in may still carry such a header or URL. Your other git config (identity, hooks, signing) still applies. Only the `ark_merge_request_open` tool's child gets your own values of exactly those variables back, so `ark merge-request open` needs `gh auth login` (keyring) or a git credential helper, not a token in the environment. https remotes only: ssh keys and the ssh agent are not touched. This stops an honest agent's `git push` and `gh` calls. It does not stop a deliberate one: `gh auth token` still reads the keyring, and the agent can set the variables back in its own shell (ADR 0003). `ark merge-request open`'s credentialed push runs with `core.hooksPath=/dev/null`, so no hook of the source repository runs in it.
-
-## Worktrees and tests
-
-```sh
-ark worktree create <run_id> [--repo path]   # worktree at <run>/worktrees/<repo> on ark/<ticket>-<slug>, push URL disabled and a pre-push hook that refuses every push (an accident guard: `--no-verify` or editing the worktree config is same-user tampering, see ADR 0003)
-ark test <run_id> --criteria ID,.. [--repo name] [--as validator]  # run the AC-tagged tests in the worktree
-ark test <run_id> --criteria ID,.. --red-green [--repo name] [--as validator]     # new behavior: base source + head tests must fail, head must pass
-ark test <run_id> --criteria ID,.. --preservation [--repo name] [--as validator]  # preserved behavior: base source + head tests must pass, head must pass
-```
-
-## Trace matrix
-
-```sh
-ark trace-check <run_id>   # write <run>/trace-matrix.md, record trace.checked; exit 1 with the reasons when it fails
-```
-
-Inputs: `ac.yml` (schema-valid, listing exactly the run's ACs; `kind` per AC, `level` per AC, default `e2e`), the latest `ark test` / `ark test --red-green` / `ark test --preservation` evidence per AC and repo, and `<run>/manual/<AC-ID>.md` for `level: manual` ACs (needs `signed-by:` and `at:` lines). Evidence counts only for a repo of the run, when its `head_sha` is that worktree's current HEAD and the worktree is clean (`git status --porcelain` empty) (and the base_sha of a red-green or preservation run is the repo's recorded base). It fails on an AC with no passing tagged test (flaky is not passing), an AC with no `kind`, a test report naming an AC of this ticket that the run does not have (`unknown_tags`, recorded by `ark test`; other tickets' IDs are ignored), a `new` AC without red-green proof, a `preserved` AC without preservation proof (the tagged tests pass on base and on head), and an unsigned manual AC. The matrix lists, per AC, the screenshots under `artifacts/screenshots/<AC-ID>/` (user interface (UI) or system behavior; listed, never counted as proof). The matrix has no timestamps: identical inputs give identical bytes. `ark gate packet <run_id> evidence` recomputes the matrix and refuses unless it passes and equals `trace-matrix.md` byte for byte.
-
-Events owned by a command (`gate.*`, `worktree.created`, `test.*`, `trace.checked`; the `owner` map in `cli/transitions.ts`) are refused by `ark advance`.
-
-`.ark/repo.yml` lists suites (see [docs/prd.md](docs/prd.md)): `format`, `level`, `run` (with a `{tags}` selector; `$ARK_OUT` is `<run>/artifacts/test/<attempt>/`), `junit` (glob in the last path segment), optional `env.up`/`env.down` and `env.vars` (name→string map: the only variables a suite gets besides the allowlist below), and optional `tests` globs (default: bun's discovery, `**/*{.test,_test,.spec,_spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}`, plus everything under any `test/`, `tests/` or `__tests__/` directory, so helpers a test imports are overlaid too) that decide which changed files red-green overlays and which files the implementer step may not touch when they carry an AC tag. Suite commands and globs are read from `.ark/repo.yml` **as committed at the repo's `base_sha`**, so a config edit on the branch changes nothing. Both the green and the red run happen in clean temporary checkouts of the recorded commit hashes (secure hash algorithm identifiers, SHAs) (red: base plus the head's test files), never in the agent's worktree, so an untracked or uncommitted file cannot make a test pass. A checkout is written from the object database (no smudge filters, attributes or hooks, no `.git`), and a committed symlink that points outside it makes the run `inconclusive`. So does a submodule (a gitlink in either recorded tree): its files are not materialized, so `ark test` refuses with "submodules are not supported by ark test yet: <path>". Suites run with an allowlisted environment (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `ARK_OUT`) plus `env.vars` of the suite, never the caller's own. Optional `commands.build` runs in each checkout before its run (dependencies are not checked in, so put `bun install` or the like there). Only the suites that hold a selected AC run (see below); give each suite its own JUnit file name. Each attempt saves JUnit, `<suite>.{stdout,stderr}.log` and `fingerprint.json` (git SHA, bun version, operating system (OS), `docker compose images` when an env is declared), and appends a `test.result` or `test.red_green` event.
-
-`ark advance <run_id> implementer.completed --data '{"repo":"<name>"}'` refuses when base..HEAD of that worktree touches a test file carrying an AC ID, and otherwise records the head SHA.
-
-`--red-green` and `--preservation` also refuse until `implementer.completed` is recorded for every repo of the run. `--as validator` records the run as a validator step: only that run lets the validator's AC-tagged test commits count (see Attribution).
-
-Two testcases with the same identity in one report (a test registered in a loop) are ambiguous: the AC is `inconclusive`. Every suite runs for every `ark test` (red and green): selecting suites by the tag text of their files would miss a test whose name is built at run time. Every suite must exit 0: a non-zero exit with no failing selected test (a file that fails to load, a runner or a step that fails, an empty report) fails a green run and makes red `inconclusive`, and no runner output is read to excuse an exit, because a suite's `run` is a shell command and nothing in its output says which step failed. So that a suite without the selected ACs still exits 0, a `bun-test` suite's `run` must contain `--pass-with-no-tests` (bun exits 1 on a `-t` that matches nothing); `ark test` refuses before running, naming the suite, otherwise. An AC tagged in no suite is `missing`. A suite must also report, in its own JUnit, a record for each selected AC its files carry (a command that runs nothing, like `true # {tags}`, reports none): that AC fails on green and is `inconclusive` on red. `unknown_tags` is read from the files of every suite, run or not, so a mistyped tag in an unselected suite still reaches trace-check.
-
-Red needs a JUnit record per selected test with a failure or error; tests are told apart by file, describe path, name and line. A selected test with no record (a file that fails to load, a runner that did not start), or one that was skipped (on either side), makes the AC `inconclusive`, not red; a selected test that passes on base makes it `no-red` even when it is skipped on head; a head suite that has selected records and exits non-zero with no failing selected test fails the run (`fail` / `green-failed`). To prove a missing module, load it inside the test (`await import(...)`) so the failure is a recorded result.
-
-## Router, agents, hook
-
-Start with `/skill:ark ticket <ID>` (the skill is `disable-model-invocation`; it is still reachable as `skill://ark`). It runs `ark run start`, logs the route, copies `skills/ark/playbooks/ticket.md`'s steps into the todo list and names every CLI call per step.
-
-```sh
-ark preflight                                  # effective OMP config (modelRoles, retry.fallbackChains): every model validate and review-x can reach must be on another vendor than implement, every review-s model on the same one
-ark log route [<run_id>] <playbook> "<why>"    # route.chosen, the first event after run.started (no run_id: the active run)
-ark artifact record <run_id> <implementer|validator|reviewer> <file.json>   # schema-check an agent result, keep it as artifacts/<agent>/<n>.json
-ark findings record <run_id> <file.json>       # judging state: disposition (stored as `bucket`) + reason per finding; act_on P0 (must fix) or P1 (likely defect) needs evidence {failing_test} (a test the latest ark test at the current head recorded as failing) or {traced_path} (weaker evidence)
-```
-
-`ark run start` runs the preflight first. Agents (`agents/`) bind the role aliases `@implement`, `@validate`, `@review-x`; the project `.omp/config.yml` maps them to models (verify selectors with `omp models <provider>`). Each agent's `output:` frontmatter is its `schemas/*.schema.json` and `structured: true` makes omp enforce it through `yield`; `ark artifact record` re-checks it. The validator's last step audits every AC-tagged test against `rules/test-audit.md` (`test_audit` in its output).
-
-`extensions/index.ts` is a `tool_call` shim for the **main session only** (`ctx.agent.kind === "main"`; subagents, `/tan` clones and the advisor are `"sub"`). It calls `ark hook tool_call`, which blocks `edit`/`write`/`ast_edit` outside the active run folder or inside its `worktrees/` directory, any write to the run's `state.json` or `ledger.ndjson`, an edit/write that names no checkable path, `eval`, every `lsp` action that can apply edits, and bash redirects/moves onto the two files. Writable URLs are checked too: `conflict://`, `vault://`, `ssh://` and the other schemes that reach files are blocked, `local://`, `agent://` and `proc://` pass, and `xd://<tool>` applies this policy to the call in its JSON `content`. A path with a selector (`archive.zip:member`, `file:10-20`) is checked as every prefix before a colon, so a symlinked archive resolves to its real container. The run that binds the session is the one it started or resumed: `ark run start` records the run folder in `$ARK_HOME/bindings/<session id>` under the `PI_SESSION_ID` its bash tool exports, and the shim sends `ctx.sessionManager.getSessionId()` with every call, so the binding holds from any current directory and whatever the project's `active-run` pointer says. A session with no binding falls back to that pointer; with neither it is not an Ark session and nothing is restricted. A done or aborted run no longer binds the session. Fail closed: a binding whose run folder is gone, a pointer that names no run, or a run whose `state.json` cannot be read blocks every guarded call (bash still passes the redirect check, so `ark run start` can repair it). Paths with globs and `ast_edit` directories are checked at their literal prefix (the run folder itself is refused), and `edit` rename destinations are checked like paths. The hook is a speed bump; tampering is caught by the ledger's hash chain and by attributing worktree changes to recorded implementer steps (ARK-115). A session that has no `ark.yml` above its current directory is never restricted.
+- [Product requirements](docs/prd.md)
+- [Architecture](docs/explanation/architecture.md)
+- [Command reference](docs/reference/cli.md)
+- [Glossary](CONTEXT.md)
+- [Decisions](docs/adr/)
