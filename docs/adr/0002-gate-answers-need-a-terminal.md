@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0004
+---
+
 # Human answers require an Oh My Pi (OMP) ask or a controlling terminal
 
 For a caller in OMP, an answer counts only when the bound main session contains the exact `ask` tool call and successful result for that run, action, packet hash and fixed answer choices. The command-line interface (CLI) binds the main session id and transcript path on every `ark run start` and resume from a main session; a subagent, recognised by the `session_init` entry OMP writes only into its transcript (`parentSession` alone is no sign: forks have it), never rebinds, and a relaunched OMP session takes over the binding. The transcript is a tree (`/tree` navigation, re-answered asks and branch summaries leave abandoned entries in the file), so only the active branch counts, found with OMP's own leaf rule; the newest ask call on it with the identical question must have one successful result that selects the requested answer with no custom input, note, cancellation or timeout (a newer ask that was cancelled, redirected to chat or has no result yet refuses; an older answer never comes back). OMP writes a transcript lazily, so a session whose transcript is not on disk yet binds only while nothing is bound, and a bound transcript that holds a `session_init` proves nothing. And a consumed result stays consumed in a fork or relaunched session. A consumed ask result cannot answer another action. Hidden answer tools are only a transport: they cannot create this proof.
