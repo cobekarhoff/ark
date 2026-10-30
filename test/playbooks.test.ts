@@ -5,6 +5,7 @@ import { join } from "node:path";
 const playbookDirectory = join(import.meta.dir, "../skills/ark/playbooks");
 const chiefPlaybook = readFileSync(join(playbookDirectory, "chief.md"), "utf8");
 const bootstrapPlaybook = readFileSync(join(playbookDirectory, "bootstrap.md"), "utf8");
+const runLeadPlaybook = readFileSync(join(playbookDirectory, "run-lead.md"), "utf8");
 
 test("ARK-162-AC1 Master Chief proceeds only with an Orca terminal handle", () => {
   const command = chiefPlaybook.match(/Run `([^`]+)`\./)?.[1];
@@ -39,4 +40,21 @@ test("ARK-164-AC1 dispatch starts in an Orca-known worktree and completes the qu
   expect(dispatch).toContain("--worktree current");
   expect(dispatch).not.toMatch(/worker-start[^\n]*--worktree path:/);
   expect(close).toMatch(/orca orchestration task-update[^\n]*--status completed/);
+});
+
+test("ARK-166-AC3 opens Plannotator on plan.md only", () => {
+  const planGate = runLeadPlaybook.split("## 5. Plan gate")[1]?.split("\n## ")[0];
+  expect(planGate).toBeDefined();
+  const annotateCommand = planGate!.match(/plannotator annotate "[^"]+"/)?.[0];
+  expect(annotateCommand).toBe('plannotator annotate "<run folder>/plan.md"');
+  expect(annotateCommand).not.toContain("plan.mmd");
+  expect(annotateCommand).not.toContain("plan.yml");
+});
+
+test("ARK-166-AC4 ticket snapshot has the required sections and AC table", () => {
+  const ticketTemplate = chiefPlaybook.split("## 6. Start a run lead for each ready ticket")[1]?.split("\n## ")[0];
+  expect(ticketTemplate).toBeDefined();
+  expect(ticketTemplate).toMatch(/## Problem[\s\S]*## Change[\s\S]*## Acceptance criteria/);
+  expect(ticketTemplate).toContain("| ID | Criterion |");
+  expect(ticketTemplate).toContain("| --- | --- |");
 });

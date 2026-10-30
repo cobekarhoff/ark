@@ -52,7 +52,7 @@ const commands: Command[] = [
   },
   {
     usage: "plan check <run>",
-    description: "Checks plan.yml in the run folder and renders plan.mmd. It prints one line for each problem and exits 1 when the plan is invalid.",
+    description: "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid.",
     flags: {},
     minimum: 1,
     maximum: 1,

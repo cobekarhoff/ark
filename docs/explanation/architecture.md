@@ -70,7 +70,7 @@ You answer in Master Chief's session or in Plannotator. The run lead records the
 
 The plan is `plan.yml`. It lists steps and test cases. Each step names a role, a repo, a harness, a model, the steps it needs, and the criteria it serves. Each test case names an acceptance criterion and a level, either integration or end-to-end.
 
-`ark plan check` rejects a plan with a cycle, an unknown `needs`, a step with no repo or role, or a criterion with no integration or end-to-end test case. It also renders `plan.mmd`, a diagram of the steps.
+`ark plan check` rejects a plan with a cycle, an unknown `needs`, a step with no repo or role, a missing summary, or a criterion with no integration or end-to-end test case. It also renders `plan.md`, a readable plan with a summary, a change table and a diagram of the steps.
 
 The validator writes tests from the approved test cases. The proof that a criterion holds is that its tagged tests pass at head on the composed workspace. Unit tests never prove a criterion. Each test runner has a parser that maps native tags to results. The first parser reads `bun test` names. Later parsers read pytest marks and behave tags.
 
@@ -108,7 +108,7 @@ Each project keeps its files under `~/.ark/projects/<project>/`.
   runs/<run>/
     ticket.md             snapshot of the ticket
     plan.yml              steps and test cases
-    plan.mmd              diagram rendered from plan.yml
+    plan.md               readable plan rendered from plan.yml
     events.ndjson         append-only event log
     state.json            state derived from the event log
     workspace/            mirror of the workspace, with a worktree per touched repo

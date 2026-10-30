@@ -50,7 +50,7 @@ The run lead asks for your decision at a gate. Master Chief shows you each quest
 
 **Criteria gate.** This opens only when the ticket has no testable AC. The run lead proposes AC. Accept them, edit them, or abort the run.
 
-**Plan gate.** This opens before any code is written. The run lead shows you `plan.yml` (the steps and the test cases) and `plan.mmd` (a diagram of the steps).
+**Plan gate.** This opens before any code is written. The run lead shows you `plan.md`: a summary, a table of changes, a diagram of the steps, and the test cases.
 
 1. If Plannotator opens, read the plan there. Approve it, or annotate what to change and submit. Annotated feedback sends the plan back for changes.
 2. If it is shown in Master Chief's session, answer `approve`, `change` or `abort`.

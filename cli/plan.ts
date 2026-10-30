@@ -23,7 +23,12 @@ export type PlanTestCase = {
   expected: string;
 };
 
-export type Plan = { steps: PlanStep[]; test_cases: PlanTestCase[] };
+export type PlanSummaryChange = { criterion: string; where: string; now: string; fix: string };
+export type Plan = {
+  summary: { why: string; changes: PlanSummaryChange[] };
+  steps: PlanStep[];
+  test_cases: PlanTestCase[];
+};
 
 const roles = ["implementer", "validator", "reviewer"];
 const levels = ["integration", "e2e"];
@@ -51,8 +56,18 @@ export function loadPlan(runDirectory: string): Plan {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ArkError("plan.yml must be a mapping with steps and test_cases");
   }
-  const { steps, test_cases } = raw as Record<string, unknown>;
+  const { steps, test_cases, summary } = raw as Record<string, unknown>;
+  const summaryBlock = summary && typeof summary === "object" ? (summary as Record<string, unknown>) : {};
   return {
+    summary: {
+      why: text(summaryBlock.why),
+      changes: objectList(summaryBlock.changes).map((change) => ({
+        criterion: text(change.criterion),
+        where: text(change.where),
+        now: text(change.now),
+        fix: text(change.fix),
+      })),
+    },
     steps: objectList(steps).map((step) => ({
       id: text(step.id),
       role: text(step.role),
@@ -150,7 +165,50 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
   for (const criterion of ticketCriteria) {
     if (!proven.has(criterion)) problems.push(`criterion ${criterion} has no integration or e2e test case`);
   }
+  if (!plan.summary.why) problems.push("plan.yml has no summary.why: add a summary block");
+  if (plan.summary.changes.length === 0) problems.push("plan.yml has no summary.changes: add a summary block");
+  plan.summary.changes.forEach((change, i) => {
+    for (const field of ["criterion", "where", "now", "fix"] as const) {
+      if (!change[field]) problems.push(`summary change #${i + 1} has no ${field}`);
+    }
+  });
+  const summarized = new Set<string>();
+  for (const change of plan.summary.changes) {
+    if (!change.criterion) continue;
+    summarized.add(change.criterion);
+    if (!ticketCriteria.includes(change.criterion)) {
+      problems.push(`summary change is for criterion "${change.criterion}", which is not in the ticket`);
+    }
+  }
+  for (const criterion of ticketCriteria) {
+    if (!summarized.has(criterion)) problems.push(`criterion ${criterion} has no row in summary.changes`);
+  }
   return problems;
+}
+
+// Stable output. Markdown table cells cannot hold a pipe or a newline.
+// Gherkin: the first step is Given, the rest are And, then the expected line is Then.
+export function renderPlanMarkdown(plan: Plan): string {
+  const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
+  const lines = ["# Plan", "", "## Summary", "", plan.summary.why, "", "## Changes", ""];
+  lines.push("| Criterion | Where | Now | Fix |", "| --- | --- | --- | --- |");
+  for (const change of plan.summary.changes) {
+    lines.push(`| ${[change.criterion, change.where, change.now, change.fix].map(tableCell).join(" | ")} |`);
+  }
+  lines.push("", "## Steps", "", "```mermaid", renderMermaid(plan).trimEnd(), "```", "");
+  lines.push("| Step | Role | Repo | Needs | Criteria |", "| --- | --- | --- | --- | --- |");
+  for (const step of plan.steps) {
+    lines.push(
+      `| ${[step.id, step.role, step.repo, step.needs.join(", ") || "none", step.criteria.join(", ")].map(tableCell).join(" | ")} |`,
+    );
+  }
+  lines.push("", "## Test cases", "");
+  for (const testCase of plan.test_cases) {
+    lines.push(`### ${testCase.id} (${testCase.criterion}, ${testCase.level})`, "", "```gherkin");
+    testCase.steps.forEach((step, i) => lines.push(`${i === 0 ? "Given" : "And"} ${step}`));
+    lines.push(`Then ${testCase.expected}`, "```", "");
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 export function planCheck(runId: string): void {
@@ -169,6 +227,6 @@ export function planCheck(runId: string): void {
     for (const problem of problems) console.log(problem);
     throw new ArkError(`plan is invalid: ${problems.length} problem${problems.length === 1 ? "" : "s"}`);
   }
-  writeFileSync(join(directory, "plan.mmd"), renderMermaid(plan));
-  console.log(`plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.mmd`);
+  writeFileSync(join(directory, "plan.md"), renderPlanMarkdown(plan));
+  console.log(`plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`);
 }
