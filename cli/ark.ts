@@ -6,6 +6,7 @@ import { planCheck } from "./plan.ts";
 import { retro } from "./retro.ts";
 import { runClose, runStart, runStep, status } from "./run.ts";
 import { testRun } from "./test-run.ts";
+import { ui } from "./ui.ts";
 import { workspaceSync } from "./workspace.ts";
 import { worktreeCreate, worktreeSync } from "./worktree.ts";
 
@@ -135,6 +136,15 @@ const commands: Command[] = [
     minimum: 1,
     maximum: 1,
     run: ([runId]) => retro(runId),
+  },
+  {
+    usage: "ui [--port <number>]",
+    description:
+      "Serves a read-only control center on localhost, port 4317 unless --port says otherwise. The page refreshes itself and shows each run's ticket, phase, steps, waiting gate, last test, MRs, run lead and workers. Each agent and each waiting gate has a command to open it in Orca or Plannotator. It changes nothing.",
+    flags: { "--port": true },
+    minimum: 0,
+    maximum: 0,
+    run: (_positionals, flags) => ui(Number(flags["--port"] ?? 4317)),
   },
 ];
 
