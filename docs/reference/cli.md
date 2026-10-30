@@ -41,7 +41,7 @@ Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refus
 ```text
 ark plan check <run>
 
-Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary block (`summary.why` and `summary.changes` with `criterion`, `where`, `now`, `fix`) is invalid.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid.
 ```
 
 ### worktree create
@@ -50,22 +50,6 @@ Checks plan.yml in the run folder and renders plan.md. It prints one line for ea
 ark worktree create <run> [<repo>...]
 
 Builds the run's workspace mirror. Each named repo, or every repo the plan uses, gets a worktree. Every other path is a symlink to the workspace.
-```
-
-### worktree sync
-
-```text
-ark worktree sync <run>
-
-Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. On a conflict it undoes the merge, names the repo and exits 1. It never merges an MR.
-```
-
-### workspace sync
-
-```text
-ark workspace sync <run>
-
-Fetches and fast-forwards the target branch of the workspace checkout of each repo the run touched. It exits 1 and names the repo when git refuses, for example on a conflicting local change. It prints repo, branch and head.
 ```
 
 ### test
@@ -100,6 +84,22 @@ ark merge-request status <run>
 Prints each MR of the run as merged, open or closed, read from gh or glab. It changes nothing.
 ```
 
+### worktree sync
+
+```text
+ark worktree sync <run>
+
+Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. On a conflict it undoes the merge, names the repo and exits 1. It never merges an MR.
+```
+
+### workspace sync
+
+```text
+ark workspace sync <run>
+
+Fetches and fast-forwards the target branch of the workspace checkout of each repo the run touched. It exits 1 and names the repo when git refuses, for example on a conflicting local change. It prints repo, branch and head.
+```
+
 ### status
 
 ```text
@@ -114,6 +114,14 @@ Prints the state of one run: phase, round, first unfinished step, waiting gate, 
 ark retro <run>
 
 Computes the run's cost, time, rework and intervention metrics and writes metrics.json.
+```
+
+### ui
+
+```text
+ark ui [--port <number>]
+
+Serves a read-only control center on localhost, port 4317 unless --port says otherwise. The page refreshes itself and shows each run's ticket, phase, steps, waiting gate, last test, MRs, run lead and workers. Each agent and each waiting gate has a command to open it in Orca or Plannotator. It changes nothing.
 ```
 
 <!-- generated:commands:end -->

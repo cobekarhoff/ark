@@ -35,7 +35,7 @@ Three facts make that machinery unnecessary:
 - Auto-merge. Only you merge.
 - Hard cost caps. Ark shows cost while a run is live and judges it in retros. It sets no estimates, alerts, or limits.
 - Audit machinery of the kind the FDA expects. Ark is not regulated, and the product repos keep their own validation.
-- A custom web interface before Orca's own interface falls short.
+- A custom web interface that watches agents, answers gates or changes a run. Orca shows agents, Plannotator takes gate answers, and Ark may show a read-only overview (ADR 0007).
 - An enforced rule that the reviewer uses a different vendor from the implementer. Plans default to a different vendor, and you can change it per step.
 - Red-green proof, preservation proof, or acceptance criterion kinds. Passing tests at head are the proof.
 
@@ -153,5 +153,6 @@ Still open: OMP doesn't load a workspace's `.claude/skills` from the mirror (ARK
 - [0004 Trusted agents and a lightweight harness](adr/0004-trusted-agents-lightweight-harness.md)
 - [0005 Orca and Plannotator](adr/0005-orca-and-plannotator.md)
 - [0006 Integration and end-to-end proof only](adr/0006-integration-and-e2e-proof-only.md)
+- [0007 Control center](adr/0007-control-center.md)
 
 ADRs 0001 to 0003 stay in `docs/adr/`. ADRs 0002 and 0003 describe the old design.

@@ -112,7 +112,7 @@ export function runClose(runId: string, outcome: string): void {
   worktreeCleanup(runId);
 }
 
-function waitingGate(state: RunState): string {
+export function waitingGate(state: RunState): string {
   if (state.phase === "awaiting_criteria") return "criteria";
   if (state.phase === "planning" && state.plan?.valid) return "plan";
   if (state.phase === "escalation") return "escalation";
