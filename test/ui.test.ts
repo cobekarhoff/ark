@@ -27,6 +27,7 @@ beforeEach(() => {
   const fakeOrca = join(orcaBinDirectory, "orca");
   writeFileSync(fakeOrca, `#!/bin/sh
 if [ "$ORCA_FAIL" = "1" ]; then exit 1; fi
+if [ "$1" = "terminal" ]; then printf '{"result":{"terminal":{"connected":true,"agentIdentity":"omp"}}}'; exit 0; fi
 case "$2" in
   run-list) printf '{"result":{"runs":%s}}' "$ORCA_RUNS" ;;
   task-list) printf '{"result":{"tasks":%s}}' "$ORCA_TASKS" ;;
@@ -142,7 +143,7 @@ test("ARK-168-AC2 serves each run's state and a page that polls for updates", as
       last_test: { passed: true },
       merge_requests: [{ repo: ".", url: "https://example.test/pull/17", number: 17 }],
       agents: [
-        { role: "run lead", terminal: "term_lead", liveness: "unknown" },
+        { role: "run lead", terminal: "term_lead", liveness: "live", model: "omp" },
         { role: "worker", title: "Build dashboard", terminal: "term_worker", model: "pi/task", liveness: "live", activity: "working" },
       ],
     });

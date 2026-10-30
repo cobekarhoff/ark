@@ -29,6 +29,18 @@ function orca(...args: string[]): OrcaResult {
   }
 }
 
+/** Run lead liveness and harness from `orca terminal show`. A failing call gives `unknown`. */
+function runLeadTerminal(handle: string | null): { liveness: string; model: string | null } {
+  if (!handle) return { liveness: "unknown", model: null };
+  try {
+    const result = Bun.spawnSync(["orca", "terminal", "show", "--terminal", handle, "--json"]);
+    if (result.exitCode !== 0) return { liveness: "unknown", model: null };
+    const terminal: { connected?: boolean; agentIdentity?: string } = JSON.parse(result.stdout.toString()).result.terminal; // trusted local orca output
+    return { liveness: terminal.connected ? "live" : "exited", model: terminal.agentIdentity ?? null };
+  } catch {
+    return { liveness: "unknown", model: null };
+  }
+}
 
 function agentsOf(orcaRun: OrcaRun): Agent[] {
   const titles = new Map<string, string>();
@@ -36,8 +48,7 @@ function agentsOf(orcaRun: OrcaRun): Agent[] {
   const runLead: Agent = {
     role: "run lead",
     title: orcaRun.objective ?? orcaRun.id,
-    model: null,
-    liveness: "unknown",
+    ...runLeadTerminal(orcaRun.coordinator_handle),
     activity: "unknown",
     terminal: orcaRun.coordinator_handle,
     command: orcaRun.coordinator_handle ? `orca terminal switch --terminal ${orcaRun.coordinator_handle}` : null,
