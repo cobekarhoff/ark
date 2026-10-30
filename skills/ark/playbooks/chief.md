@@ -42,7 +42,7 @@ Then ask the human which ones to queue, with the ask tool. Recommend an answer. 
 
 The queue is a set of Orca Tasks in Master Chief's own Orca Run.
 
-1. Check for a Run: `orca orchestration run-current --json`. If there is none, create one:
+1. Check for a Run: `orca orchestration run-current --json`. Use that Run only when its objective is exactly "Master Chief: <project> tickets". In every other case, including no Run or a Run with another objective, create it. `run-create` binds this terminal to the new Run:
 
    ```sh
    orca orchestration run-create --objective "Master Chief: <project> tickets" --json

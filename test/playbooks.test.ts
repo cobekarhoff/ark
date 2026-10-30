@@ -7,6 +7,30 @@ const chiefPlaybook = readFileSync(join(playbookDirectory, "chief.md"), "utf8");
 const bootstrapPlaybook = readFileSync(join(playbookDirectory, "bootstrap.md"), "utf8");
 const runLeadPlaybook = readFileSync(join(playbookDirectory, "run-lead.md"), "utf8");
 
+test("ARK-169-AC1 bootstrap creates the depth-check Run before starting a worker", () => {
+  const depthCheck = bootstrapPlaybook.split("## 6. Confirm Orca's nesting depth is at least 2")[1]?.split("\n## ")[0];
+  expect(depthCheck).toBeDefined();
+
+  const shellBlocks = [...depthCheck!.matchAll(/^[ \t]*```sh\n([\s\S]*?)^[ \t]*```/gm)].map(([, body]) => body);
+  const commands = shellBlocks.join("\n");
+  const createRun = commands.search(/^\s*orca orchestration run-create\b/m);
+  const startWorker = commands.search(/^\s*orca orchestration worker-start\b/m);
+
+  expect(createRun).toBeGreaterThanOrEqual(0);
+  expect(startWorker).toBeGreaterThan(createRun);
+});
+
+test("ARK-169-AC2 chief creates its own Run unless the current Run has the queue objective", () => {
+  const queueSection = chiefPlaybook.split("## 5. Queue the approved tickets")[1]?.split("\n## ")[0];
+  expect(queueSection).toBeDefined();
+  expect(queueSection).toMatch(/Use that Run only when its objective is exactly "Master Chief: <project> tickets"\./);
+  expect(queueSection).toMatch(/In every other case, including no Run or a Run with another objective, create it\./);
+
+  const runCreate = queueSection!.indexOf("orca orchestration run-create --objective \"Master Chief: <project> tickets\"");
+  const taskCreate = queueSection!.indexOf("orca orchestration task-create");
+  expect(runCreate).toBeGreaterThanOrEqual(0);
+  expect(taskCreate).toBeGreaterThan(runCreate);
+});
 test("ARK-162-AC1 Master Chief proceeds only with an Orca terminal handle", () => {
   const command = chiefPlaybook.match(/Run `([^`]+)`\./)?.[1];
   expect(command).toBe("test -n \"$ORCA_TERMINAL_HANDLE\"");
@@ -23,13 +47,6 @@ test("ARK-162-AC1 Master Chief proceeds only with an Orca terminal handle", () =
   expect(withoutTerminalHandle.exitCode).not.toBe(0);
 });
 
-test("ARK-162-AC2 bootstrap depth check does not create a Run", () => {
-  const depthCheck = bootstrapPlaybook.split("## 6. Confirm Orca's nesting depth is at least 2")[1]?.split("\n## ")[0];
-  expect(depthCheck).toBeDefined();
-
-  const shellBlocks = [...depthCheck!.matchAll(/```sh\n([\s\S]*?)\n```/g)].map(([, body]) => body);
-  expect(shellBlocks.join("\n")).not.toMatch(/^\s*orca orchestration run-create\b/m);
-});
 test("ARK-164-AC1 dispatch starts in an Orca-known worktree and completes the queue Task at close", () => {
   const dispatch = chiefPlaybook.split("## 6. Start a run lead for each ready ticket")[1]?.split("\n## ")[0];
   const close = chiefPlaybook.split("## 8. Close the run")[1]?.split("\n## ")[0];
