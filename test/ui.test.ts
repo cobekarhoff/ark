@@ -187,8 +187,14 @@ test("ARK-168-AC3 gives workers an Orca terminal switch command", async () => {
 
   await withUi(async (baseUrl) => {
     const data = await (await fetch(`${baseUrl}/api`)).json() as { runs: Record<string, any>[] };
-    const worker = data.runs.find((dashboardRun) => dashboardRun.run === run.runId)?.agents.find((agent: Record<string, any>) => agent.role === "worker");
-    expect(worker).toMatchObject({ terminal: "term_abc", command: "orca terminal switch --terminal term_abc" });
+    const agents = data.runs.find((dashboardRun) => dashboardRun.run === run.runId)?.agents;
+    expect(agents?.find((agent: Record<string, any>) => agent.role === "run lead")).toMatchObject({
+      command: "orca terminal switch --terminal term_lead",
+    });
+    expect(agents?.find((agent: Record<string, any>) => agent.role === "worker")).toMatchObject({
+      terminal: "term_abc",
+      command: "orca terminal switch --terminal term_abc",
+    });
   });
 });
 
