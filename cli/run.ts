@@ -6,6 +6,7 @@ import { appendEvent, deriveState, readEvents, writeState, type RunState } from 
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertAllowed } from "./transitions.ts";
+import { worktreeCleanup } from "./worktree.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
 
@@ -108,6 +109,7 @@ export function runClose(runId: string, outcome: string): void {
   const { directory } = findRun(runId);
   appendEvent(directory, "run.closed", { outcome });
   console.log(`${runId} closed: ${outcome}`);
+  worktreeCleanup(runId);
 }
 
 function waitingGate(state: RunState): string {

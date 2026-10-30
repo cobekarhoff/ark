@@ -12,7 +12,7 @@ Throughout this playbook:
 
 ## 1. Read your step
 
-1. Your working folder is the step's repo worktree, `<run folder>/workspace/<repo>`, on the branch `ark/<run>`. Check with `pwd` and `git branch --show-current`. If you are not there, stop and report `--outcome failed`.
+1. Your working folder is the step's repo worktree, `<run folder>/workspace/<repo>`, on the branch `ark/<ticket id>-<slug>`. Check with `pwd` and `git branch --show-current`. If you are not there, stop and report `--outcome failed`.
 2. Read `<run folder>/plan.yml`. Find the step named `<step>`. Note its `role`, `repo`, `needs` and `criteria`. Read the test cases for those criteria.
 3. Read `<run folder>/ticket.md` for the text of each AC the step serves.
 4. Read the context of the repo and the workspace: `AGENTS.md`, `CLAUDE.md` and the files that the step touches. Work from the repo's own conventions.
@@ -29,7 +29,7 @@ You write the product code.
 1. Implement the change the step's AC describe, in this repo only. Keep the change as small as the AC allow.
 2. Use the repo's own checks while you work: its build, lint and unit tests. Unit tests are for you. They never prove an AC.
 3. If a findings file or a failing test list names your step (a rework round), fix exactly what it lists. The file is `<run folder>/findings/round-<round>.md`. Do not widen the change.
-4. Commit your work on the branch `ark/<run>` with a clear message. `ark test` runs on the latest commit, so uncommitted work counts for nothing. Do not push, and do not open an MR. `ark merge-request open` does that.
+4. Commit your work on the branch `ark/<ticket id>-<slug>` with a clear message. `ark test` runs on the latest commit, so uncommitted work counts for nothing. Do not push, and do not open an MR. `ark merge-request open` does that.
 5. Do not write the AC-tagged integration or E2E tests. The validator writes them.
 
 ### Validator
@@ -50,7 +50,7 @@ You turn the plan's test cases into tests that prove the AC, and you make them p
    - Does it need an export, flag or hook that has no production caller? Then test at the real boundary instead.
 
    Delete or rewrite a test that asserts nothing, compares a value to itself, takes its expected value from the code under test, asserts on call shape or mock calls, uses a mock that supplies the asserted behavior, or has a name that promises more than it checks.
-6. Commit the tests on the branch `ark/<run>`. Do not push.
+6. Commit the tests on the branch `ark/<ticket id>-<slug>`. Do not push.
 
 ### Reviewer
 

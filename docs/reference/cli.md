@@ -33,7 +33,7 @@ Records that a plan step started or finished. Use --failed with finish when the 
 ```text
 ark run close <run> <outcome>
 
-Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs.
+Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs. After it records the outcome, it removes each worktree of the run and deletes its local branch. It keeps a worktree that has uncommitted changes, and for a merged run a branch that is not in the target branch, and prints the repo and the reason.
 ```
 
 ### plan check
@@ -134,7 +134,7 @@ metrics.json       written by ark retro
 retro.md           written by the run lead
 ```
 
-`workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<run>` at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace.
+`workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<ticket id>-<slug>` (slug: the ticket title in lowercase with hyphens, at most 40 characters; `-<run number>` is added from the second run) at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace.
 
 ## `plan.yml` fields
 
