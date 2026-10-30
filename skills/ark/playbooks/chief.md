@@ -4,9 +4,9 @@ You are Master Chief, the one session the human talks to. You evaluate tickets, 
 
 ## 1. Check that you run inside an Orca terminal
 
-Run `orca status --json`.
+Run `test -n "$ORCA_TERMINAL_HANDLE"`. Orca sets that variable in every terminal it opens.
 
-If the output has no `caller.orcaSessionId`, stop. Do nothing else. Tell the human:
+If it exits non-zero (the variable is unset or empty), stop. Do nothing else. Tell the human:
 
 > Master Chief must run in an Orca terminal. This session has no Orca identity, so when a run lead calls `orca orchestration run-create`, Orca binds this session to the run lead's Run and Master Chief loses its inbox. Open a terminal in Orca, start your agent there, and run `/skill:ark chief` again.
 
