@@ -223,6 +223,22 @@ test("ARK-152-AC2 ARK_PROJECT limits the status config check to one project", ()
     delete process.env.ARK_PROJECT;
   }
 });
+test("ARK-164-AC2 status accepts --project for config checks and run state", () => {
+  writeProject("broken", validConfig({ ticket_source: "trello" }));
+
+  const configCheck = ark("status", "--project", "demo");
+  expect(configCheck.code).toBe(0);
+  expect(configCheck.out).not.toContain("config error");
+
+  const { runId } = startRun();
+  const runStatus = ark("status", runId, "--project", "demo");
+  expect(runStatus.code).toBe(0);
+  expect(runStatus.out).toContain("phase: planning");
+
+  const missingProject = ark("status", "--project", "missing");
+  expect(missingProject.code).toBe(1);
+  expect(missingProject.err).toContain("missing");
+});
 
 test("ARK-152-AC6 status for one run shows phase, round, waiting gate and cost", () => {
   const { runId } = startRun();

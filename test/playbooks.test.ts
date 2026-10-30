@@ -29,3 +29,14 @@ test("ARK-162-AC2 bootstrap depth check does not create a Run", () => {
   const shellBlocks = [...depthCheck!.matchAll(/```sh\n([\s\S]*?)\n```/g)].map(([, body]) => body);
   expect(shellBlocks.join("\n")).not.toMatch(/^\s*orca orchestration run-create\b/m);
 });
+test("ARK-164-AC1 dispatch starts in an Orca-known worktree and completes the queue Task at close", () => {
+  const dispatch = chiefPlaybook.split("## 6. Start a run lead for each ready ticket")[1]?.split("\n## ")[0];
+  const close = chiefPlaybook.split("## 8. Close the run")[1]?.split("\n## ")[0];
+  expect(dispatch).toBeDefined();
+  expect(close).toBeDefined();
+
+  expect(dispatch).not.toMatch(/task-update[^\n]*--status dispatched/);
+  expect(dispatch).toContain("--worktree current");
+  expect(dispatch).not.toMatch(/worker-start[^\n]*--worktree path:/);
+  expect(close).toMatch(/orca orchestration task-update[^\n]*--status completed/);
+});
