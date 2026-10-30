@@ -36,7 +36,10 @@ type PlanDocument = {
 const validPlan = (): PlanDocument => ({
   summary: {
     why: "Make the plan readable.",
-    changes: [{ criterion: "ARK-900-AC1", where: "cli/plan.ts", now: "Writes plan.yml.", fix: "Write plan.md." }],
+    changes: [
+      { criterion: "ARK-900-AC1", where: "cli/plan.ts", now: "Writes plan.yml.", fix: "Write plan.md." },
+      { criterion: "ARK-900-AC2", where: "cli/plan.ts", now: "No summary.", fix: "Require summary." },
+    ],
   },
   steps: [step("build"), step("check", { role: "validator", needs: ["build"] })],
   test_cases: [testCase("t1", "ARK-900-AC1"), testCase("t2", "ARK-900-AC2", "e2e")],
@@ -164,6 +167,24 @@ describe("plan check", () => {
     const result = ark("plan", "check", runId);
     expect(result.code).toBe(1);
     expect(result.out).toContain("summary change #1 has no fix");
+  });
+
+  test("ARK-166-AC2 rejects a ticket criterion with no summary row", () => {
+    const plan = validPlan();
+    plan.summary.changes.pop();
+    writePlan(plan);
+    const result = ark("plan", "check", runId);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("criterion ARK-900-AC2 has no row in summary.changes");
+  });
+
+  test("ARK-166-AC2 rejects a summary row for a criterion not in the ticket", () => {
+    const plan = validPlan();
+    plan.summary.changes[1].criterion = "ARK-900-AC9";
+    writePlan(plan);
+    const result = ark("plan", "check", runId);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('criterion "ARK-900-AC9", which is not in the ticket');
   });
 
   test("ARK-166-AC1 renders plan.md with summary, change table, Mermaid steps and Gherkin cases", () => {

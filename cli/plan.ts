@@ -172,6 +172,17 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
       if (!change[field]) problems.push(`summary change #${i + 1} has no ${field}`);
     }
   });
+  const summarized = new Set<string>();
+  for (const change of plan.summary.changes) {
+    if (!change.criterion) continue;
+    summarized.add(change.criterion);
+    if (!ticketCriteria.includes(change.criterion)) {
+      problems.push(`summary change is for criterion "${change.criterion}", which is not in the ticket`);
+    }
+  }
+  for (const criterion of ticketCriteria) {
+    if (!summarized.has(criterion)) problems.push(`criterion ${criterion} has no row in summary.changes`);
+  }
   return problems;
 }
 
