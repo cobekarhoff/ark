@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { appendEvent } from "../cli/events.ts";
+import { planHash } from "../cli/plan.ts";
 import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
 
 const roles = {
@@ -28,7 +30,7 @@ function tempMetaWorkspace(): string {
 }
 
 /** Starts a run in a project whose workspace is `workspace`. Returns the run id and the run folder. */
-function startRun(workspace: string, criteriaIds = ["FAKE-1-AC1"]): { runId: string; runDirectory: string } {
+function startRun(workspace: string, criteriaIds = ["FAKE-1-AC1"], title = "Ticket FAKE-1"): { runId: string; runDirectory: string } {
   const arkHome = tempArkHome();
   writeProject("demo", {
     workspace,
@@ -36,10 +38,37 @@ function startRun(workspace: string, criteriaIds = ["FAKE-1-AC1"]): { runId: str
     suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
     roles,
   });
-  const ticket = writeTicket("demo", "FAKE-1", criteriaIds.map((id) => ({ id, text: `criterion ${id}` })));
+  const ticket = writeTicket("demo", "FAKE-1", criteriaIds.map((id) => ({ id, text: `criterion ${id}` })), title);
   const started = ark("run", "start", ticket, "--project", "demo");
   const runId = started.out.match(/\d{4}-\d{2}-\d{2}-FAKE-1-\d+/)![0];
   return { runId, runDirectory: join(arkHome, "projects", "demo", "runs", runId) };
+}
+
+function addRemote(workspace: string): void {
+  const remote = mkdtempSync(join(tmpdir(), "ark-remote-"));
+  const initialized = Bun.spawnSync(["git", "init", "--bare", "-b", "main", remote]);
+  if (initialized.exitCode !== 0) throw new Error(initialized.stderr.toString());
+  for (const args of [
+    ["remote", "add", "origin", remote],
+    ["push", "-u", "origin", "main"],
+    ["remote", "set-head", "origin", "main"],
+  ]) {
+    const result = Bun.spawnSync(["git", "-C", workspace, ...args]);
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+  }
+}
+
+function approveAndOpenMergeRequest(runDirectory: string): void {
+  writeFileSync(join(runDirectory, "plan.yml"), "steps: []\n");
+  appendEvent(runDirectory, "plan.checked", { valid: true, problems: [], plan_hash: planHash(runDirectory), steps: [] });
+  appendEvent(runDirectory, "gate.answered", { gate: "plan", answer: "approve" });
+  appendEvent(runDirectory, "merge_request.opened", { repo: ".", url: "https://example.com/mr/1", number: 1 });
+}
+
+function closeRun(runId: string, runDirectory: string, outcome: string): { out: string; code: number } {
+  if (outcome === "abandoned" || outcome === "merged") approveAndOpenMergeRequest(runDirectory);
+  const result = ark("run", "close", runId, outcome);
+  return { out: result.out, code: result.code };
 }
 
 function createdEvents(runDirectory: string) {
@@ -160,5 +189,76 @@ describe("workspace mirror", () => {
     expect(lstatSync(found).isSymbolicLink()).toBe(true);
     expect(realpathSync(found)).toBe(realpathSync(join(workspace, "AGENTS.md")));
     expect(readFileSync(found, "utf8")).toBe("workspace rules\n");
+  });
+});
+describe("ARK-167 worktree lifecycle", () => {
+  test("ARK-167-AC1 worktree branches use a lowercase title slug capped at 40 characters", () => {
+    const workspace = tempGitRepo();
+    const { runId, runDirectory } = startRun(workspace, ["FAKE-1-AC1"], "A VERY Long, Mixed-Case Ticket Title! With punctuation and more than forty characters");
+
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const branch = gitOutput(join(runDirectory, "workspace"), "branch", "--show-current");
+    expect(branch).toBe("ark/FAKE-1-a-very-long-mixed-case-ticket-title-with");
+    expect(branch).not.toContain("2026-");
+    expect(branch.slice("ark/FAKE-1-".length)).toHaveLength(40);
+  });
+
+  test("ARK-167-AC1 later runs append their run number to the branch", () => {
+    const workspace = tempGitRepo();
+    const first = startRun(workspace, ["FAKE-1-AC1"], "Useful Ticket");
+    expect(ark("run", "close", first.runId, "aborted").code).toBe(0);
+
+    const ticket = writeTicket("demo", "FAKE-1", [{ id: "FAKE-1-AC1", text: "criterion FAKE-1-AC1" }], "Useful Ticket");
+    const started = ark("run", "start", ticket, "--project", "demo");
+    const secondRunId = started.out.trim();
+    const secondRunDirectory = join(process.env.ARK_HOME as string, "projects", "demo", "runs", secondRunId);
+    expect(ark("worktree", "create", secondRunId, ".").code).toBe(0);
+    expect(gitOutput(join(secondRunDirectory, "workspace"), "branch", "--show-current")).toBe("ark/FAKE-1-useful-ticket-2");
+  });
+
+  test("ARK-167-AC2 closing an abandoned run removes a clean worktree and its branch", () => {
+    const workspace = tempGitRepo();
+    const { runId, runDirectory } = startRun(workspace);
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const path = join(runDirectory, "workspace");
+    const branch = gitOutput(path, "branch", "--show-current");
+
+    const closed = closeRun(runId, runDirectory, "abandoned");
+    expect(closed.code).toBe(0);
+    expect(existsSync(path)).toBe(false);
+    expect(gitOutput(workspace, "branch", "--list", branch)).toBe("");
+  });
+
+  test("ARK-167-AC2 closing keeps dirty worktrees and merged branches outside the target", () => {
+    const workspace = tempGitRepo();
+    addRemote(workspace);
+    const { runId, runDirectory } = startRun(workspace);
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const path = join(runDirectory, "workspace");
+    const branch = gitOutput(path, "branch", "--show-current");
+    writeFileSync(join(path, "uncommitted.txt"), "dirty\n");
+    const dirtyClose = closeRun(runId, runDirectory, "aborted");
+    expect(dirtyClose.out).toContain("kept     .");
+    expect(dirtyClose.out).toContain("uncommitted changes");
+    expect(existsSync(path)).toBe(true);
+    expect(gitOutput(workspace, "rev-parse", "--verify", `refs/heads/${branch}`)).not.toBe("");
+
+    const anotherTicket = writeTicket("demo", "FAKE-1", [{ id: "FAKE-1-AC1", text: "criterion FAKE-1-AC1" }]);
+    const anotherStarted = ark("run", "start", anotherTicket, "--project", "demo");
+    const anotherRunId = anotherStarted.out.trim();
+    const anotherRunDirectory = join(process.env.ARK_HOME as string, "projects", "demo", "runs", anotherRunId);
+    expect(ark("worktree", "create", anotherRunId, ".").code).toBe(0);
+    const unmergedPath = join(anotherRunDirectory, "workspace");
+    writeFileSync(join(unmergedPath, "committed.txt"), "branch-only change\n");
+    const staged = Bun.spawnSync(["git", "-C", unmergedPath, "add", "committed.txt"]);
+    expect(staged.exitCode).toBe(0);
+    const committed = Bun.spawnSync(["git", "-C", unmergedPath, "commit", "-m", "branch-only change"]);
+    expect(committed.exitCode).toBe(0);
+    const unmergedBranch = gitOutput(unmergedPath, "branch", "--show-current");
+    const unmergedClose = closeRun(anotherRunId, anotherRunDirectory, "merged");
+    expect(unmergedClose.out).toContain("kept     .");
+    expect(unmergedClose.out).toContain("branch is not in main");
+    expect(existsSync(unmergedPath)).toBe(true);
+    expect(gitOutput(workspace, "rev-parse", "--verify", `refs/heads/${unmergedBranch}`)).not.toBe("");
   });
 });
