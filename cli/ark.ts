@@ -93,13 +93,13 @@ const commands: Command[] = [
     run: ([runId]) => mergeRequestOpen(runId),
   },
   {
-    usage: "status [<run>]",
+    usage: "status [<run>] [--project <name>]",
     description:
-      "Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run.",
-    flags: {},
+      "Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT.",
+    flags: { "--project": true },
     minimum: 0,
     maximum: 1,
-    run: ([runId]) => status(runId),
+    run: ([runId], flags) => status(runId, flags["--project"] as string | undefined),
   },
   {
     usage: "retro <run>",

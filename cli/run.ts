@@ -126,11 +126,11 @@ function costLine(directory: string): string {
   }
 }
 
-export function status(runId?: string): void {
-  if (runId !== undefined) return printRun(runId);
+export function status(runId?: string, project?: string): void {
   const projects = listProjects();
-  const requested = process.env.ARK_PROJECT;
+  const requested = project ?? process.env.ARK_PROJECT;
   if (requested && !projects.includes(requested)) throw new ArkError(`project ${requested} does not exist under ${arkHome()}/projects`);
+  if (runId !== undefined) return printRun(runId);
   let invalidCount = 0;
   for (const project of requested ? [requested] : projects) {
     try {
