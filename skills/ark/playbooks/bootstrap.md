@@ -161,10 +161,7 @@ Every path must appear with `externalWorktreeVisibility` `show`. Report any path
 
 The chain is Master Chief, run lead, worker. That is depth 2. Orca's default allows depth 1 only, and no CLI reads the setting, so you test it by starting a throwaway chain.
 
-1. Create an Orca Run for the test, unless you already have one bound:
-   ```sh
-   orca orchestration run-create --objective "Ark bootstrap: nesting depth check" --json
-   ```
+1. Create no Orca Run for this test. A Run created from the human's terminal stays bound to it, and Master Chief would later find it with `run-current` and queue tickets into it.
 2. Start a throwaway depth-1 worker in the workspace. It plays the run lead:
    ```sh
    orca orchestration worker-start --agent omp --worktree path:<workspace> --task-title "Ark depth check" --spec "Run this command and nothing else: orca orchestration worker-start --agent omp --worktree path:<workspace> --spec 'Reply done and stop.' --json. Then report the full JSON the command printed. Do not retry." --json
