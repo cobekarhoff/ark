@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 import { ArkError } from "./errors.ts";
 import { gateRecord } from "./gate.ts";
-import { mergeRequestOpen } from "./merge-request.ts";
+import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
 import { planCheck } from "./plan.ts";
 import { retro } from "./retro.ts";
 import { runClose, runStart, runStep, status } from "./run.ts";
 import { testRun } from "./test-run.ts";
-import { worktreeCreate } from "./worktree.ts";
+import { workspaceSync } from "./workspace.ts";
+import { worktreeCreate, worktreeSync } from "./worktree.ts";
 
 type Flags = Record<string, string | true>;
 
@@ -91,6 +92,32 @@ const commands: Command[] = [
     minimum: 1,
     maximum: 1,
     run: ([runId]) => mergeRequestOpen(runId),
+  },
+  {
+    usage: "merge-request status <run>",
+    description: "Prints each MR of the run as merged, open or closed, read from gh or glab. It changes nothing.",
+    flags: {},
+    minimum: 1,
+    maximum: 1,
+    run: ([runId]) => mergeRequestStatus(runId),
+  },
+  {
+    usage: "worktree sync <run>",
+    description:
+      "Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. On a conflict it undoes the merge, names the repo and exits 1. It never merges an MR.",
+    flags: {},
+    minimum: 1,
+    maximum: 1,
+    run: ([runId]) => worktreeSync(runId),
+  },
+  {
+    usage: "workspace sync <run>",
+    description:
+      "Fetches and fast-forwards the target branch of the workspace checkout of each repo the run touched. It exits 1 and names the repo when git refuses, for example on a conflicting local change. It prints repo, branch and head.",
+    flags: {},
+    minimum: 1,
+    maximum: 1,
+    run: ([runId]) => workspaceSync(runId),
   },
   {
     usage: "status [<run>] [--project <name>]",

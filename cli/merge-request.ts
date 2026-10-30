@@ -181,3 +181,21 @@ export function mergeRequestOpen(runId: string): void {
     console.log(`${repo}  ${created.url}`);
   }
 }
+
+/** Prints `<repo>  merged|open|closed  <url>` for each MR the run opened. Read-only. */
+export function mergeRequestStatus(runId: string): void {
+  const { directory } = findRun(runId);
+  const state = deriveState(readEvents(directory));
+  if (state.merge_requests.length === 0) throw new ArkError(`${runId} has no merge requests`);
+  for (const merge of state.merge_requests) {
+    const worktree = state.worktrees.find((candidate) => candidate.repo === merge.repo);
+    if (worktree === undefined) throw new ArkError(`no worktree for repo ${merge.repo}`);
+    const github = detectHost(merge.url) === "github";
+    const output = run(
+      github ? ["gh", "pr", "view", merge.url, "--json", "state"] : ["glab", "mr", "view", String(merge.number), "--output", "json"],
+      worktree.path,
+    );
+    const raw = String(JSON.parse(output).state).toLowerCase();
+    console.log(`${merge.repo}  ${raw === "opened" ? "open" : raw}  ${merge.url}`);
+  }
+}

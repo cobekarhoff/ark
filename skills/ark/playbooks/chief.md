@@ -114,6 +114,8 @@ orca orchestration check --ack <delivery id> --wait --types "worker_done,escalat
 
 An empty wait or a timeout is a checkpoint. Wait again. After three empty waits, run `orca orchestration worker-list --include-remote --json` and read each row's `projection.nextAction`. Do not stop, release or restart a run lead unless a row shows it has exited.
 
+On every wait, including an empty one, run `ark merge-request status <run>` for each run in `merge_requests_open`. If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge.
+
 A `status` message from a run lead is a notice, not a question. Pass it to the human. When it says a Plannotator review is open, tell the human to answer there. The run lead records that answer itself.
 
 ### A `question` from a run lead
@@ -144,10 +146,13 @@ A run lead is blocked. Read the message, tell the human, and decide the next ste
 
 ## 8. Close the run
 
-When the human says they merged or closed the MRs, or when they ask you to check, look at each MR of the run (the URLs are in `ark status <run>`):
+When `ark merge-request status <run>` shows every MR merged (section 7), when the human says they merged or closed the MRs, or when they ask you to check, read the MR states:
 
-- GitHub: `gh pr view <url> --json state,mergedAt`
-- GitLab: `glab mr view <number> --output json`
+```sh
+ark merge-request status <run>
+```
+
+It prints `<repo>  merged|open|closed  <url>` for each MR.
 
 Choose the outcome:
 
@@ -165,8 +170,15 @@ Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.m
 After `ark run close`:
 
 1. Mark the Task: `orca orchestration task-update --id <task id> --status completed --result "<outcome>" --json`. Tasks that depend on it become ready. Use `--status failed` for `abandoned` and `aborted`.
-2. Run the close check with the human: read `playbooks/retro.md` and follow "Part 1: Close check", steps 3 and 4, which are the Master Chief steps. Steps 1 and 2 are done: `ark run close` ran, and `retro.md` exists.
-3. Start the next ready ticket, if `concurrency` allows.
+2. If the outcome is `merged`, sync and notify before you start any ticket:
+   1. Run `ark workspace sync <run>`. It fast-forwards the workspace checkout's target branch and prints `<repo>  <branch>  <head>`. If it exits 1, tell the human which repo it names and wait: new runs must not start from a stale base.
+   2. For every other open run, send its lead a `status` message with the target branch and the head that `ark workspace sync` printed:
+
+      ```sh
+      orca orchestration send --to dispatch:<run lead dispatch id> --type status --subject "<repo>: <branch> moved" --body "Run <closed run> merged. <repo> <branch> is now at <head>. Run \`ark worktree sync <run>\` before your next step." --json
+      ```
+3. Run the close check with the human: read `playbooks/retro.md` and follow "Part 1: Close check", steps 3 and 4, which are the Master Chief steps. Steps 1 and 2 are done: `ark run close` ran, and `retro.md` exists.
+4. Start the next ready ticket, if `concurrency` allows.
 
 ## 9. Link an escaped defect
 

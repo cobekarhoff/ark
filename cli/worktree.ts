@@ -5,15 +5,9 @@ import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
-import { discoverRepos, mirrorRoot } from "./workspace.ts";
+import { discoverRepos, git, mirrorRoot, targetBranch } from "./workspace.ts";
 
 const skippedRootEntries = new Set([".git", ".DS_Store", "repos"]);
-
-function git(directory: string, ...args: string[]): string {
-  const result = Bun.spawnSync(["git", "-C", directory, ...args]);
-  if (result.exitCode !== 0) throw new ArkError(`git ${args.join(" ")} failed in ${directory}: ${result.stderr.toString().trim()}`);
-  return result.stdout.toString().trim();
-}
 
 function pathExists(path: string): boolean {
   try {
@@ -74,5 +68,24 @@ export function worktreeCreate(runId: string, repos: string[]): void {
     if (repo === "." || pathExists(link)) continue;
     mkdirSync(dirname(link), { recursive: true });
     symlinkSync(join(workspace, repo), link);
+  }
+}
+
+/** Merges origin/<target> into every worktree and pushes the branch of each repo with an open MR. */
+export function worktreeSync(runId: string): void {
+  const { directory } = findRun(runId);
+  const state = deriveState(readEvents(directory));
+  if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
+  for (const worktree of state.worktrees) {
+    git(worktree.path, "fetch", "origin");
+    const target = targetBranch(worktree.path);
+    const merged = Bun.spawnSync(["git", "-C", worktree.path, "merge", "--no-edit", `origin/${target}`]);
+    if (merged.exitCode !== 0) {
+      Bun.spawnSync(["git", "-C", worktree.path, "merge", "--abort"]);
+      throw new ArkError(`repo ${worktree.repo}: merging origin/${target} failed, worktree left unchanged: ${merged.stdout.toString().trim()}${merged.stderr.toString().trim()}`);
+    }
+    const pushed = state.merge_requests.some((merge) => merge.repo === worktree.repo);
+    if (pushed) git(worktree.path, "push", "origin", worktree.branch);
+    console.log(`${worktree.repo}  ${target}  ${git(worktree.path, "rev-parse", "HEAD")}${pushed ? "  pushed" : ""}`);
   }
 }
