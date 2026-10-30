@@ -67,6 +67,13 @@ steps:
     model: claude-sonnet
     needs: []
     criteria: [CLARA-512-AC1]
+summary:
+  why: Exported files do not show units.
+  changes:
+    - criterion: CLARA-512-AC1
+      where: shared/packages/export.ts
+      now: The export does not write units.
+      fix: The export writes the unit of each result.
 test_cases:
   - id: export-includes-units
     criterion: CLARA-512-AC1
@@ -85,6 +92,7 @@ Rules for the plan:
 - Add a validator step that writes the integration and E2E tests. Put it in the repo that owns the suite (see `suites[].repo` in `ark.yml`). It needs the implementer steps whose code it tests.
 - Add a reviewer step for each repo the ticket changes. It needs the implementer and validator steps for that repo.
 - `test_cases` has: `id`, `criterion`, `level` (`integration` or `e2e`), `steps` (what the test does, in order) and `expected`. Every AC needs at least one test case. Unit tests never prove an AC, so do not list them.
+- `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
 - Keep each step small enough for one worker. Do not put two repos in one step.
 
@@ -94,7 +102,7 @@ Then check it:
 ark plan check <run>
 ```
 
-The command prints one line for each problem and exits 1. Fix `plan.yml` and run it again until it exits 0. A valid plan writes `<run folder>/plan.mmd`.
+The command prints one line for each problem and exits 1. Fix `plan.yml` and run it again until it exits 0. A valid plan writes `<run folder>/plan.md`. The human reads only `plan.md`. It has the summary, the change table, the Mermaid step diagram and the test cases as Gherkin.
 
 ## 5. Plan gate
 
@@ -106,7 +114,7 @@ Choose how to ask.
 
 ```sh
 mkdir -p "<run folder>/gates"
-plannotator annotate "<run folder>/plan.yml" "<run folder>/plan.mmd" --gate --json --require-approval --result-file "<run folder>/gates/plan-<n>.json"
+plannotator annotate "<run folder>/plan.md" --gate --json --require-approval --result-file "<run folder>/gates/plan-<n>.json"
 ```
 
 - `<n>` is 1 for the first plan gate. Add 1 each time you show a revised plan. The result file must not exist yet.
@@ -114,7 +122,7 @@ plannotator annotate "<run folder>/plan.yml" "<run folder>/plan.mmd" --gate --js
 - First tell Master Chief that a review is open, so it can point the human to it. Send this before you run the command:
 
   ```sh
-  orca orchestration send --type status --subject "Plan review open for <run>" --body "Plannotator is open on plan.yml and plan.mmd. The human answers there."
+  orca orchestration send --type status --subject "Plan review open for <run>" --body "Plannotator is open on plan.md. The human answers there."
   ```
 
 - Read the exit code and `<run folder>/gates/plan-<n>.json`:
@@ -129,7 +137,7 @@ plannotator annotate "<run folder>/plan.yml" "<run folder>/plan.mmd" --gate --js
 **Through Master Chief** (when Plannotator is not installed, or the review failed):
 
 ```sh
-orca orchestration ask --question "Run <run>: plan ready. Steps: <one line per step: id, role, repo, harness/model, needs>. Test cases: <one line per test case>. Files: <run folder>/plan.yml and plan.mmd. Approve it?" --options "approve,change,abort" --timeout-ms 600000
+orca orchestration ask --question "Run <run>: plan ready. Steps: <one line per step: id, role, repo, harness/model, needs>. Test cases: <one line per test case>. File: <run folder>/plan.md. Approve it?" --options "approve,change,abort" --timeout-ms 600000
 ```
 
 Add your recommendation. If the ask times out, resume it with `--resume <message id>`.

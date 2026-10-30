@@ -64,7 +64,7 @@ A ticket is ready when `orca orchestration task-list --ready --json` lists its T
 
 Do these steps in order for one ready ticket.
 
-1. **Write the ticket snapshot.** Write the ticket to `$ARK_HOME/projects/<project>/tickets/<ticket id>.md`. Use Markdown with this frontmatter, then the ticket body:
+1. **Write the ticket snapshot.** Write the ticket to `$ARK_HOME/projects/<project>/tickets/<ticket id>.md`. Use Markdown with this frontmatter, then the three sections. Write the sections in ASD-STE100 Simplified Technical English: short sentences, active voice.
 
    ```markdown
    ---
@@ -74,6 +74,19 @@ Do these steps in order for one ready ticket.
      - id: ARK-156-AC1
        text: "The statement, copied word for word"
    ---
+   ## Problem
+
+   What is wrong, and who it affects.
+
+   ## Change
+
+   What will be different after the change.
+
+   ## Acceptance criteria
+
+   | ID | Criterion |
+   | --- | --- |
+   | ARK-156-AC1 | The statement, copied word for word |
    ```
 
    If the ticket lists criteria without IDs, number them `<ticket id>-AC1`, `<ticket id>-AC2` and so on, in order. Do not invent or reword criteria. If the ticket has none, write `acceptance_criteria: []`. The run lead then opens the criteria gate.
@@ -123,7 +136,7 @@ A `status` message from a run lead is a notice, not a question. Pass it to the h
 Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human.
 
 1. Read the question and its options. Say which run and ticket it is for.
-2. Put it to the human with the ask tool. Keep the run lead's options and recommended answer. If the question points to `plan.yml`, `plan.mmd` or a findings file, tell the human the path.
+2. Put it to the human with the ask tool. Keep the run lead's options and recommended answer. If the question points to `plan.md` or a findings file, tell the human the path.
 3. Send the human's answer back unchanged:
 
    ```sh

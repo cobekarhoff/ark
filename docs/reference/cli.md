@@ -41,7 +41,7 @@ Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refus
 ```text
 ark plan check <run>
 
-Checks plan.yml in the run folder and renders plan.mmd. It prints one line for each problem and exits 1 when the plan is invalid.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary block (`summary.why` and `summary.changes` with `criterion`, `where`, `now`, `fix`) is invalid.
 ```
 
 ### worktree create
@@ -127,7 +127,7 @@ ticket.md          copy of the ticket file
 events.ndjson      append-only event log
 state.json         derived from the events, rebuilt by any command
 plan.yml           written by the run lead
-plan.mmd           rendered by ark plan check
+plan.md            rendered by ark plan check
 workspace/         the workspace mirror
 results/           test output and test reports
 metrics.json       written by ark retro
