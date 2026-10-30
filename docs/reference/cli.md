@@ -52,6 +52,22 @@ ark worktree create <run> [<repo>...]
 Builds the run's workspace mirror. Each named repo, or every repo the plan uses, gets a worktree. Every other path is a symlink to the workspace.
 ```
 
+### worktree sync
+
+```text
+ark worktree sync <run>
+
+Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. On a conflict it undoes the merge, names the repo and exits 1. It never merges an MR.
+```
+
+### workspace sync
+
+```text
+ark workspace sync <run>
+
+Fetches and fast-forwards the target branch of the workspace checkout of each repo the run touched. It exits 1 and names the repo when git refuses, for example on a conflicting local change. It prints repo, branch and head.
+```
+
 ### test
 
 ```text
@@ -74,6 +90,14 @@ Records your answer to a gate. The gates are criteria, plan and escalation. Ark 
 ark merge-request open <run>
 
 Pushes each repo's branch and opens one MR for each repo, in dependency order. No command merges.
+```
+
+### merge-request status
+
+```text
+ark merge-request status <run>
+
+Prints each MR of the run as merged, open or closed, read from gh or glab. It changes nothing.
 ```
 
 ### status

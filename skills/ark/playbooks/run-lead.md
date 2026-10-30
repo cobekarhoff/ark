@@ -159,6 +159,14 @@ This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the 
 
 ## 7. Run the steps
 
+Before you start any step, read your mail with the `check` command from your preamble. A `status` message from Master Chief says another run merged and names the target branch and its new head. If you got one, run this before `ark run step ... start`:
+
+```sh
+ark worktree sync <run>
+```
+
+It merges origin's target branch into each worktree and pushes the branch of every repo with an open MR. If it exits 1 on a conflict, escalate to Master Chief with the repo it names.
+
 Work through the steps in the order `needs` allows. Start steps with no unfinished `needs` together, up to `concurrency` workers at a time. For each step:
 
 1. Mark it started:
