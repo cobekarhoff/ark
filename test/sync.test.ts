@@ -162,13 +162,13 @@ test("ARK-165-AC3 worktree sync merges origin, pushes only MR worktrees and abor
   expect(pushed.code).toBe(0);
   expect(git(worktree, "rev-parse", "HEAD")).toBe(targetHead);
   expect(git(worktree, "merge-base", "HEAD", targetHead)).toBe(targetHead);
-  expect(git(pushedScenario.workspace, "rev-parse", "origin/ark/" + pushedScenario.runId)).toBe(git(worktree, "rev-parse", "HEAD"));
+  expect(git(pushedScenario.workspace, "rev-parse", "origin/" + git(worktree, "branch", "--show-current"))).toBe(git(worktree, "rev-parse", "HEAD"));
 
   const unpushedScenario = startRun();
   const unpushedTarget = advanceOrigin(unpushedScenario.workspace, ".", "target.txt", "target\n");
   expect(ark("worktree", "sync", unpushedScenario.runId).code).toBe(0);
   expect(git(unpushedScenario.worktreePath(), "merge-base", "HEAD", unpushedTarget)).toBe(unpushedTarget);
-  expect(Bun.spawnSync(["git", "-C", unpushedScenario.workspace, "rev-parse", "origin/ark/" + unpushedScenario.runId]).exitCode).not.toBe(0);
+  expect(Bun.spawnSync(["git", "-C", unpushedScenario.workspace, "rev-parse", "origin/" + git(unpushedScenario.worktreePath(), "branch", "--show-current")]).exitCode).not.toBe(0);
 
   const conflictScenario = startRun();
   commitFile(conflictScenario.worktreePath(), "shared.txt", "worktree\n");

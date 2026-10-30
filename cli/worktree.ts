@@ -24,6 +24,13 @@ function reposOfLastValidPlan(runDirectory: string): string[] {
   return [...new Set(steps.map((step) => step.repo))];
 }
 
+/** `ark/<ticket id>-<slug>`, plus `-<run number>` from the second run on. The slug is the title, lowercase, hyphenated, at most 40 characters. */
+function branchName(runId: string, ticket: { id: string; title: string }): string {
+  const slug = ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "").slice(0, 40).replace(/-+$/, "");
+  const number = Number(runId.match(/-(\d+)$/)?.[1] ?? 1);
+  return `ark/${ticket.id}${slug ? `-${slug}` : ""}${number > 1 ? `-${number}` : ""}`;
+}
+
 export function worktreeCreate(runId: string, repos: string[]): void {
   const { project, directory } = findRun(runId);
   const workspace = loadConfig(project).workspace;
@@ -35,7 +42,8 @@ export function worktreeCreate(runId: string, repos: string[]): void {
     if (!knownRepos.includes(repo)) throw new ArkError(`repo ${repo} is not in workspace ${workspace} (found: ${knownRepos.join(", ") || "none"})`);
   }
 
-  assertAllowed(deriveState(readEvents(directory)), "worktree.created", {}); // refuse before git changes anything
+  const state = deriveState(readEvents(directory));
+  assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
 
   const mirror = mirrorRoot(directory);
   mkdirSync(mirror, { recursive: true });
@@ -51,7 +59,7 @@ export function worktreeCreate(runId: string, repos: string[]): void {
     mkdirSync(dirname(path), { recursive: true });
     const source = join(workspace, repo);
     const base = git(source, "rev-parse", "HEAD");
-    const branch = `ark/${runId}`;
+    const branch = branchName(runId, state.ticket);
     git(source, "worktree", "add", "-b", branch, path, base);
     appendEvent(directory, "worktree.created", { repo, path, branch, base });
     console.log(`created  ${repo} -> ${path}`);
@@ -87,5 +95,35 @@ export function worktreeSync(runId: string): void {
     const pushed = state.merge_requests.some((merge) => merge.repo === worktree.repo);
     if (pushed) git(worktree.path, "push", "origin", worktree.branch);
     console.log(`${worktree.repo}  ${target}  ${git(worktree.path, "rev-parse", "HEAD")}${pushed ? "  pushed" : ""}`);
+  }
+}
+
+/** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, and for a merged run an unmerged branch, and prints the repo and the reason. */
+export function worktreeCleanup(runId: string): void {
+  const { project, directory } = findRun(runId);
+  const state = deriveState(readEvents(directory));
+  const workspace = loadConfig(project).workspace;
+  for (const { repo, path, branch } of state.worktrees) {
+    const source = join(workspace, repo);
+    const keep = (reason: string) => console.log(`kept     ${repo}  ${branch}: ${reason}`);
+    if (!existsSync(path)) {
+      Bun.spawnSync(["git", "-C", source, "worktree", "prune"]);
+    } else {
+      if (git(path, "status", "--porcelain") !== "") {
+        keep("uncommitted changes");
+        continue;
+      }
+      if (state.outcome === "merged") {
+        Bun.spawnSync(["git", "-C", source, "fetch", "origin"]); // best effort: a stale origin ref only keeps the branch
+        const target = targetBranch(source);
+        if (Bun.spawnSync(["git", "-C", source, "merge-base", "--is-ancestor", branch, `origin/${target}`]).exitCode !== 0) {
+          keep(`branch is not in ${target}`);
+          continue;
+        }
+      }
+      git(source, "worktree", "remove", path);
+    }
+    Bun.spawnSync(["git", "-C", source, "branch", "-D", branch]);
+    console.log(`removed  ${repo}  ${branch}`);
   }
 }

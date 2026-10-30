@@ -61,7 +61,7 @@ describe("workspace mirror", () => {
     const worktree = join(mirror, "repos/a");
     expect(lstatSync(worktree).isSymbolicLink()).toBe(false);
     expect(lstatSync(join(worktree, ".git")).isFile()).toBe(true);
-    expect(gitOutput(worktree, "rev-parse", "--abbrev-ref", "HEAD")).toBe(`ark/${runId}`);
+    expect(gitOutput(worktree, "rev-parse", "--abbrev-ref", "HEAD")).toBe("ark/FAKE-1-ticket-fake-1");
 
     expect(readlinkSync(join(mirror, "repos/b/c"))).toBe(join(workspace, "repos/b/c"));
     expect(lstatSync(join(mirror, "repos/b")).isSymbolicLink()).toBe(false);
@@ -72,7 +72,7 @@ describe("workspace mirror", () => {
 
     expect(createdEvents(runDirectory)).toEqual([
       expect.objectContaining({
-        data: { repo: "repos/a", path: worktree, branch: `ark/${runId}`, base: gitOutput(join(workspace, "repos/a"), "rev-parse", "HEAD") },
+        data: { repo: "repos/a", path: worktree, branch: "ark/FAKE-1-ticket-fake-1", base: gitOutput(join(workspace, "repos/a"), "rev-parse", "HEAD") },
       }),
     ]);
   });
@@ -96,7 +96,7 @@ describe("workspace mirror", () => {
     expect(lstatSync(join(mirror, ".git")).isFile()).toBe(true);
     expect(lstatSync(join(mirror, "AGENTS.md")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(mirror, "src/main.txt"), "utf8")).toBe("x");
-    expect(gitOutput(mirror, "rev-parse", "--abbrev-ref", "HEAD")).toBe(`ark/${runId}`);
+    expect(gitOutput(mirror, "rev-parse", "--abbrev-ref", "HEAD")).toBe("ark/FAKE-1-ticket-fake-1");
   });
 
   test("ARK-154-AC1 with no repos named, the repos of the last valid plan are used", () => {

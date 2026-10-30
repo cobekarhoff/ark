@@ -163,7 +163,7 @@ Never record `approve` unless the human said so, in Plannotator (exit 0) or thro
 ark worktree create <run>
 ```
 
-This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the plan uses is a worktree on the branch `ark/<run>`. Every other path is a link to the workspace. A repo named `.` is the workspace folder itself. A worker's working folder is `<run folder>/workspace/<repo>`.
+This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the plan uses is a worktree on the branch `ark/<ticket id>-<slug>`. Every other path is a link to the workspace. A repo named `.` is the workspace folder itself. A worker's working folder is `<run folder>/workspace/<repo>`.
 
 ## 7. Run the steps
 
