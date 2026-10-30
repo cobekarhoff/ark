@@ -64,10 +64,15 @@ function startRun(repoNames = ["."]) {
   const actualRunId = started.out.trim();
   const runDirectory = join(projectDirectory, "runs", actualRunId);
   const steps = [{ id: "build", role: "implementer", repo: repoNames[0], harness: "claude", model: "claude-sonnet", needs: [], criteria: ["ARK-900-AC1"] }];
-  writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify({
+  const plan = {
+    summary: {
+      why: "Prepare the sync fixture.",
+      changes: [{ criterion: "ARK-900-AC1", where: "workspace", now: "The fixture has no sync plan.", fix: "The fixture has a valid sync plan." }],
+    },
     steps,
     test_cases: [{ id: "sync-fixture", criterion: "ARK-900-AC1", level: "integration", steps: ["prepare sync fixture"], expected: "fixture is ready" }],
-  }));
+  };
+  writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
   const checked = ark("plan", "check", actualRunId);
   if (checked.code !== 0) throw new Error(checked.err || checked.out);
   const approved = ark("gate", "record", actualRunId, "plan", "approve");

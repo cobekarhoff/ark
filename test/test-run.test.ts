@@ -40,6 +40,10 @@ function buildingRun(options: {
   const runId = ark("run", "start", ticket, "--project", "demo").out.match(/\d{4}-\d{2}-\d{2}-FAKE-1-\d+/)![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
   const plan = {
+    summary: {
+      why: "Test the run against each criterion.",
+      changes: options.criteria.map((criterion) => ({ criterion, where: "tests", now: "Suites run against the plan.", fix: "Suites prove each criterion." })),
+    },
     steps: [{ id: "build", role: "implementer", repo: ".", harness: "claude", model: "claude-sonnet", needs: [], criteria: options.criteria }],
     test_cases: options.criteria.map((criterion) => ({ id: `proves-${criterion}`, criterion, level: "e2e", steps: ["run it"], expected: "it works" })),
   };

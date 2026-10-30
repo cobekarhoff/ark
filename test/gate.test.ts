@@ -9,6 +9,10 @@ const criteria = [
 ];
 
 const plan = {
+  summary: {
+    why: "Track the work for each criterion.",
+    changes: criteria.map(({ id }) => ({ criterion: id, where: "cli", now: "Plan approval needs a valid plan.", fix: "Keep the plan valid." })),
+  },
   steps: [
     {
       id: "build",

@@ -24,12 +24,20 @@ const testCase = (id: string, criterion: string, level = "integration") => ({
   criterion,
   level,
   steps: ["do the thing"],
-  expected: "it works",
+  expected: "the system shall complete the task",
 });
 
-type PlanDocument = { steps: Record<string, any>[]; test_cases: Record<string, any>[] };
+type PlanDocument = {
+  summary: { why: string; changes: { criterion: string; where: string; now: string; fix: string }[] };
+  steps: Record<string, any>[];
+  test_cases: Record<string, any>[];
+};
 
 const validPlan = (): PlanDocument => ({
+  summary: {
+    why: "Make the plan readable.",
+    changes: [{ criterion: "ARK-900-AC1", where: "cli/plan.ts", now: "Writes plan.yml.", fix: "Write plan.md." }],
+  },
   steps: [step("build"), step("check", { role: "validator", needs: ["build"] })],
   test_cases: [testCase("t1", "ARK-900-AC1"), testCase("t2", "ARK-900-AC2", "e2e")],
 });
@@ -113,7 +121,7 @@ describe("plan check", () => {
       const checked = events().findLast((event) => event.type === "plan.checked");
       expect(checked.data.valid).toBe(false);
       expect(checked.data.problems.join("\n")).toContain(expected);
-      expect(existsSync(join(runDirectory, "plan.mmd"))).toBe(false);
+      expect(existsSync(join(runDirectory, "plan.md"))).toBe(false);
     });
   }
 
@@ -140,21 +148,35 @@ describe("plan check", () => {
     expect(result.out).toContain("ARK-900-AC2 has no integration or e2e test case");
     expect(result.out).not.toContain("ARK-900-AC1 has no");
   });
+  test("ARK-166-AC2 rejects a plan without summary", () => {
+    const plan = validPlan();
+    delete (plan as Partial<PlanDocument>).summary;
+    writePlan(plan);
+    const result = ark("plan", "check", runId);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("plan.yml has no summary.why");
+  });
 
-  test("ARK-153-AC4 renders plan.mmd with steps as nodes and needs as edges, byte-identical on repeat", () => {
+  test("ARK-166-AC2 rejects a summary change without fix", () => {
+    const plan = validPlan();
+    delete (plan.summary.changes[0] as Partial<PlanDocument["summary"]["changes"][number]>).fix;
+    writePlan(plan);
+    const result = ark("plan", "check", runId);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("summary change #1 has no fix");
+  });
+
+  test("ARK-166-AC1 renders plan.md with summary, change table, Mermaid steps and Gherkin cases", () => {
     writePlan(validPlan());
     expect(ark("plan", "check", runId).code).toBe(0);
-    const first = readFileSync(join(runDirectory, "plan.mmd"), "utf8");
-    expect(first).toBe(
-      [
-        "flowchart LR",
-        '  step1["build: implementer @ ."]',
-        '  step2["check: validator @ ."]',
-        "  step1 --> step2",
-        "",
-      ].join("\n"),
-    );
+    const first = readFileSync(join(runDirectory, "plan.md"), "utf8");
+    expect(first).toContain("# Plan\n\n## Summary\n\nMake the plan readable.");
+    expect(first).toContain("| Criterion | Where | Now | Fix |");
+    expect(first).toContain("| ARK-900-AC1 | cli/plan.ts | Writes plan.yml. | Write plan.md. |");
+    expect(first).toContain("```mermaid\nflowchart LR\n");
+    expect(first).toContain("```gherkin\nGiven do the thing\nThen the system shall complete the task\n```");
+    expect(existsSync(join(runDirectory, "plan.mmd"))).toBe(false);
     expect(ark("plan", "check", runId).code).toBe(0);
-    expect(readFileSync(join(runDirectory, "plan.mmd"), "utf8")).toBe(first);
+    expect(readFileSync(join(runDirectory, "plan.md"), "utf8")).toBe(first);
   });
 });
