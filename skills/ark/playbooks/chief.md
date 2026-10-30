@@ -86,16 +86,10 @@ Do these steps in order for one ready ticket.
 
    The command prints the run name. Use it as `<run>` below.
 
-3. **Mark the Task as dispatched.**
+3. **Start the run lead.** Start it in the workspace Orca already knows, with `--worktree current`. The queue Task stays `ready` until close (section 8), where you complete it.
 
    ```sh
-   orca orchestration task-update --id <task id> --status dispatched --json
-   ```
-
-4. **Start the run lead.** The run lead runs in the run's workspace folder `$ARK_HOME/projects/<project>/runs/<run>/workspace` once the mirror exists, and in the run folder `$ARK_HOME/projects/<project>/runs/<run>` before that. A new run has no mirror yet, so use the run folder.
-
-   ```sh
-   orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree path:<run folder or workspace folder> --agent <harness> --model <model> --json
+   orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree current --agent <harness> --model <model> --json
    ```
 
    Use the `harness` and `model` of the `implementer` role in `ark.yml` unless the human names others. If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.

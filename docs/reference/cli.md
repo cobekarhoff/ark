@@ -79,9 +79,9 @@ Pushes each repo's branch and opens one MR for each repo, in dependency order. N
 ### status
 
 ```text
-ark status [<run>]
+ark status [<run>] [--project <name>]
 
-Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run.
+Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT.
 ```
 
 ### retro
