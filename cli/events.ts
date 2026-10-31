@@ -16,7 +16,7 @@ export type Phase =
   | "merge_requests_open"
   | "closed";
 export type CriterionStatus = "pending" | "passing" | "failing" | "missing";
-export type StepStatus = "pending" | "running" | "succeeded" | "failed";
+export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "stopped";
 
 export type RunState = {
   run: string;
@@ -179,7 +179,11 @@ export function deriveState(events: ArkEvent[]): RunState {
     id,
     role,
     repo,
-    status: stepStatus.get(id) ?? ("pending" as StepStatus),
+    // A closed run runs nothing: a step the log left running was cut off.
+    status:
+      outcome !== null && stepStatus.get(id) === "running"
+        ? ("stopped" as StepStatus)
+        : (stepStatus.get(id) ?? ("pending" as StepStatus)),
   }));
 
   let phase: Phase;

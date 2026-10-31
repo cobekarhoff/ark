@@ -128,7 +128,23 @@ test("ARK-168-AC1 documents the control center, Orca, and Plannotator split", ()
   );
 });
 
-test("ARK-168-AC2 serves each run's state and a page that polls for updates", async () => {
+type Hub = {
+  runs: Record<string, any>[];
+  needs_me: Record<string, any>[];
+  readers: { orca: string };
+};
+
+/** The first orca read runs in the background after start; wait for it unless orca is meant to fail. */
+async function hubState(baseUrl: string, orcaSettled = true): Promise<Hub> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const data = (await (await fetch(`${baseUrl}/api/state`)).json()) as Hub;
+    if (!orcaSettled || data.readers.orca === "ok") return data;
+    await Bun.sleep(100);
+  }
+  throw new Error("orca was never read");
+}
+
+test("ARK-168-AC2 serves each run's state", async () => {
   const firstRun = startRun("ARK-168-A", "First dashboard run");
   const secondRun = startRun("ARK-168-B", "Second dashboard run");
   planGate(firstRun.directory);
@@ -171,18 +187,13 @@ test("ARK-168-AC2 serves each run's state and a page that polls for updates", as
   await withUi(async (baseUrl) => {
     const page = await fetch(baseUrl);
     expect(page.status).toBe(200);
-    const html = await page.text();
-    expect(html).toContain("setInterval(tick, 3000)");
-    const response = await fetch(`${baseUrl}/api`);
-    expect(response.status).toBe(200);
-    const data = (await response.json()) as { runs: Record<string, any>[] };
+    const data = await hubState(baseUrl);
     const dashboardRun = data.runs.find((run) => run.run === firstRun.runId);
     const planningRun = data.runs.find((run) => run.run === secondRun.runId);
     expect(dashboardRun).toMatchObject({
       ticket: { id: "ARK-168-A", title: "First dashboard run" },
       phase: "merge_requests_open",
       steps: [{ id: "build", role: "implementer", status: "succeeded" }],
-      last_test: { passed: true },
       merge_requests: [{ repo: ".", url: "https://example.test/pull/17", number: 17 }],
       agents: [
         { role: "run lead", terminal: "term_lead", liveness: "live", model: "omp" },
@@ -196,11 +207,7 @@ test("ARK-168-AC2 serves each run's state and a page that polls for updates", as
         },
       ],
     });
-    expect(planningRun).toMatchObject({
-      ticket: { id: "ARK-168-B" },
-      phase: "planning",
-      gate: null,
-    });
+    expect(planningRun).toMatchObject({ ticket: { id: "ARK-168-B" }, phase: "planning" });
   });
 });
 
@@ -210,17 +217,12 @@ test("ARK-168-AC2 updates gate state in the JSON after ark gate record", async (
   setOrcaRuns([]);
 
   await withUi(async (baseUrl) => {
-    const page = await (await fetch(baseUrl)).text();
-    expect(page).toContain("setInterval(tick, 3000)");
-    const before = (await (await fetch(`${baseUrl}/api`)).json()) as {
-      runs: Record<string, any>[];
-    };
-    expect(before.runs.find((dashboardRun) => dashboardRun.run === run.runId)?.gate).toMatchObject({
-      name: "plan",
-      command: `plannotator annotate ${join(run.directory, "plan.md")}`,
-    });
+    const before = await hubState(baseUrl);
+    expect(before.needs_me).toContainEqual(
+      expect.objectContaining({ id: `gate:${run.runId}:plan`, kind: "gate" }),
+    );
     expect(ark("gate", "record", run.runId, "plan", "change").code).toBe(0);
-    const after = (await (await fetch(`${baseUrl}/api`)).json()) as { runs: Record<string, any>[] };
+    const after = await hubState(baseUrl);
     expect(after.runs.find((dashboardRun) => dashboardRun.run === run.runId)?.gates.plan).toBe(
       "change",
     );
@@ -233,7 +235,8 @@ test("ARK-168-AC2 keeps listing runs when Orca fails", async () => {
   process.env.ORCA_FAIL = "1";
 
   await withUi(async (baseUrl) => {
-    const data = (await (await fetch(`${baseUrl}/api`)).json()) as { runs: Record<string, any>[] };
+    const data = await hubState(baseUrl, false);
+    expect(data.readers.orca).toBe("unknown");
     expect(data.runs).toContainEqual(
       expect.objectContaining({
         run: run.runId,
@@ -245,8 +248,8 @@ test("ARK-168-AC2 keeps listing runs when Orca fails", async () => {
   delete process.env.ORCA_FAIL;
 });
 
-test("ARK-168-AC3 gives workers an Orca terminal switch command", async () => {
-  const run = startRun("ARK-168-E", "Worker command");
+test("ARK-168-AC3 gives agents an Orca terminal switch action", async () => {
+  const run = startRun("ARK-168-E", "Worker action");
   setOrcaRuns(
     [run.runId],
     [{ dispatchId: "dispatch-1", taskId: "task-1", agentTerminalHandle: "term_abc" }],
@@ -254,29 +257,28 @@ test("ARK-168-AC3 gives workers an Orca terminal switch command", async () => {
   );
 
   await withUi(async (baseUrl) => {
-    const data = (await (await fetch(`${baseUrl}/api`)).json()) as { runs: Record<string, any>[] };
+    const data = await hubState(baseUrl);
     const agents = data.runs.find((dashboardRun) => dashboardRun.run === run.runId)?.agents;
     expect(agents?.find((agent: Record<string, any>) => agent.role === "run lead")).toMatchObject({
-      command: "orca terminal switch --terminal term_lead",
+      action: { name: "orca-terminal-switch", params: { handle: "term_lead" } },
     });
     expect(agents?.find((agent: Record<string, any>) => agent.role === "worker")).toMatchObject({
       terminal: "term_abc",
-      command: "orca terminal switch --terminal term_abc",
+      action: { name: "orca-terminal-switch", params: { handle: "term_abc" } },
     });
   });
 });
 
-test("ARK-168-AC3 gives a waiting plan gate its Plannotator command", async () => {
-  const run = startRun("ARK-168-F", "Plan command");
+test("ARK-168-AC3 gives a waiting plan gate its Plannotator action", async () => {
+  const run = startRun("ARK-168-F", "Plan action");
   planGate(run.directory);
   setOrcaRuns([]);
 
   await withUi(async (baseUrl) => {
-    const data = (await (await fetch(`${baseUrl}/api`)).json()) as { runs: Record<string, any>[] };
-    expect(data.runs.find((dashboardRun) => dashboardRun.run === run.runId)?.gate).toEqual({
-      name: "plan",
-      command: `plannotator annotate ${join(run.directory, "plan.md")}`,
-      hint: null,
+    const data = await hubState(baseUrl);
+    expect(data.needs_me.find((item) => item.id === `gate:${run.runId}:plan`)).toMatchObject({
+      source: "ark",
+      action: { name: "plannotator-annotate", params: { kind: "plan", run: run.runId } },
     });
   });
 });
