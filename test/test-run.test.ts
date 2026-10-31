@@ -48,6 +48,7 @@ function buildingRun(options: {
   )![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
   const plan = {
+    design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
     summary: {
       why: "Test the run against each criterion.",
       changes: options.criteria.map((criterion) => ({

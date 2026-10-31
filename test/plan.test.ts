@@ -30,6 +30,11 @@ const testCase = (id: string, criterion: string, level = "integration") => ({
 });
 
 type PlanDocument = {
+  design: {
+    approach?: string;
+    interfaces: { name: string; callers?: string[] }[];
+    example?: string;
+  };
   summary: {
     why: string;
     changes: { criterion: string; where: string; now: string; fix: string }[];
@@ -39,6 +44,11 @@ type PlanDocument = {
 };
 
 const validPlan = (): PlanDocument => ({
+  design: {
+    approach: "Add a design block.",
+    interfaces: [{ name: "ark plan check", callers: ["run-lead.md section 4"] }],
+    example: "plan is valid",
+  },
   summary: {
     why: "Make the plan readable.",
     changes: [
@@ -368,5 +378,115 @@ describe("plan check", () => {
     expect(existsSync(join(runDirectory, "plan.mmd"))).toBe(false);
     expect(ark("plan", "check", runId).code).toBe(0);
     expect(readFileSync(join(runDirectory, "plan.md"), "utf8")).toBe(first);
+  });
+
+  // Each row is one design refusal: the plan edit, and the text the message must contain.
+  const designRefusals: [string, (plan: PlanDocument) => void, string][] = [
+    [
+      "a plan with no design block",
+      (plan) => {
+        delete (plan as Partial<PlanDocument>).design;
+      },
+      "design.interfaces",
+    ],
+    [
+      "a design block with an empty interfaces list",
+      (plan) => {
+        plan.design.interfaces = [];
+      },
+      "design.interfaces",
+    ],
+    [
+      "an interface with no callers list",
+      (plan) => {
+        plan.design.interfaces = [{ name: "ark plan check" }];
+      },
+      "design interface ark plan check has no callers",
+    ],
+    [
+      "an interface with an empty callers list",
+      (plan) => {
+        plan.design.interfaces = [
+          { name: "ark plan check", callers: ["run-lead.md"] },
+          { name: "renderPlanMarkdown", callers: [] },
+        ];
+      },
+      "design interface renderPlanMarkdown has no callers",
+    ],
+  ];
+  for (const [name, edit, expected] of designRefusals) {
+    test(`ARK-171-AC1 refuses ${name} and names the problem`, () => {
+      const plan = validPlan();
+      edit(plan);
+      writePlan(plan);
+      const result = ark("plan", "check", runId);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain(expected);
+      expect(existsSync(join(runDirectory, "plan.md"))).toBe(false);
+    });
+  }
+
+  test("ARK-171-AC2 accepts a design with no approach and no example", () => {
+    const plan = validPlan();
+    plan.design = { interfaces: [{ name: "ark plan check", callers: ["run-lead.md"] }] };
+    writePlan(plan);
+    expect(ark("plan", "check", runId).code).toBe(0);
+    expect(existsSync(join(runDirectory, "plan.md"))).toBe(true);
+  });
+
+  test("ARK-171-AC3 renders the Design section before Steps with approach, table and example", () => {
+    const plan = validPlan();
+    plan.design = {
+      approach: "Read the design block in loadPlan.",
+      interfaces: [
+        { name: "ark plan check", callers: ["run-lead.md section 4", "ark gate record"] },
+        { name: "renderPlanMarkdown", callers: ["planCheck"] },
+      ],
+      example: "## Design\nrow one\nrow two\n",
+    };
+    writePlan(plan);
+    expect(ark("plan", "check", runId).code).toBe(0);
+    const markdown = readFileSync(join(runDirectory, "plan.md"), "utf8");
+
+    const design = markdown.indexOf("\n## Design\n");
+    expect(design).toBeGreaterThan(markdown.indexOf("\n## Summary\n"));
+    expect(design).toBeLessThan(markdown.indexOf("\n## Steps\n"));
+    const section = markdown.slice(design, markdown.indexOf("\n## Steps\n"));
+    expect(section).toContain("Read the design block in loadPlan.");
+    expect(section).toContain(
+      "| Interface | Callers |\n| --- | --- |\n| ark plan check | run-lead.md section 4<br>ark gate record |\n| renderPlanMarkdown | planCheck |",
+    );
+    expect(section).toContain("```text\n## Design\nrow one\nrow two\n```");
+    expect(section).not.toContain("No approach given.");
+    expect(section).not.toContain("No example given.");
+  });
+
+  test("ARK-171-AC4 prints a placeholder for each missing approach and example", () => {
+    const bare = { interfaces: [{ name: "ark plan check", callers: ["run-lead.md"] }] };
+    const designSection = () => {
+      const markdown = readFileSync(join(runDirectory, "plan.md"), "utf8");
+      return markdown.slice(markdown.indexOf("\n## Design\n"), markdown.indexOf("\n## Steps\n"));
+    };
+
+    const plan = validPlan();
+    plan.design = bare;
+    writePlan(plan);
+    expect(ark("plan", "check", runId).code).toBe(0);
+    expect(designSection()).toContain("No approach given.");
+    expect(designSection()).toContain("No example given.");
+
+    plan.design = { ...bare, approach: "Only the approach." };
+    writePlan(plan);
+    expect(ark("plan", "check", runId).code).toBe(0);
+    expect(designSection()).toContain("Only the approach.");
+    expect(designSection()).not.toContain("No approach given.");
+    expect(designSection()).toContain("No example given.");
+
+    plan.design = { ...bare, example: "only example" };
+    writePlan(plan);
+    expect(ark("plan", "check", runId).code).toBe(0);
+    expect(designSection()).toContain("No approach given.");
+    expect(designSection()).toContain("```text\nonly example\n```");
+    expect(designSection()).not.toContain("No example given.");
   });
 });

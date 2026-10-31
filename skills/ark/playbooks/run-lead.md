@@ -69,6 +69,16 @@ steps:
     model: claude-sonnet
     needs: []
     criteria: [CLARA-512-AC1]
+design:
+  approach: Add a unit field to each exported result.
+  interfaces:
+    - name: export (exported function in shared/packages/export.ts)
+      callers:
+        - report command in cli/report.ts
+        - nightly export job
+  example: |
+    result,value,unit
+    glucose,5.4,mmol/L
 summary:
   why: Exported files do not show units.
   changes:
@@ -98,6 +108,7 @@ Rules for the plan:
 - Add a validator step that writes the integration and E2E tests. Put it in the repo that owns the suite (see `suites[].repo` in `ark.yml`). It needs the implementer steps whose code it tests.
 - Add a reviewer step for each repo the ticket changes. It needs the implementer and validator steps for that repo.
 - `test_cases` has: `id`, `criterion`, `level` (`integration` or `e2e`), `given` (context), `when` (actions), `then` (observable results) and `expected`. All three groups are lists of strings. `given` can be empty; `when` and `then` must not be empty. The old test-case `steps` field is rejected. Every AC needs at least one test case. Unit tests never prove an AC, so do not list them.
+- `design` is required. `ark plan check` rejects a plan with no `design.interfaces`, or with an interface that has no `callers`. `interfaces` lists each interface the change touches: a command, a playbook section, an event, a file format or an exported function. Find the callers of each one before you write it: search the repo, and read the playbooks and docs that name it. A removed or changed interface with a caller you did not list is how earlier runs broke. `approach` (the method, in a few sentences) and `example` (a sample of new or changed output) are optional, but give both. Plan.md shows "No approach given." or "No example given." for a missing part, and the human can ask for it with `change` at the plan gate.
 - `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
 - Keep each step small enough for one worker. Do not put two repos in one step.
@@ -108,7 +119,7 @@ Then check it:
 ark plan check <run>
 ```
 
-The command prints one line for each problem and exits 1. Fix `plan.yml` and run it again until it exits 0. A valid plan writes `<run folder>/plan.md`. The human reads only `plan.md`. It has the summary, the change table, the Mermaid step diagram and the test cases as Gherkin.
+The command prints one line for each problem and exits 1. Fix `plan.yml` and run it again until it exits 0. A valid plan writes `<run folder>/plan.md`. The human reads only `plan.md`. It has the summary, the change table, the Design section (approach, interfaces and callers, example), the Mermaid step diagram and the test cases as Gherkin.
 
 ## 5. Plan gate
 

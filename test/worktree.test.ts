@@ -175,6 +175,7 @@ describe("workspace mirror", () => {
     expect(ark("worktree", "create", runId).code).toBe(1);
 
     const plan = {
+      design: { interfaces: [{ name: "fixture plan", callers: ["ark worktree create"] }] },
       summary: {
         why: "Select repositories for the worktree.",
         changes: [

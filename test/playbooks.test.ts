@@ -83,3 +83,11 @@ test("ARK-166-AC3 opens Plannotator on plan.md only", () => {
   expect(annotateCommand).not.toContain("plan.mmd");
   expect(annotateCommand).not.toContain("plan.yml");
 });
+
+test("ARK-171-AC5 run-lead section 4 asks for callers of each interface and an output example", () => {
+  const writePlan = runLeadPlaybook.split("## 4. Write the plan")[1]?.split("\n## ")[0];
+  expect(writePlan).toBeDefined();
+  expect(writePlan).toMatch(/Find the callers of each one before you write it/);
+  expect(writePlan).toMatch(/`example` \(a sample of new or changed output\)/);
+  expect(writePlan).toMatch(/design\.interfaces/);
+});

@@ -25,9 +25,13 @@ export type PlanTestCase = {
   expected: string;
 };
 
+export type PlanInterface = { name: string; callers: string[] };
+export type PlanDesign = { approach: string; interfaces: PlanInterface[]; example: string };
+
 export type PlanSummaryChange = { criterion: string; where: string; now: string; fix: string };
 export type Plan = {
   summary: { why: string; changes: PlanSummaryChange[] };
+  design: PlanDesign;
   steps: PlanStep[];
   test_cases: PlanTestCase[];
 };
@@ -62,7 +66,9 @@ export function loadPlan(runDirectory: string): Plan {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ArkError("plan.yml must be a mapping with steps and test_cases");
   }
-  const { steps, test_cases, summary } = raw as Record<string, unknown>;
+  const { steps, test_cases, summary, design } = raw as Record<string, unknown>;
+  const designBlock =
+    design && typeof design === "object" ? (design as Record<string, unknown>) : {};
   const summaryBlock =
     summary && typeof summary === "object" ? (summary as Record<string, unknown>) : {};
   return {
@@ -74,6 +80,14 @@ export function loadPlan(runDirectory: string): Plan {
         now: text(change.now),
         fix: text(change.fix),
       })),
+    },
+    design: {
+      approach: text(designBlock.approach),
+      interfaces: objectList(designBlock.interfaces).map((entry) => ({
+        name: text(entry.name),
+        callers: textList(entry.callers),
+      })),
+      example: text(designBlock.example),
     },
     steps: objectList(steps).map((step) => ({
       id: text(step.id),
@@ -218,6 +232,14 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
     if (!summarized.has(criterion))
       problems.push(`criterion ${criterion} has no row in summary.changes`);
   }
+  if (plan.design.interfaces.length === 0)
+    problems.push("plan.yml has no design.interfaces: add a design block");
+  plan.design.interfaces.forEach((entry, i) => {
+    if (!entry.name) problems.push(`design interface #${i + 1} has no name`);
+    if (entry.callers.length === 0) {
+      problems.push(`design interface ${entry.name || `#${i + 1}`} has no callers`);
+    }
+  });
   return problems;
 }
 
@@ -231,6 +253,14 @@ export function renderPlanMarkdown(plan: Plan): string {
       `| ${[change.criterion, change.where, change.now, change.fix].map(tableCell).join(" | ")} |`,
     );
   }
+  lines.push("", "## Design", "", plan.design.approach.trim() || "No approach given.", "");
+  lines.push("| Interface | Callers |", "| --- | --- |");
+  for (const entry of plan.design.interfaces) {
+    lines.push(`| ${tableCell(entry.name)} | ${entry.callers.map(tableCell).join("<br>")} |`);
+  }
+  lines.push("");
+  if (plan.design.example.trim()) lines.push("```text", plan.design.example.trimEnd(), "```");
+  else lines.push("No example given.");
   lines.push("", "## Steps", "", "```mermaid", renderMermaid(plan).trimEnd(), "```", "");
   lines.push("| Step | Role | Repo | Needs | Criteria |", "| --- | --- | --- | --- | --- |");
   for (const step of plan.steps) {
