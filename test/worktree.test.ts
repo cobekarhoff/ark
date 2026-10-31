@@ -139,7 +139,7 @@ describe("workspace mirror", () => {
         changes: [{ criterion: "FAKE-1-AC1", where: "workspace", now: "The fixture plan names no summary.", fix: "The valid plan selects the nested repository." }],
       },
       steps: [{ id: "build", role: "implementer", repo: "repos/b/c", harness: "claude", model: "claude-sonnet", needs: [], criteria: ["FAKE-1-AC1"] }],
-      test_cases: [{ id: "proves-ac1", criterion: "FAKE-1-AC1", level: "e2e", steps: ["run it"], expected: "it works" }],
+      test_cases: [{ id: "proves-ac1", criterion: "FAKE-1-AC1", level: "e2e", given: [], when: ["run it"], then: ["it works"], expected: "it works" }],
     };
     writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
     expect(ark("plan", "check", runId).code).toBe(0);

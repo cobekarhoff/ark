@@ -37,7 +37,7 @@ You write the product code.
 You turn the plan's test cases into tests that prove the AC, and you make them pass.
 
 1. Read the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Find the suite whose `repo` is yours: its `level`, its `command` and its `parser`. Your tests must live where that suite's command finds them.
-2. Write one or more tests for each test case of your step's criteria. Follow the test case's `steps` and `expected`. Each test:
+2. Write one or more tests for each test case of your step's criteria. Set up its `given` context, perform its `when` actions, and assert its `then` results and `expected` EARS sentence. Each test:
    - Is an integration or E2E test, at the level the test case names. Never write a unit test to prove an AC.
    - Carries its AC ID so the suite's parser can read it. Put the ID in the test name for the `bun` parser, for example `test("ARK-156-AC1 lists the five playbooks", ...)`. Use the AC marker or tag your parser reads for `pytest` and `behave`.
    - Exercises the real system or an emulated dependency you own. Never mock the thing the test proves.

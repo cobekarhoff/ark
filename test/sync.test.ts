@@ -70,7 +70,7 @@ function startRun(repoNames = ["."]) {
       changes: [{ criterion: "ARK-900-AC1", where: "workspace", now: "The fixture has no sync plan.", fix: "The fixture has a valid sync plan." }],
     },
     steps,
-    test_cases: [{ id: "sync-fixture", criterion: "ARK-900-AC1", level: "integration", steps: ["prepare sync fixture"], expected: "fixture is ready" }],
+    test_cases: [{ id: "sync-fixture", criterion: "ARK-900-AC1", level: "integration", given: [], when: ["prepare sync fixture"], then: ["fixture is ready"], expected: "fixture is ready" }],
   };
   writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
   const checked = ark("plan", "check", actualRunId);

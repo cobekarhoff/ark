@@ -45,7 +45,7 @@ function buildingRun(options: {
       changes: options.criteria.map((criterion) => ({ criterion, where: "tests", now: "Suites run against the plan.", fix: "Suites prove each criterion." })),
     },
     steps: [{ id: "build", role: "implementer", repo: ".", harness: "claude", model: "claude-sonnet", needs: [], criteria: options.criteria }],
-    test_cases: options.criteria.map((criterion) => ({ id: `proves-${criterion}`, criterion, level: "e2e", steps: ["run it"], expected: "it works" })),
+    test_cases: options.criteria.map((criterion) => ({ id: `proves-${criterion}`, criterion, level: "e2e", given: [], when: ["run it"], then: ["it works"], expected: "it works" })),
   };
   writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
   for (const args of [["plan", "check", runId], ["gate", "record", runId, "plan", "approve"], ["worktree", "create", runId, "."]]) {

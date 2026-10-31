@@ -174,8 +174,14 @@ Each entry in `test_cases`:
 | `id` | string | Name of the test case. |
 | `criterion` | string | The AC the test case proves. |
 | `level` | string | `integration` or `e2e`. |
-| `steps` | list of strings | What the test does, in order. |
-| `expected` | string | What must be true at the end. |
+| `given` | list of strings | Context for the test. Required; can be empty. |
+| `when` | list of strings | Actions in order. Must not be empty. |
+| `then` | list of strings | Observable results in order. Must not be empty. |
+| `expected` | string | Required EARS sentence: "When ..., the system shall ...". |
+
+`ark plan check` rejects missing or malformed groups, an empty `when` or `then`, a missing `expected`, and any old test-case `steps` field. The error names the test case.
+
+In `plan.md`, each group starts with Given, When or Then, in that order. Later lines in each group start with And. An empty `given` emits no Given line. The unchanged EARS sentence follows the Gherkin block on its own `Expected:` line.
 
 Example:
 
@@ -199,9 +205,13 @@ test_cases:
   - id: export-includes-units
     criterion: CLARA-512-AC1
     level: integration
-    steps:
-      - Export a result that has a unit.
-    expected: The exported file lists the unit.
+    given:
+      - A result has a unit.
+    when:
+      - Export the result.
+    then:
+      - The exported file lists the unit.
+    expected: When a result is exported, the system shall include its unit.
 ```
 
 ## `ark.yml` fields

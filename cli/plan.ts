@@ -19,7 +19,9 @@ export type PlanTestCase = {
   id: string;
   criterion: string;
   level: string;
-  steps: string[];
+  given: string[];
+  when: string[];
+  then: string[];
   expected: string;
 };
 
@@ -77,13 +79,26 @@ export function loadPlan(runDirectory: string): Plan {
       needs: textList(step.needs),
       criteria: textList(step.criteria),
     })),
-    test_cases: objectList(test_cases).map((testCase) => ({
-      id: text(testCase.id),
-      criterion: text(testCase.criterion),
-      level: text(testCase.level),
-      steps: textList(testCase.steps),
-      expected: text(testCase.expected),
-    })),
+    test_cases: objectList(test_cases).map((testCase) => {
+      const name = text(testCase.id) || "(no id)";
+      if (Object.hasOwn(testCase, "steps")) {
+        throw new ArkError(`test case ${name} has the old steps field: use given, when and then`);
+      }
+      for (const group of ["given", "when", "then"] as const) {
+        if (!Array.isArray(testCase[group]) || !testCase[group].every((line) => typeof line === "string")) {
+          throw new ArkError(`test case ${name} ${group} must be a list of strings`);
+        }
+      }
+      return {
+        id: text(testCase.id),
+        criterion: text(testCase.criterion),
+        level: text(testCase.level),
+        given: testCase.given as string[],
+        when: testCase.when as string[],
+        then: testCase.then as string[],
+        expected: text(testCase.expected),
+      };
+    }),
   };
 }
 
@@ -152,6 +167,10 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
   const proven = new Set<string>();
   for (const testCase of plan.test_cases) {
     const name = testCase.id || "(no id)";
+    for (const group of ["when", "then"] as const) {
+      if (testCase[group].length === 0) problems.push(`test case ${name} has an empty ${group} list`);
+    }
+    if (!testCase.expected.trim()) problems.push(`test case ${name} has no expected sentence`);
     if (!levels.includes(testCase.level)) {
       problems.push(`test case ${name} has level "${testCase.level}": use integration or e2e`);
       continue;
@@ -187,7 +206,6 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
 }
 
 // Stable output. Markdown table cells cannot hold a pipe or a newline.
-// Gherkin: the first step is Given, the rest are And, then the expected line is Then.
 export function renderPlanMarkdown(plan: Plan): string {
   const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
   const lines = ["# Plan", "", "## Summary", "", plan.summary.why, "", "## Changes", ""];
@@ -205,8 +223,10 @@ export function renderPlanMarkdown(plan: Plan): string {
   lines.push("", "## Test cases", "");
   for (const testCase of plan.test_cases) {
     lines.push(`### ${testCase.id} (${testCase.criterion}, ${testCase.level})`, "", "```gherkin");
-    testCase.steps.forEach((step, i) => lines.push(`${i === 0 ? "Given" : "And"} ${step}`));
-    lines.push(`Then ${testCase.expected}`, "```", "");
+    for (const [group, keyword] of [["given", "Given"], ["when", "When"], ["then", "Then"]] as const) {
+      testCase[group].forEach((line, i) => lines.push(`${i === 0 ? keyword : "And"} ${line}`));
+    }
+    lines.push("```", "", `Expected: ${testCase.expected}`, "");
   }
   return `${lines.join("\n")}\n`;
 }

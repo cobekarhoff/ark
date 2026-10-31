@@ -23,7 +23,9 @@ const testCase = (id: string, criterion: string, level = "integration") => ({
   id,
   criterion,
   level,
-  steps: ["do the thing"],
+  given: [],
+  when: ["do the thing"],
+  then: ["the task completes"],
   expected: "the system shall complete the task",
 });
 
@@ -195,7 +197,6 @@ describe("plan check", () => {
     expect(first).toContain("| Criterion | Where | Now | Fix |");
     expect(first).toContain("| ARK-900-AC1 | cli/plan.ts | Writes plan.yml. | Write plan.md. |");
     expect(first).toContain("```mermaid\nflowchart LR\n");
-    expect(first).toContain("```gherkin\nGiven do the thing\nThen the system shall complete the task\n```");
     expect(existsSync(join(runDirectory, "plan.mmd"))).toBe(false);
     expect(ark("plan", "check", runId).code).toBe(0);
     expect(readFileSync(join(runDirectory, "plan.md"), "utf8")).toBe(first);

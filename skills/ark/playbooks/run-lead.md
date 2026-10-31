@@ -78,9 +78,13 @@ test_cases:
   - id: export-includes-units
     criterion: CLARA-512-AC1
     level: integration
-    steps:
-      - Export a result that has a unit.
-    expected: The exported file lists the unit.
+    given:
+      - A result has a unit.
+    when:
+      - Export the result.
+    then:
+      - The exported file lists the unit.
+    expected: When a result is exported, the system shall include its unit.
 ```
 
 The top comment of `plan.yml` notes which learnings you applied. If `learnings.md` does not exist, write `# Learnings applied: none (no learnings.md)`. If it exists and nothing fits, write `# Learnings applied: none (<reason>)`.
@@ -91,7 +95,7 @@ Rules for the plan:
 - Use one implementer step for each repo the ticket changes. A step that needs another repo's change lists that step in `needs`.
 - Add a validator step that writes the integration and E2E tests. Put it in the repo that owns the suite (see `suites[].repo` in `ark.yml`). It needs the implementer steps whose code it tests.
 - Add a reviewer step for each repo the ticket changes. It needs the implementer and validator steps for that repo.
-- `test_cases` has: `id`, `criterion`, `level` (`integration` or `e2e`), `steps` (what the test does, in order) and `expected`. Every AC needs at least one test case. Unit tests never prove an AC, so do not list them.
+- `test_cases` has: `id`, `criterion`, `level` (`integration` or `e2e`), `given` (context), `when` (actions), `then` (observable results) and `expected`. All three groups are lists of strings. `given` can be empty; `when` and `then` must not be empty. The old test-case `steps` field is rejected. Every AC needs at least one test case. Unit tests never prove an AC, so do not list them.
 - `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
 - Keep each step small enough for one worker. Do not put two repos in one step.
