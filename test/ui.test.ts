@@ -848,7 +848,18 @@ test(
       ).toBe(selectedBefore);
       await view.press("p");
       await waitForBrowserValue(view, "document.querySelector('#toasts .toast')?.textContent");
-      expect(await Bun.file(actionLog).text()).toContain(`${join(firstRun.directory, "plan.md")}`);
+      const expectedAction = join(firstRun.directory, "plan.md");
+      let actionOutput = "";
+      // The action launches a detached process; wait for its real side effect, not the HTTP response.
+
+      for (let attempt = 0; attempt < 50; attempt++) {
+        try {
+          actionOutput = await Bun.file(actionLog).text();
+        } catch {}
+        if (actionOutput.includes(expectedAction)) break;
+        await Bun.sleep(100);
+      }
+      expect(actionOutput).toContain(expectedAction);
       await view.press("Enter");
       expect(await view.evaluate("document.querySelector('.detail h2')?.textContent")).toContain(
         "First keyboard item",
