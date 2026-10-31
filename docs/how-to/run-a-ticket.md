@@ -60,11 +60,11 @@ Check that every AC has an integration or E2E test case. Unit tests never prove 
 
 **Escalation gate.** This opens when the run spends its round budget, which defaults to two rounds. The run lead shows what still fails. Choose one of:
 
-| Answer | What happens |
-| --- | --- |
-| `one_more_round` | The budget grows by one round. |
-| `take_over` | You write the change yourself in the run's worktree. Tell the run lead when you finish. |
-| `abort` | The run stops before any MR is opened. |
+| Answer           | What happens                                                                            |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `one_more_round` | The budget grows by one round.                                                          |
+| `take_over`      | You write the change yourself in the run's worktree. Tell the run lead when you finish. |
+| `abort`          | The run stops before any MR is opened.                                                  |
 
 ## 5. Wait for the build
 
@@ -88,12 +88,12 @@ No Ark command merges. Only you merge.
 
 Master Chief checks the state of each PR with `gh` or `glab`, and then closes the run with `ark run close <run> <outcome>`:
 
-| What happened | Outcome |
-| --- | --- |
-| You merged every PR | `merged` |
-| You closed the PRs without merging | `abandoned` |
-| You took the branches and want no PRs | `handed_off` |
-| You stopped the run before any PR existed | `aborted` |
+| What happened                             | Outcome      |
+| ----------------------------------------- | ------------ |
+| You merged every PR                       | `merged`     |
+| You closed the PRs without merging        | `abandoned`  |
+| You took the branches and want no PRs     | `handed_off` |
+| You stopped the run before any PR existed | `aborted`    |
 
 ## 8. Answer the retro questions
 

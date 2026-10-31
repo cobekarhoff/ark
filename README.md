@@ -74,14 +74,14 @@ any existing local hooks path, so preserve that setting if you already use hooks
 
 ## Project layout
 
-| Path | Contents |
-| --- | --- |
-| `cli/` | The `ark` command. |
-| `skills/` | The router skill, its playbooks and the reviewer rubric. |
-| `scripts/` | The generator for the command reference. |
-| `rules/` | The naming and test-authoring rules. |
-| `test/` | Tests. |
-| `docs/` | Requirements, architecture, reference, and decisions. |
+| Path       | Contents                                                 |
+| ---------- | -------------------------------------------------------- |
+| `cli/`     | The `ark` command.                                       |
+| `skills/`  | The router skill, its playbooks and the reviewer rubric. |
+| `scripts/` | The generator for the command reference.                 |
+| `rules/`   | The naming and test-authoring rules.                     |
+| `test/`    | Tests.                                                   |
+| `docs/`    | Requirements, architecture, reference, and decisions.    |
 
 ## Documentation
 

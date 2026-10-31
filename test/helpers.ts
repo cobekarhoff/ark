@@ -18,18 +18,30 @@ export function writeProject(name: string, config: Record<string, unknown>): str
   return directory;
 }
 
-export function writeTicket(project: string, id: string, criteria: { id: string; text: string }[], title = `Ticket ${id}`): string {
+export function writeTicket(
+  project: string,
+  id: string,
+  criteria: { id: string; text: string }[],
+  title = `Ticket ${id}`,
+): string {
   const file = join(process.env.ARK_HOME as string, "projects", project, "tickets", `${id}.md`);
   mkdirSync(dirname(file), { recursive: true });
-  const frontmatter = ["---", `id: ${id}`, `title: ${JSON.stringify(title)}`, ...(criteria.length === 0 ? ["acceptance_criteria: []"] : ["acceptance_criteria:"])];
-  for (const criterion of criteria) frontmatter.push(`  - id: ${criterion.id}`, `    text: ${JSON.stringify(criterion.text)}`);
+  const frontmatter = [
+    "---",
+    `id: ${id}`,
+    `title: ${JSON.stringify(title)}`,
+    ...(criteria.length === 0 ? ["acceptance_criteria: []"] : ["acceptance_criteria:"]),
+  ];
+  for (const criterion of criteria)
+    frontmatter.push(`  - id: ${criterion.id}`, `    text: ${JSON.stringify(criterion.text)}`);
   writeFileSync(file, `${frontmatter.join("\n")}\n---\n## Why\n\nTest ticket.\n`);
   return file;
 }
 
 function git(directory: string, ...args: string[]): void {
   const result = Bun.spawnSync(["git", ...args], { cwd: directory });
-  if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+  if (result.exitCode !== 0)
+    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
 }
 
 export function tempGitRepo(files: Record<string, string> = { "README.md": "# test\n" }): string {
@@ -47,6 +59,12 @@ export function tempGitRepo(files: Record<string, string> = { "README.md": "# te
 }
 
 export function ark(...args: string[]): { code: number; out: string; err: string } {
-  const result = Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...args], { env: process.env });
-  return { code: result.exitCode ?? 1, out: result.stdout.toString(), err: result.stderr.toString() };
+  const result = Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...args], {
+    env: process.env,
+  });
+  return {
+    code: result.exitCode ?? 1,
+    out: result.stdout.toString(),
+    err: result.stderr.toString(),
+  };
 }

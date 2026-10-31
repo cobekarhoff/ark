@@ -11,7 +11,12 @@ const criteria = [
 const plan = {
   summary: {
     why: "Track the work for each criterion.",
-    changes: criteria.map(({ id }) => ({ criterion: id, where: "cli", now: "Plan approval needs a valid plan.", fix: "Keep the plan valid." })),
+    changes: criteria.map(({ id }) => ({
+      criterion: id,
+      where: "cli",
+      now: "Plan approval needs a valid plan.",
+      fix: "Keep the plan valid.",
+    })),
   },
   steps: [
     {
@@ -24,7 +29,15 @@ const plan = {
       criteria: ["ARK-901-AC1", "ARK-901-AC2"],
     },
   ],
-  test_cases: criteria.map(({ id }) => ({ id: `t-${id}`, criterion: id, level: "integration", given: [], when: ["act"], then: ["ok"], expected: "ok" })),
+  test_cases: criteria.map(({ id }) => ({
+    id: `t-${id}`,
+    criterion: id,
+    level: "integration",
+    given: [],
+    when: ["act"],
+    then: ["ok"],
+    expected: "ok",
+  })),
 };
 
 let projectDirectory: string;
@@ -51,8 +64,12 @@ function startRun(ticketCriteria: { id: string; text: string }[]) {
 }
 
 const eventsOf = (directory: string) =>
-  readFileSync(join(directory, "events.ndjson"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-const stateOf = (directory: string) => JSON.parse(readFileSync(join(directory, "state.json"), "utf8"));
+  readFileSync(join(directory, "events.ndjson"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+const stateOf = (directory: string) =>
+  JSON.parse(readFileSync(join(directory, "state.json"), "utf8"));
 
 describe("gate record", () => {
   test("ARK-153-AC5 refuses an unknown gate and lists the legal ones", () => {
@@ -87,13 +104,19 @@ describe("gate record", () => {
     expect(accepted.code).toBe(0);
     expect(readFileSync(join(directory, "ticket.md"), "utf8")).toContain("ARK-901-AC2");
     const events = eventsOf(directory);
-    expect(events.findLast((event) => event.type === "criteria.updated").data.criteria).toEqual(["ARK-901-AC1", "ARK-901-AC2"]);
+    expect(events.findLast((event) => event.type === "criteria.updated").data.criteria).toEqual([
+      "ARK-901-AC1",
+      "ARK-901-AC2",
+    ]);
     expect(events.at(-1).type).toBe("gate.answered");
     expect(events.at(-1).data).toEqual({ gate: "criteria", answer: "accept", note: "looks right" });
     const state = stateOf(directory);
     expect(state.phase).toBe("planning");
     expect(state.gates.criteria).toBe("accept");
-    expect(state.criteria.map((criterion: { id: string }) => criterion.id)).toEqual(["ARK-901-AC1", "ARK-901-AC2"]);
+    expect(state.criteria.map((criterion: { id: string }) => criterion.id)).toEqual([
+      "ARK-901-AC1",
+      "ARK-901-AC2",
+    ]);
   });
 
   test("ARK-153-AC5 criteria edit keeps waiting and criteria abort closes the run", () => {
@@ -155,7 +178,10 @@ describe("gate record", () => {
     const { runId, directory } = startRun(criteria);
     writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
     expect(ark("plan", "check", runId).code).toBe(0);
-    writeFileSync(join(directory, "plan.yml"), JSON.stringify({ ...plan, steps: [{ ...plan.steps[0], model: "other" }] }));
+    writeFileSync(
+      join(directory, "plan.yml"),
+      JSON.stringify({ ...plan, steps: [{ ...plan.steps[0], model: "other" }] }),
+    );
     const before = eventsOf(directory).length;
     const result = ark("gate", "record", runId, "plan", "approve");
     expect(result.code).toBe(1);

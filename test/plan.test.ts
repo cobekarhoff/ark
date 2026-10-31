@@ -30,7 +30,10 @@ const testCase = (id: string, criterion: string, level = "integration") => ({
 });
 
 type PlanDocument = {
-  summary: { why: string; changes: { criterion: string; where: string; now: string; fix: string }[] };
+  summary: {
+    why: string;
+    changes: { criterion: string; where: string; now: string; fix: string }[];
+  };
   steps: Record<string, any>[];
   test_cases: Record<string, any>[];
 };
@@ -39,8 +42,18 @@ const validPlan = (): PlanDocument => ({
   summary: {
     why: "Make the plan readable.",
     changes: [
-      { criterion: "ARK-900-AC1", where: "cli/plan.ts", now: "Writes plan.yml.", fix: "Write plan.md." },
-      { criterion: "ARK-900-AC2", where: "cli/plan.ts", now: "No summary.", fix: "Require summary." },
+      {
+        criterion: "ARK-900-AC1",
+        where: "cli/plan.ts",
+        now: "Writes plan.yml.",
+        fix: "Write plan.md.",
+      },
+      {
+        criterion: "ARK-900-AC2",
+        where: "cli/plan.ts",
+        now: "No summary.",
+        fix: "Require summary.",
+      },
     ],
   },
   steps: [step("build"), step("check", { role: "validator", needs: ["build"] })],
@@ -68,9 +81,13 @@ beforeEach(() => {
   runDirectory = join(projectDirectory, "runs", runId);
 });
 
-const writePlan = (plan: unknown) => writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
+const writePlan = (plan: unknown) =>
+  writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
 const events = () =>
-  readFileSync(join(runDirectory, "events.ndjson"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
 
 describe("plan check", () => {
   test("ARK-153-AC1 exits 0 for a valid plan and appends plan.checked", () => {
@@ -104,16 +121,76 @@ describe("plan check", () => {
 
   // Each row is one refusal class: the plan edit, and the text the message must contain.
   const refusals: [string, (plan: PlanDocument) => void, string][] = [
-    ["a cycle in needs, naming the steps", (plan) => { plan.steps[0].needs = ["check"]; }, "build -> check -> build"],
-    ["a needs entry that is not a step", (plan) => { plan.steps[1].needs = ["ghost"]; }, 'step check needs "ghost"'],
-    ["a duplicate step id", (plan) => { plan.steps[1].id = "build"; }, "duplicate step id: build"],
-    ["a step with no repo", (plan) => { delete plan.steps[1].repo; }, "step check has no repo"],
-    ["a step with no role", (plan) => { delete plan.steps[1].role; }, "step check has no role"],
-    ["an unknown role", (plan) => { plan.steps[1].role = "wizard"; }, 'unknown role "wizard"'],
-    ["a step with no harness", (plan) => { delete plan.steps[0].harness; }, "step build has no harness"],
-    ["a step with no model", (plan) => { delete plan.steps[0].model; }, "step build has no model"],
-    ["a test case level that is not integration or e2e", (plan) => { plan.test_cases[0].level = "unit"; }, 'test case t1 has level "unit"'],
-    ["a test case for an unknown criterion", (plan) => { plan.test_cases[1].criterion = "ARK-900-AC9"; }, "ARK-900-AC9"],
+    [
+      "a cycle in needs, naming the steps",
+      (plan) => {
+        plan.steps[0].needs = ["check"];
+      },
+      "build -> check -> build",
+    ],
+    [
+      "a needs entry that is not a step",
+      (plan) => {
+        plan.steps[1].needs = ["ghost"];
+      },
+      'step check needs "ghost"',
+    ],
+    [
+      "a duplicate step id",
+      (plan) => {
+        plan.steps[1].id = "build";
+      },
+      "duplicate step id: build",
+    ],
+    [
+      "a step with no repo",
+      (plan) => {
+        delete plan.steps[1].repo;
+      },
+      "step check has no repo",
+    ],
+    [
+      "a step with no role",
+      (plan) => {
+        delete plan.steps[1].role;
+      },
+      "step check has no role",
+    ],
+    [
+      "an unknown role",
+      (plan) => {
+        plan.steps[1].role = "wizard";
+      },
+      'unknown role "wizard"',
+    ],
+    [
+      "a step with no harness",
+      (plan) => {
+        delete plan.steps[0].harness;
+      },
+      "step build has no harness",
+    ],
+    [
+      "a step with no model",
+      (plan) => {
+        delete plan.steps[0].model;
+      },
+      "step build has no model",
+    ],
+    [
+      "a test case level that is not integration or e2e",
+      (plan) => {
+        plan.test_cases[0].level = "unit";
+      },
+      'test case t1 has level "unit"',
+    ],
+    [
+      "a test case for an unknown criterion",
+      (plan) => {
+        plan.test_cases[1].criterion = "ARK-900-AC9";
+      },
+      "ARK-900-AC9",
+    ],
   ];
   for (const [name, edit, expected] of refusals) {
     test(`ARK-153-AC2 refuses ${name}`, () => {
@@ -276,9 +353,7 @@ describe("plan check", () => {
 
     expect(ark("plan", "check", runId).code).toBe(0);
     const markdown = readFileSync(join(runDirectory, "plan.md"), "utf8");
-    expect(markdown).toContain(
-      `Then the result appears\n\`\`\`\n\nExpected: ${expectedSentence}`,
-    );
+    expect(markdown).toContain(`Then the result appears\n\`\`\`\n\nExpected: ${expectedSentence}`);
     expect(markdown).not.toContain(`Then ${expectedSentence}`);
   });
 

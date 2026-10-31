@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { ArkError } from "../errors.ts";
 import type { SessionUsage, UsageMessage } from "./index.ts";
 
-const OVERFLOW_PATTERN = /context (length|window)|prompt is too long|input is too long|maximum context/i;
+const OVERFLOW_PATTERN =
+  /context (length|window)|prompt is too long|input is too long|maximum context/i;
 
 type OmpUsage = {
   input?: number;
@@ -22,7 +23,12 @@ type OmpMessage = {
   toolCallId?: string;
   content?: { type?: string; id?: string }[] | string;
 };
-type OmpRecord = OmpMessage & { type?: string; timestamp?: string; cwd?: string; message?: OmpMessage };
+type OmpRecord = OmpMessage & {
+  type?: string;
+  timestamp?: string;
+  cwd?: string;
+  message?: OmpMessage;
+};
 
 function numberOrZero(value: unknown): number {
   return typeof value === "number" ? value : 0;
@@ -60,7 +66,12 @@ export function parseOmpSession(file: string): SessionUsage {
     if (record.type === "compaction") contextOverflows += 1;
 
     const message = record.message ?? {};
-    if (record.type === "message" && message.role === "toolResult" && message.isError === true && message.toolCallId) {
+    if (
+      record.type === "message" &&
+      message.role === "toolResult" &&
+      message.isError === true &&
+      message.toolCallId
+    ) {
       failedToolCallIds.add(message.toolCallId);
     }
 
@@ -75,7 +86,8 @@ export function parseOmpSession(file: string): SessionUsage {
     const usage = usageSource.usage;
     const calls = new Set<string>();
     if (isAssistant && Array.isArray(message.content)) {
-      for (const block of message.content) if (block.type === "toolCall" && block.id) calls.add(block.id);
+      for (const block of message.content)
+        if (block.type === "toolCall" && block.id) calls.add(block.id);
     }
     toolCallIds.push(calls);
     messages.push({

@@ -14,13 +14,18 @@ const buildPhases = ["building", "escalation"];
 /** The event that moves a run out of `phase`, named in refusals. */
 function missingEvent(state: RunState): string {
   if (state.phase === "awaiting_criteria") return "gate.answered criteria accept";
-  if (state.phase === "planning") return state.plan?.valid ? "gate.answered plan approve" : "plan.checked valid, then gate.answered plan approve";
+  if (state.phase === "planning")
+    return state.plan?.valid
+      ? "gate.answered plan approve"
+      : "plan.checked valid, then gate.answered plan approve";
   return `a run in phase ${state.phase}`;
 }
 
 function requirePhase(state: RunState, type: string, phases: string[]): void {
   if (phases.includes(state.phase)) return;
-  throw new ArkError(`${type} refused: run is in phase ${state.phase}; missing ${missingEvent(state)}`);
+  throw new ArkError(
+    `${type} refused: run is in phase ${state.phase}; missing ${missingEvent(state)}`,
+  );
 }
 
 /** Throws an ArkError naming the missing event when `type` is not allowed in `state`. */
@@ -30,12 +35,14 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
     return;
   }
   if (state.events === 0) throw new ArkError(`${type} refused: the run has no run.started event`);
-  if (state.phase === "closed") throw new ArkError(`${type} refused: run is closed (${state.outcome})`);
+  if (state.phase === "closed")
+    throw new ArkError(`${type} refused: run is closed (${state.outcome})`);
 
   switch (type) {
     case "criteria.updated":
       requirePhase(state, type, ["awaiting_criteria"]);
-      if (!Array.isArray(data.criteria) || data.criteria.length === 0) throw new ArkError("criteria.updated refused: the ticket has no criteria");
+      if (!Array.isArray(data.criteria) || data.criteria.length === 0)
+        throw new ArkError("criteria.updated refused: the ticket has no criteria");
       return;
     case "plan.checked":
       requirePhase(state, type, ["planning", "building", "escalation"]);
@@ -47,15 +54,27 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
       return;
     case "step.started":
       requirePhase(state, type, buildPhases);
-      if (state.steps.find((step) => step.id === data.step)?.status === "running") throw new ArkError(`step.started refused: step ${data.step} is already running`);
-      if (data.role === "implementer" && data.round > 1 && data.round > state.round_budget && state.implementer !== "human") {
-        throw new ArkError("round budget spent: record gate escalation (one_more_round, take_over or abort)");
+      if (state.steps.find((step) => step.id === data.step)?.status === "running")
+        throw new ArkError(`step.started refused: step ${data.step} is already running`);
+      if (
+        data.role === "implementer" &&
+        data.round > 1 &&
+        data.round > state.round_budget &&
+        state.implementer !== "human"
+      ) {
+        throw new ArkError(
+          "round budget spent: record gate escalation (one_more_round, take_over or abort)",
+        );
       }
       return;
     case "step.finished":
       requirePhase(state, type, buildPhases);
-      if (!["succeeded", "failed"].includes(data.outcome)) throw new ArkError(`step.finished refused: outcome must be succeeded or failed, not ${data.outcome}`);
-      if (state.steps.find((step) => step.id === data.step)?.status !== "running") throw new ArkError(`step.finished refused: missing step.started for ${data.step}`);
+      if (!["succeeded", "failed"].includes(data.outcome))
+        throw new ArkError(
+          `step.finished refused: outcome must be succeeded or failed, not ${data.outcome}`,
+        );
+      if (state.steps.find((step) => step.id === data.step)?.status !== "running")
+        throw new ArkError(`step.finished refused: missing step.started for ${data.step}`);
       return;
     case "test.completed":
       requirePhase(state, type, buildPhases);
@@ -71,16 +90,25 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
 }
 
 function assertGateAllowed(state: RunState, data: EventData): void {
-  if (!Object.hasOwn(gateAnswers, data.gate)) throw new ArkError(`unknown gate "${data.gate}": use ${Object.keys(gateAnswers).join(", ")}`);
+  if (!Object.hasOwn(gateAnswers, data.gate))
+    throw new ArkError(`unknown gate "${data.gate}": use ${Object.keys(gateAnswers).join(", ")}`);
   if (!gateAnswers[data.gate].includes(data.answer)) {
-    throw new ArkError(`unknown answer "${data.answer}" for gate ${data.gate}: use ${gateAnswers[data.gate].join(", ")}`);
+    throw new ArkError(
+      `unknown answer "${data.answer}" for gate ${data.gate}: use ${gateAnswers[data.gate].join(", ")}`,
+    );
   }
-  const phaseOfGate = { criteria: "awaiting_criteria", plan: "planning", escalation: "escalation" }[data.gate as "criteria" | "plan" | "escalation"];
+  const phaseOfGate = { criteria: "awaiting_criteria", plan: "planning", escalation: "escalation" }[
+    data.gate as "criteria" | "plan" | "escalation"
+  ];
   if (state.phase !== phaseOfGate) {
-    throw new ArkError(`gate.answered ${data.gate} ${data.answer} refused: run is in phase ${state.phase}, the ${data.gate} gate opens in phase ${phaseOfGate}`);
+    throw new ArkError(
+      `gate.answered ${data.gate} ${data.answer} refused: run is in phase ${state.phase}, the ${data.gate} gate opens in phase ${phaseOfGate}`,
+    );
   }
   if (data.gate === "criteria" && data.answer === "accept" && state.criteria.length === 0) {
-    throw new ArkError("gate.answered criteria accept refused: the ticket has no criteria (criteria.updated needs at least one)");
+    throw new ArkError(
+      "gate.answered criteria accept refused: the ticket has no criteria (criteria.updated needs at least one)",
+    );
   }
   if (data.gate === "plan" && data.answer === "approve" && !state.plan?.valid) {
     throw new ArkError("gate.answered plan approve refused: missing plan.checked valid");
@@ -88,13 +116,16 @@ function assertGateAllowed(state: RunState, data: EventData): void {
 }
 
 function assertCloseAllowed(state: RunState, data: EventData): void {
-  if (!outcomes.includes(data.outcome)) throw new ArkError(`unknown outcome "${data.outcome}": use ${outcomes.join(", ")}`);
+  if (!outcomes.includes(data.outcome))
+    throw new ArkError(`unknown outcome "${data.outcome}": use ${outcomes.join(", ")}`);
   const hasMergeRequests = state.merge_requests.length > 0;
   if ((data.outcome === "merged" || data.outcome === "abandoned") && !hasMergeRequests) {
     throw new ArkError(`run.closed ${data.outcome} refused: missing merge_request.opened`);
   }
   if (data.outcome === "handed_off") {
-    if (hasMergeRequests) throw new ArkError("run.closed handed_off refused: the run has merge requests");
-    if (!state.last_test?.passed) throw new ArkError("run.closed handed_off refused: missing test.completed with passed true");
+    if (hasMergeRequests)
+      throw new ArkError("run.closed handed_off refused: the run has merge requests");
+    if (!state.last_test?.passed)
+      throw new ArkError("run.closed handed_off refused: missing test.completed with passed true");
   }
 }

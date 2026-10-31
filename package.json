@@ -2,11 +2,10 @@
   "name": "ark",
   "version": "0.2.0",
   "private": true,
-  "type": "module",
   "bin": {
     "ark": "./cli/ark.ts"
   },
-  "omp": {},
+  "type": "module",
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
@@ -20,5 +19,6 @@
     "oxlint": "^1.90.0",
     "oxlint-tsgolint": "^7.0.2005",
     "typescript": "^7.0.2"
-  }
+  },
+  "omp": {}
 }

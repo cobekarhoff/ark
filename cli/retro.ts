@@ -17,7 +17,9 @@ const toMilliseconds = (time: string): number => Date.parse(time);
 const secondsBetween = (from: number, to: number): number => (to - from) / 1000;
 
 function sortedObject<Value>(entries: Iterable<[string, Value]>): Record<string, Value> {
-  return Object.fromEntries([...entries].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)));
+  return Object.fromEntries(
+    [...entries].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+  );
 }
 
 /** A group with no messages, or only unknown costs, has usd "unknown": nothing was measured. */
@@ -39,7 +41,10 @@ function summarize(messages: UsageMessage[]): CostGroup {
   };
 }
 
-function groupBy(messages: Message[], keyOf: (message: Message) => string): Record<string, CostGroup> {
+function groupBy(
+  messages: Message[],
+  keyOf: (message: Message) => string,
+): Record<string, CostGroup> {
   const groups = new Map<string, Message[]>();
   for (const message of messages) {
     const key = keyOf(message);
@@ -49,11 +54,24 @@ function groupBy(messages: Message[], keyOf: (message: Message) => string): Reco
 }
 
 /** Every session message of the run, oldest first, so sums are always added in the same order. */
-function collectMessages(runDirectory: string): { messages: Message[]; sessions: SessionWithKey[] } {
+function collectMessages(runDirectory: string): {
+  messages: Message[];
+  sessions: SessionWithKey[];
+} {
   const sessions = readUsage(runDirectory);
   const messages = sessions
-    .flatMap((session) => session.messages.map((message) => ({ ...message, sessionKey: session.sessionKey, cwd: session.cwd })))
-    .sort((left, right) => toMilliseconds(left.time) - toMilliseconds(right.time) || (left.sessionFile < right.sessionFile ? -1 : 1));
+    .flatMap((session) =>
+      session.messages.map((message) => ({
+        ...message,
+        sessionKey: session.sessionKey,
+        cwd: session.cwd,
+      })),
+    )
+    .sort(
+      (left, right) =>
+        toMilliseconds(left.time) - toMilliseconds(right.time) ||
+        (left.sessionFile < right.sessionFile ? -1 : 1),
+    );
   return { messages, sessions };
 }
 
@@ -67,10 +85,18 @@ function stepWindows(events: ArkEvent[]): StepWindow[] {
   const windows: StepWindow[] = [];
   for (const event of events) {
     if (event.type === "step.started") {
-      windows.push({ id: event.data.step, role: event.data.role, repo: event.data.repo, start: toMilliseconds(event.time), end: null });
+      windows.push({
+        id: event.data.step,
+        role: event.data.role,
+        repo: event.data.repo,
+        start: toMilliseconds(event.time),
+        end: null,
+      });
     }
     if (event.type === "step.finished") {
-      const open = windows.findLast((window) => window.id === event.data.step && window.end === null);
+      const open = windows.findLast(
+        (window) => window.id === event.data.step && window.end === null,
+      );
       if (open) open.end = toMilliseconds(event.time);
     }
   }
@@ -78,11 +104,18 @@ function stepWindows(events: ArkEvent[]): StepWindow[] {
 }
 
 /** A message belongs to a step when its session ran in the step's worktree during the step's window. */
-function windowOf(message: Message, windows: StepWindow[], runDirectory: string, runEnd: number): StepWindow | undefined {
+function windowOf(
+  message: Message,
+  windows: StepWindow[],
+  runDirectory: string,
+  runEnd: number,
+): StepWindow | undefined {
   const time = toMilliseconds(message.time);
   return windows.find(
     (window) =>
-      isInside(message.cwd, join(runDirectory, "workspace", window.repo)) && time >= window.start && time <= (window.end ?? runEnd),
+      isInside(message.cwd, join(runDirectory, "workspace", window.repo)) &&
+      time >= window.start &&
+      time <= (window.end ?? runEnd),
   );
 }
 
@@ -98,7 +131,8 @@ function gateWaitSeconds(events: ArkEvent[]): number {
     const time = toMilliseconds(event.time);
     if (event.type === "run.started") waitingSince.set("criteria", time);
     if (event.type === "plan.checked" && event.data.valid) waitingSince.set("plan", time);
-    if (event.type === "step.finished" && event.data.outcome === "failed") waitingSince.set("escalation", time);
+    if (event.type === "step.finished" && event.data.outcome === "failed")
+      waitingSince.set("escalation", time);
     if (event.type === "gate.answered") {
       const since = waitingSince.get(event.data.gate);
       if (since !== undefined) total += secondsBetween(since, time);
@@ -111,7 +145,13 @@ function gateWaitSeconds(events: ArkEvent[]): number {
 function runCommand(command: string[], cwd: string): unknown {
   try {
     // Bun resolves the command against the PATH of its startup snapshot unless env is passed.
-    const result = Bun.spawnSync(command, { cwd, env: process.env, stdout: "pipe", stderr: "pipe", timeout: MERGE_REQUEST_QUERY_TIMEOUT_MILLISECONDS });
+    const result = Bun.spawnSync(command, {
+      cwd,
+      env: process.env,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: MERGE_REQUEST_QUERY_TIMEOUT_MILLISECONDS,
+    });
     return result.exitCode === 0 ? JSON.parse(result.stdout.toString()) : null;
   } catch {
     return null; // tool missing, directory gone, timeout or unparsable output
@@ -122,7 +162,10 @@ type MergeRequestFacts = { comments: number; commitTimes: string[] };
 
 function queryMergeRequest(url: string, number: number, cwd: string): MergeRequestFacts | null {
   if (url.includes("github.com")) {
-    const answer = runCommand(["gh", "pr", "view", String(number), "--json", "comments,reviews,commits"], cwd) as {
+    const answer = runCommand(
+      ["gh", "pr", "view", String(number), "--json", "comments,reviews,commits"],
+      cwd,
+    ) as {
       comments: unknown[];
       reviews: { body?: string }[];
       commits: { committedDate: string }[];
@@ -133,34 +176,60 @@ function queryMergeRequest(url: string, number: number, cwd: string): MergeReque
       commitTimes: answer.commits.map((commit) => commit.committedDate),
     };
   }
-  const notes = runCommand(["glab", "api", `projects/:fullpath/merge_requests/${number}/notes?per_page=100`], cwd) as { system: boolean }[] | null;
-  const commits = runCommand(["glab", "api", `projects/:fullpath/merge_requests/${number}/commits?per_page=100`], cwd) as { committed_date: string }[] | null;
+  const notes = runCommand(
+    ["glab", "api", `projects/:fullpath/merge_requests/${number}/notes?per_page=100`],
+    cwd,
+  ) as { system: boolean }[] | null;
+  const commits = runCommand(
+    ["glab", "api", `projects/:fullpath/merge_requests/${number}/commits?per_page=100`],
+    cwd,
+  ) as { committed_date: string }[] | null;
   if (!notes || !commits) return null;
-  return { comments: notes.filter((note) => !note.system).length, commitTimes: commits.map((commit) => commit.committed_date) };
+  return {
+    comments: notes.filter((note) => !note.system).length,
+    commitTimes: commits.map((commit) => commit.committed_date),
+  };
 }
 
 /** Comments and commits after the merge request opened; "unknown" when gh or glab cannot answer. */
-function mergeRequestActivity(runDirectory: string, events: ArkEvent[]): { comments: Unknowable; commits: Unknowable } {
+function mergeRequestActivity(
+  runDirectory: string,
+  events: ArkEvent[],
+): { comments: Unknowable; commits: Unknowable } {
   let comments = 0;
   let commits = 0;
   for (const event of events.filter((candidate) => candidate.type === "merge_request.opened")) {
-    const facts = queryMergeRequest(event.data.url, event.data.number, join(runDirectory, "workspace", event.data.repo));
+    const facts = queryMergeRequest(
+      event.data.url,
+      event.data.number,
+      join(runDirectory, "workspace", event.data.repo),
+    );
     if (!facts) return { comments: "unknown", commits: "unknown" };
     comments += facts.comments;
-    commits += facts.commitTimes.filter((time) => toMilliseconds(time) > toMilliseconds(event.time)).length;
+    commits += facts.commitTimes.filter(
+      (time) => toMilliseconds(time) > toMilliseconds(event.time),
+    ).length;
   }
   return { comments, commits };
 }
 
-function escapedDefects(project: string, runId: string): { ticket: string; run: string; note: string }[] {
+function escapedDefects(
+  project: string,
+  runId: string,
+): { ticket: string; run: string; note: string }[] {
   const file = join(projectDirectory(project), "escaped-defects.yml");
   if (!existsSync(file)) return [];
   const parsed = Bun.YAML.parse(readFileSync(file, "utf8"));
   if (parsed === null || parsed === undefined) return [];
-  if (!Array.isArray(parsed)) throw new ArkError(`${file}: must be a list of { ticket, run, note }`);
+  if (!Array.isArray(parsed))
+    throw new ArkError(`${file}: must be a list of { ticket, run, note }`);
   return parsed
     .filter((entry) => entry?.run === runId)
-    .map((entry) => ({ ticket: String(entry.ticket ?? ""), run: runId, note: String(entry.note ?? "") }))
+    .map((entry) => ({
+      ticket: String(entry.ticket ?? ""),
+      run: runId,
+      note: String(entry.note ?? ""),
+    }))
     .sort((left, right) => (left.ticket < right.ticket ? -1 : left.ticket > right.ticket ? 1 : 0));
 }
 
@@ -179,13 +248,22 @@ function compareWithEarlierRuns(project: string, runId: string) {
   const directory = runsDirectory(project);
   for (const name of existsSync(directory) ? readdirSync(directory).sort() : []) {
     const metricsFile = join(directory, name, "metrics.json");
-    if (name === runId || !existsSync(metricsFile) || readEvents(join(directory, name)).at(-1)?.type !== "run.closed") continue;
+    if (
+      name === runId ||
+      !existsSync(metricsFile) ||
+      readEvents(join(directory, name)).at(-1)?.type !== "run.closed"
+    )
+      continue;
     const metrics = JSON.parse(readFileSync(metricsFile, "utf8"));
     runsCompared += 1;
     if (typeof metrics.cost?.total_usd === "number") costs.push(metrics.cost.total_usd);
     if (typeof metrics.time?.wall_seconds === "number") wallSeconds.push(metrics.time.wall_seconds);
   }
-  return { runs_compared: runsCompared, median_cost_usd: median(costs), median_wall_seconds: median(wallSeconds) };
+  return {
+    runs_compared: runsCompared,
+    median_cost_usd: median(costs),
+    median_wall_seconds: median(wallSeconds),
+  };
 }
 
 function formatUsd(usd: Unknowable, includesUnknown: boolean): string {
@@ -220,27 +298,43 @@ export function retro(runId: string): void {
   const reviewer = byRole.reviewer;
   const implementer = byRole.implementer;
   const ratioKnown =
-    reviewer && implementer && reviewer.usd !== "unknown" && implementer.usd !== "unknown" && !reviewer.includes_unknown && !implementer.includes_unknown && implementer.usd > 0;
+    reviewer &&
+    implementer &&
+    reviewer.usd !== "unknown" &&
+    implementer.usd !== "unknown" &&
+    !reviewer.includes_unknown &&
+    !implementer.includes_unknown &&
+    implementer.usd > 0;
 
   const wallSeconds = secondsBetween(firstTime, runEnd);
   const gateWait = gateWaitSeconds(events);
   const stepSeconds = new Map<string, number>();
   for (const window of windows) {
-    stepSeconds.set(window.id, (stepSeconds.get(window.id) ?? 0) + secondsBetween(window.start, window.end ?? runEnd));
+    stepSeconds.set(
+      window.id,
+      (stepSeconds.get(window.id) ?? 0) + secondsBetween(window.start, window.end ?? runEnd),
+    );
   }
 
   const stepSessions = new Map<string, Set<string>>();
-  for (const [message, window] of stepOf) stepSessions.set(window.id, (stepSessions.get(window.id) ?? new Set()).add(message.sessionKey));
+  for (const [message, window] of stepOf)
+    stepSessions.set(window.id, (stepSessions.get(window.id) ?? new Set()).add(message.sessionKey));
   const closed = events.some((event) => event.type === "run.closed");
   const finishedFailedByReviewer = events.filter(
-    (event) => event.type === "step.finished" && event.data.outcome === "failed" && roleOfStep.get(event.data.step) === "reviewer",
+    (event) =>
+      event.type === "step.finished" &&
+      event.data.outcome === "failed" &&
+      roleOfStep.get(event.data.step) === "reviewer",
   ).length;
   const mergeRequests = mergeRequestActivity(runDirectory, events);
 
   let idleGaps = 0;
   for (const session of sessions) {
-    const times = session.messages.map((message) => toMilliseconds(message.time)).sort((left, right) => left - right);
-    for (let i = 1; i < times.length; i++) if (secondsBetween(times[i - 1], times[i]) > IDLE_GAP_SECONDS) idleGaps += 1;
+    const times = session.messages
+      .map((message) => toMilliseconds(message.time))
+      .sort((left, right) => left - right);
+    for (let i = 1; i < times.length; i++)
+      if (secondsBetween(times[i - 1], times[i]) > IDLE_GAP_SECONDS) idleGaps += 1;
   }
 
   const metrics = {
@@ -251,7 +345,9 @@ export function retro(runId: string): void {
       by_step: sortedObject(Object.entries(byStep)),
       by_role: sortedObject(Object.entries(byRole)),
       by_model: groupBy(messages, (message) => message.model),
-      review_to_build_ratio: ratioKnown ? (reviewer.usd as number) / (implementer.usd as number) : "unknown",
+      review_to_build_ratio: ratioKnown
+        ? (reviewer.usd as number) / (implementer.usd as number)
+        : "unknown",
       includes_unknown: total.includes_unknown,
     },
     time: {
@@ -261,12 +357,24 @@ export function retro(runId: string): void {
       gate_wait_seconds: gateWait,
     },
     rework: {
-      rounds: Math.max(1, ...events.filter((event) => event.type === "step.started").map((event) => event.data.round ?? 1)),
-      escalations: events.filter((event) => event.type === "gate.answered" && event.data.gate === "escalation").length,
+      rounds: Math.max(
+        1,
+        ...events
+          .filter((event) => event.type === "step.started")
+          .map((event) => event.data.round ?? 1),
+      ),
+      escalations: events.filter(
+        (event) => event.type === "gate.answered" && event.data.gate === "escalation",
+      ).length,
       findings_sent_back: finishedFailedByReviewer,
     },
     human_intervention: {
-      plan_changes: events.filter((event) => event.type === "gate.answered" && event.data.gate === "plan" && event.data.answer === "change").length,
+      plan_changes: events.filter(
+        (event) =>
+          event.type === "gate.answered" &&
+          event.data.gate === "plan" &&
+          event.data.answer === "change",
+      ).length,
       mr_comments: mergeRequests.comments,
       mr_commits_after_open: mergeRequests.commits,
     },
@@ -275,7 +383,9 @@ export function retro(runId: string): void {
       sessions: new Set(sessions.map((session) => session.sessionKey)).size,
       restarts: [...stepSessions.values()].reduce((sum, keys) => sum + keys.size - 1, 0),
       crashes: sessions.filter((session) => session.crashed).length,
-      stalled_workers: closed ? new Set(windows.filter((window) => window.end === null).map((window) => window.id)).size : 0,
+      stalled_workers: closed
+        ? new Set(windows.filter((window) => window.end === null).map((window) => window.id)).size
+        : 0,
       dead_dispatches: stepIds.filter((id) => !stepSessions.has(id)).length,
       tool_errors: messages.filter((message) => message.toolError).length,
       context_overflows: sessions.reduce((sum, session) => sum + session.contextOverflows, 0),
@@ -286,7 +396,8 @@ export function retro(runId: string): void {
   };
 
   const metricsFile = join(runDirectory, "metrics.json");
-  const rounded = (_key: string, value: unknown) => (typeof value === "number" ? Math.round(value * 1e6) / 1e6 : value);
+  const rounded = (_key: string, value: unknown) =>
+    typeof value === "number" ? Math.round(value * 1e6) / 1e6 : value;
   writeFileSync(metricsFile, `${JSON.stringify(metrics, rounded, 2)}\n`);
 
   const comparison = metrics.comparison;

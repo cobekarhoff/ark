@@ -30,7 +30,9 @@ function unescapeXml(text: string): string {
 
 export const parsePytest: Parser = ({ report }) => {
   if (!report.includes("<testcase")) {
-    throw new ArkError("pytest report has no test cases: check the suite command writes JUnit XML to {report}");
+    throw new ArkError(
+      "pytest report has no test cases: check the suite command writes JUnit XML to {report}",
+    );
   }
   const results: TestResult[] = [];
   for (const match of report.matchAll(/<testcase\s([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
@@ -43,7 +45,11 @@ export const parsePytest: Parser = ({ report }) => {
       const criterion = unescapeXml(property[1]).match(criterionPattern)?.[0];
       if (criterion) criteria.add(criterion);
     }
-    const status = /<(failure|error)[\s>]/.test(body) ? "failed" : /<skipped[\s/>]/.test(body) ? "skipped" : "passed";
+    const status = /<(failure|error)[\s>]/.test(body)
+      ? "failed"
+      : /<skipped[\s/>]/.test(body)
+        ? "skipped"
+        : "passed";
     results.push({
       name: unescapeXml(className ? `${className}::${testName}` : testName),
       criteria: [...criteria].sort(),

@@ -1,5 +1,12 @@
 import { beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
@@ -13,8 +20,12 @@ const roles = {
 };
 
 function git(directory: string, ...args: string[]): string {
-  const result = Bun.spawnSync(["git", "-C", directory, ...args], { stdout: "pipe", stderr: "pipe" });
-  if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+  const result = Bun.spawnSync(["git", "-C", directory, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0)
+    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
   return result.stdout.toString().trim();
 }
 
@@ -55,22 +66,56 @@ function startRun(repoNames = ["."]) {
   const projectDirectory = writeProject("demo", {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "integration", level: "integration", repo: ".", command: "true", parser: "bun" }],
+    suites: [
+      { name: "integration", level: "integration", repo: ".", command: "true", parser: "bun" },
+    ],
     roles,
   });
-  const ticketFile = writeTicket("demo", "ARK-900", [{ id: "ARK-900-AC1", text: "Sync fixture" }], "Sync test");
+  const ticketFile = writeTicket(
+    "demo",
+    "ARK-900",
+    [{ id: "ARK-900-AC1", text: "Sync fixture" }],
+    "Sync test",
+  );
   const started = ark("run", "start", ticketFile, "--project", "demo");
   if (started.code !== 0) throw new Error(started.err || started.out);
   const actualRunId = started.out.trim();
   const runDirectory = join(projectDirectory, "runs", actualRunId);
-  const steps = [{ id: "build", role: "implementer", repo: repoNames[0], harness: "claude", model: "claude-sonnet", needs: [], criteria: ["ARK-900-AC1"] }];
+  const steps = [
+    {
+      id: "build",
+      role: "implementer",
+      repo: repoNames[0],
+      harness: "claude",
+      model: "claude-sonnet",
+      needs: [],
+      criteria: ["ARK-900-AC1"],
+    },
+  ];
   const plan = {
     summary: {
       why: "Prepare the sync fixture.",
-      changes: [{ criterion: "ARK-900-AC1", where: "workspace", now: "The fixture has no sync plan.", fix: "The fixture has a valid sync plan." }],
+      changes: [
+        {
+          criterion: "ARK-900-AC1",
+          where: "workspace",
+          now: "The fixture has no sync plan.",
+          fix: "The fixture has a valid sync plan.",
+        },
+      ],
     },
     steps,
-    test_cases: [{ id: "sync-fixture", criterion: "ARK-900-AC1", level: "integration", given: [], when: ["prepare sync fixture"], then: ["fixture is ready"], expected: "fixture is ready" }],
+    test_cases: [
+      {
+        id: "sync-fixture",
+        criterion: "ARK-900-AC1",
+        level: "integration",
+        given: [],
+        when: ["prepare sync fixture"],
+        then: ["fixture is ready"],
+        expected: "fixture is ready",
+      },
+    ],
   };
   writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
   const checked = ark("plan", "check", actualRunId);
@@ -102,7 +147,10 @@ let fakeGhDirectory = "";
 beforeEach(() => {
   fakeGhDirectory = mkdtempSync(join(tmpdir(), "ark-sync-bin-"));
   const fakeGh = join(fakeGhDirectory, "gh");
-  writeFileSync(fakeGh, `#!/usr/bin/env bun\nconst states = JSON.parse(process.env.FAKE_GH_STATES ?? "{}");\nconsole.log(JSON.stringify({ state: states[process.argv[4]] ?? "OPEN" }));\n`);
+  writeFileSync(
+    fakeGh,
+    `#!/usr/bin/env bun\nconst states = JSON.parse(process.env.FAKE_GH_STATES ?? "{}");\nconsole.log(JSON.stringify({ state: states[process.argv[4]] ?? "OPEN" }));\n`,
+  );
   chmodSync(fakeGh, 0o755);
   process.env.PATH = `${fakeGhDirectory}:${process.env.PATH ?? ""}`;
 });
@@ -113,8 +161,12 @@ test("ARK-165-AC1 status reports every merged MR and allows closing, while an op
     { repo: "repos/a", url: "https://github.com/acme/a/pull/1", number: 1 },
     { repo: "repos/b", url: "https://github.com/acme/b/pull/2", number: 2 },
   ];
-  for (const mergeRequest of mergeRequests) appendEvent(scenario.runDirectory, "merge_request.opened", mergeRequest);
-  process.env.FAKE_GH_STATES = JSON.stringify({ [mergeRequests[0].url]: "MERGED", [mergeRequests[1].url]: "MERGED" });
+  for (const mergeRequest of mergeRequests)
+    appendEvent(scenario.runDirectory, "merge_request.opened", mergeRequest);
+  process.env.FAKE_GH_STATES = JSON.stringify({
+    [mergeRequests[0].url]: "MERGED",
+    [mergeRequests[1].url]: "MERGED",
+  });
 
   const merged = ark("merge-request", "status", scenario.runId);
   expect(merged.code).toBe(0);
@@ -135,7 +187,9 @@ test("ARK-165-AC1 ARK-165-AC2 Chief polls on every wait, closes merged runs and 
   const chief = readFileSync(join(playbookDirectory, "chief.md"), "utf8");
   const supervise = chief.split("## 7. Supervise")[1]?.split("\n## ")[0] ?? "";
   const close = chief.split("## 8. Close the run")[1]?.split("\n## ")[0] ?? "";
-  expect(supervise).toContain("On every wait, including an empty one, run `ark merge-request status <run>`");
+  expect(supervise).toContain(
+    "On every wait, including an empty one, run `ark merge-request status <run>`",
+  );
   expect(supervise).toContain("If every MR of a run is merged, go to section 8");
   expect(close).toContain("ark run close <run> merged");
   expect(close).toContain("ark workspace sync <run>");
@@ -162,13 +216,29 @@ test("ARK-165-AC3 worktree sync merges origin, pushes only MR worktrees and abor
   expect(pushed.code).toBe(0);
   expect(git(worktree, "rev-parse", "HEAD")).toBe(targetHead);
   expect(git(worktree, "merge-base", "HEAD", targetHead)).toBe(targetHead);
-  expect(git(pushedScenario.workspace, "rev-parse", "origin/" + git(worktree, "branch", "--show-current"))).toBe(git(worktree, "rev-parse", "HEAD"));
+  expect(
+    git(
+      pushedScenario.workspace,
+      "rev-parse",
+      "origin/" + git(worktree, "branch", "--show-current"),
+    ),
+  ).toBe(git(worktree, "rev-parse", "HEAD"));
 
   const unpushedScenario = startRun();
   const unpushedTarget = advanceOrigin(unpushedScenario.workspace, ".", "target.txt", "target\n");
   expect(ark("worktree", "sync", unpushedScenario.runId).code).toBe(0);
-  expect(git(unpushedScenario.worktreePath(), "merge-base", "HEAD", unpushedTarget)).toBe(unpushedTarget);
-  expect(Bun.spawnSync(["git", "-C", unpushedScenario.workspace, "rev-parse", "origin/" + git(unpushedScenario.worktreePath(), "branch", "--show-current")]).exitCode).not.toBe(0);
+  expect(git(unpushedScenario.worktreePath(), "merge-base", "HEAD", unpushedTarget)).toBe(
+    unpushedTarget,
+  );
+  expect(
+    Bun.spawnSync([
+      "git",
+      "-C",
+      unpushedScenario.workspace,
+      "rev-parse",
+      "origin/" + git(unpushedScenario.worktreePath(), "branch", "--show-current"),
+    ]).exitCode,
+  ).not.toBe(0);
 
   const conflictScenario = startRun();
   commitFile(conflictScenario.worktreePath(), "shared.txt", "worktree\n");
@@ -177,7 +247,9 @@ test("ARK-165-AC3 worktree sync merges origin, pushes only MR worktrees and abor
   expect(conflict.code).toBe(1);
   expect(conflict.err).toContain("repo .:");
   expect(git(conflictScenario.worktreePath(), "status", "--porcelain")).toBe("");
-  expect(git(conflictScenario.worktreePath(), "rev-parse", "HEAD")).not.toBe(git(conflictScenario.workspace, "rev-parse", "origin/main"));
+  expect(git(conflictScenario.worktreePath(), "rev-parse", "HEAD")).not.toBe(
+    git(conflictScenario.workspace, "rev-parse", "origin/main"),
+  );
 });
 
 test("ARK-165-AC4 workspace sync fast-forwards clean and unrelated-dirty checkouts but preserves conflicting changes", () => {

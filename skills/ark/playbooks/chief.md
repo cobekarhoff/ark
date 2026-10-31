@@ -74,6 +74,7 @@ Do these steps in order for one ready ticket.
      - id: ARK-156-AC1
        text: "The statement, copied word for word"
    ---
+
    ## Problem
 
    What is wrong, and who it affects.
@@ -84,8 +85,8 @@ Do these steps in order for one ready ticket.
 
    ## Acceptance criteria
 
-   | ID | Criterion |
-   | --- | --- |
+   | ID          | Criterion                           |
+   | ----------- | ----------------------------------- |
    | ARK-156-AC1 | The statement, copied word for word |
    ```
 
@@ -169,12 +170,12 @@ It prints `<repo>  merged|open|closed  <url>` for each MR.
 
 Choose the outcome:
 
-| What you find | Command |
-| --- | --- |
-| Every MR merged | `ark run close <run> merged` |
-| MRs opened, then closed without merging | `ark run close <run> abandoned` |
+| What you find                                | Command                                                           |
+| -------------------------------------------- | ----------------------------------------------------------------- |
+| Every MR merged                              | `ark run close <run> merged`                                      |
+| MRs opened, then closed without merging      | `ark run close <run> abandoned`                                   |
 | The human took the branches and wants no MRs | `ark run close <run> handed_off` (the last test must have passed) |
-| The human stops the run before any MR exists | `ark run close <run> aborted` |
+| The human stops the run before any MR exists | `ark run close <run> aborted`                                     |
 
 If some MRs are merged and others are still open, tell the human and wait. Do not close the run.
 
@@ -207,6 +208,7 @@ When the human gives you a bug ticket and it traces back to an earlier run, or y
    ```
 
    `ticket` is the bug ticket. `run` is the earlier run it traces to.
+
 3. Then queue and run the bug ticket like any other ticket.
 
 ## Rules

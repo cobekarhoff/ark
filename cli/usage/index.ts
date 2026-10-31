@@ -50,7 +50,9 @@ function sources(): Source[] {
 /** `<project dir>/<session id>.jsonl` and `<project dir>/<session id>/**\/*.jsonl` share one key. */
 function sessionKeyFor(relativeFile: string): string {
   const segments = relativeFile.split(sep);
-  return segments.length >= 3 ? `${segments[0]}/${segments[1]}` : `${segments[0]}/${segments[1].replace(/\.jsonl$/, "")}`;
+  return segments.length >= 3
+    ? `${segments[0]}/${segments[1]}`
+    : `${segments[0]}/${segments[1].replace(/\.jsonl$/, "")}`;
 }
 
 /** First `cwd` in the first 64 KiB of a session file; both formats write it near the top. */
@@ -76,7 +78,9 @@ export function readUsage(runDirectory: string): SessionWithKey[] {
   const sessions: SessionWithKey[] = [];
   for (const source of sources()) {
     if (!existsSync(source.root)) continue;
-    const relativeFiles = [...new Bun.Glob("**/*.jsonl").scanSync({ cwd: source.root, dot: true })].sort();
+    const relativeFiles = [
+      ...new Bun.Glob("**/*.jsonl").scanSync({ cwd: source.root, dot: true }),
+    ].sort();
     for (const relativeFile of relativeFiles) {
       const file = join(source.root, relativeFile);
       let cwd: string | null;

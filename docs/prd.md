@@ -51,20 +51,20 @@ Three facts make that machinery unnecessary:
 
 Tickets are on the Ark backlog. Acceptance summaries are short. Each ticket holds its own acceptance criteria.
 
-| ID | Requirement | Acceptance summary | Tickets |
-| --- | --- | --- | --- |
-| R1 | Master Chief: one session that you talk to. It starts run leads, relays gate questions, and suggests and queues tickets as Orca Tasks. | You work with one session. A ticket you approve becomes a queued Orca Task. Gate questions reach you through Master Chief. | ARK-151, ARK-156 |
-| R2 | Runs: a run folder, a ticket snapshot, an event log with derived state, and resume at the first unfinished step. | `ark run start` creates the run folder. A new run lead resumes a stopped run at the first unfinished step. | ARK-152 |
-| R3 | Run leads and workers on Orca. Depth is 2. Any supported harness works per step. | Master Chief runs in an Orca terminal, starts a run lead, and the run lead starts workers. Workers never start agents. A step can name any supported harness and model. | ARK-151, ARK-156 |
-| R4 | Plan gate: `plan.yml` holds a graph of steps and test cases. Ark validates and renders it. You review it in chat or Plannotator and you can edit it. | `ark plan check` rejects cycles, unknown `needs`, and criteria with no test case. No code is built before you approve. | ARK-153, ARK-156 |
-| R5 | Multi-repo by local composition: the run folder mirrors the workspace, with worktrees for the repos the run touches. | A Clara run's agents see the workspace's context. Docker compose run from the run folder resolves repos against the run's worktrees. | ARK-150, ARK-154, ARK-159 |
-| R6 | Proof: integration or end-to-end tests tagged with an acceptance criterion pass at head. Each test runner has its own parser. | `ark test` maps native test tags to results per criterion. Unit tests never prove a criterion. | ARK-154, ARK-158 |
-| R7 | Merge requests per repo in dependency order. Only you merge. | `ark merge-request open` opens one request per repo in order and records dependencies. No Ark command merges. | ARK-155, ARK-159 |
-| R8 | Bootstrap per project. Config lives in `~/.ark/projects/<project>/ark.yml`. Each project names its ticket source. | The bootstrap playbook writes `ark.yml` and asks only what it cannot detect. | ARK-150, ARK-158 |
-| R9 | Gates: criteria, plan, and escalation, with a round budget. | Escalation opens when the round budget is spent. You choose one more round, take over, or abort. | ARK-152 |
-| R10 | A small deterministic command line. Judgment lives in skills. | The `ark` command has ten command lines, listed by `ark --help`. The old code, tests, typed tools, and extension are deleted. | ARK-152, ARK-153, ARK-154, ARK-155, ARK-157 |
-| R11 | A retro and metrics for each run, including orchestration health. | `ark retro` writes `metrics.json` and a comparison with earlier runs. The run lead writes `retro.md` from it. | ARK-160, ARK-161 |
-| R12 | Improvement proposals that you approve. They land by scope: project, Ark, or skill. | Nothing changes without your approval. An approved proposal lands in `ark.yml`, `learnings.md`, an Ark ticket, or a skill diff. | ARK-161 |
+| ID  | Requirement                                                                                                                                          | Acceptance summary                                                                                                                                                      | Tickets                                     |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| R1  | Master Chief: one session that you talk to. It starts run leads, relays gate questions, and suggests and queues tickets as Orca Tasks.               | You work with one session. A ticket you approve becomes a queued Orca Task. Gate questions reach you through Master Chief.                                              | ARK-151, ARK-156                            |
+| R2  | Runs: a run folder, a ticket snapshot, an event log with derived state, and resume at the first unfinished step.                                     | `ark run start` creates the run folder. A new run lead resumes a stopped run at the first unfinished step.                                                              | ARK-152                                     |
+| R3  | Run leads and workers on Orca. Depth is 2. Any supported harness works per step.                                                                     | Master Chief runs in an Orca terminal, starts a run lead, and the run lead starts workers. Workers never start agents. A step can name any supported harness and model. | ARK-151, ARK-156                            |
+| R4  | Plan gate: `plan.yml` holds a graph of steps and test cases. Ark validates and renders it. You review it in chat or Plannotator and you can edit it. | `ark plan check` rejects cycles, unknown `needs`, and criteria with no test case. No code is built before you approve.                                                  | ARK-153, ARK-156                            |
+| R5  | Multi-repo by local composition: the run folder mirrors the workspace, with worktrees for the repos the run touches.                                 | A Clara run's agents see the workspace's context. Docker compose run from the run folder resolves repos against the run's worktrees.                                    | ARK-150, ARK-154, ARK-159                   |
+| R6  | Proof: integration or end-to-end tests tagged with an acceptance criterion pass at head. Each test runner has its own parser.                        | `ark test` maps native test tags to results per criterion. Unit tests never prove a criterion.                                                                          | ARK-154, ARK-158                            |
+| R7  | Merge requests per repo in dependency order. Only you merge.                                                                                         | `ark merge-request open` opens one request per repo in order and records dependencies. No Ark command merges.                                                           | ARK-155, ARK-159                            |
+| R8  | Bootstrap per project. Config lives in `~/.ark/projects/<project>/ark.yml`. Each project names its ticket source.                                    | The bootstrap playbook writes `ark.yml` and asks only what it cannot detect.                                                                                            | ARK-150, ARK-158                            |
+| R9  | Gates: criteria, plan, and escalation, with a round budget.                                                                                          | Escalation opens when the round budget is spent. You choose one more round, take over, or abort.                                                                        | ARK-152                                     |
+| R10 | A small deterministic command line. Judgment lives in skills.                                                                                        | The `ark` command has ten command lines, listed by `ark --help`. The old code, tests, typed tools, and extension are deleted.                                           | ARK-152, ARK-153, ARK-154, ARK-155, ARK-157 |
+| R11 | A retro and metrics for each run, including orchestration health.                                                                                    | `ark retro` writes `metrics.json` and a comparison with earlier runs. The run lead writes `retro.md` from it.                                                           | ARK-160, ARK-161                            |
+| R12 | Improvement proposals that you approve. They land by scope: project, Ark, or skill.                                                                  | Nothing changes without your approval. An approved proposal lands in `ark.yml`, `learnings.md`, an Ark ticket, or a skill diff.                                         | ARK-161                                     |
 
 ## How it works
 
@@ -100,27 +100,27 @@ Usage parsers read OMP and Claude Code session files first. A Codex parser follo
 
 ## Milestones
 
-| Milestone | Outcome | Tickets |
-| --- | --- | --- |
-| M1 Core loop on the Ark repo | Two spikes, the command line, the router skill and playbooks. One Ark ticket goes from Master Chief to a merged pull request. | ARK-150, ARK-151, ARK-152, ARK-153, ARK-154, ARK-155, ARK-156, ARK-157 |
-| M2 Multi-repo on Clara | Bootstrap, pytest and behave parsers, side-by-side compose. One Clara ticket across at least two repos reaches merge requests in dependency order. | ARK-158, ARK-159 |
-| M3 Self-improvement | `ark retro`, the retro playbook, the close check, the deep interview, and learnings. | ARK-160, ARK-161 |
-| M4 Later | A web view over run folders and Orca state, only if Orca's interface falls short. Onboarding for smart-qc. | Not yet ticketed |
+| Milestone                    | Outcome                                                                                                                                            | Tickets                                                                |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| M1 Core loop on the Ark repo | Two spikes, the command line, the router skill and playbooks. One Ark ticket goes from Master Chief to a merged pull request.                      | ARK-150, ARK-151, ARK-152, ARK-153, ARK-154, ARK-155, ARK-156, ARK-157 |
+| M2 Multi-repo on Clara       | Bootstrap, pytest and behave parsers, side-by-side compose. One Clara ticket across at least two repos reaches merge requests in dependency order. | ARK-158, ARK-159                                                       |
+| M3 Self-improvement          | `ark retro`, the retro playbook, the close check, the deep interview, and learnings.                                                               | ARK-160, ARK-161                                                       |
+| M4 Later                     | A web view over run folders and Orca state, only if Orca's interface falls short. Onboarding for smart-qc.                                         | Not yet ticketed                                                       |
 
-| Ticket | Title | Depends on | Milestone |
-| --- | --- | --- | --- |
-| ARK-150 | Spike: side-by-side worktrees for a Clara run, driven by Orca | None | M1 |
-| ARK-151 | Spike: Master Chief, run lead, and worker on Orca, with gate relay | None | M1 |
-| ARK-152 | CLI core: `run start`, `status`, `run close`, event log, transition table, project config | None | M1 |
-| ARK-153 | Plan file: `plan check`, `plan.mmd`, `gate record` | ARK-152 | M1 |
-| ARK-154 | Worktrees and tests: `worktree create` builds the workspace mirror, `ark test` with the bun parser | ARK-150, ARK-152 | M1 |
-| ARK-155 | Merge requests in dependency order on GitHub and GitLab | ARK-152 | M1 |
-| ARK-156 | Router skill and playbooks: chief, run-lead, worker, with Orca and Plannotator | ARK-151, ARK-153, ARK-154, ARK-155 | M1 |
-| ARK-157 | Cutover: delete the old design's code, tests, typed tools, and extension; generate the command reference | none | M1 |
-| ARK-158 | Bootstrap playbook, pytest and behave parsers, onboard Clara | ARK-156 | M2 |
-| ARK-159 | First Clara ticket across repos to merge requests in dependency order | ARK-158 | M2 |
-| ARK-160 | `ark retro`, `metrics.json`, and session usage parsers | ARK-152 | M3 |
-| ARK-161 | Retro playbook, close check, deep interview, and learnings | ARK-156, ARK-160 | M3 |
+| Ticket  | Title                                                                                                    | Depends on                         | Milestone |
+| ------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------- | --------- |
+| ARK-150 | Spike: side-by-side worktrees for a Clara run, driven by Orca                                            | None                               | M1        |
+| ARK-151 | Spike: Master Chief, run lead, and worker on Orca, with gate relay                                       | None                               | M1        |
+| ARK-152 | CLI core: `run start`, `status`, `run close`, event log, transition table, project config                | None                               | M1        |
+| ARK-153 | Plan file: `plan check`, `plan.mmd`, `gate record`                                                       | ARK-152                            | M1        |
+| ARK-154 | Worktrees and tests: `worktree create` builds the workspace mirror, `ark test` with the bun parser       | ARK-150, ARK-152                   | M1        |
+| ARK-155 | Merge requests in dependency order on GitHub and GitLab                                                  | ARK-152                            | M1        |
+| ARK-156 | Router skill and playbooks: chief, run-lead, worker, with Orca and Plannotator                           | ARK-151, ARK-153, ARK-154, ARK-155 | M1        |
+| ARK-157 | Cutover: delete the old design's code, tests, typed tools, and extension; generate the command reference | none                               | M1        |
+| ARK-158 | Bootstrap playbook, pytest and behave parsers, onboard Clara                                             | ARK-156                            | M2        |
+| ARK-159 | First Clara ticket across repos to merge requests in dependency order                                    | ARK-158                            | M2        |
+| ARK-160 | `ark retro`, `metrics.json`, and session usage parsers                                                   | ARK-152                            | M3        |
+| ARK-161 | Retro playbook, close check, deep interview, and learnings                                               | ARK-156, ARK-160                   | M3        |
 
 ARK-109 is superseded by this redesign.
 

@@ -8,7 +8,13 @@ import { assertAllowed } from "./transitions.ts";
 export type EventData = Record<string, any>;
 export type ArkEvent = { seq: number; time: string; type: string; data: EventData };
 
-export type Phase = "awaiting_criteria" | "planning" | "building" | "escalation" | "merge_requests_open" | "closed";
+export type Phase =
+  | "awaiting_criteria"
+  | "planning"
+  | "building"
+  | "escalation"
+  | "merge_requests_open"
+  | "closed";
 export type CriterionStatus = "pending" | "passing" | "failing" | "missing";
 export type StepStatus = "pending" | "running" | "succeeded" | "failed";
 
@@ -51,10 +57,22 @@ export function appendEvent(runDirectory: string, type: string, data: EventData)
   const events = readEvents(runDirectory);
   const state = deriveState(events);
   assertAllowed(state, type, data);
-  if (type === "gate.answered" && data.gate === "plan" && data.answer === "approve" && planHash(runDirectory) !== state.plan?.plan_hash) {
-    throw new ArkError("plan.yml changed after plan.checked: run ark plan check again before gate.answered plan approve");
+  if (
+    type === "gate.answered" &&
+    data.gate === "plan" &&
+    data.answer === "approve" &&
+    planHash(runDirectory) !== state.plan?.plan_hash
+  ) {
+    throw new ArkError(
+      "plan.yml changed after plan.checked: run ark plan check again before gate.answered plan approve",
+    );
   }
-  const event: ArkEvent = { seq: (events.at(-1)?.seq ?? 0) + 1, time: new Date().toISOString(), type, data };
+  const event: ArkEvent = {
+    seq: (events.at(-1)?.seq ?? 0) + 1,
+    time: new Date().toISOString(),
+    type,
+    data,
+  };
   appendFileSync(join(runDirectory, "events.ndjson"), `${JSON.stringify(event)}\n`);
   writeState(runDirectory);
   return event;
@@ -105,7 +123,14 @@ export function deriveState(events: ArkEvent[]): RunState {
       case "plan.checked":
         plan = { checked: true, valid: data.valid, plan_hash: data.plan_hash };
         planApproved = false;
-        if (data.valid) planSteps = data.steps.map(({ id, role, repo }: { id: string; role: string; repo: string }) => ({ id, role, repo }));
+        if (data.valid)
+          planSteps = data.steps.map(
+            ({ id, role, repo }: { id: string; role: string; repo: string }) => ({
+              id,
+              role,
+              repo,
+            }),
+          );
         break;
       case "gate.answered":
         gates[data.gate] = data.answer;
@@ -127,7 +152,8 @@ export function deriveState(events: ArkEvent[]): RunState {
       case "step.started":
         stepStatus.set(data.step, "running");
         round = Math.max(round, data.round);
-        if (!startedSteps.some((step) => step.id === data.step)) startedSteps.push({ id: data.step, role: data.role, repo: data.repo });
+        if (!startedSteps.some((step) => step.id === data.step))
+          startedSteps.push({ id: data.step, role: data.role, repo: data.repo });
         break;
       case "step.finished":
         stepStatus.set(data.step, data.outcome);
@@ -149,14 +175,20 @@ export function deriveState(events: ArkEvent[]): RunState {
   const steps = [
     ...planSteps,
     ...startedSteps.filter((started) => !planSteps.some((planned) => planned.id === started.id)),
-  ].map(({ id, role, repo }) => ({ id, role, repo, status: stepStatus.get(id) ?? ("pending" as StepStatus) }));
+  ].map(({ id, role, repo }) => ({
+    id,
+    role,
+    repo,
+    status: stepStatus.get(id) ?? ("pending" as StepStatus),
+  }));
 
   let phase: Phase;
   if (outcome !== null) phase = "closed";
   else if (mergeRequests.length > 0) phase = "merge_requests_open";
   else if (startedWithoutCriteria && gates.criteria !== "accept") phase = "awaiting_criteria";
   else if (!planApproved) phase = "planning";
-  else if (round >= roundBudget && lastTest && !lastTest.passed && !escalationAnswered && !human) phase = "escalation";
+  else if (round >= roundBudget && lastTest && !lastTest.passed && !escalationAnswered && !human)
+    phase = "escalation";
   else phase = "building";
 
   return {
@@ -166,7 +198,10 @@ export function deriveState(events: ArkEvent[]): RunState {
     phase,
     round,
     round_budget: roundBudget,
-    criteria: criteriaIds.map((id) => ({ id, status: criteriaStatus[id] ?? (lastTest ? "missing" : "pending") })),
+    criteria: criteriaIds.map((id) => ({
+      id,
+      status: criteriaStatus[id] ?? (lastTest ? "missing" : "pending"),
+    })),
     gates: {
       ...(gates.criteria === undefined ? {} : { criteria: gates.criteria }),
       ...(gates.plan === undefined ? {} : { plan: gates.plan }),

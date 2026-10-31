@@ -14,7 +14,13 @@ export type ProjectConfig = {
   workspace: string;
   ticket_source: "local" | "github" | "jira";
   compose?: string;
-  suites: { name: string; level: "unit" | "integration" | "e2e"; repo: string; command: string; parser: string }[];
+  suites: {
+    name: string;
+    level: "unit" | "integration" | "e2e";
+    repo: string;
+    command: string;
+    parser: string;
+  }[];
   roles: Record<Role, { harness: string; model: string }>;
   concurrency: number;
   round_budget: number;
@@ -39,12 +45,14 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     throw new ArkError(`${path}: ${message}`);
   };
   const asObject = (value: unknown, field: string): Fields => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${field} must be a mapping`);
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      fail(`${field} must be a mapping`);
     return value as Fields;
   };
   const text = (fields: Fields, key: string, field: string): string => {
     const value = fields[key];
-    if (typeof value !== "string" || value.trim() === "") fail(`${field} is required and must be a non-empty string`);
+    if (typeof value !== "string" || value.trim() === "")
+      fail(`${field} is required and must be a non-empty string`);
     return value as string;
   };
   const oneOf = (fields: Fields, key: string, field: string, allowed: string[]): string => {
@@ -54,18 +62,26 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   };
   const integer = (fields: Fields, key: string, minimum: number, fallback: number): number => {
     const value = fields[key] ?? fallback;
-    if (!Number.isInteger(value) || (value as number) < minimum) fail(`${key} must be an integer >= ${minimum}`);
+    if (!Number.isInteger(value) || (value as number) < minimum)
+      fail(`${key} must be an integer >= ${minimum}`);
     return value as number;
   };
 
   const fields = asObject(raw, "ark.yml");
 
   const workspace = text(fields, "workspace", "workspace");
-  if (!existsSync(workspace) || !statSync(workspace).isDirectory()) fail(`workspace is not an existing directory: ${workspace}`);
-  const ticketSource = oneOf(fields, "ticket_source", "ticket_source", ticketSources) as ProjectConfig["ticket_source"];
+  if (!existsSync(workspace) || !statSync(workspace).isDirectory())
+    fail(`workspace is not an existing directory: ${workspace}`);
+  const ticketSource = oneOf(
+    fields,
+    "ticket_source",
+    "ticket_source",
+    ticketSources,
+  ) as ProjectConfig["ticket_source"];
   if (fields.compose !== undefined) text(fields, "compose", "compose");
 
-  if (!Array.isArray(fields.suites) || fields.suites.length === 0) fail("suites is required and needs at least one suite");
+  if (!Array.isArray(fields.suites) || fields.suites.length === 0)
+    fail("suites is required and needs at least one suite");
   const names = new Set<string>();
   const suites = (fields.suites as unknown[]).map((entry, i) => {
     const suite = asObject(entry, `suites[${i}]`);
@@ -74,7 +90,12 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     names.add(name);
     return {
       name,
-      level: oneOf(suite, "level", `suites[${i}].level`, levels) as ProjectConfig["suites"][number]["level"],
+      level: oneOf(
+        suite,
+        "level",
+        `suites[${i}].level`,
+        levels,
+      ) as ProjectConfig["suites"][number]["level"],
       repo: text(suite, "repo", `suites[${i}].repo`),
       command: text(suite, "command", `suites[${i}].command`),
       parser: oneOf(suite, "parser", `suites[${i}].parser`, parserNames),
@@ -85,7 +106,10 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   const roles = {} as ProjectConfig["roles"];
   for (const role of roleNames) {
     const entry = asObject(rolesField[role] ?? fail(`roles.${role} is required`), `roles.${role}`);
-    roles[role] = { harness: text(entry, "harness", `roles.${role}.harness`), model: text(entry, "model", `roles.${role}.model`) };
+    roles[role] = {
+      harness: text(entry, "harness", `roles.${role}.harness`),
+      model: text(entry, "model", `roles.${role}.model`),
+    };
   }
 
   const config: ProjectConfig = {

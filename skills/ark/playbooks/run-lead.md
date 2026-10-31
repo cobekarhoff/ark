@@ -34,6 +34,7 @@ Skip this section unless the phase is `awaiting_criteria`. That means the ticket
    ```
 
    Add your recommendation to the question. If the ask times out, resume it with `--resume <message id>`. Never send a second question.
+
 3. On `edit`, the human's reply holds the changes. Revise the draft, and ask again.
 4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`. Put them in its frontmatter as `acceptance_criteria: [{id, text}]`. Then record the answer:
 
@@ -42,6 +43,7 @@ Skip this section unless the phase is `awaiting_criteria`. That means the ticket
    ```
 
    The command re-reads the ticket file and copies it to `<run folder>/ticket.md`. It refuses when the file has no criteria.
+
 5. On `abort`, run `ark gate record <run> criteria abort`, then go to section 11 with outcome `failed`.
 
 ## 3. Read the workspace and the learnings
@@ -131,12 +133,12 @@ plannotator annotate "<run folder>/plan.md" --gate --json --require-approval --r
 
 - Read the exit code and `<run folder>/gates/plan-<n>.json`:
 
-  | Exit | `decision` | What you do |
-  | --- | --- | --- |
-  | 0 | `approved` | Record `approve`. Treat any notes in `feedback` as guidance. |
-  | 1 | `annotated` | Read `feedback`. Revise the plan. Record `change`. |
-  | 1 | `dismissed` | The human closed the review without deciding. Ask Master Chief instead (below). |
-  | 2 | none | The gate failed to start. Ask Master Chief instead (below). |
+  | Exit | `decision`  | What you do                                                                     |
+  | ---- | ----------- | ------------------------------------------------------------------------------- |
+  | 0    | `approved`  | Record `approve`. Treat any notes in `feedback` as guidance.                    |
+  | 1    | `annotated` | Read `feedback`. Revise the plan. Record `change`.                              |
+  | 1    | `dismissed` | The human closed the review without deciding. Ask Master Chief instead (below). |
+  | 2    | none        | The gate failed to start. Ask Master Chief instead (below).                     |
 
 **Through Master Chief** (when Plannotator is not installed, or the review failed):
 
@@ -256,6 +258,7 @@ Each return to the implementer after the first build is a round. `ark run step <
    ```
 
    Add your recommendation and the evidence for it.
+
 2. Record the answer:
 
    ```sh

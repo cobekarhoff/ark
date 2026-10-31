@@ -1,5 +1,12 @@
 import { beforeEach, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { mergeOrder } from "../cli/merge-request";
@@ -29,12 +36,18 @@ beforeEach(() => {
   logFile = join(mkdtempSync(join(tmpdir(), "ark-fake-log-")), "calls.ndjson");
   process.env.FAKE_LOG = logFile;
   delete process.env.FAKE_GLAB_BLOCK_FAIL;
-  process.env.PATH = `${fixtures}:${(process.env.PATH ?? "").split(":").filter((entry) => entry !== fixtures).join(":")}`;
+  process.env.PATH = `${fixtures}:${(process.env.PATH ?? "")
+    .split(":")
+    .filter((entry) => entry !== fixtures)
+    .join(":")}`;
 });
 
 function calls(): LoggedCall[] {
   if (!existsSync(logFile)) return [];
-  return readFileSync(logFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  return readFileSync(logFile, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 const created = () => calls().filter((call) => call.argv.includes("create"));
@@ -67,7 +80,13 @@ function scenario(hosts: Record<"core" | "app", Host>, testPassed = true) {
   copyFileSync(ticketFile, join(runDirectory, "ticket.md"));
 
   const step = (id: string, repo: string, needs: string[], criteria: string[]) => ({
-    id, role: "implementer", repo, harness: "claude", model: "claude-sonnet", needs, criteria,
+    id,
+    role: "implementer",
+    repo,
+    harness: "claude",
+    model: "claude-sonnet",
+    needs,
+    criteria,
   });
   const steps = [
     step("app-impl", "repos/app", ["core-impl"], ["ARK-900-AC2"]),
@@ -100,27 +119,43 @@ function scenario(hosts: Record<"core" | "app", Host>, testPassed = true) {
     git(bare, "init", "--bare");
     const host: Host = name === "app" ? hosts.app : hosts.core;
     // `remote get-url` reports the host URL; pushes go to the local bare repo.
-    git(source, "remote", "add", "origin", `https://${host === "github" ? "github.com" : "gitlab.com"}/org/${name}.git`);
+    git(
+      source,
+      "remote",
+      "add",
+      "origin",
+      `https://${host === "github" ? "github.com" : "gitlab.com"}/org/${name}.git`,
+    );
     git(source, "config", "remote.origin.pushurl", bare);
     const worktree = join(mkdtempSync(join(tmpdir(), "ark-worktree-")), name);
     git(source, "worktree", "add", "-b", `ark/${run}`, worktree, base);
     if (name !== "docs") commit(worktree, name);
     worktrees[name] = worktree;
     bares[name] = bare;
-    events.push({ type: "worktree.created", data: { repo: `repos/${name}`, path: worktree, branch: `ark/${run}`, base } });
+    events.push({
+      type: "worktree.created",
+      data: { repo: `repos/${name}`, path: worktree, branch: `ark/${run}`, base },
+    });
   }
   events.push({
     type: "test.completed",
     data: {
       passed: testPassed,
-      heads: Object.fromEntries(Object.entries(worktrees).map(([name, path]) => [`repos/${name}`, git(path, "rev-parse", "HEAD")])),
+      heads: Object.fromEntries(
+        Object.entries(worktrees).map(([name, path]) => [
+          `repos/${name}`,
+          git(path, "rev-parse", "HEAD"),
+        ]),
+      ),
       suites: [{ name: "e2e", level: "e2e", passed: testPassed }],
       criteria: { "ARK-900-AC1": "passing", "ARK-900-AC2": "passing" },
     },
   });
   writeFileSync(
     join(runDirectory, "events.ndjson"),
-    events.map((event, i) => JSON.stringify({ seq: i + 1, time: "2026-10-29T00:00:00.000Z", ...event })).join("\n") + "\n",
+    events
+      .map((event, i) => JSON.stringify({ seq: i + 1, time: "2026-10-29T00:00:00.000Z", ...event }))
+      .join("\n") + "\n",
   );
   return { runDirectory, worktrees, bares };
 }
@@ -147,7 +182,10 @@ test("ARK-155-AC1 ARK-155-AC2 ARK-155-AC3 ARK-155-AC4 ARK-155-AC5 GitHub: pushes
   // The run branch reached each origin; docs had no commits and opened nothing.
   expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
   expect(git(bares.app, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
-  expect(Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.docs }).exitCode).not.toBe(0);
+  expect(
+    Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.docs })
+      .exitCode,
+  ).not.toBe(0);
 
   const coreBody = optionValue(opened[0], "--body");
   const appBody = optionValue(opened[1], "--body");
@@ -191,9 +229,15 @@ test("ARK-155-AC1 ARK-155-AC3 GitLab: uses glab, `Depends on !N` and a native de
 
   const block = calls().find((call) => call.argv.join(" ").includes("/blocks"));
   expect(block?.argv).toEqual([
-    "api", "--method", "POST", "projects/:fullpath/merge_requests/2/blocks?blocking_merge_request_id=9001",
+    "api",
+    "--method",
+    "POST",
+    "projects/:fullpath/merge_requests/2/blocks?blocking_merge_request_id=9001",
   ]);
-  for (const call of calls()) expect(call.argv.join(" ")).not.toMatch(/\/merge\b|\/approve\b|\bapprove\b|--auto|--when-pipeline/);
+  for (const call of calls())
+    expect(call.argv.join(" ")).not.toMatch(
+      /\/merge\b|\/approve\b|\bapprove\b|--auto|--when-pipeline/,
+    );
 });
 
 test("ARK-155-AC3 GitLab: a refused native dependency still opens the merge request with the description line", () => {
@@ -231,7 +275,12 @@ test("ARK-155-AC6 refuses when a worktree head moved after the test run, and nam
 });
 
 test("ARK-155-AC2 mergeOrder follows needs across repos, ties by first appearance, same plan same order", () => {
-  const step = (id: string, repo: string, needs: string[] = []) => ({ id, repo, needs, criteria: [] });
+  const step = (id: string, repo: string, needs: string[] = []) => ({
+    id,
+    repo,
+    needs,
+    criteria: [],
+  });
   const plan = {
     steps: [
       step("web-1", "web", ["api-1"]),
@@ -257,8 +306,18 @@ test("ARK-155-AC2 mergeOrder refuses a dependency cycle between repos", () => {
 });
 
 test("ARK-155-AC7 no source under cli/ runs a merge, approve or auto-merge command", () => {
-  const forbidden = /\b(pr|mr)["',\s]+(merge|approve)\b|--auto\b|--approve\b|--when-pipeline-succeeds|merge_requests\/[^"'`]*\/(merge|approve)\b/;
-  const sources = [...new Bun.Glob("**/*.ts").scanSync({ cwd: resolve(import.meta.dir, "../cli"), absolute: true })];
+  const forbidden =
+    /\b(pr|mr)["',\s]+(merge|approve)\b|--auto\b|--approve\b|--when-pipeline-succeeds|merge_requests\/[^"'`]*\/(merge|approve)\b/;
+  const sources = [
+    ...new Bun.Glob("**/*.ts").scanSync({
+      cwd: resolve(import.meta.dir, "../cli"),
+      absolute: true,
+    }),
+  ];
   expect(sources.length).toBeGreaterThan(0);
-  for (const source of sources) expect({ source, match: readFileSync(source, "utf8").match(forbidden)?.[0] }).toEqual({ source, match: undefined });
+  for (const source of sources)
+    expect({ source, match: readFileSync(source, "utf8").match(forbidden)?.[0] }).toEqual({
+      source,
+      match: undefined,
+    });
 });

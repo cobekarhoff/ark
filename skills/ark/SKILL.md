@@ -11,14 +11,14 @@ This skill is the only entry to Ark. It picks one playbook, loads it, and follow
 
 Read the first word of the arguments. It is the playbook name.
 
-| Name | Arguments | Playbook file | Who runs it |
-| --- | --- | --- | --- |
-| `chief` | none | `playbooks/chief.md` | The human opens it in an Orca terminal. It is Master Chief. |
-| `run-lead` | `<run>` | `playbooks/run-lead.md` | Master Chief starts it, one per run. |
-| `worker` | `<run> <step>` | `playbooks/worker.md` | A run lead starts it, one per step. |
-| `bootstrap` | none | `playbooks/bootstrap.md` | The human, once per project. |
-| `retro <run>` | `<run>` | `playbooks/retro.md`, Part 1: Close check | The run lead writes `retro.md`, then Master Chief asks the human three questions. |
-| `retro interview` | `interview` | `playbooks/retro.md`, Part 2: Deep interview | Master Chief, on request or every few runs. |
+| Name              | Arguments      | Playbook file                                | Who runs it                                                                       |
+| ----------------- | -------------- | -------------------------------------------- | --------------------------------------------------------------------------------- |
+| `chief`           | none           | `playbooks/chief.md`                         | The human opens it in an Orca terminal. It is Master Chief.                       |
+| `run-lead`        | `<run>`        | `playbooks/run-lead.md`                      | Master Chief starts it, one per run.                                              |
+| `worker`          | `<run> <step>` | `playbooks/worker.md`                        | A run lead starts it, one per step.                                               |
+| `bootstrap`       | none           | `playbooks/bootstrap.md`                     | The human, once per project.                                                      |
+| `retro <run>`     | `<run>`        | `playbooks/retro.md`, Part 1: Close check    | The run lead writes `retro.md`, then Master Chief asks the human three questions. |
+| `retro interview` | `interview`    | `playbooks/retro.md`, Part 2: Deep interview | Master Chief, on request or every few runs.                                       |
 
 ## Steps
 

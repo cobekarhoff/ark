@@ -50,6 +50,7 @@ You turn the plan's test cases into tests that prove the AC, and you make them p
    - Does it need an export, flag or hook that has no production caller? Then test at the real boundary instead.
 
    Delete or rewrite a test that asserts nothing, compares a value to itself, takes its expected value from the code under test, asserts on call shape or mock calls, uses a mock that supplies the asserted behavior, or has a name that promises more than it checks.
+
 6. Commit the tests on the branch `ark/<ticket id>-<slug>`. Do not push.
 
 ### Reviewer
@@ -61,12 +62,12 @@ You look for defects in the run's changes and report findings. You never edit.
 3. Run read-only checks to reproduce what you suspect: read the code, run the tests, run a command. Do not change any file in the worktree. Do not commit, stash, reset or checkout.
 4. Write the findings to `<run folder>/findings/<step>.md`. It is the only file you create. Rank each finding from P0 (must fix) to P3 (minor):
 
-   | Rank | Meaning |
-   | --- | --- |
-   | P0 | Must fix. An AC fails, data is lost, or the change is unsafe. |
-   | P1 | Should fix before merge. A real defect with a clear impact. |
-   | P2 | Worth fixing. A weakness that is not urgent. |
-   | P3 | Minor. Style or small cleanup. |
+   | Rank | Meaning                                                       |
+   | ---- | ------------------------------------------------------------- |
+   | P0   | Must fix. An AC fails, data is lost, or the change is unsafe. |
+   | P1   | Should fix before merge. A real defect with a clear impact.   |
+   | P2   | Worth fixing. A weakness that is not urgent.                  |
+   | P3   | Minor. Style or small cleanup.                                |
 
    Write each finding in this form:
 
@@ -81,6 +82,7 @@ You look for defects in the run's changes and report findings. You never edit.
    ```
 
    A finding without a file, a line and evidence is not a finding. Do not pad the list. If you find nothing, write `No findings.` in the file.
+
 5. Do not decide what sends work back. The run lead decides.
 
 ## 3. Ask and check

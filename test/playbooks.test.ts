@@ -8,10 +8,14 @@ const bootstrapPlaybook = readFileSync(join(playbookDirectory, "bootstrap.md"), 
 const runLeadPlaybook = readFileSync(join(playbookDirectory, "run-lead.md"), "utf8");
 
 test("ARK-169-AC1 bootstrap creates the depth-check Run before starting a worker", () => {
-  const depthCheck = bootstrapPlaybook.split("## 6. Confirm Orca's nesting depth is at least 2")[1]?.split("\n## ")[0];
+  const depthCheck = bootstrapPlaybook
+    .split("## 6. Confirm Orca's nesting depth is at least 2")[1]
+    ?.split("\n## ")[0];
   expect(depthCheck).toBeDefined();
 
-  const shellBlocks = [...depthCheck!.matchAll(/^[ \t]*```sh\n([\s\S]*?)^[ \t]*```/gm)].map(([, body]) => body);
+  const shellBlocks = [...depthCheck!.matchAll(/^[ \t]*```sh\n([\s\S]*?)^[ \t]*```/gm)].map(
+    ([, body]) => body,
+  );
   const commands = shellBlocks.join("\n");
   const createRun = commands.search(/^\s*orca orchestration run-create\b/m);
   const startWorker = commands.search(/^\s*orca orchestration worker-start\b/m);
@@ -21,26 +25,36 @@ test("ARK-169-AC1 bootstrap creates the depth-check Run before starting a worker
 });
 
 test("ARK-169-AC2 chief creates its own Run unless the current Run has the queue objective", () => {
-  const queueSection = chiefPlaybook.split("## 5. Queue the approved tickets")[1]?.split("\n## ")[0];
+  const queueSection = chiefPlaybook
+    .split("## 5. Queue the approved tickets")[1]
+    ?.split("\n## ")[0];
   expect(queueSection).toBeDefined();
-  expect(queueSection).toMatch(/Use that Run only when its objective is exactly "Master Chief: <project> tickets"\./);
-  expect(queueSection).toMatch(/In every other case, including no Run or a Run with another objective, create it\./);
+  expect(queueSection).toMatch(
+    /Use that Run only when its objective is exactly "Master Chief: <project> tickets"\./,
+  );
+  expect(queueSection).toMatch(
+    /In every other case, including no Run or a Run with another objective, create it\./,
+  );
 
-  const runCreate = queueSection!.indexOf("orca orchestration run-create --objective \"Master Chief: <project> tickets\"");
+  const runCreate = queueSection!.indexOf(
+    'orca orchestration run-create --objective "Master Chief: <project> tickets"',
+  );
   const taskCreate = queueSection!.indexOf("orca orchestration task-create");
   expect(runCreate).toBeGreaterThanOrEqual(0);
   expect(taskCreate).toBeGreaterThan(runCreate);
 });
 test("ARK-162-AC1 Master Chief proceeds only with an Orca terminal handle", () => {
   const command = chiefPlaybook.match(/Run `([^`]+)`\./)?.[1];
-  expect(command).toBe("test -n \"$ORCA_TERMINAL_HANDLE\"");
+  expect(command).toBe('test -n "$ORCA_TERMINAL_HANDLE"');
   expect(chiefPlaybook).not.toContain("caller.orcaSessionId");
 
   const withTerminalHandle = Bun.spawnSync(["sh", "-c", command!], {
     env: { ...process.env, ORCA_TERMINAL_HANDLE: "terminal-test" },
   });
   const withoutTerminalHandle = Bun.spawnSync(["sh", "-c", command!], {
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "ORCA_TERMINAL_HANDLE")),
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key !== "ORCA_TERMINAL_HANDLE"),
+    ),
   });
 
   expect(withTerminalHandle.exitCode).toBe(0);
@@ -48,7 +62,9 @@ test("ARK-162-AC1 Master Chief proceeds only with an Orca terminal handle", () =
 });
 
 test("ARK-164-AC1 dispatch starts in an Orca-known worktree and completes the queue Task at close", () => {
-  const dispatch = chiefPlaybook.split("## 6. Start a run lead for each ready ticket")[1]?.split("\n## ")[0];
+  const dispatch = chiefPlaybook
+    .split("## 6. Start a run lead for each ready ticket")[1]
+    ?.split("\n## ")[0];
   const close = chiefPlaybook.split("## 8. Close the run")[1]?.split("\n## ")[0];
   expect(dispatch).toBeDefined();
   expect(close).toBeDefined();
@@ -69,7 +85,9 @@ test("ARK-166-AC3 opens Plannotator on plan.md only", () => {
 });
 
 test("ARK-166-AC4 ticket snapshot has the required sections and AC table", () => {
-  const ticketTemplate = chiefPlaybook.split("## 6. Start a run lead for each ready ticket")[1]?.split("\n## ")[0];
+  const ticketTemplate = chiefPlaybook
+    .split("## 6. Start a run lead for each ready ticket")[1]
+    ?.split("\n## ")[0];
   expect(ticketTemplate).toBeDefined();
   expect(ticketTemplate).toMatch(/## Problem[\s\S]*## Change[\s\S]*## Acceptance criteria/);
   expect(ticketTemplate).toContain("| ID | Criterion |");

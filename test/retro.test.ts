@@ -33,7 +33,9 @@ type EventRow = [time: string, type: string, data: Record<string, unknown>];
 
 function writeEvents(directory: string, rows: EventRow[]): void {
   mkdirSync(directory, { recursive: true });
-  const lines = rows.map(([time, type, data], index) => JSON.stringify({ seq: index + 1, time: `2026-10-29T${time}Z`, type, data }));
+  const lines = rows.map(([time, type, data], index) =>
+    JSON.stringify({ seq: index + 1, time: `2026-10-29T${time}Z`, type, data }),
+  );
   writeFileSync(join(directory, "events.ndjson"), `${lines.join("\n")}\n`);
 }
 
@@ -41,17 +43,39 @@ const day = (time: string) => `2026-10-29T${time}Z`;
 
 // The run lead works in the workspace root; build runs in repos/platform, review in repos/shared.
 const scenario: EventRow[] = [
-  ["14:20:00.000", "run.started", { run: runId, project: "demo", ticket: { id: "ARK-901", title: "t" }, criteria: ["ARK-901-AC1"], round_budget: 2 }],
+  [
+    "14:20:00.000",
+    "run.started",
+    {
+      run: runId,
+      project: "demo",
+      ticket: { id: "ARK-901", title: "t" },
+      criteria: ["ARK-901-AC1"],
+      round_budget: 2,
+    },
+  ],
   ["14:20:30.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
   ["14:21:00.000", "gate.answered", { gate: "plan", answer: "change" }],
   ["14:21:30.000", "plan.checked", { valid: true, problems: [], plan_hash: "b", steps: [] }],
   ["14:22:00.000", "gate.answered", { gate: "plan", answer: "approve" }],
-  ["14:24:00.000", "step.started", { step: "build", role: "implementer", repo: "repos/platform", round: 1 }],
+  [
+    "14:24:00.000",
+    "step.started",
+    { step: "build", role: "implementer", repo: "repos/platform", round: 1 },
+  ],
   ["14:25:00.000", "step.finished", { step: "build", outcome: "succeeded" }],
-  ["14:28:00.000", "step.started", { step: "review", role: "reviewer", repo: "repos/shared", round: 1 }],
+  [
+    "14:28:00.000",
+    "step.started",
+    { step: "review", role: "reviewer", repo: "repos/shared", round: 1 },
+  ],
   ["14:55:00.000", "step.finished", { step: "review", outcome: "failed" }],
   ["14:55:30.000", "gate.answered", { gate: "escalation", answer: "one_more_round" }],
-  ["14:56:00.000", "step.started", { step: "build", role: "implementer", repo: "repos/platform", round: 2 }],
+  [
+    "14:56:00.000",
+    "step.started",
+    { step: "build", role: "implementer", repo: "repos/platform", round: 2 },
+  ],
   ["14:57:00.000", "step.finished", { step: "build", outcome: "succeeded" }],
   ["15:00:00.000", "run.closed", { outcome: "aborted" }],
 ];
@@ -72,9 +96,43 @@ describe("usage parsers", () => {
   test("ARK-160-AC7 parses an OMP session file into per-message usage", () => {
     const session = parseOmpSession(join(fixtures, "omp", "build.jsonl"));
     expect(session.cwd).toBe("__RUN__/workspace/repos/platform");
-    expect(session.messages.map(({ time, model, provider, input, output, cacheRead, cacheWrite, costUsd, toolError }) => ({ time, model, provider, input, output, cacheRead, cacheWrite, costUsd, toolError }))).toEqual([
-      { time: day("14:24:42.254"), model: "claude-haiku-4-5", provider: "anthropic", input: 10, output: 305, cacheRead: 0, cacheWrite: 15713, costUsd: 0.032961, toolError: false },
-      { time: day("14:24:43.535"), model: "claude-haiku-4-5", provider: "anthropic", input: 8, output: 44, cacheRead: 15713, cacheWrite: 327, costUsd: 0.0024533000000000003, toolError: false },
+    expect(
+      session.messages.map(
+        ({ time, model, provider, input, output, cacheRead, cacheWrite, costUsd, toolError }) => ({
+          time,
+          model,
+          provider,
+          input,
+          output,
+          cacheRead,
+          cacheWrite,
+          costUsd,
+          toolError,
+        }),
+      ),
+    ).toEqual([
+      {
+        time: day("14:24:42.254"),
+        model: "claude-haiku-4-5",
+        provider: "anthropic",
+        input: 10,
+        output: 305,
+        cacheRead: 0,
+        cacheWrite: 15713,
+        costUsd: 0.032961,
+        toolError: false,
+      },
+      {
+        time: day("14:24:43.535"),
+        model: "claude-haiku-4-5",
+        provider: "anthropic",
+        input: 8,
+        output: 44,
+        cacheRead: 15713,
+        cacheWrite: 327,
+        costUsd: 0.0024533000000000003,
+        toolError: false,
+      },
     ]);
     expect(session.messages[0].sessionFile).toBe(join(fixtures, "omp", "build.jsonl"));
   });
@@ -92,7 +150,14 @@ describe("usage parsers", () => {
     // Three records, two responses: the first response spans two records with the same message id.
     expect(session.messages).toHaveLength(3);
     const [first, second, unpriced] = session.messages;
-    expect(first).toMatchObject({ model: "claude-sonnet-5", provider: "anthropic", input: 2, output: 175, cacheRead: 0, cacheWrite: 32857 });
+    expect(first).toMatchObject({
+      model: "claude-sonnet-5",
+      provider: "anthropic",
+      input: 2,
+      output: 175,
+      cacheRead: 0,
+      cacheWrite: 32857,
+    });
     expect(first.costUsd).toBeCloseTo(0.133182, 9); // (2*2 + 175*10 + 32857*4) / 1e6, 1-hour cache write at 2x input
     expect(second.costUsd).toBeCloseTo(0.0108194, 9);
     expect(unpriced.costUsd).toBe("unknown");
@@ -104,9 +169,22 @@ describe("usage parsers", () => {
     installAllSessions();
     installSession(ompRoot, "platform/session-build/Helper.jsonl", "omp/build.jsonl");
     mkdirSync(join(ompRoot, "elsewhere"), { recursive: true });
-    writeFileSync(join(ompRoot, "elsewhere", "other.jsonl"), readFileSync(join(fixtures, "omp", "build.jsonl"), "utf8").replaceAll("__RUN__", "/somewhere/else"));
-    const files = readUsage(runDirectory).map((session) => session.file.replace(ompRoot, "omp").replace(claudeRoot, "claude")).sort();
-    expect(files).toEqual(["claude/workspace/session-lead.jsonl", "omp/platform/session-build.jsonl", "omp/platform/session-build/Helper.jsonl", "omp/shared/session-review.jsonl"]);
+    writeFileSync(
+      join(ompRoot, "elsewhere", "other.jsonl"),
+      readFileSync(join(fixtures, "omp", "build.jsonl"), "utf8").replaceAll(
+        "__RUN__",
+        "/somewhere/else",
+      ),
+    );
+    const files = readUsage(runDirectory)
+      .map((session) => session.file.replace(ompRoot, "omp").replace(claudeRoot, "claude"))
+      .sort();
+    expect(files).toEqual([
+      "claude/workspace/session-lead.jsonl",
+      "omp/platform/session-build.jsonl",
+      "omp/platform/session-build/Helper.jsonl",
+      "omp/shared/session-review.jsonl",
+    ]);
   });
 });
 
@@ -118,21 +196,40 @@ describe("ark retro", () => {
     retro(runId);
     expect(readFileSync(join(runDirectory, "metrics.json"), "utf8")).toBe(first);
     expect(first).not.toMatch(/\d\.\d{7,}/); // rounded to 6 decimals
-    expect(Object.keys(JSON.parse(first))).toEqual(["run", "cost", "time", "rework", "human_intervention", "escaped_defects", "orchestration", "comparison"]);
+    expect(Object.keys(JSON.parse(first))).toEqual([
+      "run",
+      "cost",
+      "time",
+      "rework",
+      "human_intervention",
+      "escaped_defects",
+      "orchestration",
+      "comparison",
+    ]);
   });
 
   test("ARK-160-AC1 compares with the project's other closed runs that have metrics", () => {
     const projectRuns = join(arkHome, "projects", "demo", "runs");
     const closed = (name: string, cost: number, wallSeconds: number, closing = true) => {
       const directory = join(projectRuns, name);
-      writeEvents(directory, [["10:00:00.000", "run.started", {}], ...(closing ? ([["10:05:00.000", "run.closed", {}]] as EventRow[]) : [])]);
-      writeFileSync(join(directory, "metrics.json"), JSON.stringify({ cost: { total_usd: cost }, time: { wall_seconds: wallSeconds } }));
+      writeEvents(directory, [
+        ["10:00:00.000", "run.started", {}],
+        ...(closing ? ([["10:05:00.000", "run.closed", {}]] as EventRow[]) : []),
+      ]);
+      writeFileSync(
+        join(directory, "metrics.json"),
+        JSON.stringify({ cost: { total_usd: cost }, time: { wall_seconds: wallSeconds } }),
+      );
     };
     closed("2026-10-01-ARK-900-1", 1, 10);
     closed("2026-10-02-ARK-900-1", 3, 30);
     closed("2026-10-03-ARK-900-1", 100, 1000, false); // still open: ignored
     retro(runId);
-    expect(readMetrics().comparison).toEqual({ runs_compared: 2, median_cost_usd: 2, median_wall_seconds: 20 });
+    expect(readMetrics().comparison).toEqual({
+      runs_compared: 2,
+      median_cost_usd: 2,
+      median_wall_seconds: 20,
+    });
   });
 
   test("ARK-160-AC2 reports cost and tokens per run, step, role and model, and the review to build ratio", () => {
@@ -147,7 +244,12 @@ describe("ark retro", () => {
     expect(cost.by_step.review.usd).toBeCloseTo(0.1821188, 5);
     expect(cost.by_role.implementer.usd).toBeCloseTo(0.0354143, 5);
     expect(cost.by_role.reviewer.usd).toBeCloseTo(0.1821188, 5);
-    expect(Object.keys(cost.by_model)).toEqual(["claude-future-9", "claude-haiku-4-5", "claude-opus-5-5", "claude-sonnet-5"]);
+    expect(Object.keys(cost.by_model)).toEqual([
+      "claude-future-9",
+      "claude-haiku-4-5",
+      "claude-opus-5-5",
+      "claude-sonnet-5",
+    ]);
     expect(cost.by_model["claude-haiku-4-5"].tokens).toBe(32120);
     expect(cost.review_to_build_ratio).toBeCloseTo(0.1821188 / 0.0354143, 4);
   });
@@ -165,7 +267,11 @@ describe("ark retro", () => {
     retro(runId);
     const { cost, orchestration } = readMetrics();
     expect(cost.includes_unknown).toBe(true);
-    expect(cost.by_model["claude-future-9"]).toEqual({ usd: "unknown", tokens: 12, includes_unknown: true });
+    expect(cost.by_model["claude-future-9"]).toEqual({
+      usd: "unknown",
+      tokens: 12,
+      includes_unknown: true,
+    });
     expect(orchestration.master_chief_and_run_lead_cost.includes_unknown).toBe(true);
     expect(orchestration.master_chief_and_run_lead_cost.usd).toBeCloseTo(0.1440014, 5); // the known part only
     expect(runningCost(runDirectory).usd).toBe("unknown");
@@ -174,7 +280,12 @@ describe("ark retro", () => {
   test("ARK-160-AC3 reports unknown, not zero, when no session usage exists", () => {
     retro(runId);
     const { cost, orchestration } = readMetrics();
-    expect(cost).toMatchObject({ total_usd: "unknown", tokens: 0, includes_unknown: true, review_to_build_ratio: "unknown" });
+    expect(cost).toMatchObject({
+      total_usd: "unknown",
+      tokens: 0,
+      includes_unknown: true,
+      review_to_build_ratio: "unknown",
+    });
     expect(cost.by_step.build).toEqual({ usd: "unknown", tokens: 0, includes_unknown: true });
     expect(orchestration.dead_dispatches).toBe(2);
     expect(runningCost(runDirectory)).toEqual({ usd: "unknown", tokens: 0 });
@@ -198,15 +309,25 @@ describe("ark retro", () => {
     retro(runId);
     const metrics = readMetrics();
     expect(metrics.rework).toEqual({ rounds: 2, escalations: 1, findings_sent_back: 1 });
-    expect(metrics.human_intervention).toEqual({ plan_changes: 1, mr_comments: 0, mr_commits_after_open: 0 });
-    expect(metrics.escaped_defects).toEqual([{ ticket: "ARK-901", run: runId, note: "rounding bug found in production" }]);
+    expect(metrics.human_intervention).toEqual({
+      plan_changes: 1,
+      mr_comments: 0,
+      mr_commits_after_open: 0,
+    });
+    expect(metrics.escaped_defects).toEqual([
+      { ticket: "ARK-901", run: runId, note: "rounding bug found in production" },
+    ]);
   });
 
   describe("merge request activity", () => {
     const originalPath = process.env.PATH;
     const withMergeRequest: EventRow[] = [
       ...scenario.slice(0, -1),
-      ["14:56:30.000", "merge_request.opened", { repo: "repos/platform", url: "https://github.com/acme/platform/pull/7", number: 7 }],
+      [
+        "14:56:30.000",
+        "merge_request.opened",
+        { repo: "repos/platform", url: "https://github.com/acme/platform/pull/7", number: 7 },
+      ],
       scenario[scenario.length - 1],
     ];
 
@@ -230,7 +351,10 @@ describe("ark retro", () => {
       } finally {
         process.env.PATH = originalPath;
       }
-      expect(readMetrics().human_intervention).toMatchObject({ mr_comments: 3, mr_commits_after_open: 1 });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_comments: 3,
+        mr_commits_after_open: 1,
+      });
     });
 
     test("ARK-160-AC5 reports unknown MR activity when gh cannot answer", () => {
@@ -241,7 +365,10 @@ describe("ark retro", () => {
       } finally {
         process.env.PATH = originalPath;
       }
-      expect(readMetrics().human_intervention).toMatchObject({ mr_comments: "unknown", mr_commits_after_open: "unknown" });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_comments: "unknown",
+        mr_commits_after_open: "unknown",
+      });
     });
   });
 
