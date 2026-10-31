@@ -54,6 +54,24 @@ bun test            # run the tests
 
 To undo the setup, run `bun unlink` and `omp plugin uninstall ark`.
 
+### Quality checks
+
+Run `bun run typecheck` (TypeScript 7), `bun run lint` (type-aware oxlint),
+`bun run format:check` (oxfmt), and `bun test` before submitting changes.
+CI runs these commands in that order and blocks on any failure.
+Use `bun run format` to format supported repository files in place.
+
+The optional pre-commit hook runs the same checks without rewriting files:
+
+```sh
+git config --local core.hooksPath .githooks  # enable for this checkout
+git config --local --unset core.hooksPath   # disable
+```
+
+The hook checks the working tree, not an isolated copy of the index; stage all
+intended changes before committing. It does not replace CI. Enabling it replaces
+any existing local hooks path, so preserve that setting if you already use hooks.
+
 ## Project layout
 
 | Path | Contents |
