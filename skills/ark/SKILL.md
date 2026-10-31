@@ -1,6 +1,6 @@
 ---
 name: ark
-description: Entry point for Ark, the system that takes tickets to merge-ready changes. Use `/skill:ark chief`, `/skill:ark run-lead <run>`, `/skill:ark worker <run> <step>`, `/skill:ark bootstrap`, `/skill:ark retro <run>` or `/skill:ark retro interview`. Use it to run a ticket, plan or build one step of a run, onboard a project, close out a run, or interview the human across several runs.
+description: Entry point for Ark, the system that takes tickets to merge-ready changes. Use `/skill:ark chief`, `/skill:ark run-lead <run>`, `/skill:ark worker <run> <step>`, `/skill:ark bootstrap`, `/skill:ark brainstorm`, `/skill:ark retro <run>` or `/skill:ark retro interview`. Use it to run a ticket, plan or build one step of a run, onboard a project, brainstorm proposed tickets, close out a run, or interview the human across several runs.
 ---
 
 # Ark
@@ -17,13 +17,14 @@ Read the first word of the arguments. It is the playbook name.
 | `run-lead`        | `<run>`        | `playbooks/run-lead.md`                      | Master Chief starts it, one per run.                                              |
 | `worker`          | `<run> <step>` | `playbooks/worker.md`                        | A run lead starts it, one per step.                                               |
 | `bootstrap`       | none           | `playbooks/bootstrap.md`                     | The human, once per project.                                                      |
+| `brainstorm`      | none           | `playbooks/brainstorm.md`                    | The human opens it. It is the brainstorm partner and writes proposed tickets.     |
 | `retro <run>`     | `<run>`        | `playbooks/retro.md`, Part 1: Close check    | The run lead writes `retro.md`, then Master Chief asks the human three questions. |
 | `retro interview` | `interview`    | `playbooks/retro.md`, Part 2: Deep interview | Master Chief, on request or every few runs.                                       |
 
 ## Steps
 
 1. Take the first word of the arguments as the name.
-2. If the name is missing or is not one of the five above, or if it is `retro` without `<run>` or `interview`, do nothing else. Print this list and stop:
+2. If the name is missing or is not one of the six above, or if it is `retro` without `<run>` or `interview`, do nothing else. Print this list and stop:
 
    ```text
    Unknown playbook "<name>". Use one of:
@@ -31,6 +32,7 @@ Read the first word of the arguments. It is the playbook name.
      run-lead <run>           Run lead: plan and drive one run
      worker <run> <step>      Worker: do one step of a run
      bootstrap                Teach Ark a new project
+     brainstorm               Brainstorm partner: write proposed tickets with the human
      retro <run>              Close check for one run
      retro interview          Deep interview across several runs
    ```
