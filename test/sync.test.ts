@@ -93,6 +93,7 @@ function startRun(repoNames = ["."]) {
     },
   ];
   const plan = {
+    design: { interfaces: [{ name: "fixture plan", callers: ["ark sync"] }] },
     summary: {
       why: "Prepare the sync fixture.",
       changes: [

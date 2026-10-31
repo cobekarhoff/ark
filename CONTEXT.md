@@ -50,6 +50,10 @@ _Avoid_: Change request
 The one agent session you talk to. It suggests and queues tickets, starts a run lead for each, and brings you every gate. It never writes product code.
 _Avoid_: Orchestrator, main agent, coordinator, master agent
 
+**Brainstorm partner**:
+The agent session you open to explore ideas. It writes the ideas you keep as proposed tickets. It never sets a ticket to ready, queues one, or sends to Master Chief.
+_Avoid_: PO agent
+
 **Run lead**:
 The agent that drives one run across every repo its ticket touches. It plans, starts workers, decides what to do with findings, and asks you for gate decisions through Master Chief. It never writes product code.
 _Avoid_: Orchestrator, ticket lead, lead
