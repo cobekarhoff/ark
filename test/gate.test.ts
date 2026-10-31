@@ -24,7 +24,7 @@ const plan = {
       criteria: ["ARK-901-AC1", "ARK-901-AC2"],
     },
   ],
-  test_cases: criteria.map(({ id }) => ({ id: `t-${id}`, criterion: id, level: "integration", steps: ["act"], expected: "ok" })),
+  test_cases: criteria.map(({ id }) => ({ id: `t-${id}`, criterion: id, level: "integration", given: [], when: ["act"], then: ["ok"], expected: "ok" })),
 };
 
 let projectDirectory: string;

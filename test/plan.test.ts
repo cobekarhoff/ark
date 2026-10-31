@@ -23,7 +23,9 @@ const testCase = (id: string, criterion: string, level = "integration") => ({
   id,
   criterion,
   level,
-  steps: ["do the thing"],
+  given: [],
+  when: ["do the thing"],
+  then: ["the task completes"],
   expected: "the system shall complete the task",
 });
 
@@ -187,6 +189,99 @@ describe("plan check", () => {
     expect(result.out).toContain('criterion "ARK-900-AC9", which is not in the ticket');
   });
 
+  test("ARK-172-AC1 accepts explicit groups and empty given through plan check", () => {
+    for (const given of [["context"], []]) {
+      const plan = validPlan();
+      plan.test_cases = [{ ...testCase("named-case", "ARK-900-AC1"), given }, plan.test_cases[1]];
+      writePlan(plan);
+      expect(ark("plan", "check", runId).code).toBe(0);
+      expect(existsSync(join(runDirectory, "plan.md"))).toBe(true);
+    }
+  });
+
+  test("ARK-172-AC1 rejects invalid groups and legacy steps by test case name", () => {
+    const invalidCases: [string, Record<string, unknown>, string][] = [
+      ["empty when", { when: [] }, "empty when list"],
+      ["empty then", { then: [] }, "empty then list"],
+      ["old steps empty", { steps: [] }, "old steps field"],
+      ["old steps null", { steps: null }, "old steps field"],
+      ["missing given", { given: undefined }, "given must be a list of strings"],
+      ["malformed given", { given: ["context", 1] }, "given must be a list of strings"],
+      ["missing when", { when: undefined }, "when must be a list of strings"],
+      ["malformed when", { when: [1] }, "when must be a list of strings"],
+      ["missing then", { then: undefined }, "then must be a list of strings"],
+      ["malformed then", { then: ["result", null] }, "then must be a list of strings"],
+      ["missing expected", { expected: undefined }, "has no expected sentence"],
+    ];
+
+    for (const [name, overrides, expected] of invalidCases) {
+      const plan = validPlan();
+      plan.test_cases = [
+        { ...testCase("named-case", "ARK-900-AC1"), ...overrides },
+        plan.test_cases[1],
+      ];
+      writePlan(plan);
+      const result = ark("plan", "check", runId);
+      expect(result.code, name).toBe(1);
+      expect(`${result.out}${result.err}`, name).toContain("named-case");
+      expect(`${result.out}${result.err}`, name).toContain(expected);
+    }
+  });
+
+  test("ARK-172-AC2 renders each group in order and omits empty given", () => {
+    const plan = validPlan();
+    const expectedSentence = "When actions finish, the system shall preserve results.";
+    plan.test_cases = [
+      {
+        ...testCase("populated", "ARK-900-AC1"),
+        given: ["context one", "context two"],
+        when: ["action one", "action two"],
+        then: ["result one", "result two"],
+        expected: expectedSentence,
+      },
+      {
+        ...testCase("empty-given", "ARK-900-AC1"),
+        when: ["empty action one", "empty action two"],
+        then: ["empty result one", "empty result two"],
+      },
+      plan.test_cases[1],
+    ];
+    writePlan(plan);
+
+    expect(ark("plan", "check", runId).code).toBe(0);
+    const markdown = readFileSync(join(runDirectory, "plan.md"), "utf8");
+    expect(markdown).toContain(
+      "```gherkin\nGiven context one\nAnd context two\nWhen action one\nAnd action two\nThen result one\nAnd result two\n```\n\nExpected: When actions finish, the system shall preserve results.",
+    );
+    expect(markdown).toContain(
+      "```gherkin\nWhen empty action one\nAnd empty action two\nThen empty result one\nAnd empty result two\n```",
+    );
+    expect(markdown).not.toContain("Given empty");
+  });
+
+  test("ARK-172-AC3 renders the exact expected sentence after the Gherkin block", () => {
+    const plan = validPlan();
+    const expectedSentence = "When the result is ready, the system shall report it verbatim.";
+    plan.test_cases = [
+      {
+        ...testCase("expected-outside-then", "ARK-900-AC1"),
+        given: ["a prepared context"],
+        when: ["the action runs"],
+        then: ["the result appears"],
+        expected: expectedSentence,
+      },
+      plan.test_cases[1],
+    ];
+    writePlan(plan);
+
+    expect(ark("plan", "check", runId).code).toBe(0);
+    const markdown = readFileSync(join(runDirectory, "plan.md"), "utf8");
+    expect(markdown).toContain(
+      `Then the result appears\n\`\`\`\n\nExpected: ${expectedSentence}`,
+    );
+    expect(markdown).not.toContain(`Then ${expectedSentence}`);
+  });
+
   test("ARK-166-AC1 renders plan.md with summary, change table, Mermaid steps and Gherkin cases", () => {
     writePlan(validPlan());
     expect(ark("plan", "check", runId).code).toBe(0);
@@ -195,7 +290,6 @@ describe("plan check", () => {
     expect(first).toContain("| Criterion | Where | Now | Fix |");
     expect(first).toContain("| ARK-900-AC1 | cli/plan.ts | Writes plan.yml. | Write plan.md. |");
     expect(first).toContain("```mermaid\nflowchart LR\n");
-    expect(first).toContain("```gherkin\nGiven do the thing\nThen the system shall complete the task\n```");
     expect(existsSync(join(runDirectory, "plan.mmd"))).toBe(false);
     expect(ark("plan", "check", runId).code).toBe(0);
     expect(readFileSync(join(runDirectory, "plan.md"), "utf8")).toBe(first);
