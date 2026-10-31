@@ -29,12 +29,12 @@ Report each problem once, at the place where it matters most. Do not repeat a pr
 
 Use these priorities:
 
-| Priority | Meaning |
-| --- | --- |
-| P0 | Must fix. The change is wrong, unsafe, or an AC has no proof. |
-| P1 | Should fix before merge. A likely defect or a test that cannot fail. |
-| P2 | Worth fixing. A real weakness that is not likely to bite soon. |
-| P3 | Minor. A small clarity or naming point. |
+| Priority | Meaning                                                              |
+| -------- | -------------------------------------------------------------------- |
+| P0       | Must fix. The change is wrong, unsafe, or an AC has no proof.        |
+| P1       | Should fix before merge. A likely defect or a test that cannot fail. |
+| P2       | Worth fixing. A real weakness that is not likely to bite soon.       |
+| P3       | Minor. A small clarity or naming point.                              |
 
 Write each finding in this form:
 

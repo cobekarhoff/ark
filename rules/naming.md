@@ -1,6 +1,7 @@
 ---
 description: "Naming gate for code: full words for identifiers, commands, flags, gate names and filenames"
 ---
+
 # Naming gate
 
 Use full words for anything that holds a domain object or lives beyond a few lines: `worktree`, `repoConfig`, `context`, `pullRequest`, `testCase`, `event`, `result`, `suite`, `runNumber`. Not `ws`, `cfg`, `ctx`, `pr`, `tc`, `ev`, `res`, `n`.

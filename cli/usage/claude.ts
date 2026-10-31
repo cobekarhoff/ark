@@ -7,7 +7,10 @@ import type { SessionUsage, UsageMessage } from "./index.ts";
  * A 1-hour cache write costs twice the input price. Values match the costs OMP recorded for
  * the same models. A model that is not listed gets cost "unknown", never zero.
  */
-const PRICES_PER_MILLION: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
+const PRICES_PER_MILLION: Record<
+  string,
+  { input: number; output: number; cacheRead: number; cacheWrite: number }
+> = {
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
@@ -20,7 +23,13 @@ const PRICES_PER_MILLION: Record<string, { input: number; output: number; cacheR
 
 const OVERFLOW_PATTERN = /prompt is too long|context (length|window)|maximum context/i;
 
-type ClaudeContentBlock = { type?: string; id?: string; tool_use_id?: string; is_error?: boolean; text?: string };
+type ClaudeContentBlock = {
+  type?: string;
+  id?: string;
+  tool_use_id?: string;
+  is_error?: boolean;
+  text?: string;
+};
 type ClaudeUsage = {
   input_tokens?: number;
   output_tokens?: number;
@@ -35,7 +44,12 @@ type ClaudeRecord = {
   cwd?: string;
   isCompactSummary?: boolean;
   isApiErrorMessage?: boolean;
-  message?: { id?: string; model?: string; usage?: ClaudeUsage; content?: ClaudeContentBlock[] | string };
+  message?: {
+    id?: string;
+    model?: string;
+    usage?: ClaudeUsage;
+    content?: ClaudeContentBlock[] | string;
+  };
 };
 
 function costUsd(model: string, usage: ClaudeUsage): number | "unknown" {
@@ -82,7 +96,10 @@ export function parseClaudeSession(file: string): SessionUsage {
       continue;
     }
     if (!cwd && record.cwd) cwd = record.cwd;
-    if (record.isCompactSummary || (record.type === "system" && record.subtype === "compact_boundary")) {
+    if (
+      record.isCompactSummary ||
+      (record.type === "system" && record.subtype === "compact_boundary")
+    ) {
       contextOverflows += 1;
     }
     const message = record.message;
@@ -98,7 +115,8 @@ export function parseClaudeSession(file: string): SessionUsage {
     if (record.type !== "assistant" || !message) continue;
 
     crashed = record.isApiErrorMessage === true;
-    if (crashed && blocks.some((block) => OVERFLOW_PATTERN.test(block.text ?? ""))) contextOverflows += 1;
+    if (crashed && blocks.some((block) => OVERFLOW_PATTERN.test(block.text ?? "")))
+      contextOverflows += 1;
     if (message.model === "<synthetic>" || !message.usage || !message.id) continue;
 
     const model = message.model ?? "unknown";

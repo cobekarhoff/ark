@@ -13,12 +13,19 @@ type Host = "github" | "gitlab";
 
 function spawn(command: string[], cwd: string) {
   const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" });
-  return { ok: result.exitCode === 0, stdout: result.stdout.toString().trim(), stderr: result.stderr.toString().trim() };
+  return {
+    ok: result.exitCode === 0,
+    stdout: result.stdout.toString().trim(),
+    stderr: result.stderr.toString().trim(),
+  };
 }
 
 function run(command: string[], cwd: string): string {
   const result = spawn(command, cwd);
-  if (!result.ok) throw new ArkError(`\`${command.slice(0, 3).join(" ")}\` failed in ${cwd}: ${result.stderr || result.stdout}`);
+  if (!result.ok)
+    throw new ArkError(
+      `\`${command.slice(0, 3).join(" ")}\` failed in ${cwd}: ${result.stderr || result.stdout}`,
+    );
   return result.stdout;
 }
 
@@ -43,7 +50,9 @@ export function mergeOrder(plan: PlanSteps): string[] {
   const ordered: string[] = [];
   while (ordered.length < repos.length) {
     const next = repos.find(
-      (repo) => !ordered.includes(repo) && [...upstream.get(repo)!].every((dependency) => ordered.includes(dependency)),
+      (repo) =>
+        !ordered.includes(repo) &&
+        [...upstream.get(repo)!].every((dependency) => ordered.includes(dependency)),
     );
     if (next === undefined) {
       const remaining = repos.filter((repo) => !ordered.includes(repo));
@@ -62,14 +71,21 @@ function detectHost(remoteUrl: string): Host {
 }
 
 function criterionTexts(runDirectory: string): Map<string, string> {
-  const match = readFileSync(join(runDirectory, "ticket.md"), "utf8").match(/^---\n([\s\S]*?)\n---/);
-  const frontmatter = match ? (Bun.YAML.parse(match[1]) as { acceptance_criteria?: { id: string; text: string }[] }) : {};
+  const match = readFileSync(join(runDirectory, "ticket.md"), "utf8").match(
+    /^---\n([\s\S]*?)\n---/,
+  );
+  const frontmatter = match
+    ? (Bun.YAML.parse(match[1]) as { acceptance_criteria?: { id: string; text: string }[] })
+    : {};
   const criteria = frontmatter.acceptance_criteria ?? [];
   return new Map(criteria.map((criterion) => [criterion.id, criterion.text]));
 }
 
 function defaultBranch(worktree: Worktree): string {
-  const result = spawn(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], worktree.path);
+  const result = spawn(
+    ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    worktree.path,
+  );
   return result.ok ? result.stdout.replace(/^origin\//, "") : worktree.base;
 }
 
@@ -89,11 +105,42 @@ function description(
   ].join("\n");
 }
 
-function createMergeRequest(host: Host, worktree: Worktree, base: string, title: string, body: string): OpenedMergeRequest {
+function createMergeRequest(
+  host: Host,
+  worktree: Worktree,
+  base: string,
+  title: string,
+  body: string,
+): OpenedMergeRequest {
   const command =
     host === "github"
-      ? ["gh", "pr", "create", "--base", base, "--head", worktree.branch, "--title", title, "--body", body]
-      : ["glab", "mr", "create", "--source-branch", worktree.branch, "--target-branch", base, "--title", title, "--description", body, "--yes"];
+      ? [
+          "gh",
+          "pr",
+          "create",
+          "--base",
+          base,
+          "--head",
+          worktree.branch,
+          "--title",
+          title,
+          "--body",
+          body,
+        ]
+      : [
+          "glab",
+          "mr",
+          "create",
+          "--source-branch",
+          worktree.branch,
+          "--target-branch",
+          base,
+          "--title",
+          title,
+          "--description",
+          body,
+          "--yes",
+        ];
   const output = run(command, worktree.path);
   const url = output.match(/https?:\/\/\S+/)?.[0];
   const number = Number(url?.match(/\/(\d+)\/?$/)?.[1]);
@@ -105,13 +152,27 @@ function createMergeRequest(host: Host, worktree: Worktree, base: string, title:
 
 // GitLab merge request dependencies need a paid tier. A failure is fine:
 // the `Depends on !N` line in the description still carries the dependency.
-function blockOnGitLab(downstream: OpenedMergeRequest, upstream: OpenedMergeRequest, downstreamPath: string, upstreamPath: string) {
-  const lookup = spawn(["glab", "api", `projects/:fullpath/merge_requests/${upstream.number}`], upstreamPath);
+function blockOnGitLab(
+  downstream: OpenedMergeRequest,
+  upstream: OpenedMergeRequest,
+  downstreamPath: string,
+  upstreamPath: string,
+) {
+  const lookup = spawn(
+    ["glab", "api", `projects/:fullpath/merge_requests/${upstream.number}`],
+    upstreamPath,
+  );
   if (!lookup.ok) return;
   try {
     const upstreamId = JSON.parse(lookup.stdout).id;
     spawn(
-      ["glab", "api", "--method", "POST", `projects/:fullpath/merge_requests/${downstream.number}/blocks?blocking_merge_request_id=${upstreamId}`],
+      [
+        "glab",
+        "api",
+        "--method",
+        "POST",
+        `projects/:fullpath/merge_requests/${downstream.number}/blocks?blocking_merge_request_id=${upstreamId}`,
+      ],
       downstreamPath,
     );
   } catch {
@@ -128,10 +189,12 @@ export function mergeRequestOpen(runId: string): void {
   }
 
   const worktrees = new Map<string, Worktree>();
-  for (const event of events) if (event.type === "worktree.created") worktrees.set(event.data.repo, event.data as Worktree);
+  for (const event of events)
+    if (event.type === "worktree.created") worktrees.set(event.data.repo, event.data as Worktree);
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
-  if (!lastTest.data.passed) throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
+  if (!lastTest.data.passed)
+    throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
   for (const worktree of worktrees.values()) {
     const head = run(["git", "rev-parse", "HEAD"], worktree.path);
     const tested: string | undefined = lastTest.data.heads?.[worktree.repo];
@@ -149,7 +212,9 @@ export function mergeRequestOpen(runId: string): void {
   const texts = criterionTexts(directory);
   const ticket = state.ticket;
   const opened = new Map<string, OpenedMergeRequest>();
-  for (const event of events) if (event.type === "merge_request.opened") opened.set(event.data.repo, event.data as OpenedMergeRequest);
+  for (const event of events)
+    if (event.type === "merge_request.opened")
+      opened.set(event.data.repo, event.data as OpenedMergeRequest);
 
   for (const repo of repos) {
     const worktree = worktrees.get(repo);
@@ -158,14 +223,22 @@ export function mergeRequestOpen(runId: string): void {
       console.log(`${repo}  already open  ${opened.get(repo)!.url}`);
       continue;
     }
-    const ahead = Number(run(["git", "rev-list", "--count", `${worktree.base}..HEAD`], worktree.path));
+    const ahead = Number(
+      run(["git", "rev-list", "--count", `${worktree.base}..HEAD`], worktree.path),
+    );
     if (ahead === 0) continue;
 
     run(["git", "push", "-u", "origin", worktree.branch], worktree.path);
     const host = detectHost(run(["git", "remote", "get-url", "origin"], worktree.path));
-    const upstreamOpened = [...(upstream.get(repo) ?? [])].flatMap((name) => opened.get(name) ?? []);
-    const dependencyLines = upstreamOpened.map((merge) => `Depends on ${host === "github" ? "#" : "!"}${merge.number}`);
-    const criteriaIds = [...new Set(plan.steps.filter((step) => step.repo === repo).flatMap((step) => step.criteria))];
+    const upstreamOpened = [...(upstream.get(repo) ?? [])].flatMap(
+      (name) => opened.get(name) ?? [],
+    );
+    const dependencyLines = upstreamOpened.map(
+      (merge) => `Depends on ${host === "github" ? "#" : "!"}${merge.number}`,
+    );
+    const criteriaIds = [
+      ...new Set(plan.steps.filter((step) => step.repo === repo).flatMap((step) => step.criteria)),
+    ];
     const created = createMergeRequest(
       host,
       worktree,
@@ -174,7 +247,8 @@ export function mergeRequestOpen(runId: string): void {
       description(ticket, criteriaIds, texts, dependencyLines),
     );
     if (host === "gitlab") {
-      for (const merge of upstreamOpened) blockOnGitLab(created, merge, worktree.path, worktrees.get(merge.repo)!.path);
+      for (const merge of upstreamOpened)
+        blockOnGitLab(created, merge, worktree.path, worktrees.get(merge.repo)!.path);
     }
     appendEvent(directory, "merge_request.opened", created);
     opened.set(repo, created);
@@ -192,7 +266,9 @@ export function mergeRequestStatus(runId: string): void {
     if (worktree === undefined) throw new ArkError(`no worktree for repo ${merge.repo}`);
     const github = detectHost(merge.url) === "github";
     const output = run(
-      github ? ["gh", "pr", "view", merge.url, "--json", "state"] : ["glab", "mr", "view", String(merge.number), "--output", "json"],
+      github
+        ? ["gh", "pr", "view", merge.url, "--json", "state"]
+        : ["glab", "mr", "view", String(merge.number), "--output", "json"],
       worktree.path,
     );
     const raw = String(JSON.parse(output).state).toLowerCase();

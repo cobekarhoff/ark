@@ -38,7 +38,11 @@ const levels = ["integration", "e2e"];
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 const textList = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
 const objectList = (value: unknown): Record<string, unknown>[] =>
-  Array.isArray(value) ? value.map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>) : {})) : [];
+  Array.isArray(value)
+    ? value.map((item) =>
+        item && typeof item === "object" ? (item as Record<string, unknown>) : {},
+      )
+    : [];
 
 export function planHash(runDirectory: string): string {
   const file = join(runDirectory, "plan.yml");
@@ -59,7 +63,8 @@ export function loadPlan(runDirectory: string): Plan {
     throw new ArkError("plan.yml must be a mapping with steps and test_cases");
   }
   const { steps, test_cases, summary } = raw as Record<string, unknown>;
-  const summaryBlock = summary && typeof summary === "object" ? (summary as Record<string, unknown>) : {};
+  const summaryBlock =
+    summary && typeof summary === "object" ? (summary as Record<string, unknown>) : {};
   return {
     summary: {
       why: text(summaryBlock.why),
@@ -85,7 +90,10 @@ export function loadPlan(runDirectory: string): Plan {
         throw new ArkError(`test case ${name} has the old steps field: use given, when and then`);
       }
       for (const group of ["given", "when", "then"] as const) {
-        if (!Array.isArray(testCase[group]) || !testCase[group].every((line) => typeof line === "string")) {
+        if (
+          !Array.isArray(testCase[group]) ||
+          !testCase[group].every((line) => typeof line === "string")
+        ) {
           throw new ArkError(`test case ${name} ${group} must be a list of strings`);
         }
       }
@@ -168,7 +176,8 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
   for (const testCase of plan.test_cases) {
     const name = testCase.id || "(no id)";
     for (const group of ["when", "then"] as const) {
-      if (testCase[group].length === 0) problems.push(`test case ${name} has an empty ${group} list`);
+      if (testCase[group].length === 0)
+        problems.push(`test case ${name} has an empty ${group} list`);
     }
     if (!testCase.expected.trim()) problems.push(`test case ${name} has no expected sentence`);
     if (!levels.includes(testCase.level)) {
@@ -176,16 +185,20 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
       continue;
     }
     if (!ticketCriteria.includes(testCase.criterion)) {
-      problems.push(`test case ${name} is for criterion "${testCase.criterion}", which is not in the ticket`);
+      problems.push(
+        `test case ${name} is for criterion "${testCase.criterion}", which is not in the ticket`,
+      );
       continue;
     }
     proven.add(testCase.criterion);
   }
   for (const criterion of ticketCriteria) {
-    if (!proven.has(criterion)) problems.push(`criterion ${criterion} has no integration or e2e test case`);
+    if (!proven.has(criterion))
+      problems.push(`criterion ${criterion} has no integration or e2e test case`);
   }
   if (!plan.summary.why) problems.push("plan.yml has no summary.why: add a summary block");
-  if (plan.summary.changes.length === 0) problems.push("plan.yml has no summary.changes: add a summary block");
+  if (plan.summary.changes.length === 0)
+    problems.push("plan.yml has no summary.changes: add a summary block");
   plan.summary.changes.forEach((change, i) => {
     for (const field of ["criterion", "where", "now", "fix"] as const) {
       if (!change[field]) problems.push(`summary change #${i + 1} has no ${field}`);
@@ -196,11 +209,14 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
     if (!change.criterion) continue;
     summarized.add(change.criterion);
     if (!ticketCriteria.includes(change.criterion)) {
-      problems.push(`summary change is for criterion "${change.criterion}", which is not in the ticket`);
+      problems.push(
+        `summary change is for criterion "${change.criterion}", which is not in the ticket`,
+      );
     }
   }
   for (const criterion of ticketCriteria) {
-    if (!summarized.has(criterion)) problems.push(`criterion ${criterion} has no row in summary.changes`);
+    if (!summarized.has(criterion))
+      problems.push(`criterion ${criterion} has no row in summary.changes`);
   }
   return problems;
 }
@@ -211,7 +227,9 @@ export function renderPlanMarkdown(plan: Plan): string {
   const lines = ["# Plan", "", "## Summary", "", plan.summary.why, "", "## Changes", ""];
   lines.push("| Criterion | Where | Now | Fix |", "| --- | --- | --- | --- |");
   for (const change of plan.summary.changes) {
-    lines.push(`| ${[change.criterion, change.where, change.now, change.fix].map(tableCell).join(" | ")} |`);
+    lines.push(
+      `| ${[change.criterion, change.where, change.now, change.fix].map(tableCell).join(" | ")} |`,
+    );
   }
   lines.push("", "## Steps", "", "```mermaid", renderMermaid(plan).trimEnd(), "```", "");
   lines.push("| Step | Role | Repo | Needs | Criteria |", "| --- | --- | --- | --- | --- |");
@@ -223,7 +241,11 @@ export function renderPlanMarkdown(plan: Plan): string {
   lines.push("", "## Test cases", "");
   for (const testCase of plan.test_cases) {
     lines.push(`### ${testCase.id} (${testCase.criterion}, ${testCase.level})`, "", "```gherkin");
-    for (const [group, keyword] of [["given", "Given"], ["when", "When"], ["then", "Then"]] as const) {
+    for (const [group, keyword] of [
+      ["given", "Given"],
+      ["when", "When"],
+      ["then", "Then"],
+    ] as const) {
       testCase[group].forEach((line, i) => lines.push(`${i === 0 ? keyword : "And"} ${line}`));
     }
     lines.push("```", "", `Expected: ${testCase.expected}`, "");
@@ -235,18 +257,31 @@ export function planCheck(runId: string): void {
   const { directory } = findRun(runId);
   const plan = loadPlan(directory);
   const state = deriveState(readEvents(directory));
-  const problems = findProblems(plan, state.criteria.map((criterion) => criterion.id));
+  const problems = findProblems(
+    plan,
+    state.criteria.map((criterion) => criterion.id),
+  );
   const valid = problems.length === 0;
   appendEvent(directory, "plan.checked", {
     valid,
     problems,
     plan_hash: planHash(directory),
-    steps: plan.steps.map(({ id, role, repo, needs, criteria }) => ({ id, role, repo, needs, criteria })),
+    steps: plan.steps.map(({ id, role, repo, needs, criteria }) => ({
+      id,
+      role,
+      repo,
+      needs,
+      criteria,
+    })),
   });
   if (!valid) {
     for (const problem of problems) console.log(problem);
-    throw new ArkError(`plan is invalid: ${problems.length} problem${problems.length === 1 ? "" : "s"}`);
+    throw new ArkError(
+      `plan is invalid: ${problems.length} problem${problems.length === 1 ? "" : "s"}`,
+    );
   }
   writeFileSync(join(directory, "plan.md"), renderPlanMarkdown(plan));
-  console.log(`plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`);
+  console.log(
+    `plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`,
+  );
 }

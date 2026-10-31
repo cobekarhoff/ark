@@ -10,8 +10,10 @@ const roles = {
   reviewer: { harness: "codex", model: "gpt-codex" },
 };
 const junit = (file: string) => `bun test --reporter=junit --reporter-outfile={report} ./${file}`;
-const suiteTests = (lines: string[]) => `import { expect, test } from "bun:test";\n${lines.join("\n")}\n`;
-const passing = (name: string) => `test(${JSON.stringify(name)}, () => { console.log(${JSON.stringify(`ark-log-marker ${name}`)}); });`;
+const suiteTests = (lines: string[]) =>
+  `import { expect, test } from "bun:test";\n${lines.join("\n")}\n`;
+const passing = (name: string) =>
+  `test(${JSON.stringify(name)}, () => { console.log(${JSON.stringify(`ark-log-marker ${name}`)}); });`;
 const failing = (name: string) => `test(${JSON.stringify(name)}, () => { expect(1).toBe(2); });`;
 
 /** Starts a run at the building phase in a single-repo workspace whose suites are real `bun test` files. */
@@ -36,19 +38,52 @@ function buildingRun(options: {
     ],
     roles,
   });
-  const ticket = writeTicket("demo", "FAKE-1", options.criteria.map((id) => ({ id, text: `criterion ${id}` })));
-  const runId = ark("run", "start", ticket, "--project", "demo").out.match(/\d{4}-\d{2}-\d{2}-FAKE-1-\d+/)![0];
+  const ticket = writeTicket(
+    "demo",
+    "FAKE-1",
+    options.criteria.map((id) => ({ id, text: `criterion ${id}` })),
+  );
+  const runId = ark("run", "start", ticket, "--project", "demo").out.match(
+    /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
+  )![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
   const plan = {
     summary: {
       why: "Test the run against each criterion.",
-      changes: options.criteria.map((criterion) => ({ criterion, where: "tests", now: "Suites run against the plan.", fix: "Suites prove each criterion." })),
+      changes: options.criteria.map((criterion) => ({
+        criterion,
+        where: "tests",
+        now: "Suites run against the plan.",
+        fix: "Suites prove each criterion.",
+      })),
     },
-    steps: [{ id: "build", role: "implementer", repo: ".", harness: "claude", model: "claude-sonnet", needs: [], criteria: options.criteria }],
-    test_cases: options.criteria.map((criterion) => ({ id: `proves-${criterion}`, criterion, level: "e2e", given: [], when: ["run it"], then: ["it works"], expected: "it works" })),
+    steps: [
+      {
+        id: "build",
+        role: "implementer",
+        repo: ".",
+        harness: "claude",
+        model: "claude-sonnet",
+        needs: [],
+        criteria: options.criteria,
+      },
+    ],
+    test_cases: options.criteria.map((criterion) => ({
+      id: `proves-${criterion}`,
+      criterion,
+      level: "e2e",
+      given: [],
+      when: ["run it"],
+      then: ["it works"],
+      expected: "it works",
+    })),
   };
   writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
-  for (const args of [["plan", "check", runId], ["gate", "record", runId, "plan", "approve"], ["worktree", "create", runId, "."]]) {
+  for (const args of [
+    ["plan", "check", runId],
+    ["gate", "record", runId, "plan", "approve"],
+    ["worktree", "create", runId, "."],
+  ]) {
     const result = ark(...args);
     if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.err}`);
   }
@@ -56,7 +91,10 @@ function buildingRun(options: {
 }
 
 function testCompleted(runDirectory: string) {
-  const events = readFileSync(join(runDirectory, "events.ndjson"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const events = readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
   return events.filter((event) => event.type === "test.completed").map((event) => event.data);
 }
 
@@ -132,8 +170,12 @@ describe("ark test", () => {
       criteria: { "FAKE-1-AC1": "passing", "FAKE-1-AC2": "passing" },
     });
     expect(event.heads["."]).not.toBe(head(workspace));
-    expect(readFileSync(join(runDirectory, "results/e2e.report"), "utf8")).toContain("FAKE-1-AC1 works");
-    expect(readFileSync(join(runDirectory, "results/e2e.log"), "utf8")).toContain("ark-log-marker FAKE-1-AC2 works");
+    expect(readFileSync(join(runDirectory, "results/e2e.report"), "utf8")).toContain(
+      "FAKE-1-AC1 works",
+    );
+    expect(readFileSync(join(runDirectory, "results/e2e.log"), "utf8")).toContain(
+      "ark-log-marker FAKE-1-AC2 works",
+    );
   });
 
   test("ARK-154-AC6 exits non-zero when a unit suite fails even though every AC passes", () => {
@@ -154,7 +196,9 @@ describe("ark test", () => {
   test("ARK-154-AC3 runs suites in the mirror and skips compose when ark.yml has none", () => {
     const { runId, runDirectory } = buildingRun({
       criteria: ["FAKE-1-AC1"],
-      e2e: [`test("FAKE-1-AC1 suite runs in the run's workspace mirror", () => { expect(process.cwd().endsWith("/workspace")).toBe(true); });`],
+      e2e: [
+        `test("FAKE-1-AC1 suite runs in the run's workspace mirror", () => { expect(process.cwd().endsWith("/workspace")).toBe(true); });`,
+      ],
     });
     expect(ark("test", runId).code).toBe(0);
     expect(testCompleted(runDirectory)[0].criteria).toEqual({ "FAKE-1-AC1": "passing" });

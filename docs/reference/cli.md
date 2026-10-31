@@ -150,34 +150,34 @@ retro.md           written by the run lead
 
 Top level:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `steps` | list | The steps of the plan. |
+| Field        | Type | Meaning                                 |
+| ------------ | ---- | --------------------------------------- |
+| `steps`      | list | The steps of the plan.                  |
 | `test_cases` | list | The test cases that prove the criteria. |
 
 Each entry in `steps`:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `id` | string | Name of the step. Other steps refer to it in `needs`. |
-| `role` | string | `implementer`, `validator`, or `reviewer`. |
-| `repo` | string | The repo the step works in, as a path relative to the workspace. |
-| `harness` | string | The agent harness, for example `claude`, `codex`, `omp`, or `pi`. |
-| `model` | string | The model the harness uses. |
-| `needs` | list of step ids | Steps that must finish first. An empty list means the step can start at once. |
-| `criteria` | list of strings | The AC the step serves. |
+| Field      | Type             | Meaning                                                                       |
+| ---------- | ---------------- | ----------------------------------------------------------------------------- |
+| `id`       | string           | Name of the step. Other steps refer to it in `needs`.                         |
+| `role`     | string           | `implementer`, `validator`, or `reviewer`.                                    |
+| `repo`     | string           | The repo the step works in, as a path relative to the workspace.              |
+| `harness`  | string           | The agent harness, for example `claude`, `codex`, `omp`, or `pi`.             |
+| `model`    | string           | The model the harness uses.                                                   |
+| `needs`    | list of step ids | Steps that must finish first. An empty list means the step can start at once. |
+| `criteria` | list of strings  | The AC the step serves.                                                       |
 
 Each entry in `test_cases`:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `id` | string | Name of the test case. |
-| `criterion` | string | The AC the test case proves. |
-| `level` | string | `integration` or `e2e`. |
-| `given` | list of strings | Context for the test. Required; can be empty. |
-| `when` | list of strings | Actions in order. Must not be empty. |
-| `then` | list of strings | Observable results in order. Must not be empty. |
-| `expected` | string | Required EARS sentence: "When ..., the system shall ...". |
+| Field       | Type            | Meaning                                                   |
+| ----------- | --------------- | --------------------------------------------------------- |
+| `id`        | string          | Name of the test case.                                    |
+| `criterion` | string          | The AC the test case proves.                              |
+| `level`     | string          | `integration` or `e2e`.                                   |
+| `given`     | list of strings | Context for the test. Required; can be empty.             |
+| `when`      | list of strings | Actions in order. Must not be empty.                      |
+| `then`      | list of strings | Observable results in order. Must not be empty.           |
+| `expected`  | string          | Required EARS sentence: "When ..., the system shall ...". |
 
 `ark plan check` rejects missing or malformed groups, an empty `when` or `then`, a missing `expected`, and any old test-case `steps` field. The error names the test case.
 
@@ -218,25 +218,25 @@ test_cases:
 
 `ark.yml` lives at `~/.ark/projects/<project>/ark.yml`. It is personal to you. The bootstrap playbook writes it, and every command that needs the project reads it. When a field is wrong, the error names it, for example `ark.yml: suites[1].parser must be one of bun, pytest, behave`.
 
-| Field | Required | Type | Meaning |
-| --- | --- | --- | --- |
-| `workspace` | yes | path | The absolute path of the workspace directory. It must exist. It is one repo or a meta-repo. |
-| `ticket_source` | yes | string | Where agents fetch tickets: `local`, `github`, or `jira`. |
-| `compose` | no | string | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them. |
-| `suites` | yes | list | The test suites. You need at least one. |
-| `roles` | yes | map | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`. |
-| `concurrency` | no | integer | The most workers that run at once. It must be 1 or more. The default is 2. |
-| `round_budget` | no | integer | How many rounds an implementer step may restart before escalation. It must be 0 or more. The default is 2. |
+| Field           | Required | Type    | Meaning                                                                                                                                                                                                                              |
+| --------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workspace`     | yes      | path    | The absolute path of the workspace directory. It must exist. It is one repo or a meta-repo.                                                                                                                                          |
+| `ticket_source` | yes      | string  | Where agents fetch tickets: `local`, `github`, or `jira`.                                                                                                                                                                            |
+| `compose`       | no       | string  | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them. |
+| `suites`        | yes      | list    | The test suites. You need at least one.                                                                                                                                                                                              |
+| `roles`         | yes      | map     | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`.                                                                                                                                            |
+| `concurrency`   | no       | integer | The most workers that run at once. It must be 1 or more. The default is 2.                                                                                                                                                           |
+| `round_budget`  | no       | integer | How many rounds an implementer step may restart before escalation. It must be 0 or more. The default is 2.                                                                                                                           |
 
 Each entry in `suites`:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `name` | string | Name of the suite. It must be unique. |
-| `level` | string | `unit`, `integration`, or `e2e`. A unit suite never proves an AC. |
-| `repo` | string | The repo the suite runs in: a path relative to the workspace, or `.`. The command runs in `<mirror>/<repo>`. |
-| `command` | string | The shell command. `{report}` is replaced with an absolute path under the run's `results/` folder. |
-| `parser` | string | `bun`, `pytest`, or `behave`. It reads the report file and the command output. |
+| Field     | Type   | Meaning                                                                                                      |
+| --------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| `name`    | string | Name of the suite. It must be unique.                                                                        |
+| `level`   | string | `unit`, `integration`, or `e2e`. A unit suite never proves an AC.                                            |
+| `repo`    | string | The repo the suite runs in: a path relative to the workspace, or `.`. The command runs in `<mirror>/<repo>`. |
+| `command` | string | The shell command. `{report}` is replaced with an absolute path under the run's `results/` folder.           |
+| `parser`  | string | `bun`, `pytest`, or `behave`. It reads the report file and the command output.                               |
 
 Example:
 
@@ -264,15 +264,15 @@ A test proves an AC when its name or tags contain the AC id, for example `CLARA-
 
 `events.ndjson` holds one JSON object for each line: `{ "seq": 1, "time": "<ISO time>", "type": "<type>", "data": { ... } }`. `seq` counts up from 1. Every command checks that an event is allowed in the run's current state before it appends the event, then rewrites `state.json`.
 
-| Type | Data | Written by |
-| --- | --- | --- |
-| `run.started` | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file` | `ark run start` |
-| `criteria.updated` | `criteria` (ids) | `ark gate record` for the `criteria` gate |
-| `plan.checked` | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`) | `ark plan check` |
-| `gate.answered` | `gate` (`criteria`, `plan`, or `escalation`), `answer`, optional `note` | `ark gate record` |
-| `worktree.created` | `repo`, `path`, `branch`, `base` | `ark worktree create` |
-| `step.started` | `step`, `role`, `repo`, `round` | `ark run step ... start` |
-| `step.finished` | `step`, `outcome` (`succeeded` or `failed`) | `ark run step ... finish` |
-| `test.completed` | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, or `missing`) | `ark test` |
-| `merge_request.opened` | `repo`, `url`, `number` | `ark merge-request open` |
-| `run.closed` | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`) | `ark run close` |
+| Type                   | Data                                                                                                                                     | Written by                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `run.started`          | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file`                                                                     | `ark run start`                           |
+| `criteria.updated`     | `criteria` (ids)                                                                                                                         | `ark gate record` for the `criteria` gate |
+| `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`)                                                    | `ark plan check`                          |
+| `gate.answered`        | `gate` (`criteria`, `plan`, or `escalation`), `answer`, optional `note`                                                                  | `ark gate record`                         |
+| `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                         | `ark worktree create`                     |
+| `step.started`         | `step`, `role`, `repo`, `round`                                                                                                          | `ark run step ... start`                  |
+| `step.finished`        | `step`, `outcome` (`succeeded` or `failed`)                                                                                              | `ark run step ... finish`                 |
+| `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, or `missing`) | `ark test`                                |
+| `merge_request.opened` | `repo`, `url`, `number`                                                                                                                  | `ark merge-request open`                  |
+| `run.closed`           | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`)                                                                            | `ark run close`                           |

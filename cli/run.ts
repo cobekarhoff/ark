@@ -12,13 +12,18 @@ const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
 
 function readTicket(ticketFile: string): { id: string; title: string; criteria: string[] } {
   const frontmatter = readFileSync(ticketFile, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!frontmatter) throw new ArkError(`${ticketFile}: the ticket needs YAML frontmatter with id, title and acceptance_criteria`);
+  if (!frontmatter)
+    throw new ArkError(
+      `${ticketFile}: the ticket needs YAML frontmatter with id, title and acceptance_criteria`,
+    );
   const fields = (Bun.YAML.parse(frontmatter[1]) ?? {}) as Record<string, unknown>;
   for (const key of ["id", "title"]) {
-    if (typeof fields[key] !== "string" || fields[key] === "") throw new ArkError(`${ticketFile}: ticket field ${key} is required`);
+    if (typeof fields[key] !== "string" || fields[key] === "")
+      throw new ArkError(`${ticketFile}: ticket field ${key} is required`);
   }
   const criteria = fields.acceptance_criteria ?? [];
-  if (!Array.isArray(criteria)) throw new ArkError(`${ticketFile}: acceptance_criteria must be a list`);
+  if (!Array.isArray(criteria))
+    throw new ArkError(`${ticketFile}: acceptance_criteria must be a list`);
   const ids = criteria.map((criterion, i) => {
     if (typeof criterion?.id !== "string" || typeof criterion?.text !== "string") {
       throw new ArkError(`${ticketFile}: acceptance_criteria[${i}] needs id and text`);
@@ -32,9 +37,13 @@ function resolveProject(absoluteTicketFile: string, project?: string): string {
   const chosen = project ?? process.env.ARK_PROJECT;
   if (chosen) return chosen;
   const projectsRoot = join(resolve(arkHome()), "projects") + sep;
-  const inside = absoluteTicketFile.startsWith(projectsRoot) ? absoluteTicketFile.slice(projectsRoot.length).split(sep)[0] : "";
+  const inside = absoluteTicketFile.startsWith(projectsRoot)
+    ? absoluteTicketFile.slice(projectsRoot.length).split(sep)[0]
+    : "";
   if (inside && listProjects().includes(inside)) return inside;
-  throw new ArkError("cannot tell the project: pass --project <name>, set ARK_PROJECT, or keep the ticket file inside the project folder");
+  throw new ArkError(
+    "cannot tell the project: pass --project <name>, set ARK_PROJECT, or keep the ticket file inside the project folder",
+  );
 }
 
 function today(): string {
@@ -57,7 +66,8 @@ export function runStart(ticketFile: string, project?: string): void {
     const parts = name.match(runIdPattern);
     if (!parts || parts[2] !== ticket.id) continue;
     const state = deriveState(readEvents(join(runsRoot, name)));
-    if (state.events > 0 && state.phase !== "closed") throw new ArkError(`ticket ${ticket.id} already has an open run: ${name}`);
+    if (state.events > 0 && state.phase !== "closed")
+      throw new ArkError(`ticket ${ticket.id} already has an open run: ${name}`);
     if (parts[1] === date) highestNumber = Math.max(highestNumber, Number(parts[3]));
   }
 
@@ -82,7 +92,8 @@ export function runStart(ticketFile: string, project?: string): void {
 }
 
 export function runStep(runId: string, stepId: string, action: string, failed = false): void {
-  if (action !== "start" && action !== "finish") throw new ArkError(`unknown step action "${action}": use start or finish`);
+  if (action !== "start" && action !== "finish")
+    throw new ArkError(`unknown step action "${action}": use start or finish`);
   if (failed && action === "start") throw new ArkError("--failed only applies to finish");
   const { directory } = findRun(runId);
   const events = readEvents(directory);
@@ -98,10 +109,20 @@ export function runStep(runId: string, stepId: string, action: string, failed = 
   // Refuse on the phase first, so a run before plan approval names the missing gate, not an unknown step.
   assertAllowed(state, "step.started", { step: stepId, role: "", repo: "", round: state.round });
   const planned = state.steps.find((step) => step.id === stepId);
-  if (!planned) throw new ArkError(`unknown step ${stepId}: the checked plan has ${state.steps.map((step) => step.id).join(", ") || "no steps"}`);
-  const finishes = events.filter((event) => event.type === "step.finished" && event.data.step === stepId).length;
+  if (!planned)
+    throw new ArkError(
+      `unknown step ${stepId}: the checked plan has ${state.steps.map((step) => step.id).join(", ") || "no steps"}`,
+    );
+  const finishes = events.filter(
+    (event) => event.type === "step.finished" && event.data.step === stepId,
+  ).length;
   const round = planned.role === "implementer" ? finishes + 1 : state.round;
-  appendEvent(directory, "step.started", { step: stepId, role: planned.role, repo: planned.repo, round });
+  appendEvent(directory, "step.started", {
+    step: stepId,
+    role: planned.role,
+    repo: planned.repo,
+    round,
+  });
   console.log(`${runId} ${stepId} started (round ${round}/${state.round_budget})`);
 }
 
@@ -131,7 +152,8 @@ function costLine(directory: string): string {
 export function status(runId?: string, project?: string): void {
   const projects = listProjects();
   const requested = project ?? process.env.ARK_PROJECT;
-  if (requested && !projects.includes(requested)) throw new ArkError(`project ${requested} does not exist under ${arkHome()}/projects`);
+  if (requested && !projects.includes(requested))
+    throw new ArkError(`project ${requested} does not exist under ${arkHome()}/projects`);
   if (runId !== undefined) return printRun(runId);
   let invalidCount = 0;
   for (const project of requested ? [requested] : projects) {
@@ -150,7 +172,8 @@ export function status(runId?: string, project?: string): void {
       const directory = join(runsRoot, name);
       if (!existsSync(join(directory, "events.ndjson"))) continue;
       const state = writeState(directory);
-      if (state.phase !== "closed") lines.push(`${name}  ${state.phase}  ${state.current_step ?? "-"}`);
+      if (state.phase !== "closed")
+        lines.push(`${name}  ${state.phase}  ${state.current_step ?? "-"}`);
     }
   }
   console.log(lines.length > 0 ? lines.join("\n") : "no open runs");

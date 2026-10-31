@@ -30,13 +30,19 @@ export function mirrorRoot(runDirectory: string): string {
 
 export function git(directory: string, ...args: string[]): string {
   const result = Bun.spawnSync(["git", "-C", directory, ...args]);
-  if (result.exitCode !== 0) throw new ArkError(`git ${args.join(" ")} failed in ${directory}: ${result.stderr.toString().trim()}`);
+  if (result.exitCode !== 0)
+    throw new ArkError(
+      `git ${args.join(" ")} failed in ${directory}: ${result.stderr.toString().trim()}`,
+    );
   return result.stdout.toString().trim();
 }
 
 /** The branch origin's HEAD points at, for example `main`. */
 export function targetBranch(repoPath: string): string {
-  return git(repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, "");
+  return git(repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(
+    /^origin\//,
+    "",
+  );
 }
 
 /** Fast-forwards the workspace checkout's target branch of each repo the run touched to origin. */
@@ -48,7 +54,8 @@ export function workspaceSync(runId: string): void {
     try {
       git(path, "fetch", "origin");
       const target = targetBranch(path);
-      if (git(path, "branch", "--show-current") === target) git(path, "merge", "--ff-only", `origin/${target}`);
+      if (git(path, "branch", "--show-current") === target)
+        git(path, "merge", "--ff-only", `origin/${target}`);
       else git(path, "fetch", "origin", `${target}:${target}`); // not checked out: git moves the ref only if it fast-forwards
       console.log(`${repo}  ${target}  ${git(path, "rev-parse", target)}`);
     } catch (err) {

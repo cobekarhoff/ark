@@ -39,12 +39,12 @@ Strip `/.git` and the workspace prefix to get each repo path, such as `repos/pla
 
 Read these files in each repo root. The first match names the stack.
 
-| File | Stack |
-| --- | --- |
-| `bun.lock`, `bunfig.toml` | Bun and TypeScript |
-| `package.json` | Node (read `scripts.test`) |
-| `pyproject.toml`, `uv.lock`, `requirements.txt` | Python |
-| `go.mod`, `Cargo.toml` | Go, Rust |
+| File                                            | Stack                      |
+| ----------------------------------------------- | -------------------------- |
+| `bun.lock`, `bunfig.toml`                       | Bun and TypeScript         |
+| `package.json`                                  | Node (read `scripts.test`) |
+| `pyproject.toml`, `uv.lock`, `requirements.txt` | Python                     |
+| `go.mod`, `Cargo.toml`                          | Go, Rust                   |
 
 Also read `README.md`, `AGENTS.md`, `CLAUDE.md` and any `Taskfile*`, `Makefile` or `justfile` for the commands the team uses to test.
 
@@ -60,11 +60,11 @@ For each repo, find test locations and classify them:
 
 Pick the runner and parser from the files:
 
-| Signal | `parser` | `command` |
-| --- | --- | --- |
-| `*.test.ts` files, Bun stack | `bun` | `bun test <directory> --reporter=junit --reporter-outfile={report}` |
-| `pytest` in `pyproject.toml`, `conftest.py`, or `test_*.py` files | `pytest` | `pytest -o junit_family=xunit1 --junitxml={report} <directory>` |
-| `features/` with `.feature` files, `behave` in dependencies | `behave` | `behave --format json -o {report} <directory>` |
+| Signal                                                            | `parser` | `command`                                                           |
+| ----------------------------------------------------------------- | -------- | ------------------------------------------------------------------- |
+| `*.test.ts` files, Bun stack                                      | `bun`    | `bun test <directory> --reporter=junit --reporter-outfile={report}` |
+| `pytest` in `pyproject.toml`, `conftest.py`, or `test_*.py` files | `pytest` | `pytest -o junit_family=xunit1 --junitxml={report} <directory>`     |
+| `features/` with `.feature` files, `behave` in dependencies       | `behave` | `behave --format json -o {report} <directory>`                      |
 
 If the repo's own tooling wraps the runner (for example `uv run pytest` or `pnpm exec`), put that wrapper in front of the command. `{report}` stays literal: `ark test` replaces it with a path under the run's `results/` folder.
 
@@ -221,7 +221,7 @@ Write `~/.ark/projects/<project>/ark.yml` in the contract schema. Create the dir
 ```yaml
 workspace: <absolute workspace path>
 ticket_source: <local | github | jira>
-compose: <compose command>        # omit when the project has no compose file
+compose: <compose command> # omit when the project has no compose file
 suites:
   - name: <unique name>
     level: <integration | e2e>
@@ -267,4 +267,3 @@ Tell the human, in one short list:
 - Anything left for the human (a missing `ac` marker hook, a missing `description`, a skipped repo).
 
 The first ticket, `/skill:ark chief` with a ticket ID, is the E2E check of the whole setup.
-

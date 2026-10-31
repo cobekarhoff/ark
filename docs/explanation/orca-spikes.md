@@ -8,11 +8,11 @@ Run on 2026-10-29 with Orca 1.4.237, Docker 29.6.1 and Docker Compose 5.3.0. Bot
 
 **Result: go.**
 
-| Check | Result |
-|---|---|
-| Ark-made worktrees | `git worktree add` for `platform` and `shared/packages` under `~/.ark/projects/clara/runs/<run>/repos/` |
-| Orca adopts them | After `orca repo add` and `orca repo set --external-worktree-visibility show`, `orca worktree list` shows both as `<repoId>::<path>` |
-| Agent launched into each | `orca agent launch --agent omp --worktree path:<worktree>`. Each agent's `pwd` and `git rev-parse --show-toplevel` were its worktree |
+| Check                                   | Result                                                                                                                                                                                   |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ark-made worktrees                      | `git worktree add` for `platform` and `shared/packages` under `~/.ark/projects/clara/runs/<run>/repos/`                                                                                  |
+| Orca adopts them                        | After `orca repo add` and `orca repo set --external-worktree-visibility show`, `orca worktree list` shows both as `<repoId>::<path>`                                                     |
+| Agent launched into each                | `orca agent launch --agent omp --worktree path:<worktree>`. Each agent's `pwd` and `git rev-parse --show-toplevel` were its worktree                                                     |
 | Downstream sees an upstream-only change | A module added only in the `shared/packages` worktree was importable in `tenant-manifest-service`, and a file added only in the `platform` worktree showed in the service's source mount |
 
 ### What changed in the design
@@ -44,12 +44,12 @@ With the mirror:
 
 **Result: go, once Orca's nesting depth is set to 2.**
 
-| Check | Result |
-|---|---|
-| Default depth | Refused: `Sub-worker dispatch is not permitted at depth 2 (max 1)` |
-| Depth set to 2 | In Orca, Settings → Orchestration → Nested worker depth = 2. The run lead's Dispatch completed at depth 1, and its worker completed at depth 2 in the run lead's own Run |
-| `worker_done` | The worker's report reached the run lead, and the run lead's report reached Master Chief's Run |
-| Gate relay | The run lead's `orca orchestration ask` reached Master Chief as a `question`. Master Chief put it to you, sent your answer back with `reply`, and the run lead received `approve` |
+| Check          | Result                                                                                                                                                                            |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Default depth  | Refused: `Sub-worker dispatch is not permitted at depth 2 (max 1)`                                                                                                                |
+| Depth set to 2 | In Orca, Settings → Orchestration → Nested worker depth = 2. The run lead's Dispatch completed at depth 1, and its worker completed at depth 2 in the run lead's own Run          |
+| `worker_done`  | The worker's report reached the run lead, and the run lead's report reached Master Chief's Run                                                                                    |
+| Gate relay     | The run lead's `orca orchestration ask` reached Master Chief as a `question`. Master Chief put it to you, sent your answer back with `reply`, and the run lead received `approve` |
 
 ### What changed in the design
 

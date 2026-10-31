@@ -11,11 +11,24 @@ type OrcaWorker = {
   dispatchId: string;
   taskId: string;
   agentTerminalHandle: string;
-  projection?: { provider?: { model?: string }; stage?: { activity?: string }; outcome?: string; liveness?: { verdict?: string } };
+  projection?: {
+    provider?: { model?: string };
+    stage?: { activity?: string };
+    outcome?: string;
+    liveness?: { verdict?: string };
+  };
 };
 type OrcaResult = { runs?: OrcaRun[]; tasks?: OrcaTask[]; workers?: OrcaWorker[] };
 
-type Agent = { role: string; title: string; model: string | null; liveness: string; activity: string; terminal: string | null; command: string | null };
+type Agent = {
+  role: string;
+  title: string;
+  model: string | null;
+  liveness: string;
+  activity: string;
+  terminal: string | null;
+  command: string | null;
+};
 
 /** Runs `orca orchestration <args> --json`. A missing or failing orca gives no agents, never an error. */
 function orca(...args: string[]): OrcaResult {
@@ -35,8 +48,13 @@ function runLeadTerminal(handle: string | null): { liveness: string; model: stri
   try {
     const result = Bun.spawnSync(["orca", "terminal", "show", "--terminal", handle, "--json"]);
     if (result.exitCode !== 0) return { liveness: "unknown", model: null };
-    const terminal: { connected?: boolean; agentIdentity?: string } = JSON.parse(result.stdout.toString()).result.terminal; // trusted local orca output
-    return { liveness: terminal.connected ? "live" : "exited", model: terminal.agentIdentity ?? null };
+    const terminal: { connected?: boolean; agentIdentity?: string } = JSON.parse(
+      result.stdout.toString(),
+    ).result.terminal; // trusted local orca output
+    return {
+      liveness: terminal.connected ? "live" : "exited",
+      model: terminal.agentIdentity ?? null,
+    };
   } catch {
     return { liveness: "unknown", model: null };
   }
@@ -44,24 +62,31 @@ function runLeadTerminal(handle: string | null): { liveness: string; model: stri
 
 function agentsOf(orcaRun: OrcaRun): Agent[] {
   const titles = new Map<string, string>();
-  for (const task of orca("task-list", "--run", orcaRun.id).tasks ?? []) titles.set(task.id, task.task_title);
+  for (const task of orca("task-list", "--run", orcaRun.id).tasks ?? [])
+    titles.set(task.id, task.task_title);
   const runLead: Agent = {
     role: "run lead",
     title: orcaRun.objective ?? orcaRun.id,
     ...runLeadTerminal(orcaRun.coordinator_handle),
     activity: "unknown",
     terminal: orcaRun.coordinator_handle,
-    command: orcaRun.coordinator_handle ? `orca terminal switch --terminal ${orcaRun.coordinator_handle}` : null,
+    command: orcaRun.coordinator_handle
+      ? `orca terminal switch --terminal ${orcaRun.coordinator_handle}`
+      : null,
   };
-  const workers = (orca("worker-list", "--run", orcaRun.id, "--include-remote").workers ?? []).map((worker): Agent => ({
-    role: "worker",
-    title: titles.get(worker.taskId) ?? worker.taskId,
-    model: worker.projection?.provider?.model ?? null,
-    liveness: worker.projection?.liveness?.verdict ?? "unknown",
-    activity: worker.projection?.stage?.activity ?? "unknown",
-    terminal: worker.agentTerminalHandle ?? null,
-    command: worker.agentTerminalHandle ? `orca terminal switch --terminal ${worker.agentTerminalHandle}` : null,
-  }));
+  const workers = (orca("worker-list", "--run", orcaRun.id, "--include-remote").workers ?? []).map(
+    (worker): Agent => ({
+      role: "worker",
+      title: titles.get(worker.taskId) ?? worker.taskId,
+      model: worker.projection?.provider?.model ?? null,
+      liveness: worker.projection?.liveness?.verdict ?? "unknown",
+      activity: worker.projection?.stage?.activity ?? "unknown",
+      terminal: worker.agentTerminalHandle ?? null,
+      command: worker.agentTerminalHandle
+        ? `orca terminal switch --terminal ${worker.agentTerminalHandle}`
+        : null,
+    }),
+  );
   return [runLead, ...workers];
 }
 
@@ -69,13 +94,21 @@ function gateOf(runId: string, directory: string, state: RunState) {
   const name = waitingGate(state);
   if (name === "none") return null;
   const command = name === "plan" ? `plannotator annotate ${join(directory, "plan.md")}` : null;
-  return { name, command, hint: command ? null : `Answer the ${name} gate in the Master Chief terminal (ark gate record ${runId} ${name} <answer>).` };
+  return {
+    name,
+    command,
+    hint: command
+      ? null
+      : `Answer the ${name} gate in the Master Chief terminal (ark gate record ${runId} ${name} <answer>).`,
+  };
 }
 
 function snapshot() {
   const orcaRuns = orca("run-list").runs ?? [];
   const runLeadRuns = new Map(
-    orcaRuns.filter((orcaRun) => orcaRun.objective?.startsWith("Ark run ")).map((orcaRun) => [orcaRun.objective!.slice("Ark run ".length), orcaRun]),
+    orcaRuns
+      .filter((orcaRun) => orcaRun.objective?.startsWith("Ark run "))
+      .map((orcaRun) => [orcaRun.objective!.slice("Ark run ".length), orcaRun]),
   );
   const runs = [];
   for (const project of listProjects()) {
@@ -87,7 +120,12 @@ function snapshot() {
       if (events.length === 0) continue;
       const state = deriveState(events);
       const orcaRun = runLeadRuns.get(name);
-      runs.push({ ...state, open: state.phase !== "closed", gate: gateOf(name, directory, state), agents: state.phase !== "closed" && orcaRun ? agentsOf(orcaRun) : [] });
+      runs.push({
+        ...state,
+        open: state.phase !== "closed",
+        gate: gateOf(name, directory, state),
+        agents: state.phase !== "closed" && orcaRun ? agentsOf(orcaRun) : [],
+      });
     }
   }
   runs.sort((left, right) => right.run.localeCompare(left.run));

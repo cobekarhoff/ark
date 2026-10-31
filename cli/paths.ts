@@ -31,7 +31,9 @@ export function findRun(runId: string): { project: string; directory: string } {
     .filter((candidate) => existsSync(candidate.directory));
   if (matches.length === 0) throw new ArkError(`run not found: ${runId}`);
   if (matches.length > 1) {
-    throw new ArkError(`run id ${runId} exists in several projects: ${matches.map((match) => match.project).join(", ")}`);
+    throw new ArkError(
+      `run id ${runId} exists in several projects: ${matches.map((match) => match.project).join(", ")}`,
+    );
   }
   return matches[0];
 }

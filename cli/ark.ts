@@ -40,7 +40,8 @@ const commands: Command[] = [
     flags: { "--failed": false },
     minimum: 3,
     maximum: 3,
-    run: ([runId, stepId, action], flags) => runStep(runId, stepId, action, flags["--failed"] === true),
+    run: ([runId, stepId, action], flags) =>
+      runStep(runId, stepId, action, flags["--failed"] === true),
   },
   {
     usage: "run close <run> <outcome>",
@@ -53,7 +54,8 @@ const commands: Command[] = [
   },
   {
     usage: "plan check <run>",
-    description: "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid.",
+    description:
+      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid.",
     flags: {},
     minimum: 1,
     maximum: 1,
@@ -84,11 +86,13 @@ const commands: Command[] = [
     flags: { "--note": true },
     minimum: 3,
     maximum: 3,
-    run: ([runId, gate, answer], flags) => gateRecord(runId, gate, answer, flags["--note"] as string | undefined),
+    run: ([runId, gate, answer], flags) =>
+      gateRecord(runId, gate, answer, flags["--note"] as string | undefined),
   },
   {
     usage: "merge-request open <run>",
-    description: "Pushes each repo's branch and opens one MR for each repo, in dependency order. No command merges.",
+    description:
+      "Pushes each repo's branch and opens one MR for each repo, in dependency order. No command merges.",
     flags: {},
     minimum: 1,
     maximum: 1,
@@ -96,7 +100,8 @@ const commands: Command[] = [
   },
   {
     usage: "merge-request status <run>",
-    description: "Prints each MR of the run as merged, open or closed, read from gh or glab. It changes nothing.",
+    description:
+      "Prints each MR of the run as merged, open or closed, read from gh or glab. It changes nothing.",
     flags: {},
     minimum: 1,
     maximum: 1,
@@ -131,7 +136,8 @@ const commands: Command[] = [
   },
   {
     usage: "retro <run>",
-    description: "Computes the run's cost, time, rework and intervention metrics and writes metrics.json.",
+    description:
+      "Computes the run's cost, time, rework and intervention metrics and writes metrics.json.",
     flags: {},
     minimum: 1,
     maximum: 1,
@@ -148,9 +154,12 @@ const commands: Command[] = [
   },
 ];
 
-const helpText = ["Usage: ark <command>", ...commands.map((command) => `  ${command.usage}`)].join("\n");
+const helpText = ["Usage: ark <command>", ...commands.map((command) => `  ${command.usage}`)].join(
+  "\n",
+);
 
-const commandWords = (command: Command): string[] => command.usage.split(" ").filter((word) => /^[a-z-]+$/.test(word));
+const commandWords = (command: Command): string[] =>
+  command.usage.split(" ").filter((word) => /^[a-z-]+$/.test(word));
 
 function parseFlags(command: Command, args: string[]): { positionals: string[]; flags: Flags } {
   const positionals: string[] = [];
@@ -161,13 +170,15 @@ function parseFlags(command: Command, args: string[]): { positionals: string[]; 
       positionals.push(arg);
       continue;
     }
-    if (!Object.hasOwn(command.flags, arg)) throw new ArkError(`unknown flag ${arg}\nusage: ark ${command.usage}`);
+    if (!Object.hasOwn(command.flags, arg))
+      throw new ArkError(`unknown flag ${arg}\nusage: ark ${command.usage}`);
     if (!command.flags[arg]) {
       flags[arg] = true;
       continue;
     }
     const value = args[++i];
-    if (value === undefined) throw new ArkError(`${arg} needs a value\nusage: ark ${command.usage}`);
+    if (value === undefined)
+      throw new ArkError(`${arg} needs a value\nusage: ark ${command.usage}`);
     flags[arg] = value;
   }
   if (positionals.length < command.minimum || positionals.length > command.maximum) {

@@ -15,12 +15,12 @@ The depth is 2: Master Chief starts run leads, and run leads start workers. Orca
 
 ## Where each concern lives
 
-| Concern | Lives in | Why |
-| --- | --- | --- |
-| Hosting agents, messages between agents, the ticket queue | Orca | Orca already runs agents from several harnesses and tracks tasks with dependencies. |
-| Review interface: the plan gate, merge request review, away-from-chat questions | Plannotator | A review interface exists, so Ark does not build one. |
-| Run state, worktrees, tests, merge requests, metrics | `ark` command | These steps must give the same result every time, so no agent should do them by hand. |
-| Judgment: planning, writing tests, writing code, reviewing, retros | Skills | Judgment changes often, and a skill is easy to change and review. |
+| Concern                                                                         | Lives in      | Why                                                                                   |
+| ------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| Hosting agents, messages between agents, the ticket queue                       | Orca          | Orca already runs agents from several harnesses and tracks tasks with dependencies.   |
+| Review interface: the plan gate, merge request review, away-from-chat questions | Plannotator   | A review interface exists, so Ark does not build one.                                 |
+| Run state, worktrees, tests, merge requests, metrics                            | `ark` command | These steps must give the same result every time, so no agent should do them by hand. |
+| Judgment: planning, writing tests, writing code, reviewing, retros              | Skills        | Judgment changes often, and a skill is easy to change and review.                     |
 
 The rule of thumb: if a step must be repeatable, it goes in the `ark` command. If a step needs judgment, it goes in a skill. The [command reference](../reference/cli.md) lists the commands.
 

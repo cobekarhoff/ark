@@ -19,14 +19,21 @@ function pathExists(path: string): boolean {
 }
 
 function reposOfLastValidPlan(runDirectory: string): string[] {
-  const checked = readEvents(runDirectory).filter((event) => event.type === "plan.checked" && event.data.valid);
+  const checked = readEvents(runDirectory).filter(
+    (event) => event.type === "plan.checked" && event.data.valid,
+  );
   const steps: { repo: string }[] = checked.at(-1)?.data.steps ?? [];
   return [...new Set(steps.map((step) => step.repo))];
 }
 
 /** `ark/<ticket id>-<slug>`, plus `-<run number>` from the second run on. The slug is the title, lowercase, hyphenated, at most 40 characters. */
 function branchName(runId: string, ticket: { id: string; title: string }): string {
-  const slug = ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "").slice(0, 40).replace(/-+$/, "");
+  const slug = ticket.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+/, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
   const number = Number(runId.match(/-(\d+)$/)?.[1] ?? 1);
   return `ark/${ticket.id}${slug ? `-${slug}` : ""}${number > 1 ? `-${number}` : ""}`;
 }
@@ -37,9 +44,15 @@ export function worktreeCreate(runId: string, repos: string[]): void {
   const knownRepos = discoverRepos(workspace);
 
   const touched = [...new Set(repos.length > 0 ? repos : reposOfLastValidPlan(directory))].sort();
-  if (touched.length === 0) throw new ArkError(`no repos named and ${runId} has no valid plan: name the repos or run ark plan check`);
+  if (touched.length === 0)
+    throw new ArkError(
+      `no repos named and ${runId} has no valid plan: name the repos or run ark plan check`,
+    );
   for (const repo of touched) {
-    if (!knownRepos.includes(repo)) throw new ArkError(`repo ${repo} is not in workspace ${workspace} (found: ${knownRepos.join(", ") || "none"})`);
+    if (!knownRepos.includes(repo))
+      throw new ArkError(
+        `repo ${repo} is not in workspace ${workspace} (found: ${knownRepos.join(", ") || "none"})`,
+      );
   }
 
   const state = deriveState(readEvents(directory));
@@ -69,7 +82,8 @@ export function worktreeCreate(runId: string, repos: string[]): void {
 
   for (const entry of readdirSync(workspace)) {
     const link = join(mirror, entry);
-    if (!skippedRootEntries.has(entry) && !pathExists(link)) symlinkSync(join(workspace, entry), link);
+    if (!skippedRootEntries.has(entry) && !pathExists(link))
+      symlinkSync(join(workspace, entry), link);
   }
   for (const repo of knownRepos) {
     const link = join(mirror, repo);
@@ -87,14 +101,25 @@ export function worktreeSync(runId: string): void {
   for (const worktree of state.worktrees) {
     git(worktree.path, "fetch", "origin");
     const target = targetBranch(worktree.path);
-    const merged = Bun.spawnSync(["git", "-C", worktree.path, "merge", "--no-edit", `origin/${target}`]);
+    const merged = Bun.spawnSync([
+      "git",
+      "-C",
+      worktree.path,
+      "merge",
+      "--no-edit",
+      `origin/${target}`,
+    ]);
     if (merged.exitCode !== 0) {
       Bun.spawnSync(["git", "-C", worktree.path, "merge", "--abort"]);
-      throw new ArkError(`repo ${worktree.repo}: merging origin/${target} failed, worktree left unchanged: ${merged.stdout.toString().trim()}${merged.stderr.toString().trim()}`);
+      throw new ArkError(
+        `repo ${worktree.repo}: merging origin/${target} failed, worktree left unchanged: ${merged.stdout.toString().trim()}${merged.stderr.toString().trim()}`,
+      );
     }
     const pushed = state.merge_requests.some((merge) => merge.repo === worktree.repo);
     if (pushed) git(worktree.path, "push", "origin", worktree.branch);
-    console.log(`${worktree.repo}  ${target}  ${git(worktree.path, "rev-parse", "HEAD")}${pushed ? "  pushed" : ""}`);
+    console.log(
+      `${worktree.repo}  ${target}  ${git(worktree.path, "rev-parse", "HEAD")}${pushed ? "  pushed" : ""}`,
+    );
   }
 }
 
@@ -116,7 +141,17 @@ export function worktreeCleanup(runId: string): void {
       if (state.outcome === "merged") {
         Bun.spawnSync(["git", "-C", source, "fetch", "origin"]); // best effort: a stale origin ref only keeps the branch
         const target = targetBranch(source);
-        if (Bun.spawnSync(["git", "-C", source, "merge-base", "--is-ancestor", branch, `origin/${target}`]).exitCode !== 0) {
+        if (
+          Bun.spawnSync([
+            "git",
+            "-C",
+            source,
+            "merge-base",
+            "--is-ancestor",
+            branch,
+            `origin/${target}`,
+          ]).exitCode !== 0
+        ) {
           keep(`branch is not in ${target}`);
           continue;
         }

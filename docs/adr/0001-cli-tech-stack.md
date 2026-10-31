@@ -21,11 +21,11 @@ All four surfaces are written in TypeScript and run on Bun. The CLI is a `#!/usr
 
 ## Alternatives
 
-| Option | For | Against |
-| --- | --- | --- |
-| Python (uv) | The team's product stacks (CLARA: pytest, Behave) are Python; quality assurance (QA) and engineers read it easily | Hooks and tools still have to be TypeScript, so there are two languages and two schema bindings. It also needs a second install path (`uv tool install`) beside the plugin, plus a Python runtime on every machine |
-| Rust | Single static binary, fastest startup, strong correctness | A per-platform build and release pipeline before the first run. A Git plugin install cannot ship a binary without a build step. Slower iteration for the agents writing it, and hooks and tools are still TypeScript |
-| Go | Static binary, simple | Same packaging and two-language costs as Rust, with less benefit |
+| Option      | For                                                                                                               | Against                                                                                                                                                                                                              |
+| ----------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python (uv) | The team's product stacks (CLARA: pytest, Behave) are Python; quality assurance (QA) and engineers read it easily | Hooks and tools still have to be TypeScript, so there are two languages and two schema bindings. It also needs a second install path (`uv tool install`) beside the plugin, plus a Python runtime on every machine   |
+| Rust        | Single static binary, fastest startup, strong correctness                                                         | A per-platform build and release pipeline before the first run. A Git plugin install cannot ship a binary without a build step. Slower iteration for the agents writing it, and hooks and tools are still TypeScript |
+| Go          | Static binary, simple                                                                                             | Same packaging and two-language costs as Rust, with less benefit                                                                                                                                                     |
 
 ## Consequences
 

@@ -38,7 +38,8 @@ const sections = commandNames(arkHelp([])).map(
 const document = readFileSync(referencePath, "utf8");
 const start = document.indexOf(startMarker);
 const end = document.indexOf(endMarker);
-if (start === -1 || end < start) throw new Error(`${referencePath} is missing the generated markers`);
+if (start === -1 || end < start)
+  throw new Error(`${referencePath} is missing the generated markers`);
 
 const updated = `${document.slice(0, start + startMarker.length)}\n\n${sections.join("\n\n")}\n\n${document.slice(end)}`;
 if (updated !== document) writeFileSync(referencePath, updated);

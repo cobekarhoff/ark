@@ -1,150 +1,141 @@
 [
- {
-  "keyword": "Feature",
-  "name": "Other",
-  "tags": [],
-  "location": "features/other.feature:1",
-  "status": "passed",
-  "elements": [
-   {
-    "type": "scenario",
-    "keyword": "Scenario",
-    "name": "Untagged",
+  {
+    "keyword": "Feature",
+    "name": "Other",
     "tags": [],
-    "location": "features/other.feature:3",
-    "steps": [
-     {
-      "keyword": "Given",
-      "step_type": "given",
-      "name": "a passing step",
-      "location": "features/other.feature:4",
-      "match": {
-       "location": "features/steps/steps.py:4",
-       "arguments": []
-      },
-      "result": {
-       "status": "passed",
-       "duration": 2.7179718017578125e-05
+    "location": "features/other.feature:1",
+    "status": "passed",
+    "elements": [
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Untagged",
+        "tags": [],
+        "location": "features/other.feature:3",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/other.feature:4",
+            "match": {
+              "location": "features/steps/steps.py:4",
+              "arguments": []
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2.7179718017578125e-5
+            }
+          }
+        ],
+        "status": "passed"
       }
-     }
-    ],
-    "status": "passed"
-   }
-  ]
- },
- {
-  "keyword": "Feature",
-  "name": "Sample",
-  "tags": [
-   "CLARA-12-AC1"
-  ],
-  "location": "features/sample.feature:2",
-  "status": "failed",
-  "elements": [
-   {
-    "type": "scenario",
-    "keyword": "Scenario",
-    "name": "Passes",
-    "tags": [],
-    "location": "features/sample.feature:4",
-    "steps": [
-     {
-      "keyword": "Given",
-      "step_type": "given",
-      "name": "a passing step",
-      "location": "features/sample.feature:5",
-      "match": {
-       "location": "features/steps/steps.py:4",
-       "arguments": []
+    ]
+  },
+  {
+    "keyword": "Feature",
+    "name": "Sample",
+    "tags": ["CLARA-12-AC1"],
+    "location": "features/sample.feature:2",
+    "status": "failed",
+    "elements": [
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Passes",
+        "tags": [],
+        "location": "features/sample.feature:4",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/sample.feature:5",
+            "match": {
+              "location": "features/steps/steps.py:4",
+              "arguments": []
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2.3126602172851562e-5
+            }
+          }
+        ],
+        "status": "passed"
       },
-      "result": {
-       "status": "passed",
-       "duration": 2.3126602172851562e-05
-      }
-     }
-    ],
-    "status": "passed"
-   },
-   {
-    "type": "scenario",
-    "keyword": "Scenario",
-    "name": "Fails",
-    "tags": [
-     "ac:CLARA-12-AC2",
-     "smoke"
-    ],
-    "location": "features/sample.feature:8",
-    "steps": [
-     {
-      "keyword": "Given",
-      "step_type": "given",
-      "name": "a failing step",
-      "location": "features/sample.feature:9",
-      "match": {
-       "location": "features/steps/steps.py:9",
-       "arguments": []
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Fails",
+        "tags": ["ac:CLARA-12-AC2", "smoke"],
+        "location": "features/sample.feature:8",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a failing step",
+            "location": "features/sample.feature:9",
+            "match": {
+              "location": "features/steps/steps.py:9",
+              "arguments": []
+            },
+            "result": {
+              "status": "failed",
+              "duration": 3.0994415283203125e-5,
+              "error_message": "ASSERT FAILED: "
+            }
+          }
+        ],
+        "status": "failed"
       },
-      "result": {
-       "status": "failed",
-       "duration": 3.0994415283203125e-05,
-       "error_message": "ASSERT FAILED: "
-      }
-     }
-    ],
-    "status": "failed"
-   },
-   {
-    "type": "scenario",
-    "keyword": "Scenario",
-    "name": "Skipped",
-    "tags": [
-     "CLARA-12-AC3"
-    ],
-    "location": "features/sample.feature:12",
-    "steps": [
-     {
-      "keyword": "Given",
-      "step_type": "given",
-      "name": "a skipped step",
-      "location": "features/sample.feature:13",
-      "match": {
-       "location": "features/steps/steps.py:14",
-       "arguments": []
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Skipped",
+        "tags": ["CLARA-12-AC3"],
+        "location": "features/sample.feature:12",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a skipped step",
+            "location": "features/sample.feature:13",
+            "match": {
+              "location": "features/steps/steps.py:14",
+              "arguments": []
+            },
+            "result": {
+              "status": "skipped",
+              "duration": 6.389617919921875e-5
+            }
+          }
+        ],
+        "status": "skipped"
       },
-      "result": {
-       "status": "skipped",
-       "duration": 6.389617919921875e-05
+      {
+        "type": "scenario",
+        "keyword": "Scenario Outline",
+        "name": "Outline 1 -- @1.1 ",
+        "tags": ["CLARA-12-AC5"],
+        "location": "features/sample.feature:21",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/sample.feature:16",
+            "match": {
+              "location": "features/steps/steps.py:4",
+              "arguments": []
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2.193450927734375e-5
+            }
+          }
+        ],
+        "status": "passed"
       }
-     }
-    ],
-    "status": "skipped"
-   },
-   {
-    "type": "scenario",
-    "keyword": "Scenario Outline",
-    "name": "Outline 1 -- @1.1 ",
-    "tags": [
-     "CLARA-12-AC5"
-    ],
-    "location": "features/sample.feature:21",
-    "steps": [
-     {
-      "keyword": "Given",
-      "step_type": "given",
-      "name": "a passing step",
-      "location": "features/sample.feature:16",
-      "match": {
-       "location": "features/steps/steps.py:4",
-       "arguments": []
-      },
-      "result": {
-       "status": "passed",
-       "duration": 2.193450927734375e-05
-      }
-     }
-    ],
-    "status": "passed"
-   }
-  ]
- }
+    ]
+  }
 ]

@@ -19,10 +19,16 @@ function acceptCriteria(runDirectory: string): void {
   }
   const content = readFileSync(ticketFile, "utf8");
   const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  const criteria = frontmatter ? (Bun.YAML.parse(frontmatter[1]) as Record<string, unknown>)?.acceptance_criteria : undefined;
-  const ids = Array.isArray(criteria) ? criteria.map((criterion) => String(criterion?.id ?? "")).filter(Boolean) : [];
+  const criteria = frontmatter
+    ? (Bun.YAML.parse(frontmatter[1]) as Record<string, unknown>)?.acceptance_criteria
+    : undefined;
+  const ids = Array.isArray(criteria)
+    ? criteria.map((criterion) => String(criterion?.id ?? "")).filter(Boolean)
+    : [];
   if (ids.length === 0) {
-    throw new ArkError(`ticket ${ticketFile} has no acceptance criteria: add at least one, then record criteria accept again`);
+    throw new ArkError(
+      `ticket ${ticketFile} has no acceptance criteria: add at least one, then record criteria accept again`,
+    );
   }
   copyFileSync(ticketFile, join(runDirectory, "ticket.md"));
   appendEvent(runDirectory, "criteria.updated", { criteria: ids });
@@ -33,12 +39,19 @@ export function gateRecord(runId: string, gate: string, answer: string, note?: s
     throw new ArkError(`unknown gate "${gate}": use ${Object.keys(gateAnswers).join(", ")}`);
   }
   if (!gateAnswers[gate].includes(answer)) {
-    throw new ArkError(`unknown answer "${answer}" for gate ${gate}: use ${gateAnswers[gate].join(", ")}`);
+    throw new ArkError(
+      `unknown answer "${answer}" for gate ${gate}: use ${gateAnswers[gate].join(", ")}`,
+    );
   }
   const { directory } = findRun(runId);
   const accepting = gate === "criteria" && answer === "accept";
   // Only the awaiting_criteria phase refreshes criteria; in any other phase the transition table refuses the answer.
-  if (accepting && deriveState(readEvents(directory)).phase === "awaiting_criteria") acceptCriteria(directory);
-  appendEvent(directory, "gate.answered", note === undefined ? { gate, answer } : { gate, answer, note });
+  if (accepting && deriveState(readEvents(directory)).phase === "awaiting_criteria")
+    acceptCriteria(directory);
+  appendEvent(
+    directory,
+    "gate.answered",
+    note === undefined ? { gate, answer } : { gate, answer, note },
+  );
   console.log(`recorded ${gate} ${answer}`);
 }
