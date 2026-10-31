@@ -146,7 +146,7 @@ const commands: Command[] = [
   {
     usage: "ui [--port <number>]",
     description:
-      "Serves a read-only control center on localhost, port 4317 unless --port says otherwise. The page refreshes itself and shows each run's ticket, phase, steps, waiting gate, last test, MRs, run lead and workers. Each agent and each waiting gate has a command to open it in Orca or Plannotator. It changes nothing.",
+      "Serves the hub on 127.0.0.1, port 4317 unless --port says otherwise. The page is a React app that Bun bundles. The server reads Ark's files every second and Orca and Plannotator every 3 seconds, each with a hard timeout, and pushes changes over Server-Sent Events. Home shows what needs you (oldest first), live runs, Master Chief per project and the agents. Keys: j/k move, Enter opens, an item's action key runs its action, Cmd-K opens the palette, ? the shortcut sheet, z focus mode, Esc closes. The only POST actions open an Orca terminal, a Plannotator review or the Inbox, or an MR URL. The server refuses a foreign Origin and any unknown action.",
     flags: { "--port": true },
     minimum: 0,
     maximum: 0,
