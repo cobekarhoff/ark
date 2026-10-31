@@ -207,6 +207,49 @@ describe("ark retro", () => {
       "comparison",
     ]);
   });
+  test("ARK-170-AC6 attributes pre-evaluation usage and starts criteria wait at the blocker event", () => {
+    const evaluationTime = "14:21:00.000";
+    writeEvents(runDirectory, [
+      [
+        "14:20:00.000",
+        "run.started",
+        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
+      ],
+      [evaluationTime, "evaluation.recorded", { blockers: ["blocked"], risks: [] }],
+      ["14:21:30.000", "gate.answered", { gate: "criteria", answer: "accept" }],
+      ["14:22:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+    mkdirSync(join(ompRoot, "evaluator"), { recursive: true });
+    writeFileSync(
+      join(ompRoot, "evaluator", "session.jsonl"),
+      `${JSON.stringify({ type: "session", version: 3, id: "evaluator", timestamp: day("14:20:00.000"), cwd: join(runDirectory, "workspace") })}\n${JSON.stringify(
+        {
+          type: "message",
+          id: "evaluation",
+          timestamp: day("14:20:30.000"),
+          message: {
+            role: "assistant",
+            provider: "anthropic",
+            model: "claude-haiku-4-5",
+            content: [],
+            usage: {
+              input: 10,
+              output: 5,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 15,
+              cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
+            },
+          },
+        },
+      )}\n`,
+    );
+
+    retro(runId);
+
+    expect(readMetrics().cost.by_role.evaluator.usd).toBeCloseTo(0.003);
+    expect(readMetrics().time.gate_wait_seconds).toBe(30);
+  });
 
   test("ARK-160-AC1 compares with the project's other closed runs that have metrics", () => {
     const projectRuns = join(arkHome, "projects", "demo", "runs");
