@@ -9,6 +9,7 @@ const criteria = [
 ];
 
 const plan = {
+  design: { interfaces: [{ name: "fixture plan", callers: ["ark gate record"] }] },
   summary: {
     why: "Track the work for each criterion.",
     changes: criteria.map(({ id }) => ({

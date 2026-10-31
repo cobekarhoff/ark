@@ -30,6 +30,11 @@ const testCase = (id: string, criterion: string, level = "integration") => ({
 });
 
 type PlanDocument = {
+  design: {
+    approach?: string;
+    interfaces: { name: string; callers?: string[] }[];
+    example?: string;
+  };
   summary: {
     why: string;
     changes: { criterion: string; where: string; now: string; fix: string }[];
@@ -39,6 +44,11 @@ type PlanDocument = {
 };
 
 const validPlan = (): PlanDocument => ({
+  design: {
+    approach: "Add a design block.",
+    interfaces: [{ name: "ark plan check", callers: ["run-lead.md section 4"] }],
+    example: "plan is valid",
+  },
   summary: {
     why: "Make the plan readable.",
     changes: [

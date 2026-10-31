@@ -41,7 +41,7 @@ Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refus
 ```text
 ark plan check <run>
 
-Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary, no design.interfaces, or an interface with no callers is invalid.
 ```
 
 ### worktree create
@@ -150,10 +150,13 @@ retro.md           written by the run lead
 
 Top level:
 
-| Field        | Type | Meaning                                 |
-| ------------ | ---- | --------------------------------------- |
-| `steps`      | list | The steps of the plan.                  |
-| `test_cases` | list | The test cases that prove the criteria. |
+| Field        | Type | Meaning                                       |
+| ------------ | ---- | --------------------------------------------- |
+| `steps`      | list | The steps of the plan.                        |
+| `test_cases` | list | The test cases that prove the criteria.       |
+| `design`     | map  | The approach, the interfaces and the example. |
+
+`design` has `interfaces` (required) and two optional fields, `approach` (string) and `example` (string). Each entry in `interfaces` has a `name` and a `callers` list of strings. An interface is a command, a playbook section, an event, a file format or an exported function. `ark plan check` rejects a plan with no `design.interfaces` and an interface with no `callers`; the error names the interface. `plan.md` has a Design section before the steps: the approach, a table of interfaces and callers, and the example in a code block. A missing `approach` or `example` shows as `No approach given.` or `No example given.`
 
 Each entry in `steps`:
 
@@ -212,6 +215,15 @@ test_cases:
     then:
       - The exported file lists the unit.
     expected: When a result is exported, the system shall include its unit.
+design:
+  approach: Add a unit field to each exported result.
+  interfaces:
+    - name: export (exported function)
+      callers:
+        - report command
+  example: |
+    result,value,unit
+    glucose,5.4,mmol/L
 ```
 
 ## `ark.yml` fields
