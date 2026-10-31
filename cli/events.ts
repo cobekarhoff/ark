@@ -27,6 +27,7 @@ export type RunState = {
   round_budget: number;
   criteria: { id: string; status: CriterionStatus }[];
   gates: { criteria?: string; plan?: string; escalation?: string };
+  evaluation: { blockers: string[]; risks: string[] } | null;
   plan: { checked: boolean; valid: boolean; plan_hash: string } | null;
   steps: { id: string; role: string; repo: string; status: StepStatus }[];
   current_step: string | null;
@@ -89,6 +90,8 @@ export function deriveState(events: ArkEvent[]): RunState {
   let project = "";
   let ticket = { id: "", title: "" };
   let startedWithoutCriteria = false;
+  let evaluation: RunState["evaluation"] = null;
+  let blocked = false;
   let round = 1;
   let roundBudget = 0;
   let criteriaIds: string[] = [];
@@ -120,6 +123,10 @@ export function deriveState(events: ArkEvent[]): RunState {
         criteriaIds = data.criteria;
         criteriaStatus = {};
         break;
+      case "evaluation.recorded":
+        evaluation = { blockers: data.blockers, risks: data.risks };
+        blocked = data.blockers.length > 0;
+        break;
       case "plan.checked":
         plan = { checked: true, valid: data.valid, plan_hash: data.plan_hash };
         planApproved = false;
@@ -134,6 +141,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "gate.answered":
         gates[data.gate] = data.answer;
+        if (data.gate === "criteria" && data.answer === "accept") blocked = false;
         if (data.gate === "plan" && data.answer === "approve") planApproved = true;
         if (data.answer === "abort") outcome = "aborted";
         if (data.gate === "escalation") {
@@ -185,7 +193,8 @@ export function deriveState(events: ArkEvent[]): RunState {
   let phase: Phase;
   if (outcome !== null) phase = "closed";
   else if (mergeRequests.length > 0) phase = "merge_requests_open";
-  else if (startedWithoutCriteria && gates.criteria !== "accept") phase = "awaiting_criteria";
+  else if (blocked || (startedWithoutCriteria && gates.criteria !== "accept"))
+    phase = "awaiting_criteria";
   else if (!planApproved) phase = "planning";
   else if (round >= roundBudget && lastTest && !lastTest.passed && !escalationAnswered && !human)
     phase = "escalation";
@@ -207,6 +216,7 @@ export function deriveState(events: ArkEvent[]): RunState {
       ...(gates.plan === undefined ? {} : { plan: gates.plan }),
       ...(gates.escalation === undefined ? {} : { escalation: gates.escalation }),
     },
+    evaluation,
     plan,
     steps,
     current_step: steps.find((step) => step.status !== "succeeded")?.id ?? null,

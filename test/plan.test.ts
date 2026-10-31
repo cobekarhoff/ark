@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
+import {
+  ark,
+  recordEvaluation,
+  tempArkHome,
+  tempGitRepo,
+  writeProject,
+  writeTicket,
+} from "./helpers.ts";
 
 const criteria = [
   { id: "ARK-900-AC1", text: "first" },
@@ -89,6 +96,7 @@ beforeEach(() => {
   expect(ark("run", "start", ticket).code).toBe(0);
   runId = readdirSync(join(projectDirectory, "runs"))[0];
   runDirectory = join(projectDirectory, "runs", runId);
+  recordEvaluation(runDirectory);
 });
 
 const writePlan = (plan: unknown) =>

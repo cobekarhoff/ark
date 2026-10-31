@@ -1,6 +1,6 @@
 # Playbook: worker `<run>` `<step>`
 
-You are a worker. You do one step of one run, in the run's worktree, and then you report. Your step has one role: implementer, validator or reviewer.
+You are a worker. You do one step of one run, in the run's worktree, and then you report. Your step has one role: implementer, validator, reviewer or evaluator. The evaluator step is named `evaluator`. It is not in `plan.yml`, because the run lead starts it before the plan exists.
 
 A worker never starts another agent. Do not run `orca orchestration worker-start`, `orca worktree create --agent`, `orca agent launch` or `orca terminal create`, and do not use a subagent tool. If the step needs more than you can do alone, say so in your report.
 
@@ -18,9 +18,33 @@ Throughout this playbook:
 4. Read the context of the repo and the workspace: `AGENTS.md`, `CLAUDE.md` and the files that the step touches. Work from the repo's own conventions.
 5. Read what the earlier steps left, if you are not the first: `git log --oneline`, and any file in `<run folder>/findings/` that names your step.
 
-Do only your step. Do not edit another repo's worktree. Do not touch the run's state: never run `ark run step`, `ark gate record`, `ark merge-request open` or `ark plan check`. The run lead does that.
+Do only your step. Do not edit another repo's worktree. Do not touch the run's state: never run `ark run step`, `ark evaluation record`, `ark gate record`, `ark merge-request open` or `ark plan check`. The run lead does that.
 
 ## 2. Work as your role
+
+### Evaluator
+
+You check the ticket before the run lead plans. Your harness and model come from `roles.evaluator` in `ark.yml`. You edit no product code, and you commit nothing. The only file you write is `<run folder>/evaluation.md`. Skip section 1 steps 1 and 2 for this role: you have no plan step, and you work in the workspace folder you were started in.
+
+1. Read `<run folder>/ticket.md` and each AC. Read the code and the context that each AC touches.
+2. Probe what you doubt, read-only: run a command with `--help`, read a log, or run `run-current` from the right terminal. Never change a file in the repo, and never start an agent.
+3. Write `<run folder>/evaluation.md` with two headings, each followed by a bullet list. An empty list is valid: leave the heading with no bullets. A missing heading is refused.
+
+   ```markdown
+   ## Blockers
+
+   - ARK-163-AC1: a worker cannot call `worker-start`, so no test can prove it.
+
+   ## Risks
+
+   - Existing plan fixtures need an `evaluation.recorded` event.
+   ```
+
+   - A blocker is an AC that is not possible, that no integration or E2E test can prove, or that conflicts with other code. Each blocker names the AC ID and the reason, with your evidence.
+   - A risk is a problem the plan must handle. It is not a reason to stop.
+   - A ticket with no ACs has no AC to block: put your doubts about the ticket in the risks.
+
+4. Do not run `ark evaluation record`. The run lead does that. Report with `--outcome succeeded` and name `evaluation.md` in `--report-path`.
 
 ### Implementer
 
@@ -106,5 +130,5 @@ After `worker_done`, stop. Do not poll, close your terminal or start other work.
 - One step only, in your own worktree.
 - Never start an agent.
 - Never write to `events.ndjson` or `state.json`. Never change run state.
-- Only the implementer writes product code. Only the validator writes the AC-tagged tests. The reviewer edits nothing in the repo.
+- Only the implementer writes product code. Only the validator writes the AC-tagged tests. The reviewer edits nothing in the repo. The evaluator writes `evaluation.md` and nothing else.
 - Never push, never open an MR, and never merge.

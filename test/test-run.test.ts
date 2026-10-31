@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
+import {
+  ark,
+  recordEvaluation,
+  tempArkHome,
+  tempGitRepo,
+  writeProject,
+  writeTicket,
+} from "./helpers.ts";
 
 const fakeCompose = join(import.meta.dir, "fixtures/worktree/fake-compose.sh");
 const roles = {
@@ -47,6 +54,7 @@ function buildingRun(options: {
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
   )![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+  recordEvaluation(runDirectory);
   const plan = {
     design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
     summary: {

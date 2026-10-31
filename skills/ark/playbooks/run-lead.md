@@ -22,15 +22,42 @@ Throughout this playbook:
 
 4. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered.
 
-## 2. Criteria gate
+## 2. Evaluate the ticket and open the criteria gate
 
-Skip this section unless the phase is `awaiting_criteria`. That means the ticket has no ACs.
+Do this before you write `plan.yml`. `ark plan check` refuses a run that has no `evaluation.recorded` event.
 
-1. Read the ticket and the code it touches. Draft testable AC. Each one is one statement that an integration or E2E test can prove. Give each an ID: `<ticket id>-AC1`, `<ticket id>-AC2` and so on.
-2. Ask Master Chief to show the draft to the human:
+### Evaluate
+
+Skip this part when `ark status <run>` shows that the run has an `evaluation.recorded` event (you replace a stopped run lead).
+
+1. Read `roles` in `ark.yml`. If it has no `evaluator` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.evaluator`: add its `harness` and `model`, then start a new run lead.
+2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the workspace and reads the ticket and the code. It has no plan step:
 
    ```sh
-   orca orchestration ask --question "Run <run>: the ticket has no testable ACs. Proposed ACs: <list, one per line>. Accept them?" --options "accept,edit,abort" --timeout-ms 600000
+   orca orchestration worker-start --spec "/skill:ark worker <run> evaluator" --task-title "evaluator (<run>)" --worktree path:<workspace from ark.yml> --agent <harness> --model <model> --json
+   ```
+
+   Wait for its `worker_done`, as in section 7. Read `<run folder>/evaluation.md`. If it is missing or malformed, do not fix it yourself: run `ark evaluation record <run>`, read the refusal, and send the evaluator the fix.
+
+3. Record it:
+
+   ```sh
+   ark evaluation record <run>
+   ```
+
+   The command refuses when `evaluation.md` has no `Blockers` list or no `Risks` list. An empty list is valid. Never write the event by hand.
+
+4. Run `ark status <run>`. With no blockers and a ticket with ACs, the phase is `planning`: skip the criteria gate and go to section 3. Never record a gate answer for the human. Carry each risk into your plan: a step, a test case or a line in `summary`. `plan.md` lists them.
+
+### Criteria gate
+
+The gate opens when the phase is `awaiting_criteria`. That means the ticket has no ACs, or the evaluation has blockers.
+
+1. If the ticket has no ACs, read the ticket and the code it touches. Draft testable AC. Each one is one statement that an integration or E2E test can prove. Give each an ID: `<ticket id>-AC1`, `<ticket id>-AC2` and so on. If the evaluation has blockers, revise the ACs they name, or list them as questions for the human.
+2. Ask Master Chief to show the draft and the blockers to the human:
+
+   ```sh
+   orca orchestration ask --question "Run <run>: <the ticket has no testable ACs | the evaluator found blockers: <list, one per line>>. Proposed ACs: <list, one per line>. Accept them?" --options "accept,edit,abort" --timeout-ms 600000
    ```
 
    Add your recommendation to the question. If the ask times out, resume it with `--resume <message id>`. Never send a second question.
@@ -42,7 +69,7 @@ Skip this section unless the phase is `awaiting_criteria`. That means the ticket
    ark gate record <run> criteria accept
    ```
 
-   The command re-reads the ticket file and copies it to `<run folder>/ticket.md`. It refuses when the file has no criteria.
+   The command re-reads the ticket file and copies it to `<run folder>/ticket.md`. It refuses when the file has no criteria. Blockers that the human accepts stay in `evaluation.md`: treat each as a risk in your plan.
 
 5. On `abort`, run `ark gate record <run> criteria abort`, then go to section 11 with outcome `failed`.
 
