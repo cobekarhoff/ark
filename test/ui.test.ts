@@ -723,6 +723,30 @@ test(
 );
 
 test(
+  "ARK-176-AC3 keeps a closed run in Needs me until all three Close check answers exist",
+  { timeout: 15_000 },
+  async () => {
+    const run = startRun("ARK-176-R", "Partial retro");
+    appendEvent(run.directory, "run.closed", { outcome: "aborted" });
+    setOrcaRuns([]);
+    const retroPath = join(run.directory, "retro.md");
+    const retroShown = async (baseUrl: string) =>
+      (await hubState(baseUrl)).needs_me.some(
+        (item) => item.kind === "retro" && item.ticket === "ARK-176-R",
+      );
+
+    writeFileSync(retroPath, "## Close check\n\n- Biggest pain: slow tests\n- Change now:\n");
+    await withUi(async (baseUrl) => expect(await retroShown(baseUrl)).toBe(true));
+
+    writeFileSync(
+      retroPath,
+      "## Close check\n\n- Biggest pain: slow tests\n- Change now: cache\n- Surprise: none\n",
+    );
+    await withUi(async (baseUrl) => expect(await retroShown(baseUrl)).toBe(false));
+  },
+);
+
+test(
   "ARK-176-AC7 Home renders panels, age colors, and filters all project data",
   { timeout: 30_000 },
   async () => {

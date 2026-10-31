@@ -30,13 +30,16 @@ export function readRuns(now = Date.now()): RunInfo[] {
   return runs.sort((left, right) => right.state.run.localeCompare(left.state.run));
 }
 
-/** A closed run whose `retro.md` exists but whose Close check has no answers yet. */
+/** A closed run whose `retro.md` Close check lacks a non-empty answer to any of the three questions. */
 function retroUnanswered(directory: string): boolean {
   try {
     const closeCheck = readFileSync(join(directory, "retro.md"), "utf8").split(
       /^## Close check\s*$/m,
     )[1];
-    return closeCheck !== undefined && !/^- Biggest pain:/m.test(closeCheck);
+    if (closeCheck === undefined) return false;
+    return !["Biggest pain", "Change now", "Surprise"].every((label) =>
+      new RegExp(`^- ${label}:[ \\t]*\\S`, "m").test(closeCheck),
+    );
   } catch {
     return false;
   }

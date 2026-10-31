@@ -167,7 +167,10 @@ export function App() {
   const oldestGate = gates.length
     ? Math.max(...gates.map((item) => minutesSince(item.since, now)))
     : 0;
-  const costNumbers = runs.map((run) => run.cost.usd);
+  const today = new Date(now).toDateString();
+  const costNumbers = hub.runs
+    .filter((run) => visible(run.project) && new Date(run.last_event).toDateString() === today)
+    .map((run) => run.cost.usd);
   const cost =
     filter === "all"
       ? hub.tiles.cost_today
