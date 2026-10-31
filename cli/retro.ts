@@ -132,7 +132,7 @@ function gateWaitSeconds(events: ArkEvent[]): number {
     if (event.type === "run.started" && event.data.criteria.length === 0)
       waitingSince.set("criteria", time);
     if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
-      waitingSince.set("criteria", time);
+      waitingSince.set("criteria", waitingSince.get("criteria") ?? time);
     if (event.type === "plan.checked" && event.data.valid) waitingSince.set("plan", time);
     if (event.type === "step.finished" && event.data.outcome === "failed")
       waitingSince.set("escalation", time);

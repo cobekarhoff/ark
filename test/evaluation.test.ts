@@ -97,6 +97,14 @@ test("ARK-170-AC2 blockers keep the criteria gate open through edits until accep
   expect(state().phase).toBe("planning");
 });
 
+test("ARK-170-AC2 a later clear evaluation does not end the criteria gate wait", () => {
+  record(["AC is impossible"], []);
+  record([], []);
+  expect(state().phase).toBe("awaiting_criteria");
+  expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(0);
+  expect(state().phase).toBe("planning");
+});
+
 test("ARK-170-AC2 aborting an evaluator-blocked criteria gate closes the run", () => {
   record(["AC is impossible"], []);
   const result = ark("gate", "record", runId, "criteria", "abort");

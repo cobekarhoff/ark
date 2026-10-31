@@ -125,7 +125,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "evaluation.recorded":
         evaluation = { blockers: data.blockers, risks: data.risks };
-        blocked = data.blockers.length > 0;
+        if (data.blockers.length > 0) blocked = true;
         break;
       case "plan.checked":
         plan = { checked: true, valid: data.valid, plan_hash: data.plan_hash };
