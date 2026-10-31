@@ -2,5 +2,15 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "rules": {
     "typescript/no-floating-promises": "error"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["cli/plan.ts", "test/**/*.ts"],
+      "rules": {
+        // Plan scenarios use `then: string[]`, not a callable Promise-like `then`.
+        // This syntax-only rule incorrectly rejects those schema fields.
+        "unicorn/no-thenable": "off"
+      }
+    }
+  ]
 }

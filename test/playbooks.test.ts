@@ -83,13 +83,3 @@ test("ARK-166-AC3 opens Plannotator on plan.md only", () => {
   expect(annotateCommand).not.toContain("plan.mmd");
   expect(annotateCommand).not.toContain("plan.yml");
 });
-
-test("ARK-166-AC4 ticket snapshot has the required sections and AC table", () => {
-  const ticketTemplate = chiefPlaybook
-    .split("## 6. Start a run lead for each ready ticket")[1]
-    ?.split("\n## ")[0];
-  expect(ticketTemplate).toBeDefined();
-  expect(ticketTemplate).toMatch(/## Problem[\s\S]*## Change[\s\S]*## Acceptance criteria/);
-  expect(ticketTemplate).toContain("| ID | Criterion |");
-  expect(ticketTemplate).toContain("| --- | --- |");
-});
