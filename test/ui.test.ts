@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { beforeEach, expect, test } from "bun:test";
 import {
+  existsSync,
   appendFileSync,
   chmodSync,
   mkdirSync,
@@ -1076,3 +1077,426 @@ test("ARK-176-AC9 keeps the hub design reference byte-identical", () => {
     expect(createHash("sha256").update(file).digest("hex")).toBe(checksums.get(filename)!);
   }
 });
+function runArkWithEnvironment(environment: Record<string, string>, ...arguments_: string[]) {
+  return Bun.spawnSync([process.execPath, join(repositoryRoot, "cli", "ark.ts"), ...arguments_], {
+    env: { ...process.env, ...environment },
+  });
+}
+
+function writeCommand(directory: string, name: string, contents: string): string {
+  const command = join(directory, name);
+  writeFileSync(command, `#!/bin/sh\n${contents}\n`);
+  chmodSync(command, 0o755);
+  return command;
+}
+
+async function waitForCondition(condition: () => Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    if (await condition()) return;
+    await Bun.sleep(100);
+  }
+  throw new Error("condition was not reached");
+}
+
+function setupNotifier(): { log: string; commandDirectory: string } {
+  const commandDirectory = mkdtempSync(join(tmpdir(), "ark-notifier-"));
+  const log = join(commandDirectory, "notifier.log");
+  writeCommand(commandDirectory, "notifier", `printf '%s\\n' "$@" >> "${log}"`);
+  return { log, commandDirectory };
+}
+
+test("ARK-178-AC1 install writes a restarting LaunchAgent and loads it", () => {
+  const temporaryHome = mkdtempSync(join(tmpdir(), "ark-install-home-"));
+  const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-install-state-"));
+  const commandDirectory = mkdtempSync(join(tmpdir(), "ark-install-bin-"));
+  const launchLog = join(commandDirectory, "launchctl.log");
+  const notifierCommand = writeCommand(commandDirectory, "terminal-notifier", "exit 0");
+  writeCommand(commandDirectory, "launchctl", `printf '%s\\n' "$*" >> "${launchLog}"`);
+
+  const result = runArkWithEnvironment(
+    {
+      HOME: temporaryHome,
+      ARK_HOME: arkHomeDirectory,
+      ARK_NOTIFIER: notifierCommand,
+      ARK_LAUNCHCTL: join(commandDirectory, "launchctl"),
+      PATH: commandDirectory,
+    },
+    "ui",
+    "install",
+  );
+  const plist = join(temporaryHome, "Library", "LaunchAgents", "dev.ark.hub.plist");
+  const contents = readFileSync(plist, "utf8");
+  expect(result.exitCode).toBe(0);
+  expect(contents).toContain("<key>RunAtLoad</key><true/>");
+  expect(contents).toContain("<key>KeepAlive</key><true/>");
+  expect(contents).toContain(`<string>${join(repositoryRoot, "cli", "ark.ts")}</string>`);
+  expect(contents).toContain(`<string>${process.execPath}</string>`);
+  expect(contents).toContain("<string>ui</string>");
+  expect(readFileSync(launchLog, "utf8").trim()).toBe(`load -w ${plist}`);
+});
+
+test("ARK-178-AC1 repeating install leaves the LaunchAgent unchanged", () => {
+  const temporaryHome = mkdtempSync(join(tmpdir(), "ark-install-home-"));
+  const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-install-state-"));
+  const commandDirectory = mkdtempSync(join(tmpdir(), "ark-install-bin-"));
+  const launchLog = join(commandDirectory, "launchctl.log");
+  const launchctlCommand = writeCommand(
+    commandDirectory,
+    "launchctl",
+    `printf '%s\\n' "$*" >> "${launchLog}"`,
+  );
+  const notifierCommand = writeCommand(commandDirectory, "terminal-notifier", "exit 0");
+  const environment = {
+    HOME: temporaryHome,
+    ARK_HOME: arkHomeDirectory,
+    ARK_NOTIFIER: notifierCommand,
+    ARK_LAUNCHCTL: launchctlCommand,
+    PATH: commandDirectory,
+  };
+
+  const firstResult = runArkWithEnvironment(environment, "ui", "install");
+  const plist = join(temporaryHome, "Library", "LaunchAgents", "dev.ark.hub.plist");
+  const firstContents = readFileSync(plist, "utf8");
+  const secondResult = runArkWithEnvironment(environment, "ui", "install");
+
+  expect(firstResult.exitCode).toBe(0);
+  expect(secondResult.exitCode).toBe(0);
+  expect(readFileSync(plist, "utf8")).toBe(firstContents);
+  expect(readFileSync(launchLog, "utf8").trim().split("\n")).toEqual([`load -w ${plist}`]);
+});
+
+test("ARK-178-AC1 install refuses a missing notifier without writing the LaunchAgent", () => {
+  const temporaryHome = mkdtempSync(join(tmpdir(), "ark-install-home-"));
+  const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-install-state-"));
+  const commandDirectory = mkdtempSync(join(tmpdir(), "ark-install-empty-bin-"));
+  const result = runArkWithEnvironment(
+    {
+      HOME: temporaryHome,
+      ARK_HOME: arkHomeDirectory,
+      ARK_NOTIFIER: "not-installed-notifier",
+      PATH: commandDirectory,
+    },
+    "ui",
+    "install",
+  );
+
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain("not-installed-notifier is not installed");
+  expect(existsSync(join(temporaryHome, "Library", "LaunchAgents", "dev.ark.hub.plist"))).toBe(
+    false,
+  );
+});
+
+test("ARK-178-AC1 uninstall removes the LaunchAgent twice and keeps notification history", () => {
+  const temporaryHome = mkdtempSync(join(tmpdir(), "ark-uninstall-home-"));
+  const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-uninstall-state-"));
+  const commandDirectory = mkdtempSync(join(tmpdir(), "ark-uninstall-bin-"));
+  const launchLog = join(commandDirectory, "launchctl.log");
+  const launchctlCommand = writeCommand(
+    commandDirectory,
+    "launchctl",
+    `printf '%s\\n' "$*" >> "${launchLog}"`,
+  );
+  const notifierCommand = writeCommand(commandDirectory, "terminal-notifier", "exit 0");
+  const environment = {
+    HOME: temporaryHome,
+    ARK_HOME: arkHomeDirectory,
+    ARK_NOTIFIER: notifierCommand,
+    ARK_LAUNCHCTL: launchctlCommand,
+    PATH: commandDirectory,
+  };
+  const installed = runArkWithEnvironment(environment, "ui", "install");
+  const plist = join(temporaryHome, "Library", "LaunchAgents", "dev.ark.hub.plist");
+  const history = join(arkHomeDirectory, "hub", "notifications.ndjson");
+  mkdirSync(join(arkHomeDirectory, "hub"), { recursive: true });
+  writeFileSync(history, '{"id":"kept"}\n');
+
+  const firstRemoval = runArkWithEnvironment(environment, "ui", "uninstall");
+  const missingAfterFirstRemoval = !existsSync(plist);
+  const secondRemoval = runArkWithEnvironment(environment, "ui", "uninstall");
+
+  expect(installed.exitCode).toBe(0);
+  expect(firstRemoval.exitCode).toBe(0);
+  expect(secondRemoval.exitCode).toBe(0);
+  expect(missingAfterFirstRemoval).toBe(true);
+  expect(readFileSync(history, "utf8")).toBe('{"id":"kept"}\n');
+  expect(readFileSync(launchLog, "utf8").trim().split("\n")).toEqual([
+    `load -w ${plist}`,
+    `unload ${plist}`,
+  ]);
+});
+
+test(
+  "ARK-178-AC2 a new gate notifies exactly once across repeated polls",
+  { timeout: 15_000 },
+  async () => {
+    const { log, commandDirectory } = setupNotifier();
+    process.env.ARK_NOTIFIER = join(commandDirectory, "notifier");
+    const uiServer = await startUi();
+    try {
+      const initialState = await hubState(`http://127.0.0.1:${uiServer.port}`);
+      expect(initialState.needs_me).toHaveLength(0);
+      // Let the one-second notification poll establish its first empty Ark baseline before adding the gate.
+      await Bun.sleep(1100);
+      const newRun = startRun("ARK-178-N1", "New gate notification");
+      planGate(newRun.directory);
+      const gateId = `gate:${newRun.runId}:plan`;
+      await waitForCondition(async () => {
+        const currentState = (await (
+          await fetch(`http://127.0.0.1:${uiServer.port}/api/state`)
+        ).json()) as Hub;
+        return currentState.needs_me.some((item) => item.id === gateId);
+      });
+      await waitForCondition(async () => {
+        try {
+          return (await Bun.file(log).text()).includes(gateId);
+        } catch {
+          return false;
+        }
+      });
+      // The one-second server poll is the behavior under test; wait beyond two ticks to catch duplicates.
+      await Bun.sleep(2200);
+      expect(
+        (await Bun.file(log).text()).split("\n").filter((line) => line.includes(`#item=${gateId}`)),
+      ).toHaveLength(1);
+    } finally {
+      uiServer.process.kill();
+      await uiServer.process.exited;
+    }
+  },
+);
+
+test(
+  "ARK-178-AC2 existing gates stay quiet through polls and a server restart",
+  { timeout: 15_000 },
+  async () => {
+    const newRun = startRun("ARK-178-N2", "Gate exists before startup");
+    planGate(newRun.directory);
+    const { log, commandDirectory } = setupNotifier();
+    process.env.ARK_NOTIFIER = join(commandDirectory, "notifier");
+    for (let restart = 0; restart < 2; restart++) {
+      await withUi(async (baseUrl) => {
+        await hubState(baseUrl);
+        // Exercise the hub's real startup and refresh intervals rather than advancing fake timers.
+        await Bun.sleep(1300);
+      });
+    }
+    expect(await Bun.file(log).exists()).toBe(false);
+  },
+);
+
+test(
+  "ARK-178-AC2 a delayed Orca source establishes its baseline without a notification",
+  { timeout: 20_000 },
+  async () => {
+    const newRun = startRun("ARK-178-N3", "Orca agent existed before read");
+    readyRun(newRun);
+    const { log, commandDirectory } = setupNotifier();
+    process.env.ARK_NOTIFIER = join(commandDirectory, "notifier");
+    const failMarker = join(commandDirectory, "orca-fails");
+    writeFileSync(failMarker, "");
+    process.env.ORCA_RUNS = JSON.stringify([
+      { id: "orca-existing-run", objective: `Ark run ${newRun.runId}`, coordinator_handle: null },
+    ]);
+    process.env.ORCA_TASKS = JSON.stringify([
+      { id: "old-worker", task_title: "Existing stuck worker" },
+    ]);
+    process.env.ORCA_WORKERS = JSON.stringify([
+      {
+        taskId: "old-worker",
+        agentTerminalHandle: "term_old_worker",
+        projection: { liveness: { verdict: "stuck" }, stage: { activity: "working" } },
+      },
+    ]);
+    process.env.ORCA_RUN_LIST_FAIL_MARKER = failMarker;
+    process.env.ORCA_RUN_LIST_FAIL = "1";
+    writeFileSync(
+      join(orcaBinDirectory, "orca"),
+      readFileSync(join(orcaBinDirectory, "orca"), "utf8").replace(
+        'if [ "$ORCA_RUN_LIST_FAIL" = "1" ]; then',
+        'if [ -f "$ORCA_RUN_LIST_FAIL_MARKER" ]; then',
+      ),
+    );
+
+    const uiServer = await startUi();
+    try {
+      const baseUrl = `http://127.0.0.1:${uiServer.port}`;
+      await waitForCondition(async () => Bun.file(failMarker).exists());
+      const initiallyUnavailable = (await hubState(baseUrl, false)).readers.orca === "unknown";
+      await Bun.file(failMarker).delete();
+      await waitForCondition(async () => (await hubState(baseUrl)).readers.orca === "ok");
+      await waitForCondition(async () => {
+        const state = (await (await fetch(`${baseUrl}/api/state`)).json()) as Hub & {
+          agents: { liveness: string }[];
+        };
+        return state.agents.some((agent) => agent.liveness === "stuck");
+      });
+      // Give the next one-second notification poll a chance to evaluate the delayed source.
+      await Bun.sleep(1300);
+      expect(initiallyUnavailable).toBe(true);
+      expect(await Bun.file(log).exists()).toBe(false);
+    } finally {
+      uiServer.process.kill();
+      await uiServer.process.exited;
+    }
+  },
+);
+
+test(
+  "ARK-178-AC3 a notification is persisted and opening its item marks it acted",
+  { timeout: 15_000 },
+  async () => {
+    const { log, commandDirectory } = setupNotifier();
+    process.env.ARK_NOTIFIER = join(commandDirectory, "notifier");
+    const uiServer = await startUi();
+    const baseUrl = `http://127.0.0.1:${uiServer.port}`;
+    try {
+      await hubState(baseUrl);
+      // Let the first refresh and Ark notification baseline complete before the new run appears.
+      await Bun.sleep(1100);
+      const newRun = startRun("ARK-178-N4", "Persisted notification item");
+      planGate(newRun.directory);
+      const notificationId = `gate:${newRun.runId}:plan`;
+      await waitForCondition(async () => {
+        try {
+          return (await Bun.file(log).text()).includes(notificationId);
+        } catch {
+          return false;
+        }
+      });
+      const history = join(process.env.ARK_HOME as string, "hub", "notifications.ndjson");
+      const notificationRecord = JSON.parse((await Bun.file(history).text()).trim());
+      expect(notificationRecord.id).toBe(notificationId);
+      expect(Number.isNaN(Date.parse(notificationRecord.time))).toBe(false);
+      expect(notificationRecord.item).toEqual({
+        kind: "gate",
+        project: "demo",
+        title: "plan gate: Persisted notification item",
+      });
+
+      const actionResponse = await fetch(`${baseUrl}/api/notifications/acted`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: notificationId }),
+      });
+      const notifiedState = (await (await fetch(`${baseUrl}/api/state`)).json()) as Hub & {
+        notifications: { id: string; acted: boolean }[];
+      };
+      expect(actionResponse.status).toBe(200);
+      expect(notifiedState.notifications.find((entry) => entry.id === notificationId)?.acted).toBe(
+        true,
+      );
+    } finally {
+      uiServer.process.kill();
+      await uiServer.process.exited;
+    }
+  },
+);
+
+test(
+  "ARK-178-AC3 the Notifications view orders persisted rows newest first with acted text",
+  { timeout: 30_000 },
+  async () => {
+    const historyDirectory = join(process.env.ARK_HOME as string, "hub");
+    mkdirSync(historyDirectory, { recursive: true });
+    const history = join(historyDirectory, "notifications.ndjson");
+    const notifications = [
+      {
+        id: "gate:oldest:plan",
+        time: "2026-01-01T10:00:00.000Z",
+        item: { kind: "gate", project: "demo", title: "Oldest gate" },
+      },
+      {
+        id: "gate:newest:plan",
+        time: "2026-01-03T10:00:00.000Z",
+        item: { kind: "gate", project: "demo", title: "Newest gate" },
+      },
+      {
+        id: "gate:middle:plan",
+        time: "2026-01-02T10:00:00.000Z",
+        item: { kind: "gate", project: "demo", title: "Middle gate" },
+      },
+    ];
+    writeFileSync(
+      history,
+      `${[
+        ...notifications.map((notification) => JSON.stringify(notification)),
+        JSON.stringify({ acted: "gate:middle:plan", time: "2026-01-02T11:00:00.000Z" }),
+      ].join("\n")}\n`,
+    );
+    await using view = new Bun.WebView({ backend: "chrome", width: 1280, height: 900 });
+    await withUi(async (baseUrl) => {
+      await view.navigate(baseUrl);
+      await waitForBrowserValue(
+        view,
+        "document.querySelectorAll('[data-notification]').length === 3",
+      );
+      const displayedNotifications = (await view.evaluate(
+        `Array.from(document.querySelectorAll('[data-notification]')).map((row) => ({
+          id: row.dataset.notification,
+          text: row.innerText,
+        }))`,
+      )) as { id: string; text: string }[];
+      expect(displayedNotifications.map((notification) => notification.id)).toEqual([
+        "gate:newest:plan",
+        "gate:middle:plan",
+        "gate:oldest:plan",
+      ]);
+      expect(displayedNotifications.map((notification) => notification.text)).toEqual(
+        expect.arrayContaining([expect.stringContaining("yes"), expect.stringContaining("no")]),
+      );
+      expect(displayedNotifications[0]?.text).toContain("no");
+      expect(displayedNotifications[1]?.text).toContain("yes");
+      expect(displayedNotifications[2]?.text).toContain("no");
+    });
+  },
+);
+
+test(
+  "ARK-178-AC4 a notification opens the hub at its item and records that it was acted on",
+  { timeout: 30_000 },
+  async () => {
+    const { log, commandDirectory } = setupNotifier();
+    process.env.ARK_NOTIFIER = join(commandDirectory, "notifier");
+    const uiServer = await startUi();
+    await using view = new Bun.WebView({ backend: "chrome", width: 1280, height: 900 });
+    try {
+      const baseUrl = `http://127.0.0.1:${uiServer.port}`;
+      await hubState(baseUrl);
+      // Let the first refresh and Ark notification baseline complete before the new run appears.
+      await Bun.sleep(1100);
+      const newRun = startRun("ARK-178-N5", "Notification click target");
+      planGate(newRun.directory);
+      const notificationId = `gate:${newRun.runId}:plan`;
+      await waitForCondition(async () => {
+        try {
+          const argumentsLog = await Bun.file(log).text();
+          return argumentsLog.includes(notificationId) && argumentsLog.includes("-open");
+        } catch {
+          return false;
+        }
+      });
+      const argumentsLog = await Bun.file(log).text();
+      expect(argumentsLog).toContain(`http://127.0.0.1:${uiServer.port}/#item=${notificationId}`);
+
+      await view.navigate(`${baseUrl}/#item=${encodeURIComponent(notificationId)}`);
+      await waitForBrowserValue(
+        view,
+        `document.querySelector('[data-need="${notificationId}"]')?.dataset.need`,
+      );
+      await waitForCondition(async () => {
+        const apiState = (await (await fetch(`${baseUrl}/api/state`)).json()) as Hub & {
+          notifications: { id: string; acted: boolean }[];
+        };
+        return apiState.notifications.find((entry) => entry.id === notificationId)?.acted === true;
+      });
+      expect(await view.evaluate("location.hash")).toBe("");
+      expect(await view.evaluate("document.querySelector('.detail h2')?.textContent")).toContain(
+        "Notification click target",
+      );
+    } finally {
+      uiServer.process.kill();
+      await uiServer.process.exited;
+    }
+  },
+);
