@@ -8,6 +8,7 @@ import {
   kinds,
   minutesSince,
   needRun,
+  notificationTime,
   otherFilter,
   stepToneOf,
   usd,
@@ -79,6 +80,7 @@ export function App() {
   const [digestShown, setDigestShown] = useState(true);
   const [theme, setTheme] = useState(() => localStorage.getItem("ark-hub-theme") ?? "dark");
   const [toast, setToast] = useState<string | null>(null);
+  const [hashTick, setHashTick] = useState(0);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -90,16 +92,52 @@ export function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    const onHashChange = () => setHashTick((tick) => tick + 1);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
   const known = hub?.projects.map((project) => project.name) ?? [];
   const visible = (project: string) => inFilter(project, filter, known);
   const needs = hub?.needs_me.filter((item) => visible(item.project)) ?? [];
   const runs = hub?.runs.filter((run) => run.open && visible(run.project)) ?? [];
   const agents = hub?.agents.filter((agent) => visible(agent.project)) ?? [];
   const chiefs = hub?.projects.filter((project) => visible(project.name)) ?? [];
+  const notifications = hub?.notifications.filter((entry) => visible(entry.item.project)) ?? [];
 
   const selectedNeed =
     selection?.type === "need" ? needs.find((item) => item.id === selection.id) : undefined;
   const cursor = selectedNeed ?? (selection === null ? needs[0] : undefined);
+
+  // A click on the macOS notification opens /#item=<id>: select that item, tell the server the human
+  // acted, and clear the hash so a reload does not select again.
+  useEffect(() => {
+    if (hub === null || !location.hash.startsWith("#item=")) return;
+    const raw = location.hash.slice("#item=".length);
+    const id = (() => {
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    })();
+    history.replaceState(null, "", location.pathname + location.search);
+    void fetch("/api/notifications/acted", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const item = hub.needs_me.find((candidate) => candidate.id === id);
+    if (!item) return setToast("That item is no longer waiting on you.");
+    if (!inFilter(item.project, filter, known)) setFilter("all");
+    setSelection({ type: "need", id });
+    requestAnimationFrame(() =>
+      document
+        .querySelector(`[data-need="${CSS.escape(id)}"]`)
+        ?.scrollIntoView({ block: "nearest" }),
+    );
+  }, [hub, hashTick]);
 
   async function perform(action: Action | null) {
     if (action === null) return;
@@ -459,6 +497,64 @@ export function App() {
               )}
             </section>
           )}
+
+          {!focus && (
+            <section aria-labelledby="notifs-h">
+              <div className="sec-h">
+                <h2 id="notifs-h">Notifications</h2>
+                <span className="count plain">{notifications.length}</span>
+                <span className="hint">newest first · acted = you opened the hub from it</span>
+              </div>
+              {notifications.length === 0 ? (
+                <div className="empty">
+                  {filter === "all"
+                    ? "No notifications yet. A new Needs-me item sends one."
+                    : `No notifications for ${filter === otherFilter ? "other projects" : filter}.`}
+                </div>
+              ) : (
+                <>
+                  <div className="colh notifs" aria-hidden="true">
+                    <span />
+                    <span>Time</span>
+                    <span>Kind</span>
+                    <span>Item</span>
+                    <span>Acted</span>
+                  </div>
+                  <ul className="list">
+                    {notifications.map((entry) => {
+                      const kind = kinds[entry.item.kind];
+                      return (
+                        <li
+                          key={entry.id}
+                          className={`row s-${kind.tone}`}
+                          data-notification={entry.id}
+                        >
+                          <button
+                            className="row-main notifs"
+                            onClick={() => setSelection({ type: "need", id: entry.id })}
+                          >
+                            <span className="mk" aria-hidden="true" />
+                            <span className="muted num" title={entry.time}>
+                              {notificationTime(entry.time, now)}
+                            </span>
+                            <span className="kind">{kind.label}</span>
+                            <span className="ttl" title={entry.item.title}>
+                              {entry.item.title}
+                              <span className="tag">{entry.item.project}</span>
+                            </span>
+                            <span className={`acted ${entry.acted ? "s-ok" : "muted"}`}>
+                              <i className={`dot ${entry.acted ? "" : "hollow"}`} />
+                              {entry.acted ? "yes" : "no"}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </section>
+          )}
         </div>
       </main>
 
@@ -627,6 +723,8 @@ function Detail({
       </div>
     );
   }
+  if (selection?.type === "need")
+    return <div className="d-empty">This item is no longer waiting on you.</div>;
   return (
     <div className="d-empty">
       Select a row to see it here.

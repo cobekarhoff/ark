@@ -23,7 +23,7 @@ function arkHelp(words: string[]): string {
 function commandNames(topLevelHelp: string): string[] {
   const names: string[] = [];
   for (const line of topLevelHelp.split("\n")) {
-    const match = line.match(/^\s*([a-z][a-z-]*(?: [a-z][a-z-]*)*)\s+[<[]/);
+    const match = line.match(/^\s*([a-z][a-z-]*(?: [a-z][a-z-]*)*)(?:\s+[<[]|$)/);
     if (!match || match[1] === "ark" || match[1].startsWith("ark ")) continue;
     names.push(match[1]);
   }
