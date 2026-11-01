@@ -1,9 +1,9 @@
 import { closeSync, existsSync, openSync, readSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { ArkError } from "../errors.ts";
 import { parseClaudeSession } from "./claude.ts";
-import { parseCodexSession } from "./codex.ts";
+import { parseCodexSession, readCodexText } from "./codex.ts";
 import { parseOmpSession } from "./omp.ts";
 
 export type UsageMessage = {
@@ -35,8 +35,9 @@ export type SessionWithKey = SessionUsage & {
 
 type Source = {
   root: string;
+  pattern: string;
   parse: (file: string) => SessionUsage;
-  /** Session key for a file; the default groups subagent transcripts under their parent. */
+  /** Codex rollouts sit in date folders, so the top-level session is the file itself. */
   keyFor?: (relativeFile: string) => string;
 };
 
@@ -44,17 +45,19 @@ function sources(): Source[] {
   return [
     {
       root: process.env.ARK_OMP_SESSIONS ?? join(homedir(), ".omp", "agent", "sessions"),
+      pattern: "**/*.jsonl",
       parse: parseOmpSession,
     },
     {
       root: process.env.ARK_CLAUDE_SESSIONS ?? join(homedir(), ".claude", "projects"),
+      pattern: "**/*.jsonl",
       parse: parseClaudeSession,
     },
     {
       root: process.env.ARK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions"),
+      pattern: "**/*.jsonl{,.zst}",
       parse: parseCodexSession,
-      // Rollouts sit in `YYYY/MM/DD/`, so the folder says nothing about the session.
-      keyFor: (relativeFile) => `codex/${relativeFile.replace(/\.jsonl$/, "")}`,
+      keyFor: (relativeFile) => `codex/${basename(relativeFile).replace(/\.jsonl(\.zst)?$/, "")}`,
     },
   ];
 }
@@ -67,14 +70,19 @@ function sessionKeyFor(relativeFile: string): string {
     : `${segments[0]}/${segments[1].replace(/\.jsonl$/, "")}`;
 }
 
-/** First `cwd` in the first 64 KiB of a session file; both formats write it near the top. */
+function findCwd(head: string): string | null {
+  const match = head.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+  return match ? JSON.parse(`"${match[1]}"`) : null;
+}
+
+/** First `cwd` in the first 64 KiB of a session file; every format writes it near the top. */
 function readCwd(file: string): string | null {
+  if (file.endsWith(".zst")) return findCwd(readCodexText(file).slice(0, 65536));
   const descriptor = openSync(file, "r");
   try {
     const buffer = Buffer.alloc(65536);
     const length = readSync(descriptor, buffer, 0, buffer.length, 0);
-    const match = buffer.toString("utf8", 0, length).match(/"cwd":"((?:[^"\\]|\\.)*)"/);
-    return match ? JSON.parse(`"${match[1]}"`) : null;
+    return findCwd(buffer.toString("utf8", 0, length));
   } finally {
     closeSync(descriptor);
   }
@@ -91,7 +99,7 @@ export function readUsage(runDirectory: string): SessionWithKey[] {
   for (const source of sources()) {
     if (!existsSync(source.root)) continue;
     const relativeFiles = [
-      ...new Bun.Glob("**/*.jsonl").scanSync({ cwd: source.root, dot: true }),
+      ...new Bun.Glob(source.pattern).scanSync({ cwd: source.root, dot: true }),
     ].sort();
     for (const relativeFile of relativeFiles) {
       const file = join(source.root, relativeFile);
@@ -102,8 +110,10 @@ export function readUsage(runDirectory: string): SessionWithKey[] {
         throw new ArkError(`cannot read session file ${file}`);
       }
       if (cwd === null || ![...parents].some((parent) => isInside(cwd, parent))) continue;
-      const sessionKey = (source.keyFor ?? sessionKeyFor)(relativeFile);
-      sessions.push({ ...source.parse(file), sessionKey });
+      sessions.push({
+        ...source.parse(file),
+        sessionKey: (source.keyFor ?? sessionKeyFor)(relativeFile),
+      });
     }
   }
   return sessions;

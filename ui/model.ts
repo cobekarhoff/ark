@@ -25,7 +25,7 @@ const stepTone = {
 };
 export const stepToneOf = (status: string) => stepTone[status as keyof typeof stepTone] ?? "idle";
 
-export const agentTone = (agent: Agent) =>
+export const agentTone = (agent: Pick<Agent, "liveness">) =>
   agent.liveness === "live"
     ? "working"
     : ["stuck", "dead", "exited"].includes(agent.liveness)
@@ -65,4 +65,89 @@ export function notificationTime(time: string, now: number): string {
   return date.toDateString() === new Date(now).toDateString()
     ? `${clock} today`
     : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${clock}`;
+}
+
+export type RunDetail = HubState["details"][string];
+
+/** Seconds as `45s`, `12m` or `1h 12m`; "unknown" stays `?`. */
+export const span = (seconds: number | "unknown") =>
+  seconds === "unknown"
+    ? "?"
+    : seconds < 60
+      ? `${Math.round(seconds)}s`
+      : duration(Math.floor(seconds / 60));
+
+export const costText = (cost: { usd: number | "unknown" } | "unknown") =>
+  cost === "unknown" ? "?" : usd(cost.usd);
+
+const splitLabels: Record<keyof RunDetail["time_split"], [string, string]> = {
+  unavailable: ["Unavailable", "before the hub began collecting"],
+  working: ["Working", ""],
+  waiting_human: ["Waiting on you", ""],
+  waiting_ci_or_paused: ["Waiting on CI or paused", ""],
+  stalled: ["Stalled", ""],
+};
+const splitTones: Record<keyof RunDetail["time_split"], string> = {
+  unavailable: "na",
+  working: "working",
+  waiting_human: "needs",
+  waiting_ci_or_paused: "waiting",
+  stalled: "bad",
+};
+
+/** Time split parts in the design's order; percentages are of the whole wall time. */
+export function splitParts(split: RunDetail["time_split"]) {
+  const total = Object.values(split).reduce((sum, seconds) => sum + seconds, 0);
+  return (Object.keys(splitLabels) as (keyof RunDetail["time_split"])[]).map((key) => ({
+    key,
+    label: splitLabels[key][0],
+    note: splitLabels[key][1],
+    tone: splitTones[key],
+    seconds: split[key],
+    percent: total > 0 ? Math.round((split[key] / total) * 100) : 0,
+  }));
+}
+
+const phaseLabels: Record<string, string> = {
+  awaiting_criteria: "Gate: criteria",
+  awaiting_strategy: "Gate: strategy",
+  planning: "Plan",
+  building: "Build",
+  escalation: "Gate: escalation",
+  merge_requests_open: "Merge requests",
+  closed: "Closed",
+};
+export const phaseLabel = (phase: string) => phaseLabels[phase] ?? phase;
+
+/** One bar segment per phase change; the last one runs to the end of the run or to now. */
+export function phaseBars(detail: RunDetail) {
+  const start = Date.parse(detail.timeline[0]?.at ?? "");
+  const end = start + detail.wall_seconds * 1000;
+  return detail.timeline.map((row, i) => {
+    const to = i + 1 < detail.timeline.length ? Date.parse(detail.timeline[i + 1].at) : end;
+    return {
+      phase: row.phase,
+      label: phaseLabel(row.phase),
+      gate: row.phase.startsWith("awaiting_") || row.phase === "escalation",
+      current: i + 1 === detail.timeline.length && row.phase !== "closed",
+      seconds: Math.max(0, (to - Date.parse(row.at)) / 1000),
+    };
+  });
+}
+
+/** Step ids in columns: a step sits one column right of its deepest `needs`. */
+export function stepColumns(steps: RunDetail["steps"]) {
+  const depth = new Map<string, number>();
+  const visit = (id: string, trail: string[]): number => {
+    const known = depth.get(id);
+    if (known !== undefined) return known;
+    const step = steps.find((candidate) => candidate.id === id);
+    if (!step || trail.includes(id)) return 0;
+    const level = Math.max(-1, ...step.needs.map((need) => visit(need, [...trail, id]))) + 1;
+    depth.set(id, level);
+    return level;
+  };
+  const columns: RunDetail["steps"][] = [];
+  for (const step of steps) (columns[visit(step.id, [])] ??= []).push(step);
+  return columns.filter(Boolean);
 }

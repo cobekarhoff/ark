@@ -1,7 +1,7 @@
 import { deriveState } from "../events.ts";
 import { waitingGate } from "../run.ts";
 import { readRuns } from "./ark.ts";
-import { readHistory, stateAt } from "./history.ts";
+import { readHistory, stateAt } from "./changes.ts";
 
 /** The parts of the hub's state the Map reads. `createHub().state()` satisfies it. */
 export type HubView = {

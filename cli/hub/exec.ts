@@ -9,9 +9,10 @@ export async function exec(
   command: string[],
   timeoutMilliseconds = readerTimeoutMilliseconds,
   okExitCodes = [0],
+  cwd?: string,
 ): Promise<string | null> {
   try {
-    const child = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const killer = setTimeout(() => child.kill(), timeoutMilliseconds);
     // The race also covers a killed shell whose grandchild still holds the stdout pipe open.
     const output = await Promise.race([
@@ -32,8 +33,9 @@ export async function execJson<T>(
   command: string[],
   timeoutMilliseconds = readerTimeoutMilliseconds,
   okExitCodes = [0],
+  cwd?: string,
 ): Promise<T | null> {
-  const output = await exec(command, timeoutMilliseconds, okExitCodes);
+  const output = await exec(command, timeoutMilliseconds, okExitCodes, cwd);
   if (output === null) return null;
   try {
     return JSON.parse(output) as T;

@@ -2,7 +2,7 @@ import { deriveState, type ArkEvent } from "../events.ts";
 import { waitingGate } from "../run.ts";
 import { readUsage } from "../usage/index.ts";
 import { readRuns } from "./ark.ts";
-import { collectedIntervals, readHistory, type HistoryEvent } from "./history.ts";
+import { collectedIntervals, readHistory, type HistoryEvent } from "./changes.ts";
 import type { HubView } from "./map.ts";
 
 export const timelineWindows = [1, 12, 24];

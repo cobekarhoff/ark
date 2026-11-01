@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Action, Agent, Item } from "../cli/hub/types.ts";
 import { MapView } from "./map.tsx";
 import { TimelineView } from "./timeline.tsx";
@@ -7,6 +7,7 @@ import { AbortButton, ChiefBox, RunLeadMessage } from "./steer.tsx";
 import {
   agentKey,
   agentTone,
+  costText,
   duration,
   heat,
   inFilter,
@@ -15,10 +16,16 @@ import {
   needRun,
   notificationTime,
   otherFilter,
+  phaseBars,
+  phaseLabel,
+  span,
+  splitParts,
+  stepColumns,
   stepToneOf,
   usd,
   type Filter,
   type HubState,
+  type RunDetail,
   type RunView,
   type Selection,
 } from "./model.ts";
@@ -215,6 +222,10 @@ export function App() {
   });
 
   if (hub === null) return <div className="d-empty">Connecting to the hub…</div>;
+  const runPage = location.hash.startsWith("#run=")
+    ? decodeURIComponent(location.hash.slice("#run=".length))
+    : null;
+  if (runPage !== null) return <RunPage hub={hub} run={runPage} perform={perform} />;
 
   const needCounts = (project: string) =>
     hub.needs_me.filter((item) => inFilter(item.project, project, known)).length;
@@ -700,6 +711,13 @@ function Detail({
             </div>
           </div>
           <div className="bar">
+            <button
+              className="btn sm"
+              data-open-run-detail
+              onClick={() => (location.hash = `run=${encodeURIComponent(run.run)}`)}
+            >
+              Run detail
+            </button>
             {run.merge_requests.map((mergeRequest) => (
               <button
                 key={mergeRequest.url}
@@ -967,6 +985,474 @@ function Sheet({ close }: { close: () => void }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Run detail for one run: the pushed detail for open runs, one fetch for closed ones. */
+function useRunDetail(hub: HubState, run: string): RunDetail | null | "missing" {
+  const pushed = hub.details[run];
+  const [fetched, setFetched] = useState<RunDetail | null | "missing">(null);
+  useEffect(() => {
+    if (pushed) return;
+    setFetched(null);
+    void fetch(`/api/runs/${encodeURIComponent(run)}`).then(async (response) =>
+      setFetched(response.ok ? ((await response.json()) as RunDetail) : "missing"),
+    );
+  }, [run, pushed === undefined]);
+  return pushed ?? fetched;
+}
+
+const Panel = ({
+  section,
+  title,
+  hint,
+  children,
+}: {
+  section: string;
+  title: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) => (
+  <section className="rd-panel" data-detail-section={section} aria-label={title}>
+    <header>
+      <h2>{title}</h2>
+      {hint && <span className="hint">{hint}</span>}
+    </header>
+    <div className="rd-body">{children}</div>
+  </section>
+);
+
+const NotAvailable = ({ what }: { what: string }) => (
+  <div className="rd-na-box" data-state="not available">
+    <b>Not available</b>
+    {what} was not written for this run, or the file could not be read.
+  </div>
+);
+
+const Status = ({ status, tone }: { status: string; tone: string }) => (
+  <span className={`st s-${tone}`}>
+    <i className={`dot ${tone === "idle" ? "hollow" : ""}`} />
+    {status}
+  </span>
+);
+
+function RunPage({
+  hub,
+  run,
+  perform,
+}: {
+  hub: HubState;
+  run: string;
+  perform: (action: Action | null) => Promise<void>;
+}) {
+  const detail = useRunDetail(hub, run);
+  const view = hub.runs.find((candidate) => candidate.run === run);
+  const crumb = (
+    <div className="rd-crumb">
+      <a href="#">Runs</a>
+      <span>/</span>
+      <span className="mono">{run}</span>
+    </div>
+  );
+  if (detail === null || detail === "missing")
+    return (
+      <div className="rd" data-run-detail={run}>
+        {crumb}
+        <div className="d-empty">{detail === null ? "Loading run…" : "No such run."}</div>
+      </div>
+    );
+  const lead = detail.agents.find((agent) => agent.role === "run lead" && agent.terminal);
+  const openGates = detail.gates.filter((gate) => gate.answered === null).length;
+  const tone = stepToneOf(detail.steps.find((step) => step.status === "running")?.status ?? "");
+  const bars = phaseBars(detail);
+  const barTotal = bars.reduce((sum, bar) => sum + bar.seconds, 0) || 1;
+  const parts = splitParts(detail.time_split);
+  const stepFor = (criterion: string) =>
+    detail.steps.filter((step) => step.criteria.includes(criterion)).map((step) => step.id);
+
+  return (
+    <div className="rd" data-run-detail={run} data-phase={detail.phase}>
+      {crumb}
+      <div className={`rd-head s-${tone}`}>
+        <span className="tkt">{detail.ticket.id}</span>
+        <h1>{detail.ticket.title}</h1>
+        <span className="pill s-working" data-detail-phase>
+          {phaseLabel(detail.phase)}
+        </span>
+        <span className="spacer" />
+        {lead && (
+          <button
+            className="btn"
+            onClick={() =>
+              void perform({
+                name: "orca-terminal-switch",
+                label: "Open run lead terminal",
+                params: { handle: lead.terminal },
+              })
+            }
+          >
+            Open run lead terminal
+          </button>
+        )}
+      </div>
+      <div className="rd-facts" data-detail-section="facts">
+        <div>
+          <span>Phase</span>
+          <b>{phaseLabel(detail.phase)}</b>
+        </div>
+        <div>
+          <span>Round</span>
+          <b>{view ? `r${view.round} / ${view.round_budget}` : "?"}</b>
+        </div>
+        <div>
+          <span>Wall time</span>
+          <b data-detail-wall>{span(detail.wall_seconds)}</b>
+        </div>
+        <div>
+          <span>Cost so far</span>
+          <b data-detail-cost>{costText(detail.cost)}</b>
+        </div>
+        <div>
+          <span>Waiting on you</span>
+          <b>
+            {openGates} open · {detail.gates.length - openGates} closed
+          </b>
+        </div>
+      </div>
+
+      <Panel section="time-split" title="Where the time went">
+        <div
+          className="rd-split"
+          role="img"
+          aria-label={parts.map((part) => `${part.label} ${span(part.seconds)}`).join(", ")}
+        >
+          {parts
+            .filter((part) => part.seconds > 0)
+            .map((part) => (
+              <i
+                key={part.key}
+                className={part.tone === "na" ? "na" : `s-${part.tone}`}
+                style={{ flex: part.seconds }}
+                title={`${part.label} ${span(part.seconds)}`}
+                data-split={part.key}
+              />
+            ))}
+        </div>
+        <div className="rd-split-l">
+          {parts.map((part) => (
+            <div key={part.key} className="rd-split-row" data-split-row={part.key}>
+              <span className={`rd-sw ${part.tone === "na" ? "na" : `s-${part.tone}`}`} />
+              <span>
+                {part.label}
+                {part.note && <span className="faint"> · {part.note}</span>}
+              </span>
+              <span className="rd-v">
+                {span(part.seconds)} · {part.percent}%
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="hint">
+          Percentages cover the whole wall time. The unavailable segment is never guessed into
+          another bucket.
+        </div>
+      </Panel>
+
+      <Panel section="timeline" title="Phase timeline" hint="gate waits hatched · rounds below">
+        <div className="rd-ph">
+          {bars.map((bar, i) => (
+            <div
+              key={`${bar.phase}-${i}`}
+              className={`${bar.gate ? "gate" : ""} ${bar.current ? "now" : ""}`}
+              style={{ flex: Math.max(bar.seconds / barTotal, 0.04) }}
+              data-phase-bar={bar.phase}
+            >
+              <b>{bar.label}</b>
+              <span>{span(bar.seconds)}</span>
+            </div>
+          ))}
+        </div>
+        <table className="t" data-detail-table="gates">
+          <thead>
+            <tr>
+              <th>Gate</th>
+              <th>Asked</th>
+              <th>Answered</th>
+              <th className="r">Waited</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detail.gates.length === 0 && (
+              <tr>
+                <td colSpan={4} className="muted">
+                  No gate asked yet.
+                </td>
+              </tr>
+            )}
+            {detail.gates.map((gate) => (
+              <tr key={`${gate.gate}-${gate.asked}`} data-gate={gate.gate}>
+                <td>{gate.gate}</td>
+                <td className="mono">{new Date(gate.asked).toLocaleTimeString()}</td>
+                <td className="mono">
+                  {gate.answered
+                    ? `${new Date(gate.answered).toLocaleTimeString()}${gate.answer ? ` · ${gate.answer}` : ""}`
+                    : "open"}
+                </td>
+                <td className="r mono">{span(gate.wait_seconds)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <table className="t" data-detail-table="rounds">
+          <thead>
+            <tr>
+              <th>Round</th>
+              <th>Started</th>
+              <th>Steps</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detail.rounds.length === 0 && (
+              <tr>
+                <td colSpan={3} className="muted">
+                  No round started yet.
+                </td>
+              </tr>
+            )}
+            {detail.rounds.map((round) => (
+              <tr key={round.round} data-round={round.round}>
+                <td>r{round.round}</td>
+                <td className="mono">{new Date(round.at).toLocaleTimeString()}</td>
+                <td className="mono">{round.steps.join(", ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+
+      <div className="rd-cols">
+        <Panel section="step-graph" title="Step graph" hint="edges = needs">
+          <div className="rd-graph">
+            {stepColumns(detail.steps).map((column, i) => (
+              <div className="rd-graph-part" key={column[0].id}>
+                {i > 0 && <i className="rd-edge" />}
+                <div className="rd-col">
+                  {column.map((step) => (
+                    <div
+                      key={step.id}
+                      className={`rd-node s-${stepToneOf(step.status)} ${step.status === "pending" ? "todo" : ""}`}
+                      data-step-node={step.id}
+                      data-needs={step.needs.join(" ")}
+                    >
+                      <b>{step.id}</b>
+                      <span>
+                        {step.role} · {step.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel section="step-list" title="Steps" hint="cost and wall time per step">
+          <table className="t">
+            <thead>
+              <tr>
+                <th>Step</th>
+                <th>State</th>
+                <th className="r">Wall</th>
+                <th className="r">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.steps.map((step) => (
+                <tr key={step.id} data-step={step.id}>
+                  <td className="mono">{step.id}</td>
+                  <td>
+                    <Status status={step.status} tone={stepToneOf(step.status)} />
+                  </td>
+                  <td className="r mono" data-step-wall>
+                    {span(step.wall_seconds)}
+                  </td>
+                  <td className="r mono" data-step-cost>
+                    {costText(step.cost)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      </div>
+
+      <Panel
+        section="ac-proof"
+        title="Acceptance criteria proof"
+        hint="latest test.completed joined with results/"
+      >
+        {detail.ac_proof.state === "not available" ? (
+          <NotAvailable what="A test run (test.completed)" />
+        ) : (
+          <table className="t" data-detail-table="ac-proof">
+            <thead>
+              <tr>
+                <th>AC</th>
+                <th>Step</th>
+                <th>Proof</th>
+                <th>Report</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.ac_proof.criteria.map((criterion) => {
+                const reports = [...new Set(criterion.cases.map((found) => found.report))];
+                return (
+                  <tr key={criterion.id} data-ac={criterion.id} data-proof={criterion.status}>
+                    <td className="rd-ac-id">{criterion.id}</td>
+                    <td className="mono">{stepFor(criterion.id).join(", ") || "–"}</td>
+                    <td>
+                      <Status
+                        status={criterion.status}
+                        tone={
+                          criterion.status === "passing"
+                            ? "ok"
+                            : criterion.status === "failing"
+                              ? "bad"
+                              : "idle"
+                        }
+                      />{" "}
+                      <span className="rd-tests">
+                        {criterion.cases.filter((found) => found.status === "passed").length} of{" "}
+                        {criterion.cases.length}
+                        {criterion.cases.some((found) => found.status === "unavailable") &&
+                          " · report unavailable"}
+                      </span>
+                    </td>
+                    <td className="mono" data-ac-report>
+                      {reports.length ? reports.join(", ") : "–"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Panel>
+
+      <div className="rd-cols">
+        <Panel section="plan" title="Plan" hint="plan.md">
+          {detail.plan.state === "ok" ? (
+            <div className="rd-doc" dangerouslySetInnerHTML={{ __html: detail.plan.html }} />
+          ) : (
+            <NotAvailable what="plan.md" />
+          )}
+        </Panel>
+        <Panel section="strategies" title="Strategies" hint="strategies.md">
+          {detail.strategies.state === "ok" ? (
+            detail.strategies.cards.map((card) => (
+              <div className="rd-card" key={card.id} data-strategy={card.id}>
+                <b>
+                  {card.id} {card.title}
+                </b>
+                {card.chosen && <span className="pill s-ok">chosen</span>}
+                {card.recommended && <span className="pill s-working">recommended</span>}
+                <div className="hint">{card.approach}</div>
+                {card.mockups.map((mockup) => (
+                  <div className="hint mono" key={mockup.path}>
+                    {mockup.path}
+                    {mockup.exists ? "" : " (missing)"}
+                  </div>
+                ))}
+              </div>
+            ))
+          ) : (
+            <NotAvailable what="strategies.md" />
+          )}
+        </Panel>
+      </div>
+
+      <Panel section="evaluation" title="Evaluation" hint="evaluation.md">
+        {detail.evaluation.state === "ok" ? (
+          <div className="rd-doc">
+            {(["blockers", "risks", "surfaces"] as const).map((name) => (
+              <div key={name} data-evaluation={name}>
+                <h4>{name}</h4>
+                {detail.evaluation.state === "ok" && detail.evaluation[name].length ? (
+                  <ul>
+                    {detail.evaluation[name].map((entry) => (
+                      <li key={entry}>{entry}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="muted">None.</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <NotAvailable what="evaluation.md" />
+        )}
+      </Panel>
+
+      <Panel
+        section="live-agents"
+        title="Live agents"
+        hint="last 20 lines per terminal · refreshed with the hub · an unreadable terminal is unknown, never empty"
+      >
+        {!detail.agents_known && (
+          <div className="rd-unk" data-state="unknown">
+            Orca did not answer: agents unknown.
+          </div>
+        )}
+        <div className="rd-agents">
+          {detail.agents.map((agent) => (
+            <article
+              key={`${agent.role}:${agent.title}`}
+              className={`rd-agent s-${agentTone(agent)}`}
+              data-agent={agent.title}
+            >
+              <header>
+                <i className="dot" />
+                <b>{agent.title}</b>
+                <span className="spacer" />
+                <span className="pill">{agent.liveness}</span>
+              </header>
+              <div className="rd-meta">
+                <span>
+                  wall <b data-agent-wall>{span(agent.wall_seconds)}</b>
+                </span>
+                <span>
+                  cost <b data-agent-cost>{costText(agent.cost)}</b>
+                </span>
+                <span>{agent.terminal ?? ""}</span>
+              </div>
+              {agent.output === "unknown" ? (
+                <pre className="rd-out" data-output="unknown">
+                  <em>Output unknown.</em>
+                </pre>
+              ) : (
+                <pre className="rd-out" data-output="lines">
+                  {agent.output.length ? agent.output.slice(-20).join("\n") : "(no output)"}
+                </pre>
+              )}
+            </article>
+          ))}
+        </div>
+      </Panel>
+
+      {/* ark worktree sync did not land a run-lead-message component in this tree; ARK-177 fills this slot. */}
+      <section
+        className="rd-slot"
+        data-slot="run-lead-message"
+        data-detail-section="run-lead-message"
+        aria-label="Run-lead message (ARK-177)"
+      >
+        <span className="tag">ARK-177</span>
+        <div>
+          <b>Run-lead message (ARK-177)</b>
+          <div className="hint">Empty slot. ARK-177 renders its message component here.</div>
+        </div>
+      </section>
     </div>
   );
 }
