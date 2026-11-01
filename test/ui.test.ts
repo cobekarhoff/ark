@@ -1,5 +1,12 @@
 import { beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
@@ -450,6 +457,83 @@ test(
       );
       for (const field of ["id", "kind", "source", "project", "ticket", "title", "since", "action"])
         expect(gates[0]).toHaveProperty(field);
+    });
+  },
+);
+
+test(
+  "ARK-176-AC3 lists and opens a waiting strategy gate in Plannotator",
+  { timeout: 10_000 },
+  async () => {
+    const run = startRun("ARK-176-S", "Strategy gate");
+    planGate(run.directory);
+    writeFileSync(join(run.directory, "strategies.md"), "# Strategies\n");
+    // This worktree predates strategy.recorded; append the future event after valid run setup.
+
+    const eventFile = join(run.directory, "events.ndjson");
+    const events = readFileSync(eventFile, "utf8").trim().split("\n");
+    appendFileSync(
+      eventFile,
+      `${JSON.stringify({
+        seq: events.length + 1,
+        time: new Date().toISOString(),
+        type: "strategy.recorded",
+        data: {
+          count: 2,
+          recommended: "a",
+          cards: ["a", "b"],
+          reason: "Choose an approach",
+          card_text: { a: "First", b: "Second" },
+        },
+      })}\n`,
+    );
+    const commandLog = join(mkdtempSync(join(tmpdir(), "ark-strategy-action-")), "calls.txt");
+    process.env.ORCA_ACTION_LOG = commandLog;
+    const plannotator = join(orcaBinDirectory, "plannotator");
+    writeFileSync(
+      plannotator,
+      `#!/bin/sh
+if [ "$1" = "sessions" ] && [ "$2" = "--json" ]; then printf '[]'; exit 0; fi
+printf '%s\\n' "$*" >> "$ORCA_ACTION_LOG"
+`,
+    );
+    chmodSync(plannotator, 0o755);
+    setOrcaRuns([]);
+
+    await withUi(async (baseUrl) => {
+      const items = (await (await fetch(`${baseUrl}/api/needs-me`)).json()) as Record<
+        string,
+        any
+      >[];
+      const strategyGate = items.find((item) => item.id === `gate:${run.runId}:strategy`);
+      const response = await fetch(`${baseUrl}/api/actions/plannotator-annotate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "strategy", run: run.runId }),
+      });
+      // The action launches Plannotator as a detached process; wait for its real filesystem signal.
+      for (let attempt = 0; attempt < 50 && !(await Bun.file(commandLog).exists()); attempt++)
+        await Bun.sleep(20);
+      const commands = (
+        await Bun.file(commandLog)
+          .text()
+          .catch(() => "")
+      )
+        .trim()
+        .split("\n");
+
+      expect({ strategyGate, commands, status: response.status }).toEqual({
+        strategyGate: {
+          kind: "gate",
+          title: "strategy gate: Strategy gate",
+          action: {
+            name: "plannotator-annotate",
+            params: { kind: "strategy", run: run.runId },
+          },
+        },
+        commands: [`annotate ${join(run.directory, "strategies.md")}`],
+        status: 200,
+      });
     });
   },
 );
