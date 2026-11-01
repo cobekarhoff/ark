@@ -16,9 +16,10 @@ export type Segment = {
   state?: string;
 };
 
-/** `usd` is the sum of known costs, or "unknown" when any message in the window has no provider cost. */
+/** `usd` is the known cost inside the window, or "unknown" when any message in it has no provider cost. `baseline` is the cumulative known cost before the window, where `series` starts. */
 export type Cost = {
   usd: number | "unknown";
+  baseline: number;
   series: { at: string; usd: number | "unknown" }[];
 };
 
@@ -30,7 +31,7 @@ export type Lane = {
   cost: Cost;
 };
 
-const unknownCost: Cost = { usd: "unknown", series: [] };
+const unknownCost: Cost = { usd: "unknown", baseline: 0, series: [] };
 
 type Open = { name: string; from: string };
 
@@ -120,17 +121,23 @@ function costOf(directory: string, since: number): Cost {
       .flatMap((session) => session.messages)
       .sort((left, right) => Date.parse(left.time) - Date.parse(right.time));
     let sum = 0;
+    let baseline = 0;
     const series: Cost["series"] = [];
     for (const message of messages) {
       if (message.costUsd !== "unknown") sum += message.costUsd;
-      if (Date.parse(message.time) >= since)
+      if (Date.parse(message.time) < since) baseline = sum;
+      else
         series.push({
           at: message.time,
           usd: message.costUsd === "unknown" ? "unknown" : sum,
         });
     }
     return {
-      usd: series.length === 0 || series.some((point) => point.usd === "unknown") ? "unknown" : sum,
+      usd:
+        series.length === 0 || series.some((point) => point.usd === "unknown")
+          ? "unknown"
+          : sum - baseline,
+      baseline,
       series,
     };
   } catch {

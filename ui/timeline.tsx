@@ -23,7 +23,7 @@ type Pick = { lane: string; segment: string | null } | null;
 function burnOf(cost: Cost, start: number, end: number) {
   const size = (end - start) / bucketCount;
   const buckets = Array.from({ length: bucketCount }, () => ({ value: 0, unknown: false }));
-  let previous: number | null = null;
+  let previous = cost.baseline;
   for (const point of cost.series) {
     const index = Math.min(
       bucketCount - 1,
@@ -31,8 +31,7 @@ function burnOf(cost: Cost, start: number, end: number) {
     );
     if (point.usd === "unknown") buckets[index].unknown = true;
     else {
-      // ponytail: the first in-window point has no earlier total to subtract, so it adds 0.
-      buckets[index].value += previous === null ? 0 : point.usd - previous;
+      buckets[index].value += point.usd - previous;
       previous = point.usd;
     }
   }

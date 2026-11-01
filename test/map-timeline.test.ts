@@ -568,7 +568,7 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
     mkdirSync(join(ompRoot, "sessions"), { recursive: true });
     writeFileSync(
       join(ompRoot, "sessions", "session.jsonl"),
-      `${JSON.stringify({ type: "session", version: 3, id: "omp", timestamp: at(20), cwd: join(run.directory, "workspace") })}\n${JSON.stringify({ type: "message", id: "m1", timestamp: at(15), message: { role: "assistant", provider: "anthropic", model: "claude-sonnet", content: [], usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 } } } })}\n`,
+      `${JSON.stringify({ type: "session", version: 3, id: "omp", timestamp: at(20), cwd: join(run.directory, "workspace") })}\n${JSON.stringify({ type: "message", id: "m0", timestamp: at(13 * 60), message: { role: "assistant", provider: "anthropic", model: "claude-sonnet", content: [], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0.02, output: 0.03, cacheRead: 0, cacheWrite: 0, total: 0.05 } } } })}\n${JSON.stringify({ type: "message", id: "m1", timestamp: at(15), message: { role: "assistant", provider: "anthropic", model: "claude-sonnet", content: [], usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 } } } })}\n`,
     );
     mkdirSync(join(codexRoot, "2026", "11", "01"), { recursive: true });
     writeFileSync(
@@ -577,10 +577,15 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
     );
     await withUi(async (baseUrl) => {
       const timeline = (await (await fetch(`${baseUrl}/api/timeline?hours=12`)).json()) as {
-        lanes: { id: string; cost: { usd: number | string; series: { usd: number | string }[] } }[];
+        lanes: {
+          id: string;
+          cost: { usd: number | string; baseline: number; series: { usd: number | string }[] };
+        }[];
       };
       const cost = timeline.lanes.find((lane) => lane.id === `run:${run.runId}`)!.cost;
-      expect(cost.series.map((point) => point.usd)).toEqual([0.03, "unknown"]);
+      // The cost before the window is the baseline, so the first priced message in the window still counts.
+      expect(cost.baseline).toBe(0.05);
+      expect(cost.series.map((point) => point.usd)).toEqual([0.08, "unknown"]);
       expect(cost.usd).toBe("unknown");
     });
   });
@@ -600,6 +605,13 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       });
       const other = startRun("ARK-180-MAPUI2", "Other run");
       planGate(other.directory);
+      appendEvent(other.directory, "gate.answered", { gate: "plan", answer: "approve" });
+      appendEvent(other.directory, "step.started", {
+        step: "build",
+        role: "implementer",
+        repo: ".",
+        round: 1,
+      });
       setOrca([run.runId, other.runId]);
       await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
       await withUi(async (baseUrl) => {
@@ -614,13 +626,14 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
         );
         const states = JSON.parse(
           await view.evaluate(
-            `JSON.stringify({ selected: document.querySelector('[data-node="step:${run.runId}:build"]')?.dataset.lit, connected: document.querySelector('[data-node="run:${run.runId}"]')?.dataset.lit, unrelated: document.querySelector('[data-node="run:${other.runId}"]')?.dataset.lit, detail: document.querySelector('.app > aside.detail:not([hidden]) h2')?.textContent, cursor: document.querySelector('.node.cursor')?.dataset.node })`,
+            `JSON.stringify({ selected: document.querySelector('[data-node="step:${run.runId}:build"]')?.dataset.lit, connected: document.querySelector('[data-node="run:${run.runId}"]')?.dataset.lit, unrelated: document.querySelector('[data-node="run:${other.runId}"]')?.dataset.lit, unrelatedStep: document.querySelector('[data-node="step:${other.runId}:build"]')?.dataset.lit, detail: document.querySelector('.app > aside.detail:not([hidden]) h2')?.textContent, cursor: document.querySelector('.node.cursor')?.dataset.node })`,
           ),
         );
         expect(states).toEqual({
           selected: "true",
           connected: "true",
           unrelated: "false",
+          unrelatedStep: "false",
           detail: "build",
           cursor: `step:${run.runId}:build`,
         });
@@ -737,6 +750,33 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
         join(codexRoot, "2026", "11", "01", "rollout-ui.jsonl"),
         `${JSON.stringify({ type: "session_meta", payload: { cwd: join(run.directory, "workspace") } })}\n${JSON.stringify({ type: "event_msg", timestamp: at(5), payload: { type: "token_count", info: { last_token_usage: { input_tokens: 4, output_tokens: 2 }, total_token_usage: { total_tokens: 6 } } } })}\n`,
       );
+      const ompRoot = mkdtempSync(join(tmpdir(), "ark-omp-ui-"));
+      process.env.ARK_OMP_SESSIONS = ompRoot;
+      mkdirSync(join(ompRoot, "sessions"), { recursive: true });
+      const priced = (id: string, minutesAgo: number, total: number) =>
+        JSON.stringify({
+          type: "message",
+          id,
+          timestamp: at(minutesAgo),
+          message: {
+            role: "assistant",
+            provider: "anthropic",
+            model: "claude-sonnet",
+            content: [],
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: { input: total, output: 0, cacheRead: 0, cacheWrite: 0, total },
+            },
+          },
+        });
+      writeFileSync(
+        join(ompRoot, "sessions", "session.jsonl"),
+        `${JSON.stringify({ type: "session", version: 3, id: "omp", timestamp: at(13 * 60), cwd: join(run.directory, "workspace") })}\n${priced("before", 13 * 60, 0.4)}\n${priced("first", 30, 0.25)}\n`,
+      );
       await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
       await withUi(async (baseUrl) => {
         await view.navigate(baseUrl);
@@ -754,6 +794,10 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
         expect(
           await view.evaluate("document.querySelector('[data-testid=burn]')?.textContent"),
         ).toContain("?");
+        // The first priced message in the window counts: $0.25, not $0.00.
+        expect(
+          await view.evaluate("document.querySelector('[data-testid=burn] b')?.textContent"),
+        ).toBe("$0.25");
       });
     },
   );
