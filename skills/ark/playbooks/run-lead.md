@@ -128,6 +128,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    - Read the root context: `AGENTS.md`, `CLAUDE.md`, `README.md`, `knowledge/`, the compose file.
    - Read the ticket and each AC. Decide which repos the ticket changes, and which repo depends on which. For example, a service that builds against a shared package needs the package's change first.
 2. Read `$ARK_HOME/projects/<project>/learnings.md` if it exists. It holds lessons from earlier runs. Apply each one that fits this ticket: for example, a step layout to avoid, a test case to add, or a model to choose. Note each one you apply, and each one you decide does not fit and why, for section 4.
+3. Look for work that overlaps this ticket in the project's recent MRs, open and merged: `gh pr list --state all --limit 10` (`glab mr list` on GitLab). Note each overlapping file or concept in the plan `summary`, so that two runs do not build the same thing.
 
 ## 4. Write the plan
 
@@ -181,6 +182,7 @@ Rules for the plan:
 - Write the plan for the strategy card the human chose (or the only card). The `design.approach` follows that card.
 - `decisions` is optional. It lists the smaller choices inside the chosen strategy that the human should make. Each decision has `id`, `question`, `options` (2 to 4, each with `label` and `tradeoffs`), `recommended` (the label of one option) and, after the human answers, `chosen` (the label of one option). `ark plan check` refuses a decision with fewer than 2 or more than 4 options, or a `recommended` or `chosen` value that is not an option, and names it. `plan.md` shows an open decision as a Plannotator `:::question` block with "Recommended:", and a decided one with `- [x]` on the chosen option.
 - `steps` has: `id`, `role` (`implementer`, `validator` or `reviewer`), `repo`, `harness`, `model`, `needs` (step IDs, empty for none) and `criteria` (the AC the step serves).
+- Name each step after the work it does, such as `evaluation-record` or `hub-server`. Do not name a step after a role, such as `evaluator`, `validator` or `reviewer`: metrics group cost by step and by role, and the same word for both reads as wrong.
 - Use one implementer step for each repo the ticket changes. A step that needs another repo's change lists that step in `needs`.
 - Add a validator step that writes the integration and E2E tests. Put it in the repo that owns the suite (see `suites[].repo` in `ark.yml`). It needs the implementer steps whose code it tests.
 - Add a reviewer step for each repo the ticket changes. It needs the implementer and validator steps for that repo.
@@ -201,6 +203,8 @@ The command prints one line for each problem and exits 1. Fix `plan.yml` and run
 ## 5. Plan gate
 
 No code is written before the human approves the plan.
+
+Read your mail with the `check` command from your preamble before you open the gate, and again before you record the human's answer. A message from Master Chief can change the plan, for example a new model policy or a merge that changes the plan schema. If one does, change `plan.yml`, run `ark plan check` again and open a new gate.
 
 Choose how to ask.
 
@@ -294,7 +298,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
    orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
    ```
 
-   Process every message, then acknowledge the batch with `--ack <delivery id>`. A timeout is a checkpoint: wait again. After three empty waits, run `orca orchestration worker-list --include-remote --json` and act on `projection.nextAction`. Never stop or restart a worker without proof that it exited.
+   Process every message, then acknowledge the batch with `--ack <delivery id>`. A timeout is a checkpoint: wait again. After one empty wait, read each running worker's output with `orca orchestration worker-read --dispatch <dispatch id> --source terminal --limit 40 --json` and look for a provider error, such as `usage_limit_reached` or a rate limit. A worker that hit one idles and never sends `worker_done`. Tell Master Chief the provider and the reset time, and ask whether to wait or change the model. Also look for a worker that finished but whose `worker_done` did not arrive: a new commit in its worktree (`git log`), checks reported as passing, and a quiet terminal. Ask that worker to send `worker_done` again with `orca orchestration send`, and if it cannot, finish the step from its commit and its report. After three empty waits, run `orca orchestration worker-list --include-remote --json` and act on `projection.nextAction`. Never stop or restart a worker without proof that it exited.
 
    - `question` from a worker: answer it with `orca orchestration reply --id <message id> --body "<answer>" --json` if it is yours to decide. If only the human can decide, ask Master Chief and relay the answer.
    - `escalation` from a worker: read it, and fix the cause or take it to Master Chief.
@@ -307,7 +311,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
    ark run step <run> <step> finish --failed
    ```
 
-   Use `--failed` when the worker reported `--outcome failed` or the report shows the step did not finish. Then release the worker with `orca orchestration worker-release --dispatch <dispatch id> --json`.
+   Use `--failed` when the worker reported `--outcome failed` or the report shows the step did not finish. Then release the worker with `orca orchestration worker-release --dispatch <dispatch id> --json`. Run `finish` for every step a worker completed, reviewer steps too, before you start the same step again: `ark run step ... start` refuses a step that is still `running`.
 
 If a step fails, read the worker's output with `orca orchestration worker-read --dispatch <dispatch id> --json`, and decide: start the step again, change the plan (run `ark plan check <run>` and go back to section 5), or ask Master Chief.
 
@@ -330,8 +334,8 @@ Run the reviewer steps after the tests pass. Each reviewer writes its findings t
 **Judge every finding.** You decide which ones send work back. Read the evidence in the file and check it yourself in the code. Then:
 
 - P0 sends work back. Tell the implementer to fix it.
-- P1 sends work back unless you can show it is wrong or out of scope.
-- P2 and P3 do not send work back unless several of them point at one real problem. Record them in the retro.
+- P1 sends work back unless you can show it is wrong or out of scope. Reproduce a P0 or P1 with a test or a command before you send work back; do not send it on the reviewer's evidence alone.
+- P2 and P3 do not send work back unless several of them point at one real problem. Record them in the retro. A P2 that names a CI risk on another platform sends work back, because you cannot test it locally.
 - Write each decision and its reason in `<run folder>/findings/<step>.md`, in a section named `Run lead decision`. For each finding, write: send back or leave, and why.
 
 To send work back, write the findings you accept into `<run folder>/findings/round-<round>.md`, start the implementer step again, run `ark test <run>` when it finishes, and then start the reviewer step again to check the fixes. Stop when a review sends nothing back and the tests pass.
@@ -363,7 +367,7 @@ Each return to the implementer after the first build is a round. `ark run step <
 
 ## 10. Open the MRs
 
-Open the MRs only when the last `ark test <run>` passed at the latest commit and no review sends work back:
+Open the MRs only when the last `ark test <run>` passed at the latest commit and no review sends work back. First run `ark worktree sync <run>` as its own command and read that it exited 0. A sync conflict goes back to an implementer before any MR opens. Then run, as a separate command:
 
 ```sh
 ark merge-request open <run>
