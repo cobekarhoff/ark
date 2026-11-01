@@ -21,6 +21,16 @@ If the `orca` command is missing, say so and stop.
 
 Use the project name as `<project>` below.
 
+### One Master Chief for each project
+
+Do this before anything else in the session. Each project has one Master Chief.
+
+1. List the Runs: `orca orchestration run-list --json`.
+2. Find a Run whose objective is exactly "Master Chief: <project> tickets". If none exists, go on.
+3. Read the Run's `coordinator_handle` (`orca orchestration run-show --id <run id> --json`). Check that it is live with `orca terminal list --json`.
+4. If the handle is live and is not your own `$ORCA_TERMINAL_HANDLE`, stop. Do nothing else. Tell the human: "A Master Chief for <project> already runs in terminal <handle>. Use that terminal." Name the handle.
+5. If the handle is dead (not listed), take over that Run. Do not create another. Bind this terminal to it with `orca orchestration run-use --id <run id>`, then use it in section 5.
+
 ## 3. Evaluate the ticket
 
 The human names a ticket or several. For each one:
@@ -106,7 +116,7 @@ Do these steps in order for one ready ticket.
    orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree current --agent <harness> --model <model> --json
    ```
 
-   Use the `harness` and `model` of the `implementer` role in `ark.yml` unless the human names others. If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.
+   Use the `harness` and `model` of the `chief` role in `ark.yml` unless the human names others. If `roles.chief` is missing, do not start the run lead and do not edit `ark.yml`. Tell the human: "Prerequisite missing: `roles.chief` (harness and model) is not set in `<project>/ark.yml`. Add it, for example `chief: { harness: claude, model: claude-opus }`, then ask me again." If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.
 
    If `worker-start` exits non-zero, do not start it again. Read `failedStage` and `residualResources` in the output, tell the human, and decide with them.
 

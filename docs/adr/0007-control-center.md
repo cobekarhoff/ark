@@ -1,10 +1,12 @@
 ---
-status: accepted
+status: superseded in part by ADR 0008
 ---
 
 # A read-only control center gives the high-level view
 
 Orca shows agents and terminals, but not tickets, run phases, steps, waiting gates, test results or MRs. To see Ark as a whole, the human had to ask Master Chief or open many files. ADR 0005 dropped the planned Ark Console "unless Orca's UI falls short". On 2026-10-30 the human found that it falls short for the high-level view, while Orca stays the right place to watch an agent work.
+
+> ADR 0008 supersedes the read-only rule and the name "control center" in this ADR. The page is now the hub, and it steers agents through Master Chief. The rest stays: three tools, three jobs.
 
 ## Decision
 
