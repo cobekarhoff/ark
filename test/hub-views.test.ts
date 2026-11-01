@@ -14,7 +14,6 @@ import {
 } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
-const chromeExecutable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 let projectOneDirectory: string;
 let projectTwoDirectory: string;
 let orcaDirectory: string;
@@ -566,94 +565,17 @@ test("ARK-181-AC5 returns project configuration and chief state through Orca fai
   });
 });
 
-type CdpResponse = {
-  id?: number;
-  result?: { result?: { value?: unknown }; value?: unknown };
-  error?: { message: string };
-};
-
 async function withHeadlessChrome<T>(
   url: string,
   callback: (evaluate: (expression: string) => Promise<unknown>) => Promise<T>,
 ): Promise<T> {
-  const profileDirectory = mkdtempSync(join(tmpdir(), "ark-hub-chrome-"));
-  const chrome = Bun.spawn(
-    [
-      chromeExecutable,
-      "--headless=new",
-      "--no-sandbox",
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      "--remote-allow-origins=*",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${profileDirectory}`,
-      "about:blank",
-    ],
-    { stdout: "ignore", stderr: "ignore" },
-  );
-  let socket: WebSocket | undefined;
-  try {
-    let debuggingPort = 0;
-    const activePortFile = join(profileDirectory, "DevToolsActivePort");
-    for (let attempt = 0; attempt < 100 && !debuggingPort; attempt++) {
-      const activePort = Bun.file(activePortFile);
-      if (await activePort.exists())
-        debuggingPort = Number((await activePort.text()).split("\n")[0]);
-      if (!debuggingPort) await Bun.sleep(50);
-    }
-    if (!debuggingPort) throw new Error("headless Chrome did not start a DevTools endpoint");
-    const pageResponse = await fetch(
-      `http://127.0.0.1:${debuggingPort}/json/new?${encodeURIComponent(url)}`,
-      { method: "PUT" },
-    );
-    if (!pageResponse.ok) throw new Error(`Chrome could not create a page: ${pageResponse.status}`);
-    const page = (await pageResponse.json()) as { webSocketDebuggerUrl: string };
-    socket = new WebSocket(page.webSocketDebuggerUrl);
-    await new Promise<void>((resolve, reject) => {
-      socket!.addEventListener("open", () => resolve(), { once: true });
-      socket!.addEventListener(
-        "error",
-        () => reject(new Error("Chrome DevTools connection failed")),
-        { once: true },
-      );
-    });
-    let nextId = 0;
-    const pending = new Map<
-      number,
-      { resolve: (value: CdpResponse) => void; reject: (error: Error) => void }
-    >();
-    socket.addEventListener("message", (message) => {
-      const response = JSON.parse(String(message.data)) as CdpResponse;
-      if (response.id === undefined) return;
-      const waiter = pending.get(response.id);
-      if (waiter) {
-        pending.delete(response.id);
-        if (response.error) waiter.reject(new Error(response.error.message));
-        else waiter.resolve(response);
-      }
-    });
-    const command = (method: string, params: Record<string, unknown> = {}) =>
-      new Promise<CdpResponse>((resolve, reject) => {
-        const id = ++nextId;
-        pending.set(id, { resolve, reject });
-        socket!.send(JSON.stringify({ id, method, params }));
-      });
-    await command("Page.enable");
-    await command("Runtime.enable");
-    const evaluate = async (expression: string): Promise<unknown> => {
-      const response = await command("Runtime.evaluate", {
-        expression,
-        awaitPromise: true,
-        returnByValue: true,
-      });
-      return response.result?.result?.value ?? response.result?.value;
-    };
-    return await callback(evaluate);
-  } finally {
-    socket?.close();
-    chrome.kill();
-    await chrome.exited;
-  }
+  await using view = new Bun.WebView({
+    backend: "chrome",
+    width: 1280,
+    height: 900,
+  });
+  await view.navigate(url);
+  return await callback(async (expression) => view.evaluate(expression));
 }
 
 test(
