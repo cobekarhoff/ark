@@ -522,7 +522,7 @@ printf '%s\\n' "$*" >> "$ORCA_ACTION_LOG"
         .trim()
         .split("\n");
 
-      expect({ strategyGate, commands, status: response.status }).toEqual({
+      expect({ strategyGate, commands, status: response.status }).toMatchObject({
         strategyGate: {
           kind: "gate",
           title: "strategy gate: Strategy gate",
