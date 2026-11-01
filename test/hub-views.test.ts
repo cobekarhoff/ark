@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
 import {
@@ -187,7 +187,7 @@ test("ARK-181-AC1 returns ticket-file fields and keeps unreadable tickets", asyn
   );
   writeFileSync(join(projectOneDirectory, "README.md"), "wrong README data");
   writeFileSync(join(projectOneDirectory, "tickets", "BROKEN.md"), "not frontmatter");
-  writeTicket("two", "ARK-181-TWO", [], "Other project ticket");
+  const otherTicket = writeTicket("two", "ARK-181-TWO", [], "Other project ticket");
 
   await withUi(async (baseUrl) => {
     const answer = await json<{
@@ -215,6 +215,7 @@ test("ARK-181-AC1 returns ticket-file fields and keeps unreadable tickets", asyn
       status: "unreadable",
     });
     expect(answer.tickets.some((ticket) => ticket.id === "README")).toBe(false);
+    expect(answer.tickets.some((ticket) => ticket.file === otherTicket)).toBe(true);
   });
 });
 
@@ -391,19 +392,25 @@ test("ARK-181-AC3 aggregates only the selected week and preserves unknown metric
     cost: { total_usd: 8 },
     time: { wall_seconds: 300, gate_wait_seconds: 40 },
   });
-  writeMetrics("two", "ARK-181-METRICS-OUTSIDE", "2026-11-02T12:00:00.000Z", "handed_off", {
-    cost: { total_usd: 99 },
-    time: { wall_seconds: 999, gate_wait_seconds: 999 },
-    override_rate: 1,
-    design_rounds: 9,
-  });
+  const outsideRunDirectory = writeMetrics(
+    "two",
+    "ARK-181-METRICS-OUTSIDE",
+    "2026-11-02T12:00:00.000Z",
+    "handed_off",
+    {
+      cost: { total_usd: 99 },
+      time: { wall_seconds: 999, gate_wait_seconds: 999 },
+      override_rate: 1,
+      design_rounds: 9,
+    },
+  );
   writeMetrics("one", "ARK-181-METRICS-UNKNOWN", "2026-10-30T12:00:00.000Z", "aborted", {
     time: { wall_seconds: 200, gate_wait_seconds: 30 },
   });
 
   await withUi(async (baseUrl) => {
     const answer = await json<{
-      runs: { outcome: string }[];
+      runs: { run: string; outcome: string }[];
       runs_by_outcome: Record<string, number>;
       cost_by_day: { day: string; usd: number | "unavailable"; includes_unknown: boolean }[];
       median_wall_seconds: number;
@@ -432,37 +439,55 @@ test("ARK-181-AC3 aggregates only the selected week and preserves unknown metric
       usd: "unavailable",
       includes_unknown: true,
     });
-    expect(answer.runs.some((run) => run.outcome === "outside")).toBe(false);
+    expect(answer.runs.some((run) => run.run === basename(outsideRunDirectory))).toBe(false);
   });
 });
 
-test("ARK-181-AC4 finds local files and Orca session hits with link targets", async () => {
-  const ticketFile = writeTicket("one", "ARK-181-SEARCH", [], "Searchneedle ticket title");
+test("ARK-181-AC4 finds tickets, runs, plans, retros and Orca session hits with link targets", async () => {
+  const ticketFile = writeTicket("one", "ARK-181-SEARCH", [], "Titleneedle ticket title");
   writeFileSync(
     ticketFile,
-    "---\nid: ARK-181-SEARCH\ntitle: Searchneedle ticket title\nstatus: proposed\n---\nBodysearchneedle in body.\n",
+    "---\nid: ARK-181-SEARCH\ntitle: Titleneedle ticket title\nstatus: proposed\n---\nBodyneedle in the ticket body.\n",
   );
-  const runDirectory = join(projectOneDirectory, "runs", "2026-11-01-ARK-181-SEARCHneedle");
+  const searchRun = "2026-11-01-Runneedle";
+  const runDirectory = join(projectOneDirectory, "runs", searchRun);
   mkdirSync(runDirectory, { recursive: true });
-  writeFileSync(join(runDirectory, "plan.md"), "# Searchneedle plan\n");
-  writeFileSync(join(runDirectory, "retro.md"), "# Searchneedle retro\n");
+  writeFileSync(join(runDirectory, "plan.md"), "# Planneedle plan\n");
+  writeFileSync(join(runDirectory, "retro.md"), "# Retroneedle retro\n");
   process.env.TEST_SESSION_CWD = projectOneDirectory;
 
   await withUi(async (baseUrl) => {
-    const answer = await json<{
-      hits: { kind: string; target: Record<string, string> }[];
-      orca: { state: string };
-    }>(baseUrl, "/api/search?q=Searchneedle");
-    expect(answer.orca.state).toBe("enabled");
-    expect(answer.hits.map((hit) => hit.kind)).toEqual(
-      expect.arrayContaining(["ticket", "run", "plan", "retro", "session"]),
-    );
-    for (const kind of ["ticket", "run", "plan", "retro", "session"]) {
-      const hit = answer.hits.find((entry) => entry.kind === kind);
-      expect(hit?.target).toBeDefined();
-      expect(Object.keys(hit?.target ?? {}).length).toBeGreaterThan(0);
-    }
-    expect(answer.hits.find((hit) => hit.kind === "session")?.target.session).toBe("session-7");
+    const search = (query: string) =>
+      json<{
+        hits: { kind: string; target: Record<string, string> }[];
+        orca: { state: string };
+      }>(baseUrl, `/api/search?q=${query}`);
+    const title = await search("Titleneedle");
+    const body = await search("Bodyneedle");
+    const run = await search("Runneedle");
+    const plan = await search("Planneedle");
+    const retro = await search("Retroneedle");
+    const session = await search("Sessionneedle");
+
+    expect(title.hits.find((hit) => hit.kind === "ticket")).toMatchObject({
+      target: { view: "backlog", project: "one", ticket: "ARK-181-SEARCH" },
+    });
+    expect(body.hits.find((hit) => hit.kind === "ticket")).toMatchObject({
+      target: { view: "backlog", project: "one", ticket: "ARK-181-SEARCH" },
+    });
+    expect(run.hits.find((hit) => hit.kind === "run")).toMatchObject({
+      target: { view: "run", run: searchRun },
+    });
+    expect(plan.hits.find((hit) => hit.kind === "plan")).toMatchObject({
+      target: { view: "run", run: searchRun, file: "plan.md" },
+    });
+    expect(retro.hits.find((hit) => hit.kind === "retro")).toMatchObject({
+      target: { view: "run", run: searchRun, file: "retro.md" },
+    });
+    expect(session.orca.state).toBe("enabled");
+    expect(session.hits.find((hit) => hit.kind === "session")).toMatchObject({
+      target: { view: "session", session: "session-7" },
+    });
   });
 });
 
