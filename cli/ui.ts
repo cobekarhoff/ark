@@ -122,11 +122,17 @@ export function ui(port: number): void {
 const label = "dev.ark.hub";
 const notifierCommand = () => process.env.ARK_NOTIFIER || "terminal-notifier";
 const plistPath = () => join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
-const launchctl = (...args: string[]) =>
-  Bun.spawnSync([process.env.ARK_LAUNCHCTL || "launchctl", ...args], {
-    stdout: "ignore",
-    stderr: "ignore",
-  });
+const launchctl = (...arguments_: string[]): { ok: boolean; error: string } => {
+  try {
+    const result = Bun.spawnSync([process.env.ARK_LAUNCHCTL || "launchctl", ...arguments_], {
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    return { ok: result.exitCode === 0, error: result.stderr.toString().trim() };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+};
 
 const xml = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -134,7 +140,11 @@ const xml = (value: string) =>
 function plistFor(port: number, log: string): string {
   const arguments_ = [process.execPath, join(import.meta.dir, "ark.ts"), "ui", "--port", `${port}`];
   // launchd starts with a bare PATH, so hand over this one: the hub finds orca and the notifier by it.
-  const environment = { PATH: process.env.PATH ?? "", ARK_HOME: process.env.ARK_HOME ?? "" };
+  const environment = {
+    PATH: process.env.PATH ?? "",
+    ARK_HOME: process.env.ARK_HOME ?? "",
+    ARK_NOTIFIER: notifierCommand(),
+  };
   const entries = Object.entries(environment)
     .filter(([, value]) => value !== "")
     .map(([key, value]) => `    <key>${key}</key><string>${xml(value)}</string>`);
@@ -184,7 +194,16 @@ export function uiInstall(port: number): void {
   mkdirSync(join(log, ".."), { recursive: true });
   if (old !== null) launchctl("unload", path);
   writeFileSync(path, plist);
-  launchctl("load", "-w", path);
+  const loaded = launchctl("load", "-w", path);
+  if (!loaded.ok) {
+    // Remove the plist so a second run retries instead of reporting "already installed".
+    rmSync(path);
+    console.error(
+      `launchctl load failed: ${loaded.error || "no error text"}\nThe hub is not running.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
   const oldPort = old?.match(/<string>--port<\/string>\s*<string>(\d+)</)?.[1];
   console.log(
     [

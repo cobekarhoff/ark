@@ -1132,6 +1132,7 @@ test("ARK-178-AC1 install writes a restarting LaunchAgent and loads it", () => {
   expect(contents).toContain(`<string>${join(repositoryRoot, "cli", "ark.ts")}</string>`);
   expect(contents).toContain(`<string>${process.execPath}</string>`);
   expect(contents).toContain("<string>ui</string>");
+  expect(contents).toContain(`<key>ARK_NOTIFIER</key><string>${notifierCommand}</string>`);
   expect(readFileSync(launchLog, "utf8").trim()).toBe(`load -w ${plist}`);
 });
 
@@ -1163,6 +1164,34 @@ test("ARK-178-AC1 repeating install leaves the LaunchAgent unchanged", () => {
   expect(secondResult.exitCode).toBe(0);
   expect(readFileSync(plist, "utf8")).toBe(firstContents);
   expect(readFileSync(launchLog, "utf8").trim().split("\n")).toEqual([`load -w ${plist}`]);
+});
+
+test("ARK-178-AC1 install exits 1 with the launchctl error when load fails", () => {
+  const temporaryHome = mkdtempSync(join(tmpdir(), "ark-install-home-"));
+  const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-install-state-"));
+  const commandDirectory = mkdtempSync(join(tmpdir(), "ark-install-bin-"));
+  const notifierCommand = writeCommand(commandDirectory, "terminal-notifier", "exit 0");
+  const launchctlCommand = writeCommand(
+    commandDirectory,
+    "launchctl",
+    `echo "Load failed: 5: Input/output error" >&2; exit 5`,
+  );
+
+  const result = runArkWithEnvironment(
+    {
+      HOME: temporaryHome,
+      ARK_HOME: arkHomeDirectory,
+      ARK_NOTIFIER: notifierCommand,
+      ARK_LAUNCHCTL: launchctlCommand,
+      PATH: commandDirectory,
+    },
+    "ui",
+    "install",
+  );
+
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain("Load failed: 5: Input/output error");
+  expect(result.stdout.toString()).not.toContain("It is running now");
 });
 
 test("ARK-178-AC1 install refuses a missing notifier without writing the LaunchAgent", () => {
