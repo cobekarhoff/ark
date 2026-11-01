@@ -166,6 +166,7 @@ A run lives at `$ARK_HOME/projects/<project>/runs/<run>/`:
 ticket.md          copy of the ticket file
 events.ndjson      append-only event log
 state.json         derived from the events, rebuilt by any command
+history.ndjson     written by the hub only: timestamped changes of MR CI state and agent liveness
 evaluation.md      written by the evaluator
 strategies.md      written by the run lead (strategy cards)
 mockups/           written by the Designer, never in an MR
@@ -178,6 +179,8 @@ retro.md           written by the run lead
 ```
 
 `workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<ticket id>-<slug>` (slug: the ticket title in lowercase with hyphens, at most 40 characters; `-<run number>` is added from the second run) at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace.
+
+`history.ndjson` holds one JSON line per change: `{"time","kind","subject","state"}`. `kind` is `ci` (subject: the MR URL; state: `pending`, `passing` or `failing`, read from `gh` or `glab` with a 5 second timeout; a failed read writes nothing) or `liveness` (subject: the terminal handle; state: `live`, `stuck`, `dead`, `exited`, `paused` or `unknown`). Orca has no run-level pause flag, so a pause shows as the `paused` verdict. The hub appends a line only when a state differs from the last line for the same kind and subject. Time before the first line is unavailable and is never counted as zero. `ark retro` and the event log do not read it.
 
 ## `evaluation.md` format
 

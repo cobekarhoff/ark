@@ -4,6 +4,7 @@ import { loadConfig } from "../config.ts";
 import type { RunState } from "../events.ts";
 import { arkHome, listProjects } from "../paths.ts";
 import { runningCost } from "../retro.ts";
+import { collectHistory } from "./history.ts";
 import { arkItems, readRuns, type RunInfo } from "./ark.ts";
 import { readNotifications } from "./notify.ts";
 import { emptyOrca, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
@@ -140,6 +141,7 @@ export function createHub() {
         return workspace ? [{ name, workspace }] : [];
       });
       [orca, plannotator] = await Promise.all([readOrca(openRuns), readPlannotator(projects)]);
+      await collectHistory(runs, orca.agents);
       const today = new Date().toDateString();
       for (const { directory, state, events } of runs) {
         const active =
