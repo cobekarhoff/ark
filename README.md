@@ -52,6 +52,10 @@ omp plugin link .   # install this repo as an OMP plugin
 bun test            # run the tests
 ```
 
+The hub's Needs me section reports when the Plannotator Inbox is not running or
+when its reader fails. `/api/state` exposes the reader status and error in
+`readers.plannotator` and `readers.plannotator_error`.
+
 To undo the setup, run `bun unlink` and `omp plugin uninstall ark`.
 
 ### Quality checks
