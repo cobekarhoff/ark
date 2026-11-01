@@ -8,7 +8,7 @@ Review the diff of the run's branch against its base:
 git diff <base>...HEAD
 ```
 
-Read the ticket and the step's ACs first. Then check each area below.
+Read the ticket and the step's ACs first. If the repo has a web UI, also load the skills `web-design-guidelines` and `review-animations` and check the changed UI code against them. Rank what they find with the priorities below. Then check each area below.
 
 ## What to check
 

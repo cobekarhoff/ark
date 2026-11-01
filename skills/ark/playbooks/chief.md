@@ -146,6 +146,8 @@ Every `ask` from a run lead is a gate or a decision for the human. Relay every o
 
 If a run lead says it opened a Plannotator review, tell the human to answer there. Do not reply to that message yourself.
 
+The strategy gate is one of these questions. Its options are the card IDs of `<run folder>/strategies.md`, and `abort`. Tell the human the path of `strategies.md` and of each mockup in `<run folder>/mockups/`, and that one Plannotator review can hold them all. If the human writes a note instead of a card ID (a change or a mix of cards), send the note back unchanged: the run lead asks the Designer to revise and asks again. Do not pick a card for the human.
+
 ### An `escalation` from a run lead
 
 A run lead is blocked. Read the message, tell the human, and decide the next step with them. Use `orca orchestration send --to dispatch:<dispatch id> --subject "<subject>" --body "<guidance>" --json` to steer the run lead.
