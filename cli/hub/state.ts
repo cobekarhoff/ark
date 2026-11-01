@@ -6,6 +6,7 @@ import { arkHome, listProjects } from "../paths.ts";
 import { runningCost } from "../retro.ts";
 import { arkItems, readRuns, type RunInfo } from "./ark.ts";
 import { readNotifications } from "./notify.ts";
+import { createCollector, readCi, type Observed } from "./history.ts";
 import { emptyOrca, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
 import {
   emptyPlannotator,
@@ -101,6 +102,7 @@ export function createHub() {
   let plannotator: PlannotatorSnapshot = emptyPlannotator;
   const costs = new Map<string, Cost>();
   const firstSeen = new Map<string, string>();
+  const collector = createCollector();
 
   const chiefOf = (project: string, workspace: string | null): ChiefState => {
     if (!orca.ok || orca.terminals === null || workspace === null) return { state: "unknown" };
@@ -139,7 +141,24 @@ export function createHub() {
         const workspace = workspaceOf(name);
         return workspace ? [{ name, workspace }] : [];
       });
-      [orca, plannotator] = await Promise.all([readOrca(openRuns), readPlannotator(projects)]);
+      const mergeRequestUrls = runs
+        .filter(({ state }) => state.phase !== "closed")
+        .flatMap(({ state }) => state.merge_requests.map((mergeRequest) => mergeRequest.url));
+      let ci: Map<string, Observed>;
+      [orca, plannotator, ci] = await Promise.all([
+        readOrca(openRuns),
+        readPlannotator(projects),
+        readCi(mergeRequestUrls),
+      ]);
+      const observed = new Map<string, Observed>(ci);
+      for (const agent of [...orca.agents.values()].flat()) {
+        const key = `agent:${agent.run}:${agent.terminal ?? agent.role}`;
+        observed.set(key, { state: agent.liveness, activity: agent.activity });
+      }
+      for (const { name, workspace } of projects) {
+        observed.set(`chief:${name}`, { state: chiefOf(name, workspace).state });
+      }
+      collector.record(observed, orca.ok ? [] : ["agent:"]);
       const today = new Date().toDateString();
       for (const { directory, state, events } of runs) {
         const active =

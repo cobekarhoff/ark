@@ -8,6 +8,7 @@ export const readerTimeoutMilliseconds = 2000;
 export async function exec(
   command: string[],
   timeoutMilliseconds = readerTimeoutMilliseconds,
+  okExitCodes = [0],
 ): Promise<string | null> {
   try {
     const child = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
@@ -16,7 +17,7 @@ export async function exec(
     const output = await Promise.race([
       new Response(child.stdout)
         .text()
-        .then(async (text) => ((await child.exited) === 0 ? text : null)),
+        .then(async (text) => (okExitCodes.includes(await child.exited) ? text : null)),
       Bun.sleep(timeoutMilliseconds + 100).then(() => null),
     ]);
     clearTimeout(killer);
@@ -30,8 +31,9 @@ export async function exec(
 export async function execJson<T>(
   command: string[],
   timeoutMilliseconds = readerTimeoutMilliseconds,
+  okExitCodes = [0],
 ): Promise<T | null> {
-  const output = await exec(command, timeoutMilliseconds);
+  const output = await exec(command, timeoutMilliseconds, okExitCodes);
   if (output === null) return null;
   try {
     return JSON.parse(output) as T;

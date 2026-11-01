@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { ArkError } from "../errors.ts";
 import { parseClaudeSession } from "./claude.ts";
+import { parseCodexSession } from "./codex.ts";
 import { parseOmpSession } from "./omp.ts";
 
 export type UsageMessage = {
@@ -32,7 +33,12 @@ export type SessionWithKey = SessionUsage & {
   sessionKey: string;
 };
 
-type Source = { root: string; parse: (file: string) => SessionUsage };
+type Source = {
+  root: string;
+  parse: (file: string) => SessionUsage;
+  /** Session key for a file; the default groups subagent transcripts under their parent. */
+  keyFor?: (relativeFile: string) => string;
+};
 
 function sources(): Source[] {
   return [
@@ -43,6 +49,12 @@ function sources(): Source[] {
     {
       root: process.env.ARK_CLAUDE_SESSIONS ?? join(homedir(), ".claude", "projects"),
       parse: parseClaudeSession,
+    },
+    {
+      root: process.env.ARK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions"),
+      parse: parseCodexSession,
+      // Rollouts sit in `YYYY/MM/DD/`, so the folder says nothing about the session.
+      keyFor: (relativeFile) => `codex/${relativeFile.replace(/\.jsonl$/, "")}`,
     },
   ];
 }
@@ -90,7 +102,8 @@ export function readUsage(runDirectory: string): SessionWithKey[] {
         throw new ArkError(`cannot read session file ${file}`);
       }
       if (cwd === null || ![...parents].some((parent) => isInside(cwd, parent))) continue;
-      sessions.push({ ...source.parse(file), sessionKey: sessionKeyFor(relativeFile) });
+      const sessionKey = (source.keyFor ?? sessionKeyFor)(relativeFile);
+      sessions.push({ ...source.parse(file), sessionKey });
     }
   }
   return sessions;
