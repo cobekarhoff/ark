@@ -23,7 +23,7 @@ const fieldNames = [
  * `Name: text` fields (Approach, Interfaces, Tradeoffs, Steps, Mockup, Recommended, Reason). A
  * field runs until the next field or heading.
  */
-function parseCards(content: string): Card[] {
+export function parseCards(content: string): Card[] {
   const cards: Card[] = [];
   let card: Card | null = null;
   let field: string | null = null;
@@ -50,7 +50,7 @@ function parseCards(content: string): Card[] {
 }
 
 /** Paths in a Mockup field: markdown links, or comma and space separated paths. */
-function mockupPaths(value: string): string[] {
+export function mockupPaths(value: string): string[] {
   const links = [...value.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1]);
   if (links.length > 0) return links;
   return value

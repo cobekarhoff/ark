@@ -65,6 +65,12 @@ export function ui(port: number): void {
     routes: {
       "/": index,
       "/api/state": () => Response.json(hub.state()),
+      "/api/runs/:run": async (request) => {
+        const detail = await hub.detail(request.params.run);
+        return detail
+          ? Response.json(detail)
+          : Response.json({ error: "no such run" }, { status: 404 });
+      },
       "/api/needs-me": () => Response.json(hub.state().needs_me),
       "/api/events": () => {
         let controller: ReadableStreamDefaultController<Uint8Array>;

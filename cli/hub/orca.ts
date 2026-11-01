@@ -151,3 +151,25 @@ export function orcaItems(
       };
     });
 }
+
+/**
+ * The last `lines` lines of a terminal, or "unknown" when `orca terminal read` fails, times out or
+ * returns no output list. Blank trailing lines are dropped.
+ */
+export async function readTerminalTail(handle: string, lines = 20): Promise<string[] | "unknown"> {
+  const read = await execJson<{ result?: { terminal?: { tail?: unknown } } }>([
+    "orca",
+    "terminal",
+    "read",
+    "--terminal",
+    handle,
+    "--limit",
+    String(lines),
+    "--json",
+  ]);
+  const tail = read?.result?.terminal?.tail;
+  if (!Array.isArray(tail) || !tail.every((line) => typeof line === "string")) return "unknown";
+  const output = tail as string[];
+  while (output.length > 0 && output[output.length - 1].trim() === "") output.pop();
+  return output.slice(-lines);
+}

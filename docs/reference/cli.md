@@ -158,6 +158,22 @@ Unloads and deletes the LaunchAgent dev.ark.hub. It does nothing, and exits 0, w
 
 <!-- generated:commands:end -->
 
+### Run detail API
+
+`GET /api/runs/<run>` returns one run's detail as JSON (404 for an unknown run). The pushed state also carries `details`, the same object for each open run, rebuilt every 3 seconds. Fields:
+
+| Field                              | Content                                                                                                                                                                                                                                                                                |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeline`                         | `{phase, at}` for each phase change in `events.ndjson`                                                                                                                                                                                                                                 |
+| `gates`                            | `{gate, asked, answered, answer, wait_seconds}`; an open gate has `answered: null` and waits until now                                                                                                                                                                                 |
+| `rounds`                           | `{round, at, steps}` from `step.started`                                                                                                                                                                                                                                               |
+| `steps`                            | each plan step with `status`, `cost` and `wall_seconds`                                                                                                                                                                                                                                |
+| `ac_proof`                         | the latest `test.completed`: each AC with its status and test cases (`name`, `status`, `suite`, `report`). Cases come from the `results/` reports; a missing or unreadable report gives a case with `status: "unavailable"`, never a pass. `not available` before the first `ark test` |
+| `cost`                             | `{usd, tokens}` for the run, and for each step and agent. It uses the readers and the step assignment of `ark retro`; a cost that cannot be measured is `"unknown"`, never 0                                                                                                           |
+| `agents`                           | each Orca agent of the run with `cost`, `wall_seconds` and `output`: the last 20 lines from `orca terminal read` (2 second timeout), or `"unknown"` when the agent is not live or the read fails                                                                                       |
+| `time_split`                       | seconds in `working`, `waiting_human` (an open gate), `waiting_ci_or_paused`, `stalled` and `unavailable`; the parts add up to `wall_seconds`. Time before the first `history.ndjson` line is `unavailable` unless a gate was open                                                     |
+| `plan`, `evaluation`, `strategies` | `{state: "ok", ...}` (`plan.html` is the rendered `plan.md`; `evaluation` has `blockers`, `risks`, `surfaces`; `strategies.cards` has each card with its `mockups` links), or `{state: "not available"}` when the file is missing                                                      |
+
 ## Run folder
 
 A run lives at `$ARK_HOME/projects/<project>/runs/<run>/`:

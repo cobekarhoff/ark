@@ -4,6 +4,7 @@ import { loadConfig } from "../config.ts";
 import type { RunState } from "../events.ts";
 import { arkHome, listProjects } from "../paths.ts";
 import { runningCost } from "../retro.ts";
+import { buildDetail, type RunDetail } from "./detail.ts";
 import { collectHistory } from "./history.ts";
 import { arkItems, readRuns, type RunInfo } from "./ark.ts";
 import { readNotifications } from "./notify.ts";
@@ -101,6 +102,8 @@ export function createHub() {
   let orca: OrcaSnapshot = emptyOrca;
   let plannotator: PlannotatorSnapshot = emptyPlannotator;
   const costs = new Map<string, Cost>();
+  /** Detail of each open run, rebuilt by `refresh()`: it reads agent terminals, so `state()` cannot. */
+  let details: Record<string, RunDetail> = {};
   const firstSeen = new Map<string, string>();
 
   const chiefOf = (project: string, workspace: string | null): ChiefState => {
@@ -143,7 +146,20 @@ export function createHub() {
       [orca, plannotator] = await Promise.all([readOrca(openRuns), readPlannotator(projects)]);
       await collectHistory(runs, orca.agents);
       const today = new Date().toDateString();
+      const built: Record<string, RunDetail> = {};
+      await Promise.all(
+        runs
+          .filter(({ state }) => state.phase !== "closed")
+          .map(async (run) => {
+            built[run.state.run] = await buildDetail(run, orca.agents.get(run.state.run));
+          }),
+      );
+      details = built;
       for (const { directory, state, events } of runs) {
+        if (built[state.run]) {
+          costs.set(state.run, built[state.run].cost);
+          continue;
+        }
         const active =
           state.phase !== "closed" ||
           new Date(events[events.length - 1].time).toDateString() === today;
@@ -154,6 +170,12 @@ export function createHub() {
           costs.set(state.run, { usd: "unknown", tokens: 0 });
         }
       }
+    },
+
+    /** Fresh detail of any run, or null when no run has that id. */
+    async detail(run: string): Promise<RunDetail | null> {
+      const info = readRuns().find(({ state }) => state.run === run);
+      return info ? buildDetail(info, orca.agents.get(run)) : null;
     },
 
     state() {
@@ -236,6 +258,7 @@ export function createHub() {
           live_runs: runViews.filter((run) => run.open).length,
         },
         notifications: readNotifications(),
+        details,
         last_seen: lastSeen,
         digest: digestOf(runs, needsMe.length, lastSeen),
       };
