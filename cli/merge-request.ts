@@ -256,7 +256,7 @@ export function mergeRequestOpen(runId: string): void {
   }
 }
 
-/** Prints `<repo>  merged|open|closed  <url>` for each MR the run opened. Read-only. */
+/** Prints MR state and failed check names for each MR the run opened. Read-only. */
 export function mergeRequestStatus(runId: string): void {
   const { directory } = findRun(runId);
   const state = deriveState(readEvents(directory));
@@ -267,11 +267,57 @@ export function mergeRequestStatus(runId: string): void {
     const github = detectHost(merge.url) === "github";
     const output = run(
       github
-        ? ["gh", "pr", "view", merge.url, "--json", "state"]
+        ? ["gh", "pr", "view", merge.url, "--json", "state,statusCheckRollup"]
         : ["glab", "mr", "view", String(merge.number), "--output", "json"],
       worktree.path,
     );
-    const raw = String(JSON.parse(output).state).toLowerCase();
-    console.log(`${merge.repo}  ${raw === "opened" ? "open" : raw}  ${merge.url}`);
+    const view = JSON.parse(output);
+    const raw = String(view.state).toLowerCase();
+    const status = raw === "opened" ? "open" : raw;
+    let failures: string[] = [];
+    if (status === "open" && github) {
+      if (
+        view.statusCheckRollup === undefined ||
+        (view.statusCheckRollup !== null && !Array.isArray(view.statusCheckRollup))
+      )
+        throw new ArkError(`could not read checks for ${merge.url}`);
+      const failed = [
+        "FAILURE",
+        "ERROR",
+        "TIMED_OUT",
+        "CANCELLED",
+        "ACTION_REQUIRED",
+        "STARTUP_FAILURE",
+      ];
+      failures = (view.statusCheckRollup ?? [])
+        .filter((check: { conclusion?: string; state?: string }) =>
+          failed.includes(check.conclusion ?? check.state ?? ""),
+        )
+        .map(
+          (check: { name?: string; context?: string }) =>
+            check.name ?? check.context ?? "unnamed check",
+        );
+    } else if (status === "open") {
+      const pipeline = view.head_pipeline ?? view.pipeline;
+      if (pipeline) {
+        if (!pipeline.id) throw new ArkError(`could not read head pipeline for ${merge.url}`);
+        const jobs = JSON.parse(
+          run(
+            [
+              "glab",
+              "api",
+              `projects/:id/pipelines/${pipeline.id}/jobs?scope[]=failed`,
+              "--paginate",
+            ],
+            worktree.path,
+          ),
+        );
+        if (!Array.isArray(jobs)) throw new ArkError(`could not read jobs for ${merge.url}`);
+        failures = jobs.map((job: { name: string }) => job.name);
+      }
+    }
+    console.log(
+      `${merge.repo}  ${status}  ${merge.url}${failures.length ? `  checks failing: ${failures.join(", ")}` : ""}`,
+    );
   }
 }
