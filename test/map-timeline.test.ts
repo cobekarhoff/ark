@@ -618,6 +618,10 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
       await withUi(async (baseUrl) => {
         await view.navigate(baseUrl);
+        await waitForBrowserValue(
+          view,
+          `!!document.querySelector('.vbar button[aria-current="page"]')`,
+        );
         await view.press("2");
         await waitForBrowserValue(
           view,
@@ -680,6 +684,10 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
       await withUi(async (baseUrl) => {
         await view.navigate(baseUrl);
+        await waitForBrowserValue(
+          view,
+          `!!document.querySelector('.vbar button[aria-current="page"]')`,
+        );
         await view.press("2");
         await waitForBrowserValue(view, "document.querySelector('[data-node]')?.dataset.node");
         await view.evaluate(
@@ -782,6 +790,10 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
       await withUi(async (baseUrl) => {
         await view.navigate(baseUrl);
+        await waitForBrowserValue(
+          view,
+          `!!document.querySelector('.vbar button[aria-current="page"]')`,
+        );
         await view.press("3");
         await waitForBrowserValue(view, "!!document.querySelector('[data-lane]')");
         for (const hours of ["24h", "1h", "12h"]) {
@@ -828,6 +840,10 @@ printf '%s\\n' "$*" >> "$ORCA_ACTION_LOG"
       await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
       await withUi(async (baseUrl) => {
         await view.navigate(baseUrl);
+        await waitForBrowserValue(
+          view,
+          `!!document.querySelector('.vbar button[aria-current="page"]')`,
+        );
         await view.press("3");
         await waitForBrowserValue(
           view,
