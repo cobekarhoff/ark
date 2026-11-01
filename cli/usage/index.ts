@@ -1,8 +1,9 @@
 import { closeSync, existsSync, openSync, readSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { ArkError } from "../errors.ts";
 import { parseClaudeSession } from "./claude.ts";
+import { parseCodexSession, readCodexText } from "./codex.ts";
 import { parseOmpSession } from "./omp.ts";
 
 export type UsageMessage = {
@@ -31,13 +32,16 @@ export type SessionWithKey = SessionUsage & {
   /** Identifies the top-level session; subagent transcripts share their parent's key. */
   sessionKey: string;
   /** The harness whose reader parsed the file. Orca names the same harnesses in `agentIdentity`. */
-  harness: "omp" | "claude";
+  harness: "omp" | "claude" | "codex";
 };
 
 type Source = {
   harness: SessionWithKey["harness"];
   root: string;
+  pattern: string;
   parse: (file: string) => SessionUsage;
+  /** Codex rollouts sit in date folders, so the top-level session is the file itself. */
+  keyFor?: (relativeFile: string) => string;
 };
 
 function sources(): Source[] {
@@ -45,12 +49,21 @@ function sources(): Source[] {
     {
       harness: "omp",
       root: process.env.ARK_OMP_SESSIONS ?? join(homedir(), ".omp", "agent", "sessions"),
+      pattern: "**/*.jsonl",
       parse: parseOmpSession,
     },
     {
       harness: "claude",
       root: process.env.ARK_CLAUDE_SESSIONS ?? join(homedir(), ".claude", "projects"),
+      pattern: "**/*.jsonl",
       parse: parseClaudeSession,
+    },
+    {
+      harness: "codex",
+      root: process.env.ARK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions"),
+      pattern: "**/*.jsonl{,.zst}",
+      parse: parseCodexSession,
+      keyFor: (relativeFile) => `codex/${basename(relativeFile).replace(/\.jsonl(\.zst)?$/, "")}`,
     },
   ];
 }
@@ -63,14 +76,19 @@ function sessionKeyFor(relativeFile: string): string {
     : `${segments[0]}/${segments[1].replace(/\.jsonl$/, "")}`;
 }
 
-/** First `cwd` in the first 64 KiB of a session file; both formats write it near the top. */
+function findCwd(head: string): string | null {
+  const match = head.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+  return match ? JSON.parse(`"${match[1]}"`) : null;
+}
+
+/** First `cwd` in the first 64 KiB of a session file; every format writes it near the top. */
 function readCwd(file: string): string | null {
+  if (file.endsWith(".zst")) return findCwd(readCodexText(file).slice(0, 65536));
   const descriptor = openSync(file, "r");
   try {
     const buffer = Buffer.alloc(65536);
     const length = readSync(descriptor, buffer, 0, buffer.length, 0);
-    const match = buffer.toString("utf8", 0, length).match(/"cwd":"((?:[^"\\]|\\.)*)"/);
-    return match ? JSON.parse(`"${match[1]}"`) : null;
+    return findCwd(buffer.toString("utf8", 0, length));
   } finally {
     closeSync(descriptor);
   }
@@ -95,7 +113,7 @@ export function readUsageIn(directories: string[]): Map<string, SessionWithKey[]
   for (const source of sources()) {
     if (!existsSync(source.root)) continue;
     const relativeFiles = [
-      ...new Bun.Glob("**/*.jsonl").scanSync({ cwd: source.root, dot: true }),
+      ...new Bun.Glob(source.pattern).scanSync({ cwd: source.root, dot: true }),
     ].sort();
     for (const relativeFile of relativeFiles) {
       const file = join(source.root, relativeFile);
@@ -112,7 +130,7 @@ export function readUsageIn(directories: string[]): Map<string, SessionWithKey[]
       if (matching.length === 0) continue;
       const session = {
         ...source.parse(file),
-        sessionKey: sessionKeyFor(relativeFile),
+        sessionKey: (source.keyFor ?? sessionKeyFor)(relativeFile),
         harness: source.harness,
       };
       for (const directory of matching) result.get(directory)!.push(session);
