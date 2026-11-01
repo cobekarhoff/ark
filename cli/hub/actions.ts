@@ -73,11 +73,7 @@ const send = async (handle: string, text: string): Promise<Reply> =>
 async function toChief(project: string, text: string): Promise<Reply> {
   const snapshot = await readTerminals();
   if (!snapshot) return reply(502, "orca did not answer");
-  const chief = findLiveChief(
-    snapshot.terminals,
-    new Set(snapshot.runs.flatMap((orcaRun) => orcaRun.coordinator_handle ?? [])),
-    workspaceOf(project),
-  );
+  const chief = findLiveChief(snapshot, project, workspaceOf(project));
   return chief
     ? send(chief.handle, text)
     : reply(409, `no live Master Chief for project ${project}`);
@@ -129,10 +125,7 @@ const steering: Record<string, (params: Params) => Promise<Reply>> = {
     const snapshot = await readTerminals();
     if (!snapshot) return reply(502, "orca did not answer");
     const workspace = workspaceOf(project);
-    const coordinators = new Set(
-      snapshot.runs.flatMap((orcaRun) => orcaRun.coordinator_handle ?? []),
-    );
-    if (findLiveChief(snapshot.terminals, coordinators, workspace))
+    if (findLiveChief(snapshot, project, workspace))
       return reply(409, `project ${project} already has a live Master Chief`);
     const created = await execJson<{
       result?: { terminal?: { handle?: string }; handle?: string };

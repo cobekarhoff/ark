@@ -24,22 +24,17 @@ test("ARK-169-AC1 bootstrap creates the depth-check Run before starting a worker
   expect(startWorker).toBeGreaterThan(createRun);
 });
 
-test("ARK-169-AC2 chief creates its own Run unless the current Run has the queue objective", () => {
+test("ARK-169-AC2 chief creates its own Run at start and queues Tasks in it", () => {
   const queueSection = chiefPlaybook
     .split("## 5. Queue the approved tickets")[1]
     ?.split("\n## ")[0];
   expect(queueSection).toBeDefined();
-  expect(queueSection).toMatch(
-    /Use that Run only when its objective is exactly "Master Chief: <project> tickets"\./,
-  );
-  expect(queueSection).toMatch(
-    /In every other case, including no Run or a Run with another objective, create it\./,
-  );
+  expect(queueSection).toMatch(/Use the Run bound at start/);
 
-  const runCreate = queueSection!.indexOf(
+  const runCreate = chiefPlaybook.indexOf(
     'orca orchestration run-create --objective "Master Chief: <project> tickets"',
   );
-  const taskCreate = queueSection!.indexOf("orca orchestration task-create");
+  const taskCreate = chiefPlaybook.indexOf("orca orchestration task-create");
   expect(runCreate).toBeGreaterThanOrEqual(0);
   expect(taskCreate).toBeGreaterThan(runCreate);
 });
@@ -168,6 +163,7 @@ test("ARK-177-AC7 chief playbook refuses a second live Master Chief and takes ov
   expect(oneChief).toBeDefined();
   expect(oneChief).toMatch(/List the Runs: `orca orchestration run-list --json`/);
   expect(oneChief).toMatch(/objective is exactly "Master Chief: <project> tickets"/);
+  expect(oneChief).toMatch(/If none exists, create it now/);
   expect(oneChief).toMatch(/If the handle is live and is not your own.*stop/i);
   expect(oneChief).toMatch(/A Master Chief for <project> already runs in terminal <handle>/);
   expect(oneChief).toMatch(/If the handle is dead.*take over that Run/i);

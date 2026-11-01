@@ -33,30 +33,37 @@ export type OrcaSnapshot = {
   agents: Map<string, Agent[]>;
   /** Every live terminal, or null when `orca terminal list` failed. */
   terminals: OrcaTerminal[] | null;
-  /** Coordinator handle of every Orca run, so Master Chief detection can skip run leads. */
-  coordinatorHandles: Set<string>;
+  /** Every Orca run, so Master Chief detection can find the Master Chief Run of a project. */
+  runs: OrcaRun[];
 };
 
 export const emptyOrca: OrcaSnapshot = {
   ok: false,
   agents: new Map(),
   terminals: null,
-  coordinatorHandles: new Set(),
+  runs: [],
 };
 
-/** The live Master Chief of a workspace: a connected terminal there that is not an Orca run's coordinator. */
+/**
+ * The live Master Chief of a project: the connected coordinator of the Orca run whose objective is
+ * exactly `Master Chief: <project> tickets`, in the project workspace. No other terminal counts.
+ */
 export const findLiveChief = (
-  terminals: OrcaTerminal[],
-  coordinatorHandles: Set<string>,
+  snapshot: { terminals: OrcaTerminal[]; runs: OrcaRun[] },
+  project: string,
   workspace: string,
-): OrcaTerminal | undefined =>
-  terminals.find(
-    (candidate) =>
-      candidate.connected &&
-      candidate.worktreePath !== undefined &&
-      resolve(candidate.worktreePath) === workspace &&
-      !coordinatorHandles.has(candidate.handle),
+): OrcaTerminal | undefined => {
+  const handle = snapshot.runs.find(
+    (orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`,
+  )?.coordinator_handle;
+  return snapshot.terminals.find(
+    (terminal) =>
+      terminal.handle === handle &&
+      terminal.connected &&
+      terminal.worktreePath !== undefined &&
+      resolve(terminal.worktreePath) === workspace,
   );
+};
 
 /** Reads Orca now, for an action that must not act on a 3-second-old snapshot. Null when Orca did not answer. */
 export async function readTerminals(): Promise<{
@@ -165,7 +172,7 @@ export async function readOrca(
     ok: true,
     agents,
     terminals,
-    coordinatorHandles: new Set(orcaRuns.flatMap((orcaRun) => orcaRun.coordinator_handle ?? [])),
+    runs: orcaRuns,
   };
 }
 

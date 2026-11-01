@@ -109,7 +109,11 @@ export function createHub() {
 
   const chiefOf = (project: string, workspace: string | null): ChiefState => {
     if (!orca.ok || orca.terminals === null || workspace === null) return { state: "unknown" };
-    const terminal = findLiveChief(orca.terminals, orca.coordinatorHandles, workspace);
+    const terminal = findLiveChief(
+      { terminals: orca.terminals, runs: orca.runs },
+      project,
+      workspace,
+    );
     return terminal
       ? {
           state: "live",
