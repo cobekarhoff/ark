@@ -73,7 +73,13 @@ function acProof(directory: string, project: string, events: ArkEvent[]) {
     const parser = config?.suites.find((candidate) => candidate.name === suite.name)?.parser;
     const reportText = readFile(join(directory, report));
     if (!parser || !parsers[parser] || reportText === null) {
-      cases.push({ name: null, status: "unavailable", criteria: [], suite: suite.name, report });
+      cases.push({
+        name: null,
+        status: "unavailable",
+        criteria: [],
+        suite: suite.name,
+        report,
+      });
       continue;
     }
     const stdout = readFile(join(directory, "results", `${suite.name}.log`)) ?? "";
@@ -81,7 +87,13 @@ function acProof(directory: string, project: string, events: ArkEvent[]) {
       for (const result of parsers[parser]({ report: reportText, stdout }))
         cases.push({ ...result, suite: suite.name, report });
     } catch {
-      cases.push({ name: null, status: "unavailable", criteria: [], suite: suite.name, report });
+      cases.push({
+        name: null,
+        status: "unavailable",
+        criteria: [],
+        suite: suite.name,
+        report,
+      });
     }
   }
   const criteria = Object.entries(test.data.criteria as Record<string, string>).map(
@@ -91,7 +103,12 @@ function acProof(directory: string, project: string, events: ArkEvent[]) {
       cases: cases.filter((found) => found.status === "unavailable" || found.criteria.includes(id)),
     }),
   );
-  return { state: "ok" as const, at: test.time, passed: test.data.passed as boolean, criteria };
+  return {
+    state: "ok" as const,
+    at: test.time,
+    passed: test.data.passed as boolean,
+    criteria,
+  };
 }
 
 const gateWait = (events: ArkEvent[], end: number) =>
@@ -155,7 +172,10 @@ function timeSplit(
     stalled: 0,
     unavailable: 0,
   };
-  const records = history.map((record) => ({ ...record, at: Date.parse(record.time) }));
+  const records = history.map((record) => ({
+    ...record,
+    at: Date.parse(record.time),
+  }));
   const collected =
     records.length === 0 ? Infinity : Math.min(...records.map((record) => record.at));
   const gates = waits.map((wait) => [
@@ -188,9 +208,46 @@ function timeSplit(
   return split;
 }
 
+const esc = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const safeUrl = (u: string) => (/^(https?:|mailto:|#|\/|\.)/i.test(u.trim()) ? esc(u) : "");
+const tag = (name: string) => (children: string) => `<${name}>${children}</${name}>`;
+const align = (a?: string) =>
+  a ? ` style="text-align:${a === "right" || a === "center" ? a : "left"}"` : "";
+/** Renders plan.md for innerHTML: raw HTML is escaped as text and only safe link/image URLs survive. */
+const planHtml = (text: string) =>
+  Bun.markdown.render(text, {
+    text: esc,
+    html: (c: string) => c,
+    heading: (c: string, m?: { level: number }) => `<h${m!.level}>${c}</h${m!.level}>\n`,
+    paragraph: (c: string) => `<p>${c}</p>\n`,
+    blockquote: (c: string) => `<blockquote>${c}</blockquote>\n`,
+    code: (c: string, m?: { language?: string }) =>
+      `<pre><code${m?.language ? ` class="language-${esc(m.language)}"` : ""}>${c}</code></pre>\n`,
+    codespan: (c: string) => `<code>${c}</code>`,
+    hr: () => "<hr>\n",
+    strong: tag("strong"),
+    emphasis: tag("em"),
+    strikethrough: tag("del"),
+    list: (c: string, m?: { ordered: boolean; start?: number }) =>
+      m?.ordered
+        ? `<ol${m.start && m.start !== 1 ? ` start="${m.start}"` : ""}>\n${c}</ol>\n`
+        : `<ul>\n${c}</ul>\n`,
+    listItem: (c: string) => `<li>${c}</li>\n`,
+    table: tag("table"),
+    thead: tag("thead"),
+    tbody: tag("tbody"),
+    tr: (c: string) => `<tr>${c}</tr>\n`,
+    th: (c: string, m?: { align?: string }) => `<th${align(m?.align)}>${c}</th>`,
+    td: (c: string, m?: { align?: string }) => `<td${align(m?.align)}>${c}</td>`,
+    link: (c: string, m?: { href: string }) => `<a href="${safeUrl(m!.href)}">${c}</a>`,
+    image: (_: string, m?: { src: string; title?: string }) =>
+      `<img src="${safeUrl(m!.src)}" alt="${_}">`,
+  });
+
 function planView(directory: string) {
   const text = readFile(join(directory, "plan.md"));
-  return text === null ? notAvailable : { state: "ok" as const, html: Bun.markdown.html(text) };
+  return text === null ? notAvailable : { state: "ok" as const, html: planHtml(text) };
 }
 
 function evaluationView(directory: string) {
