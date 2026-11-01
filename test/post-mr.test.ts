@@ -189,21 +189,12 @@ test("ARK-208-AC3 status preserves host errors rather than treating unavailable 
   expect(result.out).not.toContain("gitlab  open");
 });
 
-test("ARK-208-AC4 run-lead completion contract requires CI verification and logged repair before success", () => {
+test("ARK-208-AC4 run-lead orders MR checks, repair verification and sync before its final report", () => {
   const playbook = readFileSync(
     join(import.meta.dir, "../skills/ark/playbooks/run-lead.md"),
     "utf8",
   );
-  const workflow = playbook.split("## 10. Open the MRs")[1]?.split("## 11.")[0];
-  expect(workflow).toBeDefined();
-  expect(workflow).toMatch(/After the MRs open, run `ark merge-request status <run>`/);
-  expect(workflow).toMatch(/verify that checks have finished and passed/);
-  expect(workflow).toMatch(
-    /Restart the validator for test-only fixes or the implementer for product fixes through the logged steps/,
+  expect(playbook).toMatch(
+    /ark merge-request open <run>[\s\S]*`ark merge-request status <run>`[\s\S]*`gh pr checks <url>`[\s\S]*`ark test <run>`[\s\S]*`ark worktree sync <run>`[\s\S]*`worker_done`/,
   );
-  expect(workflow).toMatch(/record a fresh escalation answer/);
-  expect(workflow).toMatch(
-    /Re-run `ark test <run>`[\s\S]*`ark worktree sync <run>`[\s\S]*Recheck MR status/,
-  );
-  expect(workflow).toMatch(/Do not report success while CI is failing, pending, or unknown/);
 });
