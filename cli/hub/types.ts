@@ -31,3 +31,13 @@ export type Agent = {
 
 export const switchTerminal = (handle: string | null, label = "Open terminal"): Action | null =>
   handle ? { name: "orca-terminal-switch", label, params: { handle } } : null;
+
+/** Item kinds as the human reads them, in the Needs-me list and in notification titles. */
+export const kindLabels: Record<ItemKind, string> = {
+  gate: "Gate",
+  mr: "Merge request",
+  question: "Question",
+  agent: "Agent",
+  ticket: "Approval",
+  retro: "Retro",
+};

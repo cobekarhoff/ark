@@ -8,7 +8,7 @@ import { retro } from "./retro.ts";
 import { runClose, runStart, runStep, status } from "./run.ts";
 import { strategyRecord } from "./strategy.ts";
 import { testRun } from "./test-run.ts";
-import { ui } from "./ui.ts";
+import { ui, uiInstall, uiUninstall } from "./ui.ts";
 import { workspaceSync } from "./workspace.ts";
 import { worktreeCreate, worktreeSync } from "./worktree.ts";
 
@@ -172,6 +172,24 @@ const commands: Command[] = [
     maximum: 0,
     run: (_positionals, flags) => ui(Number(flags["--port"] ?? 4317)),
   },
+  {
+    usage: "ui install [--port <number>]",
+    description:
+      "Writes the LaunchAgent dev.ark.hub in ~/Library/LaunchAgents and loads it, so the hub starts at login and restarts after a crash (port 4317 unless --port says otherwise). The hub sends a macOS notification for each new Needs-me item through terminal-notifier (or the command in ARK_NOTIFIER), and a click opens the hub at that item. Install refuses, and writes nothing, when terminal-notifier is missing: run brew install terminal-notifier. A second run with the same settings changes nothing; with a new port it rewrites the plist and reloads.",
+    flags: { "--port": true },
+    minimum: 0,
+    maximum: 0,
+    run: (_positionals, flags) => uiInstall(Number(flags["--port"] ?? 4317)),
+  },
+  {
+    usage: "ui uninstall",
+    description:
+      "Unloads and deletes the LaunchAgent dev.ark.hub. It does nothing, and exits 0, when the agent is not installed. The notification history in ~/.ark/hub/notifications.ndjson is kept.",
+    flags: {},
+    minimum: 0,
+    maximum: 0,
+    run: () => uiUninstall(),
+  },
 ];
 
 const helpText = ["Usage: ark <command>", ...commands.map((command) => `  ${command.usage}`)].join(
@@ -212,10 +230,10 @@ async function main(args: string[]): Promise<void> {
     console.log(helpText);
     return;
   }
-  const command = commands.find((candidate) => {
-    const words = commandWords(candidate);
-    return words.every((word, i) => args[i] === word);
-  });
+  // The longest match wins, so `ui install` is not read as `ui`.
+  const command = commands
+    .filter((candidate) => commandWords(candidate).every((word, i) => args[i] === word))
+    .sort((left, right) => commandWords(right).length - commandWords(left).length)[0];
   if (!command) {
     console.error(helpText);
     process.exitCode = 1;

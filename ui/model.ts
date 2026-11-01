@@ -1,5 +1,5 @@
 import type { createHub } from "../cli/hub/state.ts";
-import type { Agent, Item, ItemKind } from "../cli/hub/types.ts";
+import { kindLabels, type Agent, type Item, type ItemKind } from "../cli/hub/types.ts";
 
 export type HubState = ReturnType<ReturnType<typeof createHub>["state"]>;
 export type RunView = HubState["runs"][number];
@@ -8,12 +8,12 @@ export type Selection = { type: "need" | "run" | "agent"; id: string } | null;
 /** Item kinds as the design shows them: label, color tone, button text and action key. */
 export const kinds: Record<ItemKind, { label: string; tone: string; short: string; key: string }> =
   {
-    gate: { label: "Gate", tone: "needs", short: "Plannotator", key: "p" },
-    mr: { label: "Merge request", tone: "ok", short: "Open MR", key: "o" },
-    question: { label: "Question", tone: "waiting", short: "Answer", key: "i" },
-    agent: { label: "Agent", tone: "bad", short: "Orca", key: "o" },
-    ticket: { label: "Approval", tone: "working", short: "Plannotator", key: "p" },
-    retro: { label: "Retro", tone: "idle", short: "Retro", key: "r" },
+    gate: { label: kindLabels.gate, tone: "needs", short: "Plannotator", key: "p" },
+    mr: { label: kindLabels.mr, tone: "ok", short: "Open MR", key: "o" },
+    question: { label: kindLabels.question, tone: "waiting", short: "Answer", key: "i" },
+    agent: { label: kindLabels.agent, tone: "bad", short: "Orca", key: "o" },
+    ticket: { label: kindLabels.ticket, tone: "working", short: "Plannotator", key: "p" },
+    retro: { label: kindLabels.retro, tone: "idle", short: "Retro", key: "r" },
   };
 
 const stepTone = {
@@ -55,3 +55,12 @@ export const needRun = (item: Item, runs: RunView[]) =>
   item.ticket === null
     ? undefined
     : runs.find((run) => run.open && run.ticket.id === item.ticket && run.project === item.project);
+
+/** `HH:MM today`, else `Mon D HH:MM`, in local time. */
+export function notificationTime(time: string, now: number): string {
+  const date = new Date(time);
+  const clock = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return date.toDateString() === new Date(now).toDateString()
+    ? `${clock} today`
+    : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${clock}`;
+}
