@@ -501,7 +501,7 @@ type Hub = {
   projects: { name: string; chief: Record<string, unknown> }[];
   runs: Record<string, any>[];
   needs_me: Record<string, any>[];
-  readers: { orca: string; plannotator: string };
+  readers: { orca: string; plannotator: string; plannotator_error: string | null };
 };
 
 /** The first orca read runs in the background after start; wait for it unless orca is meant to fail. */
@@ -1090,6 +1090,74 @@ test(
     }
   },
 );
+
+for (const testCase of [
+  {
+    name: "ARK-212-AC1 reports not running and no Inbox items when the port file is absent",
+    inbox: "absent",
+    status: "not running",
+    error: null,
+  },
+  {
+    name: "ARK-212-AC2 reports unknown with the HTTP error and no failed Inbox items",
+    inbox: "http-error",
+    status: "unknown",
+    error: "Inbox read failed for demo: Error: HTTP 503",
+  },
+  {
+    name: "ARK-212-AC2 reports unknown with the error for a malformed Inbox port file",
+    inbox: "malformed",
+    status: "unknown",
+    error: "Inbox port read failed:",
+  },
+] as const) {
+  test(testCase.name, async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), "ark-inbox-state-"));
+    process.env.PLANNOTATOR_DATA_DIR = dataDirectory;
+    const plannotator = join(orcaBinDirectory, "plannotator");
+    writeFileSync(plannotator, "#!/bin/sh\nprintf '[]'\n");
+    chmodSync(plannotator, 0o755);
+    const inboxServer =
+      testCase.inbox === "http-error"
+        ? Bun.serve({
+            port: 0,
+            hostname: "127.0.0.1",
+            fetch: () => new Response("Inbox unavailable", { status: 503 }),
+          })
+        : null;
+    if (testCase.inbox !== "absent") {
+      mkdirSync(join(dataDirectory, "inbox"));
+      writeFileSync(
+        join(dataDirectory, "inbox", "inbox.json"),
+        inboxServer ? JSON.stringify({ port: inboxServer.port }) : "{invalid JSON",
+      );
+    }
+    try {
+      await withUi(async (baseUrl) => {
+        let state: Hub | undefined;
+        // Refresh runs in the child process, beyond this test's fake timers.
+        for (let attempt = 0; attempt < 50; attempt++) {
+          state = await hubState(baseUrl);
+          if (state.readers.plannotator_error !== "Plannotator has not been read yet") break;
+          await Bun.sleep(100);
+        }
+        expect(state?.readers.plannotator).toBe(testCase.status);
+        if (testCase.error === null) {
+          expect(state?.readers.plannotator_error).toBeNull();
+        } else {
+          expect(state?.readers.plannotator_error).toContain(testCase.error);
+        }
+        expect(state?.needs_me.filter((item) => item.source === "plannotator")).toEqual([]);
+        const response = await fetch(`${baseUrl}/api/needs-me`);
+        expect(response.status).toBe(200);
+        const items = (await response.json()) as Hub["needs_me"];
+        expect(items.filter((item) => item.source === "plannotator")).toEqual([]);
+      });
+    } finally {
+      await inboxServer?.stop(true);
+    }
+  });
+}
 
 test(
   "ARK-176-AC4 returns Master Chief states and live run counts",
