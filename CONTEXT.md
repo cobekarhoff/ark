@@ -36,6 +36,10 @@ _Avoid_: Cancelled, failed
 The run's tests passed and its branches were given to a human without Ark opening MRs.
 _Avoid_: Delivered
 
+**Hub**:
+The browser page `ark ui` serves. It lists what waits for the human across all projects, with live runs, Master Chief state and agents.
+_Avoid_: Control center, dashboard
+
 **Merge request (MR)**:
 The request Ark opens for a human to review and merge one repo's changes. On GitHub it's a pull request.
 _Avoid_: Change request
