@@ -32,6 +32,8 @@ export const agentTone = (agent: Agent) =>
       ? "bad"
       : "idle";
 
+export const agentKey = (agent: Agent) => `${agent.run}:${agent.role}:${agent.title}`;
+
 export const minutesSince = (since: string, now: number) =>
   Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
 

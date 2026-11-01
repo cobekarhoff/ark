@@ -1,6 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { Action, Agent, Item } from "../cli/hub/types.ts";
+import { MapView } from "./map.tsx";
+import { TimelineView } from "./timeline.tsx";
+import { Kbd, ViewBar, type View } from "./views.tsx";
 import {
+  agentKey,
   agentTone,
   duration,
   heat,
@@ -20,8 +24,6 @@ import {
 
 type Layer = "palette" | "sheet" | null;
 type PaletteEntry = { group: string; label: string; hint?: string; run: () => void };
-
-const Kbd = ({ children }: { children: ReactNode }) => <kbd>{children}</kbd>;
 
 function useHub(): HubState | null {
   const [state, setState] = useState<HubState | null>(null);
@@ -75,6 +77,7 @@ export function App() {
   const now = useNow();
   const [filter, setFilter] = useState<Filter>("all");
   const [selection, setSelection] = useState<Selection>(null);
+  const [view, setView] = useState<View>("home");
   const [layer, setLayer] = useState<Layer>(null);
   const [focus, setFocus] = useState(false);
   const [digestShown, setDigestShown] = useState(true);
@@ -183,6 +186,14 @@ export function App() {
         return setLayer(layer === "palette" ? null : "palette");
       }
       if (typing || layer !== null || event.metaKey || event.ctrlKey || event.altKey) return;
+      const viewKey = ["home", "map", "timeline"][Number(event.key) - 1] as View | undefined;
+      if (viewKey) return setView(viewKey);
+      // Map and Timeline read their own keys; Home's list keys must not move Home's selection there.
+      if (view !== "home") {
+        if (event.key === "?") setLayer("sheet");
+        else if (event.key === "t") toggleTheme();
+        return;
+      }
       if (event.key === "j") move(1);
       else if (event.key === "k") move(-1);
       else if (event.key === "Enter" && cursor) open(cursor);
@@ -242,7 +253,9 @@ export function App() {
       label: `Filter: ${name === "all" ? "All projects" : name}`,
       run: () => setFilter(name),
     })),
-    { group: "Go to", label: "Home", hint: "1", run: () => setSelection(null) },
+    { group: "Go to", label: "Home", hint: "1", run: () => setView("home") },
+    { group: "Go to", label: "Map", hint: "2", run: () => setView("map") },
+    { group: "Go to", label: "Timeline", hint: "3", run: () => setView("timeline") },
     ...needs.map((item) => ({
       group: "Needs me",
       label: `${item.ticket ?? item.source} · ${item.title}`,
@@ -262,9 +275,10 @@ export function App() {
 
   return (
     <div className="app" data-focus={focus}>
-      <main className="center">
+      <main className="center" hidden={view !== "home"}>
         <header className="top">
           <h1>Ark hub</h1>
+          <ViewBar view={view} setView={setView} />
           <div className="chips" role="group" aria-label="Project filter">
             {["all", ...known, otherFilter].map((name) => (
               <button
@@ -558,9 +572,30 @@ export function App() {
         </div>
       </main>
 
-      <aside className="detail" aria-label="Detail">
+      <aside className="detail" aria-label="Detail" hidden={view !== "home"}>
         <Detail hub={hub} now={now} need={cursor} selection={selection} perform={perform} />
       </aside>
+      {view === "map" && (
+        <MapView
+          hub={hub}
+          selection={selection}
+          setSelection={setSelection}
+          perform={perform}
+          view={view}
+          setView={setView}
+          active={layer === null}
+        />
+      )}
+      {view === "timeline" && (
+        <TimelineView
+          hub={hub}
+          now={now}
+          perform={perform}
+          view={view}
+          setView={setView}
+          active={layer === null}
+        />
+      )}
 
       <footer className="status">
         <div className="achips" role="group" aria-label="Agent activity">
@@ -591,8 +626,6 @@ export function App() {
     </div>
   );
 }
-
-const agentKey = (agent: Agent) => `${agent.run}:${agent.role}:${agent.title}`;
 
 function Detail({
   hub,
@@ -854,6 +887,18 @@ const shortcuts: [string, [string, string[]][]][] = [
       ["MR or agent: open", ["o"]],
       ["Question: Inbox", ["i"]],
       ["Retro: answer", ["r"]],
+    ],
+  ],
+  [
+    "Views",
+    [
+      ["Home, Map, Timeline", ["1", "2", "3"]],
+      ["Map: move between nodes", ["j", "k"]],
+      ["Map: dim other nodes on/off", ["v"]],
+      ["Map: replay previous / next event", ["[", "]"]],
+      ["Map: back to live", ["l"]],
+      ["Timeline: zoom 1h, 12h, 24h", ["w"]],
+      ["Timeline: cost burn", ["b"]],
     ],
   ],
 ];
