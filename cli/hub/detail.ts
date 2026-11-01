@@ -17,6 +17,7 @@ import { parseEvaluation } from "../evaluation.ts";
 import type { RunInfo } from "./ark.ts";
 import { readHistory, type HistoryRecord } from "./history.ts";
 import { readTerminalTail } from "./orca.ts";
+import { loadPlan, type PlanStep } from "../plan.ts";
 import type { Agent } from "./types.ts";
 
 const notAvailable = { state: "not available" } as const;
@@ -41,6 +42,15 @@ type CaseView = {
   suite: string;
   report: string;
 };
+
+/** Each step's `needs` and `criteria` from plan.yml; empty when the plan is missing or invalid. */
+function planSteps(directory: string): PlanStep[] {
+  try {
+    return loadPlan(directory).steps;
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Each AC of the latest `test.completed` with its test cases, read from the suite reports in
@@ -245,6 +255,7 @@ export async function buildDetail(
       .filter((window) => window.id === id)
       .reduce((sum, window) => sum + ((window.end ?? end) - window.start) / 1000, 0);
 
+  const plan = planSteps(directory);
   const waits = gateWait(events, end);
   const history = readHistory(directory);
   const orchestration = messages.filter((message) => !stepOf.has(message));
@@ -285,8 +296,12 @@ export async function buildDetail(
     rounds: rounds(events),
     steps: state.steps.map((step) => ({
       ...step,
+      needs: plan.find((planned) => planned.id === step.id)?.needs ?? [],
+      criteria: plan.find((planned) => planned.id === step.id)?.criteria ?? [],
       cost: stepCost(step.id),
-      wall_seconds: windows.some((window) => window.id === step.id) ? wallOf(step.id) : "unknown",
+      wall_seconds: windows.some((window) => window.id === step.id)
+        ? wallOf(step.id)
+        : ("unknown" as const),
     })),
     ac_proof: acProof(directory, state.project, events),
     cost: usageKnown ? costOf(summarize(messages)) : { usd: "unknown" as const, tokens: 0 },
