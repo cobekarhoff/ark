@@ -252,11 +252,18 @@ export function uiInstall(port: number): void {
   writeFileSync(path, plist);
   const loaded = launchctl("load", "-w", path);
   if (!loaded.ok) {
-    // Remove the plist so a second run retries instead of reporting "already installed".
-    rmSync(path);
-    console.error(
-      `launchctl load failed: ${loaded.error || "no error text"}\nThe hub is not running.`,
-    );
+    let recovery: string;
+    if (old === null) {
+      rmSync(path);
+      recovery = "The hub is not running.";
+    } else {
+      writeFileSync(path, old);
+      const restored = launchctl("load", "-w", path);
+      recovery = restored.ok
+        ? `The update was not applied. Restored the previous LaunchAgent ${label} and reloaded it.\nThe hub is running with the old settings.`
+        : `The previous LaunchAgent was restored, but reloading it failed: ${restored.error || "no error text"}\nThe hub is not running.`;
+    }
+    console.error(`launchctl load failed: ${loaded.error || "no error text"}\n${recovery}`);
     process.exitCode = 1;
     return;
   }
