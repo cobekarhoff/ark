@@ -19,7 +19,7 @@ You never write product code. You write only `ark.yml`, in step 7 one OMP settin
 test -f ~/.ark/projects/<project>/ark.yml && cat ~/.ark/projects/<project>/ark.yml
 ```
 
-If the file exists, show it and ask: "`ark.yml` exists for `<project>`. Keep it, replace it, or edit it?" Recommended: keep it, unless the workspace changed. On "keep", jump to step 4 and register what is missing. On "replace" or "edit", continue and write the file in step 8 only after the human's answer.
+If the file exists, show it and ask: "`ark.yml` exists for `<project>`. Keep it, replace it, or edit it?" Recommended: keep it, unless the workspace changed. On "keep", run the "Repos" and "UI" parts of step 2 (step 10 needs their result), then jump to step 4 and register what is missing. On "replace" or "edit", continue and write the file in step 8 only after the human's answer.
 
 ## 2. Detect the workspace
 
