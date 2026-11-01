@@ -4,7 +4,14 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
-import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
+import {
+  ark,
+  recordEvaluation,
+  tempArkHome,
+  tempGitRepo,
+  writeProject,
+  writeTicket,
+} from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
 let projectDirectory: string;
@@ -82,7 +89,9 @@ function startRun(
   const result = ark("run", "start", ticketFile, "--project", "demo");
   expect(result.code).toBe(0);
   const runId = result.out.trim();
-  return { runId, directory: join(projectDirectory, "runs", runId) };
+  const directory = join(projectDirectory, "runs", runId);
+  recordEvaluation(directory);
+  return { runId, directory };
 }
 
 function setOrcaRuns(runIds: string[], workers: object[] = [], tasks: object[] = []): void {
@@ -126,6 +135,7 @@ async function withUi<T>(callback: (baseUrl: string) => Promise<T>): Promise<T> 
 }
 
 function planGate(directory: string): void {
+  recordEvaluation(directory);
   writeFileSync(join(directory, "plan.yml"), "steps: []\n");
   appendEvent(directory, "plan.checked", {
     valid: true,

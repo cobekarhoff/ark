@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { appendEvent } from "../cli/events.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
 
@@ -67,4 +68,13 @@ export function ark(...args: string[]): { code: number; out: string; err: string
     out: result.stdout.toString(),
     err: result.stderr.toString(),
   };
+}
+
+/** Records an evaluation the way ark evaluation record does, so a run can pass ark plan check. */
+export function recordEvaluation(
+  runDirectory: string,
+  blockers: string[] = [],
+  risks: string[] = [],
+): void {
+  appendEvent(runDirectory, "evaluation.recorded", { blockers, risks });
 }

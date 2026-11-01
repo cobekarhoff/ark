@@ -121,7 +121,7 @@ function windowOf(
 
 /**
  * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
- * run start, the plan gate at each valid plan check, the escalation gate at the failed step that
+ * run start when the ticket has no ACs and at an evaluation with blockers, the plan gate at each valid plan check, the escalation gate at the failed step that
  * spent the round budget.
  */
 function gateWaitSeconds(events: ArkEvent[]): number {
@@ -129,7 +129,10 @@ function gateWaitSeconds(events: ArkEvent[]): number {
   let total = 0;
   for (const event of events) {
     const time = toMilliseconds(event.time);
-    if (event.type === "run.started") waitingSince.set("criteria", time);
+    if (event.type === "run.started" && event.data.criteria.length === 0)
+      waitingSince.set("criteria", time);
+    if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
+      waitingSince.set("criteria", waitingSince.get("criteria") ?? time);
     if (event.type === "plan.checked" && event.data.valid) waitingSince.set("plan", time);
     if (event.type === "step.finished" && event.data.outcome === "failed")
       waitingSince.set("escalation", time);
@@ -286,12 +289,32 @@ export function retro(runId: string): void {
     const window = windowOf(message, windows, runDirectory, runEnd);
     if (window) stepOf.set(message, window);
   }
-  const orchestrationMessages = messages.filter((message) => !stepOf.has(message));
+  // The evaluator session ends at the last evaluation.recorded. The run lead session outlasts it.
+  const evaluationEnd = events.findLast((event) => event.type === "evaluation.recorded")?.time;
+  const evaluatorSessions = new Set(
+    messages
+      .filter((message) => !stepOf.has(message))
+      .map((message) => message.sessionKey)
+      .filter((key) =>
+        messages
+          .filter((message) => message.sessionKey === key)
+          .every(
+            (message) =>
+              !stepOf.has(message) &&
+              evaluationEnd !== undefined &&
+              toMilliseconds(message.time) <= toMilliseconds(evaluationEnd),
+          ),
+      ),
+  );
+  const roleOf = (message: Message): string =>
+    stepOf.get(message)?.role ??
+    (evaluatorSessions.has(message.sessionKey) ? "evaluator" : "orchestration");
+  const orchestrationMessages = messages.filter((message) => roleOf(message) === "orchestration");
   const stepIds = [...new Set(windows.map((window) => window.id))];
   const roleOfStep = new Map(windows.map((window) => [window.id, window.role]));
 
   const byStep = groupBy(messages, (message) => stepOf.get(message)?.id ?? "orchestration");
-  const byRole = groupBy(messages, (message) => stepOf.get(message)?.role ?? "orchestration");
+  const byRole = groupBy(messages, roleOf);
   for (const id of stepIds) byStep[id] ??= summarize([]); // a step that ran with no session found has unknown cost
   for (const role of roleOfStep.values()) byRole[role] ??= summarize([]);
   const total = summarize(messages);

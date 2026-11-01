@@ -14,7 +14,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
-import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
+import {
+  ark,
+  recordEvaluation,
+  tempArkHome,
+  tempGitRepo,
+  writeProject,
+  writeTicket,
+} from "./helpers.ts";
 
 const roles = {
   implementer: { harness: "claude", model: "claude-sonnet" },
@@ -62,7 +69,9 @@ function startRun(
   );
   const started = ark("run", "start", ticket, "--project", "demo");
   const runId = started.out.match(/\d{4}-\d{2}-\d{2}-FAKE-1-\d+/)![0];
-  return { runId, runDirectory: join(arkHome, "projects", "demo", "runs", runId) };
+  const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+  recordEvaluation(runDirectory);
+  return { runId, runDirectory };
 }
 
 function addRemote(workspace: string): void {
@@ -81,6 +90,7 @@ function addRemote(workspace: string): void {
 
 function approveAndOpenMergeRequest(runDirectory: string): void {
   writeFileSync(join(runDirectory, "plan.yml"), "steps: []\n");
+  recordEvaluation(runDirectory);
   appendEvent(runDirectory, "plan.checked", {
     valid: true,
     problems: [],

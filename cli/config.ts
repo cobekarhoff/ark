@@ -9,6 +9,7 @@ const parserNames = ["bun", "pytest", "behave"];
 const roleNames = ["implementer", "validator", "reviewer"] as const;
 
 type Role = (typeof roleNames)[number];
+type RoleConfig = { harness: string; model: string };
 
 export type ProjectConfig = {
   workspace: string;
@@ -21,7 +22,7 @@ export type ProjectConfig = {
     command: string;
     parser: string;
   }[];
-  roles: Record<Role, { harness: string; model: string }>;
+  roles: Record<Role, RoleConfig> & { evaluator?: RoleConfig };
   concurrency: number;
   round_budget: number;
 };
@@ -104,7 +105,9 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
 
   const rolesField = asObject(fields.roles ?? fail("roles is required"), "roles");
   const roles = {} as ProjectConfig["roles"];
-  for (const role of roleNames) {
+  // The evaluator is optional: ark evaluation record names it when it is missing.
+  for (const role of [...roleNames, "evaluator" as const]) {
+    if (role === "evaluator" && rolesField.evaluator === undefined) continue;
     const entry = asObject(rolesField[role] ?? fail(`roles.${role} is required`), `roles.${role}`);
     roles[role] = {
       harness: text(entry, "harness", `roles.${role}.harness`),

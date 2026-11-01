@@ -101,7 +101,10 @@ roles:
   implementer: { harness: claude, model: claude-sonnet }
   validator: { harness: codex, model: gpt-codex }
   reviewer: { harness: codex, model: gpt-codex }
+  evaluator: { harness: codex, model: gpt-codex }
 ```
+
+The evaluator checks the ticket before the run lead plans. Give it a different vendor from the run lead. Without `roles.evaluator`, `ark evaluation record` refuses and no plan passes `ark plan check`.
 
 Run `command -v claude codex omp`. If a harness from the default is missing, the roles are unknown: ask in step 3.
 
@@ -232,6 +235,7 @@ roles:
   implementer: { harness: <harness>, model: <model> }
   validator: { harness: <harness>, model: <model> }
   reviewer: { harness: <harness>, model: <model> }
+  evaluator: { harness: <harness>, model: <model> }
 ```
 
 Rules for the file:

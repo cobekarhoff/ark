@@ -244,7 +244,7 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
 }
 
 // Stable output. Markdown table cells cannot hold a pipe or a newline.
-export function renderPlanMarkdown(plan: Plan): string {
+export function renderPlanMarkdown(plan: Plan, risks: string[]): string {
   const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
   const lines = ["# Plan", "", "## Summary", "", plan.summary.why, "", "## Changes", ""];
   lines.push("| Criterion | Where | Now | Fix |", "| --- | --- | --- | --- |");
@@ -261,6 +261,9 @@ export function renderPlanMarkdown(plan: Plan): string {
   lines.push("");
   if (plan.design.example.trim()) lines.push("```text", plan.design.example.trimEnd(), "```");
   else lines.push("No example given.");
+  lines.push("", "## Evaluation", "");
+  if (risks.length === 0) lines.push("No risks.");
+  else for (const risk of risks) lines.push(`- ${risk.replaceAll("\n", " ")}`);
   lines.push("", "## Steps", "", "```mermaid", renderMermaid(plan).trimEnd(), "```", "");
   lines.push("| Step | Role | Repo | Needs | Criteria |", "| --- | --- | --- | --- | --- |");
   for (const step of plan.steps) {
@@ -310,7 +313,10 @@ export function planCheck(runId: string): void {
       `plan is invalid: ${problems.length} problem${problems.length === 1 ? "" : "s"}`,
     );
   }
-  writeFileSync(join(directory, "plan.md"), renderPlanMarkdown(plan));
+  writeFileSync(
+    join(directory, "plan.md"),
+    renderPlanMarkdown(plan, state.evaluation?.risks ?? []),
+  );
   console.log(
     `plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`,
   );

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { ArkError } from "./errors.ts";
+import { evaluationRecord } from "./evaluation.ts";
 import { gateRecord } from "./gate.ts";
 import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
 import { planCheck } from "./plan.ts";
@@ -51,6 +52,15 @@ const commands: Command[] = [
     minimum: 2,
     maximum: 2,
     run: ([runId, outcome]) => runClose(runId, outcome),
+  },
+  {
+    usage: "evaluation record <run>",
+    description:
+      "Reads evaluation.md in the run folder and records its blockers and risks. It refuses a missing file, a file with no Blockers or Risks list, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.",
+    flags: {},
+    minimum: 1,
+    maximum: 1,
+    run: ([runId]) => evaluationRecord(runId),
   },
   {
     usage: "plan check <run>",

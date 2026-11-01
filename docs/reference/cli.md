@@ -33,7 +33,15 @@ Records that a plan step started or finished. Use --failed with finish when the 
 ```text
 ark run close <run> <outcome>
 
-Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs. After it records the outcome, it removes each worktree of the run and deletes its local branch. It keeps a worktree that has uncommitted changes, and for a merged run a branch that is not in the target branch, and prints the repo and the reason.
+Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs.
+```
+
+### evaluation record
+
+```text
+ark evaluation record <run>
+
+Reads evaluation.md in the run folder and records its blockers and risks. It refuses a missing file, a file with no Blockers or Risks list, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.
 ```
 
 ### plan check
@@ -41,7 +49,7 @@ Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refus
 ```text
 ark plan check <run>
 
-Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary, no design.interfaces, or an interface with no callers is invalid.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid.
 ```
 
 ### worktree create
@@ -134,6 +142,7 @@ A run lives at `$ARK_HOME/projects/<project>/runs/<run>/`:
 ticket.md          copy of the ticket file
 events.ndjson      append-only event log
 state.json         derived from the events, rebuilt by any command
+evaluation.md      written by the evaluator
 plan.yml           written by the run lead
 plan.md            rendered by ark plan check
 workspace/         the workspace mirror
@@ -143,6 +152,10 @@ retro.md           written by the run lead
 ```
 
 `workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<ticket id>-<slug>` (slug: the ticket title in lowercase with hyphens, at most 40 characters; `-<run number>` is added from the second run) at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace.
+
+## `evaluation.md` format
+
+The evaluator writes `evaluation.md` in the run folder. `ark evaluation record` reads two headings, `Blockers` and `Risks` (any heading level, any case). Each heading is followed by a bullet list. An empty list is valid. A missing heading is refused. Other text is ignored. With one or more blockers the phase is `awaiting_criteria` until `gate.answered criteria accept`. `plan.md` lists the risks of the latest evaluation in its Evaluation section.
 
 ## `plan.yml` fields
 
@@ -236,7 +249,7 @@ design:
 | `ticket_source` | yes      | string  | Where agents fetch tickets: `local`, `github`, or `jira`.                                                                                                                                                                            |
 | `compose`       | no       | string  | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them. |
 | `suites`        | yes      | list    | The test suites. You need at least one.                                                                                                                                                                                              |
-| `roles`         | yes      | map     | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`.                                                                                                                                            |
+| `roles`         | yes      | map     | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`. The optional `evaluator` role is needed by `ark evaluation record`.                                                                        |
 | `concurrency`   | no       | integer | The most workers that run at once. It must be 1 or more. The default is 2.                                                                                                                                                           |
 | `round_budget`  | no       | integer | How many rounds an implementer step may restart before escalation. It must be 0 or more. The default is 2.                                                                                                                           |
 
@@ -266,6 +279,7 @@ roles:
   implementer: { harness: claude, model: claude-sonnet }
   validator: { harness: codex, model: gpt-codex }
   reviewer: { harness: codex, model: gpt-codex }
+  evaluator: { harness: codex, model: gpt-codex }
 concurrency: 2
 round_budget: 2
 ```
@@ -280,6 +294,7 @@ A test proves an AC when its name or tags contain the AC id, for example `CLARA-
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `run.started`          | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file`                                                                     | `ark run start`                           |
 | `criteria.updated`     | `criteria` (ids)                                                                                                                         | `ark gate record` for the `criteria` gate |
+| `evaluation.recorded`  | `blockers` (strings), `risks` (strings)                                                                                                  | `ark evaluation record`                   |
 | `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`)                                                    | `ark plan check`                          |
 | `gate.answered`        | `gate` (`criteria`, `plan`, or `escalation`), `answer`, optional `note`                                                                  | `ark gate record`                         |
 | `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                         | `ark worktree create`                     |

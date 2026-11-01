@@ -102,7 +102,7 @@ export function createHub() {
   const firstSeen = new Map<string, string>();
 
   const chiefOf = (project: string, workspace: string | null): ChiefState => {
-    if (orca.terminals === null || workspace === null) return { state: "unknown" };
+    if (!orca.ok || orca.terminals === null || workspace === null) return { state: "unknown" };
     const terminal = orca.terminals.find(
       (candidate) =>
         candidate.connected &&

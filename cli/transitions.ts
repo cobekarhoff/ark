@@ -13,7 +13,10 @@ const buildPhases = ["building", "escalation"];
 
 /** The event that moves a run out of `phase`, named in refusals. */
 function missingEvent(state: RunState): string {
-  if (state.phase === "awaiting_criteria") return "gate.answered criteria accept";
+  if (state.phase === "awaiting_criteria")
+    return state.evaluation?.blockers.length
+      ? "gate.answered criteria accept (the evaluation has blockers)"
+      : "gate.answered criteria accept";
   if (state.phase === "planning")
     return state.plan?.valid
       ? "gate.answered plan approve"
@@ -44,8 +47,18 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
       if (!Array.isArray(data.criteria) || data.criteria.length === 0)
         throw new ArkError("criteria.updated refused: the ticket has no criteria");
       return;
+    case "evaluation.recorded":
+      requirePhase(state, type, ["awaiting_criteria", "planning"]);
+      for (const list of ["blockers", "risks"])
+        if (!Array.isArray(data[list]) || !data[list].every((line) => typeof line === "string"))
+          throw new ArkError(`evaluation.recorded refused: ${list} must be a list of strings`);
+      return;
     case "plan.checked":
       requirePhase(state, type, ["planning", "building", "escalation"]);
+      if (!state.evaluation)
+        throw new ArkError(
+          "plan.checked refused: missing evaluation.recorded (ark evaluation record)",
+        );
       return;
     case "gate.answered":
       return assertGateAllowed(state, data);
