@@ -817,7 +817,13 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       const actionLog = join(mkdtempSync(join(tmpdir(), "ark-gate-action-")), "actions.log");
       process.env.ORCA_ACTION_LOG = actionLog;
       const plannotator = join(orcaBinDirectory, "plannotator");
-      writeFileSync(plannotator, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$ORCA_ACTION_LOG"\n`);
+      writeFileSync(
+        plannotator,
+        `#!/bin/sh
+if [ "$1" = "sessions" ] && [ "$2" = "--json" ]; then printf '[]'; exit 0; fi
+printf '%s\\n' "$*" >> "$ORCA_ACTION_LOG"
+`,
+      );
       chmodSync(plannotator, 0o755);
       await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
       await withUi(async (baseUrl) => {

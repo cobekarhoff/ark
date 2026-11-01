@@ -7,7 +7,7 @@ import { runningCost } from "../retro.ts";
 import { arkItems, readRuns, type RunInfo } from "./ark.ts";
 import { readNotifications } from "./notify.ts";
 import { createCollector, readCi, type Observed } from "./history.ts";
-import { emptyOrca, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
+import { emptyOrca, findLiveChief, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
 import {
   emptyPlannotator,
   plannotatorItems,
@@ -18,7 +18,12 @@ import type { Agent } from "./types.ts";
 
 type Cost = { usd: number | "unknown"; tokens: number };
 type ChiefState =
-  | { state: "live"; handle: string; harness: string | null; model: string | null }
+  | {
+      state: "live";
+      handle: string;
+      harness: string | null;
+      model: string | null;
+    }
   | { state: "missing" }
   | { state: "unknown" };
 
@@ -106,12 +111,10 @@ export function createHub() {
 
   const chiefOf = (project: string, workspace: string | null): ChiefState => {
     if (!orca.ok || orca.terminals === null || workspace === null) return { state: "unknown" };
-    const terminal = orca.terminals.find(
-      (candidate) =>
-        candidate.connected &&
-        candidate.worktreePath !== undefined &&
-        resolve(candidate.worktreePath) === workspace &&
-        !orca.coordinatorHandles.has(candidate.handle),
+    const terminal = findLiveChief(
+      { terminals: orca.terminals, runs: orca.runs },
+      project,
+      workspace,
     );
     return terminal
       ? {

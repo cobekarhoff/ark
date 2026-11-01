@@ -1802,3 +1802,84 @@ kbd {
     grid-template-columns: 6px 88px 124px minmax(0, 1fr) 64px;
   }
 }
+
+/* steering */
+.chief-box {
+  display: grid;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  flex: none;
+}
+.chief-box h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--faint);
+}
+.chief-box h3 b {
+  color: var(--text);
+  font-size: 14px;
+}
+.steer {
+  display: grid;
+  gap: 6px;
+}
+.steer label {
+  display: grid;
+  gap: 4px;
+}
+.steer-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--faint);
+}
+.steer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.steer-row.wrap {
+  flex-wrap: wrap;
+}
+.steer-row input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.steer-row input:focus {
+  border-color: var(--cyan);
+}
+.steer-status {
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--c) 35%, var(--line));
+  background: color-mix(in oklab, var(--c) 10%, var(--surface));
+}
+.steer-status.ok {
+  --c: var(--green);
+}
+.steer-status.bad {
+  --c: var(--red);
+}
+.steer-status b {
+  color: var(--c);
+}
+.steer-quote {
+  font: 12.5px/1.45 var(--mono);
+  color: var(--text);
+  padding: 9px 11px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--red);
+  border-radius: 8px;
+}
+.dialog .body {
+  display: grid;
+  gap: 10px;
+}

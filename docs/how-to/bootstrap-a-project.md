@@ -65,6 +65,7 @@ You need:
      implementer: { harness: claude, model: claude-sonnet }
      validator: { harness: codex, model: gpt-codex }
      reviewer: { harness: codex, model: gpt-codex }
+     chief: { harness: claude, model: claude-opus }
    ```
 
    If a repo has UI code, Master Chief also offers to make `PRODUCT.md` with impeccable `init` and `DESIGN.md` with impeccable `document` in that repo. With no UI code, it asks one question: is the project designed for a UI that does not exist yet? On yes it offers `PRODUCT.md` only. On no it makes no design file. It never writes over an existing `PRODUCT.md` or `DESIGN.md`: it skips the file and names it in the summary.
@@ -119,6 +120,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
      implementer: { harness: claude, model: claude-sonnet }
      validator: { harness: codex, model: gpt-codex }
      reviewer: { harness: codex, model: gpt-codex }
+     chief: { harness: claude, model: claude-opus }
    ```
 
    `ark test` runs each suite from `<run folder>/workspace/<repo>`. Before the suites it runs `docker compose --project-directory <run folder>/workspace -p <run id> up -d --wait`, so the compose file resolves every `./repos/*` path to the run's worktrees.
