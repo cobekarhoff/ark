@@ -91,3 +91,71 @@ test("ARK-171-AC5 run-lead section 4 asks for callers of each interface and an o
   expect(writePlan).toMatch(/`example` \(a sample of new or changed output\)/);
   expect(writePlan).toMatch(/design\.interfaces/);
 });
+test("ARK-174-AC1 bootstrap detects UI repos and offers both design files", () => {
+  const uiDetection = bootstrapPlaybook.split("### UI")[1]?.split("\n## ")[0];
+  const designContext = bootstrapPlaybook.split("## 10. Design context")[1]?.split("\n## ")[0];
+
+  expect(uiDetection).toBeDefined();
+  expect(designContext).toBeDefined();
+  expect(uiDetection).toMatch(/web framework in `package\.json`/);
+  expect(uiDetection).toMatch(/HTML templates/);
+  expect(uiDetection).toMatch(/Storybook config/);
+  expect(uiDetection).toMatch(/ios` or `android` project/);
+  expect(uiDetection).toMatch(
+    /For each one, record whether `PRODUCT\.md` and `DESIGN\.md` already exist at its root/,
+  );
+  expect(designContext).toMatch(/offer the files below for each UI repo from step 2/);
+  expect(designContext).toMatch(/Existing UI code, no `PRODUCT\.md`: run impeccable `init`/);
+  expect(designContext).toMatch(/Existing UI code, no `DESIGN\.md`: run impeccable `document`/);
+});
+
+test("ARK-174-AC2 bootstrap asks once about a planned UI and limits files by answer", () => {
+  const ask = bootstrapPlaybook
+    .split("## 3. Ask only what you could not detect")[1]
+    ?.split("\n## ")[0];
+  const designContext = bootstrapPlaybook.split("## 10. Design context")[1]?.split("\n## ")[0];
+
+  expect(ask).toBeDefined();
+  expect(designContext).toBeDefined();
+  expect(ask).toMatch(/only when step 2 found no repo with UI code/);
+  expect(ask).toMatch(
+    /Recommended: `<yes or no>`, because `<evidence from the README or the tickets>`/,
+  );
+  expect(designContext).toMatch(
+    /Planned UI with no code \(a "yes" in step 3\): run impeccable `init` only/,
+  );
+  expect(designContext).toMatch(/`DESIGN\.md` comes later, from the first Designer run/);
+  expect(designContext).toMatch(/No UI and a "no" in step 3: make no design file/);
+});
+
+test("ARK-174-AC3 bootstrap preserves and reports existing design files", () => {
+  const designContext = bootstrapPlaybook.split("## 10. Design context")[1]?.split("\n## ")[0];
+  const report = bootstrapPlaybook.split("## 11. Report")[1]?.split("\n## ")[0];
+
+  expect(designContext).toBeDefined();
+  expect(report).toBeDefined();
+  expect(designContext).toMatch(/Never write over `PRODUCT\.md` or `DESIGN\.md`/);
+  expect(designContext).toMatch(
+    /For a file that already exists, skip its command and list the file as skipped in step 11/,
+  );
+  expect(report).toMatch(/Skipped, already exists: <repo>\/PRODUCT\.md/);
+});
+
+test("ARK-174-AC4 report and Designer use committed design context", () => {
+  const report = bootstrapPlaybook.split("## 11. Report")[1]?.split("\n## ")[0];
+  const designer = readFileSync(join(playbookDirectory, "worker.md"), "utf8")
+    .split("### Designer")[1]
+    ?.split("\n### ")[0];
+
+  expect(report).toBeDefined();
+  expect(designer).toBeDefined();
+  expect(report).toMatch(/Design files/);
+  expect(report).toMatch(/Made: <repo>\/PRODUCT\.md \(impeccable init\)/);
+  expect(report).toMatch(/Made: <repo>\/DESIGN\.md \(impeccable document\)/);
+  expect(report).toMatch(/Commit and merge the made files/);
+  expect(report).toMatch(/Run worktrees start from the base branch/);
+  expect(designer).toMatch(/run `impeccable context` in the UI repo's worktree/);
+  expect(designer).toMatch(
+    /When a file is missing, say so in a line at the top of `strategies\.md`/,
+  );
+});
