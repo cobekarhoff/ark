@@ -67,6 +67,10 @@ You need:
      reviewer: { harness: codex, model: gpt-codex }
    ```
 
+   If a repo has UI code, Master Chief also offers to make `PRODUCT.md` with impeccable `init` and `DESIGN.md` with impeccable `document` in that repo. With no UI code, it asks one question: is the project designed for a UI that does not exist yet? On yes it offers `PRODUCT.md` only. On no it makes no design file. It never writes over an existing `PRODUCT.md` or `DESIGN.md`: it skips the file and names it in the summary.
+
+   Commit and merge the files it made. Run worktrees start from the base branch, so an uncommitted file is not in a run's worktree. On the next web UI run after the merge, the Designer reads the files through `impeccable context`. If a file is missing, the Designer says so in `strategies.md`.
+
 8. Read the summary Master Chief prints. It lists what it detected, what you answered, what it registered in Orca, and anything left for you.
 
 ## Bootstrap a meta-repo that holds several repos
