@@ -612,7 +612,9 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
         repo: ".",
         round: 1,
       });
-      setOrca([run.runId, other.runId]);
+      const waiting = startRun("ARK-180-MAPUI3", "Waiting run");
+      planGate(waiting.directory);
+      setOrca([run.runId, other.runId, waiting.runId]);
       await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
       await withUi(async (baseUrl) => {
         await view.navigate(baseUrl);
@@ -639,16 +641,16 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
         });
         await waitForBrowserValue(
           view,
-          `document.querySelector('[data-badge="run:${other.runId}"]') !== null`,
+          `document.querySelector('[data-badge="run:${waiting.runId}"]') !== null`,
         );
         await view.evaluate(
-          `document.querySelector('[data-badge="run:${other.runId}"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true, view: window }))`,
+          `document.querySelector('[data-badge="run:${waiting.runId}"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true, view: window }))`,
         );
         expect(
           await view.evaluate(
             "document.querySelector('.app > aside.detail:not([hidden]) h2')?.textContent",
           ),
-        ).toBe("ARK-180-MAPUI2");
+        ).toBe("ARK-180-MAPUI3");
       });
     },
   );
