@@ -1627,7 +1627,60 @@ test("ARK-178-AC1 repeating install leaves the LaunchAgent unchanged", () => {
   expect(readFileSync(launchLog, "utf8").trim().split("\n")).toEqual([`load -w ${plist}`]);
 });
 
-test("ARK-178-AC1 install exits 1 with the launchctl error when load fails", () => {
+for (const recoverySucceeds of [true, false]) {
+  test(`ARK-213-AC1 failed update restores the previous plist when recovery ${recoverySucceeds ? "succeeds" : "fails"}`, () => {
+    const temporaryHome = mkdtempSync(join(tmpdir(), "ark-install-home-"));
+    const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-install-state-"));
+    const commandDirectory = mkdtempSync(join(tmpdir(), "ark-install-bin-"));
+    const notifierCommand = writeCommand(commandDirectory, "terminal-notifier", "exit 0");
+    const launchctlCommand = writeCommand(commandDirectory, "launchctl", "exit 0");
+    const environment = {
+      HOME: temporaryHome,
+      ARK_HOME: arkHomeDirectory,
+      ARK_NOTIFIER: notifierCommand,
+      ARK_LAUNCHCTL: launchctlCommand,
+      PATH: commandDirectory,
+    };
+    const installed = runArkWithEnvironment(environment, "ui", "install", "--port", "4317");
+    expect(installed.exitCode).toBe(0);
+    const plist = join(temporaryHome, "Library", "LaunchAgents", "dev.ark.hub.plist");
+    const previousContents = readFileSync(plist);
+    const attemptedPlist = join(commandDirectory, "attempted.plist");
+    const recoveryPlist = join(commandDirectory, "recovery.plist");
+    writeCommand(
+      commandDirectory,
+      "launchctl",
+      `if [ "$1" = "unload" ]; then exit 0; fi
+if [ ! -f "${attemptedPlist}" ]; then
+  /bin/cp "$3" "${attemptedPlist}" || exit 99
+  echo "Update load failed: 5: Input/output error" >&2
+  exit 5
+fi
+/bin/cp "$3" "${recoveryPlist}" || exit 99
+${recoverySucceeds ? "exit 0" : 'echo "Recovery load failed: 6: Device not configured" >&2; exit 6'}`,
+    );
+
+    const result = runArkWithEnvironment(environment, "ui", "install", "--port", "4318");
+    expect(result.exitCode).toBe(1);
+    expect(readFileSync(attemptedPlist, "utf8")).toContain("<string>4318</string>");
+    expect(readFileSync(plist)).toEqual(previousContents);
+    expect(readFileSync(recoveryPlist)).toEqual(previousContents);
+    const errorOutput = result.stderr.toString();
+    expect(errorOutput).toContain("Update load failed: 5: Input/output error");
+    if (recoverySucceeds) {
+      expect(errorOutput).toContain("reloaded");
+      expect(errorOutput).toContain("running with the old settings");
+      expect(errorOutput).not.toContain("hub is not running");
+    } else {
+      expect(errorOutput).toContain("Recovery load failed: 6: Device not configured");
+      expect(errorOutput).toContain("hub is not running");
+      expect(errorOutput).not.toContain("running with the old settings");
+    }
+    expect(result.stdout.toString()).not.toContain("It is running now");
+  });
+}
+
+test("ARK-178-AC1 ARK-213-AC2 failed new install removes its plist and exits 1 with the launchctl error", () => {
   const temporaryHome = mkdtempSync(join(tmpdir(), "ark-install-home-"));
   const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-install-state-"));
   const commandDirectory = mkdtempSync(join(tmpdir(), "ark-install-bin-"));
@@ -1651,6 +1704,9 @@ test("ARK-178-AC1 install exits 1 with the launchctl error when load fails", () 
   );
 
   expect(result.exitCode).toBe(1);
+  expect(existsSync(join(temporaryHome, "Library", "LaunchAgents", "dev.ark.hub.plist"))).toBe(
+    false,
+  );
   expect(result.stderr.toString()).toContain("Load failed: 5: Input/output error");
   expect(result.stdout.toString()).not.toContain("It is running now");
 });
