@@ -5,6 +5,7 @@ import type { RunState } from "../events.ts";
 import { arkHome, listProjects } from "../paths.ts";
 import { runningCost } from "../retro.ts";
 import { arkItems, readRuns, type RunInfo } from "./ark.ts";
+import { readNotifications } from "./notify.ts";
 import { emptyOrca, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
 import {
   emptyPlannotator,
@@ -232,6 +233,7 @@ export function createHub() {
             : costToday.reduce((sum: number, usd) => sum + (usd as number), 0),
           live_runs: runViews.filter((run) => run.open).length,
         },
+        notifications: readNotifications(),
         last_seen: lastSeen,
         digest: digestOf(runs, needsMe.length, lastSeen),
       };
