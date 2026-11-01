@@ -10,7 +10,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
-import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
+import {
+  ark,
+  recordEvaluation,
+  tempArkHome,
+  tempGitRepo,
+  writeProject,
+  writeTicket,
+} from "./helpers.ts";
 
 const playbookDirectory = join(import.meta.dir, "../skills/ark/playbooks");
 const roles = {
@@ -81,6 +88,7 @@ function startRun(repoNames = ["."]) {
   if (started.code !== 0) throw new Error(started.err || started.out);
   const actualRunId = started.out.trim();
   const runDirectory = join(projectDirectory, "runs", actualRunId);
+  recordEvaluation(runDirectory);
   const steps = [
     {
       id: "build",

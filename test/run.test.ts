@@ -3,7 +3,14 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
-import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
+import {
+  ark,
+  recordEvaluation,
+  tempArkHome,
+  tempGitRepo,
+  writeProject,
+  writeTicket,
+} from "./helpers.ts";
 
 const workspaceSteps = [
   { id: "build", role: "implementer", repo: ".", needs: [], criteria: ["ARK-900-AC1"] },
@@ -43,6 +50,7 @@ function startRun(project = "demo", ticketId = "ARK-900"): { runId: string; dire
 /** Puts a run into phase building the way the plan commands do: a valid plan.checked, then an approving gate.answered. */
 function approvePlan(directory: string): void {
   writeFileSync(join(directory, "plan.yml"), "steps: []\n");
+  recordEvaluation(directory);
   appendEvent(directory, "plan.checked", {
     valid: true,
     problems: [],
@@ -200,6 +208,7 @@ test("ARK-152-AC3 events are append-only and a deleted state.json is rebuilt byt
 test("ARK-152-AC4 a step cannot start before plan approval, exits non-zero and names the missing event", () => {
   const { runId, directory } = startRun();
   writeFileSync(join(directory, "plan.yml"), "steps: []\n");
+  recordEvaluation(directory);
   appendEvent(directory, "plan.checked", {
     valid: true,
     problems: [],
@@ -217,6 +226,7 @@ test("ARK-152-AC4 a step cannot start before plan approval, exits non-zero and n
 test("ARK-152-AC4 a plan edited after the check cannot be approved", () => {
   const { directory } = startRun();
   writeFileSync(join(directory, "plan.yml"), "steps: []\n");
+  recordEvaluation(directory);
   appendEvent(directory, "plan.checked", {
     valid: true,
     problems: [],

@@ -55,7 +55,7 @@ The agent that drives one run across every repo its ticket touches. It plans, st
 _Avoid_: Orchestrator, ticket lead, lead
 
 **Worker**:
-An agent a run lead starts for one step: an implementer, validator or reviewer. A worker never starts other agents.
+An agent a run lead starts for one step: an implementer, validator or reviewer. The run lead also starts one evaluator before it plans. A worker never starts other agents.
 _Avoid_: Subagent, child agent, helper
 
 **Implementer**:
@@ -69,6 +69,16 @@ _Avoid_: Tester, QA agent
 **Reviewer**:
 The worker that looks for defects in a run's changes and reports findings. It never edits.
 _Avoid_: Critic, judge, auditor
+
+**Evaluator**:
+The worker that checks a ticket before the run lead plans. It reads the ticket and the code, runs read-only probes, and writes `evaluation.md` with blockers and risks. It never edits product code. `ark.yml` sets its harness and model.
+_Avoid_: Pre-reviewer, triage agent
+
+**Blocker**:
+A problem the evaluator finds in an AC: it is not possible, no integration or E2E test can prove it, or it conflicts with other code. A blocker opens the criteria gate.
+
+**Risk**:
+A problem the evaluator finds that the plan must handle. `plan.md` lists each risk.
 
 **Vendor**:
 The company whose model runs a worker, such as Anthropic or OpenAI.
@@ -103,7 +113,7 @@ _Avoid_: Issue, comment, bug report
 ## Gates and rework
 
 **Gate**:
-A point where the run waits for your decision. The gates are criteria (the ticket lacks testable ACs), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
+A point where the run waits for your decision. The gates are criteria (the ticket lacks testable ACs, or the evaluator found a blocker), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
 _Avoid_: Checkpoint, approval step
 
 **Answer**:
