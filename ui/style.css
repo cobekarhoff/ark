@@ -1763,3 +1763,42 @@ kbd {
 #toasts {
   left: calc((100vw - 420px) / 2);
 }
+
+/* notifications */
+.row-main.notifs {
+  grid-template-columns: 6px 104px 124px minmax(0, 1fr) 64px;
+  height: 38px;
+}
+.colh.notifs {
+  grid-template-columns: 6px 104px 124px minmax(0, 1fr) 64px;
+}
+.row-main.notifs .mk {
+  width: 6px;
+  height: 22px;
+}
+.row-main.notifs .ttl {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.acted {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.acted.s-ok {
+  color: var(--green);
+}
+.acted.muted {
+  color: var(--muted);
+  --c: var(--muted);
+}
+@media (max-width: 760px) {
+  .row-main.notifs,
+  .colh.notifs {
+    grid-template-columns: 6px 88px 124px minmax(0, 1fr) 64px;
+  }
+}
