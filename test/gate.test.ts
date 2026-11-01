@@ -87,7 +87,7 @@ describe("gate record", () => {
     const before = eventsOf(directory).length;
     const result = ark("gate", "record", runId, "setup", "accept");
     expect(result.code).toBe(1);
-    expect(result.err).toContain("criteria, plan, escalation");
+    expect(result.err).toContain("criteria, strategy, plan, escalation");
     expect(eventsOf(directory).length).toBe(before);
   });
 

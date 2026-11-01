@@ -20,7 +20,7 @@ function evaluation(content: string): void {
 }
 
 function record(blockers: string[], risks: string[]): void {
-  appendEvent(runDirectory, "evaluation.recorded", { blockers, risks });
+  appendEvent(runDirectory, "evaluation.recorded", { blockers, risks, surfaces: ["none"] });
 }
 
 const events = () =>
@@ -48,7 +48,7 @@ beforeEach(() => {
 
 test("ARK-170-AC1 evaluation record writes both lists from evaluation.md", () => {
   evaluation(
-    "## Blockers\n- AC2 cannot be exercised\n\n## Risks\n- Requires a configured role\n- Timing boundary\n",
+    "## Blockers\n- AC2 cannot be exercised\n\n## Risks\n- Requires a configured role\n- Timing boundary\n\n## Surfaces\n- cli_output\n",
   );
   const result = ark("evaluation", "record", runId);
   expect(result.code).toBe(0);
@@ -168,6 +168,12 @@ test("ARK-170-AC4 plan check refuses a valid plan without an evaluation event", 
 test("ARK-170-AC5 plan markdown lists only risks from the latest evaluation", () => {
   record([], ["old risk"]);
   record([], ["latest one", "latest two"]);
+  appendEvent(runDirectory, "strategy.recorded", {
+    count: 1,
+    recommended: "S1",
+    cards: ["S1"],
+    reason: "only one fits",
+  });
   writeFileSync(
     join(runDirectory, "plan.yml"),
     JSON.stringify({

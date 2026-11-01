@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { appendEvent } from "../cli/events.ts";
+import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
 
@@ -70,11 +70,22 @@ export function ark(...args: string[]): { code: number; out: string; err: string
   };
 }
 
-/** Records an evaluation the way ark evaluation record does, so a run can pass ark plan check. */
+/**
+ * Records an evaluation the way ark evaluation record does. A clear evaluation that leaves the run
+ * in planning also records a one-card strategy, so the run can pass ark plan check.
+ */
 export function recordEvaluation(
   runDirectory: string,
   blockers: string[] = [],
   risks: string[] = [],
 ): void {
-  appendEvent(runDirectory, "evaluation.recorded", { blockers, risks });
+  appendEvent(runDirectory, "evaluation.recorded", { blockers, risks, surfaces: ["none"] });
+  if (deriveState(readEvents(runDirectory)).phase !== "planning") return;
+  appendEvent(runDirectory, "strategy.recorded", {
+    count: 1,
+    recommended: "S1",
+    cards: ["S1"],
+    reason: "the only approach fits",
+    card_text: { S1: "### S1 Only" },
+  });
 }

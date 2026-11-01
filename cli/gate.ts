@@ -4,8 +4,10 @@ import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 
+// The strategy gate has no fixed answers: the transition table checks the card ids of the run.
 const gateAnswers: Record<string, string[]> = {
   criteria: ["accept", "edit", "abort"],
+  strategy: [],
   plan: ["approve", "change", "abort"],
   escalation: ["one_more_round", "take_over", "abort"],
 };
@@ -38,7 +40,7 @@ export function gateRecord(runId: string, gate: string, answer: string, note?: s
   if (!Object.hasOwn(gateAnswers, gate)) {
     throw new ArkError(`unknown gate "${gate}": use ${Object.keys(gateAnswers).join(", ")}`);
   }
-  if (!gateAnswers[gate].includes(answer)) {
+  if (gate !== "strategy" && !gateAnswers[gate].includes(answer)) {
     throw new ArkError(
       `unknown answer "${answer}" for gate ${gate}: use ${gateAnswers[gate].join(", ")}`,
     );
