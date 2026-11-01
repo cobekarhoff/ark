@@ -821,6 +821,9 @@ test(
       "plan.checked",
       new Date(Date.now() - 45 * 60_000).toISOString(),
     );
+    const liveRun = startRun("ARK-176-G3", "Live project run");
+    readyRun(liveRun);
+    appendEvent(liveRun.directory, "step.finished", { step: "build", outcome: "succeeded" });
     const workspacePath = JSON.parse(
       readFileSync(join(process.env.ARK_HOME as string, "projects", "demo", "ark.yml"), "utf8"),
     ).workspace as string;
@@ -834,7 +837,7 @@ test(
       },
     ]);
     setOrcaRuns(
-      [olderRun.runId, newerRun.runId],
+      [olderRun.runId, newerRun.runId, liveRun.runId],
       [
         {
           taskId: "task-1",
@@ -845,7 +848,7 @@ test(
       [{ id: "task-1", task_title: "UI agent" }],
     );
     process.env.ORCA_RUNS = JSON.stringify(
-      [olderRun.runId, newerRun.runId].map((runId) => ({
+      [olderRun.runId, newerRun.runId, liveRun.runId].map((runId) => ({
         id: `orca-${runId}`,
         objective: `Ark run ${runId}`,
         coordinator_handle: null,
@@ -867,21 +870,22 @@ test(
         "worker",
       ])
         expect(homeText).toContain(label);
-      expect(homeText).toContain("Welcome, items waiting for you: 2.");
+      expect(homeText).toContain("Welcome, steps finished: 1; items waiting for you: 2.");
       expect(homeText).toContain("demo\nlive · omp · pi/task");
       expect(homeText).toContain("other\nmissing");
       expect(await view.evaluate("document.querySelector('[data-heat=hot]') !== null")).toBe(true);
       expect(await view.evaluate("document.querySelector('[data-heat=warm]') !== null")).toBe(true);
       expect(homeText).toContain("ARK-176-G1 waits for you to approve its plan");
-      expect(homeText).toContain("ARK-176-G2 waits for you to approve its plan");
+      expect(homeText).toContain("ARK-176-G3 is building: 1 of 1 steps done");
       await view.click('button.chip[aria-pressed="false"]');
       const filtered = (await view.evaluate("document.body.innerText")) as string;
       expect(filtered).toContain("ARK-176-G1");
+      expect(filtered).toContain("ARK-176-G3 is building: 1 of 1 steps done");
       expect(filtered).not.toContain("ARK-176-G2");
       expect(await view.evaluate("document.querySelectorAll('.stats .tile').length")).toBe(4);
-      expect(await view.evaluate("document.querySelectorAll('[data-run]').length")).toBe(1);
+      expect(await view.evaluate("document.querySelectorAll('[data-run]').length")).toBe(2);
       expect(await view.evaluate("document.querySelectorAll('[data-need]').length")).toBe(1);
-      expect(await view.evaluate("document.querySelectorAll('.achip').length")).toBe(2);
+      expect(await view.evaluate("document.querySelectorAll('.achip').length")).toBe(4);
       expect(await view.evaluate("document.querySelectorAll('.chief-item').length")).toBe(1);
       expect(filtered).toContain(basename(secondProject));
     });
