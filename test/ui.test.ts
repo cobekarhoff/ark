@@ -24,7 +24,14 @@ function projectConfigFor(workspace: string): Record<string, unknown> {
 }
 
 beforeEach(() => {
-  for (const name of ["ORCA_FAIL", "ORCA_DELAY", "ORCA_ACTION_LOG", "PLANNOTATOR_DATA_DIR"])
+  for (const name of [
+    "ORCA_FAIL",
+    "ORCA_RUN_LIST_FAIL",
+    "ORCA_RUN_LIST_FAIL_MARKER",
+    "ORCA_DELAY",
+    "ORCA_ACTION_LOG",
+    "PLANNOTATOR_DATA_DIR",
+  ])
     delete process.env[name];
   tempArkHome();
   projectDirectory = writeProject("demo", projectConfigFor(tempGitRepo()));
@@ -49,7 +56,13 @@ if [ "$1" = "terminal" ]; then
   exit 0
 fi
 case "$2" in
-  run-list) printf '{"result":{"runs":%s}}' "$ORCA_RUNS" ;;
+  run-list)
+    if [ "$ORCA_RUN_LIST_FAIL" = "1" ]; then
+      : > "$ORCA_RUN_LIST_FAIL_MARKER"
+      exit 1
+    fi
+    printf '{"result":{"runs":%s}}' "$ORCA_RUNS"
+    ;;
   task-list) printf '{"result":{"tasks":%s}}' "$ORCA_TASKS" ;;
   worker-list) printf '{"result":{"workers":%s}}' "$ORCA_WORKERS" ;;
   *) exit 2 ;;
@@ -607,6 +620,39 @@ test(
     });
   },
 );
+
+test("ARK-176-AC4 reports unknown Master Chief state when Orca run-list fails", async () => {
+  const workspacePath = JSON.parse(
+    readFileSync(join(process.env.ARK_HOME as string, "projects", "demo", "ark.yml"), "utf8"),
+  ).workspace as string;
+  setMasterChiefs([
+    {
+      handle: "term_chief",
+      connected: true,
+      worktreePath: workspacePath,
+      agentIdentity: "omp",
+      model: "pi/task",
+    },
+  ]);
+  setOrcaRuns([]);
+  const runListFailureMarker = join(mkdtempSync(join(tmpdir(), "ark-orca-failure-")), "read");
+  process.env.ORCA_RUN_LIST_FAIL_MARKER = runListFailureMarker;
+  process.env.ORCA_RUN_LIST_FAIL = "1";
+
+  await withUi(async (baseUrl) => {
+    for (
+      let attempt = 0;
+      attempt < 50 && !(await Bun.file(runListFailureMarker).exists());
+      attempt++
+    )
+      await Bun.sleep(20);
+    expect(await Bun.file(runListFailureMarker).exists()).toBe(true);
+    // The child process has signaled the failure; allow its rejected result to reach the hub.
+    await Bun.sleep(50);
+    const data = await hubState(baseUrl, false);
+    expect(data.projects).toContainEqual({ name: "demo", chief: { state: "unknown" } });
+  });
+});
 
 test(
   "ARK-176-AC5 restricts action commands and rejects foreign origins and unknown actions",
