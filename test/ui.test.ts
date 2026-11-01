@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, expect, test } from "bun:test";
 import {
   appendFileSync,
@@ -7,7 +8,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
@@ -766,8 +767,9 @@ printf '%s %s\\n' "$0" "$*" >> "$ORCA_ACTION_LOG"
 `,
     );
     chmodSync(plannotator, 0o755);
-    const opener = join(orcaBinDirectory, "open");
-    writeFileSync(opener, `#!/bin/sh\nprintf 'open %s\\n' "$*" >> "$ORCA_ACTION_LOG"\n`);
+    const openerName = process.platform === "darwin" ? "open" : "xdg-open";
+    const opener = join(orcaBinDirectory, openerName);
+    writeFileSync(opener, `#!/bin/sh\nprintf '${openerName} %s\\n' "$*" >> "$ORCA_ACTION_LOG"\n`);
     chmodSync(opener, 0o755);
     setOrcaRuns([]);
 
@@ -815,7 +817,7 @@ printf '%s %s\\n' "$0" "$*" >> "$ORCA_ACTION_LOG"
       expect(commands).toContain(`${plannotator} sessions --open 3`);
       expect(commands).toContain(`${plannotator} annotate ${join(run.directory, "plan.md")}`);
       expect(commands).toContain(`${plannotator} inbox --open`);
-      expect(commands).toContain("open https://example.test/pull/45");
+      expect(commands).toContain(`${openerName} https://example.test/pull/45`);
       expect(commands).toHaveLength(5);
       expect(new URL(baseUrl).hostname).toBe("127.0.0.1");
     });
@@ -1059,10 +1061,18 @@ test(
 );
 
 test("ARK-176-AC9 keeps the hub design reference byte-identical", () => {
-  const prototypeDirectory = join(homedir(), ".ark", "projects", "ark", "prototypes", "hub");
+  const checksumFile = join(repositoryRoot, "docs", "design", "hub", "SHA256SUMS");
+  const checksums = new Map(
+    readFileSync(checksumFile, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => {
+        const [checksum, filename] = line.split(/\s+/) as [string, string];
+        return [filename, checksum];
+      }),
+  );
   for (const filename of ["variant-d2.html", "data.js"]) {
-    expect(readFileSync(join(repositoryRoot, "docs", "design", "hub", filename))).toEqual(
-      readFileSync(join(prototypeDirectory, filename)),
-    );
+    const file = readFileSync(join(repositoryRoot, "docs", "design", "hub", filename));
+    expect(createHash("sha256").update(file).digest("hex")).toBe(checksums.get(filename)!);
   }
 });
