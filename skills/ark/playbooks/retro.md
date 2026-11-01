@@ -54,7 +54,7 @@ The run lead reads `learnings.md` as a source of what it already knew: a problem
 
 ### 3. Master Chief asks the three close questions
 
-When `retro.md` exists, give the human the summary and the numbers in a few lines. Then ask these three questions, one at a time, and wait for each answer. Do not offer a score, a rating or a "how did Ark do" question.
+When `retro.md` exists, give the human the summary and the numbers in a few lines. Then ask these three questions, one at a time, and wait for each answer. Do not offer a score, a rating or a "how did Ark do" question. Let the human pick more than one option for the first two questions: several problems can share the pain, and several changes can land at once.
 
 1. **What caused the most pain in this run?** Recommended answer: the biggest item under "What went wrong", named with its cost.
 2. **What should change now?** Recommended answer: the proposal with the strongest evidence, named.
