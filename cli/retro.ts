@@ -9,10 +9,16 @@ import { type SessionWithKey, type UsageMessage, isInside, readUsage } from "./u
 const IDLE_GAP_SECONDS = 600;
 const MERGE_REQUEST_QUERY_TIMEOUT_MILLISECONDS = 10_000;
 
-type CostGroup = { usd: number | "unknown"; tokens: number; includes_unknown: boolean };
+export type CostGroup = { usd: number | "unknown"; tokens: number; includes_unknown: boolean };
 type Unknowable = number | "unknown";
-type Message = UsageMessage & { sessionKey: string; cwd: string };
-type StepWindow = { id: string; role: string; repo: string; start: number; end: number | null };
+export type Message = UsageMessage & { sessionKey: string; cwd: string };
+export type StepWindow = {
+  id: string;
+  role: string;
+  repo: string;
+  start: number;
+  end: number | null;
+};
 
 const toMilliseconds = (time: string): number => Date.parse(time);
 const secondsBetween = (from: number, to: number): number => (to - from) / 1000;
@@ -24,7 +30,7 @@ function sortedObject<Value>(entries: Iterable<[string, Value]>): Record<string,
 }
 
 /** A group with no messages, or only unknown costs, has usd "unknown": nothing was measured. */
-function summarize(messages: UsageMessage[]): CostGroup {
+export function summarize(messages: UsageMessage[]): CostGroup {
   let known = 0;
   let knownCount = 0;
   let tokens = 0;
@@ -55,7 +61,7 @@ function groupBy(
 }
 
 /** Every session message of the run, oldest first, so sums are always added in the same order. */
-function collectMessages(runDirectory: string): {
+export function collectMessages(runDirectory: string): {
   messages: Message[];
   sessions: SessionWithKey[];
 } {
@@ -82,7 +88,7 @@ export function runningCost(runDirectory: string): { usd: number | "unknown"; to
   return { usd: group.includes_unknown ? "unknown" : group.usd, tokens: group.tokens };
 }
 
-function stepWindows(events: ArkEvent[]): StepWindow[] {
+export function stepWindows(events: ArkEvent[]): StepWindow[] {
   const windows: StepWindow[] = [];
   for (const event of events) {
     if (event.type === "step.started") {
@@ -118,6 +124,21 @@ function windowOf(
       time >= window.start &&
       time <= (window.end ?? runEnd),
   );
+}
+
+/** The step window of each message that ran in a step's worktree during the step. */
+export function assignSteps(
+  messages: Message[],
+  windows: StepWindow[],
+  runDirectory: string,
+  runEnd: number,
+): Map<Message, StepWindow> {
+  const stepOf = new Map<Message, StepWindow>();
+  for (const message of messages) {
+    const window = windowOf(message, windows, runDirectory, runEnd);
+    if (window) stepOf.set(message, window);
+  }
+  return stepOf;
 }
 
 /** Strategy records after the first one and before the strategy answer. */
@@ -161,33 +182,61 @@ function decisionCounts(
   return { total, overridden };
 }
 
+/** Each gate wait of the run, in order; `answered` is null while the gate is open. A re-asked gate replaces its unanswered wait. */
+export type GateWait = {
+  gate: string;
+  asked: string;
+  answered: string | null;
+  answer: string | null;
+};
+
+export function gateWaits(events: ArkEvent[]): GateWait[] {
+  const waits: GateWait[] = [];
+  const waiting = new Map<string, GateWait>();
+  const ask = (gate: string, time: string, keepFirst = false) => {
+    const open = waiting.get(gate);
+    if (open && keepFirst) return;
+    if (open) waits.splice(waits.indexOf(open), 1);
+    const wait = { gate, asked: time, answered: null, answer: null };
+    waiting.set(gate, wait);
+    waits.push(wait);
+  };
+  for (const event of events) {
+    if (event.type === "run.started" && event.data.criteria.length === 0)
+      ask("criteria", event.time);
+    if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
+      ask("criteria", event.time, true);
+    if (event.type === "plan.checked" && event.data.valid) ask("plan", event.time);
+    if (event.type === "strategy.recorded" && event.data.count >= 2)
+      ask("strategy", event.time, true);
+    if (event.type === "step.finished" && event.data.outcome === "failed")
+      ask("escalation", event.time);
+    if (event.type === "gate.answered") {
+      const wait = waiting.get(event.data.gate);
+      if (wait) {
+        wait.answered = event.time;
+        wait.answer = event.data.answer ?? null;
+      }
+      waiting.delete(event.data.gate);
+    }
+  }
+  return waits;
+}
+
 /**
  * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
  * run start when the ticket has no ACs and at an evaluation with blockers, the strategy gate at a
  * strategy record of 2 or more cards, the plan gate at each valid plan check, the escalation gate
- * at the failed step that spent the round budget.
+ * at the failed step that spent the round budget. An unanswered gate adds nothing.
  */
 function gateWaitSeconds(events: ArkEvent[]): number {
-  const waitingSince = new Map<string, number>();
-  let total = 0;
-  for (const event of events) {
-    const time = toMilliseconds(event.time);
-    if (event.type === "run.started" && event.data.criteria.length === 0)
-      waitingSince.set("criteria", time);
-    if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
-      waitingSince.set("criteria", waitingSince.get("criteria") ?? time);
-    if (event.type === "plan.checked" && event.data.valid) waitingSince.set("plan", time);
-    if (event.type === "strategy.recorded" && event.data.count >= 2)
-      waitingSince.set("strategy", waitingSince.get("strategy") ?? time);
-    if (event.type === "step.finished" && event.data.outcome === "failed")
-      waitingSince.set("escalation", time);
-    if (event.type === "gate.answered") {
-      const since = waitingSince.get(event.data.gate);
-      if (since !== undefined) total += secondsBetween(since, time);
-      waitingSince.delete(event.data.gate);
-    }
-  }
-  return total;
+  return gateWaits(events).reduce(
+    (total, wait) =>
+      wait.answered === null
+        ? total
+        : total + secondsBetween(toMilliseconds(wait.asked), toMilliseconds(wait.answered)),
+    0,
+  );
 }
 
 function runCommand(command: string[], cwd: string): unknown {
@@ -329,11 +378,7 @@ export function retro(runId: string): void {
   const windows = stepWindows(events);
   const { messages, sessions } = collectMessages(runDirectory);
 
-  const stepOf = new Map<Message, StepWindow>();
-  for (const message of messages) {
-    const window = windowOf(message, windows, runDirectory, runEnd);
-    if (window) stepOf.set(message, window);
-  }
+  const stepOf = assignSteps(messages, windows, runDirectory, runEnd);
   // The evaluator session ends at the last evaluation.recorded. The run lead session outlasts it.
   const evaluationEnd = events.findLast((event) => event.type === "evaluation.recorded")?.time;
   const evaluatorSessions = new Set(

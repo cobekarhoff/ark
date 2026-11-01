@@ -65,6 +65,14 @@ export function ui(port: number): void {
     routes: {
       "/": index,
       "/api/state": () => Response.json(hub.state()),
+      "/api/runs/:run": async (request) => {
+        if (!isLocalRequest(request, server.port!))
+          return Response.json({ error: "foreign origin" }, { status: 403 });
+        const detail = await hub.detail(request.params.run);
+        return detail
+          ? Response.json(detail)
+          : Response.json({ error: "no such run" }, { status: 404 });
+      },
       "/api/needs-me": () => Response.json(hub.state().needs_me),
       "/api/events": () => {
         let controller: ReadableStreamDefaultController<Uint8Array>;
@@ -79,7 +87,12 @@ export function ui(port: number): void {
               clients.delete(controller);
             },
           }),
-          { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } },
+          {
+            headers: {
+              "content-type": "text/event-stream",
+              "cache-control": "no-cache",
+            },
+          },
         );
       },
       "/api/seen": {
@@ -94,7 +107,9 @@ export function ui(port: number): void {
         POST: async (request) => {
           if (!isLocalRequest(request, server.port!))
             return Response.json({ error: "foreign origin" }, { status: 403 });
-          const { id } = (await request.json().catch(() => ({}))) as { id?: unknown };
+          const { id } = (await request.json().catch(() => ({}))) as {
+            id?: unknown;
+          };
           if (typeof id !== "string") return Response.json({ error: "id needed" }, { status: 400 });
           markActed(id);
           return Response.json({ ok: true });
@@ -128,9 +143,15 @@ const launchctl = (...arguments_: string[]): { ok: boolean; error: string } => {
       stdout: "ignore",
       stderr: "pipe",
     });
-    return { ok: result.exitCode === 0, error: result.stderr.toString().trim() };
+    return {
+      ok: result.exitCode === 0,
+      error: result.stderr.toString().trim(),
+    };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 };
 
