@@ -388,9 +388,10 @@ kbd {
 .top {
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 50px;
-  padding: 0 18px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 50px;
+  padding: 6px 18px;
   flex: none;
 }
 .top h1 {
@@ -400,6 +401,7 @@ kbd {
 }
 .chips {
   display: flex;
+  flex: none;
   gap: 2px;
   padding: 3px;
   margin-left: 8px;
