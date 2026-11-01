@@ -11,9 +11,10 @@ type Params = Record<string, unknown>;
 /** The file a `plannotator-annotate` action opens. The page names a run or ticket, never a path. */
 function annotateTarget(params: Params): string {
   const { kind, run, project, ticket } = params;
-  if (kind === "plan" || kind === "retro") {
+  if (kind === "plan" || kind === "strategy" || kind === "retro") {
     if (typeof run !== "string" || !idPattern.test(run)) throw new Error("bad run");
-    return join(findRun(run).directory, kind === "plan" ? "plan.md" : "retro.md");
+    const file = { plan: "plan.md", strategy: "strategies.md", retro: "retro.md" }[kind];
+    return join(findRun(run).directory, file);
   }
   if (kind === "ticket") {
     if (typeof project !== "string" || !listProjects().includes(project))

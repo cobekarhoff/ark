@@ -41,7 +41,15 @@ Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refus
 ```text
 ark evaluation record <run>
 
-Reads evaluation.md in the run folder and records its blockers and risks. It refuses a missing file, a file with no Blockers or Risks list, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.
+Reads evaluation.md in the run folder and records its blockers, risks and surfaces (web_ui, cli_output, document or none). It refuses a missing file, a file with no Blockers, Risks or Surfaces list, an unknown surface, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.
+```
+
+### strategy record
+
+```text
+ark strategy record <run>
+
+Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or a project whose ark.yml has no roles.designer. Two or more cards open the strategy gate; one card opens no gate.
 ```
 
 ### plan check
@@ -49,7 +57,7 @@ Reads evaluation.md in the run folder and records its blockers and risks. It ref
 ```text
 ark plan check <run>
 
-Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. It records the number of open decisions.
 ```
 
 ### worktree create
@@ -73,7 +81,7 @@ Runs the project's suites on the run's workspace mirror and records which ACs ha
 ```text
 ark gate record <run> <gate> <answer> [--note <text>]
 
-Records your answer to a gate. The gates are criteria, plan and escalation. Ark refuses an answer that the run's state does not allow.
+Records your answer to a gate. The gates are criteria, strategy, plan and escalation. The strategy gate takes the ID of a card in the latest strategy record, or abort. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.
 ```
 
 ### merge-request open
@@ -143,6 +151,8 @@ ticket.md          copy of the ticket file
 events.ndjson      append-only event log
 state.json         derived from the events, rebuilt by any command
 evaluation.md      written by the evaluator
+strategies.md      written by the run lead (strategy cards)
+mockups/           written by the Designer, never in an MR
 plan.yml           written by the run lead
 plan.md            rendered by ark plan check
 workspace/         the workspace mirror
@@ -155,7 +165,11 @@ retro.md           written by the run lead
 
 ## `evaluation.md` format
 
-The evaluator writes `evaluation.md` in the run folder. `ark evaluation record` reads two headings, `Blockers` and `Risks` (any heading level, any case). Each heading is followed by a bullet list. An empty list is valid. A missing heading is refused. Other text is ignored. With one or more blockers the phase is `awaiting_criteria` until `gate.answered criteria accept`. `plan.md` lists the risks of the latest evaluation in its Evaluation section.
+The evaluator writes `evaluation.md` in the run folder. `ark evaluation record` reads three headings, `Blockers`, `Risks` and `Surfaces` (any heading level, any case). Each heading is followed by a bullet list. An empty `Blockers` or `Risks` list is valid. `Surfaces` needs at least one of `web_ui`, `cli_output`, `document` and `none`; `none` stands alone. A missing heading or an unknown surface is refused. Other text is ignored. With one or more blockers the phase is `awaiting_criteria` until `gate.answered criteria accept`. `plan.md` lists the risks of the latest evaluation in its Evaluation section.
+
+## `strategies.md` format
+
+The run lead writes `strategies.md` in the run folder, and the Designer adds mockup links. Each card is a level-2 heading `## <id> <title>`, followed by lines `Approach:`, `Interfaces:`, `Tradeoffs:`, `Steps:`, `Mockup:` (links to files in the run folder), `Recommended: yes` and, for a single card, `Reason:`. `ark strategy record` reads them. With 2 or more cards exactly one is recommended, and the phase is `awaiting_strategy` until `gate.answered strategy <card id>`. With one card, `plan.md` has a Strategy section with "Only one strategy considered, because <reason>".
 
 ## `plan.yml` fields
 
@@ -170,6 +184,8 @@ Top level:
 | `design`     | map  | The approach, the interfaces and the example. |
 
 `design` has `interfaces` (required) and two optional fields, `approach` (string) and `example` (string). Each entry in `interfaces` has a `name` and a `callers` list of strings. An interface is a command, a playbook section, an event, a file format or an exported function. `ark plan check` rejects a plan with no `design.interfaces` and an interface with no `callers`; the error names the interface. `plan.md` has a Design section before the steps: the approach, a table of interfaces and callers, and the example in a code block. A missing `approach` or `example` shows as `No approach given.` or `No example given.`
+
+`decisions` is an optional list. Each entry has `id`, `question`, `options` (2 to 4 entries, each with `label` and `tradeoffs`), `recommended` (an option label) and, after the human answers, `chosen` (an option label). `ark plan check` names a decision with the wrong number of options or a `recommended` or `chosen` value that is not an option. `plan.md` shows an open decision as a `:::question` block with "Recommended:", and a decided one with `- [x]` on the chosen option. `plan.checked` records `open_decisions`, and `ark gate record <run> plan approve` is refused while it is above 0.
 
 Each entry in `steps`:
 
@@ -243,15 +259,15 @@ design:
 
 `ark.yml` lives at `~/.ark/projects/<project>/ark.yml`. It is personal to you. The bootstrap playbook writes it, and every command that needs the project reads it. When a field is wrong, the error names it, for example `ark.yml: suites[1].parser must be one of bun, pytest, behave`.
 
-| Field           | Required | Type    | Meaning                                                                                                                                                                                                                              |
-| --------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `workspace`     | yes      | path    | The absolute path of the workspace directory. It must exist. It is one repo or a meta-repo.                                                                                                                                          |
-| `ticket_source` | yes      | string  | Where agents fetch tickets: `local`, `github`, or `jira`.                                                                                                                                                                            |
-| `compose`       | no       | string  | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them. |
-| `suites`        | yes      | list    | The test suites. You need at least one.                                                                                                                                                                                              |
-| `roles`         | yes      | map     | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`. The optional `evaluator` role is needed by `ark evaluation record`.                                                                        |
-| `concurrency`   | no       | integer | The most workers that run at once. It must be 1 or more. The default is 2.                                                                                                                                                           |
-| `round_budget`  | no       | integer | How many rounds an implementer step may restart before escalation. It must be 0 or more. The default is 2.                                                                                                                           |
+| Field           | Required | Type    | Meaning                                                                                                                                                                                                                                                                              |
+| --------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workspace`     | yes      | path    | The absolute path of the workspace directory. It must exist. It is one repo or a meta-repo.                                                                                                                                                                                          |
+| `ticket_source` | yes      | string  | Where agents fetch tickets: `local`, `github`, or `jira`.                                                                                                                                                                                                                            |
+| `compose`       | no       | string  | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them.                                                 |
+| `suites`        | yes      | list    | The test suites. You need at least one.                                                                                                                                                                                                                                              |
+| `roles`         | yes      | map     | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`. The optional `evaluator` role is needed by `ark evaluation record`. The optional `designer` role is needed by `ark strategy record` when the evaluation lists a surface other than `none`. |
+| `concurrency`   | no       | integer | The most workers that run at once. It must be 1 or more. The default is 2.                                                                                                                                                                                                           |
+| `round_budget`  | no       | integer | How many rounds an implementer step may restart before escalation. It must be 0 or more. The default is 2.                                                                                                                                                                           |
 
 Each entry in `suites`:
 
@@ -280,6 +296,7 @@ roles:
   validator: { harness: codex, model: gpt-codex }
   reviewer: { harness: codex, model: gpt-codex }
   evaluator: { harness: codex, model: gpt-codex }
+  designer: { harness: claude, model: claude-opus }
 concurrency: 2
 round_budget: 2
 ```
@@ -294,9 +311,10 @@ A test proves an AC when its name or tags contain the AC id, for example `CLARA-
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `run.started`          | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file`                                                                     | `ark run start`                           |
 | `criteria.updated`     | `criteria` (ids)                                                                                                                         | `ark gate record` for the `criteria` gate |
-| `evaluation.recorded`  | `blockers` (strings), `risks` (strings)                                                                                                  | `ark evaluation record`                   |
-| `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`)                                                    | `ark plan check`                          |
-| `gate.answered`        | `gate` (`criteria`, `plan`, or `escalation`), `answer`, optional `note`                                                                  | `ark gate record`                         |
+| `evaluation.recorded`  | `blockers` (strings), `risks` (strings), `surfaces` (strings)                                                                            | `ark evaluation record`                   |
+| `strategy.recorded`    | `count`, `recommended`, `cards` (ids), optional `reason`                                                                                 | `ark strategy record`                     |
+| `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`), `open_decisions`                                  | `ark plan check`                          |
+| `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, or `escalation`), `answer`, optional `note`                                                      | `ark gate record`                         |
 | `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                         | `ark worktree create`                     |
 | `step.started`         | `step`, `role`, `repo`, `round`                                                                                                          | `ark run step ... start`                  |
 | `step.finished`        | `step`, `outcome` (`succeeded` or `failed`)                                                                                              | `ark run step ... finish`                 |

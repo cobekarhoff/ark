@@ -24,7 +24,7 @@ Throughout this playbook:
 
 ## 2. Evaluate the ticket and open the criteria gate
 
-Do this before you write `plan.yml`. `ark plan check` refuses a run that has no `evaluation.recorded` event.
+Do this before you write `plan.yml`. `ark plan check` refuses a run that has no `evaluation.recorded` event, and a run that has no `strategy.recorded` event or waits in the phase `awaiting_strategy`.
 
 ### Evaluate
 
@@ -45,9 +45,9 @@ Skip this part when `ark status <run>` shows that the run has an `evaluation.rec
    ark evaluation record <run>
    ```
 
-   The command refuses when `evaluation.md` has no `Blockers` list or no `Risks` list. An empty list is valid. Never write the event by hand.
+   The command refuses when `evaluation.md` has no `Blockers` list, no `Risks` list or no `Surfaces` list, or when `Surfaces` holds a value other than `web_ui`, `cli_output`, `document` and `none`. An empty `Blockers` or `Risks` list is valid. Never write the event by hand.
 
-4. Run `ark status <run>`. With no blockers and a ticket with ACs, the phase is `planning`: skip the criteria gate and go to section 3. Never record a gate answer for the human. Carry each risk into your plan: a step, a test case or a line in `summary`. `plan.md` lists them.
+4. Run `ark status <run>`. With no blockers and a ticket with ACs, the phase is `planning`: skip the criteria gate and go to the strategy part below. Never record a gate answer for the human. Carry each risk into your plan: a step, a test case or a line in `summary`. `plan.md` lists them.
 
 ### Criteria gate
 
@@ -69,9 +69,57 @@ The gate opens when the phase is `awaiting_criteria`. That means the ticket has 
    ark gate record <run> criteria accept
    ```
 
-   The command re-reads the ticket file and copies it to `<run folder>/ticket.md`. It refuses when the file has no criteria. Blockers that the human accepts stay in `evaluation.md`: treat each as a risk in your plan.
+   The command re-reads the ticket file and copies it to `<run folder>/ticket.md`. It refuses when the file has no criteria. Blockers that the human accepts stay in `evaluation.md`: treat each as a risk in your plan. Then go to the strategy part below.
 
 5. On `abort`, run `ark gate record <run> criteria abort`, then go to section 11 with outcome `failed`.
+
+### Strategy and design rounds
+
+The strategy comes after the evaluation and before the plan. Skip this part when `ark status <run>` shows the run has a `strategy.recorded` event and the phase is not `awaiting_strategy` (you replace a stopped run lead). If the phase is `awaiting_strategy`, go to step 5.
+
+1. Write `<run folder>/strategies.md`: 2 or 3 short cards, one level-2 heading for each card (`## <id> <title>`). Each card has these fields, one per line: `Approach:`, `Interfaces:`, `Tradeoffs:` (risk, size, what it leaves out), `Steps:` (a rough list), `Mockup:` (links to files in `<run folder>/mockups/`) and `Recommended: yes` on exactly one card. If only one strategy is possible, write one card with a `Reason:` line that says why there is no alternative.
+2. Read `Surfaces` in `evaluation.md`. When a surface is not `none`, every card needs a `Mockup:` link, and `ark strategy record` refuses a card with none. Start a Designer to make them:
+   1. Read `roles` in `ark.yml`. If it has no `designer` entry, stop. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.designer`: add its `harness` and `model`, then start a new run lead.
+   2. Start the Designer with the `harness` and `model` of `roles.designer`. It works in the workspace, has no plan step, and is named `designer`:
+
+      ```sh
+      orca orchestration worker-start --spec "/skill:ark worker <run> designer" --task-title "designer (<run>)" --worktree path:<workspace from ark.yml> --agent <harness> --model <model> --json
+      ```
+
+      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Wait for its `worker_done`, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
+3. Record it:
+
+   ```sh
+   ark strategy record <run>
+   ```
+
+   The command refuses a missing `strategies.md`, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no `evaluation.recorded`, and one card with no reason. It refuses a missing `roles.designer` when a surface is not `none`. Read the refusal and fix the file. Mockups and prototypes stay in the run folder or a throwaway worktree. Never put one in a repo worktree or an MR.
+
+4. With 1 card, the phase is `planning`. No gate opens, and `plan.md` shows the card and "Only one strategy considered, because <reason>". Go to section 3.
+5. With 2 or more cards, the phase is `awaiting_strategy`. Show the human `strategies.md` and each mockup in one review:
+
+   ```sh
+   mkdir -p "<run folder>/gates"
+   plannotator annotate "<run folder>/strategies.md" "<run folder>/mockups/<file>" --gate --json --result-file "<run folder>/gates/strategy-<n>.json"
+   ```
+
+   `<n>` is 1 for the first review and goes up by 1 for each design round. Tell Master Chief that a review is open before you run it, as in section 5. For a question about interaction, the human can instead open a running prototype on `localhost`. If Plannotator is not installed or the review fails, ask Master Chief:
+
+   ```sh
+   orca orchestration ask --question "Run <run>: strategies ready in <run folder>/strategies.md (mockups in <run folder>/mockups/). Cards: <one line per card: id and approach>. Which card? Say a card id, or abort. To mix cards or change one, write the note." --options "<card ids>,abort" --timeout-ms 600000
+   ```
+
+   Add your recommendation.
+
+6. **Design round.** If the human writes notes or annotations and does not pick a card, send them to the same Designer (`orca orchestration send` to its terminal, or start it again with the notes). Revise `strategies.md` with the Designer's changes, run `ark strategy record <run>` again, and show it again. Each new `strategy.recorded` before the answer is one design round. Design rounds have no budget. They never use the build round budget, and they never open the escalation gate. To mix two strategies, write a mixed card from the human's note and record again.
+7. Record the human's answer with the exact card ID, or `abort`:
+
+   ```sh
+   ark gate record <run> strategy <card id>
+   ark gate record <run> strategy abort
+   ```
+
+   The command refuses a card ID that is not in the latest `strategy.recorded`. After a card ID, the phase is `planning`: go to section 3, and write the plan for that card only. On `abort`, go to section 11 with outcome `failed`.
 
 ## 3. Read the workspace and the learnings
 
@@ -130,6 +178,8 @@ The top comment of `plan.yml` notes which learnings you applied. If `learnings.m
 
 Rules for the plan:
 
+- Write the plan for the strategy card the human chose (or the only card). The `design.approach` follows that card.
+- `decisions` is optional. It lists the smaller choices inside the chosen strategy that the human should make. Each decision has `id`, `question`, `options` (2 to 4, each with `label` and `tradeoffs`), `recommended` (the label of one option) and, after the human answers, `chosen` (the label of one option). `ark plan check` refuses a decision with fewer than 2 or more than 4 options, or a `recommended` or `chosen` value that is not an option, and names it. `plan.md` shows an open decision as a Plannotator `:::question` block with "Recommended:", and a decided one with `- [x]` on the chosen option.
 - `steps` has: `id`, `role` (`implementer`, `validator` or `reviewer`), `repo`, `harness`, `model`, `needs` (step IDs, empty for none) and `criteria` (the AC the step serves).
 - Use one implementer step for each repo the ticket changes. A step that needs another repo's change lists that step in `needs`.
 - Add a validator step that writes the integration and E2E tests. Put it in the repo that owns the suite (see `suites[].repo` in `ark.yml`). It needs the implementer steps whose code it tests.
@@ -196,7 +246,8 @@ ark gate record <run> plan abort
 
 - `change`: revise `plan.yml`, run `ark plan check <run>`, and show the plan again. Increase `<n>`.
 - If the human edits `plan.yml` after approving, run `ark plan check <run>` again. The approval is then cleared. Show the plan again.
-- `approve` is refused unless the last `ark plan check` was valid and `plan.yml` has not changed since. Fix the cause. Never edit the log to get around it.
+- `approve` is refused unless the last `ark plan check` was valid and `plan.yml` has not changed since. It is also refused while the latest `plan.checked` has `open_decisions` above 0. Fix the cause. Never edit the log to get around it.
+- Open decisions are part of the plan gate. Ask the human to answer each one in the Plannotator review, or in the Master Chief question. Write each answer into `chosen` in `plan.yml` as the exact option label, run `ark plan check <run>` again, and show the plan again. Record `approve` only after the human said so and `open_decisions` is 0.
 - `abort`: go to section 11 with outcome `failed`.
 
 Never record `approve` unless the human said so, in Plannotator (exit 0) or through Master Chief.
@@ -334,6 +385,7 @@ Do this when the MRs are open, and also when the run ends in an abort.
 - Never write product code. Never edit a worktree except to read it.
 - Never start an agent except through `orca orchestration worker-start`. Never start more workers at once than `concurrency` in `ark.yml`.
 - Never write to `events.ndjson` or `state.json`. Use the `ark` commands.
-- Never record a gate answer the human did not give.
+- Never record a gate answer the human did not give. This includes the strategy card and each plan decision.
+- Never write `plan.yml` before the strategy is recorded and, with 2 or more cards, answered. Never put a mockup or a prototype in a repo worktree or an MR.
 - Never open MRs while a test fails or a review sends work back.
 - Never close the run. Master Chief closes it after the human merges.

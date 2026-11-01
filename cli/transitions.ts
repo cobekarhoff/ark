@@ -17,6 +17,8 @@ function missingEvent(state: RunState): string {
     return state.evaluation?.blockers.length
       ? "gate.answered criteria accept (the evaluation has blockers)"
       : "gate.answered criteria accept";
+  if (state.phase === "awaiting_strategy")
+    return `gate.answered strategy <card id> (${state.strategy?.cards.join(", ")}) or abort`;
   if (state.phase === "planning")
     return state.plan?.valid
       ? "gate.answered plan approve"
@@ -49,9 +51,29 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
       return;
     case "evaluation.recorded":
       requirePhase(state, type, ["awaiting_criteria", "planning"]);
-      for (const list of ["blockers", "risks"])
+      for (const list of ["blockers", "risks", "surfaces"])
         if (!Array.isArray(data[list]) || !data[list].every((line) => typeof line === "string"))
           throw new ArkError(`evaluation.recorded refused: ${list} must be a list of strings`);
+      return;
+    case "strategy.recorded":
+      requirePhase(state, type, ["planning", "awaiting_strategy"]);
+      if (!state.evaluation)
+        throw new ArkError(
+          "strategy.recorded refused: missing evaluation.recorded (ark evaluation record)",
+        );
+      if (state.strategy && state.strategy.count >= 2 && state.strategy.chosen !== null)
+        throw new ArkError(
+          `strategy.recorded refused: the human already chose ${state.strategy.chosen}`,
+        );
+      if (
+        !Array.isArray(data.cards) ||
+        data.cards.length === 0 ||
+        data.count !== data.cards.length ||
+        !data.cards.includes(data.recommended)
+      )
+        throw new ArkError(
+          "strategy.recorded refused: count must equal the card ids, and recommended must be one of them",
+        );
       return;
     case "plan.checked":
       requirePhase(state, type, ["planning", "building", "escalation"]);
@@ -59,6 +81,8 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
         throw new ArkError(
           "plan.checked refused: missing evaluation.recorded (ark evaluation record)",
         );
+      if (state.phase === "planning" && !state.strategy)
+        throw new ArkError("plan.checked refused: missing strategy.recorded (ark strategy record)");
       return;
     case "gate.answered":
       return assertGateAllowed(state, data);
@@ -102,17 +126,25 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
   }
 }
 
+export const gateNames = ["criteria", "strategy", "plan", "escalation"];
+
 function assertGateAllowed(state: RunState, data: EventData): void {
-  if (!Object.hasOwn(gateAnswers, data.gate))
-    throw new ArkError(`unknown gate "${data.gate}": use ${Object.keys(gateAnswers).join(", ")}`);
-  if (!gateAnswers[data.gate].includes(data.answer)) {
+  if (!gateNames.includes(data.gate))
+    throw new ArkError(`unknown gate "${data.gate}": use ${gateNames.join(", ")}`);
+  // The strategy gate takes the id of a card in the latest strategy.recorded, or abort.
+  const answers =
+    data.gate === "strategy" ? [...(state.strategy?.cards ?? []), "abort"] : gateAnswers[data.gate];
+  if (!answers.includes(data.answer)) {
     throw new ArkError(
-      `unknown answer "${data.answer}" for gate ${data.gate}: use ${gateAnswers[data.gate].join(", ")}`,
+      `unknown answer "${data.answer}" for gate ${data.gate}: use ${answers.join(", ")}`,
     );
   }
-  const phaseOfGate = { criteria: "awaiting_criteria", plan: "planning", escalation: "escalation" }[
-    data.gate as "criteria" | "plan" | "escalation"
-  ];
+  const phaseOfGate = {
+    criteria: "awaiting_criteria",
+    strategy: "awaiting_strategy",
+    plan: "planning",
+    escalation: "escalation",
+  }[data.gate as "criteria" | "strategy" | "plan" | "escalation"];
   if (state.phase !== phaseOfGate) {
     throw new ArkError(
       `gate.answered ${data.gate} ${data.answer} refused: run is in phase ${state.phase}, the ${data.gate} gate opens in phase ${phaseOfGate}`,
@@ -123,8 +155,14 @@ function assertGateAllowed(state: RunState, data: EventData): void {
       "gate.answered criteria accept refused: the ticket has no criteria (criteria.updated needs at least one)",
     );
   }
-  if (data.gate === "plan" && data.answer === "approve" && !state.plan?.valid) {
-    throw new ArkError("gate.answered plan approve refused: missing plan.checked valid");
+  if (data.gate === "plan" && data.answer === "approve") {
+    if (!state.plan?.valid)
+      throw new ArkError("gate.answered plan approve refused: missing plan.checked valid");
+    if (state.plan.open_decisions > 0) {
+      throw new ArkError(
+        `gate.answered plan approve refused: the plan has ${state.plan.open_decisions} open decision${state.plan.open_decisions === 1 ? "" : "s"}; write the human's answers into plan.yml chosen and run ark plan check again`,
+      );
+    }
   }
 }
 

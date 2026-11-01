@@ -1,6 +1,6 @@
 # Playbook: worker `<run>` `<step>`
 
-You are a worker. You do one step of one run, in the run's worktree, and then you report. Your step has one role: implementer, validator, reviewer or evaluator. The evaluator step is named `evaluator`. It is not in `plan.yml`, because the run lead starts it before the plan exists.
+You are a worker. You do one step of one run, in the run's worktree, and then you report. Your step has one role: implementer, validator, reviewer, evaluator or designer. The evaluator and designer steps are named `evaluator` and `designer`. They are not in `plan.yml`, because the run lead starts them before the plan exists.
 
 A worker never starts another agent. Do not run `orca orchestration worker-start`, `orca worktree create --agent`, `orca agent launch` or `orca terminal create`, and do not use a subagent tool. If the step needs more than you can do alone, say so in your report.
 
@@ -28,7 +28,7 @@ You check the ticket before the run lead plans. Your harness and model come from
 
 1. Read `<run folder>/ticket.md` and each AC. Read the code and the context that each AC touches.
 2. Probe what you doubt, read-only: run a command with `--help`, read a log, or run `run-current` from the right terminal. Never change a file in the repo, and never start an agent.
-3. Write `<run folder>/evaluation.md` with two headings, each followed by a bullet list. An empty list is valid: leave the heading with no bullets. A missing heading is refused.
+3. Write `<run folder>/evaluation.md` with three headings, each followed by a bullet list. An empty `Blockers` or `Risks` list is valid: leave the heading with no bullets. A missing heading is refused. `Surfaces` needs at least one value.
 
    ```markdown
    ## Blockers
@@ -38,13 +38,34 @@ You check the ticket before the run lead plans. Your harness and model come from
    ## Risks
 
    - Existing plan fixtures need an `evaluation.recorded` event.
+
+   ## Surfaces
+
+   - cli_output
    ```
 
+   - A surface is what a person sees when the ticket is done. Use `web_ui`, `cli_output`, `document` or `none`. Use `none` alone when the change shows a person nothing. Any other value makes the run lead start a Designer, so list a surface only when the ticket changes it.
    - A blocker is an AC that is not possible, that no integration or E2E test can prove, or that conflicts with other code. Each blocker names the AC ID and the reason, with your evidence.
    - A risk is a problem the plan must handle. It is not a reason to stop.
    - A ticket with no ACs has no AC to block: put your doubts about the ticket in the risks.
 
 4. Do not run `ark evaluation record`. The run lead does that. Report with `--outcome succeeded` and name `evaluation.md` in `--report-path`.
+
+### Designer
+
+You make the mockups that let the human choose a strategy before code exists. Your harness and model come from `roles.designer` in `ark.yml`. You edit no product code, you commit nothing, and you work in the workspace folder you were started in. You write only in `<run folder>/mockups/`, in `<run folder>/strategies.md` and in a throwaway worktree. Skip section 1 steps 1 and 2 for this role: you have no plan step.
+
+1. Read `<run folder>/ticket.md`, `<run folder>/evaluation.md` (the `Surfaces` list) and `<run folder>/strategies.md` (the cards the run lead wrote). Read the code that the surface touches.
+2. Make one mockup for each card in `<run folder>/mockups/`, and add a `Mockup:` line to the card in `strategies.md` with a link to the file. The form depends on the surface:
+   - `web_ui`: an HTML page.
+   - `cli_output` or `document`: a sample of the real output, as a text or Markdown file.
+   - A state change: the logic page from `skill://prototype`.
+3. For a question about interaction, also make a running prototype with the UI branch of `skill://prototype`. Put it in a throwaway worktree, never in the run's worktrees. It runs on `localhost`. Name its address in your report.
+4. Read these skills for direction and craft: `impeccable` (direction, mode and critique only), `emil-design-eng`, `prototype` and `plannotator-visual-explainer` (for diagrams and tables).
+   - Never run `impeccable generate`, and never use impeccable live mode. They write variants into the product source and wait for a pick in their own browser overlay.
+5. Mockups and prototypes never go into an MR. Do not copy them into any repo worktree.
+6. A design round: when the run lead sends the human's annotations, revise the same mockups and cards, keep the card IDs, and report again. Do not start over.
+7. Report with `--outcome succeeded` and name the mockups in your report. Do not run `ark strategy record`. The run lead does that.
 
 ### Implementer
 
@@ -82,7 +103,7 @@ You turn the plan's test cases into tests that prove the AC, and you make them p
 You look for defects in the run's changes and report findings. You never edit.
 
 1. Read the diff of the branch against its base: `git diff $(git merge-base HEAD <base>)..HEAD`. The base is in the `worktree.created` event in `<run folder>/events.ndjson`.
-2. Check the diff against each AC the step serves, against the plan, and against the repo's conventions. Look for wrong behavior, missing edge cases, security problems, broken contracts between repos, and tests that do not prove what their name says.
+2. Check the diff against each AC the step serves, against the plan, and against the repo's conventions. Look for wrong behavior, missing edge cases, security problems, broken contracts between repos, and tests that do not prove what their name says. If the repo has a web UI, load the skills `web-design-guidelines` and `review-animations` and check the UI code against them. Rank what they find like any other finding.
 3. Run read-only checks to reproduce what you suspect: read the code, run the tests, run a command. Do not change any file in the worktree. Do not commit, stash, reset or checkout.
 4. Write the findings to `<run folder>/findings/<step>.md`. It is the only file you create. Rank each finding from P0 (must fix) to P3 (minor):
 
@@ -130,5 +151,5 @@ After `worker_done`, stop. Do not poll, close your terminal or start other work.
 - One step only, in your own worktree.
 - Never start an agent.
 - Never write to `events.ndjson` or `state.json`. Never change run state.
-- Only the implementer writes product code. Only the validator writes the AC-tagged tests. The reviewer edits nothing in the repo. The evaluator writes `evaluation.md` and nothing else.
+- Only the implementer writes product code. Only the validator writes the AC-tagged tests. The reviewer edits nothing in the repo. The evaluator writes `evaluation.md` and nothing else. The designer writes mockups and prototypes outside the run's worktrees and nothing else.
 - Never push, never open an MR, and never merge.

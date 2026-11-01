@@ -59,7 +59,7 @@ The agent that drives one run across every repo its ticket touches. It plans, st
 _Avoid_: Orchestrator, ticket lead, lead
 
 **Worker**:
-An agent a run lead starts for one step: an implementer, validator or reviewer. The run lead also starts one evaluator before it plans. A worker never starts other agents.
+An agent a run lead starts for one step: an implementer, validator or reviewer. The run lead also starts one evaluator before it plans, and one Designer when the ticket changes something a person sees. A worker never starts other agents.
 _Avoid_: Subagent, child agent, helper
 
 **Implementer**:
@@ -77,6 +77,25 @@ _Avoid_: Critic, judge, auditor
 **Evaluator**:
 The worker that checks a ticket before the run lead plans. It reads the ticket and the code, runs read-only probes, and writes `evaluation.md` with blockers and risks. It never edits product code. `ark.yml` sets its harness and model.
 _Avoid_: Pre-reviewer, triage agent
+
+**Designer**:
+The worker that makes mockups for the strategy cards, and for a question about interaction a running prototype in a throwaway worktree. It revises them in each design round and never edits product code. Mockups never go into an MR. `roles.designer` in `ark.yml` sets its harness and model, and it is optional.
+_Avoid_: UI agent, artist
+
+**Strategy**:
+A whole way to do the ticket, written as a short card in `strategies.md`: approach, interfaces, tradeoffs, rough steps, optional mockup links and a recommendation. With one possible strategy, the file has one card and a reason.
+_Avoid_: Option, proposal
+
+**Strategy gate**:
+The gate that opens when `strategies.md` has 2 or more cards. The phase is `awaiting_strategy`. You answer with a card ID or abort. With one card, no gate opens.
+
+**Design round**:
+One more `ark strategy record` before you answer the strategy gate, after you annotated the cards or mockups and the same Designer revised them. Design rounds have no budget and never open an escalation.
+_Avoid_: Strategy round
+
+**Decision**:
+A smaller choice inside the chosen strategy, in the `decisions` list of `plan.yml`: a question, 2 to 4 options with tradeoffs, a recommended option and, after you answer, the chosen one. You answer open decisions at the plan gate, and `plan approve` is refused while one is open.
+_Avoid_: Question, open point
 
 **Blocker**:
 A problem the evaluator finds in an AC: it is not possible, no integration or E2E test can prove it, or it conflicts with other code. A blocker opens the criteria gate.
@@ -117,7 +136,7 @@ _Avoid_: Issue, comment, bug report
 ## Gates and rework
 
 **Gate**:
-A point where the run waits for your decision. The gates are criteria (the ticket lacks testable ACs, or the evaluator found a blocker), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
+A point where the run waits for your decision. The gates are criteria (the ticket lacks testable ACs, or the evaluator found a blocker), strategy (2 or more strategy cards), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
 _Avoid_: Checkpoint, approval step
 
 **Answer**:

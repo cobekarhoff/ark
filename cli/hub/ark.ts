@@ -99,11 +99,16 @@ export function arkItems(
             ? event.type === "run.started"
             : gate === "plan"
               ? event.type === "plan.checked"
-              : event.type === "step.finished",
+              : gate === "strategy"
+                ? event.type === "strategy.recorded"
+                : event.type === "step.finished",
         ),
         action:
-          gate === "plan"
-            ? annotate(join(directory, "plan.md"), { kind: "plan", run: state.run })
+          gate === "plan" || gate === "strategy"
+            ? annotate(join(directory, gate === "plan" ? "plan.md" : "strategies.md"), {
+                kind: gate,
+                run: state.run,
+              })
             : handle
               ? {
                   name: "orca-terminal-switch",
