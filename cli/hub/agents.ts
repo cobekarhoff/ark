@@ -82,7 +82,7 @@ function costOf(
     includes_unknown: true,
     reason,
   });
-  if (harness !== "omp" && harness !== "claude")
+  if (harness !== "omp" && harness !== "claude" && harness !== "codex")
     return unavailable(`no usage reader for harness ${harness}`);
   if (folder === null) return unavailable("Orca gave no folder for this agent");
   const messages = (sessions.get(folder) ?? [])
