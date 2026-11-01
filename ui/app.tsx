@@ -1,7 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Action, Agent, Item } from "../cli/hub/types.ts";
+import { MapView } from "./map.tsx";
+import { TimelineView } from "./timeline.tsx";
+import { Kbd, ViewBar, views, type View } from "./views.tsx";
 import { AbortButton, ChiefBox, RunLeadMessage } from "./steer.tsx";
 import {
+  agentKey,
   agentTone,
   costText,
   duration,
@@ -25,7 +29,7 @@ import {
   type RunView,
   type Selection,
 } from "./model.ts";
-import { Agents, Backlog, Metrics, Projects, Search, viewNames, type ViewName } from "./views.tsx";
+import { Agents, Backlog, Metrics, Projects, Search } from "./hub-views.tsx";
 
 type Layer = "palette" | "sheet" | null;
 type PaletteEntry = {
@@ -34,8 +38,6 @@ type PaletteEntry = {
   hint?: string;
   run: () => void;
 };
-
-const Kbd = ({ children }: { children: ReactNode }) => <kbd>{children}</kbd>;
 
 function useHub(): HubState | null {
   const [state, setState] = useState<HubState | null>(null);
@@ -89,13 +91,13 @@ export function App() {
   const now = useNow();
   const [filter, setFilter] = useState<Filter>("all");
   const [selection, setSelection] = useState<Selection>(null);
+  const [view, setView] = useState<View>("home");
   const [layer, setLayer] = useState<Layer>(null);
   const [focus, setFocus] = useState(false);
   const [digestShown, setDigestShown] = useState(true);
   const [theme, setTheme] = useState(() => localStorage.getItem("ark-hub-theme") ?? "dark");
   const [toast, setToast] = useState<string | null>(null);
   const [hashTick, setHashTick] = useState(0);
-  const [view, setView] = useState<ViewName>("home");
   const [pane, setPane] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -199,6 +201,14 @@ export function App() {
         return setLayer(layer === "palette" ? null : "palette");
       }
       if (typing || layer !== null || event.metaKey || event.ctrlKey || event.altKey) return;
+      const viewKey = views[Number(event.key) - 1]?.view;
+      if (viewKey) return setView(viewKey);
+      // Map and Timeline read their own keys; Home's list keys must not move Home's selection there.
+      if (view !== "home") {
+        if (event.key === "?") setLayer("sheet");
+        else if (event.key === "t") toggleTheme();
+        return;
+      }
       if (event.key === "j") move(1);
       else if (event.key === "k") move(-1);
       else if (event.key === "Enter" && cursor) open(cursor);
@@ -206,7 +216,6 @@ export function App() {
       else if (event.key === "z") setFocus(!focus);
       else if (event.key === "t") toggleTheme();
       else if (event.key === "f") cycleFilter();
-      else if (/^[1-6]$/.test(event.key)) setView(viewNames[Number(event.key) - 1][0]);
       else if (event.key === "d") dismissDigest();
       else if (cursor && event.key === kinds[cursor.kind].key) void perform(cursor.action);
     };
@@ -268,10 +277,10 @@ export function App() {
       label: `Filter: ${name === "all" ? "All projects" : name}`,
       run: () => setFilter(name),
     })),
-    ...viewNames.map(([name, label], index) => ({
+    ...views.map(({ view: name, label, key }) => ({
       group: "Go to",
       label,
-      hint: String(index + 1),
+      hint: key,
       run: () => {
         setView(name);
         if (name === "home") setSelection(null);
@@ -302,9 +311,10 @@ export function App() {
 
   return (
     <div className="app" data-focus={focus}>
-      <main className="center">
+      <main className="center" hidden={view === "map" || view === "timeline"}>
         <header className="top">
           <h1>Ark hub</h1>
+          <ViewBar view={view} setView={setView} />
           <div className="chips" role="group" aria-label="Project filter">
             {["all", ...known, otherFilter].map((name) => (
               <button
@@ -326,20 +336,6 @@ export function App() {
             Shortcuts <Kbd>?</Kbd>
           </button>
         </header>
-
-        <nav className="views" aria-label="Views">
-          {viewNames.map(([name, label], index) => (
-            <button
-              key={name}
-              className="view-tab"
-              aria-current={view === name ? "page" : undefined}
-              data-view={name}
-              onClick={() => setView(name)}
-            >
-              {label} <Kbd>{index + 1}</Kbd>
-            </button>
-          ))}
-        </nav>
 
         {view !== "home" ? (
           <div className="scroll" data-view={view}>
@@ -635,13 +631,34 @@ export function App() {
         )}
       </main>
 
-      <aside className="detail" aria-label="Detail">
+      <aside className="detail" aria-label="Detail" hidden={view === "map" || view === "timeline"}>
         {view === "home" ? (
           <Detail hub={hub} now={now} need={cursor} selection={selection} perform={perform} />
         ) : (
           <div className="pane" ref={setPane} />
         )}
       </aside>
+      {view === "map" && (
+        <MapView
+          hub={hub}
+          selection={selection}
+          setSelection={setSelection}
+          perform={perform}
+          view={view}
+          setView={setView}
+          active={layer === null}
+        />
+      )}
+      {view === "timeline" && (
+        <TimelineView
+          hub={hub}
+          now={now}
+          perform={perform}
+          view={view}
+          setView={setView}
+          active={layer === null}
+        />
+      )}
 
       <footer className="status">
         <div className="achips" role="group" aria-label="Agent activity">
@@ -672,8 +689,6 @@ export function App() {
     </div>
   );
 }
-
-const agentKey = (agent: Agent) => `${agent.run}:${agent.role}:${agent.title}`;
 
 function Detail({
   hub,
@@ -948,6 +963,18 @@ const shortcuts: [string, [string, string[]][]][] = [
       ["MR or agent: open", ["o"]],
       ["Question: Inbox", ["i"]],
       ["Retro: answer", ["r"]],
+    ],
+  ],
+  [
+    "Views",
+    [
+      ["Home, Map, Timeline", ["1", "2", "3"]],
+      ["Map: move between nodes", ["j", "k"]],
+      ["Map: dim other nodes on/off", ["v"]],
+      ["Map: replay previous / next event", ["[", "]"]],
+      ["Map: back to live", ["l"]],
+      ["Timeline: zoom 1h, 12h, 24h", ["w"]],
+      ["Timeline: cost burn", ["b"]],
     ],
   ],
 ];

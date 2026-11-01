@@ -635,12 +635,12 @@ test(
         };
         await waitFor("Boolean(document.querySelector('[data-view=backlog]'))");
         const viewButtons = await evaluate(
-          "[...document.querySelectorAll('nav.views button')].map((button) => [button.textContent.trim(), button.getAttribute('data-view')])",
+          "[...document.querySelectorAll('nav.vbar button')].map((button) => [button.textContent.trim(), button.getAttribute('data-view')])",
         );
-        expect(viewButtons).toHaveLength(6);
+        expect(viewButtons).toHaveLength(8);
         for (const view of ["backlog", "agents", "metrics", "search", "projects"]) {
           const clicked = await evaluate(
-            `(() => { const button = [...document.querySelectorAll('nav.views button')].find((candidate) => candidate.dataset.view === '${view}'); button?.click(); return Boolean(button); })()`,
+            `(() => { const button = [...document.querySelectorAll('nav.vbar button')].find((candidate) => candidate.dataset.view === '${view}'); button?.click(); return Boolean(button); })()`,
           );
           expect(clicked).toBe(true);
           await waitFor(`Boolean(document.querySelector('.scroll[data-view="${view}"]'))`);
@@ -678,7 +678,7 @@ test(
         }
 
         await evaluate(
-          "[...document.querySelectorAll('nav.views button')].find((button) => button.dataset.view === 'backlog')?.click()",
+          "[...document.querySelectorAll('nav.vbar button')].find((button) => button.dataset.view === 'backlog')?.click()",
         );
         await waitFor(
           "Boolean(document.querySelector('[data-ticket=\"one:ARK-181-CHROME-ONE\"] button'))",
@@ -693,7 +693,7 @@ test(
         expect(String(detailText)).toContain("One project ticket");
 
         await evaluate(
-          "[...document.querySelectorAll('nav.views button')].find((button) => button.dataset.view === 'agents')?.click()",
+          "[...document.querySelectorAll('nav.vbar button')].find((button) => button.dataset.view === 'agents')?.click()",
         );
         await waitFor("Boolean(document.querySelector('[data-agent=term_one] button'))");
         await evaluate("document.querySelector('[data-agent=term_one] button').click()");
@@ -709,7 +709,7 @@ test(
         expect(await Bun.file(terminalLog).text()).toContain("terminal switch --terminal term_one");
 
         await evaluate(
-          "[...document.querySelectorAll('nav.views button')].find((button) => button.dataset.view === 'search')?.click()",
+          "[...document.querySelectorAll('nav.vbar button')].find((button) => button.dataset.view === 'search')?.click()",
         );
         await waitFor("Boolean(document.querySelector('input[aria-label=\"Search text\"]'))");
         await evaluate(

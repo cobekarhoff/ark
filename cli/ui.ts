@@ -10,6 +10,8 @@ import { readMetrics } from "./hub/metrics.ts";
 import { readProjects } from "./hub/projects.ts";
 import { search } from "./hub/search.ts";
 import { createNotifier, markActed } from "./hub/notify.ts";
+import { buildMap } from "./hub/map.ts";
+import { buildTimeline, timelineWindows } from "./hub/timeline.ts";
 import { createHub, knownUrls, markSeen } from "./hub/state.ts";
 
 const stateIntervalMilliseconds = 1000;
@@ -94,6 +96,18 @@ export function ui(port: number): void {
         const query = new URL(request.url).searchParams.get("q")?.trim() ?? "";
         if (query === "") return Response.json({ error: "q is required" }, { status: 400 });
         return Response.json(await search(query));
+      },
+      "/api/map": (request) => {
+        const at = new URL(request.url).searchParams.get("at");
+        if (at !== null && Number.isNaN(Date.parse(at)))
+          return Response.json({ error: "at must be an ISO time" }, { status: 400 });
+        return Response.json(buildMap(hub.state(), at));
+      },
+      "/api/timeline": (request) => {
+        const hours = Number(new URL(request.url).searchParams.get("hours") ?? 12);
+        if (!timelineWindows.includes(hours))
+          return Response.json({ error: "hours must be 1, 12 or 24" }, { status: 400 });
+        return Response.json(buildTimeline(hub.state(), hours));
       },
       "/api/events": () => {
         let controller: ReadableStreamDefaultController<Uint8Array>;

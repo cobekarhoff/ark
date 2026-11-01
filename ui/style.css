@@ -2205,33 +2205,6 @@ kbd {
 }
 
 /* views */
-.views {
-  display: flex;
-  gap: 4px;
-  padding: 0 16px 8px;
-  flex-wrap: wrap;
-}
-.view-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid var(--line-soft);
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: 13px;
-}
-.view-tab:hover {
-  background: var(--hover);
-}
-.view-tab[aria-current="page"] {
-  color: var(--text);
-  background: var(--surface-2);
-  border-color: var(--cyan);
-}
 .pane {
   display: contents;
 }

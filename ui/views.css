@@ -1,0 +1,459 @@
+/* Map, Timeline and the view bar. Motion stops under prefers-reduced-motion: style.css turns off every animation and hides .ping. */
+.app [hidden] {
+  display: none;
+}
+.vbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.vbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+.vbtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.vbtn[aria-current="page"] {
+  border-color: var(--cyan);
+  background: color-mix(in oklab, var(--cyan) 16%, var(--surface));
+  color: var(--text);
+}
+.vchip {
+  font: 500 11.5px var(--mono);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 2px 9px;
+}
+.vchip.warn {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.map-view,
+.timeline-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 18px 12px;
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.gcap {
+  min-height: 34px;
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+.gcap b {
+  color: var(--text);
+}
+.graph {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 6px 8px 8px;
+}
+.graph text {
+  fill: var(--text);
+  font: 12.5px var(--sans);
+  pointer-events: none;
+}
+.graph .m {
+  font-family: var(--mono);
+}
+.graph .b {
+  font-weight: 700;
+}
+.graph .sub {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.graph .col {
+  fill: var(--faint);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.node {
+  cursor: pointer;
+  outline: none;
+}
+.node .bd {
+  fill: color-mix(in oklab, var(--c) 15%, var(--surface));
+  stroke: var(--c);
+  stroke-width: 1.5;
+}
+.node:hover .bd {
+  fill: color-mix(in oklab, var(--c) 30%, var(--surface));
+}
+.node.cursor .bd,
+.node:focus-visible .bd {
+  stroke: var(--text);
+  stroke-width: 3;
+}
+.node.s-none .bd {
+  fill: transparent;
+  stroke-dasharray: 5 4;
+}
+.node.s-unavail .bd {
+  fill: url(#hatch);
+  stroke: var(--faint);
+  stroke-dasharray: 4 4;
+}
+.edge {
+  fill: none;
+  stroke: color-mix(in oklab, var(--idle) 60%, transparent);
+  stroke-width: 1.6;
+}
+.edge.flow {
+  stroke: var(--cyan);
+  stroke-dasharray: 6 6;
+  animation: flow 1.1s linear infinite;
+}
+.graph.focus .edge.rel {
+  stroke: var(--text);
+  stroke-width: 2.8;
+}
+.graph.dim.focus [data-lit="false"] {
+  opacity: 0.35;
+}
+.ping {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ping 1.9s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes ping {
+  0% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  85%,
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+@keyframes flow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+.mapbadge {
+  cursor: pointer;
+  outline: none;
+}
+.mapbadge circle {
+  fill: var(--amber);
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+.graph .mapbadge text {
+  fill: var(--ink);
+  font: 700 11.5px var(--mono);
+  text-anchor: middle;
+}
+.mapbadge:focus-visible circle,
+.mapbadge.cursor circle {
+  stroke: var(--text);
+  stroke-width: 3;
+}
+.replay {
+  padding: 9px 14px 8px;
+  position: sticky;
+  bottom: 0;
+}
+.rp-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.rp-head h2 {
+  font-size: 14px;
+  margin: 0;
+}
+.readout {
+  margin: 4px 0 6px;
+  color: var(--muted);
+}
+.readout b {
+  color: var(--text);
+}
+.rp-track {
+  position: relative;
+  height: 30px;
+}
+.rp-track .ev {
+  position: absolute;
+  top: 5px;
+  width: 2px;
+  height: 20px;
+  margin-left: -1px;
+  background: var(--line);
+}
+.rp-track input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  background: none;
+  accent-color: var(--cyan);
+}
+.rp-ticks {
+  display: flex;
+  justify-content: space-between;
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+.sw {
+  display: inline-block;
+  width: 18px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid var(--c);
+  background: color-mix(in oklab, var(--c) 30%, var(--surface));
+  vertical-align: -1px;
+}
+.sw.unav,
+.blk.unav {
+  border: 1px dashed var(--faint);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--text) 26%, transparent) 0 1.5px,
+      transparent 1.5px 7px
+    ),
+    var(--bg);
+}
+.sw.gate {
+  --c: var(--amber);
+}
+
+/* timeline */
+.tm-panel {
+  display: flex;
+  flex-direction: column;
+}
+.tm-axis,
+.lane-row {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 14px;
+}
+.tm-axis {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font: 11px var(--mono);
+  color: var(--faint);
+}
+.ax {
+  position: relative;
+  height: 18px;
+}
+.ax i {
+  position: absolute;
+  top: 0;
+  font-style: normal;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.tm-lanes {
+  position: relative;
+}
+.tm-lane {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.tm-lane.sel {
+  background: color-mix(in oklab, var(--cyan) 7%, transparent);
+}
+.lh {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: none;
+  border: 0;
+  text-align: left;
+}
+.lh:hover {
+  background: var(--hover);
+}
+.lh .nm {
+  font-weight: 700;
+}
+.lh .meta {
+  font: 500 11.5px var(--mono);
+  color: var(--faint);
+}
+.tr {
+  position: relative;
+  height: 22px;
+  margin-top: 3px;
+}
+.blk {
+  --c: var(--idle);
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 5px;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--c);
+  background: color-mix(in oklab, var(--c) 27%, var(--surface));
+  font: 500 11px/1 var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.blk:hover {
+  box-shadow: 0 0 0 2px var(--c);
+}
+.blk.k-work {
+  --c: var(--cyan);
+}
+.blk.k-ok {
+  --c: var(--green);
+}
+.blk.k-wait {
+  --c: var(--violet);
+}
+.blk.k-fail,
+.blk.k-stall {
+  --c: var(--red);
+}
+.blk.k-stall {
+  border-style: dashed;
+  background: color-mix(in oklab, var(--red) 10%, transparent);
+}
+.blk.cur {
+  box-shadow: inset -3px 0 0 var(--c);
+}
+.blk.k-gate {
+  --c: var(--amber);
+  font-weight: 700;
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--c) 36%, var(--surface)) 25%,
+    color-mix(in oklab, var(--c) 11%, var(--surface)) 25% 50%,
+    color-mix(in oklab, var(--c) 36%, var(--surface)) 50% 75%,
+    color-mix(in oklab, var(--c) 11%, var(--surface)) 75%
+  );
+  background-size: 14px 14px;
+}
+.blk.k-gate.done {
+  opacity: 0.62;
+  font-weight: 500;
+}
+.blk.k-gate.new {
+  --c: color-mix(in oklab, var(--amber) 55%, var(--muted));
+}
+.blk.k-gate.old {
+  --c: var(--red);
+}
+.blk.k-gate.live {
+  animation: march 1.1s linear infinite;
+}
+@keyframes march {
+  to {
+    background-position: 14px 0;
+  }
+}
+.blk.pick {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+.blk.unav {
+  justify-content: center;
+  font: 600 10.5px var(--mono);
+  letter-spacing: 0.06em;
+}
+.burn {
+  position: relative;
+  height: 30px;
+  margin-top: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.burn .spend {
+  position: absolute;
+  bottom: 0;
+  background: color-mix(in oklab, var(--text) 22%, transparent);
+  border-top: 1.5px solid var(--muted);
+}
+.burn .q {
+  position: absolute;
+  bottom: 0;
+  top: 2px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--muted);
+  border-radius: 3px;
+  font: 700 12px var(--mono);
+}
+.now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin-left: -2px;
+  border-left: 2px solid var(--cyan);
+  pointer-events: none;
+}
+.tm-foot {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 7px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+.tm-foot span {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.ask {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  margin-bottom: 5px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: var(--bg);
+}
+.ask:hover {
+  background: var(--hover);
+}
