@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { type ArkEvent, readEvents } from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
+import { type PlanDecision, loadPlan } from "./plan.ts";
 import { type SessionWithKey, type UsageMessage, isInside, readUsage } from "./usage/index.ts";
 
 const IDLE_GAP_SECONDS = 600;
@@ -119,10 +120,52 @@ function windowOf(
   );
 }
 
+/** Strategy records after the first one and before the strategy answer. */
+function designRoundCount(events: ArkEvent[]): number {
+  const answer = events.findIndex(
+    (event) => event.type === "gate.answered" && event.data.gate === "strategy",
+  );
+  const before = answer === -1 ? events : events.slice(0, answer);
+  return Math.max(0, before.filter((event) => event.type === "strategy.recorded").length - 1);
+}
+
+/** A strategy answer or a decided plan decision is overridden when it is not the recommended one. */
+function decisionCounts(
+  runDirectory: string,
+  events: ArkEvent[],
+): { total: number; overridden: number } {
+  let total = 0;
+  let overridden = 0;
+  let recommended = "";
+  for (const event of events) {
+    if (event.type === "strategy.recorded") recommended = event.data.recommended;
+    if (
+      event.type === "gate.answered" &&
+      event.data.gate === "strategy" &&
+      event.data.answer !== "abort"
+    ) {
+      total += 1;
+      if (event.data.answer !== recommended) overridden += 1;
+    }
+  }
+  let decisions: PlanDecision[] = [];
+  try {
+    decisions = loadPlan(runDirectory).decisions;
+  } catch (err) {
+    if (!(err instanceof ArkError)) throw err; // no plan.yml, or one that does not parse: no plan decisions
+  }
+  for (const decision of decisions.filter((candidate) => candidate.chosen)) {
+    total += 1;
+    if (decision.chosen !== decision.recommended) overridden += 1;
+  }
+  return { total, overridden };
+}
+
 /**
  * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
- * run start when the ticket has no ACs and at an evaluation with blockers, the plan gate at each valid plan check, the escalation gate at the failed step that
- * spent the round budget.
+ * run start when the ticket has no ACs and at an evaluation with blockers, the strategy gate at a
+ * strategy record of 2 or more cards, the plan gate at each valid plan check, the escalation gate
+ * at the failed step that spent the round budget.
  */
 function gateWaitSeconds(events: ArkEvent[]): number {
   const waitingSince = new Map<string, number>();
@@ -134,6 +177,8 @@ function gateWaitSeconds(events: ArkEvent[]): number {
     if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
       waitingSince.set("criteria", waitingSince.get("criteria") ?? time);
     if (event.type === "plan.checked" && event.data.valid) waitingSince.set("plan", time);
+    if (event.type === "strategy.recorded" && event.data.count >= 2)
+      waitingSince.set("strategy", waitingSince.get("strategy") ?? time);
     if (event.type === "step.finished" && event.data.outcome === "failed")
       waitingSince.set("escalation", time);
     if (event.type === "gate.answered") {
@@ -306,9 +351,38 @@ export function retro(runId: string): void {
           ),
       ),
   );
+  // The Designer session runs after the first evaluation and ends by the last strategy record or answer.
+  const designStart = events.find((event) => event.type === "evaluation.recorded")?.time;
+  const designEnd = events.findLast(
+    (event) =>
+      event.type === "strategy.recorded" ||
+      (event.type === "gate.answered" && event.data.gate === "strategy"),
+  )?.time;
+  const designerKeys = new Set(
+    messages
+      .filter((message) => !stepOf.has(message) && !evaluatorSessions.has(message.sessionKey))
+      .map((message) => message.sessionKey)
+      .filter((key) =>
+        messages
+          .filter((message) => message.sessionKey === key)
+          .every(
+            (message) =>
+              !stepOf.has(message) &&
+              designStart !== undefined &&
+              designEnd !== undefined &&
+              toMilliseconds(message.time) >= toMilliseconds(designStart) &&
+              toMilliseconds(message.time) <= toMilliseconds(designEnd),
+          ),
+      ),
+  );
+  const designRounds = designRoundCount(events);
   const roleOf = (message: Message): string =>
     stepOf.get(message)?.role ??
-    (evaluatorSessions.has(message.sessionKey) ? "evaluator" : "orchestration");
+    (evaluatorSessions.has(message.sessionKey)
+      ? "evaluator"
+      : designerKeys.has(message.sessionKey)
+        ? "designer"
+        : "orchestration");
   const orchestrationMessages = messages.filter((message) => roleOf(message) === "orchestration");
   const stepIds = [...new Set(windows.map((window) => window.id))];
   const roleOfStep = new Map(windows.map((window) => [window.id, window.role]));
@@ -318,6 +392,7 @@ export function retro(runId: string): void {
   for (const id of stepIds) byStep[id] ??= summarize([]); // a step that ran with no session found has unknown cost
   for (const role of roleOfStep.values()) byRole[role] ??= summarize([]);
   const total = summarize(messages);
+  if (designerKeys.size > 0) byRole.designer ??= summarize([]);
   const reviewer = byRole.reviewer;
   const implementer = byRole.implementer;
   const ratioKnown =
@@ -391,6 +466,8 @@ export function retro(runId: string): void {
       ).length,
       findings_sent_back: finishedFailedByReviewer,
     },
+    design_rounds: designRounds,
+    decisions: decisionCounts(runDirectory, events),
     human_intervention: {
       plan_changes: events.filter(
         (event) =>

@@ -93,7 +93,10 @@ function agentsOf(orcaRun: OrcaRun): Agent[] {
 function gateOf(runId: string, directory: string, state: RunState) {
   const name = waitingGate(state);
   if (name === "none") return null;
-  const command = name === "plan" ? `plannotator annotate ${join(directory, "plan.md")}` : null;
+  const command =
+    name === "plan" || name === "strategy"
+      ? `plannotator annotate ${join(directory, name === "plan" ? "plan.md" : "strategies.md")}`
+      : null;
   return {
     name,
     command,

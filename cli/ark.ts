@@ -6,6 +6,7 @@ import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
 import { planCheck } from "./plan.ts";
 import { retro } from "./retro.ts";
 import { runClose, runStart, runStep, status } from "./run.ts";
+import { strategyRecord } from "./strategy.ts";
 import { testRun } from "./test-run.ts";
 import { ui } from "./ui.ts";
 import { workspaceSync } from "./workspace.ts";
@@ -56,16 +57,25 @@ const commands: Command[] = [
   {
     usage: "evaluation record <run>",
     description:
-      "Reads evaluation.md in the run folder and records its blockers and risks. It refuses a missing file, a file with no Blockers or Risks list, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.",
+      "Reads evaluation.md in the run folder and records its blockers, risks and surfaces (web_ui, cli_output, document or none). It refuses a missing file, a file with no Blockers, Risks or Surfaces list, an unknown surface, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.",
     flags: {},
     minimum: 1,
     maximum: 1,
     run: ([runId]) => evaluationRecord(runId),
   },
   {
+    usage: "strategy record <run>",
+    description:
+      "Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or a project whose ark.yml has no roles.designer. Two or more cards open the strategy gate; one card opens no gate.",
+    flags: {},
+    minimum: 1,
+    maximum: 1,
+    run: ([runId]) => strategyRecord(runId),
+  },
+  {
     usage: "plan check <run>",
     description:
-      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid.",
+      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. It records the number of open decisions.",
     flags: {},
     minimum: 1,
     maximum: 1,
@@ -92,7 +102,7 @@ const commands: Command[] = [
   {
     usage: "gate record <run> <gate> <answer> [--note <text>]",
     description:
-      "Records your answer to a gate. The gates are criteria, plan and escalation. Ark refuses an answer that the run's state does not allow.",
+      "Records your answer to a gate. The gates are criteria, strategy, plan and escalation. The strategy gate takes the ID of a card in the latest strategy record, or abort. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.",
     flags: { "--note": true },
     minimum: 3,
     maximum: 3,

@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
-import { appendEvent, deriveState, readEvents } from "./events.ts";
+import { type RunState, appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
+import { assertAllowed } from "./transitions.ts";
 
 export type PlanStep = {
   id: string;
@@ -29,9 +30,18 @@ export type PlanInterface = { name: string; callers: string[] };
 export type PlanDesign = { approach: string; interfaces: PlanInterface[]; example: string };
 
 export type PlanSummaryChange = { criterion: string; where: string; now: string; fix: string };
+export type PlanDecision = {
+  id: string;
+  question: string;
+  options: { label: string; tradeoffs: string }[];
+  recommended: string;
+  /** Empty while the human has not answered. */
+  chosen: string;
+};
 export type Plan = {
   summary: { why: string; changes: PlanSummaryChange[] };
   design: PlanDesign;
+  decisions: PlanDecision[];
   steps: PlanStep[];
   test_cases: PlanTestCase[];
 };
@@ -66,7 +76,7 @@ export function loadPlan(runDirectory: string): Plan {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ArkError("plan.yml must be a mapping with steps and test_cases");
   }
-  const { steps, test_cases, summary, design } = raw as Record<string, unknown>;
+  const { steps, test_cases, summary, design, decisions } = raw as Record<string, unknown>;
   const designBlock =
     design && typeof design === "object" ? (design as Record<string, unknown>) : {};
   const summaryBlock =
@@ -89,6 +99,20 @@ export function loadPlan(runDirectory: string): Plan {
       })),
       example: text(designBlock.example),
     },
+    decisions: objectList(decisions).map((decision) => ({
+      id: text(decision.id),
+      question: text(decision.question),
+      options: (Array.isArray(decision.options) ? decision.options : []).map((option: unknown) =>
+        typeof option === "string"
+          ? { label: option, tradeoffs: "" }
+          : {
+              label: text((option as Record<string, unknown>)?.label),
+              tradeoffs: text((option as Record<string, unknown>)?.tradeoffs),
+            },
+      ),
+      recommended: text(decision.recommended),
+      chosen: text(decision.chosen),
+    })),
     steps: objectList(steps).map((step) => ({
       id: text(step.id),
       role: text(step.role),
@@ -240,11 +264,34 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
       problems.push(`design interface ${entry.name || `#${i + 1}`} has no callers`);
     }
   });
+  const decisionIds = new Set<string>();
+  plan.decisions.forEach((decision, i) => {
+    const name = decision.id || `#${i + 1}`;
+    if (!decision.id) problems.push(`decision #${i + 1} has no id`);
+    else if (decisionIds.has(decision.id)) problems.push(`duplicate decision id: ${decision.id}`);
+    decisionIds.add(decision.id);
+    if (!decision.question) problems.push(`decision ${name} has no question`);
+    const labels = decision.options.map((option) => option.label);
+    if (decision.options.length < 2 || decision.options.length > 4) {
+      problems.push(`decision ${name} has ${decision.options.length} options: use 2 to 4`);
+    }
+    if (labels.includes("")) problems.push(`decision ${name} has an option with no label`);
+    if (!labels.includes(decision.recommended)) {
+      problems.push(`decision ${name} recommended "${decision.recommended}" is not an option`);
+    }
+    if (decision.chosen && !labels.includes(decision.chosen)) {
+      problems.push(`decision ${name} chosen "${decision.chosen}" is not an option`);
+    }
+  });
   return problems;
 }
 
 // Stable output. Markdown table cells cannot hold a pipe or a newline.
-export function renderPlanMarkdown(plan: Plan, risks: string[]): string {
+export function renderPlanMarkdown(
+  plan: Plan,
+  risks: string[],
+  strategy: RunState["strategy"] = null,
+): string {
   const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
   const lines = ["# Plan", "", "## Summary", "", plan.summary.why, "", "## Changes", ""];
   lines.push("| Criterion | Where | Now | Fix |", "| --- | --- | --- | --- |");
@@ -252,6 +299,21 @@ export function renderPlanMarkdown(plan: Plan, risks: string[]): string {
     lines.push(
       `| ${[change.criterion, change.where, change.now, change.fix].map(tableCell).join(" | ")} |`,
     );
+  }
+  if (strategy) {
+    lines.push("", "## Strategy", "");
+    if (strategy.count === 1) {
+      lines.push(
+        strategy.card_text[strategy.cards[0]] ?? strategy.cards[0],
+        "",
+        `Only one strategy considered, because ${strategy.reason}`,
+      );
+    } else {
+      lines.push(
+        `Chosen: ${strategy.chosen ?? "none yet"} (recommended: ${strategy.recommended}; cards: ${strategy.cards.join(", ")})`,
+      );
+      if (strategy.chosen) lines.push("", strategy.card_text[strategy.chosen] ?? strategy.chosen);
+    }
   }
   lines.push("", "## Design", "", plan.design.approach.trim() || "No approach given.", "");
   lines.push("| Interface | Callers |", "| --- | --- |");
@@ -261,6 +323,19 @@ export function renderPlanMarkdown(plan: Plan, risks: string[]): string {
   lines.push("");
   if (plan.design.example.trim()) lines.push("```text", plan.design.example.trimEnd(), "```");
   else lines.push("No example given.");
+  if (plan.decisions.length > 0) {
+    lines.push("", "## Decisions", "");
+    for (const decision of plan.decisions) {
+      lines.push(":::question", `${decision.question.replaceAll("\n", " ")} (${decision.id})`, "");
+      for (const option of decision.options) {
+        const tradeoffs = option.tradeoffs.replaceAll("\n", " ");
+        lines.push(
+          `- [${option.label === decision.chosen ? "x" : " "}] ${option.label}${tradeoffs ? ` — ${tradeoffs}` : ""}`,
+        );
+      }
+      lines.push("", `Recommended: ${decision.recommended}`, ":::", "");
+    }
+  }
   lines.push("", "## Evaluation", "");
   if (risks.length === 0) lines.push("No risks.");
   else for (const risk of risks) lines.push(`- ${risk.replaceAll("\n", " ")}`);
@@ -288,8 +363,10 @@ export function renderPlanMarkdown(plan: Plan, risks: string[]): string {
 
 export function planCheck(runId: string): void {
   const { directory } = findRun(runId);
-  const plan = loadPlan(directory);
   const state = deriveState(readEvents(directory));
+  // Refuse a run that is not ready for a plan check before reading plan.yml.
+  assertAllowed(state, "plan.checked", {});
+  const plan = loadPlan(directory);
   const problems = findProblems(
     plan,
     state.criteria.map((criterion) => criterion.id),
@@ -299,6 +376,7 @@ export function planCheck(runId: string): void {
     valid,
     problems,
     plan_hash: planHash(directory),
+    open_decisions: plan.decisions.filter((decision) => !decision.chosen).length,
     steps: plan.steps.map(({ id, role, repo, needs, criteria }) => ({
       id,
       role,
@@ -315,7 +393,7 @@ export function planCheck(runId: string): void {
   }
   writeFileSync(
     join(directory, "plan.md"),
-    renderPlanMarkdown(plan, state.evaluation?.risks ?? []),
+    renderPlanMarkdown(plan, state.evaluation?.risks ?? [], state.strategy),
   );
   console.log(
     `plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`,

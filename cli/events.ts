@@ -10,6 +10,7 @@ export type ArkEvent = { seq: number; time: string; type: string; data: EventDat
 
 export type Phase =
   | "awaiting_criteria"
+  | "awaiting_strategy"
   | "planning"
   | "building"
   | "escalation"
@@ -26,9 +27,23 @@ export type RunState = {
   round: number;
   round_budget: number;
   criteria: { id: string; status: CriterionStatus }[];
-  gates: { criteria?: string; plan?: string; escalation?: string };
-  evaluation: { blockers: string[]; risks: string[] } | null;
-  plan: { checked: boolean; valid: boolean; plan_hash: string } | null;
+  gates: { criteria?: string; strategy?: string; plan?: string; escalation?: string };
+  evaluation: { blockers: string[]; risks: string[]; surfaces: string[] } | null;
+  /** The latest strategy.recorded; `chosen` is the card the human picked, or the only card. */
+  strategy: {
+    count: number;
+    recommended: string;
+    cards: string[];
+    reason: string;
+    card_text: Record<string, string>;
+    chosen: string | null;
+  } | null;
+  plan: {
+    checked: boolean;
+    valid: boolean;
+    plan_hash: string;
+    open_decisions: number;
+  } | null;
   steps: { id: string; role: string; repo: string; status: StepStatus }[];
   current_step: string | null;
   worktrees: { repo: string; path: string; branch: string }[];
@@ -91,6 +106,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   let ticket = { id: "", title: "" };
   let startedWithoutCriteria = false;
   let evaluation: RunState["evaluation"] = null;
+  let strategy: RunState["strategy"] = null;
   let blocked = false;
   let round = 1;
   let roundBudget = 0;
@@ -124,11 +140,16 @@ export function deriveState(events: ArkEvent[]): RunState {
         criteriaStatus = {};
         break;
       case "evaluation.recorded":
-        evaluation = { blockers: data.blockers, risks: data.risks };
+        evaluation = { blockers: data.blockers, risks: data.risks, surfaces: data.surfaces ?? [] };
         if (data.blockers.length > 0) blocked = true;
         break;
       case "plan.checked":
-        plan = { checked: true, valid: data.valid, plan_hash: data.plan_hash };
+        plan = {
+          checked: true,
+          valid: data.valid,
+          plan_hash: data.plan_hash,
+          open_decisions: data.open_decisions ?? 0,
+        };
         planApproved = false;
         if (data.valid)
           planSteps = data.steps.map(
@@ -139,8 +160,20 @@ export function deriveState(events: ArkEvent[]): RunState {
             }),
           );
         break;
+      case "strategy.recorded":
+        strategy = {
+          count: data.count,
+          recommended: data.recommended,
+          cards: data.cards,
+          reason: data.reason ?? "",
+          card_text: data.card_text ?? {},
+          chosen: data.count === 1 ? data.cards[0] : null,
+        };
+        break;
       case "gate.answered":
         gates[data.gate] = data.answer;
+        if (data.gate === "strategy" && strategy && strategy.cards.includes(data.answer))
+          strategy.chosen = data.answer;
         if (data.gate === "criteria" && data.answer === "accept") blocked = false;
         if (data.gate === "plan" && data.answer === "approve") planApproved = true;
         if (data.answer === "abort") outcome = "aborted";
@@ -195,6 +228,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   else if (mergeRequests.length > 0) phase = "merge_requests_open";
   else if (blocked || (startedWithoutCriteria && gates.criteria !== "accept"))
     phase = "awaiting_criteria";
+  else if (strategy && strategy.count >= 2 && strategy.chosen === null) phase = "awaiting_strategy";
   else if (!planApproved) phase = "planning";
   else if (round >= roundBudget && lastTest && !lastTest.passed && !escalationAnswered && !human)
     phase = "escalation";
@@ -213,10 +247,12 @@ export function deriveState(events: ArkEvent[]): RunState {
     })),
     gates: {
       ...(gates.criteria === undefined ? {} : { criteria: gates.criteria }),
+      ...(gates.strategy === undefined ? {} : { strategy: gates.strategy }),
       ...(gates.plan === undefined ? {} : { plan: gates.plan }),
       ...(gates.escalation === undefined ? {} : { escalation: gates.escalation }),
     },
     evaluation,
+    strategy,
     plan,
     steps,
     current_step: steps.find((step) => step.status !== "succeeded")?.id ?? null,

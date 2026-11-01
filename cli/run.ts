@@ -135,6 +135,7 @@ export function runClose(runId: string, outcome: string): void {
 
 export function waitingGate(state: RunState): string {
   if (state.phase === "awaiting_criteria") return "criteria";
+  if (state.phase === "awaiting_strategy") return "strategy";
   if (state.phase === "planning" && state.plan?.valid) return "plan";
   if (state.phase === "escalation") return "escalation";
   return "none";

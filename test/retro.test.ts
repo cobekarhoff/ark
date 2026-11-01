@@ -201,6 +201,8 @@ describe("ark retro", () => {
       "cost",
       "time",
       "rework",
+      "design_rounds",
+      "decisions",
       "human_intervention",
       "escaped_defects",
       "orchestration",
