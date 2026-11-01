@@ -247,6 +247,26 @@ test("ARK-179-AC1 run detail returns phase times, gate waits and both step round
   });
 });
 
+test("ARK-179-AC1 run detail rejects foreign origins and hosts", async () => {
+  const run = startRun("ARK-179-FOREIGN-REQUEST");
+  await withUi(async (baseUrl) => {
+    const foreignOrigin = await fetch(`${baseUrl}/api/runs/${run.runId}`, {
+      headers: { origin: "https://foreign.example" },
+    });
+    expect(foreignOrigin.status).toBe(403);
+    expect(await foreignOrigin.json()).toEqual({ error: "foreign origin" });
+
+    const foreignHost = await fetch(`${baseUrl}/api/runs/${run.runId}`, {
+      headers: { host: "foreign.example" },
+    });
+    expect(foreignHost.status).toBe(403);
+    expect(await foreignHost.json()).toEqual({ error: "foreign origin" });
+
+    const local = await detail(baseUrl, run.runId);
+    expect(local.timeline).toBeArray();
+  });
+});
+
 test("ARK-179-AC2 run detail joins AC results to suite reports and marks a missing report unavailable", async () => {
   const run = startRun("ARK-179-PROOF", [
     { id: "ARK-179-AC1", text: "Pass" },
@@ -540,6 +560,24 @@ test("ARK-179-AC6 run detail renders plan and returns available evaluation and s
         mockups: [{ path: "mockups/detail.html", exists: true }],
       }),
     );
+  });
+});
+
+test("ARK-179-AC6 run detail keeps raw HTML and javascript links inert", async () => {
+  const run = startRun("ARK-179-UNSAFE-PLAN");
+  writeFileSync(
+    join(run.directory, "plan.md"),
+    "# Safe heading\n\n- Visible list item\n\n<img src=x onerror=alert(1)>\n\n[unsafe](javascript:alert(1))\n",
+  );
+  await withUi(async (baseUrl) => {
+    const result = await detail(baseUrl, run.runId);
+    if (result.plan.state !== "ok") throw new Error("plan was unavailable");
+    expect(result.plan.html).toContain("<h1>Safe heading</h1>");
+    expect(result.plan.html).toContain("<ul>");
+    expect(result.plan.html).toContain("<li>Visible list item</li>");
+    expect(result.plan.html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(result.plan.html).not.toMatch(/<img\b/i);
+    expect(result.plan.html).not.toMatch(/javascript:/i);
   });
 });
 
