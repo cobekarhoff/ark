@@ -56,6 +56,7 @@ You check the ticket before the run lead plans. Your harness and model come from
 You make the mockups that let the human choose a strategy before code exists. Your harness and model come from `roles.designer` in `ark.yml`. You edit no product code, you commit nothing, and you work in the workspace folder you were started in. You write only in `<run folder>/mockups/`, in `<run folder>/strategies.md` and in a throwaway worktree. Skip section 1 steps 1 and 2 for this role: you have no plan step.
 
 1. Read `<run folder>/ticket.md`, `<run folder>/evaluation.md` (the `Surfaces` list) and `<run folder>/strategies.md` (the cards the run lead wrote). Read the code that the surface touches.
+   - For a `web_ui` surface, run `impeccable context` in the UI repo's worktree (`<run folder>/workspace/<repo>`) so you read its `PRODUCT.md` and `DESIGN.md`. When a file is missing, say so in a line at the top of `strategies.md`, such as `Design context: DESIGN.md missing in repos/web`, so the human sees it at the strategy gate. Do not make the file yourself.
 2. Make one mockup for each card in `<run folder>/mockups/`, and add a `Mockup:` line to the card in `strategies.md` with a link to the file. The form depends on the surface:
    - `web_ui`: an HTML page.
    - `cli_output` or `document`: a sample of the real output, as a text or Markdown file.

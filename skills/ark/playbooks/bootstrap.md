@@ -4,7 +4,7 @@ You teach Ark one project. You run as Master Chief, in an Orca terminal. You det
 
 Inputs: the workspace path (default: the current directory) and the project name (default: the lowercase directory name of the workspace). Use absolute paths everywhere.
 
-You never write product code. You write only `ark.yml` and, in step 7, one OMP setting.
+You never write product code. You write only `ark.yml`, in step 7 one OMP setting, and in step 10 the design files that impeccable makes.
 
 ## Rules
 
@@ -19,7 +19,7 @@ You never write product code. You write only `ark.yml` and, in step 7, one OMP s
 test -f ~/.ark/projects/<project>/ark.yml && cat ~/.ark/projects/<project>/ark.yml
 ```
 
-If the file exists, show it and ask: "`ark.yml` exists for `<project>`. Keep it, replace it, or edit it?" Recommended: keep it, unless the workspace changed. On "keep", jump to step 4 and register what is missing. On "replace" or "edit", continue and write the file in step 8 only after the human's answer.
+If the file exists, show it and ask: "`ark.yml` exists for `<project>`. Keep it, replace it, or edit it?" Recommended: keep it, unless the workspace changed. On "keep", run the "Repos" and "UI" parts of step 2 (step 10 needs their result), then jump to step 4 and register what is missing. On "replace" or "edit", continue and write the file in step 8 only after the human's answer.
 
 ## 2. Detect the workspace
 
@@ -111,6 +111,10 @@ Run `command -v claude codex omp`. If a harness from the default is missing, the
 
 Leave out `concurrency` and `round_budget`. Their defaults are 2 and 2.
 
+### UI
+
+A repo has UI code when it has one of these signals: a web framework in `package.json` (`react`, `vue`, `svelte`, `next`, `@angular/core`), HTML templates, a Storybook config (`.storybook/`), or an `ios` or `android` project. Find each UI repo without a question. For each one, record whether `PRODUCT.md` and `DESIGN.md` already exist at its root. Bootstrap writes no `ark.yml` field for this: step 10 uses the result.
+
 ## 3. Ask only what you could not detect
 
 Make a list of the unknowns: ticket source, roles, an ambiguous suite level, or a missing suite command. For each unknown, one at a time:
@@ -122,6 +126,8 @@ Make a list of the unknowns: ticket source, roles, an ambiguous suite level, or 
 Example: "I found Jira in `.mcp.json` and a GitLab remote. Which ticket source should Ark use? Recommended: `jira`, because the agents' Jira tools are configured and the GitLab remote only hosts code."
 
 If nothing is unknown, ask nothing and go on.
+
+UI question: ask it only when step 2 found no repo with UI code. "Is this project designed for a UI that does not exist yet? Recommended: `<yes or no>`, because `<evidence from the README or the tickets>`." Ask it once for the workspace. A repo with UI code never triggers it.
 
 ## 4. Check Orca
 
@@ -260,7 +266,20 @@ ARK_PROJECT=<project> ark status
 - Exit 0: the file passes the config check. Report "`ark.yml` is valid".
 - Exit 1 with `config error: <project>: <message>`: the message names the field. Fix that field, run the command again, and tell the human what you fixed. Stop after two failed fixes and show the human the error.
 
-## 10. Report
+## 10. Design context
+
+`impeccable` works best when a UI repo has `PRODUCT.md` (who the product is for) and `DESIGN.md` (the visual system). The Designer reads them through `impeccable context`. Load the `impeccable` skill, then offer the files below for each UI repo from step 2 (and, on a "yes" in step 3, for the planned UI). Ask the human once for each repo, with a recommended answer of yes.
+
+- Never write over `PRODUCT.md` or `DESIGN.md`. For a file that already exists, skip its command and list the file as skipped in step 11.
+- Existing UI code, no `PRODUCT.md`: run impeccable `init` in the repo. It interviews the human by itself and makes `PRODUCT.md`.
+- Existing UI code, no `DESIGN.md`: run impeccable `document`. It makes `DESIGN.md` from the code.
+- Planned UI with no code (a "yes" in step 3): run impeccable `init` only, for `PRODUCT.md` in the workspace root. `DESIGN.md` comes later, from the first Designer run.
+- No UI and a "no" in step 3: make no design file. Go to step 11.
+- If the human declines a file, skip it and list it as declined in step 11.
+
+Write the made, skipped and declined files down for step 11. Do not commit them.
+
+## 11. Report
 
 Tell the human, in one short list:
 
@@ -270,6 +289,16 @@ Tell the human, in one short list:
 - What you registered in Orca, and what was already registered.
 - The nesting depth result.
 - The skills method you used.
+- Design files, in this form (omit a line type that has no files):
+  ```text
+  Design files
+  - Made: <repo>/PRODUCT.md (impeccable init)
+  - Made: <repo>/DESIGN.md (impeccable document)
+  - Skipped, already exists: <repo>/PRODUCT.md
+  - Declined: <repo>/DESIGN.md
+  Commit and merge the made files. Run worktrees start from the base branch, so an
+  uncommitted file is not in a run's worktree.
+  ```
 - Anything left for the human (a missing `ac` marker hook, a missing `description`, a skipped repo).
 
 The first ticket, `/skill:ark chief` with a ticket ID, is the E2E check of the whole setup.
