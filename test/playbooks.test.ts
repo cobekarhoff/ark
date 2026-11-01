@@ -159,3 +159,17 @@ test("ARK-174-AC4 report and Designer use committed design context", () => {
     /When a file is missing, say so in a line at the top of `strategies\.md`/,
   );
 });
+
+test("ARK-177-AC7 chief playbook refuses a second live Master Chief and takes over a dead Run", () => {
+  const oneChief = chiefPlaybook
+    .split("### One Master Chief for each project")[1]
+    ?.split("\n## ")[0];
+
+  expect(oneChief).toBeDefined();
+  expect(oneChief).toMatch(/List the Runs: `orca orchestration run-list --json`/);
+  expect(oneChief).toMatch(/objective is exactly "Master Chief: <project> tickets"/);
+  expect(oneChief).toMatch(/If the handle is live and is not your own.*stop/i);
+  expect(oneChief).toMatch(/A Master Chief for <project> already runs in terminal <handle>/);
+  expect(oneChief).toMatch(/If the handle is dead.*take over that Run/i);
+  expect(oneChief).toMatch(/run-use --id <run id>/);
+});
