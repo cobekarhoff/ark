@@ -388,9 +388,10 @@ kbd {
 .top {
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 50px;
-  padding: 0 18px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 50px;
+  padding: 6px 18px;
   flex: none;
 }
 .top h1 {
@@ -400,6 +401,7 @@ kbd {
 }
 .chips {
   display: flex;
+  flex: none;
   gap: 2px;
   padding: 3px;
   margin-left: 8px;
@@ -2202,4 +2204,69 @@ kbd {
 .dialog .body {
   display: grid;
   gap: 10px;
+}
+
+/* views */
+.pane {
+  display: contents;
+}
+.banner {
+  margin: 8px 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--c) 60%, var(--line));
+  background: var(--surface);
+}
+.banner.s-needs {
+  --c: var(--amber);
+}
+.banner.s-bad {
+  --c: var(--red);
+}
+.banner p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.row-main.v-backlog {
+  grid-template-columns: 74px minmax(0, 1fr) 90px 200px 80px;
+  height: 44px;
+}
+.row-main.v-agents {
+  grid-template-columns: 90px 90px 190px 80px minmax(0, 1fr);
+  height: 44px;
+}
+.row-main.v-runs {
+  grid-template-columns: minmax(0, 1fr) 90px 90px 70px;
+  height: 38px;
+}
+.row-main.v-search {
+  grid-template-columns: 80px 90px minmax(0, 1fr);
+  height: 38px;
+}
+.row-main.v-projects {
+  grid-template-columns: 90px 160px minmax(0, 1fr);
+  height: 44px;
+}
+.row-main.v-day,
+span.row-main.v-day {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 150px;
+  height: 34px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px;
+}
+.bar-fill {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--cyan);
+}
+.line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kvrow {
+  display: contents;
 }

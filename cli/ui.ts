@@ -4,6 +4,11 @@ import { join } from "node:path";
 import index from "../ui/index.html";
 import { isLocalRequest, runAction } from "./hub/actions.ts";
 import { arkHome } from "./paths.ts";
+import { readAgents } from "./hub/agents.ts";
+import { readBacklog } from "./hub/backlog.ts";
+import { readMetrics } from "./hub/metrics.ts";
+import { readProjects } from "./hub/projects.ts";
+import { search } from "./hub/search.ts";
 import { createNotifier, markActed } from "./hub/notify.ts";
 import { buildMap } from "./hub/map.ts";
 import { buildTimeline, timelineWindows } from "./hub/timeline.ts";
@@ -76,6 +81,22 @@ export function ui(port: number): void {
           : Response.json({ error: "no such run" }, { status: 404 });
       },
       "/api/needs-me": () => Response.json(hub.state().needs_me),
+      "/api/backlog": () => Response.json(readBacklog()),
+      "/api/agents": async () => Response.json(await readAgents()),
+      "/api/projects": async () => Response.json(await readProjects()),
+      "/api/metrics": (request) => {
+        try {
+          const { searchParams } = new URL(request.url);
+          return Response.json(readMetrics(searchParams.get("week"), searchParams.get("project")));
+        } catch (err) {
+          return Response.json({ error: (err as Error).message }, { status: 400 });
+        }
+      },
+      "/api/search": async (request) => {
+        const query = new URL(request.url).searchParams.get("q")?.trim() ?? "";
+        if (query === "") return Response.json({ error: "q is required" }, { status: 400 });
+        return Response.json(await search(query));
+      },
       "/api/map": (request) => {
         const at = new URL(request.url).searchParams.get("at");
         if (at !== null && Number.isNaN(Date.parse(at)))

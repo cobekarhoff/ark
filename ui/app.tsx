@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { Action, Agent, Item } from "../cli/hub/types.ts";
 import { MapView } from "./map.tsx";
 import { TimelineView } from "./timeline.tsx";
-import { Kbd, ViewBar, type View } from "./views.tsx";
+import { Kbd, ViewBar, views, type View } from "./views.tsx";
 import { AbortButton, ChiefBox, RunLeadMessage } from "./steer.tsx";
 import {
   agentKey,
@@ -29,6 +29,7 @@ import {
   type RunView,
   type Selection,
 } from "./model.ts";
+import { Agents, Backlog, Metrics, Projects, Search } from "./hub-views.tsx";
 
 type Layer = "palette" | "sheet" | null;
 type PaletteEntry = {
@@ -97,6 +98,7 @@ export function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("ark-hub-theme") ?? "dark");
   const [toast, setToast] = useState<string | null>(null);
   const [hashTick, setHashTick] = useState(0);
+  const [pane, setPane] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -199,7 +201,7 @@ export function App() {
         return setLayer(layer === "palette" ? null : "palette");
       }
       if (typing || layer !== null || event.metaKey || event.ctrlKey || event.altKey) return;
-      const viewKey = ["home", "map", "timeline"][Number(event.key) - 1] as View | undefined;
+      const viewKey = views[Number(event.key) - 1]?.view;
       if (viewKey) return setView(viewKey);
       // Map and Timeline read their own keys; Home's list keys must not move Home's selection there.
       if (view !== "home") {
@@ -275,9 +277,15 @@ export function App() {
       label: `Filter: ${name === "all" ? "All projects" : name}`,
       run: () => setFilter(name),
     })),
-    { group: "Go to", label: "Home", hint: "1", run: () => setView("home") },
-    { group: "Go to", label: "Map", hint: "2", run: () => setView("map") },
-    { group: "Go to", label: "Timeline", hint: "3", run: () => setView("timeline") },
+    ...views.map(({ view: name, label, key }) => ({
+      group: "Go to",
+      label,
+      hint: key,
+      run: () => {
+        setView(name);
+        if (name === "home") setSelection(null);
+      },
+    })),
     ...needs.map((item) => ({
       group: "Needs me",
       label: `${item.ticket ?? item.source} · ${item.title}`,
@@ -299,9 +307,11 @@ export function App() {
     })),
   ];
 
+  const viewProps = { hub, filter, known, perform, pane };
+
   return (
     <div className="app" data-focus={focus}>
-      <main className="center" hidden={view !== "home"}>
+      <main className="center" hidden={view === "map" || view === "timeline"}>
         <header className="top">
           <h1>Ark hub</h1>
           <ViewBar view={view} setView={setView} />
@@ -327,288 +337,306 @@ export function App() {
           </button>
         </header>
 
-        {!focus && (
-          <div className="stats" role="group" aria-label="Status">
-            <button
-              className="tile s-working"
-              onClick={() =>
-                setSelection(agents[0] ? { type: "agent", id: agentKey(agents[0]) } : null)
-              }
-            >
-              <b className="n">
-                {working}
-                <small>/{agents.length}</small>
-              </b>
-              <span className="tx">
-                <span className="l">Agents working</span>
-                <span className="s">{stuck ? `${stuck} stuck or dead` : "none stuck"}</span>
-              </span>
-            </button>
-            <button
-              className={`tile ${gates.length ? "s-needs" : "plain"}`}
-              onClick={() => gates[0] && setSelection({ type: "need", id: gates[0].id })}
-            >
-              <b className="n">{gates.length}</b>
-              <span className="tx">
-                <span className="l">Gates waiting</span>
-                <span className="s">
-                  {gates.length ? `oldest ${duration(oldestGate)}` : "none open"}
-                </span>
-              </span>
-            </button>
-            <button className="tile plain">
-              <b className="n">{usd(cost as number | "unknown")}</b>
-              <span className="tx">
-                <span className="l">{filter === "all" ? "Cost today" : "Run cost in scope"}</span>
-                <span className="s">
-                  {hub.readers.orca === "unknown" ? "Orca unknown" : "Orca ok"}
-                </span>
-              </span>
-            </button>
-            <button
-              className="tile plain"
-              onClick={() => setSelection(runs[0] ? { type: "run", id: runs[0].run } : null)}
-            >
-              <b className="n">{runs.length}</b>
-              <span className="tx">
-                <span className="l">Live runs</span>
-                <span className="s">
-                  {runs.filter((run) => run.phase === "escalation").length} escalated ·{" "}
-                  {runs.filter((run) => run.phase === "merge_requests_open").length} to merge
-                </span>
-              </span>
-            </button>
+        {view !== "home" ? (
+          <div className="scroll" data-view={view}>
+            {view === "backlog" && <Backlog {...viewProps} />}
+            {view === "agents" && <Agents {...viewProps} />}
+            {view === "metrics" && <Metrics {...viewProps} />}
+            {view === "search" && <Search {...viewProps} />}
+            {view === "projects" && <Projects {...viewProps} />}
           </div>
-        )}
-
-        {!focus && (
-          <div className="chief">
-            <span className="chief-label">Master Chief</span>
-            {chiefs.map(({ name, chief }) => (
-              <span className="chief-item" key={name} data-chief={chief.state}>
-                <i
-                  className={`dot s-${chief.state === "live" ? "working" : "idle"} ${chief.state === "live" ? "calm" : "hollow"}`}
-                />
-                <b>{name}</b>
-                {chief.state === "live"
-                  ? `live · ${chief.harness ?? "?"} · ${chief.model ?? "?"}`
-                  : chief.state}
-                {chief.state === "live" && (
-                  <button
-                    className="btn sm ghost"
-                    onClick={() =>
-                      void perform({
-                        name: "orca-terminal-switch",
-                        label: `Open ${name} Master Chief`,
-                        params: { handle: chief.handle },
-                      })
-                    }
-                  >
-                    Open
-                  </button>
-                )}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {!focus &&
-          chiefs.map(({ name, chief }) => (
-            <ChiefBox
-              key={name}
-              project={name}
-              live={chief.state === "unknown" ? null : chief.state === "live"}
-            />
-          ))}
-
-        <div className="scroll">
-          {focus ? (
-            <p className="hint">
-              <span className="focus-note">Focus mode.</span> Only what needs you is shown. Press{" "}
-              <Kbd>z</Kbd> to bring the rest back.
-            </p>
-          ) : (
-            digestShown && (
-              <div className="brief">
-                <div className="brief-main">
-                  <p className="lede">{hub.digest}</p>
-                </div>
-                <button className="btn ghost sm" onClick={dismissDigest}>
-                  Dismiss <Kbd>d</Kbd>
+        ) : (
+          <>
+            {!focus && (
+              <div className="stats" role="group" aria-label="Status">
+                <button
+                  className="tile s-working"
+                  onClick={() =>
+                    setSelection(agents[0] ? { type: "agent", id: agentKey(agents[0]) } : null)
+                  }
+                >
+                  <b className="n">
+                    {working}
+                    <small>/{agents.length}</small>
+                  </b>
+                  <span className="tx">
+                    <span className="l">Agents working</span>
+                    <span className="s">{stuck ? `${stuck} stuck or dead` : "none stuck"}</span>
+                  </span>
+                </button>
+                <button
+                  className={`tile ${gates.length ? "s-needs" : "plain"}`}
+                  onClick={() => gates[0] && setSelection({ type: "need", id: gates[0].id })}
+                >
+                  <b className="n">{gates.length}</b>
+                  <span className="tx">
+                    <span className="l">Gates waiting</span>
+                    <span className="s">
+                      {gates.length ? `oldest ${duration(oldestGate)}` : "none open"}
+                    </span>
+                  </span>
+                </button>
+                <button className="tile plain">
+                  <b className="n">{usd(cost as number | "unknown")}</b>
+                  <span className="tx">
+                    <span className="l">
+                      {filter === "all" ? "Cost today" : "Run cost in scope"}
+                    </span>
+                    <span className="s">
+                      {hub.readers.orca === "unknown" ? "Orca unknown" : "Orca ok"}
+                    </span>
+                  </span>
+                </button>
+                <button
+                  className="tile plain"
+                  onClick={() => setSelection(runs[0] ? { type: "run", id: runs[0].run } : null)}
+                >
+                  <b className="n">{runs.length}</b>
+                  <span className="tx">
+                    <span className="l">Live runs</span>
+                    <span className="s">
+                      {runs.filter((run) => run.phase === "escalation").length} escalated ·{" "}
+                      {runs.filter((run) => run.phase === "merge_requests_open").length} to merge
+                    </span>
+                  </span>
                 </button>
               </div>
-            )
-          )}
-
-          <section aria-labelledby="needs-h">
-            <div className="sec-h">
-              <h2 id="needs-h">Needs me</h2>
-              <span className="count">{needs.length}</span>
-              <span className="hint">longest wait first · bar = age against 4 h</span>
-              <span className="spacer" />
-              <span className="hint">
-                <Kbd>j</Kbd>
-                <Kbd>k</Kbd> move <Kbd>↵</Kbd> open
-              </span>
-            </div>
-            {needs.length === 0 ? (
-              <div className="empty">Nothing is waiting on you. Master Chief has it.</div>
-            ) : (
-              <ul className={`list ${focus ? "big" : ""}`}>
-                {needs.map((item) => {
-                  const kind = kinds[item.kind];
-                  const active = cursor?.id === item.id;
-                  return (
-                    <li
-                      key={item.id}
-                      className={`row need s-${kind.tone} ${active ? "cursor" : ""}`}
-                      data-need={item.id}
-                      aria-current={active}
-                    >
-                      <button
-                        className="row-main needs"
-                        onClick={() => setSelection({ type: "need", id: item.id })}
-                        onDoubleClick={() => open(item)}
-                      >
-                        <span className="mk" aria-hidden="true" />
-                        <span className="kindcol">
-                          <span className="kind">{kind.label}</span>
-                          <span className="who">
-                            <span className="tag">{item.project}</span>
-                            <span className="tkt muted">{item.ticket ?? item.source}</span>
-                          </span>
-                        </span>
-                        <span className="ttl" title={item.title}>
-                          {item.title}
-                        </span>
-                        <Wait since={item.since} now={now} big={focus} />
-                      </button>
-                      <button
-                        className="act"
-                        disabled={item.action === null}
-                        title={item.action?.label}
-                        data-action-key={kind.key}
-                        onClick={() => void perform(item.action)}
-                      >
-                        <span>{kind.short}</span>
-                        <Kbd>{kind.key}</Kbd>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
             )}
-          </section>
 
-          {!focus && (
-            <section aria-labelledby="runs-h">
-              <div className="sec-h">
-                <h2 id="runs-h">Live runs</h2>
-                <span className="count plain">{runs.length}</span>
-                <span className="hint">I implementer · V validator · R reviewer</span>
-              </div>
-              {runs.length === 0 ? (
-                <div className="empty">No live runs.</div>
-              ) : (
-                <ul className="list">
-                  {runs.map((run) => (
-                    <li
-                      key={run.run}
-                      className={`row ${selection?.type === "run" && selection.id === run.run ? "cursor" : ""}`}
-                      data-run={run.run}
-                    >
+            {!focus && (
+              <div className="chief">
+                <span className="chief-label">Master Chief</span>
+                {chiefs.map(({ name, chief }) => (
+                  <span className="chief-item" key={name} data-chief={chief.state}>
+                    <i
+                      className={`dot s-${chief.state === "live" ? "working" : "idle"} ${chief.state === "live" ? "calm" : "hollow"}`}
+                    />
+                    <b>{name}</b>
+                    {chief.state === "live"
+                      ? `live · ${chief.harness ?? "?"} · ${chief.model ?? "?"}`
+                      : chief.state}
+                    {chief.state === "live" && (
                       <button
-                        className="row-main runs"
-                        onClick={() => setSelection({ type: "run", id: run.run })}
+                        className="btn sm ghost"
+                        onClick={() =>
+                          void perform({
+                            name: "orca-terminal-switch",
+                            label: `Open ${name} Master Chief`,
+                            params: { handle: chief.handle },
+                          })
+                        }
                       >
-                        <span className="runmain">
-                          <span className="t1">
-                            <span className="ttl">{run.ticket.title}</span>
-                            <span className="tag">{run.project}</span>
-                          </span>
-                          <span className="story">{run.story}</span>
-                        </span>
-                        <span className="pill s-working">{run.phase.replaceAll("_", " ")}</span>
-                        <Dots run={run} />
-                        <span
-                          className="ac"
-                          title={`${run.ac.passing} passing, ${run.ac.failing} failing`}
-                        >
-                          <b className={run.ac.passing ? "p" : "z"}>{run.ac.passing}</b>
-                          <i>/</i>
-                          <b className={run.ac.failing ? "f" : "z"}>{run.ac.failing}</b>
-                        </span>
-                        <span className="num">{usd(run.cost.usd)}</span>
+                        Open
                       </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-
-          {!focus && (
-            <section aria-labelledby="notifs-h">
-              <div className="sec-h">
-                <h2 id="notifs-h">Notifications</h2>
-                <span className="count plain">{notifications.length}</span>
-                <span className="hint">newest first · acted = you opened the hub from it</span>
+                    )}
+                  </span>
+                ))}
               </div>
-              {notifications.length === 0 ? (
-                <div className="empty">
-                  {filter === "all"
-                    ? "No notifications yet. A new Needs-me item sends one."
-                    : `No notifications for ${filter === otherFilter ? "other projects" : filter}.`}
-                </div>
+            )}
+
+            {!focus &&
+              chiefs.map(({ name, chief }) => (
+                <ChiefBox
+                  key={name}
+                  project={name}
+                  live={chief.state === "unknown" ? null : chief.state === "live"}
+                />
+              ))}
+
+            <div className="scroll">
+              {focus ? (
+                <p className="hint">
+                  <span className="focus-note">Focus mode.</span> Only what needs you is shown.
+                  Press <Kbd>z</Kbd> to bring the rest back.
+                </p>
               ) : (
-                <>
-                  <div className="colh notifs" aria-hidden="true">
-                    <span />
-                    <span>Time</span>
-                    <span>Kind</span>
-                    <span>Item</span>
-                    <span>Acted</span>
+                digestShown && (
+                  <div className="brief">
+                    <div className="brief-main">
+                      <p className="lede">{hub.digest}</p>
+                    </div>
+                    <button className="btn ghost sm" onClick={dismissDigest}>
+                      Dismiss <Kbd>d</Kbd>
+                    </button>
                   </div>
-                  <ul className="list">
-                    {notifications.map((entry) => {
-                      const kind = kinds[entry.item.kind];
+                )
+              )}
+
+              <section aria-labelledby="needs-h">
+                <div className="sec-h">
+                  <h2 id="needs-h">Needs me</h2>
+                  <span className="count">{needs.length}</span>
+                  <span className="hint">longest wait first · bar = age against 4 h</span>
+                  <span className="spacer" />
+                  <span className="hint">
+                    <Kbd>j</Kbd>
+                    <Kbd>k</Kbd> move <Kbd>↵</Kbd> open
+                  </span>
+                </div>
+                {needs.length === 0 ? (
+                  <div className="empty">Nothing is waiting on you. Master Chief has it.</div>
+                ) : (
+                  <ul className={`list ${focus ? "big" : ""}`}>
+                    {needs.map((item) => {
+                      const kind = kinds[item.kind];
+                      const active = cursor?.id === item.id;
                       return (
                         <li
-                          key={entry.id}
-                          className={`row s-${kind.tone}`}
-                          data-notification={entry.id}
+                          key={item.id}
+                          className={`row need s-${kind.tone} ${active ? "cursor" : ""}`}
+                          data-need={item.id}
+                          aria-current={active}
                         >
                           <button
-                            className="row-main notifs"
-                            onClick={() => setSelection({ type: "need", id: entry.id })}
+                            className="row-main needs"
+                            onClick={() => setSelection({ type: "need", id: item.id })}
+                            onDoubleClick={() => open(item)}
                           >
                             <span className="mk" aria-hidden="true" />
-                            <span className="muted num" title={entry.time}>
-                              {notificationTime(entry.time, now)}
+                            <span className="kindcol">
+                              <span className="kind">{kind.label}</span>
+                              <span className="who">
+                                <span className="tag">{item.project}</span>
+                                <span className="tkt muted">{item.ticket ?? item.source}</span>
+                              </span>
                             </span>
-                            <span className="kind">{kind.label}</span>
-                            <span className="ttl" title={entry.item.title}>
-                              {entry.item.title}
-                              <span className="tag">{entry.item.project}</span>
+                            <span className="ttl" title={item.title}>
+                              {item.title}
                             </span>
-                            <span className={`acted ${entry.acted ? "s-ok" : "muted"}`}>
-                              <i className={`dot ${entry.acted ? "" : "hollow"}`} />
-                              {entry.acted ? "yes" : "no"}
-                            </span>
+                            <Wait since={item.since} now={now} big={focus} />
+                          </button>
+                          <button
+                            className="act"
+                            disabled={item.action === null}
+                            title={item.action?.label}
+                            data-action-key={kind.key}
+                            onClick={() => void perform(item.action)}
+                          >
+                            <span>{kind.short}</span>
+                            <Kbd>{kind.key}</Kbd>
                           </button>
                         </li>
                       );
                     })}
                   </ul>
-                </>
+                )}
+              </section>
+
+              {!focus && (
+                <section aria-labelledby="runs-h">
+                  <div className="sec-h">
+                    <h2 id="runs-h">Live runs</h2>
+                    <span className="count plain">{runs.length}</span>
+                    <span className="hint">I implementer · V validator · R reviewer</span>
+                  </div>
+                  {runs.length === 0 ? (
+                    <div className="empty">No live runs.</div>
+                  ) : (
+                    <ul className="list">
+                      {runs.map((run) => (
+                        <li
+                          key={run.run}
+                          className={`row ${selection?.type === "run" && selection.id === run.run ? "cursor" : ""}`}
+                          data-run={run.run}
+                        >
+                          <button
+                            className="row-main runs"
+                            onClick={() => setSelection({ type: "run", id: run.run })}
+                          >
+                            <span className="runmain">
+                              <span className="t1">
+                                <span className="ttl">{run.ticket.title}</span>
+                                <span className="tag">{run.project}</span>
+                              </span>
+                              <span className="story">{run.story}</span>
+                            </span>
+                            <span className="pill s-working">{run.phase.replaceAll("_", " ")}</span>
+                            <Dots run={run} />
+                            <span
+                              className="ac"
+                              title={`${run.ac.passing} passing, ${run.ac.failing} failing`}
+                            >
+                              <b className={run.ac.passing ? "p" : "z"}>{run.ac.passing}</b>
+                              <i>/</i>
+                              <b className={run.ac.failing ? "f" : "z"}>{run.ac.failing}</b>
+                            </span>
+                            <span className="num">{usd(run.cost.usd)}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
               )}
-            </section>
-          )}
-        </div>
+
+              {!focus && (
+                <section aria-labelledby="notifs-h">
+                  <div className="sec-h">
+                    <h2 id="notifs-h">Notifications</h2>
+                    <span className="count plain">{notifications.length}</span>
+                    <span className="hint">newest first · acted = you opened the hub from it</span>
+                  </div>
+                  {notifications.length === 0 ? (
+                    <div className="empty">
+                      {filter === "all"
+                        ? "No notifications yet. A new Needs-me item sends one."
+                        : `No notifications for ${filter === otherFilter ? "other projects" : filter}.`}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="colh notifs" aria-hidden="true">
+                        <span />
+                        <span>Time</span>
+                        <span>Kind</span>
+                        <span>Item</span>
+                        <span>Acted</span>
+                      </div>
+                      <ul className="list">
+                        {notifications.map((entry) => {
+                          const kind = kinds[entry.item.kind];
+                          return (
+                            <li
+                              key={entry.id}
+                              className={`row s-${kind.tone}`}
+                              data-notification={entry.id}
+                            >
+                              <button
+                                className="row-main notifs"
+                                onClick={() => setSelection({ type: "need", id: entry.id })}
+                              >
+                                <span className="mk" aria-hidden="true" />
+                                <span className="muted num" title={entry.time}>
+                                  {notificationTime(entry.time, now)}
+                                </span>
+                                <span className="kind">{kind.label}</span>
+                                <span className="ttl" title={entry.item.title}>
+                                  {entry.item.title}
+                                  <span className="tag">{entry.item.project}</span>
+                                </span>
+                                <span className={`acted ${entry.acted ? "s-ok" : "muted"}`}>
+                                  <i className={`dot ${entry.acted ? "" : "hollow"}`} />
+                                  {entry.acted ? "yes" : "no"}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </>
+                  )}
+                </section>
+              )}
+            </div>
+          </>
+        )}
       </main>
 
-      <aside className="detail" aria-label="Detail" hidden={view !== "home"}>
-        <Detail hub={hub} now={now} need={cursor} selection={selection} perform={perform} />
+      <aside className="detail" aria-label="Detail" hidden={view === "map" || view === "timeline"}>
+        {view === "home" ? (
+          <Detail hub={hub} now={now} need={cursor} selection={selection} perform={perform} />
+        ) : (
+          <div className="pane" ref={setPane} />
+        )}
       </aside>
       {view === "map" && (
         <MapView

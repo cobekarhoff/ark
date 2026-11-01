@@ -31,9 +31,12 @@ export type SessionUsage = {
 export type SessionWithKey = SessionUsage & {
   /** Identifies the top-level session; subagent transcripts share their parent's key. */
   sessionKey: string;
+  /** The harness whose reader parsed the file. Orca names the same harnesses in `agentIdentity`. */
+  harness: "omp" | "claude" | "codex";
 };
 
 type Source = {
+  harness: SessionWithKey["harness"];
   root: string;
   pattern: string;
   parse: (file: string) => SessionUsage;
@@ -44,16 +47,19 @@ type Source = {
 function sources(): Source[] {
   return [
     {
+      harness: "omp",
       root: process.env.ARK_OMP_SESSIONS ?? join(homedir(), ".omp", "agent", "sessions"),
       pattern: "**/*.jsonl",
       parse: parseOmpSession,
     },
     {
+      harness: "claude",
       root: process.env.ARK_CLAUDE_SESSIONS ?? join(homedir(), ".claude", "projects"),
       pattern: "**/*.jsonl",
       parse: parseClaudeSession,
     },
     {
+      harness: "codex",
       root: process.env.ARK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions"),
       pattern: "**/*.jsonl{,.zst}",
       parse: parseCodexSession,
@@ -92,10 +98,18 @@ export function isInside(directory: string, parent: string): boolean {
   return directory === parent || directory.startsWith(parent + sep);
 }
 
-/** Every session file, from either harness, whose cwd is the run folder or below it. */
-export function readUsage(runDirectory: string): SessionWithKey[] {
-  const parents = new Set([resolve(runDirectory), realpathSync(runDirectory)]);
-  const sessions: SessionWithKey[] = [];
+/**
+ * Every session file, from either harness, whose cwd is one of the folders or below it, grouped by
+ * folder. Scans the session roots once for all folders. A folder that does not exist has no sessions.
+ */
+export function readUsageIn(directories: string[]): Map<string, SessionWithKey[]> {
+  const parents = new Map(
+    directories.map((directory) => [
+      directory,
+      new Set([resolve(directory), ...(existsSync(directory) ? [realpathSync(directory)] : [])]),
+    ]),
+  );
+  const result = new Map<string, SessionWithKey[]>(directories.map((directory) => [directory, []]));
   for (const source of sources()) {
     if (!existsSync(source.root)) continue;
     const relativeFiles = [
@@ -109,12 +123,24 @@ export function readUsage(runDirectory: string): SessionWithKey[] {
       } catch {
         throw new ArkError(`cannot read session file ${file}`);
       }
-      if (cwd === null || ![...parents].some((parent) => isInside(cwd, parent))) continue;
-      sessions.push({
+      if (cwd === null) continue;
+      const matching = directories.filter((directory) =>
+        [...parents.get(directory)!].some((parent) => isInside(cwd, parent)),
+      );
+      if (matching.length === 0) continue;
+      const session = {
         ...source.parse(file),
         sessionKey: (source.keyFor ?? sessionKeyFor)(relativeFile),
-      });
+        harness: source.harness,
+      };
+      for (const directory of matching) result.get(directory)!.push(session);
     }
   }
-  return sessions;
+  return result;
+}
+
+/** Every session file, from either harness, whose cwd is the run folder or below it. */
+export function readUsage(runDirectory: string): SessionWithKey[] {
+  realpathSync(runDirectory);
+  return readUsageIn([runDirectory]).get(runDirectory)!;
 }
