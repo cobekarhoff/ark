@@ -1,8 +1,13 @@
+import { resolve } from "node:path";
 import { execJson } from "./exec.ts";
 import { switchTerminal, type Agent, type Item } from "./types.ts";
 
 // Only the fields the hub reads. Orca output is local and trusted, so it is cast, not parsed.
-type OrcaRun = { id: string; objective?: string; coordinator_handle: string | null };
+type OrcaRun = {
+  id: string;
+  objective?: string;
+  coordinator_handle: string | null;
+};
 type OrcaTask = { id: string; task_title: string };
 type OrcaWorker = {
   taskId: string;
@@ -28,15 +33,60 @@ export type OrcaSnapshot = {
   agents: Map<string, Agent[]>;
   /** Every live terminal, or null when `orca terminal list` failed. */
   terminals: OrcaTerminal[] | null;
-  /** Coordinator handle of every Orca run, so Master Chief detection can skip run leads. */
-  coordinatorHandles: Set<string>;
+  /** Every Orca run, so Master Chief detection can find the Master Chief Run of a project. */
+  runs: OrcaRun[];
 };
 
 export const emptyOrca: OrcaSnapshot = {
   ok: false,
   agents: new Map(),
   terminals: null,
-  coordinatorHandles: new Set(),
+  runs: [],
+};
+
+/**
+ * The live Master Chief of a project: the connected coordinator of the Orca run whose objective is
+ * exactly `Master Chief: <project> tickets`, in the project workspace. No other terminal counts.
+ */
+export const findLiveChief = (
+  snapshot: { terminals: OrcaTerminal[]; runs: OrcaRun[] },
+  project: string,
+  workspace: string,
+): OrcaTerminal | undefined => {
+  const handle = snapshot.runs.find(
+    (orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`,
+  )?.coordinator_handle;
+  return snapshot.terminals.find(
+    (terminal) =>
+      terminal.handle === handle &&
+      terminal.connected &&
+      terminal.worktreePath !== undefined &&
+      resolve(terminal.worktreePath) === workspace,
+  );
+};
+
+/** Reads Orca now, for an action that must not act on a 3-second-old snapshot. Null when Orca did not answer. */
+export async function readTerminals(): Promise<{
+  terminals: OrcaTerminal[];
+  runs: OrcaRun[];
+} | null> {
+  const [runList, terminalList] = await Promise.all([
+    orcaOrchestration<{ runs?: OrcaRun[] }>("run-list"),
+    execJson<{ result?: { terminals?: OrcaTerminal[] } }>(["orca", "terminal", "list", "--json"]),
+  ]);
+  const terminals = terminalList?.result?.terminals;
+  return runList && terminals ? { terminals, runs: runList.runs ?? [] } : null;
+}
+
+/** The live run lead terminal of an Ark run: the coordinator of the Orca run whose objective is `Ark run <run>`. */
+export const findRunLead = (
+  snapshot: { terminals: OrcaTerminal[]; runs: OrcaRun[] },
+  run: string,
+): OrcaTerminal | undefined => {
+  const handle = snapshot.runs.find(
+    (orcaRun) => orcaRun.objective === `Ark run ${run}`,
+  )?.coordinator_handle;
+  return snapshot.terminals.find((terminal) => terminal.handle === handle && terminal.connected);
 };
 
 const orcaOrchestration = async <T>(...args: string[]): Promise<T | null> =>
@@ -122,7 +172,7 @@ export async function readOrca(
     ok: true,
     agents,
     terminals,
-    coordinatorHandles: new Set(orcaRuns.flatMap((orcaRun) => orcaRun.coordinator_handle ?? [])),
+    runs: orcaRuns,
   };
 }
 

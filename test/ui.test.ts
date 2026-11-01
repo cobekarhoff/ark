@@ -6,6 +6,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -30,7 +31,15 @@ function projectConfigFor(workspace: string): Record<string, unknown> {
   return {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "cli", level: "integration", repo: ".", command: "bun test", parser: "bun" }],
+    suites: [
+      {
+        name: "cli",
+        level: "integration",
+        repo: ".",
+        command: "bun test",
+        parser: "bun",
+      },
+    ],
     roles: {
       implementer: { harness: "omp", model: "pi/task" },
       validator: { harness: "omp", model: "pi/validate" },
@@ -53,6 +62,7 @@ beforeEach(() => {
   projectDirectory = writeProject("demo", projectConfigFor(tempGitRepo()));
   orcaBinDirectory = mkdtempSync(join(tmpdir(), "ark-orca-"));
   process.env.ORCA_TERMINALS = "[]";
+  process.env.ORCA_CHIEF_RUNS = "[]";
   process.env.ORCA_RUNS = "[]";
   process.env.ORCA_TASKS = "[]";
   process.env.ORCA_WORKERS = "[]";
@@ -65,8 +75,9 @@ if [ "$ORCA_DELAY" = "1" ]; then sleep 8; fi
 if [ "$1" = "terminal" ]; then
   case "$2" in
     show) printf '{"result":{"terminal":{"connected":true,"agentIdentity":"omp"}}}' ;;
-    list) printf '{"result":{"terminals":%s}}' "$ORCA_TERMINALS" ;;
-    switch) printf '%s\\n' "$*" >> "$ORCA_ACTION_LOG"; printf '{"result":{}}' ;;
+    list) printf '{"result":{"terminals":%s}}' "$ORCA_TERMINALS"; exit 0 ;;
+    send|switch) printf '%s\\n' "$*" >> "$ORCA_ACTION_LOG"; printf '{"result":{}}' ;;
+    create) printf '%s\\n' "$*" >> "$ORCA_ACTION_LOG"; printf '{"result":{"terminal":{"handle":"term_spawned"}}}' ;;
     *) exit 2 ;;
   esac
   exit 0
@@ -77,7 +88,10 @@ case "$2" in
       : > "$ORCA_RUN_LIST_FAIL_MARKER"
       exit 1
     fi
-    printf '{"result":{"runs":%s}}' "$ORCA_RUNS"
+    runs=\${ORCA_RUNS#[}; runs=\${runs%]}
+    chiefs=\${ORCA_CHIEF_RUNS#[}; chiefs=\${chiefs%]}
+    separator=; if [ -n "$runs" ] && [ -n "$chiefs" ]; then separator=,; fi
+    printf '{"result":{"runs":[%s%s%s]}}' "$runs" "$separator" "$chiefs"
     ;;
   task-list) printf '{"result":{"tasks":%s}}' "$ORCA_TASKS" ;;
   worker-list) printf '{"result":{"workers":%s}}' "$ORCA_WORKERS" ;;
@@ -89,6 +103,335 @@ esac
   process.env.PATH = `${orcaBinDirectory}:${process.env.PATH}`;
 });
 
+function terminalActionLog(): string[] {
+  return readFileSync(process.env.ORCA_ACTION_LOG as string, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+}
+
+function liveChiefTerminal(
+  projectWorkspace = JSON.parse(readFileSync(join(projectDirectory, "ark.yml"), "utf8")).workspace,
+): object {
+  return {
+    handle: "term_chief",
+    worktreePath: projectWorkspace,
+    connected: true,
+    agentIdentity: "omp",
+  };
+}
+
+function openRunSnapshot(runId: string): void {
+  process.env.ORCA_RUNS = JSON.stringify([
+    {
+      id: `orca-${runId}`,
+      objective: `Ark run ${runId}`,
+      coordinator_handle: "term_lead",
+    },
+  ]);
+  setMasterChiefs([
+    liveChiefTerminal(),
+    {
+      handle: "term_lead",
+      worktreePath: JSON.parse(readFileSync(join(projectDirectory, "ark.yml"), "utf8")).workspace,
+      connected: true,
+      agentIdentity: "omp",
+    },
+  ]);
+}
+
+test("ARK-177-AC2 a stray workspace terminal with no Master Chief Run is not a Master Chief", async () => {
+  const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
+  process.env.ORCA_ACTION_LOG = actionLog;
+  process.env.ORCA_TERMINALS = JSON.stringify([liveChiefTerminal()]);
+
+  await withUi(async (baseUrl) => {
+    const refused = await fetch(`${baseUrl}/api/actions/chief-message`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: "demo", text: "status?" }),
+    });
+    expect(refused.status).toBe(409);
+    expect(existsSync(actionLog)).toBe(false);
+  });
+});
+
+test("ARK-177-AC1 accepted ADR 0008 supersedes ADR 0007's read-only rule and leaves ADR 0005 accepted", () => {
+  const adr0008 = readFileSync(
+    join(repositoryRoot, "docs/adr/0008-hub-steers-through-master-chief.md"),
+    "utf8",
+  );
+  const adr0007 = readFileSync(join(repositoryRoot, "docs/adr/0007-control-center.md"), "utf8");
+  const adr0005 = readFileSync(
+    join(repositoryRoot, "docs/adr/0005-orca-and-plannotator.md"),
+    "utf8",
+  );
+
+  expect(adr0008).toMatch(/^status: accepted$/m);
+  expect(adr0008).toMatch(/hub steers.*Master Chief/i);
+  expect(adr0005).toMatch(/Plannotator/);
+  expect(adr0007).toMatch(/superseded/i);
+  expect(adr0007).toMatch(/read-only/i);
+  expect(adr0007).toMatch(/control center/i);
+  expect(adr0005).toMatch(/^status: accepted$/m);
+  expect(adr0005).toMatch(/Each gate has one place it is answered/);
+  expect(adr0005).not.toMatch(/superseded/i);
+});
+
+test("ARK-177-AC2 sends chief messages only to the live project's Master Chief terminal", async () => {
+  const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
+  const idleWorkspace = tempGitRepo();
+  writeProject("idle", projectConfigFor(idleWorkspace));
+  process.env.ORCA_ACTION_LOG = actionLog;
+  setMasterChiefs([liveChiefTerminal()]);
+
+  await withUi(async (baseUrl) => {
+    const sent = await fetch(`${baseUrl}/api/actions/chief-message`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: "demo", text: "status?" }),
+    });
+    expect(sent.status).toBe(200);
+    expect(terminalActionLog()).toEqual([
+      "terminal send --terminal term_chief --text status? --enter --json",
+    ]);
+
+    const refused = await fetch(`${baseUrl}/api/actions/chief-message`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: "idle", text: "status?" }),
+    });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      error: "no live Master Chief for project idle",
+    });
+    expect(terminalActionLog()).toHaveLength(1);
+  });
+});
+
+test("ARK-177-AC3 sends run-lead messages and rejects page-selected or unavailable terminals", async () => {
+  const run = startRun("ARK-177-M1", "Message the run lead");
+  const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
+  process.env.ORCA_ACTION_LOG = actionLog;
+  openRunSnapshot(run.runId);
+
+  await withUi(async (baseUrl) => {
+    const post = (params: Record<string, unknown>) =>
+      fetch(`${baseUrl}/api/actions/run-lead-message`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(params),
+      });
+    expect((await post({ run: run.runId, text: "use the smaller step" })).status).toBe(200);
+    expect(terminalActionLog()).toEqual([
+      "terminal send --terminal term_lead --text use the smaller step --enter --json",
+    ]);
+
+    expect(
+      (
+        await post({
+          run: run.runId,
+          text: "wrong target",
+          handle: "term_chief",
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  setMasterChiefs([liveChiefTerminal()]);
+  await withUi(async (baseUrl) => {
+    const refused = await fetch(`${baseUrl}/api/actions/run-lead-message`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run: run.runId, text: "no lead" }),
+    });
+    expect(refused.status).toBe(409);
+    expect(terminalActionLog()).toHaveLength(1);
+  });
+});
+
+test("ARK-177-AC4 sends fixed steering instructions and requires confirmation before abort", async () => {
+  const run = startRun("ARK-177-M2", "Steering actions");
+  const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
+  process.env.ORCA_ACTION_LOG = actionLog;
+  openRunSnapshot(run.runId);
+
+  await withUi(async (baseUrl) => {
+    const post = (instruction: string, confirmed?: boolean) =>
+      fetch(`${baseUrl}/api/actions/chief-instruction`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          project: "demo",
+          instruction,
+          ...(instruction === "abort"
+            ? { run: run.runId, ...(confirmed ? { confirmed } : {}) }
+            : {}),
+        }),
+      });
+    for (const instruction of [
+      "approve-and-queue",
+      "reorder-queue",
+      "pause",
+      "resume",
+      "retry-stuck-agent",
+    ]) {
+      expect((await post(instruction)).status).toBe(200);
+    }
+    expect(terminalActionLog()).toEqual([
+      "terminal send --terminal term_chief --text Hub: approve and queue the proposed tickets in the order shown. The human asked for it. --enter --json",
+      "terminal send --terminal term_chief --text Hub: reorder the queue by priority, highest first, and tell the human the new order. --enter --json",
+      "terminal send --terminal term_chief --text Hub: pause. Do not start new runs. Let running runs finish their current step. --enter --json",
+      "terminal send --terminal term_chief --text Hub: resume. Start queued runs again. --enter --json",
+      "terminal send --terminal term_chief --text Hub: retry the stuck agent. Nudge it, and if it does not respond, restart its step. --enter --json",
+    ]);
+    expect((await post("abort")).status).toBe(400);
+    expect(terminalActionLog()).toHaveLength(5);
+    expect((await post("abort", true)).status).toBe(200);
+    expect(terminalActionLog()).toHaveLength(6);
+    expect(terminalActionLog().at(-1)).toBe(
+      `terminal send --terminal term_chief --text Hub: abort run ${run.runId}. The human confirmed it. --enter --json`,
+    );
+  });
+});
+
+test(
+  "ARK-177-AC4 hub abort dialog sends only after the human confirms",
+  { timeout: 30_000 },
+  async () => {
+    const run = startRun("ARK-177-M3", "Confirm abort");
+    const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
+    process.env.ORCA_ACTION_LOG = actionLog;
+    openRunSnapshot(run.runId);
+
+    await using view = new Bun.WebView({
+      backend: "chrome",
+      width: 1280,
+      height: 900,
+    });
+    await withUi(async (baseUrl) => {
+      await view.navigate(baseUrl);
+      await waitForBrowserValue(
+        view,
+        `document.querySelector("[data-run='${run.runId}']") !== null`,
+      );
+      await view.click(`[data-run="${run.runId}"] button.row-main`);
+      await waitForBrowserValue(view, "document.querySelector('button.danger') !== null");
+      await view.click("button.danger");
+      await waitForBrowserValue(view, "document.querySelector('[role=alertdialog]') !== null");
+      expect(await view.evaluate("document.querySelector('.steer-quote')?.textContent")).toBe(
+        `Hub: abort run ${run.runId}. The human confirmed it.`,
+      );
+      await view.click('[role="alertdialog"] button:not(.danger)');
+      expect(existsSync(actionLog)).toBe(false);
+      await view.click("button.danger");
+      await view.click('[role="alertdialog"] button.danger');
+      await waitForCondition(async () => existsSync(actionLog));
+      expect(terminalActionLog()).toEqual([
+        `terminal send --terminal term_chief --text Hub: abort run ${run.runId}. The human confirmed it. --enter --json`,
+      ]);
+    });
+  },
+);
+
+test("ARK-177-AC5 loads old and chief-role configs and bootstrap defines roles.chief", () => {
+  const configWithChief = projectConfigFor(tempGitRepo());
+  configWithChief.roles = {
+    ...(configWithChief.roles as object),
+    chief: { harness: "omp", model: "pi/task" },
+  };
+  writeProject("with-chief", configWithChief);
+  writeProject("old-config", projectConfigFor(tempGitRepo()));
+
+  expect(ark("status", "--project", "with-chief").code).toBe(0);
+  expect(ark("status", "--project", "old-config").code).toBe(0);
+  const bootstrapPlaybook = readFileSync(
+    join(repositoryRoot, "skills/ark/playbooks/bootstrap.md"),
+    "utf8",
+  );
+  const roleSection = bootstrapPlaybook.split("## 8. Write `ark.yml`")[1]?.split("\n## ")[0];
+  expect(roleSection).toBeDefined();
+  expect(roleSection).toMatch(/chief:\s*\{\s*harness:/);
+  expect(roleSection).toMatch(/chief:\s*\{\s*harness:[^}]*model:/);
+
+  const invalidConfig = {
+    ...configWithChief,
+    roles: { ...(configWithChief.roles as object), chief: { harness: "omp" } },
+  };
+  writeProject("missing-chief-model", invalidConfig);
+  const refused = ark("status", "--project", "missing-chief-model");
+  expect(refused.code).toBe(1);
+  expect(refused.out + refused.err).toContain("roles.chief.model");
+});
+
+test(
+  "ARK-177-AC6 offers Spawn only without a live chief and creates then switches its terminal",
+  { timeout: 30_000 },
+  async () => {
+    const arkWorkspace = tempGitRepo();
+    const otherWorkspace = tempGitRepo();
+    const arkConfig = projectConfigFor(arkWorkspace);
+    arkConfig.roles = {
+      ...(arkConfig.roles as object),
+      chief: { harness: "omp", model: "pi/task" },
+    };
+    writeProject("ark", arkConfig);
+    const otherConfig = projectConfigFor(otherWorkspace);
+    otherConfig.roles = {
+      ...(otherConfig.roles as object),
+      chief: { harness: "omp", model: "pi/task" },
+    };
+    writeProject("other", otherConfig);
+    const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
+    process.env.ORCA_ACTION_LOG = actionLog;
+    setMasterChiefs([liveChiefTerminal(otherWorkspace), liveChiefTerminal()]);
+
+    await using view = new Bun.WebView({
+      backend: "chrome",
+      width: 1280,
+      height: 900,
+    });
+    await withUi(async (baseUrl) => {
+      await view.navigate(baseUrl);
+      const state = await hubState(baseUrl);
+      expect(state.projects.map(({ name, chief }) => [name, chief.state])).toEqual([
+        ["ark", "missing"],
+        ["demo", "live"],
+        ["other", "live"],
+      ]);
+      await waitForBrowserValue(view, "document.querySelector('[data-chief=live]') !== null");
+      expect(await view.evaluate("document.body.innerText")).toContain("Spawn Master Chief");
+      const spawnProjects = await view.evaluate(
+        "Array.from(document.querySelectorAll('.chief-box')).filter((section) => Array.from(section.querySelectorAll('button')).some((button) => button.textContent.trim() === 'Spawn Master Chief')).map((section) => section.querySelector('h3 b')?.textContent)",
+      );
+      expect(spawnProjects).toEqual(["ark"]);
+      await view.click('.chief-box[aria-label="Master Chief for ark"] > .steer-row button.primary');
+      await waitForCondition(async () => existsSync(actionLog));
+      expect(terminalActionLog()).toEqual([
+        `terminal create --worktree path:${arkWorkspace} --title Master Chief: ark --command omp --model pi/task "/skill:ark chief" --json`,
+        "terminal switch --terminal term_spawned",
+      ]);
+
+      const refusedLive = await fetch(`${baseUrl}/api/actions/chief-spawn`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ project: "other" }),
+      });
+      expect(refusedLive.status).toBe(409);
+      writeProject("no-chief-role", projectConfigFor(tempGitRepo()));
+      const refusedMissingRole = await fetch(`${baseUrl}/api/actions/chief-spawn`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ project: "no-chief-role" }),
+      });
+      expect(refusedMissingRole.status).toBe(400);
+      expect(await refusedMissingRole.json()).toMatchObject({
+        error: expect.stringContaining("roles.chief"),
+      });
+      expect(terminalActionLog()).toHaveLength(2);
+    });
+  },
+);
 function startRun(
   ticketId: string,
   title: string,
@@ -175,14 +518,20 @@ test("ARK-168-AC2 serves each run's state", async () => {
   const firstRun = startRun("ARK-168-A", "First dashboard run");
   const secondRun = startRun("ARK-168-B", "Second dashboard run");
   planGate(firstRun.directory);
-  appendEvent(firstRun.directory, "gate.answered", { gate: "plan", answer: "approve" });
+  appendEvent(firstRun.directory, "gate.answered", {
+    gate: "plan",
+    answer: "approve",
+  });
   appendEvent(firstRun.directory, "step.started", {
     step: "build",
     role: "implementer",
     repo: ".",
     round: 1,
   });
-  appendEvent(firstRun.directory, "step.finished", { step: "build", outcome: "succeeded" });
+  appendEvent(firstRun.directory, "step.finished", {
+    step: "build",
+    outcome: "succeeded",
+  });
   appendEvent(firstRun.directory, "test.completed", {
     passed: true,
     heads: {},
@@ -223,7 +572,12 @@ test("ARK-168-AC2 serves each run's state", async () => {
       steps: [{ id: "build", role: "implementer", status: "succeeded" }],
       merge_requests: [{ repo: ".", url: "https://example.test/pull/17", number: 17 }],
       agents: [
-        { role: "run lead", terminal: "term_lead", liveness: "live", model: "omp" },
+        {
+          role: "run lead",
+          terminal: "term_lead",
+          liveness: "live",
+          model: "omp",
+        },
         {
           role: "worker",
           title: "Build dashboard",
@@ -234,7 +588,10 @@ test("ARK-168-AC2 serves each run's state", async () => {
         },
       ],
     });
-    expect(planningRun).toMatchObject({ ticket: { id: "ARK-168-B" }, phase: "planning" });
+    expect(planningRun).toMatchObject({
+      ticket: { id: "ARK-168-B" },
+      phase: "planning",
+    });
   });
 });
 
@@ -279,7 +636,13 @@ test("ARK-168-AC3 gives agents an Orca terminal switch action", async () => {
   const run = startRun("ARK-168-E", "Worker action");
   setOrcaRuns(
     [run.runId],
-    [{ dispatchId: "dispatch-1", taskId: "task-1", agentTerminalHandle: "term_abc" }],
+    [
+      {
+        dispatchId: "dispatch-1",
+        taskId: "task-1",
+        agentTerminalHandle: "term_abc",
+      },
+    ],
     [{ id: "task-1", task_title: "Worker task" }],
   );
 
@@ -305,7 +668,10 @@ test("ARK-168-AC3 gives a waiting plan gate its Plannotator action", async () =>
     const data = await hubState(baseUrl);
     expect(data.needs_me.find((item) => item.id === `gate:${run.runId}:plan`)).toMatchObject({
       source: "ark",
-      action: { name: "plannotator-annotate", params: { kind: "plan", run: run.runId } },
+      action: {
+        name: "plannotator-annotate",
+        params: { kind: "plan", run: run.runId },
+      },
     });
   });
 });
@@ -324,8 +690,16 @@ function setEventTime(directory: string, eventType: string, time: string): void 
 
 function readyRun(run: { runId: string; directory: string }, step = "build"): void {
   planGate(run.directory);
-  appendEvent(run.directory, "gate.answered", { gate: "plan", answer: "approve" });
-  appendEvent(run.directory, "step.started", { step, role: "implementer", repo: ".", round: 1 });
+  appendEvent(run.directory, "gate.answered", {
+    gate: "plan",
+    answer: "approve",
+  });
+  appendEvent(run.directory, "step.started", {
+    step,
+    role: "implementer",
+    repo: ".",
+    round: 1,
+  });
 }
 
 function startProjectRun(
@@ -348,8 +722,34 @@ function startProjectRun(
   };
 }
 
+/** Sets the live terminals and, for each, the Master Chief Run its project would have bound it to. */
 function setMasterChiefs(terminals: object[]): void {
   process.env.ORCA_TERMINALS = JSON.stringify(terminals);
+  const projectsDirectory = join(process.env.ARK_HOME as string, "projects");
+  const workspaceToProject = new Map(
+    readdirSync(projectsDirectory).map((name) => [
+      JSON.parse(readFileSync(join(projectsDirectory, name, "ark.yml"), "utf8")).workspace,
+      name,
+    ]),
+  );
+  process.env.ORCA_CHIEF_RUNS = JSON.stringify(
+    terminals.flatMap((terminal) => {
+      const { handle, worktreePath } = terminal as {
+        handle: string;
+        worktreePath: string;
+      };
+      const project = workspaceToProject.get(worktreePath);
+      return project
+        ? [
+            {
+              id: `orca-chief-${project}`,
+              objective: `Master Chief: ${project} tickets`,
+              coordinator_handle: handle,
+            },
+          ]
+        : [];
+    }),
+  );
 }
 
 async function waitForBrowserValue<T>(
@@ -400,12 +800,18 @@ test(
       try {
         await stream.read();
         const before = Date.now();
-        appendEvent(run.directory, "step.finished", { step: "build", outcome: "succeeded" });
+        appendEvent(run.directory, "step.finished", {
+          step: "build",
+          outcome: "succeeded",
+        });
         let pushed = "";
         while (Date.now() - before < 4_500) {
           const chunk = await Promise.race([
             stream.read(),
-            Bun.sleep(4_500).then(() => ({ done: true as const, value: undefined })),
+            Bun.sleep(4_500).then(() => ({
+              done: true as const,
+              value: undefined,
+            })),
           ]);
           if (chunk.done) break;
           pushed += new TextDecoder().decode(chunk.value);
@@ -548,7 +954,10 @@ test(
     planGate(waitingGate.directory);
     const readyMerge = startRun("ARK-176-C2", "Ready MR");
     readyRun(readyMerge);
-    appendEvent(readyMerge.directory, "step.finished", { step: "build", outcome: "succeeded" });
+    appendEvent(readyMerge.directory, "step.finished", {
+      step: "build",
+      outcome: "succeeded",
+    });
     appendEvent(readyMerge.directory, "test.completed", {
       passed: true,
       heads: {},
@@ -561,7 +970,10 @@ test(
       repo: ".",
       round: 1,
     });
-    appendEvent(readyMerge.directory, "step.finished", { step: "review", outcome: "succeeded" });
+    appendEvent(readyMerge.directory, "step.finished", {
+      step: "review",
+      outcome: "succeeded",
+    });
     appendEvent(readyMerge.directory, "merge_request.opened", {
       repo: ".",
       url: "https://example.test/pull/31",
@@ -636,8 +1048,14 @@ test(
           "retro",
           "ticket",
         ]);
-        expect(itemByKind.get("gate")).toMatchObject({ source: "ark", ticket: "ARK-176-C1" });
-        expect(itemByKind.get("mr")).toMatchObject({ source: "ark", ticket: "ARK-176-C2" });
+        expect(itemByKind.get("gate")).toMatchObject({
+          source: "ark",
+          ticket: "ARK-176-C1",
+        });
+        expect(itemByKind.get("mr")).toMatchObject({
+          source: "ark",
+          ticket: "ARK-176-C2",
+        });
         expect(itemByKind.get("question")).toMatchObject({
           source: "plannotator",
           title: "Inbox question",
@@ -646,8 +1064,14 @@ test(
           source: "orca",
           title: expect.stringContaining("stuck"),
         });
-        expect(itemByKind.get("ticket")).toMatchObject({ source: "ark", ticket: "ARK-176-C4" });
-        expect(itemByKind.get("retro")).toMatchObject({ source: "ark", ticket: "ARK-176-C3" });
+        expect(itemByKind.get("ticket")).toMatchObject({
+          source: "ark",
+          ticket: "ARK-176-C4",
+        });
+        expect(itemByKind.get("retro")).toMatchObject({
+          source: "ark",
+          ticket: "ARK-176-C3",
+        });
       });
 
       process.env.ORCA_DELAY = "1";
@@ -676,7 +1100,10 @@ test(
       { id: "ARK-176-D-AC2", text: "One fails" },
     ]);
     readyRun(run);
-    appendEvent(run.directory, "step.finished", { step: "build", outcome: "succeeded" });
+    appendEvent(run.directory, "step.finished", {
+      step: "build",
+      outcome: "succeeded",
+    });
     appendEvent(run.directory, "test.completed", {
       passed: false,
       heads: {},
@@ -702,9 +1129,17 @@ test(
       const data = await hubState(baseUrl);
       expect(data.projects).toContainEqual({
         name: "demo",
-        chief: { state: "live", handle: "term_chief", harness: "omp", model: "pi/task" },
+        chief: {
+          state: "live",
+          handle: "term_chief",
+          harness: "omp",
+          model: "pi/task",
+        },
       });
-      expect(data.projects).toContainEqual({ name: "missing", chief: { state: "missing" } });
+      expect(data.projects).toContainEqual({
+        name: "missing",
+        chief: { state: "missing" },
+      });
       expect(data.runs.find((item) => item.run === run.runId)).toMatchObject({
         phase: "building",
         round: 1,
@@ -746,7 +1181,10 @@ test("ARK-176-AC4 reports unknown Master Chief state when Orca run-list fails", 
     // The child process has signaled the failure; allow its rejected result to reach the hub.
     await Bun.sleep(50);
     const data = await hubState(baseUrl, false);
-    expect(data.projects).toContainEqual({ name: "demo", chief: { state: "unknown" } });
+    expect(data.projects).toContainEqual({
+      name: "demo",
+      chief: { state: "unknown" },
+    });
   });
 });
 
@@ -778,7 +1216,10 @@ printf '%s %s\\n' "$0" "$*" >> "$ORCA_ACTION_LOG"
       const actions: { name: string; params: Record<string, unknown> }[] = [
         { name: "orca-terminal-switch", params: { handle: "term_abc" } },
         { name: "plannotator-session", params: { index: 3 } },
-        { name: "plannotator-annotate", params: { kind: "plan", run: run.runId } },
+        {
+          name: "plannotator-annotate",
+          params: { kind: "plan", run: run.runId },
+        },
         { name: "plannotator-inbox", params: {} },
       ];
       for (const action of actions) {
@@ -803,7 +1244,10 @@ printf '%s %s\\n' "$0" "$*" >> "$ORCA_ACTION_LOG"
 
       const foreign = await fetch(`${baseUrl}/api/actions/plannotator-inbox`, {
         method: "POST",
-        headers: { origin: "https://attacker.test", "content-type": "application/json" },
+        headers: {
+          origin: "https://attacker.test",
+          "content-type": "application/json",
+        },
         body: "{}",
       });
       const unknown = await fetch(`${baseUrl}/api/actions/not-an-action`, {
@@ -831,7 +1275,10 @@ test(
   async () => {
     const run = startRun("ARK-176-F", "Closed step");
     readyRun(run);
-    appendEvent(run.directory, "step.finished", { step: "build", outcome: "succeeded" });
+    appendEvent(run.directory, "step.finished", {
+      step: "build",
+      outcome: "succeeded",
+    });
     appendEvent(run.directory, "step.started", {
       step: "review",
       role: "reviewer",
@@ -910,7 +1357,10 @@ test(
     );
     const liveRun = startRun("ARK-176-G3", "Live project run");
     readyRun(liveRun);
-    appendEvent(liveRun.directory, "step.finished", { step: "build", outcome: "succeeded" });
+    appendEvent(liveRun.directory, "step.finished", {
+      step: "build",
+      outcome: "succeeded",
+    });
     const workspacePath = JSON.parse(
       readFileSync(join(process.env.ARK_HOME as string, "projects", "demo", "ark.yml"), "utf8"),
     ).workspace as string;
@@ -929,7 +1379,10 @@ test(
         {
           taskId: "task-1",
           agentTerminalHandle: "term_agent",
-          projection: { liveness: { verdict: "live" }, stage: { activity: "working" } },
+          projection: {
+            liveness: { verdict: "live" },
+            stage: { activity: "working" },
+          },
         },
       ],
       [{ id: "task-1", task_title: "UI agent" }],
@@ -942,7 +1395,11 @@ test(
       })),
     );
 
-    await using view = new Bun.WebView({ backend: "chrome", width: 1440, height: 1000 });
+    await using view = new Bun.WebView({
+      backend: "chrome",
+      width: 1440,
+      height: 1000,
+    });
     await withUi(async (baseUrl) => {
       await view.navigate(baseUrl);
       await waitForBrowserValue(view, "document.querySelector('[data-need]')?.dataset.need");
@@ -999,7 +1456,11 @@ test(
     );
     chmodSync(join(orcaBinDirectory, "plannotator"), 0o755);
 
-    await using view = new Bun.WebView({ backend: "chrome", width: 1280, height: 900 });
+    await using view = new Bun.WebView({
+      backend: "chrome",
+      width: 1280,
+      height: 900,
+    });
     await withUi(async (baseUrl) => {
       await view.navigate(baseUrl);
       await waitForBrowserValue(view, "document.querySelectorAll('[data-need]').length === 3");
@@ -1325,7 +1786,11 @@ test(
     const failMarker = join(commandDirectory, "orca-fails");
     writeFileSync(failMarker, "");
     process.env.ORCA_RUNS = JSON.stringify([
-      { id: "orca-existing-run", objective: `Ark run ${newRun.runId}`, coordinator_handle: null },
+      {
+        id: "orca-existing-run",
+        objective: `Ark run ${newRun.runId}`,
+        coordinator_handle: null,
+      },
     ]);
     process.env.ORCA_TASKS = JSON.stringify([
       { id: "old-worker", task_title: "Existing stuck worker" },
@@ -1334,7 +1799,10 @@ test(
       {
         taskId: "old-worker",
         agentTerminalHandle: "term_old_worker",
-        projection: { liveness: { verdict: "stuck" }, stage: { activity: "working" } },
+        projection: {
+          liveness: { verdict: "stuck" },
+          stage: { activity: "working" },
+        },
       },
     ]);
     process.env.ORCA_RUN_LIST_FAIL_MARKER = failMarker;
@@ -1450,10 +1918,17 @@ test(
       history,
       `${[
         ...notifications.map((notification) => JSON.stringify(notification)),
-        JSON.stringify({ acted: "gate:middle:plan", time: "2026-01-02T11:00:00.000Z" }),
+        JSON.stringify({
+          acted: "gate:middle:plan",
+          time: "2026-01-02T11:00:00.000Z",
+        }),
       ].join("\n")}\n`,
     );
-    await using view = new Bun.WebView({ backend: "chrome", width: 1280, height: 900 });
+    await using view = new Bun.WebView({
+      backend: "chrome",
+      width: 1280,
+      height: 900,
+    });
     await withUi(async (baseUrl) => {
       await view.navigate(baseUrl);
       await waitForBrowserValue(
@@ -1488,7 +1963,11 @@ test(
     const { log, commandDirectory } = setupNotifier();
     process.env.ARK_NOTIFIER = join(commandDirectory, "notifier");
     const uiServer = await startUi();
-    await using view = new Bun.WebView({ backend: "chrome", width: 1280, height: 900 });
+    await using view = new Bun.WebView({
+      backend: "chrome",
+      width: 1280,
+      height: 900,
+    });
     try {
       const baseUrl = `http://127.0.0.1:${uiServer.port}`;
       await hubState(baseUrl);

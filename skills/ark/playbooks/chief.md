@@ -21,6 +21,23 @@ If the `orca` command is missing, say so and stop.
 
 Use the project name as `<project>` below.
 
+### One Master Chief for each project
+
+Do this before anything else in the session. Each project has one Master Chief.
+
+1. List the Runs: `orca orchestration run-list --json`.
+2. Find a Run whose objective is exactly "Master Chief: <project> tickets". If none exists, create it now. `run-create` binds this terminal to the new Run, and the hub finds and steers Master Chief through that Run:
+
+   ```sh
+   orca orchestration run-create --objective "Master Chief: <project> tickets" --json
+   ```
+
+   Then skip steps 3 to 5.
+
+3. Read the Run's `coordinator_handle` (`orca orchestration run-show --id <run id> --json`). Check that it is live with `orca terminal list --json`.
+4. If the handle is live and is not your own `$ORCA_TERMINAL_HANDLE`, stop. Do nothing else. Tell the human: "A Master Chief for <project> already runs in terminal <handle>. Use that terminal." Name the handle.
+5. If the handle is dead (not listed), take over that Run. Do not create another. Bind this terminal to it with `orca orchestration run-use --id <run id>`, then use it in section 5.
+
 ## 3. Evaluate the ticket
 
 The human names a ticket or several. For each one:
@@ -42,11 +59,7 @@ Then ask the human which ones to queue, with the ask tool. Recommend an answer. 
 
 The queue is a set of Orca Tasks in Master Chief's own Orca Run.
 
-1. Check for a Run: `orca orchestration run-current --json`. Use that Run only when its objective is exactly "Master Chief: <project> tickets". In every other case, including no Run or a Run with another objective, create it. `run-create` binds this terminal to the new Run:
-
-   ```sh
-   orca orchestration run-create --objective "Master Chief: <project> tickets" --json
-   ```
+1. Use the Run bound at start: `orca orchestration run-current --json` must show the objective "Master Chief: <project> tickets". If it does not, bind this terminal to the Run with `orca orchestration run-use --id <run id>`; create the Run as in "One Master Chief for each project" only when none exists.
 
 2. Create one Task for each approved ticket. Put the ID of every Task it depends on in `--deps`. A ticket depends on another when it is blocked by it in the ticket source or when the human says so.
 
@@ -106,7 +119,7 @@ Do these steps in order for one ready ticket.
    orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree current --agent <harness> --model <model> --json
    ```
 
-   Use the `harness` and `model` of the `implementer` role in `ark.yml` unless the human names others. If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.
+   Use the `harness` and `model` of the `chief` role in `ark.yml` unless the human names others. If `roles.chief` is missing, do not start the run lead and do not edit `ark.yml`. Tell the human: "Prerequisite missing: `roles.chief` (harness and model) is not set in `<project>/ark.yml`. Add it, for example `chief: { harness: claude, model: claude-opus }`, then ask me again." If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.
 
    If `worker-start` exits non-zero, do not start it again. Read `failedStage` and `residualResources` in the output, tell the human, and decide with them.
 

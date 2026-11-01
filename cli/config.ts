@@ -22,7 +22,11 @@ export type ProjectConfig = {
     command: string;
     parser: string;
   }[];
-  roles: Record<Role, RoleConfig> & { evaluator?: RoleConfig; designer?: RoleConfig };
+  roles: Record<Role, RoleConfig> & {
+    evaluator?: RoleConfig;
+    designer?: RoleConfig;
+    chief?: RoleConfig;
+  };
   concurrency: number;
   round_budget: number;
 };
@@ -105,9 +109,13 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
 
   const rolesField = asObject(fields.roles ?? fail("roles is required"), "roles");
   const roles = {} as ProjectConfig["roles"];
-  // The evaluator and designer are optional: ark evaluation record and ark strategy record name them when missing.
-  for (const role of [...roleNames, "evaluator" as const, "designer" as const]) {
-    if ((role === "evaluator" || role === "designer") && rolesField[role] === undefined) continue;
+  // The evaluator, designer and chief are optional: ark evaluation record, ark strategy record and the chief playbook name them when missing.
+  for (const role of [...roleNames, "evaluator" as const, "designer" as const, "chief" as const]) {
+    if (
+      (role === "evaluator" || role === "designer" || role === "chief") &&
+      rolesField[role] === undefined
+    )
+      continue;
     const entry = asObject(rolesField[role] ?? fail(`roles.${role} is required`), `roles.${role}`);
     roles[role] = {
       harness: text(entry, "harness", `roles.${role}.harness`),
