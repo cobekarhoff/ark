@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Action, Agent, Item } from "../cli/hub/types.ts";
+import { AbortButton, ChiefBox, RunLeadMessage } from "./steer.tsx";
 import {
   agentTone,
   duration,
@@ -19,7 +20,12 @@ import {
 } from "./model.ts";
 
 type Layer = "palette" | "sheet" | null;
-type PaletteEntry = { group: string; label: string; hint?: string; run: () => void };
+type PaletteEntry = {
+  group: string;
+  label: string;
+  hint?: string;
+  run: () => void;
+};
 
 const Kbd = ({ children }: { children: ReactNode }) => <kbd>{children}</kbd>;
 
@@ -236,7 +242,12 @@ export function App() {
       run: () => setFocus(!focus),
     },
     { group: "Actions", label: "Toggle theme", hint: "t", run: toggleTheme },
-    { group: "Actions", label: "Show keyboard shortcuts", hint: "?", run: () => setLayer("sheet") },
+    {
+      group: "Actions",
+      label: "Show keyboard shortcuts",
+      hint: "?",
+      run: () => setLayer("sheet"),
+    },
     ...["all", ...known, otherFilter].map((name) => ({
       group: "Filter",
       label: `Filter: ${name === "all" ? "All projects" : name}`,
@@ -256,7 +267,11 @@ export function App() {
     ...agents.map((agent) => ({
       group: "Agents",
       label: `${agent.role} · ${agent.title}`,
-      run: () => setSelection({ type: "agent", id: `${agent.run}:${agent.role}:${agent.title}` }),
+      run: () =>
+        setSelection({
+          type: "agent",
+          id: `${agent.run}:${agent.role}:${agent.title}`,
+        }),
     })),
   ];
 
@@ -371,6 +386,15 @@ export function App() {
             ))}
           </div>
         )}
+
+        {!focus &&
+          chiefs.map(({ name, chief }) => (
+            <ChiefBox
+              key={name}
+              project={name}
+              live={chief.state === "unknown" ? null : chief.state === "live"}
+            />
+          ))}
 
         <div className="scroll">
           {focus ? (
@@ -658,8 +682,14 @@ function Detail({
                 {mergeRequest.label}
               </button>
             ))}
+            {run.open && <AbortButton project={run.project} run={run.run} />}
           </div>
         </div>
+        {run.open && (
+          <section className="d-sec">
+            <RunLeadMessage run={run.run} />
+          </section>
+        )}
         <section className="d-sec">
           <h3>Steps</h3>
           <table className="t">
