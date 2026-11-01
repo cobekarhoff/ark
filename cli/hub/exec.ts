@@ -8,6 +8,7 @@ export const readerTimeoutMilliseconds = 2000;
 export async function exec(
   command: string[],
   timeoutMilliseconds = readerTimeoutMilliseconds,
+  okExitCodes = [0],
   cwd?: string,
 ): Promise<string | null> {
   try {
@@ -17,7 +18,7 @@ export async function exec(
     const output = await Promise.race([
       new Response(child.stdout)
         .text()
-        .then(async (text) => ((await child.exited) === 0 ? text : null)),
+        .then(async (text) => (okExitCodes.includes(await child.exited) ? text : null)),
       Bun.sleep(timeoutMilliseconds + 100).then(() => null),
     ]);
     clearTimeout(killer);
@@ -31,9 +32,10 @@ export async function exec(
 export async function execJson<T>(
   command: string[],
   timeoutMilliseconds = readerTimeoutMilliseconds,
+  okExitCodes = [0],
   cwd?: string,
 ): Promise<T | null> {
-  const output = await exec(command, timeoutMilliseconds, cwd);
+  const output = await exec(command, timeoutMilliseconds, okExitCodes, cwd);
   if (output === null) return null;
   try {
     return JSON.parse(output) as T;

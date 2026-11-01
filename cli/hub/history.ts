@@ -64,6 +64,7 @@ async function readChecks(
     }>(
       ["gh", "pr", "view", mergeRequest.url, "--json", "statusCheckRollup"],
       ciTimeoutMilliseconds,
+      undefined,
       cwd,
     );
     const checks = view?.statusCheckRollup;
@@ -83,6 +84,7 @@ async function readChecks(
   }>(
     ["glab", "mr", "view", String(mergeRequest.number), "--output", "json"],
     ciTimeoutMilliseconds,
+    undefined,
     cwd,
   );
   const status = (view?.head_pipeline ?? view?.pipeline)?.status;
