@@ -247,7 +247,7 @@ echo $! > "<run folder>/gates/plan-<n>.pid"
   orca orchestration send --type status --subject "Plan review open for <run>" --body "Plannotator is open on plan.md. The human answers there."
   ```
 
-- Read the exit code and `<run folder>/gates/plan-<n>.json`:
+- Read `<run folder>/gates/plan-<n>.json`. The `decision` gives the answer. If the process ended and left no result file, the gate failed to start (exit 2):
 
   | Exit | `decision`  | What you do                                                                     |
   | ---- | ----------- | ------------------------------------------------------------------------------- |
