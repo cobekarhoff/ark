@@ -341,6 +341,46 @@ test("ARK-173-AC10 old config loads but visible work requires a configured Desig
   expect(bootstrap).toContain("designer: { harness: <harness>, model: <model> }");
 });
 
+const withoutDesigner = () => {
+  const config = JSON.parse(readFileSync(join(projectDirectory, "ark.yml"), "utf8"));
+  delete config.roles.designer;
+  writeProject("demo", config);
+};
+
+const phase = () => JSON.parse(readFileSync(join(runDirectory, "state.json"), "utf8")).phase;
+
+test("ARK-238-AC1 a none surface accepts a card with no Mockup line and no designer role", () => {
+  withoutDesigner();
+  expect(evaluation(["none"]).code).toBe(0);
+  strategies(card("S1", "Reason: only.\n"));
+  expect(ark("strategy", "record", runId).code).toBe(0);
+  expect(phase()).toBe("planning");
+});
+
+test("ARK-238-AC2 a one-card document strategy needs no Mockup line and no designer role", () => {
+  withoutDesigner();
+  expect(evaluation(["document"]).code).toBe(0);
+  strategies(card("S1", "Reason: only.\n"));
+  expect(ark("strategy", "record", runId).code).toBe(0);
+  expect(phase()).toBe("planning");
+});
+
+test("ARK-238-AC2 a two-card document strategy still requires a Mockup line", () => {
+  expect(evaluation(["document"]).code).toBe(0);
+  strategies(card("S1"), card("S2", "Reason: other.\n"));
+  const result = ark("strategy", "record", runId);
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("S1");
+});
+
+test("ARK-238-AC3 the run-lead playbook says when to skip the Mockup line and the Designer", () => {
+  const lead = readFileSync(join(import.meta.dir, "../skills/ark/playbooks/run-lead.md"), "utf8");
+  expect(lead).toContain(
+    "when `Surfaces` is only `none`, or when there is one card and `Surfaces` is only `document`, leave out the `Mockup:` line",
+  );
+  expect(lead).toContain("skip the Designer");
+});
+
 test("ARK-173-AC13 mockups remain outside actual worktrees and use one human review loop", () => {
   evaluation(["web_ui"]);
   mkdirSync(join(runDirectory, "mockups"), { recursive: true });
