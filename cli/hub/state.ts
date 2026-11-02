@@ -9,8 +9,20 @@ import { collectHistory } from "./history.ts";
 import { arkItems, readRuns, type RunInfo } from "./ark.ts";
 import { readNotifications } from "./notify.ts";
 import { createCollector, readCi, type Observed } from "./changes.ts";
-import { emptyOrca, findLiveChief, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
-import { limitItems, readUsageLimits, type UsageLimit } from "./limits.ts";
+import {
+  emptyOrca,
+  findLiveChief,
+  orcaItems,
+  readOrca,
+  type OrcaSnapshot,
+} from "./orca.ts";
+import {
+  limitAgents,
+  limitItems,
+  readUsageLimits,
+  type UsageLimit,
+} from "./limits.ts";
+import { projectOfPath } from "./agents.ts";
 import {
   emptyPlannotator,
   plannotatorItems,
@@ -42,7 +54,10 @@ export function readLastSeen(): string | null {
 }
 
 export function markSeen(): void {
-  writeFileSync(lastSeenFile(), JSON.stringify({ last_seen: new Date().toISOString() }));
+  writeFileSync(
+    lastSeenFile(),
+    JSON.stringify({ last_seen: new Date().toISOString() }),
+  );
 }
 
 const criterionLabel = (id: string, ticket: string) =>
@@ -83,7 +98,11 @@ function repoName(project: string, repo: string): string {
   }
 }
 
-function digestOf(runs: RunInfo[], waiting: number, lastSeen: string | null): string {
+function digestOf(
+  runs: RunInfo[],
+  waiting: number,
+  lastSeen: string | null,
+): string {
   const since = lastSeen === null ? 0 : Date.parse(lastSeen);
   const events = runs
     .flatMap((run) => run.events)
@@ -96,7 +115,10 @@ function digestOf(runs: RunInfo[], waiting: number, lastSeen: string | null): st
     `runs closed: ${count((type) => type === "run.closed")}`,
   ].filter((part) => !part.endsWith(": 0"));
   const waits = `items waiting for you: ${waiting}`;
-  const away = lastSeen === null ? "Welcome" : `Since ${new Date(lastSeen).toLocaleTimeString()}`;
+  const away =
+    lastSeen === null
+      ? "Welcome"
+      : `Since ${new Date(lastSeen).toLocaleTimeString()}`;
   return `${away}, ${[...parts, waits].join("; ")}.`;
 }
 
@@ -117,7 +139,8 @@ export function createHub() {
   const collector = createCollector();
 
   const chiefOf = (project: string, workspace: string | null): ChiefState => {
-    if (!orca.ok || orca.terminals === null || workspace === null) return { state: "unknown" };
+    if (!orca.ok || orca.terminals === null || workspace === null)
+      return { state: "unknown" };
     const terminal = findLiveChief(
       { terminals: orca.terminals, runs: orca.runs },
       project,
@@ -153,7 +176,9 @@ export function createHub() {
       });
       const mergeRequestUrls = runs
         .filter(({ state }) => state.phase !== "closed")
-        .flatMap(({ state }) => state.merge_requests.map((mergeRequest) => mergeRequest.url));
+        .flatMap(({ state }) =>
+          state.merge_requests.map((mergeRequest) => mergeRequest.url),
+        );
       let ci: Map<string, Observed>;
       [orca, plannotator, ci] = await Promise.all([
         readOrca(openRuns),
@@ -166,19 +191,32 @@ export function createHub() {
         observed.set(key, { state: agent.liveness, activity: agent.activity });
       }
       for (const { name, workspace } of projects) {
-        observed.set(`chief:${name}`, { state: chiefOf(name, workspace).state });
+        observed.set(`chief:${name}`, {
+          state: chiefOf(name, workspace).state,
+        });
       }
       collector.record(observed, orca.ok ? [] : ["agent:"]);
       await collectHistory(runs, orca.agents);
       // A failed Orca read keeps the last answer: it never clears a usage limit.
-      if (orca.ok) limits = await readUsageLimits([...orca.agents.values()].flat(), limits);
+      if (orca.ok)
+        limits = await readUsageLimits(
+          limitAgents(
+            [...orca.agents.values()].flat(),
+            orca.terminals,
+            projectOfPath,
+          ),
+          limits,
+        );
       const today = new Date().toDateString();
       const built: Record<string, RunDetail> = {};
       await Promise.all(
         runs
           .filter(({ state }) => state.phase !== "closed")
           .map(async (run) => {
-            built[run.state.run] = await buildDetail(run, orca.agents.get(run.state.run));
+            built[run.state.run] = await buildDetail(
+              run,
+              orca.agents.get(run.state.run),
+            );
           }),
       );
       details = built;
@@ -213,10 +251,14 @@ export function createHub() {
         chief: chiefOf(name, workspaceOf(name)),
       }));
       const chiefHandle = (project: string) => {
-        const chief = projects.find((candidate) => candidate.name === project)?.chief;
+        const chief = projects.find(
+          (candidate) => candidate.name === project,
+        )?.chief;
         return chief?.state === "live" ? chief.handle : null;
       };
-      const agents: Agent[] = runs.flatMap(({ state }) => orca.agents.get(state.run) ?? []);
+      const agents: Agent[] = runs.flatMap(
+        ({ state }) => orca.agents.get(state.run) ?? [],
+      );
       const ticketOf = (run: string) =>
         runs.find(({ state }) => state.run === run)?.state.ticket.id ?? null;
       const since = (id: string) => {
@@ -230,7 +272,8 @@ export function createHub() {
         ...limitItems(limits, ticketOf, since),
       ].sort(
         (left, right) =>
-          Date.parse(left.since) - Date.parse(right.since) || left.id.localeCompare(right.id),
+          Date.parse(left.since) - Date.parse(right.since) ||
+          left.id.localeCompare(right.id),
       );
 
       const today = new Date().toDateString();
@@ -265,7 +308,10 @@ export function createHub() {
         };
       });
       const costToday = runs
-        .filter(({ events }) => new Date(events[events.length - 1].time).toDateString() === today)
+        .filter(
+          ({ events }) =>
+            new Date(events[events.length - 1].time).toDateString() === today,
+        )
         .map(({ state }) => costs.get(state.run)?.usd ?? "unknown");
       const lastSeen = readLastSeen();
       return {
@@ -279,7 +325,8 @@ export function createHub() {
           plannotator_error: plannotator.error,
         },
         tiles: {
-          agents_working: agents.filter((agent) => agent.liveness === "live").length,
+          agents_working: agents.filter((agent) => agent.liveness === "live")
+            .length,
           gates_waiting: needsMe.filter((item) => item.kind === "gate").length,
           cost_today: costToday.includes("unknown")
             ? "unknown"
@@ -296,5 +343,11 @@ export function createHub() {
 }
 
 /** Known MR URLs, the only URLs the `open-url` action opens. */
-export const knownUrls = (state: { runs: { merge_requests: { url: string }[] }[] }): Set<string> =>
-  new Set(state.runs.flatMap((run) => run.merge_requests.map((mergeRequest) => mergeRequest.url)));
+export const knownUrls = (state: {
+  runs: { merge_requests: { url: string }[] }[];
+}): Set<string> =>
+  new Set(
+    state.runs.flatMap((run) =>
+      run.merge_requests.map((mergeRequest) => mergeRequest.url),
+    ),
+  );
