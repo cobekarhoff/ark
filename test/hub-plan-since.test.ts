@@ -20,7 +20,11 @@ const preamble: EventRow[] = [
       round_budget: 2,
     },
   ],
-  ["2026-11-01T09:01:00.000Z", "evaluation.recorded", { blockers: [], risks: [], surfaces: ["none"] }],
+  [
+    "2026-11-01T09:01:00.000Z",
+    "evaluation.recorded",
+    { blockers: [], risks: [], surfaces: ["none"] },
+  ],
   [
     "2026-11-01T09:02:00.000Z",
     "strategy.recorded",
