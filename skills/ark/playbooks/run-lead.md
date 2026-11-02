@@ -24,6 +24,7 @@ Throughout this playbook:
    ```
 
    Take the open Run whose objective is exactly `Ark run <run>`. If the list is paged, follow it with `--cursor` until you have read every Run.
+
 5. If you found a Run, bind it. Do not run `run-create`:
 
    ```sh
@@ -31,6 +32,7 @@ Throughout this playbook:
    ```
 
    If `run-use` fails (the Run is closed, or another lead owns it), do not fall back to `run-create`. Send an escalation to Master Chief with the Run ID and the error text, and stop until Master Chief answers.
+
 6. Only when no existing Run was found in steps 3 and 4, create your own Orca Run, so your workers report to you and not to Master Chief:
 
    ```sh
