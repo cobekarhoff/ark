@@ -386,18 +386,32 @@ describe("ark retro", () => {
     expect(readMetrics().time.gate_wait_seconds).toBe(3601);
   });
 
-  test("ARK-240-AC1 counts only ranked lines of round-<n>.md files, in any listed form", () => {
+  test("ARK-240-AC1 counts the ranked findings of every round file into rework.findings_sent_back", () => {
+    const findings = join(runDirectory, "findings");
+    mkdirSync(findings, { recursive: true });
+    writeFileSync(join(findings, "round-1.md"), "### P1: first\n- P2 (cli/a.ts): second\n");
+    writeFileSync(join(findings, "round-2.md"), "* P3 (cli/b.ts): third\n");
+    retro(runId);
+    expect(readMetrics().rework.findings_sent_back).toBe(3);
+  });
+
+  test("ARK-240-AC1 counts ranked heading, numbered and bold bullet lines of round-<n>.md only", () => {
+    // the scenario already has a reviewer step that finished failed: it must add nothing
     const findings = join(runDirectory, "findings");
     mkdirSync(findings, { recursive: true });
     writeFileSync(
       join(findings, "round-1.md"),
       "### P1: heading\n1. P0 numbered\n- **P2** bullet\n- format drift in a.ts\nP10 not a rank\n",
     );
-    writeFileSync(join(findings, "round-2.md"), "* P3 (cli/a.ts): star\n");
     writeFileSync(join(findings, "reviewer.md"), "- P0 not a round file\n");
     writeFileSync(join(findings, "round-x.md"), "- P0 not digits\n");
     retro(runId);
-    expect(readMetrics().rework.findings_sent_back).toBe(4);
+    expect(readMetrics().rework.findings_sent_back).toBe(3);
+  });
+
+  test("ARK-240-AC1 reports 0 findings sent back when the run has no findings folder", () => {
+    retro(runId);
+    expect(readMetrics().rework.findings_sent_back).toBe(0);
   });
 
   test("ARK-160-AC5 reports rework, plan changes and escaped defects linked to the run", () => {
