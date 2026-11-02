@@ -22,8 +22,13 @@ const ciWorkflow = readFileSync(join(repositoryRoot, ".github/workflows/ci.yml")
 const ciCommands = [
   ...ciWorkflow.split(/^ {2}playwright:$/m)[0].matchAll(/^ {6}- run: (.+)$/gm),
 ].map((match) => match[1]);
+const setupCommands = [
+  "bun install --frozen-lockfile",
+  "bunx playwright install --with-deps chromium",
+];
 const expectedCiCommands = [
   "bun install --frozen-lockfile",
+  "bunx playwright install --with-deps chromium",
   "bun run typecheck",
   "bun run lint",
   "bun run format:check",
@@ -90,7 +95,7 @@ function executeCiSequence(projectDirectory: string): {
 } {
   let output = "";
   for (const commandLine of ciCommands) {
-    if (commandLine === "bun install --frozen-lockfile") continue;
+    if (setupCommands.includes(commandLine)) continue;
     const [command, ...arguments_] = commandLine.split(" ");
     const result = runCommand(projectDirectory, command, arguments_);
     output += `${commandLine}\n${result.output}`;
