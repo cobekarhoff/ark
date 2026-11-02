@@ -52,7 +52,10 @@ function removeOwnChromeProfiles(): void {
   }
 }
 
+// Removing the Chrome profiles and the root after a full run outlasts bun's 5s default hook timeout.
+const cleanupTimeoutMilliseconds = 60_000;
+
 afterAll(() => {
   removeOwnChromeProfiles();
   rmSync(tempRoot, { recursive: true, force: true });
-});
+}, cleanupTimeoutMilliseconds);
