@@ -93,7 +93,8 @@ test(
     const scratch = scratchDirectory();
     const result = await runBunTest(fixturePath, scratch);
     expect(result.exitCode, result.output).toBe(0);
-    expect(readdirSync(scratch)).toEqual([]);
+    // Chrome may leave other entries (e.g. com.google.Chrome.<id> on Linux); only the .bun-chrome profile is the contract.
+    expect(readdirSync(scratch).filter((entry) => entry.endsWith(".bun-chrome"))).toEqual([]);
   },
   { timeout: 120_000 },
 );
