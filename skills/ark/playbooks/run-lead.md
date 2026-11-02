@@ -234,18 +234,20 @@ Choose how to ask.
 
 ```sh
 mkdir -p "<run folder>/gates"
-plannotator annotate "<run folder>/plan.md" --gate --json --require-approval --result-file "<run folder>/gates/plan-<n>.json"
+plannotator annotate "<run folder>/plan.md" --gate --json --require-approval --result-file "<run folder>/gates/plan-<n>.json" &
+echo $! > "<run folder>/gates/plan-<n>.pid"
 ```
 
 - `<n>` is 1 for the first plan gate. Add 1 each time you show a revised plan. The result file must not exist yet.
-- The command blocks until the human decides. Run it with no time limit. If the session was stopped by a limit, run the same command again.
+- The command runs in the background and blocks until the human decides, so Master Chief can still reach you. Run it with no time limit. The review has ended when `<run folder>/gates/plan-<n>.json` exists. Read your mail with the `check` command from your preamble while you wait. If the session was stopped by a limit and the result file does not exist, run the same command again.
+- If Master Chief relays the human's answer before the result file exists, stop the review before you record the gate: `kill "$(cat "<run folder>/gates/plan-<n>.pid")"`. Do not read `plan-<n>.json`. Record the relayed answer with `ark gate record`, as below.
 - First tell Master Chief that a review is open, so it can point the human to it. Send this before you run the command:
 
   ```sh
   orca orchestration send --type status --subject "Plan review open for <run>" --body "Plannotator is open on plan.md. The human answers there."
   ```
 
-- Read the exit code and `<run folder>/gates/plan-<n>.json`:
+- Read `<run folder>/gates/plan-<n>.json`. The `decision` gives the answer. If the process ended and left no result file, the gate failed to start (exit 2):
 
   | Exit | `decision`  | What you do                                                                     |
   | ---- | ----------- | ------------------------------------------------------------------------------- |
