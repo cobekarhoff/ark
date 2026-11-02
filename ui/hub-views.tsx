@@ -122,8 +122,12 @@ export function Backlog({ hub, filter, known, perform, pane }: ViewProps) {
   );
   const chiefLive = (project: string) =>
     hub.projects.find((candidate) => candidate.name === project)?.chief.state === "live";
-  const steer = (project: string, instruction: string, label: string) =>
-    perform({ name: "chief-instruction", label, params: { project, instruction } });
+  const steer = (
+    project: string,
+    instruction: string,
+    label: string,
+    extra: Record<string, unknown> = {},
+  ) => perform({ name: "chief-instruction", label, params: { project, instruction, ...extra } });
   const queued = [...new Set(tickets.map((ticket) => ticket.project))];
   return (
     <>
@@ -210,7 +214,9 @@ export function Backlog({ hub, filter, known, perform, pane }: ViewProps) {
                   className="btn primary"
                   disabled={!chiefLive(open.project)}
                   onClick={() =>
-                    void steer(open.project, "approve-and-queue", `Approve and queue ${open.id}`)
+                    void steer(open.project, "approve-and-queue", `Approve and queue ${open.id}`, {
+                      tickets: [open.id],
+                    })
                   }
                 >
                   Approve and queue

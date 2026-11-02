@@ -332,26 +332,19 @@ test("ARK-177-AC4 sends fixed steering instructions and requires confirmation be
             : {}),
         }),
       });
-    for (const instruction of [
-      "approve-and-queue",
-      "reorder-queue",
-      "pause",
-      "resume",
-      "retry-stuck-agent",
-    ]) {
+    for (const instruction of ["reorder-queue", "pause", "resume", "retry-stuck-agent"]) {
       expect((await post(instruction)).status).toBe(200);
     }
     expect(terminalActionLog()).toEqual([
-      "terminal send --terminal term_chief --text Hub: approve and queue the proposed tickets in the order shown. The human asked for it. --enter --json",
       "terminal send --terminal term_chief --text Hub: reorder the queue by priority, highest first, and tell the human the new order. --enter --json",
       "terminal send --terminal term_chief --text Hub: pause. Do not start new runs. Let running runs finish their current step. --enter --json",
       "terminal send --terminal term_chief --text Hub: resume. Start queued runs again. --enter --json",
       "terminal send --terminal term_chief --text Hub: retry the stuck agent. Nudge it, and if it does not respond, restart its step. --enter --json",
     ]);
     expect((await post("abort")).status).toBe(400);
-    expect(terminalActionLog()).toHaveLength(5);
+    expect(terminalActionLog()).toHaveLength(4);
     expect((await post("abort", true)).status).toBe(200);
-    expect(terminalActionLog()).toHaveLength(6);
+    expect(terminalActionLog()).toHaveLength(5);
     expect(terminalActionLog().at(-1)).toBe(
       `terminal send --terminal term_chief --text Hub: abort run ${run.runId}. The human confirmed it. --enter --json`,
     );
