@@ -5,7 +5,7 @@ export type Action = {
   params: Record<string, unknown>;
 };
 
-export type ItemKind = "gate" | "mr" | "question" | "agent" | "ticket" | "retro";
+export type ItemKind = "gate" | "mr" | "question" | "agent" | "ticket" | "retro" | "usage_limit";
 export type Source = "ark" | "orca" | "plannotator";
 
 /** One thing that waits for the human. */
@@ -18,6 +18,8 @@ export type Item = {
   title: string;
   since: string;
   action: Action | null;
+  /** On a usage_limit item: the provider and the reset time (ISO) when the output gave one. */
+  limit?: { provider: string; reset_at: string | null };
 };
 
 /** `unknown` means the reader failed or timed out. It is never turned into live, dead or stuck. */
@@ -44,6 +46,7 @@ export const kindLabels: Record<ItemKind, string> = {
   agent: "Agent",
   ticket: "Approval",
   retro: "Retro",
+  usage_limit: "Usage limit",
 };
 
 /** The fixed lines the steering buttons type into Master Chief. The abort line names the run, so the page shows it before the human confirms. */

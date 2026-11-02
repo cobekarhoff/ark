@@ -24,6 +24,7 @@ export type OrcaTerminal = {
   connected?: boolean;
   agentIdentity?: string;
   model?: string;
+  title?: string;
 };
 
 export type OrcaSnapshot = {
@@ -53,12 +54,14 @@ export const findLiveChief = (
   project: string,
   workspace: string,
 ): OrcaTerminal | undefined => {
-  const handle = snapshot.runs.find(
-    (orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`,
-  )?.coordinator_handle;
+  const coordinatorHandles = new Set(
+    snapshot.runs
+      .filter((orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`)
+      .map((orcaRun) => orcaRun.coordinator_handle),
+  );
   return snapshot.terminals.find(
     (terminal) =>
-      terminal.handle === handle &&
+      coordinatorHandles.has(terminal.handle) &&
       terminal.connected &&
       terminal.worktreePath !== undefined &&
       resolve(terminal.worktreePath) === workspace,

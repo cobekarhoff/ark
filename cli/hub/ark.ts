@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { deriveState, readEvents, type ArkEvent, type RunState } from "../events.ts";
 import { listProjects, projectDirectory, runsDirectory } from "../paths.ts";
+import { gateWaits } from "../retro.ts";
 import { waitingGate } from "../run.ts";
 import type { PlannotatorSession } from "./plannotator.ts";
 import type { Action, Item } from "./types.ts";
@@ -94,15 +95,17 @@ export function arkItems(
         id: `gate:${state.run}:${gate}`,
         kind: "gate",
         title: `${gate} gate: ${state.ticket.title}`,
-        since: lastTime(events, (event) =>
-          gate === "criteria"
-            ? event.type === "run.started"
-            : gate === "plan"
-              ? event.type === "plan.checked"
-              : gate === "strategy"
-                ? event.type === "strategy.recorded"
-                : event.type === "step.finished",
-        ),
+        since:
+          gate === "plan"
+            ? (gateWaits(events).findLast((wait) => wait.gate === "plan" && wait.answered === null)
+                ?.asked ?? lastTime(events, (event) => event.type === "plan.checked"))
+            : lastTime(events, (event) =>
+                gate === "criteria"
+                  ? event.type === "run.started"
+                  : gate === "strategy"
+                    ? event.type === "strategy.recorded"
+                    : event.type === "step.finished",
+              ),
         action:
           gate === "plan" || gate === "strategy"
             ? annotate(join(directory, gate === "plan" ? "plan.md" : "strategies.md"), {

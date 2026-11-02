@@ -10,6 +10,8 @@ import { arkItems, readRuns, type RunInfo } from "./ark.ts";
 import { readNotifications } from "./notify.ts";
 import { createCollector, readCi, type Observed } from "./changes.ts";
 import { emptyOrca, findLiveChief, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
+import { limitAgents, limitItems, readUsageLimits, type UsageLimit } from "./limits.ts";
+import { projectOfPath } from "./agents.ts";
 import {
   emptyPlannotator,
   plannotatorItems,
@@ -110,6 +112,8 @@ export function createHub() {
   const costs = new Map<string, Cost>();
   /** Detail of each open run, rebuilt by `refresh()`: it reads agent terminals, so `state()` cannot. */
   let details: Record<string, RunDetail> = {};
+  /** Usage-limit errors in live agent output, by terminal handle, from the last `refresh()`. */
+  let limits = new Map<string, UsageLimit>();
   const firstSeen = new Map<string, string>();
   const collector = createCollector();
 
@@ -163,10 +167,18 @@ export function createHub() {
         observed.set(key, { state: agent.liveness, activity: agent.activity });
       }
       for (const { name, workspace } of projects) {
-        observed.set(`chief:${name}`, { state: chiefOf(name, workspace).state });
+        observed.set(`chief:${name}`, {
+          state: chiefOf(name, workspace).state,
+        });
       }
       collector.record(observed, orca.ok ? [] : ["agent:"]);
       await collectHistory(runs, orca.agents);
+      // A failed Orca read keeps the last answer: it never clears a usage limit.
+      if (orca.ok)
+        limits = await readUsageLimits(
+          limitAgents([...orca.agents.values()].flat(), orca.terminals, projectOfPath),
+          limits,
+        );
       const today = new Date().toDateString();
       const built: Record<string, RunDetail> = {};
       await Promise.all(
@@ -222,6 +234,7 @@ export function createHub() {
         ...arkItems(runs, plannotator.sessions, chiefHandle),
         ...plannotatorItems(plannotator),
         ...orcaItems(agents, ticketOf, since),
+        ...limitItems(limits, ticketOf, since),
       ].sort(
         (left, right) =>
           Date.parse(left.since) - Date.parse(right.since) || left.id.localeCompare(right.id),

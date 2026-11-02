@@ -18,6 +18,7 @@ import {
   otherFilter,
   phaseBars,
   phaseLabel,
+  resetText,
   span,
   splitParts,
   stepColumns,
@@ -512,6 +513,11 @@ export function App() {
                             </span>
                             <span className="ttl" title={item.title}>
                               {item.title}
+                              {item.limit && (
+                                <span className="tag countdown" data-countdown>
+                                  {item.limit.provider} · {resetText(item.limit.reset_at, now)}
+                                </span>
+                              )}
                             </span>
                             <Wait since={item.since} now={now} big={focus} />
                           </button>
@@ -826,6 +832,11 @@ function Detail({
           <span className="tkt">{need.ticket ?? need.source}</span>
         </div>
         <h2>{need.title}</h2>
+        {need.limit && (
+          <div className="countdown" data-countdown>
+            {need.limit.provider} · {resetText(need.limit.reset_at, now)}
+          </div>
+        )}
         <div className="d-wait">
           <Wait since={need.since} now={now} big />
           <div className="since">waiting since {new Date(need.since).toLocaleTimeString()}</div>
