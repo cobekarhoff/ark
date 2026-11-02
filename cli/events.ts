@@ -216,6 +216,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "escalation.requested":
         escalationRequested = true;
+        escalationAnswered = false;
         break;
       case "merge_request.opened":
         if (mergeRequests.length === 0) escalationAnswered = false;

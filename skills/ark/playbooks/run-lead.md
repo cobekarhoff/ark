@@ -346,6 +346,8 @@ Each return to the implementer after the first build is a round. `ark run step <
 
 If the last `ark test <run>` passed but a review P0 or P1 is unresolved at the spent budget, the phase is still `building`. Open the gate with `ark escalate <run> --reason "<the unresolved finding>"`. Never add a failing test only to open the gate.
 
+After `ark escalate`, continue with steps 1 to 3 below, as for any spent budget.
+
 1. Do not work around it. Ask Master Chief to put the decision to the human:
 
    ```sh
