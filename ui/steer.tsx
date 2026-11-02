@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { abortInstruction, instructions } from "../cli/hub/types.ts";
+import { abortInstruction, approveInstruction, instructions } from "../cli/hub/types.ts";
 
 type Result = { ok: boolean; text: string };
 
@@ -89,7 +89,6 @@ export const RunLeadMessage = ({ run, live = true }: { run: string; live?: boole
   );
 
 const fixedActions: [keyof typeof instructions, string][] = [
-  ["approve-and-queue", "Approve and queue"],
   ["reorder-queue", "Reorder queue"],
   ["pause", "Pause"],
   ["resume", "Resume"],
@@ -97,7 +96,15 @@ const fixedActions: [keyof typeof instructions, string][] = [
 ];
 
 /** The Master Chief box of one project: free text, fixed instructions, and Spawn when no Master Chief is live. */
-export function ChiefBox({ project, live }: { project: string; live: boolean | null }) {
+export function ChiefBox({
+  project,
+  live,
+  proposed,
+}: {
+  project: string;
+  live: boolean | null;
+  proposed: { id: string; title: string }[];
+}) {
   const [result, setResult] = useState<Result | null>(null);
   const [spawned, setSpawned] = useState<Result | null>(null);
   return (
@@ -134,6 +141,7 @@ export function ChiefBox({ project, live }: { project: string; live: boolean | n
         placeholder="e.g. ARK-181 first, then ARK-179"
       />
       <div className="steer-row wrap">
+        <ApproveButton project={project} proposed={proposed} onResult={setResult} />
         {fixedActions.map(([instruction, label]) => (
           <button
             key={instruction}
@@ -149,6 +157,82 @@ export function ChiefBox({ project, live }: { project: string; live: boolean | n
       </div>
       <Status result={result} />
     </section>
+  );
+}
+
+/** Approve and queue names the tickets the human sees: the dialog lists them, and only Confirm posts them. */
+function ApproveButton({
+  project,
+  proposed,
+  onResult,
+}: {
+  project: string;
+  proposed: { id: string; title: string }[];
+  onResult: (result: Result) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ids = proposed.map(({ id }) => id);
+  return (
+    <>
+      <button
+        className="btn sm"
+        disabled={proposed.length === 0}
+        title={proposed.length === 0 ? "No proposed tickets" : approveInstruction(ids)}
+        onClick={() => setOpen(true)}
+      >
+        Approve and queue
+      </button>
+      {proposed.length === 0 && <span className="hint">No proposed tickets</span>}
+      {open && (
+        <div className="scrim" onClick={() => setOpen(false)}>
+          <div
+            className="dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="approve-title"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.key === "Escape" && setOpen(false)}
+          >
+            <h2 id="approve-title">
+              Approve and queue {proposed.length} {proposed.length === 1 ? "ticket" : "tickets"}?
+            </h2>
+            <div className="body">
+              <p>
+                This types an instruction into the Master Chief terminal for {project} to approve
+                and queue these proposed tickets.
+              </p>
+              <ul className="approve-list">
+                {proposed.map(({ id, title }) => (
+                  <li key={id}>
+                    <b>{id}</b> <span>{title}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="foot">
+              <button className="btn" autoFocus onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                onClick={() =>
+                  void steer("chief-instruction", {
+                    project,
+                    instruction: "approve-and-queue",
+                    tickets: ids,
+                  }).then((outcome) => {
+                    onResult(outcome);
+                    setOpen(false);
+                  })
+                }
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

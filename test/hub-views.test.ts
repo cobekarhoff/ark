@@ -223,6 +223,10 @@ test("ARK-181-AC1 returns ticket-file fields and keeps unreadable tickets", asyn
 });
 
 test("ARK-181-AC1 approve-and-queue sends only the exact live-chief instruction", async () => {
+  for (const id of ["ARK-A", "ARK-B"]) {
+    const file = writeTicket("one", id, [], `Ticket ${id}`);
+    writeFileSync(file, readFileSync(file, "utf8").replace("---\n", "---\nstatus: proposed\n"));
+  }
   setOrca(
     [
       {
@@ -239,18 +243,22 @@ test("ARK-181-AC1 approve-and-queue sends only the exact live-chief instruction"
     const response = await fetch(`${baseUrl}/api/actions/chief-instruction`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ project: "one", instruction: "approve-and-queue" }),
+      body: JSON.stringify({
+        project: "one",
+        instruction: "approve-and-queue",
+        tickets: ["ARK-A"],
+      }),
     });
     expect(response.status).toBe(200);
     expect(await Bun.file(terminalLog).text()).toContain(
-      "terminal send --terminal term_chief --text Hub: approve and queue the proposed tickets in the order shown. The human asked for it. --enter --json",
+      "terminal send --terminal term_chief --text Hub: approve and queue ARK-A. The human asked for exactly these tickets. Do not approve any other proposed ticket. --enter --json",
     );
     const unavailable = await fetch(`${baseUrl}/api/actions/chief-instruction`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ project: "two", instruction: "approve-and-queue" }),
     });
-    expect(unavailable.status).toBe(409);
+    expect(unavailable.status).toBe(400);
     expect((await Bun.file(terminalLog).text()).trim().split("\n")).toHaveLength(1);
   });
 });

@@ -47,7 +47,7 @@ export function retroUnanswered(directory: string): boolean {
   }
 }
 
-function proposedTickets(project: string): { id: string; title: string; since: string }[] {
+export function proposedTickets(project: string): { id: string; title: string; since: string }[] {
   const ticketsRoot = join(projectDirectory(project), "tickets");
   if (!existsSync(ticketsRoot)) return [];
   const found = [];
