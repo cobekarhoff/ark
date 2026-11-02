@@ -188,6 +188,8 @@ export type GateWait = {
   asked: string;
   answered: string | null;
   answer: string | null;
+  /** Who answered; events from before `by` existed read as human. */
+  by: "human" | "auto" | null;
 };
 
 export function gateWaits(events: ArkEvent[]): GateWait[] {
@@ -197,7 +199,7 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
     const open = waiting.get(gate);
     if (open && keepFirst) return;
     if (open) waits.splice(waits.indexOf(open), 1);
-    const wait = { gate, asked: time, answered: null, answer: null };
+    const wait = { gate, asked: time, answered: null, answer: null, by: null };
     waiting.set(gate, wait);
     waits.push(wait);
   };
@@ -216,6 +218,7 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
       if (wait) {
         wait.answered = event.time;
         wait.answer = event.data.answer ?? null;
+        wait.by = event.data.by === "auto" ? "auto" : "human";
       }
       waiting.delete(event.data.gate);
     }
@@ -480,6 +483,7 @@ export function retro(runId: string): void {
       if (secondsBetween(times[i - 1], times[i]) > IDLE_GAP_SECONDS) idleGaps += 1;
   }
 
+  const gateAnswers = events.filter((event) => event.type === "gate.answered");
   const metrics = {
     run: runId,
     cost: {
@@ -525,6 +529,10 @@ export function retro(runId: string): void {
       mr_comments: mergeRequests.comments,
       mr_commits_after_open: mergeRequests.commits,
     },
+    gates: {
+      auto_answers: gateAnswers.filter((event) => event.data.by === "auto").length,
+      human_answers: gateAnswers.filter((event) => event.data.by !== "auto").length,
+    },
     escaped_defects: escapedDefects(project, runId),
     orchestration: {
       sessions: new Set(sessions.map((session) => session.sessionKey)).size,
@@ -555,6 +563,7 @@ export function retro(runId: string): void {
       `time: ${Math.round(wallSeconds)}s wall, ${Math.round(gateWait)}s waiting at gates`,
       `rework: ${metrics.rework.rounds} rounds, ${metrics.rework.escalations} escalations, ${metrics.rework.findings_sent_back} findings sent back, ${metrics.rework.merge_steps} merge steps`,
       `orchestration: ${metrics.orchestration.restarts} restarts, ${metrics.orchestration.tool_errors} tool errors, ${metrics.orchestration.context_overflows} context overflows, ${metrics.orchestration.idle_gaps} idle gaps`,
+      `gate answers: ${metrics.gates.auto_answers} auto, ${metrics.gates.human_answers} human`,
       `compared with ${comparison.runs_compared} earlier closed runs`,
       `wrote ${metricsFile}`,
     ].join("\n"),

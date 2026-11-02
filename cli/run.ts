@@ -203,6 +203,12 @@ function printRun(runId: string): void {
   const { directory } = findRun(runId);
   const state = writeState(directory);
   if (state.events === 0) throw new ArkError(`run ${runId} has no events`);
+  const answered = readEvents(directory)
+    .filter((event) => event.type === "gate.answered")
+    .map(
+      (event) =>
+        `  ${event.data.gate} ${event.data.answer} by ${event.data.by === "auto" ? "auto" : "human"}`,
+    );
   const current = state.steps.find((step) => step.id === state.current_step);
   const lines = [
     `run: ${basename(directory)}`,
@@ -211,6 +217,7 @@ function printRun(runId: string): void {
     `round: ${state.round}/${state.round_budget}`,
     `current step: ${current ? `${current.id} (${current.status})` : "none"}`,
     `waiting gate: ${waitingGate(state)}`,
+    ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
     `merge requests: ${state.merge_requests.length === 0 ? "none" : ""}`,
     ...state.merge_requests.map((request) => `  ${request.repo} ${request.url}`),
