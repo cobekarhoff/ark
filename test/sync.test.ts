@@ -67,14 +67,20 @@ function configureOrigin(repoPath: string): void {
   git(repoPath, "remote", "set-head", "origin", "main");
 }
 
-function startRun(repoNames = ["."]) {
+function startRun(repoNames = ["."], withValidator = false) {
   const workspace = makeWorkspace(repoNames);
   tempArkHome();
   const projectDirectory = writeProject("demo", {
     workspace,
     ticket_source: "local",
     suites: [
-      { name: "integration", level: "integration", repo: ".", command: "true", parser: "bun" },
+      {
+        name: "integration",
+        level: "integration",
+        repo: ".",
+        command: "true",
+        parser: "bun",
+      },
     ],
     roles,
   });
@@ -99,6 +105,19 @@ function startRun(repoNames = ["."]) {
       needs: [],
       criteria: ["ARK-900-AC1"],
     },
+    ...(withValidator
+      ? [
+          {
+            id: "check",
+            role: "validator",
+            repo: repoNames[0],
+            harness: "codex",
+            model: "gpt-codex",
+            needs: ["build"],
+            criteria: ["ARK-900-AC1"],
+          },
+        ]
+      : []),
   ];
   const plan = {
     design: { interfaces: [{ name: "fixture plan", callers: ["ark sync"] }] },
@@ -184,9 +203,15 @@ test("ARK-165-AC1 status reports every merged MR and allows closing, while an op
   expect(ark("run", "close", scenario.runId, "merged").code).toBe(0);
 
   const openScenario = startRun();
-  const openMergeRequest = { repo: ".", url: "https://github.com/acme/main/pull/3", number: 3 };
+  const openMergeRequest = {
+    repo: ".",
+    url: "https://github.com/acme/main/pull/3",
+    number: 3,
+  };
   appendEvent(openScenario.runDirectory, "merge_request.opened", openMergeRequest);
-  process.env.FAKE_GH_STATES = JSON.stringify({ [openMergeRequest.url]: "OPEN" });
+  process.env.FAKE_GH_STATES = JSON.stringify({
+    [openMergeRequest.url]: "OPEN",
+  });
   const open = ark("merge-request", "status", openScenario.runId);
   expect(open.code).toBe(0);
   expect(open.out).toContain(".  open  https://github.com/acme/main/pull/3");
@@ -219,7 +244,11 @@ test("ARK-165-AC3 worktree sync merges origin, pushes only MR worktrees and abor
   const pushedScenario = startRun();
   const worktree = pushedScenario.worktreePath();
   const targetHead = advanceOrigin(pushedScenario.workspace, ".", "target.txt", "target\n");
-  const mergeRequest = { repo: ".", url: "https://github.com/acme/main/pull/1", number: 1 };
+  const mergeRequest = {
+    repo: ".",
+    url: "https://github.com/acme/main/pull/1",
+    number: 1,
+  };
   appendEvent(pushedScenario.runDirectory, "merge_request.opened", mergeRequest);
   const pushed = ark("worktree", "sync", pushedScenario.runId);
   expect(pushed.code).toBe(0);
@@ -287,4 +316,127 @@ test("ARK-165-AC4 workspace sync fast-forwards clean and unrelated-dirty checkou
   expect(unrelated.code).toBe(0);
   expect(git(unrelatedScenario.workspace, "rev-parse", "main")).toBe(unrelatedHead);
   expect(readFileSync(join(unrelatedScenario.workspace, "local.txt"), "utf8")).toBe("keep\n");
+});
+
+const readEventLines = (runDirectory: string) =>
+  readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+
+/** Runs build once per round: start then finish. */
+function buildRounds(runId: string, rounds: number): void {
+  for (let round = 0; round < rounds; round++) {
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  }
+}
+
+/** Leaves the worktree and origin in conflict and runs the failing sync. */
+function syncWithConflict(scenario: ReturnType<typeof startRun>): void {
+  commitFile(scenario.worktreePath(), "shared.txt", "worktree\n");
+  advanceOrigin(scenario.workspace, ".", "shared.txt", "target\n");
+  expect(ark("worktree", "sync", scenario.runId).code).toBe(1);
+}
+
+test("ARK-211-AC1 start --merge after a sync conflict keeps the round although the budget is spent", () => {
+  const scenario = startRun();
+  buildRounds(scenario.runId, 2);
+  expect(ark("run", "step", scenario.runId, "build", "start").err).toContain("round budget spent");
+  syncWithConflict(scenario);
+
+  const merged = ark("run", "step", scenario.runId, "build", "start", "--merge");
+  expect(merged.code).toBe(0);
+  expect(merged.out).toContain("started (merge, round 2/2)");
+  const started = readEventLines(scenario.runDirectory).filter(
+    (event) => event.type === "step.started",
+  );
+  expect(started.map((event) => [event.data.round, event.data.merge])).toEqual([
+    [1, undefined],
+    [2, undefined],
+    [2, true],
+  ]);
+  expect(JSON.parse(readFileSync(join(scenario.runDirectory, "state.json"), "utf8")).round).toBe(2);
+});
+
+test("ARK-211-AC1 a finished merge step does not raise the round of the next implementer start", () => {
+  const scenario = startRun();
+  buildRounds(scenario.runId, 1);
+  syncWithConflict(scenario);
+  expect(ark("run", "step", scenario.runId, "build", "start", "--merge").code).toBe(0);
+  expect(ark("run", "step", scenario.runId, "build", "finish").code).toBe(0);
+
+  const next = ark("run", "step", scenario.runId, "build", "start");
+  expect(next.code).toBe(0);
+  expect(next.out).toContain("started (round 2/2)");
+  const events = readEventLines(scenario.runDirectory);
+  expect(
+    events.findLast((event) => event.type === "step.finished" && event.data.merge),
+  ).toBeTruthy();
+});
+
+test("ARK-211-AC1 --merge is refused on a non-implementer start and on finish, naming the reason", () => {
+  const scenario = startRun(["."], true);
+  buildRounds(scenario.runId, 1);
+  syncWithConflict(scenario);
+
+  const validator = ark("run", "step", scenario.runId, "check", "start", "--merge");
+  expect(validator.code).toBe(1);
+  expect(validator.err).toContain("--merge applies to an implementer step, not validator");
+
+  expect(ark("run", "step", scenario.runId, "build", "start", "--merge").code).toBe(0);
+  const finish = ark("run", "step", scenario.runId, "build", "finish", "--merge");
+  expect(finish.code).toBe(1);
+  expect(finish.err).toContain("--merge only applies to start");
+});
+
+test("ARK-211-AC2 --merge is refused when no sync is on record or the last sync was clean", () => {
+  const scenario = startRun();
+  const never = ark("run", "step", scenario.runId, "build", "start", "--merge");
+  expect(never.code).toBe(1);
+  expect(never.err).toContain("--merge needs a failed ark worktree sync for repo .");
+
+  advanceOrigin(scenario.workspace, ".", "target.txt", "target\n");
+  expect(ark("worktree", "sync", scenario.runId).code).toBe(0);
+  const clean = ark("run", "step", scenario.runId, "build", "start", "--merge");
+  expect(clean.code).toBe(1);
+  expect(clean.err).toContain("--merge needs a failed ark worktree sync for repo .");
+  expect(readEventLines(scenario.runDirectory).some((event) => event.type === "step.started")).toBe(
+    false,
+  );
+});
+
+test("ARK-211-AC2 sync records a conflict before failing and a later clean sync clears it", () => {
+  const scenario = startRun();
+  syncWithConflict(scenario);
+  const synced = () =>
+    readEventLines(scenario.runDirectory)
+      .filter((event) => event.type === "worktree.synced")
+      .map((event) => event.data.conflict);
+  expect(synced()).toEqual([true]);
+
+  // Origin takes the worktree's change, so the next merge is clean.
+  advanceOrigin(scenario.workspace, ".", "shared.txt", "worktree\n");
+  expect(ark("worktree", "sync", scenario.runId).code).toBe(0);
+  expect(synced()).toEqual([true, false]);
+  const refused = ark("run", "step", scenario.runId, "build", "start", "--merge");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("--merge needs a failed ark worktree sync for repo .");
+});
+
+test("ARK-211-AC3 retro counts merge steps in rework.merge_steps and not in rework.rounds", () => {
+  process.env.ARK_OMP_SESSIONS = mkdtempSync(join(tmpdir(), "ark-omp-sessions-"));
+  process.env.ARK_CLAUDE_SESSIONS = mkdtempSync(join(tmpdir(), "ark-claude-sessions-"));
+  const scenario = startRun();
+  buildRounds(scenario.runId, 1);
+  syncWithConflict(scenario);
+  expect(ark("run", "step", scenario.runId, "build", "start", "--merge").code).toBe(0);
+  expect(ark("run", "step", scenario.runId, "build", "finish").code).toBe(0);
+
+  const retroResult = ark("retro", scenario.runId);
+  expect(retroResult.code).toBe(0);
+  const metrics = JSON.parse(readFileSync(join(scenario.runDirectory, "metrics.json"), "utf8"));
+  expect(metrics.rework.rounds).toBe(1);
+  expect(metrics.rework.merge_steps).toBe(1);
+  expect(retroResult.out).toContain("1 rounds, 0 escalations, 0 findings sent back, 1 merge steps");
 });
