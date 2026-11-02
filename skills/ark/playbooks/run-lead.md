@@ -97,7 +97,7 @@ The gate opens when the phase is `awaiting_criteria`. That means the ticket has 
 The strategy comes after the evaluation and before the plan. Skip this part when `ark status <run>` shows the run has a `strategy.recorded` event and the phase is not `awaiting_strategy` (you replace a stopped run lead). If the phase is `awaiting_strategy`, go to step 5.
 
 1. Write `<run folder>/strategies.md`: 2 or 3 short cards, one level-2 heading for each card (`## <id> <title>`). Each card has these fields, one per line: `Approach:`, `Interfaces:`, `Tradeoffs:` (risk, size, what it leaves out), `Steps:` (a rough list), `Mockup:` (links to files in `<run folder>/mockups/`) and `Recommended: yes` on exactly one card. If only one strategy is possible, write one card with a `Reason:` line that says why there is no alternative.
-2. Read `Surfaces` in `evaluation.md`. When a surface is not `none`, every card needs a `Mockup:` link, and `ark strategy record` refuses a card with none. Start a Designer to make them:
+2. Read `Surfaces` in `evaluation.md`. When a surface is not `none`, every card needs a `Mockup:` link, and `ark strategy record` refuses a card with none. Exception: when `Surfaces` is only `none`, or when there is one card and `Surfaces` is only `document`, leave out the `Mockup:` line (never write `Mockup: none`, it is refused), skip the Designer and go to step 3. Otherwise start a Designer to make them:
    1. Read `roles` in `ark.yml`. If it has no `designer` entry, stop. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.designer`: add its `harness` and `model`, then start a new run lead.
    2. Start the Designer with the `harness` and `model` of `roles.designer`. It works in the workspace, has no plan step, and is named `designer`:
 
@@ -112,7 +112,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    ark strategy record <run>
    ```
 
-   The command refuses a missing `strategies.md`, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no `evaluation.recorded`, and one card with no reason. It refuses a missing `roles.designer` when a surface is not `none`. Read the refusal and fix the file. Mockups and prototypes stay in the run folder or a throwaway worktree. Never put one in a repo worktree or an MR.
+   The command refuses a missing `strategies.md`, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no `evaluation.recorded`, and one card with no reason. It refuses a missing `roles.designer` when a surface is not `none`, except when `Surfaces` is only `none`, or one card has only `document`. Read the refusal and fix the file. Mockups and prototypes stay in the run folder or a throwaway worktree. Never put one in a repo worktree or an MR.
 
 4. With 1 card, the phase is `planning`. No gate opens, and `plan.md` shows the card and "Only one strategy considered, because <reason>". Go to section 3.
 5. With 2 or more cards and `gates.strategy` set to `auto`, `ark strategy record` answers the gate with the recommended card (`by: auto`). It needs no Plannotator review and no relay: check `ark status <run>` and go to section 3.
