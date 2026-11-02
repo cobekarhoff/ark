@@ -68,37 +68,6 @@ test.each(["pass", "fail"] as const)(
   { timeout: 60_000 },
 );
 
-const opensWebView = `
-import { test, expect } from "bun:test";
-test("fixture opens a chrome WebView", async () => {
-  await using view = new Bun.WebView({ backend: "chrome", width: 400, height: 300 });
-  await view.navigate("data:text/html,<title>x</title>hello");
-  expect(await view.evaluate("document.body.textContent")).toBe("hello");
-}, 30_000); // Chrome starts slowly on Linux CI; bun's 5s default is too short
-`;
-
-test(
-  "ARK-235-AC1 a browser test file leaves no .bun-chrome profile in the temporary directory",
-  async () => {
-    const fixturePath = writeFixture("webview", opensWebView);
-
-    // Control: without the preload, Chrome's profile lands in the scratch TMPDIR. Proves the check can fail.
-    const emptyConfig = join(fixtureRoot, "empty-bunfig.toml");
-    writeFileSync(emptyConfig, "");
-    const controlScratch = scratchDirectory();
-    const control = await runBunTest(fixturePath, controlScratch, [`--config=${emptyConfig}`]);
-    expect(control.exitCode, control.output).toBe(0);
-    expect(readdirSync(controlScratch).some((entry) => entry.endsWith(".bun-chrome"))).toBe(true);
-
-    const scratch = scratchDirectory();
-    const result = await runBunTest(fixturePath, scratch);
-    expect(result.exitCode, result.output).toBe(0);
-    // Chrome may leave other entries (e.g. com.google.Chrome.<id> on Linux); only the .bun-chrome profile is the contract.
-    expect(readdirSync(scratch).filter((entry) => entry.endsWith(".bun-chrome"))).toEqual([]);
-  },
-  { timeout: 120_000 },
-);
-
 // Prints its tmpdir() to <signal>/<name>.dir, writes a file there, and waits for <signal>/<name>.go.
 // After the signal, the file must still exist or the fixture fails.
 const concurrentFixture = (signalDirectory: string, name: string) => `

@@ -1,9 +1,10 @@
 // Node-safe helpers for the Playwright specs. No bun:test, no Bun.* globals: Playwright runs under Node.
 import { test } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { appendEvent, deriveState, readEvents } from "../../cli/events.ts";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 
@@ -26,6 +27,57 @@ export function tempArkHome(): string {
   const home = tempDirectory("ark-home-");
   process.env.ARK_HOME = home;
   return home;
+}
+
+/** Writes `$ARK_HOME/projects/<name>/ark.yml`. JSON is valid YAML, so the config is written as JSON. */
+export function writeProject(name: string, config: Record<string, unknown>): string {
+  const directory = join(process.env.ARK_HOME as string, "projects", name);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "ark.yml"), JSON.stringify(config, null, 2));
+  return directory;
+}
+
+export function writeTicket(
+  project: string,
+  id: string,
+  criteria: { id: string; text: string }[],
+  title = `Ticket ${id}`,
+): string {
+  const file = join(process.env.ARK_HOME as string, "projects", project, "tickets", `${id}.md`);
+  mkdirSync(dirname(file), { recursive: true });
+  const frontmatter = [
+    "---",
+    `id: ${id}`,
+    `title: ${JSON.stringify(title)}`,
+    ...(criteria.length === 0 ? ["acceptance_criteria: []"] : ["acceptance_criteria:"]),
+  ];
+  for (const criterion of criteria)
+    frontmatter.push(`  - id: ${criterion.id}`, `    text: ${JSON.stringify(criterion.text)}`);
+  writeFileSync(file, `${frontmatter.join("\n")}\n---\n## Why\n\nTest ticket.\n`);
+  return file;
+}
+
+/** Records an evaluation as `ark evaluation record` does, plus a one-card strategy when the run is still planning. */
+export function recordEvaluation(
+  runDirectory: string,
+  blockers: string[] = [],
+  risks: string[] = [],
+): void {
+  appendEvent(runDirectory, "evaluation.recorded", { blockers, risks, surfaces: ["none"] });
+  if (deriveState(readEvents(runDirectory)).phase !== "planning") return;
+  appendEvent(runDirectory, "strategy.recorded", {
+    count: 1,
+    recommended: "S1",
+    cards: ["S1"],
+    reason: "the only approach fits",
+    card_text: { S1: "### S1 Only" },
+  });
+}
+
+/** Dated `YYYY/MM/DD` folder segments of the frozen clock's UTC day, as Codex lays out its sessions. */
+export function codexDay(): [string, string, string] {
+  const [year, month, day] = new Date(testNow()).toISOString().slice(0, 10).split("-");
+  return [year, month, day];
 }
 
 /** The temp git repo `tempGitRepo` makes in test/helpers.ts: one commit on main. */

@@ -20,7 +20,6 @@ const repositoryRoot = join(import.meta.dir, "..");
 
 useFrozenClock();
 let projectOneDirectory: string;
-let projectTwoDirectory: string;
 let orcaDirectory: string;
 let terminalLog: string;
 let searchStateFile: string;
@@ -164,7 +163,7 @@ exit 2
 beforeEach(() => {
   tempArkHome();
   projectOneDirectory = writeProject("one", projectConfig(tempGitRepo(), "local", "pi/lead"));
-  projectTwoDirectory = writeProject("two", projectConfig(tempGitRepo(), "github", "pi/other"));
+  writeProject("two", projectConfig(tempGitRepo(), "github", "pi/other"));
   orcaDirectory = mkdtempSync(join(tmpdir(), "ark-hub-orca-"));
   terminalLog = join(mkdtempSync(join(tmpdir(), "ark-hub-actions-")), "terminal.log");
   searchStateFile = join(mkdtempSync(join(tmpdir(), "ark-hub-search-")), "state");
@@ -567,166 +566,3 @@ test("ARK-181-AC5 returns project configuration and chief state through Orca fai
     });
   });
 });
-
-async function withHeadlessChrome<T>(
-  url: string,
-  callback: (evaluate: (expression: string) => Promise<unknown>) => Promise<T>,
-): Promise<T> {
-  await using view = new Bun.WebView({
-    backend: "chrome",
-    width: 1280,
-    height: 900,
-  });
-  await view.navigate(url);
-  return await callback(async (expression) => view.evaluate(expression));
-}
-
-test(
-  "ARK-181-AC6 renders, filters, opens details and switches an agent in headless Chrome",
-  { timeout: 60_000 },
-  async () => {
-    writeTicket("one", "ARK-181-CHROME-ONE", [], "One project ticket");
-    writeTicket("two", "ARK-181-CHROME-TWO", [], "Two project ticket");
-    setOrca([
-      {
-        handle: "term_one",
-        connected: true,
-        agentIdentity: "omp",
-        model: "pi/task",
-        worktreePath: projectOneDirectory,
-        preview: "One agent output",
-      },
-      {
-        handle: "term_two",
-        connected: true,
-        agentIdentity: "omp",
-        model: "pi/task",
-        worktreePath: projectTwoDirectory,
-        preview: "Two agent output",
-      },
-    ]);
-    writeFileSync(searchStateFile, "disabled");
-    // The metrics view defaults to the clock's UTC week, so closed runs must be dated at the clock.
-    const closedAt = isoAgo(0);
-    writeMetrics("one", "ARK-181-CHROME-METRICS-ONE", closedAt, "handed_off", {
-      cost: { total_usd: 1 },
-      time: { wall_seconds: 60, gate_wait_seconds: 10 },
-    });
-    writeMetrics("two", "ARK-181-CHROME-METRICS-TWO", closedAt, "handed_off", {
-      cost: { total_usd: 2 },
-      time: { wall_seconds: 120, gate_wait_seconds: 20 },
-    });
-    for (const project of ["one", "two"]) {
-      const projectDirectory = project === "one" ? projectOneDirectory : projectTwoDirectory;
-      const runDirectory = join(
-        projectDirectory,
-        "runs",
-        `2026-11-01-${project}-CHROME-SEARCH-NEEDLE`,
-      );
-      mkdirSync(runDirectory, { recursive: true });
-      writeFileSync(join(runDirectory, "plan.md"), "# Chrome-search-needle plan");
-    }
-
-    await withUi(async (baseUrl) =>
-      withHeadlessChrome(baseUrl, async (evaluate) => {
-        const waitFor = async (expression: string) => {
-          for (let attempt = 0; attempt < 80; attempt++) {
-            const ready = await evaluate(expression);
-            if (ready) return;
-            // The page and API are separate processes; wait for the rendered DOM condition.
-            await Bun.sleep(100);
-          }
-          throw new Error(`Chrome condition timed out: ${expression}`);
-        };
-        await waitFor("Boolean(document.querySelector('[data-view=backlog]'))");
-        const viewButtons = await evaluate(
-          "[...document.querySelectorAll('nav.vbar button')].map((button) => [button.textContent.trim(), button.getAttribute('data-view')])",
-        );
-        expect(viewButtons).toHaveLength(8);
-        for (const view of ["backlog", "agents", "metrics", "search", "projects"]) {
-          const clicked = await evaluate(
-            `(() => { const button = [...document.querySelectorAll('nav.vbar button')].find((candidate) => candidate.dataset.view === '${view}'); button?.click(); return Boolean(button); })()`,
-          );
-          expect(clicked).toBe(true);
-          await waitFor(`Boolean(document.querySelector('.scroll[data-view="${view}"]'))`);
-          await waitFor(
-            `Boolean(document.querySelector('.scroll[data-view="${view}"] button, .scroll[data-view="${view}"] input'))`,
-          );
-          if (view === "metrics")
-            await waitFor(
-              `!document.querySelector('.scroll[data-view="metrics"]').innerText.includes('Reading metrics')`,
-            );
-          if (view === "search") {
-            await evaluate(
-              "(() => { const input = document.querySelector('input[aria-label=\"Search text\"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Chrome-search-needle'); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form').requestSubmit(); })()",
-            );
-            await waitFor("Boolean(document.querySelector('[data-hit=plan]'))");
-          }
-          const allText = await evaluate(
-            `document.querySelector('.scroll[data-view="${view}"]').innerText`,
-          );
-          expect(String(allText).toLowerCase()).toContain("one");
-          expect(String(allText).toLowerCase()).toContain("two");
-          await evaluate(
-            "[...document.querySelectorAll('.chips button')].find((button) => button.textContent.trim().toLowerCase().startsWith('one'))?.click()",
-          );
-          await waitFor(
-            `document.querySelector('.scroll[data-view="${view}"]').innerText.toLowerCase().includes('one')`,
-          );
-          const filteredText = await evaluate(
-            `document.querySelector('.scroll[data-view="${view}"]').innerText`,
-          );
-          expect(String(filteredText).toLowerCase()).not.toContain("two");
-          await evaluate(
-            "[...document.querySelectorAll('.chips button')].find((button) => button.getAttribute('aria-pressed') === 'false' && button.textContent.trim().toLowerCase().startsWith('all'))?.click()",
-          );
-        }
-
-        await evaluate(
-          "[...document.querySelectorAll('nav.vbar button')].find((button) => button.dataset.view === 'backlog')?.click()",
-        );
-        await waitFor(
-          "Boolean(document.querySelector('[data-ticket=\"one:ARK-181-CHROME-ONE\"] button'))",
-        );
-        await evaluate(
-          "document.querySelector('[data-ticket=\"one:ARK-181-CHROME-ONE\"] button').click()",
-        );
-        await waitFor(
-          "document.querySelector('aside.detail').innerText.includes('One project ticket')",
-        );
-        const detailText = await evaluate("document.querySelector('aside.detail').innerText");
-        expect(String(detailText)).toContain("One project ticket");
-
-        await evaluate(
-          "[...document.querySelectorAll('nav.vbar button')].find((button) => button.dataset.view === 'agents')?.click()",
-        );
-        await waitFor("Boolean(document.querySelector('[data-agent=term_one] button'))");
-        await evaluate("document.querySelector('[data-agent=term_one] button').click()");
-        await waitFor(
-          "document.querySelector('aside.detail button')?.textContent.includes('Open in Orca')",
-        );
-        await evaluate("document.querySelector('aside.detail button').click()");
-        await waitFor("Boolean(document.querySelector('[data-agent=term_one]'))");
-        for (let attempt = 0; attempt < 40 && !(await Bun.file(terminalLog).exists()); attempt++) {
-          // Orca switching runs as a child process, so wait for its durable output.
-          await Bun.sleep(25);
-        }
-        expect(await Bun.file(terminalLog).text()).toContain("terminal switch --terminal term_one");
-
-        await evaluate(
-          "[...document.querySelectorAll('nav.vbar button')].find((button) => button.dataset.view === 'search')?.click()",
-        );
-        await waitFor("Boolean(document.querySelector('input[aria-label=\"Search text\"]'))");
-        await evaluate(
-          "(() => { const input = document.querySelector('input[aria-label=\"Search text\"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Chrome-search-needle'); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form').requestSubmit(); })()",
-        );
-        await waitFor(
-          "document.querySelector('.s-needs')?.innerText.includes('Orca history is disabled')",
-        );
-        expect(await evaluate("document.querySelector('.s-needs').innerText")).toContain(
-          "Orca history is disabled",
-        );
-      }),
-    );
-  },
-);

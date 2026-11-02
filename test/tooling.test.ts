@@ -18,7 +18,10 @@ const packageConfiguration = JSON.parse(
   scripts: Record<string, string>;
 };
 const ciWorkflow = readFileSync(join(repositoryRoot, ".github/workflows/ci.yml"), "utf8");
-const ciCommands = [...ciWorkflow.matchAll(/^      - run: (.+)$/gm)].map((match) => match[1]);
+// The `test` job comes first; the `playwright` job has its own commands.
+const ciCommands = [
+  ...ciWorkflow.split(/^ {2}playwright:$/m)[0].matchAll(/^ {6}- run: (.+)$/gm),
+].map((match) => match[1]);
 const expectedCiCommands = [
   "bun install --frozen-lockfile",
   "bun run typecheck",
