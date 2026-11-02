@@ -441,3 +441,119 @@ test("ark --help prints usage and an unknown command exits 1", () => {
   expect(unknown.code).toBe(1);
   expect(unknown.err).toContain("Usage: ark <command>");
 });
+
+/** A building run with both rounds spent; the last ark test result is `passed`. */
+function spentBudgetRun(passed: boolean): { runId: string; directory: string } {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  for (const round of [1, 2]) {
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+    expect(round).toBeLessThanOrEqual(2);
+  }
+  appendEvent(directory, "test.completed", {
+    passed,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": passed ? "passing" : "failing" },
+  });
+  return { runId, directory };
+}
+
+const eventTypes = (directory: string): string[] =>
+  eventLines(directory).map((line) => JSON.parse(line).type);
+
+test("ARK-210-AC1 ark escalate opens escalation at the spent budget although the last test passed", () => {
+  const { runId, directory } = spentBudgetRun(true);
+  expect(ark("status", runId).out).toContain("phase: building");
+  const result = ark("escalate", runId, "--reason", "review P1 unresolved, tests pass");
+  expect(result.code).toBe(0);
+  expect(result.out).toContain("round 2 of 2");
+  expect(JSON.parse(eventLines(directory).at(-1) as string)).toMatchObject({
+    type: "escalation.requested",
+    data: { reason: "review P1 unresolved, tests pass" },
+  });
+  expect(ark("status", runId).out).toContain("phase: escalation");
+});
+
+test("ARK-210-AC1 an open escalation request survives a passing ark test", () => {
+  const { runId, directory } = spentBudgetRun(true);
+  expect(ark("escalate", runId, "--reason", "P1 open").code).toBe(0);
+  appendEvent(directory, "test.completed", {
+    passed: true,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": "passing" },
+  });
+  expect(ark("status", runId).out).toContain("phase: escalation");
+});
+
+test("ARK-210-AC2 ark escalate below the round budget exits 1, names the budget and logs nothing", () => {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  const before = eventLines(directory);
+  const result = ark("escalate", runId, "--reason", "too early");
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("round budget");
+  expect(eventLines(directory)).toEqual(before);
+  expect(eventTypes(directory)).not.toContain("escalation.requested");
+});
+
+test("ARK-210-AC2 ark escalate outside phase building exits 1 and names the phase", () => {
+  const planning = startRun();
+  approvePlan(planning.directory);
+  // a run before plan approval is in planning
+  const early = startRun("demo", "ARK-901");
+  const planningRefusal = ark("escalate", early.runId, "--reason", "x");
+  expect(planningRefusal.code).toBe(1);
+  expect(planningRefusal.err).toContain("awaiting_criteria");
+
+  const open = spentBudgetRun(false);
+  expect(ark("status", open.runId).out).toContain("phase: escalation");
+  const escalationRefusal = ark("escalate", open.runId, "--reason", "x");
+  expect(escalationRefusal.code).toBe(1);
+  expect(escalationRefusal.err).toContain("escalation");
+  expect(eventTypes(open.directory)).not.toContain("escalation.requested");
+});
+
+test("ARK-210-AC2 ark escalate in merge_requests_open exits 1 and names the phase", () => {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  appendEvent(directory, "merge_request.opened", { repo: ".", url: "https://x/pull/1", number: 1 });
+  expect(ark("status", runId).out).toContain("phase: merge_requests_open");
+  const result = ark("escalate", runId, "--reason", "x");
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("merge_requests_open");
+});
+
+test("ARK-210-AC3 one_more_round after ark escalate returns to building and starts round 3", () => {
+  const { runId, directory } = spentBudgetRun(true);
+  expect(ark("escalate", runId, "--reason", "P1 open").code).toBe(0);
+  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+  expect(ark("status", runId).out).toContain("phase: building");
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  expect(JSON.parse(eventLines(directory).at(-1) as string)).toMatchObject({
+    type: "step.started",
+    data: { round: 3 },
+  });
+});
+
+test("ARK-210-AC3 take_over and abort answers after ark escalate are recorded", () => {
+  const takeOver = spentBudgetRun(true);
+  expect(ark("escalate", takeOver.runId, "--reason", "P1 open").code).toBe(0);
+  expect(ark("gate", "record", takeOver.runId, "escalation", "take_over").code).toBe(0);
+  expect(JSON.parse(eventLines(takeOver.directory).at(-1) as string)).toMatchObject({
+    type: "gate.answered",
+    data: { gate: "escalation", answer: "take_over" },
+  });
+
+  const aborted = spentBudgetRun(true);
+  expect(ark("escalate", aborted.runId, "--reason", "P1 open").code).toBe(0);
+  expect(ark("gate", "record", aborted.runId, "escalation", "abort").code).toBe(0);
+  expect(ark("status", aborted.runId).out).toContain("phase: closed");
+  expect(ark("status", aborted.runId).out).toContain("aborted");
+});
