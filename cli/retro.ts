@@ -371,6 +371,20 @@ function formatUsd(usd: Unknowable, includesUnknown: boolean): string {
   return `$${usd.toFixed(2)}${includesUnknown ? " (some costs unknown)" : ""}`;
 }
 
+const ROUND_FILE = /^round-\d+\.md$/;
+const RANKED_LINE = /^\s*#*\s*(?:(?:\d+\.|[-*])\s+)?(?:\*\*|__)?P[0-3]\b/;
+
+/** Ranked P0 to P3 lines in every findings/round-<number>.md file. No findings folder means 0. */
+function countFindingsSentBack(runDirectory: string): number {
+  const findingsDirectory = join(runDirectory, "findings");
+  if (!existsSync(findingsDirectory)) return 0;
+  let count = 0;
+  for (const name of readdirSync(findingsDirectory).filter((file) => ROUND_FILE.test(file)))
+    for (const line of readFileSync(join(findingsDirectory, name), "utf8").split("\n"))
+      if (RANKED_LINE.test(line)) count++;
+  return count;
+}
+
 export function retro(runId: string, inProject?: string): void {
   const { project, directory: runDirectory } = findRun(runId, inProject);
   const events = readEvents(runDirectory);
@@ -466,12 +480,7 @@ export function retro(runId: string, inProject?: string): void {
   for (const [message, window] of stepOf)
     stepSessions.set(window.id, (stepSessions.get(window.id) ?? new Set()).add(message.sessionKey));
   const closed = events.some((event) => event.type === "run.closed");
-  const finishedFailedByReviewer = events.filter(
-    (event) =>
-      event.type === "step.finished" &&
-      event.data.outcome === "failed" &&
-      roleOfStep.get(event.data.step) === "reviewer",
-  ).length;
+  const findingsSentBack = countFindingsSentBack(runDirectory);
   const mergeRequests = mergeRequestActivity(runDirectory, events);
 
   let idleGaps = 0;
@@ -513,7 +522,7 @@ export function retro(runId: string, inProject?: string): void {
       escalations: events.filter(
         (event) => event.type === "gate.answered" && event.data.gate === "escalation",
       ).length,
-      findings_sent_back: finishedFailedByReviewer,
+      findings_sent_back: findingsSentBack,
       merge_steps: events.filter((event) => event.type === "step.started" && event.data.merge)
         .length,
     },
