@@ -2132,3 +2132,97 @@ test(
     }
   },
 );
+
+
+const leadSlot = '[data-slot="run-lead-message"]';
+
+// Earlier tests leave their plannotator stubs on PATH; shadow them so the hub's session poll does not write to this test's action log.
+function shadowPlannotator(): void {
+  const stub = join(orcaBinDirectory, "plannotator");
+  writeFileSync(stub, "#!/bin/sh\nprintf '[]'\n");
+  chmodSync(stub, 0o755);
+}
+
+test(
+  "ARK-215-AC1 run detail slot sends a typed message to the live run lead terminal",
+  { timeout: 30_000 },
+  async () => {
+    const run = startRun("ARK-215-LIVE", "Slot sends");
+    readyRun(run);
+    const actionLog = join(
+      mkdtempSync(join(tmpdir(), "ark-steering-")),
+      "calls.txt",
+    );
+    process.env.ORCA_ACTION_LOG = actionLog;
+    shadowPlannotator();
+    openRunSnapshot(run.runId);
+
+    await using view = new Bun.WebView({
+      backend: "chrome",
+      width: 1280,
+      height: 900,
+    });
+    await withUi(async (baseUrl) => {
+      await view.navigate(`${baseUrl}/#run=${run.runId}`);
+      // The slot exists only after the detail page has mounted with its data.
+      await waitForBrowserValue(
+        view,
+        `document.querySelector('${leadSlot} input') !== null`,
+      );
+      expect(
+        await view.evaluate(
+          `document.querySelector('${leadSlot} form') !== null`,
+        ),
+      ).toBe(true);
+      // view.click on the offscreen input hangs; focus it directly.
+      await view.evaluate(
+        `(() => { const i = document.querySelector('${leadSlot} input'); i.scrollIntoView(); i.focus(); })()`,
+      );
+      await view.type("use the smaller step");
+      await view.click(`${leadSlot} button[type=submit]`);
+      await waitForCondition(async () => existsSync(actionLog));
+      expect(terminalActionLog()).toEqual([
+        "terminal send --terminal term_lead --text use the smaller step --enter --json",
+      ]);
+    });
+  },
+);
+
+test(
+  "ARK-215-AC2 run detail slot says no run lead is live and sends nothing",
+  { timeout: 30_000 },
+  async () => {
+    const run = startRun("ARK-215-NONE", "Slot without lead");
+    const actionLog = join(
+      mkdtempSync(join(tmpdir(), "ark-steering-")),
+      "calls.txt",
+    );
+    process.env.ORCA_ACTION_LOG = actionLog;
+    shadowPlannotator();
+    setOrcaRuns([]);
+
+    await using view = new Bun.WebView({
+      backend: "chrome",
+      width: 1280,
+      height: 900,
+    });
+    await withUi(async (baseUrl) => {
+      await view.navigate(`${baseUrl}/#run=${run.runId}`);
+      await waitForBrowserValue(
+        view,
+        `document.querySelector('${leadSlot}') !== null`,
+      );
+      expect(
+        await view.evaluate(
+          `document.querySelector('${leadSlot}').textContent`,
+        ),
+      ).toContain("No run lead is live");
+      expect(
+        await view.evaluate(
+          `document.querySelectorAll('${leadSlot} input, ${leadSlot} button').length`,
+        ),
+      ).toBe(0);
+      expect(existsSync(actionLog)).toBe(false);
+    });
+  },
+);
