@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
+import { buildTimeline } from "../cli/hub/timeline.ts";
 import { planHash } from "../cli/plan.ts";
 import {
   ark,
@@ -587,5 +589,40 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       expect(cost.series.map((point) => point.usd)).toEqual([0.08, "unknown"]);
       expect(cost.usd).toBe("unknown");
     });
+  });
+
+  test("ARK-246-AC2 buildTimeline scans the session roots once for all runs", () => {
+    const runs = ["ARK-246-SCAN1", "ARK-246-SCAN2", "ARK-246-SCAN3", "ARK-246-SCAN4"].map((id) =>
+      startRun(id),
+    );
+    const ompRoot = mkdtempSync(join(tmpdir(), "ark-omp-"));
+    process.env.ARK_OMP_SESSIONS = ompRoot;
+    process.env.ARK_CODEX_SESSIONS = join(ompRoot, "no-codex");
+    mkdirSync(join(ompRoot, "sessions"), { recursive: true });
+    const header = (cwd: string) =>
+      `${JSON.stringify({ type: "session", version: 3, id: "omp", timestamp: at(20), cwd })}\n`;
+    // A session of no run: every scan of the root opens it once, so the opens count the scans.
+    const decoy = join(ompRoot, "sessions", "decoy.jsonl");
+    writeFileSync(decoy, header(tmpdir()));
+    runs.forEach(({ directory }, index) =>
+      writeFileSync(
+        join(ompRoot, "sessions", `run${index}.jsonl`),
+        header(join(directory, "workspace")),
+      ),
+    );
+    const view = { projects: [], runs: [], needs_me: [], last_seen: null };
+    const opened: string[] = [];
+    const open = fs.openSync;
+    const spy = spyOn(fs, "openSync").mockImplementation(((path: fs.PathLike, ...rest: never[]) => {
+      opened.push(String(path));
+      return (open as (...args: unknown[]) => number)(path, ...rest);
+    }) as typeof fs.openSync);
+    try {
+      const timeline = buildTimeline(view, 12);
+      expect(timeline.lanes.filter((lane) => lane.kind === "run")).toHaveLength(runs.length);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(opened.filter((path) => path === decoy)).toHaveLength(1);
   });
 });
