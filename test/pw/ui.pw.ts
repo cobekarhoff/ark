@@ -666,3 +666,125 @@ test("ARK-215-AC2 run detail slot says no run lead is live and sends nothing", a
     expect(existsSync(actionLog)).toBe(false);
   });
 });
+
+const approveBox = '.chief-box[aria-label="Master Chief for alpha"]';
+const proposedTitles = ["Alpha one", "Alpha two", "Alpha three"];
+
+/** Project alpha (own repo, live chief) with ARK-185..187 proposed, one ready ticket, and a send log. */
+function seedAlpha(proposed = true): string {
+  const workspace = tempGitRepo();
+  writeProject("alpha", projectConfigFor(workspace));
+  const addStatus = (file: string, status: string) =>
+    writeFileSync(file, readFileSync(file, "utf8").replace("---\n", `---\nstatus: ${status}\n`));
+  ["ARK-185", "ARK-186", "ARK-187"].forEach((id, index) =>
+    addStatus(
+      writeTicket("alpha", id, [{ id: `${id}-AC1`, text: "It works" }], proposedTitles[index]),
+      proposed ? "proposed" : "draft",
+    ),
+  );
+  addStatus(writeTicket("alpha", "ARK-188", [], "Alpha ready"), "ready");
+  const actionLog = join(tempDirectory("ark-steering-"), "calls.txt");
+  process.env.ORCA_ACTION_LOG = actionLog;
+  setMasterChiefs([{ ...liveChiefTerminal(workspace), handle: "term_alpha" }]);
+  return actionLog;
+}
+
+test("ARK-258-AC1 Backlog approve names only the open ticket", async ({ page }) => {
+  const actionLog = seedAlpha();
+  await withUi(async (baseUrl) => {
+    await page.goto(baseUrl);
+    await page.locator('nav.vbar button[data-view="backlog"]').click();
+    await page.locator('[data-ticket="alpha:ARK-185"] button').click();
+    await expect(page.locator("aside.detail")).toContainText("ARK-185");
+    const request = page.waitForRequest("**/api/actions/chief-instruction");
+    await page.locator("aside.detail").getByRole("button", { name: "Approve and queue" }).click();
+    expect((await request).postDataJSON()).toMatchObject({ tickets: ["ARK-185"] });
+    await expect.poll(() => existsSync(actionLog)).toBe(true);
+    const [line, ...rest] = terminalActionLog();
+    expect(rest).toEqual([]);
+    expect(line).toContain("--terminal term_alpha");
+    expect(line).toContain("ARK-185");
+    expect(line).not.toMatch(/ARK-18[67]/);
+    expect(line).not.toContain("the proposed tickets in the order shown");
+  });
+});
+
+test("ARK-258-AC2 server answers 400 and sends nothing for a bad ticket list", async () => {
+  const actionLog = seedAlpha();
+  await withUi(async (baseUrl) => {
+    const base = { project: "alpha", instruction: "approve-and-queue" };
+    for (const tickets of [
+      undefined,
+      [],
+      ["ARK-188"],
+      ["ARK-999"],
+      "ARK-185",
+      ["ARK-185", 186],
+      ["ARK-185", "ARK-185"],
+    ]) {
+      const response = await fetch(`${baseUrl}/api/actions/chief-instruction`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...base, tickets }),
+      });
+      expect(response.status, JSON.stringify(tickets)).toBe(400);
+      expect(existsSync(actionLog)).toBe(false);
+    }
+  });
+});
+
+test("ARK-258-AC3 box approve lists proposed tickets and sends only on confirm", async ({
+  page,
+}) => {
+  const actionLog = seedAlpha();
+  await withUi(async (baseUrl) => {
+    await page.goto(baseUrl);
+    const open = async () => {
+      await page.locator(approveBox).getByRole("button", { name: "Approve and queue" }).click();
+      const dialog = page.locator("[role=alertdialog]");
+      await expect(dialog).toBeVisible();
+      return dialog;
+    };
+    let dialog = await open();
+    const rows = dialog.locator(".approve-list li");
+    await expect(rows).toHaveCount(3);
+    for (const [index, id] of ["ARK-185", "ARK-186", "ARK-187"].entries())
+      await expect(rows.filter({ hasText: id })).toContainText(proposedTitles[index]);
+    await expect(dialog).not.toContainText("ARK-188");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toBeHidden();
+    expect(existsSync(actionLog)).toBe(false);
+    dialog = await open();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    expect(existsSync(actionLog)).toBe(false);
+    dialog = await open();
+    await dialog.getByRole("button", { name: "Confirm" }).click();
+    await expect.poll(() => existsSync(actionLog)).toBe(true);
+    const [line, ...rest] = terminalActionLog();
+    expect(rest).toEqual([]);
+    expect([...line.matchAll(/ARK-\d+/g)].map(([id]) => id).sort()).toEqual([
+      "ARK-185",
+      "ARK-186",
+      "ARK-187",
+    ]);
+  });
+});
+
+test("ARK-258-AC4 box approve is disabled with a reason when nothing is proposed", async ({
+  page,
+}) => {
+  seedAlpha(false);
+  await withUi(async (baseUrl) => {
+    await page.goto(baseUrl);
+    const box = page.locator(approveBox);
+    await expect(box).toBeVisible();
+    await expect(box.getByRole("button", { name: "Approve and queue" })).toBeDisabled();
+    await expect(box).toContainText("No proposed tickets");
+  });
+});
+
+test("ARK-258-AC5 specs for AC1 to AC4 exist with their AC id in the title", async () => {
+  const source = readFileSync(import.meta.filename, "utf8");
+  for (const id of ["AC1", "AC2", "AC3", "AC4"]) expect(source).toContain(`test("ARK-258-${id} `);
+});
