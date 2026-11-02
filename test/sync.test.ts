@@ -441,3 +441,55 @@ test("ARK-211-AC3 retro counts merge steps in rework.merge_steps and not in rewo
   expect(metrics.rework.merge_steps).toBe(1);
   expect(retroResult.out).toContain("1 rounds, 0 escalations, 0 findings sent back, 1 merge steps");
 });
+
+test("ARK-233-AC1 --merge is refused after a succeeded merge step until a new sync conflicts", () => {
+  const scenario = startRun();
+  buildRounds(scenario.runId, 1);
+  syncWithConflict(scenario);
+  expect(ark("run", "step", scenario.runId, "build", "start", "--merge").code).toBe(0);
+  expect(ark("run", "step", scenario.runId, "build", "finish").code).toBe(0);
+
+  const refused = ark("run", "step", scenario.runId, "build", "start", "--merge");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("--merge needs a failed ark worktree sync for repo .");
+
+  // A new conflict: the worktree and origin both change another file.
+  commitFile(scenario.worktreePath(), "again.txt", "worktree\n");
+  advanceOrigin(scenario.workspace, ".", "again.txt", "target\n");
+  expect(ark("worktree", "sync", scenario.runId).code).toBe(1);
+  expect(ark("run", "step", scenario.runId, "build", "start", "--merge").code).toBe(0);
+});
+
+test("ARK-233-AC1 --merge stays allowed after a merge step finished as failed", () => {
+  const scenario = startRun();
+  buildRounds(scenario.runId, 1);
+  syncWithConflict(scenario);
+  expect(ark("run", "step", scenario.runId, "build", "start", "--merge").code).toBe(0);
+  expect(ark("run", "step", scenario.runId, "build", "finish", "--failed").code).toBe(0);
+
+  expect(ark("run", "step", scenario.runId, "build", "start", "--merge").code).toBe(0);
+});
+
+test("ARK-233-AC2 the CLI reference documents rework.merge_steps", () => {
+  const doc = readFileSync(join(import.meta.dir, "../docs/reference/cli.md"), "utf8");
+  expect(doc).toContain("rework.merge_steps");
+});
+
+test("ARK-233-AC3 worktree sync on a closed run exits with a phase error and leaves HEAD unchanged", () => {
+  const scenario = startRun();
+  appendEvent(scenario.runDirectory, "merge_request.opened", {
+    repo: ".",
+    url: "https://github.com/acme/main/pull/9",
+    number: 9,
+  });
+  // A dirty worktree survives the close, so the sync has a worktree to leave alone.
+  writeFileSync(join(scenario.worktreePath(), "dirty.txt"), "dirty\n");
+  expect(ark("run", "close", scenario.runId, "merged").code).toBe(0);
+  const before = git(scenario.worktreePath(), "rev-parse", "HEAD");
+  advanceOrigin(scenario.workspace, ".", "target.txt", "target\n");
+
+  const synced = ark("worktree", "sync", scenario.runId);
+  expect(synced.code).toBe(1);
+  expect(synced.err).toContain("closed");
+  expect(git(scenario.worktreePath(), "rev-parse", "HEAD")).toBe(before);
+});
