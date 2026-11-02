@@ -209,6 +209,65 @@ test("ARK-177-AC2 sends chief messages only to the live project's Master Chief t
   });
 });
 
+/** Two Master Chief Runs for `demo`, stale first; `liveHandle` is the second Run's terminal (or null for none). */
+function setDuplicateChiefRuns(staleHandle: string | null, liveHandle: string | null): void {
+  process.env.ORCA_CHIEF_RUNS = JSON.stringify(
+    [staleHandle, liveHandle].map((handle, index) => ({
+      id: `orca-chief-duplicate-${index}`,
+      objective: "Master Chief: demo tickets",
+      coordinator_handle: handle,
+    })),
+  );
+}
+
+test("ARK-216-AC1 a stale duplicate Master Chief Run listed first does not hide the live Master Chief", async () => {
+  const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
+  process.env.ORCA_ACTION_LOG = actionLog;
+  const workspace = JSON.parse(readFileSync(join(projectDirectory, "ark.yml"), "utf8")).workspace;
+  const config = projectConfigFor(workspace);
+  writeProject("demo", {
+    ...config,
+    roles: { ...(config.roles as object), chief: { harness: "omp", model: "pi/task" } },
+  });
+  process.env.ORCA_TERMINALS = JSON.stringify([
+    { handle: "term_stale", worktreePath: workspace, connected: false, agentIdentity: "omp" },
+    { ...liveChiefTerminal(), model: "pi/task" },
+  ]);
+  setDuplicateChiefRuns("term_stale", "term_chief");
+
+  await withUi(async (baseUrl) => {
+    const data = await hubState(baseUrl);
+    expect(data.projects).toContainEqual({
+      name: "demo",
+      chief: { state: "live", handle: "term_chief", harness: "omp", model: "pi/task" },
+    });
+
+    const refused = await fetch(`${baseUrl}/api/actions/chief-spawn`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: "demo" }),
+    });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      error: expect.stringContaining("already has a live Master Chief"),
+    });
+    expect(existsSync(actionLog)).toBe(false);
+  });
+});
+
+test("ARK-216-AC2 duplicate Master Chief Runs that are all dead report missing", async () => {
+  const workspace = JSON.parse(readFileSync(join(projectDirectory, "ark.yml"), "utf8")).workspace;
+  process.env.ORCA_TERMINALS = JSON.stringify([
+    { handle: "term_stale", worktreePath: workspace, connected: false, agentIdentity: "omp" },
+  ]);
+  setDuplicateChiefRuns("term_stale", null);
+
+  await withUi(async (baseUrl) => {
+    const data = await hubState(baseUrl);
+    expect(data.projects).toContainEqual({ name: "demo", chief: { state: "missing" } });
+  });
+});
+
 test("ARK-177-AC3 sends run-lead messages and rejects page-selected or unavailable terminals", async () => {
   const run = startRun("ARK-177-M1", "Message the run lead");
   const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
