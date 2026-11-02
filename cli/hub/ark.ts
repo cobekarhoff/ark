@@ -33,7 +33,7 @@ export function readRuns(now = hubNow()): RunInfo[] {
 }
 
 /** A closed run whose `retro.md` Close check lacks a non-empty answer to any of the three questions. */
-function retroUnanswered(directory: string): boolean {
+export function retroUnanswered(directory: string): boolean {
   try {
     const closeCheck = readFileSync(join(directory, "retro.md"), "utf8").split(
       /^## Close check\s*$/m,

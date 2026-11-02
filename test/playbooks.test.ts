@@ -289,3 +289,27 @@ test("ARK-236-AC5 run-lead section 7 copies every literal string an AC names int
     /copy every literal string an AC names \(a field, flag or message\) word for word/,
   );
 });
+
+test("ARK-244-AC3 chief names both loop scripts by path", () => {
+  expect(chiefPlaybook).toContain("scripts/auto-merger.sh");
+  expect(chiefPlaybook).toContain("scripts/temp-cleaner.sh");
+});
+
+test("ARK-244-AC4 chief takes over from live state and hands over at 70% context use", () => {
+  expect(chiefPlaybook).toMatch(/ark chief state --project <project>/);
+  expect(chiefPlaybook).toMatch(/`handoff\.md` keeps only standing rules/);
+
+  const handover = chiefPlaybook.split(/^## .*70%.*$/m)[1]?.split("\n## ")[0];
+  expect(handover).toBeDefined();
+  expect(chiefPlaybook).toContain("70% or more");
+  const run = handover!.indexOf("ark chief handover --project <project>");
+  const close = handover!.indexOf("orca terminal close");
+  expect(run).toBeGreaterThanOrEqual(0);
+  expect(close).toBeGreaterThan(run);
+
+  // No rule may tell Master Chief to write a State section in handoff.md.
+  expect(chiefPlaybook).not.toMatch(
+    /(write|keep|update|add)[^.\n]*State section[^.\n]*handoff\.md/i,
+  );
+  expect(chiefPlaybook).toMatch(/Do not write a State section/);
+});

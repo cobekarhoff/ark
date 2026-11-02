@@ -230,6 +230,27 @@ When the human gives you a bug ticket and it traces back to an earlier run, or y
 
 3. Then queue and run the bug ticket like any other ticket.
 
+## 10. Take over from live state
+
+When you take over a Master Chief Run (section 2, step 5) or start as a replacement from `ark chief handover`, run `ark chief state --project <project>` and work from its output. It reads the open runs, run leads, queued Orca Tasks, the main head, gates, concurrency, closed runs with an empty Close check and free disk live. A section that says `unavailable` is unknown, not empty: check it yourself before you act.
+
+`handoff.md` keeps only standing rules: decisions of the human that stay true, and how the human wants Master Chief to work. Do not write a State section in it. State goes stale in minutes, and `ark chief state` replaces it.
+
+## 11. Hand over at 70% context use
+
+At 70% or more context use, as your status line shows, do these steps in order. Stop starting new work first.
+
+1. Run `ark chief handover --project <project>`. It starts a new Master Chief in a new Orca terminal and prints its handle. It does not close your terminal. The new agent waits until your terminal is gone, then binds to your Run with `run-use`.
+2. If it exits non-zero, tell the human and stop. Do not close your terminal.
+3. Tell the human the new handle, then close your own terminal: `orca terminal close --terminal "$ORCA_TERMINAL_HANDLE"`.
+
+## 12. Background loops
+
+Two loops run in the Ark repo's `scripts/` folder. Start each one in its own background job in a terminal, with the workspace and the interval in seconds as arguments:
+
+- `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again.
+- `scripts/temp-cleaner.sh <workspace> 300` removes Ark test temp directories older than 12 minutes from `$TMPDIR`. It prints `LOW DISK` and exits when `/` has less than 15 GB free.
+
 ## Rules
 
 - Never write product code, edit a worktree, or run a project's tests yourself. Run leads and workers do that.
