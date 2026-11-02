@@ -121,7 +121,7 @@ Prints each MR of the run as merged, open or closed, read from gh or glab. For o
 ```text
 ark worktree sync <run> [--project <name>]
 
-Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge, names the repo and exits 1. A closed run gets a phase error and its worktrees stay unchanged. It never merges an MR.
+Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge and goes on to the next repo. After the last repo it exits 1 and names every conflicting repo. A closed run gets a phase error and its worktrees stay unchanged. It never merges an MR.
 ```
 
 ### workspace sync
