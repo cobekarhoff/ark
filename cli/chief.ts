@@ -11,8 +11,8 @@ import { listProjects, runsDirectory } from "./paths.ts";
 /** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for a one-off command. */
 const orcaTimeoutMilliseconds = 10_000;
 
-type OrcaRunRow = { id: string; objective?: string };
-type WorkerRow = { dispatchId: string; runId?: string; agentTerminalHandle?: string };
+type OrcaRunRow = { id: string; objective?: string; coordinator_handle?: string };
+type WorkerRow = { dispatchId: string; agentTerminalHandle?: string };
 type TaskRow = { id: string; task_title: string; status?: string };
 
 const unavailable = (what: string): string => `unavailable: ${what} did not answer`;
@@ -68,53 +68,38 @@ export async function chiefState(inProject?: string): Promise<void> {
   );
 
   const orcaRuns = (await orcaOrchestration<{ runs?: OrcaRunRow[] }>("run-list"))?.runs;
-  // Workers are listed for each open run's own Orca Run: a call with no --run sees only the caller's Run.
-  const orcaRunOf = new Map(
-    (orcaRuns ?? [])
-      .filter((orcaRun) => orcaRun.objective?.startsWith("Ark run "))
-      .map((orcaRun) => [orcaRun.objective!.slice("Ark run ".length), orcaRun.id]),
-  );
-  const runOfOrcaRun = new Map([...orcaRunOf].map(([run, id]) => [id, run]));
-  let leadsText = unavailable("`orca orchestration worker-list`");
-  if (orcaRuns) {
-    const answers = await Promise.all(
-      openRuns.flatMap((state) => {
-        const orcaRunId = orcaRunOf.get(state.run);
-        return orcaRunId
-          ? [
-              orcaOrchestration<{ workers?: WorkerRow[] }>(
-                "worker-list",
-                "--run",
-                orcaRunId,
-                "--include-remote",
-              ),
-            ]
-          : [];
-      }),
-    );
-    if (answers.every((answer) => answer !== null)) {
-      const rows = new Map<string, WorkerRow>();
-      for (const answer of answers)
-        for (const worker of answer!.workers ?? []) rows.set(worker.dispatchId, worker);
-      leadsText =
-        rows.size === 0
-          ? "none"
-          : table(
-              ["Run", "Dispatch", "Terminal"],
-              [...rows.values()].map((worker) => [
-                runOfOrcaRun.get(worker.runId ?? "") ?? worker.runId ?? "-",
-                worker.dispatchId,
-                worker.agentTerminalHandle ?? "-",
-              ]),
-            );
-    }
-  }
-  sections.push("## Run leads", leadsText);
-
-  // The queue is the set of Tasks in Master Chief's own Orca Run.
   const chiefRunId = (orcaRuns ?? []).find(
     (orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`,
   )?.id;
+  // A run lead is a worker in Master Chief's own Orca Run. It is the lead of the Ark run whose
+  // Orca Run names the worker's terminal as its coordinator.
+  const runOfLead = new Map(
+    (orcaRuns ?? [])
+      .filter((orcaRun) => orcaRun.objective?.startsWith("Ark run ") && orcaRun.coordinator_handle)
+      .map((orcaRun) => [orcaRun.coordinator_handle!, orcaRun.objective!.slice("Ark run ".length)]),
+  );
+  const openRunNames = new Set(openRuns.map((state) => state.run));
+  let leadsText = unavailable("`orca orchestration worker-list`");
+  if (orcaRuns && chiefRunId) {
+    const answer = await orcaOrchestration<{ workers?: WorkerRow[] }>(
+      "worker-list",
+      "--run",
+      chiefRunId,
+      "--include-remote",
+    );
+    if (answer) {
+      const rows = (answer.workers ?? []).flatMap((worker) => {
+        const run = runOfLead.get(worker.agentTerminalHandle ?? "");
+        return run && openRunNames.has(run)
+          ? [[run, worker.dispatchId, worker.agentTerminalHandle!]]
+          : [];
+      });
+      leadsText = rows.length === 0 ? "none" : table(["Run", "Dispatch", "Terminal"], rows);
+    }
+  } else if (orcaRuns) leadsText = `unavailable: no Orca Run "Master Chief: ${project} tickets"`;
+  sections.push("## Run leads", leadsText);
+
+  // The queue is the set of Tasks in Master Chief's own Orca Run.
   let queueText = unavailable("`orca orchestration task-list`");
   if (orcaRuns && chiefRunId) {
     const [ready, pending] = await Promise.all([

@@ -15,12 +15,16 @@ export async function exec(
     const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const killer = setTimeout(() => child.kill(), timeoutMilliseconds);
     // The race also covers a killed shell whose grandchild still holds the stdout pipe open.
+    let backstop: ReturnType<typeof setTimeout> | undefined;
     const output = await Promise.race([
       new Response(child.stdout)
         .text()
         .then(async (text) => (okExitCodes.includes(await child.exited) ? text : null)),
-      Bun.sleep(timeoutMilliseconds + 100).then(() => null),
+      new Promise<null>((done) => {
+        backstop = setTimeout(() => done(null), timeoutMilliseconds + 100);
+      }),
     ]);
+    clearTimeout(backstop);
     clearTimeout(killer);
     return output;
   } catch {
