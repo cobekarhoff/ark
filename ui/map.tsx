@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MapGraph, MapNode } from "../cli/hub/map.ts";
 import type { Action, Item } from "../cli/hub/types.ts";
+import { FinishedToggle, isFinished, useShowFinished } from "./finished.tsx";
 import { agentKey, type HubState, type Selection } from "./model.ts";
 import { Kbd, stateTone, ViewBar, clock, type View } from "./views.tsx";
 
@@ -114,8 +115,31 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
   }, [at]);
 
   const graph = (at === null ? live : (past ?? live)) ?? null;
-  const nodes = graph?.nodes ?? [];
-  const edges = graph?.edges ?? [];
+  const [showFinished, setShowFinished] = useShowFinished();
+  // Live graph only: replay needs_you ignores retros, so a replayed run cannot be called finished.
+  // A run the selection names stays, compared through ownerOf (steps, gates, agents name their run).
+  const kept =
+    selection?.type === "agent"
+      ? hub.agents.find((candidate) => agentKey(candidate) === selection.id)?.run
+      : selection?.type === "run"
+        ? selection.id
+        : selection && ownerOf(selection.id);
+  const hiddenIds = new Set<string>();
+  if (at === null && !showFinished && graph) {
+    for (const node of graph.nodes)
+      if (isFinished("run", node) && ownerOf(node.id) !== kept) hiddenIds.add(node.id);
+    const queue = [...hiddenIds];
+    for (let next = queue.pop(); next !== undefined; next = queue.pop())
+      for (const [from, to] of graph.edges)
+        if (from === next && !hiddenIds.has(to)) {
+          hiddenIds.add(to);
+          queue.push(to);
+        }
+  }
+  const nodes = (graph?.nodes ?? []).filter((node) => !hiddenIds.has(node.id));
+  const edges = (graph?.edges ?? []).filter(
+    ([from, to]) => !hiddenIds.has(from) && !hiddenIds.has(to),
+  );
 
   const selectionOf = (node: MapNode): Selection | undefined => {
     if (node.kind === "run" || node.kind === "step") return { type: "run", id: ownerOf(node.id) };
@@ -217,6 +241,15 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
           <h1>Ark hub</h1>
           <ViewBar view={view} setView={setView} />
           <span className="spacer" />
+          {hiddenIds.size > 0 && <span className="vchip">{hiddenIds.size} finished hidden</span>}
+          {!replaying && (
+            <FinishedToggle
+              on={showFinished}
+              set={setShowFinished}
+              hidden={hiddenIds.size}
+              label="Show finished"
+            />
+          )}
           {replaying && <span className="vchip warn">Replay, read only</span>}
         </header>
         <div className="scroll map-view">
