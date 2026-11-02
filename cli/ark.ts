@@ -36,14 +36,14 @@ const commands: Command[] = [
     run: ([ticketFile], flags) => runStart(ticketFile, flags["--project"] as string | undefined),
   },
   {
-    usage: "run step <run> <step> start|finish [--failed]",
+    usage: "run step <run> <step> start|finish [--failed] [--merge]",
     description:
-      "Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan.",
-    flags: { "--failed": false },
+      "Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo.",
+    flags: { "--failed": false, "--merge": false },
     minimum: 3,
     maximum: 3,
     run: ([runId, stepId, action], flags) =>
-      runStep(runId, stepId, action, flags["--failed"] === true),
+      runStep(runId, stepId, action, flags["--failed"] === true, flags["--merge"] === true),
   },
   {
     usage: "run close <run> <outcome>",
@@ -139,7 +139,7 @@ const commands: Command[] = [
   {
     usage: "worktree sync <run>",
     description:
-      "Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. On a conflict it undoes the merge, names the repo and exits 1. It never merges an MR.",
+      "Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge, names the repo and exits 1. It never merges an MR.",
     flags: {},
     minimum: 1,
     maximum: 1,

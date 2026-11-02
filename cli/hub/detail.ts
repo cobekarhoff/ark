@@ -134,7 +134,7 @@ function timeline(events: ArkEvent[]) {
 function rounds(events: ArkEvent[]) {
   const byRound = new Map<number, { round: number; at: string; steps: string[] }>();
   for (const event of events) {
-    if (event.type !== "step.started") continue;
+    if (event.type !== "step.started" || event.data.merge) continue;
     const entry = byRound.get(event.data.round) ?? {
       round: event.data.round,
       at: event.time,

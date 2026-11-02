@@ -503,13 +503,15 @@ export function retro(runId: string): void {
       rounds: Math.max(
         1,
         ...events
-          .filter((event) => event.type === "step.started")
+          .filter((event) => event.type === "step.started" && !event.data.merge)
           .map((event) => event.data.round ?? 1),
       ),
       escalations: events.filter(
         (event) => event.type === "gate.answered" && event.data.gate === "escalation",
       ).length,
       findings_sent_back: finishedFailedByReviewer,
+      merge_steps: events.filter((event) => event.type === "step.started" && event.data.merge)
+        .length,
     },
     design_rounds: designRounds,
     decisions: decisionCounts(runDirectory, events),
@@ -551,7 +553,7 @@ export function retro(runId: string): void {
       `retro ${runId}`,
       `cost: ${formatUsd(total.usd, total.includes_unknown)}, ${total.tokens} tokens`,
       `time: ${Math.round(wallSeconds)}s wall, ${Math.round(gateWait)}s waiting at gates`,
-      `rework: ${metrics.rework.rounds} rounds, ${metrics.rework.escalations} escalations, ${metrics.rework.findings_sent_back} findings sent back`,
+      `rework: ${metrics.rework.rounds} rounds, ${metrics.rework.escalations} escalations, ${metrics.rework.findings_sent_back} findings sent back, ${metrics.rework.merge_steps} merge steps`,
       `orchestration: ${metrics.orchestration.restarts} restarts, ${metrics.orchestration.tool_errors} tool errors, ${metrics.orchestration.context_overflows} context overflows, ${metrics.orchestration.idle_gaps} idle gaps`,
       `compared with ${comparison.runs_compared} earlier closed runs`,
       `wrote ${metricsFile}`,

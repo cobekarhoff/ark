@@ -272,7 +272,7 @@ Before you start any step, read your mail with the `check` command from your pre
 ark worktree sync <run>
 ```
 
-It merges origin's target branch into each worktree and pushes the branch of every repo with an open MR. If it exits 1 on a conflict, escalate to Master Chief with the repo it names.
+It merges origin's target branch into each worktree and pushes the branch of every repo with an open MR. If it exits 1 on a conflict, it records the conflict. Start the implementer step of the repo it names with `--merge`, and tell the worker to merge origin's target branch into the worktree and fix the conflict. A merge step costs no round, and the command refuses `--merge` unless the last sync of that repo conflicted. Do not escalate to Master Chief for a merge-only conflict that the implementer can fix. After the MRs open, a merge start still needs the escalation answer, like any implementer start.
 
 Work through the steps in the order `needs` allows. Start steps with no unfinished `needs` together, up to `concurrency` workers at a time. For each step:
 

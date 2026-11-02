@@ -89,6 +89,9 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
     case "worktree.created":
       requirePhase(state, type, ["planning", ...buildPhases]);
       return;
+    case "worktree.synced":
+      requirePhase(state, type, ["planning", ...buildPhases]);
+      return;
     case "step.started":
       requirePhase(state, type, buildPhases);
       if (state.steps.find((step) => step.id === data.step)?.status === "running")
@@ -101,7 +104,18 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
         throw new ArkError(
           "step.started refused: record gate escalation (one_more_round, take_over or abort)",
         );
+      if (data.merge) {
+        if (data.role !== "implementer")
+          throw new ArkError(
+            `step.started refused: --merge applies to an implementer step, not ${data.role}`,
+          );
+        if (!state.sync_conflicts.includes(data.repo))
+          throw new ArkError(
+            `step.started refused: --merge needs a failed ark worktree sync for repo ${data.repo}`,
+          );
+      }
       if (
+        !data.merge &&
         data.role === "implementer" &&
         data.round > 1 &&
         data.round > state.round_budget &&

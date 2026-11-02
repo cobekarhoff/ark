@@ -91,17 +91,31 @@ export function runStart(ticketFile: string, project?: string): void {
   console.log(run);
 }
 
-export function runStep(runId: string, stepId: string, action: string, failed = false): void {
+export function runStep(
+  runId: string,
+  stepId: string,
+  action: string,
+  failed = false,
+  merge = false,
+): void {
   if (action !== "start" && action !== "finish")
     throw new ArkError(`unknown step action "${action}": use start or finish`);
   if (failed && action === "start") throw new ArkError("--failed only applies to finish");
+  if (merge && action === "finish") throw new ArkError("--merge only applies to start");
   const { directory } = findRun(runId);
   const events = readEvents(directory);
   const state = deriveState(events);
 
   if (action === "finish") {
     const outcome = failed ? "failed" : "succeeded";
-    appendEvent(directory, "step.finished", { step: stepId, outcome });
+    const started = events.findLast(
+      (event) => event.type === "step.started" && event.data.step === stepId,
+    );
+    appendEvent(directory, "step.finished", {
+      step: stepId,
+      outcome,
+      ...(started?.data.merge ? { merge: true } : {}),
+    });
     console.log(`${runId} ${stepId} ${outcome}`);
     return;
   }
@@ -114,16 +128,19 @@ export function runStep(runId: string, stepId: string, action: string, failed = 
       `unknown step ${stepId}: the checked plan has ${state.steps.map((step) => step.id).join(", ") || "no steps"}`,
     );
   const finishes = events.filter(
-    (event) => event.type === "step.finished" && event.data.step === stepId,
+    (event) => event.type === "step.finished" && event.data.step === stepId && !event.data.merge,
   ).length;
-  const round = planned.role === "implementer" ? finishes + 1 : state.round;
+  const round = planned.role === "implementer" && !merge ? finishes + 1 : state.round;
   appendEvent(directory, "step.started", {
     step: stepId,
     role: planned.role,
     repo: planned.repo,
     round,
+    ...(merge ? { merge: true } : {}),
   });
-  console.log(`${runId} ${stepId} started (round ${round}/${state.round_budget})`);
+  console.log(
+    `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${state.round_budget})`,
+  );
 }
 
 export function runClose(runId: string, outcome: string): void {
