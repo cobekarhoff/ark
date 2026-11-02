@@ -6,6 +6,7 @@ import type { MetricsAnswer } from "../cli/hub/metrics.ts";
 import type { ProjectsAnswer } from "../cli/hub/projects.ts";
 import type { Hit, SearchAnswer } from "../cli/hub/search.ts";
 import { switchTerminal, type Action } from "../cli/hub/types.ts";
+import { EmptyFinished, FinishedToggle, isFinished, useShowFinished } from "./finished.tsx";
 import { inFilter, otherFilter, type Filter, type HubState } from "./model.ts";
 
 type Perform = (action: Action | null) => Promise<void>;
@@ -104,10 +105,15 @@ const statusOrder = [
 export function Backlog({ hub, filter, known, perform, pane }: ViewProps) {
   const { data, failed } = useApi<BacklogAnswer>("/api/backlog");
   const [selected, setSelected] = useState<string | null>(null);
+  const [showFinished, setShowFinished] = useShowFinished();
   if (failed) return <Banner tone="bad" title="The hub could not read the tickets." />;
   if (data === null) return <div className="empty">Reading tickets…</div>;
-  const tickets = data.tickets.filter((ticket) => inFilter(ticket.project, filter, known));
   const key = (ticket: Ticket) => `${ticket.project}:${ticket.id}`;
+  const scoped = data.tickets.filter((ticket) => inFilter(ticket.project, filter, known));
+  const tickets = scoped.filter(
+    (ticket) => showFinished || !isFinished("ticket", ticket) || key(ticket) === selected,
+  );
+  const hidden = scoped.length - tickets.length;
   const open = tickets.find((ticket) => key(ticket) === selected);
   const statuses = [...new Set(tickets.map((ticket) => ticket.status))].sort(
     (left, right) =>
@@ -141,7 +147,18 @@ export function Backlog({ hub, filter, known, perform, pane }: ViewProps) {
           </button>
         </div>
       ))}
-      {tickets.length === 0 && <div className="empty">No tickets.</div>}
+      <div className="sec-h">
+        <span className="spacer" />
+        <FinishedToggle on={showFinished} set={setShowFinished} hidden={hidden} />
+      </div>
+      {tickets.length === 0 && (
+        <EmptyFinished
+          plain="No tickets."
+          what="No open tickets."
+          hidden={hidden}
+          set={setShowFinished}
+        />
+      )}
       {statuses.map((status) => (
         <section key={status} aria-label={status}>
           <div className="sec-h">
@@ -220,6 +237,7 @@ export function Backlog({ hub, filter, known, perform, pane }: ViewProps) {
 export function Agents({ filter, known, perform, pane }: ViewProps) {
   const { data, failed } = useApi<AgentsAnswer>("/api/agents");
   const [selected, setSelected] = useState<string | null>(null);
+  const [showFinished, setShowFinished] = useShowFinished();
   if (failed) return <Banner tone="bad" title="The hub did not answer." />;
   if (data === null) return <div className="empty">Asking Orca…</div>;
   if (data.state === "unknown")
@@ -228,12 +246,29 @@ export function Agents({ filter, known, perform, pane }: ViewProps) {
         The hub cannot tell whether agents are running. This is not an empty list.
       </Banner>
     );
-  const agents = data.agents.filter((agent) => inFilter(agent.project, filter, known));
+  const scoped = data.agents.filter((agent) => inFilter(agent.project, filter, known));
+  const agents = scoped.filter(
+    (agent) => showFinished || !isFinished("agent", agent) || agent.terminal === selected,
+  );
+  const hidden = scoped.length - agents.length;
   const open = agents.find((agent) => agent.terminal === selected);
   return (
     <>
+      <div className="sec-h">
+        <span className="spacer" />
+        <FinishedToggle on={showFinished} set={setShowFinished} hidden={hidden} />
+      </div>
       {agents.length === 0 ? (
-        <div className="empty">Orca lists no agents in this scope.</div>
+        scoped.length === 0 ? (
+          <div className="empty">Orca lists no agents in this scope.</div>
+        ) : (
+          <EmptyFinished
+            plain="No running agents."
+            what="No running agents."
+            hidden={hidden}
+            set={setShowFinished}
+          />
+        )
       ) : (
         <ul className="list">
           {agents.map((agent) => (
