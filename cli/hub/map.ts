@@ -102,7 +102,7 @@ export function buildMap(view: HubView, at: string | null, now = new Date()): Ma
       label: finalState.ticket.id,
       state: !state ? "not_started" : gate !== "none" ? "waiting" : state.phase,
       needs_you: live
-        ? needsYouOfOwner(["gate", "mr", "retro", "agent"], finalState.run)
+        ? needsYouOfOwner(["gate", "mr", "retro", "agent", "limit"], finalState.run)
         : gate !== "none"
           ? 1
           : 0,
@@ -159,7 +159,9 @@ export function buildMap(view: HubView, at: string | null, now = new Date()): Ma
           kind: "agent",
           label: agent.title,
           state: agent.liveness,
-          needs_you: view.needs_me.filter((item) => item.id === id).length,
+          needs_you: view.needs_me.filter(
+            (item) => item.id === id || item.id === `limit:${run.run}:${agent.terminal}`,
+          ).length,
         });
       }
     }

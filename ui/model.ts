@@ -14,6 +14,7 @@ export const kinds: Record<ItemKind, { label: string; tone: string; short: strin
     agent: { label: kindLabels.agent, tone: "bad", short: "Orca", key: "o" },
     ticket: { label: kindLabels.ticket, tone: "working", short: "Plannotator", key: "p" },
     retro: { label: kindLabels.retro, tone: "idle", short: "Retro", key: "r" },
+    usage_limit: { label: kindLabels.usage_limit, tone: "bad", short: "Orca", key: "o" },
   };
 
 const stepTone = {
@@ -42,6 +43,14 @@ export const heat = (minutes: number) => (minutes >= 120 ? "hot" : minutes >= 30
 
 export const duration = (minutes: number) =>
   minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+
+/** The countdown of a usage_limit item. A reset time in the past never shows a negative time. */
+export const resetText = (resetAt: string | null, now: number) => {
+  if (resetAt === null) return "reset time unknown";
+  const seconds = (Date.parse(resetAt) - now) / 1000;
+  if (seconds <= 0) return "reset time passed";
+  return seconds < 60 ? "resets in under 1m" : `resets in ${duration(Math.ceil(seconds / 60))}`;
+};
 
 export const usd = (value: number | "unknown") =>
   value === "unknown" ? "?" : `$${value.toFixed(2)}`;
