@@ -154,6 +154,7 @@ test("ARK-170-AC4 plan check refuses a valid plan without an evaluation event", 
           level: "integration",
           given: [],
           when: ["run"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
           then: ["pass"],
           expected: "the system shall pass",
         },
@@ -200,6 +201,7 @@ test("ARK-170-AC5 plan markdown lists only risks from the latest evaluation", ()
           level: "integration",
           given: [],
           when: ["run"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
           then: ["pass"],
           expected: "the system shall pass",
         },

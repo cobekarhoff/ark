@@ -32,6 +32,7 @@ const testCase = (id: string, criterion: string, level = "integration") => ({
   level,
   given: [],
   when: ["do the thing"],
+  // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
   then: ["the task completes"],
   expected: "the system shall complete the task",
 });
@@ -297,6 +298,7 @@ describe("plan check", () => {
   test("ARK-172-AC1 rejects invalid groups and legacy steps by test case name", () => {
     const invalidCases: [string, Record<string, unknown>, string][] = [
       ["empty when", { when: [] }, "empty when list"],
+      // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
       ["empty then", { then: [] }, "empty then list"],
       ["old steps empty", { steps: [] }, "old steps field"],
       ["old steps null", { steps: null }, "old steps field"],
@@ -304,7 +306,9 @@ describe("plan check", () => {
       ["malformed given", { given: ["context", 1] }, "given must be a list of strings"],
       ["missing when", { when: undefined }, "when must be a list of strings"],
       ["malformed when", { when: [1] }, "when must be a list of strings"],
+      // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
       ["missing then", { then: undefined }, "then must be a list of strings"],
+      // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
       ["malformed then", { then: ["result", null] }, "then must be a list of strings"],
       ["missing expected", { expected: undefined }, "has no expected sentence"],
     ];
@@ -331,12 +335,14 @@ describe("plan check", () => {
         ...testCase("populated", "ARK-900-AC1"),
         given: ["context one", "context two"],
         when: ["action one", "action two"],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
         then: ["result one", "result two"],
         expected: expectedSentence,
       },
       {
         ...testCase("empty-given", "ARK-900-AC1"),
         when: ["empty action one", "empty action two"],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
         then: ["empty result one", "empty result two"],
       },
       plan.test_cases[1],
@@ -362,6 +368,7 @@ describe("plan check", () => {
         ...testCase("expected-outside-then", "ARK-900-AC1"),
         given: ["a prepared context"],
         when: ["the action runs"],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
         then: ["the result appears"],
         expected: expectedSentence,
       },

@@ -215,6 +215,7 @@ describe("workspace mirror", () => {
           level: "e2e",
           given: [],
           when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
           then: ["it works"],
           expected: "it works",
         },
