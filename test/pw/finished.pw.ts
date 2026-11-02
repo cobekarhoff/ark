@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "../../cli/events.ts";
 import { planHash } from "../../cli/plan.ts";
@@ -401,5 +403,24 @@ test("ARK-275-AC5 empty states name the hidden count and offer Show finished", a
     ).toBeVisible();
     await page.getByRole("button", { name: "Show finished", exact: true }).click();
     await expect(page.locator("[data-agent]")).toHaveCount(3);
+  });
+});
+
+test("ARK-275-AC6 the hub runs against a temporary ARK_HOME and a fake orca, never the real ones", async ({
+  page,
+}) => {
+  const home = process.env.ARK_HOME as string;
+  expect(home.startsWith(tmpdir())).toBe(true);
+  expect(home).not.toBe(join(homedir(), ".ark"));
+  const orca = spawnSync("sh", ["-c", "command -v orca"], { encoding: "utf8" }).stdout.trim();
+  expect(orca.startsWith(tmpdir())).toBe(true);
+  setTerminals([terminal("term_gone", false, demoDirectory)]);
+  await withHub(async (baseUrl) => {
+    await open(page, baseUrl);
+    await goTo(page, "agents");
+    // Only the fake orca's terminal and the temporary home's projects can show up here.
+    await expect(
+      page.getByText("No running agents. 1 finished hidden. Show finished", { exact: true }),
+    ).toBeVisible();
   });
 });
