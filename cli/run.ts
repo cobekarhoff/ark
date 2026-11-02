@@ -97,12 +97,13 @@ export function runStep(
   action: string,
   failed = false,
   merge = false,
+  inProject?: string,
 ): void {
   if (action !== "start" && action !== "finish")
     throw new ArkError(`unknown step action "${action}": use start or finish`);
   if (failed && action === "start") throw new ArkError("--failed only applies to finish");
   if (merge && action === "finish") throw new ArkError("--merge only applies to start");
-  const { directory } = findRun(runId);
+  const { directory } = findRun(runId, inProject);
   const events = readEvents(directory);
   const state = deriveState(events);
 
@@ -143,11 +144,11 @@ export function runStep(
   );
 }
 
-export function runClose(runId: string, outcome: string): void {
-  const { directory } = findRun(runId);
+export function runClose(runId: string, outcome: string, inProject?: string): void {
+  const { directory } = findRun(runId, inProject);
   appendEvent(directory, "run.closed", { outcome });
   console.log(`${runId} closed: ${outcome}`);
-  worktreeCleanup(runId);
+  worktreeCleanup(runId, inProject);
 }
 
 export function waitingGate(state: RunState): string {
@@ -172,7 +173,7 @@ export function status(runId?: string, project?: string): void {
   const requested = project ?? process.env.ARK_PROJECT;
   if (requested && !projects.includes(requested))
     throw new ArkError(`project ${requested} does not exist under ${arkHome()}/projects`);
-  if (runId !== undefined) return printRun(runId);
+  if (runId !== undefined) return printRun(runId, project);
   let invalidCount = 0;
   for (const project of requested ? [requested] : projects) {
     try {
@@ -198,8 +199,8 @@ export function status(runId?: string, project?: string): void {
   if (invalidCount > 0) throw new ArkError(`${invalidCount} project config(s) invalid`);
 }
 
-function printRun(runId: string): void {
-  const { directory } = findRun(runId);
+function printRun(runId: string, inProject?: string): void {
+  const { directory } = findRun(runId, inProject);
   const state = writeState(directory);
   if (state.events === 0) throw new ArkError(`run ${runId} has no events`);
   const answered = readEvents(directory)
