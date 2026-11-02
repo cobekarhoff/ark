@@ -446,10 +446,9 @@ test("ark --help prints usage and an unknown command exits 1", () => {
 function spentBudgetRun(passed: boolean): { runId: string; directory: string } {
   const { runId, directory } = startRun();
   approvePlan(directory);
-  for (const round of [1, 2]) {
+  for (let round = 1; round <= 2; round++) {
     expect(ark("run", "step", runId, "build", "start").code).toBe(0);
     expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
-    expect(round).toBeLessThanOrEqual(2);
   }
   appendEvent(directory, "test.completed", {
     passed,
@@ -502,9 +501,7 @@ test("ARK-210-AC2 ark escalate below the round budget exits 1, names the budget 
 });
 
 test("ARK-210-AC2 ark escalate outside phase building exits 1 and names the phase", () => {
-  const planning = startRun();
-  approvePlan(planning.directory);
-  // a run before plan approval is in planning
+  // a run that has not approved its plan is not building
   const early = startRun("demo", "ARK-901");
   const planningRefusal = ark("escalate", early.runId, "--reason", "x");
   expect(planningRefusal.code).toBe(1);
