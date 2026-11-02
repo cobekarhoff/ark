@@ -28,6 +28,7 @@ export type RunState = {
   round_budget: number;
   criteria: { id: string; status: CriterionStatus }[];
   gates: { criteria?: string; strategy?: string; plan?: string; escalation?: string };
+  post_mr_escalation_answered: boolean;
   evaluation: { blockers: string[]; risks: string[]; surfaces: string[] } | null;
   /** The latest strategy.recorded; `chosen` is the card the human picked, or the only card. */
   strategy: {
@@ -195,6 +196,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         round = Math.max(round, data.round);
         if (!startedSteps.some((step) => step.id === data.step))
           startedSteps.push({ id: data.step, role: data.role, repo: data.repo });
+        if (mergeRequests.length > 0 && data.role === "implementer") escalationAnswered = false;
         break;
       case "step.finished":
         stepStatus.set(data.step, data.outcome);
@@ -205,6 +207,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         escalationAnswered = false;
         break;
       case "merge_request.opened":
+        if (mergeRequests.length === 0) escalationAnswered = false;
         mergeRequests.push({ repo: data.repo, url: data.url, number: data.number });
         break;
       case "run.closed":
@@ -255,6 +258,7 @@ export function deriveState(events: ArkEvent[]): RunState {
       ...(gates.plan === undefined ? {} : { plan: gates.plan }),
       ...(gates.escalation === undefined ? {} : { escalation: gates.escalation }),
     },
+    post_mr_escalation_answered: escalationAnswered && mergeRequests.length > 0,
     evaluation,
     strategy,
     plan,

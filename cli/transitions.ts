@@ -9,7 +9,7 @@ const gateAnswers: Record<string, string[]> = {
   escalation: ["one_more_round", "take_over", "abort"],
 };
 
-const buildPhases = ["building", "escalation"];
+const buildPhases = ["building", "escalation", "merge_requests_open"];
 
 /** The event that moves a run out of `phase`, named in refusals. */
 function missingEvent(state: RunState): string {
@@ -94,6 +94,14 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
       if (state.steps.find((step) => step.id === data.step)?.status === "running")
         throw new ArkError(`step.started refused: step ${data.step} is already running`);
       if (
+        state.phase === "merge_requests_open" &&
+        data.role === "implementer" &&
+        !state.post_mr_escalation_answered
+      )
+        throw new ArkError(
+          "step.started refused: record gate escalation (one_more_round, take_over or abort)",
+        );
+      if (
         data.role === "implementer" &&
         data.round > 1 &&
         data.round > state.round_budget &&
@@ -145,7 +153,10 @@ function assertGateAllowed(state: RunState, data: EventData): void {
     plan: "planning",
     escalation: "escalation",
   }[data.gate as "criteria" | "strategy" | "plan" | "escalation"];
-  if (state.phase !== phaseOfGate) {
+  if (
+    state.phase !== phaseOfGate &&
+    !(data.gate === "escalation" && state.phase === "merge_requests_open")
+  ) {
     throw new ArkError(
       `gate.answered ${data.gate} ${data.answer} refused: run is in phase ${state.phase}, the ${data.gate} gate opens in phase ${phaseOfGate}`,
     );

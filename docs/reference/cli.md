@@ -97,7 +97,7 @@ Pushes each repo's branch and opens one MR for each repo, in dependency order. N
 ```text
 ark merge-request status <run>
 
-Prints each MR of the run as merged, open or closed, read from gh or glab. It changes nothing.
+Prints each MR of the run as merged, open or closed, read from gh or glab. For open MRs, it also prints `checks failing` and failed check or job names. Check retrieval errors fail the command. It changes nothing.
 ```
 
 ### worktree sync

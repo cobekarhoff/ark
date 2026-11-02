@@ -158,7 +158,7 @@ beforeEach(() => {
   const fakeGh = join(fakeGhDirectory, "gh");
   writeFileSync(
     fakeGh,
-    `#!/usr/bin/env bun\nconst states = JSON.parse(process.env.FAKE_GH_STATES ?? "{}");\nconsole.log(JSON.stringify({ state: states[process.argv[4]] ?? "OPEN" }));\n`,
+    `#!/usr/bin/env bun\nconst states = JSON.parse(process.env.FAKE_GH_STATES ?? "{}");\nconsole.log(JSON.stringify({ state: states[process.argv[4]] ?? "OPEN", statusCheckRollup: [] }));\n`,
   );
   chmodSync(fakeGh, 0o755);
   process.env.PATH = `${fakeGhDirectory}:${process.env.PATH ?? ""}`;

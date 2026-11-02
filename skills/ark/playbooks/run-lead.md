@@ -375,6 +375,8 @@ ark merge-request open <run>
 
 The command pushes each repo's branch and opens one MR for each repo, in dependency order. If it fails, read the error. Fix what you can: for example, a push that needs a rebase goes back to the implementer. If it needs the human, such as a missing login for `gh` or `glab`, ask Master Chief.
 
+After the MRs open, run `ark merge-request status <run>` and read the checks for every MR. Use `gh pr checks <url>` or the GitLab head pipeline to verify that checks have finished and passed; the Ark status command reports failures, not pending or absent checks. Wait for pending checks; an error retrieving checks is not a pass. Read CI logs for every failure and write the evidence into `<run folder>/findings/round-<round>.md`. Restart the validator for test-only fixes or the implementer for product fixes through the logged steps in section 7. Before each post-MR implementer round, ask the human through Master Chief and record a fresh escalation answer as in section 9; do not bypass the round budget. Re-run `ark test <run>` and the reviewer steps after repair, then run `ark worktree sync <run>` to push the repair. Recheck MR status and repeat until checks pass and no review sends work back. Do not report success while CI is failing, pending, or unknown.
+
 ## 11. Retro and final report
 
 Do this when the MRs are open, and also when the run ends in an abort.

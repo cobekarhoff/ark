@@ -121,7 +121,7 @@ const commands: Command[] = [
   {
     usage: "merge-request status <run>",
     description:
-      "Prints each MR of the run as merged, open or closed, read from gh or glab. It changes nothing.",
+      "Prints each MR's state and failed check names, read from gh or glab. It changes nothing.",
     flags: {},
     minimum: 1,
     maximum: 1,
