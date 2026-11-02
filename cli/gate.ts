@@ -53,7 +53,7 @@ export function gateRecord(runId: string, gate: string, answer: string, note?: s
   appendEvent(
     directory,
     "gate.answered",
-    note === undefined ? { gate, answer } : { gate, answer, note },
+    note === undefined ? { gate, answer, by: "human" } : { gate, answer, by: "human", note },
   );
   console.log(`recorded ${gate} ${answer}`);
 }
