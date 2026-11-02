@@ -1,5 +1,6 @@
 [test]
 preload = ["./test/tmpdir-preload.ts"]
+pathIgnorePatterns = ["test/pw/**"]
 
 [serve.static]
 plugins = ["./ui/react-compiler.ts"]
