@@ -65,7 +65,7 @@ Checks plan.yml in the run folder and renders plan.md. It prints one line for ea
 ```text
 ark worktree create <run> [<repo>...]
 
-Builds the run's workspace mirror. Each named repo, or every repo the plan uses, gets a worktree. Every other path is a symlink to the workspace.
+Builds the run's workspace mirror. Each named repo, or every repo the plan uses, gets a worktree. Every other path is a symlink to the workspace. When `ark.yml` sets `setup`, the command runs it with `sh -c` in each new worktree. If `setup` exits non-zero, the command removes that worktree and its branch, prints the repo, the exit code and the end of stderr, and exits 1. It records the worktree only after `setup` passes, so a retry runs `setup` again.
 ```
 
 ### test
@@ -307,6 +307,7 @@ design:
 | `workspace`     | yes      | path    | The absolute path of the workspace directory. It must exist. It is one repo or a meta-repo.                                                                                                                                                                                          |
 | `ticket_source` | yes      | string  | Where agents fetch tickets: `local`, `github`, or `jira`.                                                                                                                                                                                                                            |
 | `compose`       | no       | string  | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them.                                                 |
+| `setup`         | no       | string  | A shell command that prepares a new worktree, for example `bun install --frozen-lockfile`. `ark worktree create` runs it with `sh -c` in each new worktree, so the suites find the dependencies. It must be a non-empty string when set. A failure exits 1 and removes the worktree.                  |
 | `suites`        | yes      | list    | The test suites. You need at least one.                                                                                                                                                                                                                                              |
 | `roles`         | yes      | map     | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`. The optional `evaluator` role is needed by `ark evaluation record`. The optional `designer` role is needed by `ark strategy record` when the evaluation lists a surface other than `none`. |
 | `concurrency`   | no       | integer | The most workers that run at once. It must be 1 or more. The default is 2.                                                                                                                                                                                                           |

@@ -15,6 +15,7 @@ export type ProjectConfig = {
   workspace: string;
   ticket_source: "local" | "github" | "jira";
   compose?: string;
+  setup?: string;
   suites: {
     name: string;
     level: "unit" | "integration" | "e2e";
@@ -84,6 +85,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     ticketSources,
   ) as ProjectConfig["ticket_source"];
   if (fields.compose !== undefined) text(fields, "compose", "compose");
+  if (fields.setup !== undefined) text(fields, "setup", "setup");
 
   if (!Array.isArray(fields.suites) || fields.suites.length === 0)
     fail("suites is required and needs at least one suite");
@@ -132,5 +134,6 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     round_budget: integer(fields, "round_budget", 0, 2),
   };
   if (fields.compose !== undefined) config.compose = fields.compose as string;
+  if (fields.setup !== undefined) config.setup = fields.setup as string;
   return config;
 }
