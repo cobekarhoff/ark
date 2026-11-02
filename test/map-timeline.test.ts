@@ -836,7 +836,6 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       planGate(run.directory);
       writeFileSync(join(run.directory, "plan.md"), "# Plan\n");
       writeFileSync(join(run.directory, "plan.yml"), "steps: []\n");
-      appendEvent(run.directory, "gate.answered", { gate: "plan", answer: "change" });
       setOrca([run.runId]);
       const actionLog = join(mkdtempSync(join(tmpdir(), "ark-gate-action-")), "actions.log");
       process.env.ORCA_ACTION_LOG = actionLog;
