@@ -556,3 +556,22 @@ test("ARK-210-AC3 abort answer after ark escalate is recorded", () => {
   expect(ark("status", aborted.runId).out).toContain("phase: closed");
   expect(ark("status", aborted.runId).out).toContain("aborted");
 });
+
+test("ARK-228-AC1 ark escalate after an answered one_more_round opens the escalation gate again", () => {
+  const { runId } = spentBudgetRun(true);
+  expect(ark("escalate", runId, "--reason", "P1 open").code).toBe(0);
+  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  expect(ark("escalate", runId, "--reason", "P1 still open").code).toBe(0);
+  expect(ark("status", runId).out).toContain("phase: escalation");
+});
+
+test("ARK-228-AC2 ark escalate stores the reason without outer whitespace", () => {
+  const { runId, directory } = spentBudgetRun(true);
+  expect(ark("escalate", runId, "--reason", "  P1 unresolved \n").code).toBe(0);
+  expect(JSON.parse(eventLines(directory).at(-1) as string)).toMatchObject({
+    type: "escalation.requested",
+    data: { reason: "P1 unresolved" },
+  });
+});
