@@ -163,4 +163,55 @@ describe("ARK-198 ark.yml setup", () => {
     }
     expect(existsSync(join(runDirectory, "workspace", ".git"))).toBe(true);
   });
+
+  test("ARK-242-AC1 a setup that fails with empty stderr shows the end of its stdout", () => {
+    const { runId } = approvedRun({ setup: "echo cause-on-stdout; exit 1" });
+    const result = ark("worktree", "create", runId, ".");
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("exited 1");
+    expect(result.err).toContain("cause-on-stdout");
+  });
+
+  test("ARK-242-AC1 a setup that fails with only stdout output shows at most its last 10 lines", () => {
+    const { runId } = approvedRun({ setup: "seq -f 'row%02g' 1 15; exit 1" });
+    const result = ark("worktree", "create", runId, ".");
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("row15");
+    expect(result.err).toContain("row06");
+    expect(result.err).not.toContain("row05");
+  });
+
+  test("ARK-242-AC2 when removing the failed worktree also fails, the output names the leftover worktree and branch", () => {
+    const { runId, runDirectory, workspace } = approvedRun({
+      setup: "git worktree lock . ; exit 1",
+    });
+    const result = ark("worktree", "create", runId, ".");
+
+    expect(result.code).toBe(1);
+    const branch = git(workspace, "branch", "--list", "ark/*", "--format=%(refname:short)");
+    expect(branch).not.toBe("");
+    expect(result.err).toContain(`left behind  worktree  ${join(runDirectory, "workspace")}`);
+    expect(result.err).toContain(`left behind  branch    ${branch}`);
+  });
+
+  test("ARK-242-AC2 the next create after a failed cleanup removes the leftover, runs setup and records the worktree", () => {
+    const { runId, runDirectory } = approvedRun({
+      setup: 'test -f "$ARK_242_FIXED" || { git worktree lock . ; exit 1; }',
+    });
+    expect(ark("worktree", "create", runId, ".").code).toBe(1);
+
+    const flag = join(runDirectory, "fixed");
+    writeFileSync(flag, "");
+    process.env.ARK_242_FIXED = flag;
+    try {
+      const retried = ark("worktree", "create", runId, ".");
+      expect(retried.code, retried.err).toBe(0);
+      expect(retried.out).toContain("setup    .");
+    } finally {
+      delete process.env.ARK_242_FIXED;
+    }
+    expect(readFileSync(join(runDirectory, "events.ndjson"), "utf8")).toContain("worktree.created");
+  });
 });
