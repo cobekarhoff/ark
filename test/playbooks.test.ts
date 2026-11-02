@@ -200,3 +200,10 @@ test("ARK-229-AC2 run-lead section 1 binds a found Run with run-use and creates 
   expect(runLeadStart!.match(/run-create\b.*--objective/g)).toHaveLength(1);
   expect(runLeadStart).toMatch(/Only when no existing Run was found[\s\S]*run-create --objective/);
 });
+
+test("ARK-228-AC3 run-lead section 9 tells the run lead to continue with steps 1 to 3 after ark escalate", () => {
+  const section = runLeadPlaybook
+    .split("## 9. Escalate when the round budget is spent")[1]
+    ?.split("\n## ")[0];
+  expect(section).toMatch(/After `ark escalate`, continue with steps 1 to 3/);
+});
