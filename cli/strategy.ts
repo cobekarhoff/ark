@@ -59,8 +59,8 @@ export function mockupPaths(value: string): string[] {
     .filter(Boolean);
 }
 
-export function strategyRecord(runId: string): void {
-  const { project, directory } = findRun(runId);
+export function strategyRecord(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   if (!state.evaluation)
     throw new ArkError(

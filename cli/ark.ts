@@ -36,146 +36,166 @@ const commands: Command[] = [
     run: ([ticketFile], flags) => runStart(ticketFile, flags["--project"] as string | undefined),
   },
   {
-    usage: "run step <run> <step> start|finish [--failed] [--merge]",
+    usage: "run step <run> <step> start|finish [--failed] [--merge] [--project <name>]",
     description:
       "Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo.",
-    flags: { "--failed": false, "--merge": false },
+    flags: { "--failed": false, "--merge": false, "--project": true },
     minimum: 3,
     maximum: 3,
     run: ([runId, stepId, action], flags) =>
-      runStep(runId, stepId, action, flags["--failed"] === true, flags["--merge"] === true),
+      runStep(
+        runId,
+        stepId,
+        action,
+        flags["--failed"] === true,
+        flags["--merge"] === true,
+        flags["--project"] as string | undefined,
+      ),
   },
   {
-    usage: "run close <run> <outcome>",
+    usage: "run close <run> <outcome> [--project <name>]",
     description:
       "Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs.",
-    flags: {},
+    flags: { "--project": true },
     minimum: 2,
     maximum: 2,
-    run: ([runId, outcome]) => runClose(runId, outcome),
+    run: ([runId, outcome], flags) =>
+      runClose(runId, outcome, flags["--project"] as string | undefined),
   },
   {
-    usage: "evaluation record <run>",
+    usage: "evaluation record <run> [--project <name>]",
     description:
       "Reads evaluation.md in the run folder and records its blockers, risks and surfaces (web_ui, cli_output, document or none). It refuses a missing file, a file with no Blockers, Risks or Surfaces list, an unknown surface, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.",
-    flags: {},
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => evaluationRecord(runId),
+    run: ([runId], flags) => evaluationRecord(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "strategy record <run>",
+    usage: "strategy record <run> [--project <name>]",
     description:
       "Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or a project whose ark.yml has no roles.designer. Two or more cards open the strategy gate; one card opens no gate.",
-    flags: {},
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => strategyRecord(runId),
+    run: ([runId], flags) => strategyRecord(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "plan check <run>",
+    usage: "plan check <run> [--project <name>]",
     description:
       "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. It records the number of open decisions.",
-    flags: {},
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => planCheck(runId),
+    run: ([runId], flags) => planCheck(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "worktree create <run> [<repo>...]",
+    usage: "worktree create <run> [<repo>...] [--project <name>]",
     description:
-      "Builds the run's workspace mirror. Each named repo, or every repo the plan uses, gets a worktree. Every other path is a symlink to the workspace.",
-    flags: {},
+      "Builds the run's workspace mirror. Each named repo, or every repo the plan uses, gets a worktree. Every other path is a symlink to the workspace. When `ark.yml` sets `setup`, the command runs it with `sh -c` in each new worktree. If `setup` exits non-zero, the command removes that worktree and its branch, prints the repo, the exit code and the end of stderr, and exits 1. It records the worktree only after `setup` passes, so a retry runs `setup` again.",
+    flags: { "--project": true },
     minimum: 1,
     maximum: Infinity,
-    run: ([runId, ...repos]) => worktreeCreate(runId, repos),
+    run: ([runId, ...repos], flags) =>
+      worktreeCreate(runId, repos, flags["--project"] as string | undefined),
   },
   {
-    usage: "test <run>",
+    usage: "test <run> [--project <name>]",
     description:
       "Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. It exits 1 unless every AC passes.",
-    flags: {},
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => testRun(runId),
+    run: ([runId], flags) => testRun(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "gate record <run> <gate> <answer> [--note <text>]",
+    usage: "gate record <run> <gate> <answer> [--note <text>] [--project <name>]",
     description:
       "Records your answer to a gate. The gates are criteria, strategy, plan and escalation. The strategy gate takes the ID of a card in the latest strategy record, or abort. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.",
-    flags: { "--note": true },
+    flags: { "--note": true, "--project": true },
     minimum: 3,
     maximum: 3,
     run: ([runId, gate, answer], flags) =>
-      gateRecord(runId, gate, answer, flags["--note"] as string | undefined),
+      gateRecord(
+        runId,
+        gate,
+        answer,
+        flags["--note"] as string | undefined,
+        flags["--project"] as string | undefined,
+      ),
   },
   {
-    usage: "escalate <run> --reason <text>",
+    usage: "escalate <run> --reason <text> [--project <name>]",
     description:
       "Opens the escalation gate when the round budget is spent, also when the last ark test passed. Use it for an unresolved review P0 or P1. It records escalation.requested with the reason. It refuses a run that is not in phase building, a round budget that is not spent, and an empty reason. Answer the gate with ark gate record.",
-    flags: { "--reason": true },
+    flags: { "--reason": true, "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId], flags) => escalate(runId, flags["--reason"] as string | undefined),
+    run: ([runId], flags) =>
+      escalate(
+        runId,
+        flags["--reason"] as string | undefined,
+        flags["--project"] as string | undefined,
+      ),
   },
   {
-    usage: "merge-request open <run>",
+    usage: "merge-request open <run> [--project <name>]",
     description:
       "Pushes each repo's branch and opens one MR for each repo, in dependency order. No command merges.",
-    flags: {},
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => mergeRequestOpen(runId),
+    run: ([runId], flags) => mergeRequestOpen(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "merge-request status <run>",
+    usage: "merge-request status <run> [--project <name>]",
     description:
-      "Prints each MR's state and failed check names, read from gh or glab. It changes nothing.",
-    flags: {},
+      "Prints each MR of the run as merged, open or closed, read from gh or glab. For open MRs, it also prints `checks failing` and failed check or job names. Check retrieval errors fail the command. It changes nothing.",
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => mergeRequestStatus(runId),
+    run: ([runId], flags) => mergeRequestStatus(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "worktree sync <run>",
+    usage: "worktree sync <run> [--project <name>]",
     description:
-      "Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge, names the repo and exits 1. It never merges an MR.",
-    flags: {},
+      "Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge, names the repo and exits 1. A closed run gets a phase error and its worktrees stay unchanged. It never merges an MR.",
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => worktreeSync(runId),
+    run: ([runId], flags) => worktreeSync(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "workspace sync <run>",
+    usage: "workspace sync <run> [--project <name>]",
     description:
       "Fetches and fast-forwards the target branch of the workspace checkout of each repo the run touched. It exits 1 and names the repo when git refuses, for example on a conflicting local change. It prints repo, branch and head.",
-    flags: {},
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => workspaceSync(runId),
+    run: ([runId], flags) => workspaceSync(runId, flags["--project"] as string | undefined),
   },
   {
     usage: "status [<run>] [--project <name>]",
     description:
-      "Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT.",
+      "Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT, and with a run it looks for the run in that project only.",
     flags: { "--project": true },
     minimum: 0,
     maximum: 1,
     run: ([runId], flags) => status(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "retro <run>",
+    usage: "retro <run> [--project <name>]",
     description:
-      "Computes the run's cost, time, rework and intervention metrics and writes metrics.json.",
-    flags: {},
+      "Computes the run's cost, time, rework and intervention metrics and writes metrics.json. The `rework` object holds `rounds` (highest round of a non-merge step), `escalations` (escalation gate answers) and `findings_sent_back` (reviewer steps that finished failed). `rework.merge_steps` counts steps started with `--merge`.",
+    flags: { "--project": true },
     minimum: 1,
     maximum: 1,
-    run: ([runId]) => retro(runId),
+    run: ([runId], flags) => retro(runId, flags["--project"] as string | undefined),
   },
   {
     usage: "ui [--port <number>]",
     description:
-      "Serves the hub on 127.0.0.1, port 4317 unless --port says otherwise. The page is a React app that Bun bundles. The server reads Ark's files every second and Orca and Plannotator every 3 seconds, each with a hard timeout, and pushes changes over Server-Sent Events. Home shows what needs you (oldest first), live runs, Master Chief per project and the agents. Keys: j/k move, Enter opens, an item's action key runs its action, Cmd-K opens the palette, ? the shortcut sheet, z focus mode, Esc closes. A view bar switches views (keys 1 Home, 2 Map, 3 Timeline). Map: a graph of project, Master Chief, run, step, agent and MR with a needs-you badge on each node that waits for you; click a node or badge, or press j/k, to light its path; v turns dimming of the other nodes on or off; [ and ] step the replay to the previous or next event since your last visit and l returns to live; Map shares its selection with Home. Timeline: one lane for each Master Chief, run and standalone agent; w cycles the window 12h, 24h, 1h; b shows the cost burn, where a bucket with no provider cost shows ?; a click on a waiting gate block runs the action of its item; Timeline keeps its own selection. Time with no history shows UNAVAILABLE. Both views stop pulses under prefers-reduced-motion. Endpoints: GET /api/state and /api/events (SSE) feed Home; GET /api/map?at=<ISO time> returns {at, replay:{from?,to,events}, nodes:[{id,kind,label,state,needs_you}], edges:[[from,to]]} with state not_started, unavailable or unknown where nothing is known; GET /api/timeline?hours=1|12|24 returns {hours, lanes:[{id,kind,label,segments:[{kind,from,to|null,item?,state?}],cost:{usd,series:[{at,usd}]}}]} and refuses any other hours with 400. History: the hub appends to $ARK_HOME/hub/history.ndjson, one JSON object a line: collector.started when the hub starts, collector.tick each minute, and state.changed {time,key,state,activity?} when an agent (key agent:<run>:<terminal>), a Master Chief (chief:<project>) or the CI of an MR (ci:<MR url>) changes; a refresh with no change writes nothing, and time before the first start or between the last tick and the next start is unavailable. POST actions open an Orca terminal, a Plannotator review or the Inbox, or an MR URL, and steer by typing one line into an Orca terminal with `orca terminal send`: a free message or a fixed instruction (approve and queue, reorder queue, pause, resume, retry stuck agent, and abort after a confirm dialog) to the project's live Master Chief, and a free message to a run's lead. The server picks the terminal and the hub never changes run state; with no live Master Chief it returns 409 and sends nothing. A project with no live Master Chief shows Spawn Master Chief, which opens a terminal that runs `/skill:ark chief` with `roles.chief` from ark.yml and switches Orca to it. The server refuses a foreign Origin and any unknown action. ARK_NOW=<ISO instant> freezes the hub clock, for reproducible demos and bug reports.",
+      "Serves the hub on 127.0.0.1, port 4317 unless --port says otherwise. The page is a React app that Bun bundles. The server reads Ark's files every second and Orca and Plannotator every 3 seconds, each with a hard timeout, and pushes changes over Server-Sent Events. Home shows what needs you (oldest first), live runs, Master Chief per project and the agents. A live agent terminal (of an open run or not; the run is empty for an agent Ark did not start) whose last 3 output lines show a provider usage-limit or rate-limit error is a `usage_limit` Needs-me item (id `limit:<run>:<terminal>`, field `limit: {provider, reset_at}`; `reset_at` is null when the output gives no wait time). Home shows a countdown to `reset_at`, and the action switches Orca to the agent terminal. The item goes when the error leaves the output or the agent exits; a failed read keeps it. Keys: j/k move, Enter opens, an item's action key runs its action, Cmd-K opens the palette, ? the shortcut sheet, z focus mode, Esc closes. A view bar switches views (keys 1 Home, 2 Map, 3 Timeline). Map: a graph of project, Master Chief, run, step, agent and MR with a needs-you badge on each node that waits for you; click a node or badge, or press j/k, to light its path; v turns dimming of the other nodes on or off; [ and ] step the replay to the previous or next event since your last visit and l returns to live; Map shares its selection with Home. Timeline: one lane for each Master Chief, run and standalone agent; w cycles the window 12h, 24h, 1h; b shows the cost burn, where a bucket with no provider cost shows ?; a click on a waiting gate block runs the action of its item; Timeline keeps its own selection. Time with no history shows UNAVAILABLE. Both views stop pulses under prefers-reduced-motion. Endpoints: GET /api/state and /api/events (SSE) feed Home; GET /api/map?at=<ISO time> returns {at, replay:{from?,to,events}, nodes:[{id,kind,label,state,needs_you}], edges:[[from,to]]} with state not_started, unavailable or unknown where nothing is known; GET /api/timeline?hours=1|12|24 returns {hours, lanes:[{id,kind,label,segments:[{kind,from,to|null,item?,state?}],cost:{usd,series:[{at,usd}]}}]} and refuses any other hours with 400. History: the hub appends to $ARK_HOME/hub/history.ndjson, one JSON object a line: collector.started when the hub starts, collector.tick each minute, and state.changed {time,key,state,activity?} when an agent (key agent:<run>:<terminal>), a Master Chief (chief:<project>) or the CI of an MR (ci:<MR url>) changes; a refresh with no change writes nothing, and time before the first start or between the last tick and the next start is unavailable. POST actions open an Orca terminal, a Plannotator review or the Inbox, or an MR URL, and steer by typing one line into an Orca terminal with `orca terminal send`: a free message or a fixed instruction (approve and queue, reorder queue, pause, resume, retry stuck agent, and abort after a confirm dialog) to the project's live Master Chief (the connected coordinator of the Orca Run \"Master Chief: <project> tickets\" in the project workspace), and a free message to a run's lead. The server picks the terminal and the hub never changes run state; with no live Master Chief it returns 409 and sends nothing. A project with no live Master Chief shows Spawn Master Chief, which opens a terminal that runs `/skill:ark chief` with `roles.chief` from ark.yml and switches Orca to it. The server refuses a foreign Origin and any unknown action. ARK_NOW=<ISO instant> freezes the hub clock, for reproducible demos and bug reports.",
     flags: { "--port": true },
     minimum: 0,
     maximum: 0,
@@ -184,7 +204,7 @@ const commands: Command[] = [
   {
     usage: "ui install [--port <number>]",
     description:
-      "Writes the LaunchAgent dev.ark.hub in ~/Library/LaunchAgents and loads it, so the hub starts at login and restarts after a crash (port 4317 unless --port says otherwise). The hub sends a macOS notification for each new Needs-me item through terminal-notifier (or the command in ARK_NOTIFIER), and a click opens the hub at that item. Install refuses, and writes nothing, when terminal-notifier is missing: run brew install terminal-notifier. A second run with the same settings changes nothing; with a new port it rewrites the plist and reloads.",
+      "Writes the LaunchAgent dev.ark.hub in ~/Library/LaunchAgents and loads it, so the hub starts at login and restarts after a crash (port 4317 unless --port says otherwise). The hub sends a macOS notification for each new Needs-me item through terminal-notifier (or the command in ARK_NOTIFIER), and a click opens the hub at that item. Install refuses, and writes nothing, when terminal-notifier is missing: run brew install terminal-notifier. A second run with the same settings changes nothing; with a new port it rewrites the plist and reloads. If loading an update fails, install restores and reloads the previous plist, reports any reload failure, and exits 1. If loading a new install fails, it removes the new plist and exits 1.",
     flags: { "--port": true },
     minimum: 0,
     maximum: 0,

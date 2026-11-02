@@ -218,3 +218,22 @@ test("ARK-228-AC3 run-lead section 9 tells the run lead to continue with steps 1
     ?.split("\n## ")[0];
   expect(section).toMatch(/After `ark escalate`, continue with steps 1 to 3/);
 });
+
+test("ARK-232-AC1 run-lead section 7 reads the first dispatch terminal about 2 minutes after start, before the long wait, with orca terminal read as fallback", () => {
+  const section = runLeadPlaybook.split("## 7. Run the steps")[1]?.split("\n## ")[0];
+  expect(section).toBeDefined();
+
+  const shortWait = section!.search(
+    /About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds[\s\S]*?--timeout-ms 120000/,
+  );
+  const earlyRead = section!.search(/worker-read --dispatch <dispatch id> --source terminal/);
+  const fallback = section!.search(
+    /If `worker-read` returns no text[\s\S]*?orca terminal read --terminal <handle> --json/,
+  );
+  const longWait = section!.search(/--timeout-ms 900000/);
+
+  expect(shortWait).toBeGreaterThanOrEqual(0);
+  expect(earlyRead).toBeGreaterThan(shortWait);
+  expect(fallback).toBeGreaterThan(earlyRead);
+  expect(longWait).toBeGreaterThan(fallback);
+});

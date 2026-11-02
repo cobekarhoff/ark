@@ -34,8 +34,8 @@ function criterionStatus(criterion: string, provingResults: TestResult[]): Statu
   return tagged.some((result) => result.status === "passed") ? "passing" : "missing";
 }
 
-export function testRun(runId: string): void {
-  const { project, directory } = findRun(runId);
+export function testRun(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
   const mirror = mirrorRoot(directory);
   if (!existsSync(mirror))
