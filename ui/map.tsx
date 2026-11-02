@@ -67,6 +67,7 @@ type Props = {
 };
 
 export function MapView({ hub, selection, setSelection, perform, view, setView, active }: Props) {
+  const now = Date.parse(hub.now);
   const [live, setLive] = useState<MapGraph | null>(null);
   const [past, setPast] = useState<MapGraph | null>(null);
   const [at, setAt] = useState<string | null>(null);
@@ -336,7 +337,7 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
             <div className="rp-head">
               <h2>Replay</h2>
               <span className="vchip" data-testid="asof">
-                {replaying ? `replay ${clock(at)}` : "live"}
+                {replaying ? `replay ${clock(at, now)}` : "live"}
               </span>
               <span className="hint">
                 <Kbd>[</Kbd> <Kbd>]</Kbd> step to previous / next event <Kbd>l</Kbd> back to live
@@ -349,7 +350,8 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
             ) : (
               <>
                 <p className="readout" aria-live="polite">
-                  As of <b>{replaying ? clock(at) : "now"}</b> · {replaying ? "replay" : "live"}
+                  As of <b>{replaying ? clock(at, now) : "now"}</b> ·{" "}
+                  {replaying ? "replay" : "live"}
                   {unavailable > 0 && (
                     <>
                       {" "}
@@ -374,7 +376,7 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
                     max={end}
                     step={1000}
                     value={moment}
-                    aria-label={`Replay time, from ${clock(from)} to now`}
+                    aria-label={`Replay time, from ${clock(from, now)} to now`}
                     onChange={(event) =>
                       setAt(
                         Number(event.target.value) >= end
@@ -385,7 +387,7 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
                   />
                 </div>
                 <div className="rp-ticks">
-                  <span>{clock(from)}</span>
+                  <span>{clock(from, now)}</span>
                   <span>now</span>
                 </div>
               </>
@@ -408,7 +410,7 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
                 {node.state === "unavailable" ? "UNAVAILABLE" : node.state.replaceAll("_", " ")}
               </dd>
               <dt>As of</dt>
-              <dd className="mono">{graph ? clock(graph.at) : "now"}</dd>
+              <dd className="mono">{graph ? clock(graph.at, now) : "now"}</dd>
               <dt>Source</dt>
               <dd className="mono">
                 {["chief", "agent", "mr"].includes(node.kind)

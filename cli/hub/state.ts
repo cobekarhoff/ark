@@ -19,6 +19,7 @@ import {
   type PlannotatorSnapshot,
 } from "./plannotator.ts";
 import type { Agent } from "./types.ts";
+import { now as hubNow } from "./clock.ts";
 
 type Cost = { usd: number | "unknown"; tokens: number };
 type ChiefState =
@@ -43,7 +44,7 @@ export function readLastSeen(): string | null {
 }
 
 export function markSeen(): void {
-  writeFileSync(lastSeenFile(), JSON.stringify({ last_seen: new Date().toISOString() }));
+  writeFileSync(lastSeenFile(), JSON.stringify({ last_seen: new Date(hubNow()).toISOString() }));
 }
 
 const criterionLabel = (id: string, ticket: string) =>
@@ -179,7 +180,7 @@ export function createHub() {
           limitAgents([...orca.agents.values()].flat(), orca.terminals, projectOfPath),
           limits,
         );
-      const today = new Date().toDateString();
+      const today = new Date(hubNow()).toDateString();
       const built: Record<string, RunDetail> = {};
       await Promise.all(
         runs
@@ -213,7 +214,7 @@ export function createHub() {
     },
 
     state() {
-      const now = new Date().toISOString();
+      const now = new Date(Math.floor(hubNow() / 1000) * 1000).toISOString();
       const runs = readRuns();
       const projects = listProjects().map((name) => ({
         name,
@@ -240,7 +241,7 @@ export function createHub() {
           Date.parse(left.since) - Date.parse(right.since) || left.id.localeCompare(right.id),
       );
 
-      const today = new Date().toDateString();
+      const today = new Date(hubNow()).toDateString();
       const runViews = runs.map(({ state, events }) => {
         const criteria = state.criteria.map((criterion) => criterion.status);
         const open = state.phase !== "closed";
@@ -276,6 +277,7 @@ export function createHub() {
         .map(({ state }) => costs.get(state.run)?.usd ?? "unknown");
       const lastSeen = readLastSeen();
       return {
+        now,
         projects,
         runs: runViews,
         needs_me: needsMe,

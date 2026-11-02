@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { arkHome } from "../paths.ts";
 import { execJson } from "./exec.ts";
+import { now as hubNow } from "./clock.ts";
 
 /**
  * The hub's own history, `$ARK_HOME/hub/history.ndjson`. Orca, gh and Plannotator report only
@@ -136,7 +137,11 @@ export function createCollector() {
   let started = false;
 
   return {
-    record(observed: Map<string, Observed>, failedPrefixes: string[], now = new Date()): void {
+    record(
+      observed: Map<string, Observed>,
+      failedPrefixes: string[],
+      now = new Date(hubNow()),
+    ): void {
       const time = now.toISOString();
       const lines: HistoryEvent[] = [];
       if (!started) {

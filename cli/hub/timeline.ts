@@ -4,6 +4,7 @@ import { readUsage } from "../usage/index.ts";
 import { readRuns } from "./ark.ts";
 import { collectedIntervals, readHistory, type HistoryEvent } from "./changes.ts";
 import type { HubView } from "./map.ts";
+import { now as hubNow } from "./clock.ts";
 
 export const timelineWindows = [1, 12, 24];
 
@@ -149,7 +150,7 @@ function costOf(directory: string, since: number): Cost {
 export function buildTimeline(
   view: HubView,
   hours: number,
-  now = new Date(),
+  now = new Date(hubNow()),
 ): { hours: number; lanes: Lane[] } {
   const nowIso = now.toISOString();
   const since = now.getTime() - hours * 3_600_000;

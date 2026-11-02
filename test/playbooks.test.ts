@@ -237,3 +237,55 @@ test("ARK-232-AC1 run-lead section 7 reads the first dispatch terminal about 2 m
   expect(fallback).toBeGreaterThan(earlyRead);
   expect(longWait).toBeGreaterThan(fallback);
 });
+
+const workerPlaybook = readFileSync(join(playbookDirectory, "worker.md"), "utf8");
+const implementerSection = workerPlaybook.split("### Implementer")[1]?.split("\n### ")[0];
+
+test("ARK-236-AC1 worker implementer runs format, format:check, typecheck and lint before each commit and before worker_done, also in rework and Markdown-only changes", () => {
+  expect(implementerSection).toBeDefined();
+  expect(implementerSection).toMatch(/Before each commit and before `worker_done`/);
+  expect(implementerSection).toMatch(
+    /`format` \(it writes\), then `format:check`, `typecheck` and `lint`/,
+  );
+  expect(implementerSection).toMatch(/in rework rounds too, and for Markdown-only changes/);
+});
+
+test("ARK-236-AC2 worker commits its own work before worker_done and run-lead section 8 says a findings file never forbids it", () => {
+  expect(implementerSection).toMatch(
+    /Commit your own work on the branch[^\n]*before `worker_done`/,
+  );
+
+  const section = runLeadPlaybook.split("## 8. Test, review and rework")[1]?.split("\n## ")[0];
+  expect(section).toBeDefined();
+  expect(section).toMatch(/A findings file never forbids an implementer commit/);
+});
+
+test("ARK-236-AC3 run-lead section 7 gives the worktree path of repo . without a trailing /.", () => {
+  const section = runLeadPlaybook.split("## 7. Run the steps")[1]?.split("\n## ")[0];
+  expect(section).toBeDefined();
+  expect(section).toMatch(
+    /For a repo named `\.` it is `<run folder>\/workspace`, with no trailing `\/\.`/,
+  );
+});
+
+test("ARK-236-AC4 run-lead section 1 treats a found run_ ID as a candidate and binds only after run-show shows the objective", () => {
+  expect(runLeadStart).toBeDefined();
+  expect(runLeadStart).toMatch(/Treat an ID found there as a candidate only/);
+
+  const show = runLeadStart!.search(/run-show --id <run_id> --json/);
+  const objective = runLeadStart!.search(
+    /Bind with `run-use` only after `run-show` shows the objective `Ark run <run>`/,
+  );
+  const bind = runLeadStart!.search(/run-use --id <run_id>/);
+  expect(show).toBeGreaterThanOrEqual(0);
+  expect(objective).toBeGreaterThan(show);
+  expect(bind).toBeGreaterThan(show);
+});
+
+test("ARK-236-AC5 run-lead section 7 copies every literal string an AC names into the worker spec word for word", () => {
+  const section = runLeadPlaybook.split("## 7. Run the steps")[1]?.split("\n## ")[0];
+  expect(section).toBeDefined();
+  expect(section).toMatch(
+    /copy every literal string an AC names \(a field, flag or message\) word for word/,
+  );
+});
