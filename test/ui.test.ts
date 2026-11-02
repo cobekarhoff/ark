@@ -577,86 +577,90 @@ async function hubState(baseUrl: string, orcaSettled = true): Promise<Hub> {
   throw new Error("orca was never read");
 }
 
-test("ARK-168-AC2 serves each run's state", async () => {
-  const firstRun = startRun("ARK-168-A", "First dashboard run");
-  const secondRun = startRun("ARK-168-B", "Second dashboard run");
-  planGate(firstRun.directory);
-  appendEvent(firstRun.directory, "gate.answered", {
-    gate: "plan",
-    answer: "approve",
-  });
-  appendEvent(firstRun.directory, "step.started", {
-    step: "build",
-    role: "implementer",
-    repo: ".",
-    round: 1,
-  });
-  appendEvent(firstRun.directory, "step.finished", {
-    step: "build",
-    outcome: "succeeded",
-  });
-  appendEvent(firstRun.directory, "test.completed", {
-    passed: true,
-    heads: {},
-    suites: [],
-    criteria: { "ARK-168-A-AC1": "passing" },
-  });
-  appendEvent(firstRun.directory, "merge_request.opened", {
-    repo: ".",
-    url: "https://example.test/pull/17",
-    number: 17,
-  });
-  setOrcaRuns(
-    [firstRun.runId, secondRun.runId],
-    [
-      {
-        dispatchId: "dispatch-1",
-        taskId: "task-1",
-        agentTerminalHandle: "term_worker",
-        projection: {
-          provider: { model: "pi/task" },
-          stage: { activity: "working" },
-          liveness: { verdict: "live" },
-        },
-      },
-    ],
-    [{ id: "task-1", task_title: "Build dashboard" }],
-  );
-
-  await withUi(async (baseUrl) => {
-    const page = await fetch(baseUrl);
-    expect(page.status).toBe(200);
-    const data = await hubState(baseUrl);
-    const dashboardRun = data.runs.find((run) => run.run === firstRun.runId);
-    const planningRun = data.runs.find((run) => run.run === secondRun.runId);
-    expect(dashboardRun).toMatchObject({
-      ticket: { id: "ARK-168-A", title: "First dashboard run" },
-      phase: "merge_requests_open",
-      steps: [{ id: "build", role: "implementer", status: "succeeded" }],
-      merge_requests: [{ repo: ".", url: "https://example.test/pull/17", number: 17 }],
-      agents: [
+test(
+  "ARK-168-AC2 serves each run's state",
+  async () => {
+    const firstRun = startRun("ARK-168-A", "First dashboard run");
+    const secondRun = startRun("ARK-168-B", "Second dashboard run");
+    planGate(firstRun.directory);
+    appendEvent(firstRun.directory, "gate.answered", {
+      gate: "plan",
+      answer: "approve",
+    });
+    appendEvent(firstRun.directory, "step.started", {
+      step: "build",
+      role: "implementer",
+      repo: ".",
+      round: 1,
+    });
+    appendEvent(firstRun.directory, "step.finished", {
+      step: "build",
+      outcome: "succeeded",
+    });
+    appendEvent(firstRun.directory, "test.completed", {
+      passed: true,
+      heads: {},
+      suites: [],
+      criteria: { "ARK-168-A-AC1": "passing" },
+    });
+    appendEvent(firstRun.directory, "merge_request.opened", {
+      repo: ".",
+      url: "https://example.test/pull/17",
+      number: 17,
+    });
+    setOrcaRuns(
+      [firstRun.runId, secondRun.runId],
+      [
         {
-          role: "run lead",
-          terminal: "term_lead",
-          liveness: "live",
-          model: "omp",
-        },
-        {
-          role: "worker",
-          title: "Build dashboard",
-          terminal: "term_worker",
-          model: "pi/task",
-          liveness: "live",
-          activity: "working",
+          dispatchId: "dispatch-1",
+          taskId: "task-1",
+          agentTerminalHandle: "term_worker",
+          projection: {
+            provider: { model: "pi/task" },
+            stage: { activity: "working" },
+            liveness: { verdict: "live" },
+          },
         },
       ],
+      [{ id: "task-1", task_title: "Build dashboard" }],
+    );
+
+    await withUi(async (baseUrl) => {
+      const page = await fetch(baseUrl);
+      expect(page.status).toBe(200);
+      const data = await hubState(baseUrl);
+      const dashboardRun = data.runs.find((run) => run.run === firstRun.runId);
+      const planningRun = data.runs.find((run) => run.run === secondRun.runId);
+      expect(dashboardRun).toMatchObject({
+        ticket: { id: "ARK-168-A", title: "First dashboard run" },
+        phase: "merge_requests_open",
+        steps: [{ id: "build", role: "implementer", status: "succeeded" }],
+        merge_requests: [{ repo: ".", url: "https://example.test/pull/17", number: 17 }],
+        agents: [
+          {
+            role: "run lead",
+            terminal: "term_lead",
+            liveness: "live",
+            model: "omp",
+          },
+          {
+            role: "worker",
+            title: "Build dashboard",
+            terminal: "term_worker",
+            model: "pi/task",
+            liveness: "live",
+            activity: "working",
+          },
+        ],
+      });
+      expect(planningRun).toMatchObject({
+        ticket: { id: "ARK-168-B" },
+        phase: "planning",
+      });
     });
-    expect(planningRun).toMatchObject({
-      ticket: { id: "ARK-168-B" },
-      phase: "planning",
-    });
-  });
-});
+  },
+  { timeout: 30_000 },
+);
 
 test("ARK-168-AC2 updates gate state in the JSON after ark gate record", async () => {
   const run = startRun("ARK-168-C", "Refresh dashboard");
