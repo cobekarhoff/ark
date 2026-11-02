@@ -74,7 +74,7 @@ test("fixture opens a chrome WebView", async () => {
   await using view = new Bun.WebView({ backend: "chrome", width: 400, height: 300 });
   await view.navigate("data:text/html,<title>x</title>hello");
   expect(await view.evaluate("document.body.textContent")).toBe("hello");
-});
+}, 30_000); // Chrome starts slowly on Linux CI; bun's 5s default is too short
 `;
 
 test(
