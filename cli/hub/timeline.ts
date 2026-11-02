@@ -1,6 +1,6 @@
 import { deriveState, type ArkEvent } from "../events.ts";
 import { waitingGate } from "../run.ts";
-import { readUsage } from "../usage/index.ts";
+import { readUsageIn, type SessionWithKey } from "../usage/index.ts";
 import { readRuns } from "./ark.ts";
 import { collectedIntervals, readHistory, type HistoryEvent } from "./changes.ts";
 import type { HubView } from "./map.ts";
@@ -116,34 +116,30 @@ function historySegments(
 }
 
 /** Cost over time from the usage logs. A message with no provider cost makes its point and the total "unknown". */
-function costOf(directory: string, since: number): Cost {
-  try {
-    const messages = readUsage(directory)
-      .flatMap((session) => session.messages)
-      .sort((left, right) => Date.parse(left.time) - Date.parse(right.time));
-    let sum = 0;
-    let baseline = 0;
-    const series: Cost["series"] = [];
-    for (const message of messages) {
-      if (message.costUsd !== "unknown") sum += message.costUsd;
-      if (Date.parse(message.time) < since) baseline = sum;
-      else
-        series.push({
-          at: message.time,
-          usd: message.costUsd === "unknown" ? "unknown" : sum,
-        });
-    }
-    return {
-      usd:
-        series.length === 0 || series.some((point) => point.usd === "unknown")
-          ? "unknown"
-          : sum - baseline,
-      baseline,
-      series,
-    };
-  } catch {
-    return unknownCost;
+function costOf(unsorted: SessionWithKey["messages"], since: number): Cost {
+  const messages = unsorted.toSorted(
+    (left, right) => Date.parse(left.time) - Date.parse(right.time),
+  );
+  let sum = 0;
+  let baseline = 0;
+  const series: Cost["series"] = [];
+  for (const message of messages) {
+    if (message.costUsd !== "unknown") sum += message.costUsd;
+    if (Date.parse(message.time) < since) baseline = sum;
+    else
+      series.push({
+        at: message.time,
+        usd: message.costUsd === "unknown" ? "unknown" : sum,
+      });
   }
+  return {
+    usd:
+      series.length === 0 || series.some((point) => point.usd === "unknown")
+        ? "unknown"
+        : sum - baseline,
+    baseline,
+    series,
+  };
 }
 
 /** One lane for each Master Chief, run and agent that belongs to no run, over the last `hours`. */
@@ -200,6 +196,13 @@ export function buildTimeline(
     ({ state, events }) =>
       state.phase !== "closed" || Date.parse(events[events.length - 1].time) > since,
   );
+  // One scan of the session roots for all runs. A bad session file makes every lane's cost unknown.
+  let usage = new Map<string, SessionWithKey[]>();
+  try {
+    usage = readUsageIn(runs.map(({ directory }) => directory));
+  } catch {
+    // costs stay unknown
+  }
   for (const { directory, state, events } of runs) {
     const agentStates = (pick: (event: HistoryEvent) => Omit<Segment, "from" | "to"> | null) =>
       [
@@ -225,7 +228,12 @@ export function buildTimeline(
           ),
         ),
       ]),
-      cost: costOf(directory, since),
+      cost: usage.has(directory)
+        ? costOf(
+            usage.get(directory)!.flatMap((session) => session.messages),
+            since,
+          )
+        : unknownCost,
     });
   }
 

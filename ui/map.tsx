@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MapGraph, MapNode } from "../cli/hub/map.ts";
 import type { Action, Item } from "../cli/hub/types.ts";
 import { agentKey, type HubState, type Selection } from "./model.ts";
@@ -79,19 +79,27 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
     selection: Selection;
   } | null>(null);
 
-  useEffect(() => {
-    let stale = false;
+  const inFlight = useRef(false);
+  const answeredAt = useRef(0);
+
+  function load() {
+    inFlight.current = true;
     fetch("/api/map")
       .then((response) => response.json() as Promise<MapGraph>)
       .then((graph) => {
-        if (stale) return;
         setLive(graph);
         setFailed(false);
+        answeredAt.current = Date.now();
       })
-      .catch(() => !stale && setFailed(true));
-    return () => {
-      stale = true;
-    };
+      .catch(() => setFailed(true))
+      .finally(() => {
+        inFlight.current = false;
+      });
+  }
+  // The hub pushes every second: fetch again only when idle and the answer is 15 s old.
+  useEffect(load, []);
+  useEffect(() => {
+    if (!inFlight.current && Date.now() - answeredAt.current > 15_000) load();
   }, [hub]);
   useEffect(() => {
     if (at === null) return setPast(null);
@@ -227,6 +235,9 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
             </p>
             {failed && (
               <p className="hint">The Map could not be read. The hub may be restarting.</p>
+            )}
+            {live === null && at === null && !failed && (
+              <div className="empty">Loading the Map…</div>
             )}
             <svg
               className={`graph ${lit ? "focus" : ""} ${dim ? "dim" : ""}`}
