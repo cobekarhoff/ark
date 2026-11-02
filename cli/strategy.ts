@@ -69,18 +69,24 @@ export function strategyRecord(runId: string, inProject?: string): void {
   const file = join(directory, "strategies.md");
   if (!existsSync(file)) throw new ArkError(`strategies.md not found in ${directory}`);
 
-  const needsMockups = state.evaluation.surfaces.some((surface) => surface !== "none");
-  if (needsMockups && !loadConfig(project).roles.designer) {
-    throw new ArkError(
-      `ark.yml of project ${project} has no roles.designer: add its harness and model (the evaluation lists surface ${state.evaluation.surfaces.join(", ")})`,
-    );
-  }
-
   const cards = parseCards(readFileSync(file, "utf8"));
   if (cards.length === 0)
     throw new ArkError(
       'strategies.md has no cards: add one "## <id> <title>" heading for each card',
     );
+  // No surface needs a mockup, and one card with only a document is not compared by the human.
+  const surfaces = state.evaluation.surfaces;
+  const needsMockups =
+    surfaces.some((surface) => surface !== "none") &&
+    !(
+      cards.length === 1 &&
+      surfaces.every((surface) => surface === "document" || surface === "none")
+    );
+  if (needsMockups && !loadConfig(project).roles.designer) {
+    throw new ArkError(
+      `ark.yml of project ${project} has no roles.designer: add its harness and model (the evaluation lists surface ${surfaces.join(", ")})`,
+    );
+  }
   const ids = new Set<string>();
   for (const card of cards) {
     if (ids.has(card.id)) throw new ArkError(`strategies.md has two cards with the id ${card.id}`);
