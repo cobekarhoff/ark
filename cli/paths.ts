@@ -25,9 +25,18 @@ export function listProjects(): string[] {
     .sort();
 }
 
-export function findRun(runId: string): { project: string; directory: string } {
-  const matches = listProjects()
-    .map((project) => ({ project, directory: join(runsDirectory(project), runId) }))
+/** With `project`, looks for the run in that project only and refuses an unknown project. */
+export function findRun(runId: string, project?: string): { project: string; directory: string } {
+  const projects = listProjects();
+  if (project !== undefined) {
+    if (!projects.includes(project))
+      throw new ArkError(`project ${project} does not exist under ${arkHome()}/projects`);
+    const directory = join(runsDirectory(project), runId);
+    if (!existsSync(directory)) throw new ArkError(`run not found in project ${project}: ${runId}`);
+    return { project, directory };
+  }
+  const matches = projects
+    .map((name) => ({ project: name, directory: join(runsDirectory(name), runId) }))
     .filter((candidate) => existsSync(candidate.directory));
   if (matches.length === 0) throw new ArkError(`run not found: ${runId}`);
   if (matches.length > 1) {

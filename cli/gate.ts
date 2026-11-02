@@ -36,7 +36,13 @@ function acceptCriteria(runDirectory: string): void {
   appendEvent(runDirectory, "criteria.updated", { criteria: ids });
 }
 
-export function gateRecord(runId: string, gate: string, answer: string, note?: string): void {
+export function gateRecord(
+  runId: string,
+  gate: string,
+  answer: string,
+  note?: string,
+  inProject?: string,
+): void {
   if (!Object.hasOwn(gateAnswers, gate)) {
     throw new ArkError(`unknown gate "${gate}": use ${Object.keys(gateAnswers).join(", ")}`);
   }
@@ -45,7 +51,7 @@ export function gateRecord(runId: string, gate: string, answer: string, note?: s
       `unknown answer "${answer}" for gate ${gate}: use ${gateAnswers[gate].join(", ")}`,
     );
   }
-  const { directory } = findRun(runId);
+  const { directory } = findRun(runId, inProject);
   const accepting = gate === "criteria" && answer === "accept";
   // Only the awaiting_criteria phase refreshes criteria; in any other phase the transition table refuses the answer.
   if (accepting && deriveState(readEvents(directory)).phase === "awaiting_criteria")
@@ -58,8 +64,8 @@ export function gateRecord(runId: string, gate: string, answer: string, note?: s
   console.log(`recorded ${gate} ${answer}`);
 }
 
-export function escalate(runId: string, reason: string | undefined): void {
-  const { directory } = findRun(runId);
+export function escalate(runId: string, reason: string | undefined, inProject?: string): void {
+  const { directory } = findRun(runId, inProject);
   appendEvent(directory, "escalation.requested", { reason: (reason ?? "").trim() });
   const state = deriveState(readEvents(directory));
   console.log(`recorded escalation request: round ${state.round} of ${state.round_budget}`);

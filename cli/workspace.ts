@@ -46,8 +46,8 @@ export function targetBranch(repoPath: string): string {
 }
 
 /** Fast-forwards the workspace checkout's target branch of each repo the run touched to origin. */
-export function workspaceSync(runId: string): void {
-  const { project, directory } = findRun(runId);
+export function workspaceSync(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
   const workspace = loadConfig(project).workspace;
   for (const { repo } of deriveState(readEvents(directory)).worktrees) {
     const path = join(workspace, repo);
