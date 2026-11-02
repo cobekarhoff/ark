@@ -505,7 +505,7 @@ test("ARK-210-AC2 ark escalate outside phase building exits 1 and names the phas
   const early = startRun("demo", "ARK-901");
   const planningRefusal = ark("escalate", early.runId, "--reason", "x");
   expect(planningRefusal.code).toBe(1);
-  expect(planningRefusal.err).toContain("awaiting_criteria");
+  expect(planningRefusal.err).toContain("planning");
 
   const open = spentBudgetRun(false);
   expect(ark("status", open.runId).out).toContain("phase: escalation");
@@ -539,7 +539,7 @@ test("ARK-210-AC3 one_more_round after ark escalate returns to building and star
   });
 });
 
-test("ARK-210-AC3 take_over and abort answers after ark escalate are recorded", () => {
+test("ARK-210-AC3 take_over answer after ark escalate is recorded", () => {
   const takeOver = spentBudgetRun(true);
   expect(ark("escalate", takeOver.runId, "--reason", "P1 open").code).toBe(0);
   expect(ark("gate", "record", takeOver.runId, "escalation", "take_over").code).toBe(0);
@@ -547,7 +547,9 @@ test("ARK-210-AC3 take_over and abort answers after ark escalate are recorded", 
     type: "gate.answered",
     data: { gate: "escalation", answer: "take_over" },
   });
+});
 
+test("ARK-210-AC3 abort answer after ark escalate is recorded", () => {
   const aborted = spentBudgetRun(true);
   expect(ark("escalate", aborted.runId, "--reason", "P1 open").code).toBe(0);
   expect(ark("gate", "record", aborted.runId, "escalation", "abort").code).toBe(0);

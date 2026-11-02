@@ -206,7 +206,7 @@ const helpText = ["Usage: ark <command>", ...commands.map((command) => `  ${comm
 );
 
 const commandWords = (command: Command): string[] =>
-  command.usage.split(" ").filter((word) => /^[a-z-]+$/.test(word));
+  command.usage.split(" ").filter((word) => /^[a-z][a-z-]*$/.test(word));
 
 function parseFlags(command: Command, args: string[]): { positionals: string[]; flags: Flags } {
   const positionals: string[] = [];
