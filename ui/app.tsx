@@ -1228,13 +1228,14 @@ function RunPage({
               <th>Gate</th>
               <th>Asked</th>
               <th>Answered</th>
+              <th>By</th>
               <th className="r">Waited</th>
             </tr>
           </thead>
           <tbody>
             {detail.gates.length === 0 && (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={5} className="muted">
                   No gate asked yet.
                 </td>
               </tr>
@@ -1248,6 +1249,7 @@ function RunPage({
                     ? `${new Date(gate.answered).toLocaleTimeString()}${gate.answer ? ` · ${gate.answer}` : ""}`
                     : "open"}
                 </td>
+                <td>{gate.by ?? "—"}</td>
                 <td className="r mono">{span(gate.wait_seconds)}</td>
               </tr>
             ))}

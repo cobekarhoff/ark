@@ -138,4 +138,13 @@ export function strategyRecord(runId: string): void {
   console.log(
     `recorded strategy: ${cards.length} card${cards.length === 1 ? "" : "s"}, recommended ${recommendedId}`,
   );
+  // One card opens no gate. Two or more always have exactly one recommended card (checked above).
+  if (cards.length > 1 && loadConfig(project).gates.strategy === "auto") {
+    appendEvent(directory, "gate.answered", {
+      gate: "strategy",
+      answer: recommendedId,
+      by: "auto",
+    });
+    console.log(`gates.strategy is auto: recorded strategy ${recommendedId} by auto`);
+  }
 }
