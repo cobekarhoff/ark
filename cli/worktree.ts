@@ -38,8 +38,8 @@ function branchName(runId: string, ticket: { id: string; title: string }): strin
   return `ark/${ticket.id}${slug ? `-${slug}` : ""}${number > 1 ? `-${number}` : ""}`;
 }
 
-export function worktreeCreate(runId: string, repos: string[]): void {
-  const { project, directory } = findRun(runId);
+export function worktreeCreate(runId: string, repos: string[], inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
   const workspace = config.workspace;
   const knownRepos = discoverRepos(workspace);
@@ -108,8 +108,8 @@ export function worktreeCreate(runId: string, repos: string[]): void {
 }
 
 /** Merges origin/<target> into every worktree and pushes the branch of each repo with an open MR. */
-export function worktreeSync(runId: string): void {
-  const { directory } = findRun(runId);
+export function worktreeSync(runId: string, inProject?: string): void {
+  const { directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
   assertAllowed(state, "worktree.synced", { repo: state.worktrees[0].repo, conflict: false });
@@ -143,8 +143,8 @@ export function worktreeSync(runId: string): void {
 }
 
 /** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, and for a merged run an unmerged branch, and prints the repo and the reason. */
-export function worktreeCleanup(runId: string): void {
-  const { project, directory } = findRun(runId);
+export function worktreeCleanup(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   const workspace = loadConfig(project).workspace;
   for (const { repo, path, branch } of state.worktrees) {

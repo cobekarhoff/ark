@@ -180,8 +180,8 @@ function blockOnGitLab(
   }
 }
 
-export function mergeRequestOpen(runId: string): void {
-  const { directory } = findRun(runId);
+export function mergeRequestOpen(runId: string, inProject?: string): void {
+  const { directory } = findRun(runId, inProject);
   const events = readEvents(directory);
   const state = deriveState(events);
   if (!["building", "escalation", "merge_requests_open"].includes(state.phase)) {
@@ -257,8 +257,8 @@ export function mergeRequestOpen(runId: string): void {
 }
 
 /** Prints MR state and failed check names for each MR the run opened. Read-only. */
-export function mergeRequestStatus(runId: string): void {
-  const { directory } = findRun(runId);
+export function mergeRequestStatus(runId: string, inProject?: string): void {
+  const { directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   if (state.merge_requests.length === 0) throw new ArkError(`${runId} has no merge requests`);
   for (const merge of state.merge_requests) {

@@ -49,8 +49,8 @@ export function parseEvaluation(content: string): {
   return { blockers: lists.blockers, risks: lists.risks, surfaces };
 }
 
-export function evaluationRecord(runId: string): void {
-  const { project, directory } = findRun(runId);
+export function evaluationRecord(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
   if (!loadConfig(project).roles.evaluator) {
     throw new ArkError(
       `ark.yml of project ${project} has no roles.evaluator: add its harness and model`,
