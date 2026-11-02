@@ -60,3 +60,11 @@ test("ARK-227-AC2 hub plan gate since is the new check after a change answer", (
   ]);
   expect(item?.since).toBe("2026-11-01T10:30:00.000Z");
 });
+
+test("ARK-239-AC1 hub lists no plan gate after a change answer with no later check", () => {
+  const item = planGateItem([
+    ["2026-11-01T10:00:00.000Z", "plan.checked", checked],
+    ["2026-11-01T10:01:00.000Z", "gate.answered", { gate: "plan", answer: "change" }],
+  ]);
+  expect(item).toBeUndefined();
+});
