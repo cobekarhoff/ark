@@ -314,7 +314,13 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 
    Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`, then run `ark run step <run> <step> finish --failed` and decide what to do.
 
-3. Keep the terminal handle from the `worker-start` JSON. About 2 minutes after the first dispatch on each model starts, read its terminal, without waiting for the long wait below:
+3. Keep the terminal handle from the `worker-start --json` output: the `id` of the entry in `result.effects[]` with `"kind": "terminal"` (`term_...`). About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds, then read its terminal, without waiting for the long wait below:
+
+   ```sh
+   orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 120000 --json
+   ```
+
+   If a `worker_done` arrives in this short wait, process it as in step 4. Then read the terminal:
 
    ```sh
    orca orchestration worker-read --dispatch <dispatch id> --source terminal --limit 40 --json
