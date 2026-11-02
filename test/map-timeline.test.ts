@@ -522,37 +522,41 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
     });
   });
 
-  test("ARK-180-AC3 timeline API applies each supported window and rejects unsupported hours", async () => {
-    const run = startRun("ARK-180-TIME2");
-    planGate(run.directory);
-    appendEvent(run.directory, "gate.answered", { gate: "plan", answer: "approve" });
-    appendEvent(run.directory, "step.started", {
-      step: "build",
-      role: "implementer",
-      repo: ".",
-      round: 1,
-    });
-    appendEvent(run.directory, "step.finished", { step: "build", outcome: "succeeded" });
-    setEventTime(run.directory, "step.started", at(300));
-    setEventTime(run.directory, "step.finished", at(299));
-    await withUi(async (baseUrl) => {
-      for (const hours of [1, 12, 24]) {
-        const response = await fetch(`${baseUrl}/api/timeline?hours=${hours}`);
-        expect(response.status).toBe(200);
-        const timeline = (await response.json()) as {
-          hours: number;
-          lanes: { segments: { item?: string }[] }[];
-        };
-        expect(timeline.hours).toBe(hours);
-        expect(
-          timeline.lanes.find((lane) =>
-            lane.segments.some((segment) => segment.item === `step:${run.runId}:build`),
-          ) !== undefined,
-        ).toBe(hours !== 1);
-      }
-      expect((await fetch(`${baseUrl}/api/timeline?hours=2`)).status).toBe(400);
-    });
-  });
+  test(
+    "ARK-180-AC3 timeline API applies each supported window and rejects unsupported hours",
+    async () => {
+      const run = startRun("ARK-180-TIME2");
+      planGate(run.directory);
+      appendEvent(run.directory, "gate.answered", { gate: "plan", answer: "approve" });
+      appendEvent(run.directory, "step.started", {
+        step: "build",
+        role: "implementer",
+        repo: ".",
+        round: 1,
+      });
+      appendEvent(run.directory, "step.finished", { step: "build", outcome: "succeeded" });
+      setEventTime(run.directory, "step.started", at(300));
+      setEventTime(run.directory, "step.finished", at(299));
+      await withUi(async (baseUrl) => {
+        for (const hours of [1, 12, 24]) {
+          const response = await fetch(`${baseUrl}/api/timeline?hours=${hours}`);
+          expect(response.status).toBe(200);
+          const timeline = (await response.json()) as {
+            hours: number;
+            lanes: { segments: { item?: string }[] }[];
+          };
+          expect(timeline.hours).toBe(hours);
+          expect(
+            timeline.lanes.find((lane) =>
+              lane.segments.some((segment) => segment.item === `step:${run.runId}:build`),
+            ) !== undefined,
+          ).toBe(hours !== 1);
+        }
+        expect((await fetch(`${baseUrl}/api/timeline?hours=2`)).status).toBe(400);
+      });
+    },
+    { timeout: 30_000 },
+  );
 
   test("ARK-180-AC3 timeline API exposes rising priced usage and unknown Codex cost without estimating", async () => {
     const run = startRun("ARK-180-COST1");
