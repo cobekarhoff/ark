@@ -749,12 +749,18 @@ test("ARK-258-AC3 box approve lists proposed tickets and sends only on confirm",
     const rows = dialog.locator(".approve-list li");
     await expect(rows).toHaveCount(3);
     for (const [index, id] of ["ARK-185", "ARK-186", "ARK-187"].entries())
-      await expect(rows.filter({ hasText: id })).toContainText(proposedTitles[index]);
+      await expect(rows.nth(index)).toHaveText(`${id} ${proposedTitles[index]}`);
     await expect(dialog).not.toContainText("ARK-188");
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toBeHidden();
     expect(existsSync(actionLog)).toBe(false);
+    await page
+      .getByRole("group", { name: "Project filter" })
+      .locator("button")
+      .filter({ hasText: /^alpha/ })
+      .click();
     dialog = await open();
+    await expect(dialog.locator(".approve-list li")).toHaveCount(3);
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     expect(existsSync(actionLog)).toBe(false);
@@ -784,7 +790,19 @@ test("ARK-258-AC4 box approve is disabled with a reason when nothing is proposed
   });
 });
 
-test("ARK-258-AC5 specs for AC1 to AC4 exist with their AC id in the title", async () => {
-  const source = readFileSync(import.meta.filename, "utf8");
-  for (const id of ["AC1", "AC2", "AC3", "AC4"]) expect(source).toContain(`test("ARK-258-${id} `);
+test("ARK-258-AC5 Backlog approve of one ticket shows its toast and sends only that ticket", async ({
+  page,
+}) => {
+  const actionLog = seedAlpha();
+  await withUi(async (baseUrl) => {
+    await page.goto(baseUrl);
+    await page.locator('nav.vbar button[data-view="backlog"]').click();
+    await page.locator('[data-ticket="alpha:ARK-185"] button').click();
+    await page.locator("aside.detail").getByRole("button", { name: "Approve and queue" }).click();
+    await expect(page.locator("#toasts")).toContainText("Approve and queue ARK-185");
+    await expect.poll(() => existsSync(actionLog)).toBe(true);
+    const [line, ...rest] = terminalActionLog();
+    expect(rest).toEqual([]);
+    expect([...line.matchAll(/ARK-\d+/g)].map(([id]) => id)).toEqual(["ARK-185"]);
+  });
 });
