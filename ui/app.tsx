@@ -1478,18 +1478,13 @@ function RunPage({
         </div>
       </Panel>
 
-      {/* ark worktree sync did not land a run-lead-message component in this tree; ARK-177 fills this slot. */}
       <section
-        className="rd-slot"
+        className="rd-message"
         data-slot="run-lead-message"
         data-detail-section="run-lead-message"
-        aria-label="Run-lead message (ARK-177)"
+        aria-label="Run-lead message"
       >
-        <span className="tag">ARK-177</span>
-        <div>
-          <b>Run-lead message (ARK-177)</b>
-          <div className="hint">Empty slot. ARK-177 renders its message component here.</div>
-        </div>
+        <RunLeadMessage run={run} live={detail.agents_known && lead?.liveness === "live"} />
       </section>
     </div>
   );

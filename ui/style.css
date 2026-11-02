@@ -2114,15 +2114,8 @@ kbd {
   color: var(--amber);
   margin-bottom: 8px;
 }
-.rd-slot {
+.rd-message {
   margin-top: 14px;
-  border: 1.5px dashed color-mix(in oklab, var(--violet) 60%, var(--line));
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  background: color-mix(in oklab, var(--violet) 6%, transparent);
 }
 
 /* steering */
