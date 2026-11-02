@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync, unlinkSync 
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
-import { appendEvent, deriveState, readEvents } from "./events.ts";
+import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 import { discoverRepos, git, mirrorRoot, targetBranch } from "./workspace.ts";
@@ -54,6 +54,74 @@ function removeWorktree(source: string, path: string, branch: string, forces: nu
   return left;
 }
 
+/** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. */
+function addRepoWorktree(
+  runId: string,
+  directory: string,
+  workspace: string,
+  setup: string | undefined,
+  state: RunState,
+  repo: string,
+  log: (line: string) => void,
+): void {
+  const mirror = mirrorRoot(directory);
+  mkdirSync(mirror, { recursive: true });
+  const path = repo === "." ? mirror : join(mirror, repo);
+  const isSymlink = pathExists(path) && lstatSync(path).isSymbolicLink();
+  const source = join(workspace, repo);
+  const branch = branchName(runId, state.ticket);
+  if (!isSymlink && existsSync(join(path, ".git"))) {
+    if (state.worktrees.some((worktree) => worktree.repo === repo)) {
+      log(`exists   ${repo}`);
+      return;
+    }
+    // no worktree.created event: an earlier create failed and its cleanup failed too
+    const left = removeWorktree(source, path, branch, 2);
+    if (left.length > 0)
+      throw new ArkError(
+        `could not remove the stale leftover in repo "${repo}"\n${left.join("\n")}`,
+      );
+    log(`removed  ${repo} (stale leftover of an earlier failed create)`);
+  }
+  if (isSymlink) unlinkSync(path); // an earlier call left this repo untouched
+  mkdirSync(dirname(path), { recursive: true });
+  const base = git(source, "rev-parse", "HEAD");
+  git(source, "worktree", "add", "-b", branch, path, base);
+  log(`created  ${repo} -> ${path}`);
+  if (setup) {
+    const result = Bun.spawnSync(["sh", "-c", setup], { cwd: path });
+    if (result.exitCode !== 0) {
+      const left = removeWorktree(source, path, branch, 1);
+      if (left.length === 0) log(`removed  ${repo} (setup failed, worktree and branch deleted)`);
+      // stderr wins when it has text; otherwise the cause is on stdout
+      const stderr = result.stderr.toString().trim();
+      const cause = (stderr || result.stdout.toString().trim()).split("\n").slice(-10).join("\n");
+      throw new ArkError(
+        [
+          `setup failed in repo "${repo}": \`${setup}\` exited ${result.exitCode}`,
+          ...(cause ? [cause] : []),
+          ...left,
+        ].join("\n"),
+      );
+    }
+    log(`setup    ${repo}: ${setup}`);
+  }
+  appendEvent(directory, "worktree.created", { repo, path, branch, base });
+}
+
+/** Early worktree of the first repo of the workspace, so the run lead and its first workers have their own folder. Prints `path:<absolute path>`; a second call prints the same line and records nothing. */
+export function worktreeAnchor(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
+  const config = loadConfig(project);
+  const repo = discoverRepos(config.workspace)[0];
+  if (repo === undefined) throw new ArkError(`workspace ${config.workspace} has no git repo`);
+  const state = deriveState(readEvents(directory));
+  assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
+  addRepoWorktree(runId, directory, config.workspace, config.setup, state, repo, () => {});
+  const mirror = mirrorRoot(directory);
+  console.log(`path:${repo === "." ? mirror : join(mirror, repo)}`);
+}
+
 export function worktreeCreate(runId: string, repos: string[], inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
@@ -75,54 +143,10 @@ export function worktreeCreate(runId: string, repos: string[], inProject?: strin
   const state = deriveState(readEvents(directory));
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
 
+  for (const repo of touched)
+    addRepoWorktree(runId, directory, workspace, config.setup, state, repo, console.log);
+
   const mirror = mirrorRoot(directory);
-  mkdirSync(mirror, { recursive: true });
-
-  for (const repo of touched) {
-    const path = repo === "." ? mirror : join(mirror, repo);
-    const isSymlink = pathExists(path) && lstatSync(path).isSymbolicLink();
-    const source = join(workspace, repo);
-    const branch = branchName(runId, state.ticket);
-    if (!isSymlink && existsSync(join(path, ".git"))) {
-      if (state.worktrees.some((worktree) => worktree.repo === repo)) {
-        console.log(`exists   ${repo}`);
-        continue;
-      }
-      // no worktree.created event: an earlier create failed and its cleanup failed too
-      const left = removeWorktree(source, path, branch, 2);
-      if (left.length > 0)
-        throw new ArkError(
-          `could not remove the stale leftover in repo "${repo}"\n${left.join("\n")}`,
-        );
-      console.log(`removed  ${repo} (stale leftover of an earlier failed create)`);
-    }
-    if (isSymlink) unlinkSync(path); // an earlier call left this repo untouched
-    mkdirSync(dirname(path), { recursive: true });
-    const base = git(source, "rev-parse", "HEAD");
-    git(source, "worktree", "add", "-b", branch, path, base);
-    console.log(`created  ${repo} -> ${path}`);
-    if (config.setup) {
-      const setup = Bun.spawnSync(["sh", "-c", config.setup], { cwd: path });
-      if (setup.exitCode !== 0) {
-        const left = removeWorktree(source, path, branch, 1);
-        if (left.length === 0)
-          console.log(`removed  ${repo} (setup failed, worktree and branch deleted)`);
-        // stderr wins when it has text; otherwise the cause is on stdout
-        const stderr = setup.stderr.toString().trim();
-        const cause = (stderr || setup.stdout.toString().trim()).split("\n").slice(-10).join("\n");
-        throw new ArkError(
-          [
-            `setup failed in repo "${repo}": \`${config.setup}\` exited ${setup.exitCode}`,
-            ...(cause ? [cause] : []),
-            ...left,
-          ].join("\n"),
-        );
-      }
-      console.log(`setup    ${repo}: ${config.setup}`);
-    }
-    appendEvent(directory, "worktree.created", { repo, path, branch, base });
-  }
-
   if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror
 
   for (const entry of readdirSync(workspace)) {
@@ -176,18 +200,44 @@ export function worktreeSync(runId: string, inProject?: string): void {
   if (conflicts.length > 0) throw new ArkError(conflicts.join("\n"));
 }
 
+/** Entries of `git status` for a worktree, minus untracked entries Ark made itself: a symlink of the mirror, and a nested worktree of the run. Any other untracked or modified entry counts. */
+function dirtyLines(path: string, worktreePaths: string[]): string[] {
+  const records = git(path, "status", "--porcelain", "-z", "--untracked-files=all")
+    .split("\0")
+    .filter((record) => record !== "");
+  const dirty: string[] = [];
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (record[0] === "R" || record[0] === "C") index++; // a rename or copy carries its source path as the next record
+    if (!record.startsWith("?? ")) {
+      dirty.push(record);
+      continue;
+    }
+    const entry = join(path, record.slice(3).replace(/\/$/, ""));
+    if (lstatSync(entry).isSymbolicLink() || worktreePaths.includes(entry)) continue;
+    dirty.push(record);
+  }
+  return dirty;
+}
+
 /** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, and for a merged run an unmerged branch, and prints the repo and the reason. */
 export function worktreeCleanup(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   const workspace = loadConfig(project).workspace;
-  for (const { repo, path, branch } of state.worktrees) {
+  for (const { repo, path, branch } of [...state.worktrees].reverse()) {
+    // newest first: the anchor of a root repo holds the nested worktrees
     const source = join(workspace, repo);
     const keep = (reason: string) => console.log(`kept     ${repo}  ${branch}: ${reason}`);
     if (!existsSync(path)) {
       Bun.spawnSync(["git", "-C", source, "worktree", "prune"]);
     } else {
-      if (git(path, "status", "--porcelain") !== "") {
+      if (
+        dirtyLines(
+          path,
+          state.worktrees.map((other) => other.path),
+        ).length > 0
+      ) {
         keep("uncommitted changes");
         continue;
       }
@@ -209,7 +259,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
           continue;
         }
       }
-      git(source, "worktree", "remove", path);
+      git(source, "worktree", "remove", "--force", path); // clean but for Ark's own symlinks
     }
     Bun.spawnSync(["git", "-C", source, "branch", "-D", branch]);
     console.log(`removed  ${repo}  ${branch}`);

@@ -113,10 +113,16 @@ Do these steps in order for one ready ticket.
 
    The command prints the run name. Use it as `<run>` below.
 
-3. **Start the run lead.** Start it in the workspace Orca already knows, with `--worktree current`. The queue Task stays `ready` until close (section 8), where you complete it.
+3. **Start the run lead.** First make the run worktree, so the run lead does not start in the main workspace. You stay in the main workspace.
 
    ```sh
-   orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree current --agent <harness> --model <model> --json
+   ark worktree anchor <run>
+   ```
+
+   It prints one line, `path:<absolute path>`. If it exits non-zero, do not start the run lead: tell the human. Start the run lead with that printed `path:<...>` as `--worktree`. The queue Task stays `ready` until close (section 8), where you complete it.
+
+   ```sh
+   orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree path:<printed path> --agent <harness> --model <model> --json
    ```
 
    Use the `harness` and `model` of the `chief` role in `ark.yml` unless the human names others. If `roles.chief` is missing, do not start the run lead and do not edit `ark.yml`. Tell the human: "Prerequisite missing: `roles.chief` (harness and model) is not set in `<project>/ark.yml`. Add it, for example `chief: { harness: claude, model: claude-opus }`, then ask me again." If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.
@@ -186,6 +192,12 @@ ark merge-request status <run>
 ```
 
 It prints `<repo>  merged|open|closed  <url>` for each MR.
+
+Release the run lead before you close the run, so that the removal of its worktree does not end a live agent. Do it when it is not yet released: its row in `orca orchestration worker-list --include-remote --json` is still listed as running, and section 7 (`worker_done` from a run lead, step 5) has not released it. If it was released there, skip this.
+
+```sh
+orca orchestration worker-release --dispatch <dispatch id> --json
+```
 
 Choose the outcome:
 

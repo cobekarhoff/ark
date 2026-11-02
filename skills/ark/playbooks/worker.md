@@ -24,7 +24,7 @@ Do only your step. Do not edit another repo's worktree. Do not touch the run's s
 
 ### Evaluator
 
-You check the ticket before the run lead plans. Your harness and model come from `roles.evaluator` in `ark.yml`. You edit no product code, and you commit nothing. The only file you write is `<run folder>/evaluation.md`. Skip section 1 steps 1 and 2 for this role: you have no plan step, and you work in the workspace folder you were started in.
+You check the ticket before the run lead plans. Your harness and model come from `roles.evaluator` in `ark.yml`. You edit no product code, and you commit nothing. The only file you write is `<run folder>/evaluation.md`. Skip section 1 steps 1 and 2 for this role: you have no plan step, and you work in the run worktree you were started in.
 
 1. Read `<run folder>/ticket.md` and each AC. Read the code and the context that each AC touches.
 2. Probe what you doubt, read-only: run a command with `--help`, read a log, or run `run-current` from the right terminal. Never change a file in the repo, and never start an agent.
@@ -53,7 +53,7 @@ You check the ticket before the run lead plans. Your harness and model come from
 
 ### Designer
 
-You make the mockups that let the human choose a strategy before code exists. Your harness and model come from `roles.designer` in `ark.yml`. You edit no product code, you commit nothing, and you work in the workspace folder you were started in. You write only in `<run folder>/mockups/`, in `<run folder>/strategies.md` and in a throwaway worktree. Skip section 1 steps 1 and 2 for this role: you have no plan step.
+You make the mockups that let the human choose a strategy before code exists. Your harness and model come from `roles.designer` in `ark.yml`. You edit no product code, you commit nothing, and you work in the run worktree you were started in. You write only in `<run folder>/mockups/`, in `<run folder>/strategies.md` and in a throwaway worktree. Skip section 1 steps 1 and 2 for this role: you have no plan step.
 
 1. Read `<run folder>/ticket.md`, `<run folder>/evaluation.md` (the `Surfaces` list) and `<run folder>/strategies.md` (the cards the run lead wrote). Read the code that the surface touches.
    - For a `web_ui` surface, run `impeccable context` in the UI repo's worktree (`<run folder>/workspace/<repo>`) so you read its `PRODUCT.md` and `DESIGN.md`. When a file is missing, say so in a line at the top of `strategies.md`, such as `Design context: DESIGN.md missing in repos/web`, so the human sees it at the strategy gate. Do not make the file yourself.
