@@ -371,8 +371,8 @@ function formatUsd(usd: Unknowable, includesUnknown: boolean): string {
   return `$${usd.toFixed(2)}${includesUnknown ? " (some costs unknown)" : ""}`;
 }
 
-export function retro(runId: string): void {
-  const { project, directory: runDirectory } = findRun(runId);
+export function retro(runId: string, inProject?: string): void {
+  const { project, directory: runDirectory } = findRun(runId, inProject);
   const events = readEvents(runDirectory);
   if (events.length === 0) throw new ArkError(`run ${runId} has no events`);
 
