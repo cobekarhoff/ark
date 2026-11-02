@@ -354,11 +354,17 @@ Example:
 workspace: /Users/you/Dev/clara
 ticket_source: local
 compose: docker compose
+setup: bun install --frozen-lockfile && bunx playwright install chromium
 suites:
   - name: e2e
     level: e2e
     repo: repos/platform
     command: bun test --reporter=junit --reporter-outfile={report}
+    parser: bun
+  - name: playwright
+    level: e2e
+    repo: repos/platform
+    command: PLAYWRIGHT_JUNIT_OUTPUT_FILE={report} bunx playwright test --reporter=junit
     parser: bun
 roles:
   implementer: { harness: claude, model: claude-sonnet }
@@ -372,6 +378,8 @@ gates:
   plan: auto
   strategy: auto
 ```
+
+A browser suite runs Playwright Test. Playwright's JUnit reporter writes the test title in `name`, so the `bun` parser reads it unchanged, and `PLAYWRIGHT_JUNIT_OUTPUT_FILE` carries the `{report}` path. The `setup` above also installs Chromium, so each new worktree can run the suite; the download is cached in `~/.cache/ms-playwright`.
 
 A test proves an AC when its name or tags contain the AC id, for example `CLARA-512-AC1`. For each AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran.
 
