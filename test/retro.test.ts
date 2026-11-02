@@ -204,6 +204,7 @@ describe("ark retro", () => {
       "design_rounds",
       "decisions",
       "human_intervention",
+      "gates",
       "escaped_defects",
       "orchestration",
       "comparison",
