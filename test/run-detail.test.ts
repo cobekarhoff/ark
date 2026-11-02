@@ -14,14 +14,20 @@ import type { RunDetail } from "../cli/hub/detail.ts";
 import { planHash } from "../cli/plan.ts";
 import {
   ark,
+  codexDay,
+  isoAgo,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  testNow,
+  useFrozenClock,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
+
+useFrozenClock();
 let projectDirectory: string;
 let orcaDirectory: string;
 let orcaStateDirectory: string;
@@ -202,7 +208,7 @@ function setEventTimes(directory: string, replacements: Record<string, string[]>
 
 test("ARK-179-AC1 run detail returns phase times, gate waits and both step rounds", async () => {
   const run = startRun("ARK-179-TIMELINE");
-  const start = Date.now() - 90_000;
+  const start = testNow() - 90_000;
   readyForBuild(run.directory);
   appendEvent(run.directory, "step.started", {
     step: "build",
@@ -330,7 +336,7 @@ test("ARK-179-AC3 run detail uses shared OMP, Claude and Codex usage with unknow
     join(run.directory, "plan.yml"),
     "steps:\n  - id: build\n    role: implementer\n    repo: repos/platform\n    needs: []\n    criteria: [ARK-179-AC1]\n",
   );
-  const currentTime = new Date().toISOString();
+  const currentTime = isoAgo(0);
   const omp = readFileSync(join(import.meta.dir, "fixtures", "retro", "omp", "build.jsonl"), "utf8")
     .replaceAll("__RUN__", run.directory)
     .replaceAll(/2026-10-29T[^"]+/g, currentTime);
@@ -357,7 +363,7 @@ test("ARK-179-AC3 run detail uses shared OMP, Claude and Codex usage with unknow
   ];
   addSession(
     codexDirectory,
-    "2026/11/01/rollout.jsonl",
+    `${codexDay().join("/")}/rollout.jsonl`,
     `${codexRecords.map((record) => JSON.stringify(record)).join("\n")}\n`,
   );
   setOrcaRun(
@@ -443,7 +449,7 @@ test("ARK-179-AC4 run detail returns the last 20 lines and unknown for a failed 
 
 test("ARK-179-AC5 run detail splits gate, CI, paused, stalled and working time into the wall interval", async () => {
   const run = startRun("ARK-179-TIME");
-  const start = Date.now() - 100_000;
+  const start = testNow() - 100_000;
   setRunStart(run.directory, start);
   readyForBuild(run.directory);
   setEventTimes(run.directory, {
@@ -497,7 +503,7 @@ test("ARK-179-AC5 run detail splits gate, CI, paused, stalled and working time i
 test("ARK-179-AC5 run detail marks pre-collection time unavailable and records the stuck interval", async () => {
   await withUi(async (baseUrl) => {
     const run = startRun("ARK-179-UNCOLLECTED");
-    const start = Date.now() - 30_000;
+    const start = testNow() - 30_000;
     setRunStart(run.directory, start);
     setOrcaRun(
       run.runId,
@@ -520,7 +526,23 @@ test("ARK-179-AC5 run detail marks pre-collection time unavailable and records t
       attempt++
     )
       await Bun.sleep(100);
-    const history = readFileSync(join(run.directory, "history.ndjson"), "utf8");
+    // The clock is frozen, so no time passes between the collector's first observation and now: tick by moving the recorded history back 10s.
+    const historyFile = join(run.directory, "history.ndjson");
+    writeFileSync(
+      historyFile,
+      `${readFileSync(historyFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => {
+          const record = JSON.parse(line) as { time: string };
+          return JSON.stringify({
+            ...record,
+            time: new Date(Date.parse(record.time) - 10_000).toISOString(),
+          });
+        })
+        .join("\n")}\n`,
+    );
+    const history = readFileSync(historyFile, "utf8");
     const after = await detail(baseUrl, run.runId);
     expect(history).toMatch(/"time":"[^"]+".*"kind":"liveness".*"state":"stuck"/);
     expect(after.time_split.unavailable).toBeGreaterThan(0);
