@@ -109,6 +109,10 @@ export function worktreeSync(runId: string): void {
       "--no-edit",
       `origin/${target}`,
     ]);
+    appendEvent(directory, "worktree.synced", {
+      repo: worktree.repo,
+      conflict: merged.exitCode !== 0,
+    });
     if (merged.exitCode !== 0) {
       Bun.spawnSync(["git", "-C", worktree.path, "merge", "--abort"]);
       throw new ArkError(

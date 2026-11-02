@@ -48,6 +48,7 @@ export type RunState = {
   steps: { id: string; role: string; repo: string; status: StepStatus }[];
   current_step: string | null;
   worktrees: { repo: string; path: string; branch: string }[];
+  sync_conflicts: string[];
   last_test: { passed: boolean; heads: Record<string, string> } | null;
   merge_requests: { repo: string; url: string; number: number }[];
   outcome: string | null;
@@ -120,6 +121,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   const stepStatus = new Map<string, StepStatus>();
   const startedSteps: { id: string; role: string; repo: string }[] = [];
   const worktrees: RunState["worktrees"] = [];
+  const syncConflicts = new Set<string>();
   let lastTest: RunState["last_test"] = null;
   let escalationAnswered = false;
   let escalationRequested = false;
@@ -193,6 +195,10 @@ export function deriveState(events: ArkEvent[]): RunState {
         else worktrees[known] = worktree;
         break;
       }
+      case "worktree.synced":
+        if (data.conflict) syncConflicts.add(data.repo);
+        else syncConflicts.delete(data.repo);
+        break;
       case "step.started":
         stepStatus.set(data.step, "running");
         round = Math.max(round, data.round);
@@ -275,6 +281,7 @@ export function deriveState(events: ArkEvent[]): RunState {
     steps,
     current_step: steps.find((step) => step.status !== "succeeded")?.id ?? null,
     worktrees,
+    sync_conflicts: [...syncConflicts],
     last_test: lastTest,
     merge_requests: mergeRequests,
     outcome,

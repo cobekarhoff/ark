@@ -392,7 +392,12 @@ describe("ark retro", () => {
     );
     retro(runId);
     const metrics = readMetrics();
-    expect(metrics.rework).toEqual({ rounds: 2, escalations: 1, findings_sent_back: 1 });
+    expect(metrics.rework).toEqual({
+      rounds: 2,
+      escalations: 1,
+      findings_sent_back: 1,
+      merge_steps: 0,
+    });
     expect(metrics.human_intervention).toEqual({
       plan_changes: 1,
       mr_comments: 0,

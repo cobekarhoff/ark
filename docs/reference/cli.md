@@ -23,9 +23,9 @@ Starts a run from a ticket file. It creates the run folder, copies the ticket an
 ### run step
 
 ```text
-ark run step <run> <step> start|finish [--failed]
+ark run step <run> <step> start|finish [--failed] [--merge]
 
-Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan.
+Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo.
 ```
 
 ### run close
@@ -113,7 +113,7 @@ Prints each MR of the run as merged, open or closed, read from gh or glab. For o
 ```text
 ark worktree sync <run>
 
-Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. On a conflict it undoes the merge, names the repo and exits 1. It never merges an MR.
+Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge, names the repo and exits 1. It never merges an MR.
 ```
 
 ### workspace sync
@@ -174,7 +174,7 @@ Unloads and deletes the LaunchAgent dev.ark.hub. It does nothing, and exits 0, w
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `timeline`                         | `{phase, at}` for each phase change in `events.ndjson`                                                                                                                                                                                                                                 |
 | `gates`                            | `{gate, asked, answered, answer, wait_seconds}`; an open gate has `answered: null` and waits until now                                                                                                                                                                                 |
-| `rounds`                           | `{round, at, steps}` from `step.started`                                                                                                                                                                                                                                               |
+| `rounds`                           | `{round, at, steps}` from `step.started`, merge steps skipped                                                                                                                                                                                                                          |
 | `steps`                            | each plan step with `status`, `cost` and `wall_seconds`                                                                                                                                                                                                                                |
 | `ac_proof`                         | the latest `test.completed`: each AC with its status and test cases (`name`, `status`, `suite`, `report`). Cases come from the `results/` reports; a missing or unreadable report gives a case with `status: "unavailable"`, never a pass. `not available` before the first `ark test` |
 | `cost`                             | `{usd, tokens}` for the run, and for each step and agent. It uses the readers and the step assignment of `ark retro`; a cost that cannot be measured is `"unknown"`, never 0                                                                                                           |
@@ -360,8 +360,9 @@ A test proves an AC when its name or tags contain the AC id, for example `CLARA-
 | `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, or `escalation`), `answer`, optional `note`                                                      | `ark gate record`                         |
 | `escalation.requested` | `reason`                                                                                                                                 | `ark escalate`                            |
 | `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                         | `ark worktree create`                     |
-| `step.started`         | `step`, `role`, `repo`, `round`                                                                                                          | `ark run step ... start`                  |
-| `step.finished`        | `step`, `outcome` (`succeeded` or `failed`)                                                                                              | `ark run step ... finish`                 |
+| `worktree.synced`      | `repo`, `conflict`                                                                                                                       | `ark worktree sync`                       |
+| `step.started`         | `step`, `role`, `repo`, `round`, optional `merge` (true)                                                                                 | `ark run step ... start`                  |
+| `step.finished`        | `step`, `outcome` (`succeeded` or `failed`), optional `merge` (true)                                                                     | `ark run step ... finish`                 |
 | `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, or `missing`) | `ark test`                                |
 | `merge_request.opened` | `repo`, `url`, `number`                                                                                                                  | `ark merge-request open`                  |
 | `run.closed`           | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`)                                                                            | `ark run close`                           |
