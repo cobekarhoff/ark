@@ -2133,7 +2133,6 @@ test(
   },
 );
 
-
 const leadSlot = '[data-slot="run-lead-message"]';
 
 // Earlier tests leave their plannotator stubs on PATH; shadow them so the hub's session poll does not write to this test's action log.
@@ -2149,10 +2148,7 @@ test(
   async () => {
     const run = startRun("ARK-215-LIVE", "Slot sends");
     readyRun(run);
-    const actionLog = join(
-      mkdtempSync(join(tmpdir(), "ark-steering-")),
-      "calls.txt",
-    );
+    const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
     process.env.ORCA_ACTION_LOG = actionLog;
     shadowPlannotator();
     openRunSnapshot(run.runId);
@@ -2165,15 +2161,8 @@ test(
     await withUi(async (baseUrl) => {
       await view.navigate(`${baseUrl}/#run=${run.runId}`);
       // The slot exists only after the detail page has mounted with its data.
-      await waitForBrowserValue(
-        view,
-        `document.querySelector('${leadSlot} input') !== null`,
-      );
-      expect(
-        await view.evaluate(
-          `document.querySelector('${leadSlot} form') !== null`,
-        ),
-      ).toBe(true);
+      await waitForBrowserValue(view, `document.querySelector('${leadSlot} input') !== null`);
+      expect(await view.evaluate(`document.querySelector('${leadSlot} form') !== null`)).toBe(true);
       // view.click on the offscreen input hangs; focus it directly.
       await view.evaluate(
         `(() => { const i = document.querySelector('${leadSlot} input'); i.scrollIntoView(); i.focus(); })()`,
@@ -2193,10 +2182,7 @@ test(
   { timeout: 30_000 },
   async () => {
     const run = startRun("ARK-215-NONE", "Slot without lead");
-    const actionLog = join(
-      mkdtempSync(join(tmpdir(), "ark-steering-")),
-      "calls.txt",
-    );
+    const actionLog = join(mkdtempSync(join(tmpdir(), "ark-steering-")), "calls.txt");
     process.env.ORCA_ACTION_LOG = actionLog;
     shadowPlannotator();
     setOrcaRuns([]);
@@ -2208,15 +2194,10 @@ test(
     });
     await withUi(async (baseUrl) => {
       await view.navigate(`${baseUrl}/#run=${run.runId}`);
-      await waitForBrowserValue(
-        view,
-        `document.querySelector('${leadSlot}') !== null`,
+      await waitForBrowserValue(view, `document.querySelector('${leadSlot}') !== null`);
+      expect(await view.evaluate(`document.querySelector('${leadSlot}').textContent`)).toContain(
+        "No run lead is live",
       );
-      expect(
-        await view.evaluate(
-          `document.querySelector('${leadSlot}').textContent`,
-        ),
-      ).toContain("No run lead is live");
       expect(
         await view.evaluate(
           `document.querySelectorAll('${leadSlot} input, ${leadSlot} button').length`,
