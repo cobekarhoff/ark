@@ -1,3 +1,4 @@
+import { now as hubNow } from "./hub/clock.ts";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { loadConfig } from "./config.ts";
@@ -47,7 +48,7 @@ function resolveProject(absoluteTicketFile: string, project?: string): string {
 }
 
 function today(): string {
-  const now = new Date();
+  const now = new Date(hubNow());
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
