@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { type RunState, appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
@@ -367,7 +368,7 @@ export function renderPlanMarkdown(
 }
 
 export function planCheck(runId: string): void {
-  const { directory } = findRun(runId);
+  const { project, directory } = findRun(runId);
   const state = deriveState(readEvents(directory));
   // Refuse a run that is not ready for a plan check before reading plan.yml.
   assertAllowed(state, "plan.checked", {});
@@ -377,11 +378,12 @@ export function planCheck(runId: string): void {
     state.criteria.map((criterion) => criterion.id),
   );
   const valid = problems.length === 0;
+  const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
   appendEvent(directory, "plan.checked", {
     valid,
     problems,
     plan_hash: planHash(directory),
-    open_decisions: plan.decisions.filter((decision) => !decision.chosen).length,
+    open_decisions: openDecisions,
     steps: plan.steps.map(({ id, role, repo, needs, criteria }) => ({
       id,
       role,
@@ -403,4 +405,8 @@ export function planCheck(runId: string): void {
   console.log(
     `plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`,
   );
+  if (loadConfig(project).gates.plan === "auto" && openDecisions === 0) {
+    appendEvent(directory, "gate.answered", { gate: "plan", answer: "approve", by: "auto" });
+    console.log("gates.plan is auto: recorded plan approve by auto");
+  }
 }

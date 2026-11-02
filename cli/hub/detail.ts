@@ -117,6 +117,7 @@ const gateWait = (events: ArkEvent[], end: number) =>
     asked: wait.asked,
     answered: wait.answered,
     answer: wait.answer,
+    by: wait.by,
     wait_seconds:
       ((wait.answered ? Date.parse(wait.answered) : end) - Date.parse(wait.asked)) / 1000,
   }));
