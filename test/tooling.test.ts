@@ -265,3 +265,50 @@ test("ARK-175-AC4 opt-in pre-commit hook blocks defects and preserves the staged
     rmSync(projectDirectory, { recursive: true, force: true });
   }
 }, 120_000);
+
+test("ARK-184-AC1 lint config has no file-glob override for no-thenable", () => {
+  const configuration = JSON.parse(
+    readFileSync(join(repositoryRoot, ".oxlintrc.json"), "utf8"),
+  ) as { overrides?: { files: string[]; rules?: Record<string, unknown> }[] };
+  const offending = (configuration.overrides ?? []).filter(
+    (override) => override.rules && "unicorn/no-thenable" in override.rules,
+  );
+  expect(offending).toEqual([]);
+});
+
+test("ARK-184-AC2 every then property has an inline disable with a reason", () => {
+  const tracked = runCommand(repositoryRoot, "git", ["ls-files", "*.ts", "*.tsx"]);
+  expect(tracked.code).toBe(0);
+  const thenProperty = /^\s*then\s*:.*,\s*$/; // object literal property, not a type member
+  const disable = /oxlint-disable(?:-next-line)?\s+unicorn\/no-thenable\s+--\s+\S/;
+  const missing: string[] = [];
+  let found = 0;
+  for (const filePath of tracked.output.split("\n").filter(Boolean)) {
+    const lines = readFileSync(join(repositoryRoot, filePath), "utf8").split("\n");
+    lines.forEach((line, index) => {
+      if (!thenProperty.test(line) || disable.test(line)) return;
+      found += 1;
+      if (!disable.test(lines[index - 1] ?? "")) missing.push(`${filePath}:${index + 1}`);
+    });
+  }
+  expect(found).toBeGreaterThan(0);
+  expect(missing).toEqual([]);
+});
+
+test("ARK-184-AC3 lint passes on the repo and rejects a bare then property", () => {
+  const clean = runCommand(repositoryRoot, "bun", ["run", "lint"]);
+  if (clean.code !== 0) throw new Error(clean.output);
+
+  const projectDirectory = temporaryDirectory();
+  try {
+    createToolingProject(projectDirectory);
+    const sourcePath = "test/bare-then.test.ts";
+    writeProjectFile(projectDirectory, sourcePath, "export const plan = { then: [1] };\n");
+    const rejected = runCommand(projectDirectory, "bun", ["run", "lint"]);
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.output).toContain("no-thenable");
+    expect(rejected.output).toContain(sourcePath);
+  } finally {
+    rmSync(projectDirectory, { recursive: true, force: true });
+  }
+}, 120_000);

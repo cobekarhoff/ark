@@ -43,6 +43,7 @@ const plan = {
     level: "integration",
     given: [],
     when: ["act"],
+    // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
     then: ["ok"],
     expected: "ok",
   })),

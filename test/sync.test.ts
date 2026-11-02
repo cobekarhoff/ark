@@ -140,6 +140,7 @@ function startRun(repoNames = ["."], withValidator = false) {
         level: "integration",
         given: [],
         when: ["prepare sync fixture"],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
         then: ["fixture is ready"],
         expected: "fixture is ready",
       },

@@ -141,6 +141,7 @@ export function loadPlan(runDirectory: string): Plan {
         level: text(testCase.level),
         given: testCase.given as string[],
         when: testCase.when as string[],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
         then: testCase.then as string[],
         expected: text(testCase.expected),
       };
