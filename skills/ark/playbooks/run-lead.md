@@ -314,7 +314,19 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 
    Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`, then run `ark run step <run> <step> finish --failed` and decide what to do.
 
-3. Wait for the worker. Wait for every started worker together:
+3. Keep the terminal handle from the `worker-start` JSON. About 2 minutes after the first dispatch on each model starts, read its terminal, without waiting for the long wait below:
+
+   ```sh
+   orca orchestration worker-read --dispatch <dispatch id> --source terminal --limit 40 --json
+   ```
+
+   Look for a provider error, such as `usage_limit_reached` or a rate limit. If `worker-read` returns no text, read the terminal with the handle instead:
+
+   ```sh
+   orca terminal read --terminal <handle> --json
+   ```
+
+4. Wait for the worker. Wait for every started worker together:
 
    ```sh
    orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
@@ -326,7 +338,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
    - `escalation` from a worker: read it, and fix the cause or take it to Master Chief.
    - `worker_done`: check that it comes from the dispatch you started. Read its report.
 
-4. Record the result:
+5. Record the result:
 
    ```sh
    ark run step <run> <step> finish
