@@ -2,6 +2,7 @@ import { deriveState } from "../events.ts";
 import { waitingGate } from "../run.ts";
 import { readRuns } from "./ark.ts";
 import { readHistory, stateAt } from "./changes.ts";
+import { now as hubNow } from "./clock.ts";
 
 /** The parts of the hub's state the Map reads. `createHub().state()` satisfies it. */
 export type HubView = {
@@ -54,7 +55,7 @@ const ownerOf = (id: string): string => id.split(":")[1] ?? "";
  * Agent, Master Chief and CI state of a past time come from the history log only: before
  * collection or inside a gap it is "unavailable".
  */
-export function buildMap(view: HubView, at: string | null, now = new Date()): MapGraph {
+export function buildMap(view: HubView, at: string | null, now = new Date(hubNow())): MapGraph {
   const nowIso = now.toISOString();
   const live = at === null || Date.parse(at) >= now.getTime();
   const time = live || at === null ? nowIso : at;

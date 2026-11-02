@@ -8,9 +8,13 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  testNow,
+  useFrozenClock,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+
+useFrozenClock();
 
 const repositoryRoot = join(import.meta.dir, "..");
 const workerHandle = "term_limit";
@@ -187,10 +191,8 @@ async function waitForLimits(baseUrl: string, done: (limits: Item[]) => boolean)
 
 test("ARK-199-AC1 a live agent's usage-limit error gives a usage_limit item with provider and reset time", async () => {
   setTail(["working...", limitLine(4805)]);
-  const before = Date.now();
   await withUi(async (baseUrl) => {
     const [item] = await waitForLimits(baseUrl, (limits) => limits.length === 1);
-    const after = Date.now();
     expect(item.project).toBe("demo");
     expect(item.ticket).toBe("ARK-199-LIMIT");
     expect(item.title).toContain("limit-tests");
@@ -199,9 +201,7 @@ test("ARK-199-AC1 a live agent's usage-limit error gives a usage_limit item with
       params: { handle: workerHandle },
     });
     expect(item.limit?.provider).toBe("codex");
-    const resetAt = Date.parse(item.limit?.reset_at as string);
-    expect(resetAt).toBeGreaterThanOrEqual(before + 4805_000);
-    expect(resetAt).toBeLessThanOrEqual(after + 4805_000);
+    expect(item.limit?.reset_at).toBe(new Date(testNow() + 4805_000).toISOString());
   });
 });
 
