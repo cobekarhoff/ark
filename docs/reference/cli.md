@@ -68,6 +68,14 @@ ark plan check <run> [--project <name>]
 Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. It records the number of open decisions.
 ```
 
+### worktree anchor
+
+```text
+ark worktree anchor <run> [--project <name>]
+
+Makes the run's worktree early, for the first repo of the workspace, with the same branch, `setup` and `worktree.created` event as `worktree create`. It prints one line, `path:<absolute path>`, the folder to start the run lead and its first workers in. A second call prints the same line and records nothing. A later `worktree create` prints `exists` for that repo. If `setup` exits non-zero it removes the worktree and exits 1, as `worktree create` does. It refuses a closed run.
+```
+
 ### worktree create
 
 ```text

@@ -12,7 +12,7 @@ import { strategyRecord } from "./strategy.ts";
 import { testRun } from "./test-run.ts";
 import { ui, uiInstall, uiUninstall } from "./ui.ts";
 import { workspaceSync } from "./workspace.ts";
-import { worktreeCreate, worktreeSync } from "./worktree.ts";
+import { worktreeAnchor, worktreeCreate, worktreeSync } from "./worktree.ts";
 
 type Flags = Record<string, string | true>;
 
@@ -100,6 +100,15 @@ const commands: Command[] = [
     minimum: 1,
     maximum: 1,
     run: ([runId], flags) => planCheck(runId, flags["--project"] as string | undefined),
+  },
+  {
+    usage: "worktree anchor <run> [--project <name>]",
+    description:
+      "Makes the run's worktree early, for the first repo of the workspace, with the same branch, `setup` and `worktree.created` event as `worktree create`. It prints one line, `path:<absolute path>`, the folder to start the run lead and its first workers in. A second call prints the same line and records nothing. A later `worktree create` prints `exists` for that repo. If `setup` exits non-zero it removes the worktree and exits 1, as `worktree create` does. It refuses a closed run.",
+    flags: { "--project": true },
+    minimum: 1,
+    maximum: 1,
+    run: ([runId], flags) => worktreeAnchor(runId, flags["--project"] as string | undefined),
   },
   {
     usage: "worktree create <run> [<repo>...] [--project <name>]",

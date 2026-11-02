@@ -101,8 +101,7 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
     case "gate.answered":
       return assertGateAllowed(state, data);
     case "worktree.created":
-      requirePhase(state, type, ["planning", ...buildPhases]);
-      return;
+      return; // every open phase: closed is refused above
     case "worktree.synced":
       requirePhase(state, type, ["planning", ...buildPhases]);
       return;
