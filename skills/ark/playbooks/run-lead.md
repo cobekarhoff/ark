@@ -16,7 +16,7 @@ Throughout this playbook:
 2. Read `<run folder>/ticket.md` and the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Note `workspace`, `suites`, `roles`, `concurrency` and `round_budget`.
 3. Look for an existing Orca Run for this Ark run before you create one. A replaced lead's Run still holds its workers and messages.
    - Read your Orca inbox with the `check` command from your preamble, and ack each batch with `--ack <delivery_id>` until `count` is 0. Master Chief's message may name a `run_...` ID.
-   - Search the run folder for a `run_...` ID: `grep -rhoE 'run_[0-9a-f]+' <run folder> --include='*.md' --include='*.yml'`. Never search `events.ndjson` or `state.json`.
+   - Search the run folder for a `run_...` ID: `grep -rhoE 'run_[0-9a-f]+' <run folder> --include='*.md' --include='*.yml'`. Never search `events.ndjson` or `state.json`. Treat an ID found there as a candidate only.
 4. If step 3 found no ID, list the Orca Runs and look for the objective `Ark run <run>`:
 
    ```sh
@@ -25,7 +25,7 @@ Throughout this playbook:
 
    Take the open Run whose objective is exactly `Ark run <run>`. If the list is paged, follow it with `--cursor` until you have read every Run.
 
-5. If you found a Run, bind it. Do not run `run-create`:
+5. If you found a Run, bind it. Do not run `run-create`. Run `orca orchestration run-show --id <run_id> --json` first. Bind with `run-use` only after `run-show` shows the objective `Ark run <run>`. If the objective is another one, drop the candidate and go on to step 4:
 
    ```sh
    orca orchestration run-use --id <run_id> --from <your own handle> --json
@@ -311,8 +311,12 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 2. Start the worker:
 
    ```sh
-   orca orchestration worker-start --spec $'/skill:ark worker <run> <step>\nYou are the <ROLE> for step <step> of run <run>.' --task-title "<step> (<role>, <repo>)" --worktree path:<run folder>/workspace/<repo> --agent <harness> --model <model> --json
+   orca orchestration worker-start --spec $'/skill:ark worker <run> <step>\nYou are the <ROLE> for step <step> of run <run>.' --task-title "<step> (<role>, <repo>)" --worktree path:<worktree path> --agent <harness> --model <model> --json
    ```
+
+   The worktree path is `<run folder>/workspace/<repo>`. For a repo named `.` it is `<run folder>/workspace`, with no trailing `/.`.
+
+   In the worker spec, copy every literal string an AC names (a field, flag or message) word for word. Do not paraphrase it. Example: `Literal strings: field "owner_id", flag --dry-run, message "Run not found".`
 
    Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`, then run `ark run step <run> <step> finish --failed` and decide what to do.
 
@@ -381,6 +385,8 @@ Run the reviewer steps after the tests pass. Each reviewer writes its findings t
 - Write each decision and its reason in `<run folder>/findings/<step>.md`, in a section named `Run lead decision`. For each finding, write: send back or leave, and why.
 
 To send work back, write the findings you accept into `<run folder>/findings/round-<round>.md`, start the implementer step again, run `ark test <run>` when it finishes, and then start the reviewer step again to check the fixes. Stop when a review sends nothing back and the tests pass.
+
+A findings file never forbids an implementer commit. The implementer commits its own work in every round, even when `findings/round-<round>.md` says "no edits" to the reviewer.
 
 ## 9. Escalate when the round budget is spent
 
