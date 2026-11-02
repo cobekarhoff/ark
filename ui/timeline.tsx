@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Cost, Lane, Segment } from "../cli/hub/timeline.ts";
 import type { Action } from "../cli/hub/types.ts";
 import { duration, minutesSince, usd, type HubState } from "./model.ts";
@@ -71,20 +71,32 @@ export function TimelineView({ hub, now, perform, view, setView, active }: Props
   // Only the Timeline keeps this. Home and the Map never read it.
   const [pick, setPick] = useState<Pick>(null);
 
-  useEffect(() => {
-    let stale = false;
+  const windowNow = useRef(hours);
+  windowNow.current = hours;
+  const inFlight = useRef(false);
+  const answeredAt = useRef(0);
+
+  function load() {
+    inFlight.current = true;
     fetch(`/api/timeline?hours=${hours}`)
       .then((response) => response.json() as Promise<{ hours: number; lanes: Lane[] }>)
       .then((body) => {
-        if (stale || body.hours !== hours) return;
+        // A window change drops the old window's answer; a push never does.
+        if (body.hours !== windowNow.current) return;
         setLanes(body.lanes);
         setFailed(false);
+        answeredAt.current = Date.now();
       })
-      .catch(() => !stale && setFailed(true));
-    return () => {
-      stale = true;
-    };
-  }, [hub, hours]);
+      .catch(() => hours === windowNow.current && setFailed(true))
+      .finally(() => {
+        inFlight.current = false;
+      });
+  }
+  // The hub pushes every second: fetch again only when idle and the answer is 15 s old.
+  useEffect(load, [hours]);
+  useEffect(() => {
+    if (!inFlight.current && Date.now() - answeredAt.current > 15_000) load();
+  }, [hub]);
 
   useEffect(() => {
     if (!active || view !== "timeline") return;
