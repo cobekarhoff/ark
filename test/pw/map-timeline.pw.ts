@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendEvent } from "../../cli/events.ts";
@@ -405,5 +405,42 @@ test("ARK-180-AC5 Timeline lane selection stays separate from Home and Map selec
     await page.keyboard.press("2");
     await expect(mapCursor).toBeAttached();
     await expect(page.locator(".node.cursor")).toHaveAttribute("data-node", mapSelection as string);
+  });
+});
+
+test("ARK-246-AC4 Timeline lanes and Map nodes appear when each API answer takes 3 seconds and the hub pushes every second", async ({
+  page,
+}) => {
+  const run = startRun("ARK-246-SLOW1", "Slow answers");
+  planGate(run.directory);
+  appendEvent(run.directory, "gate.answered", { gate: "plan", answer: "approve" });
+  appendEvent(run.directory, "step.started", {
+    step: "build",
+    role: "implementer",
+    repo: ".",
+    round: 1,
+  });
+  setEventTime(run.directory, "step.started", new Date(Date.now() - 10 * 60_000).toISOString());
+  setOrca([run.runId]);
+  const delayed = async (route: Route) => {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await route.continue().catch(() => undefined);
+  };
+  // A frozen hub clock (ARK_NOW) makes the state identical, so the hub would push nothing.
+  const frozenClock = process.env.ARK_NOW;
+  process.env.ARK_NOW = "";
+  await page.route("**/api/timeline*", delayed);
+  await page.route("**/api/map*", delayed);
+  await withUi(async (baseUrl) => {
+    await openApp(page, baseUrl);
+    // The hub pushes state every second, so several pushes land inside each 3 second answer.
+    await page.keyboard.press("2");
+    await expect(page.getByText("Loading the Map…")).toBeVisible();
+    await expect(page.locator(`[data-node="run:${run.runId}"]`)).toBeAttached();
+    await expect(page.getByText("Loading the Map…")).toBeHidden();
+    await page.keyboard.press("3");
+    await expect(page.locator(`[data-lane="run:${run.runId}"]`)).toBeAttached();
+  }).finally(() => {
+    process.env.ARK_NOW = frozenClock;
   });
 });
