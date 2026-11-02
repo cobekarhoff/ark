@@ -1,5 +1,6 @@
 import { readTerminalTail, type OrcaTerminal } from "./orca.ts";
 import { switchTerminal, type Agent, type Item } from "./types.ts";
+import { now as hubNow } from "./clock.ts";
 
 /** A live agent whose last output shows a provider usage-limit or rate-limit error. */
 export type UsageLimit = {
@@ -65,7 +66,7 @@ export function matchUsageLimit(
   tail: string[],
   agent: Agent,
   previous: UsageLimit | undefined,
-  now = Date.now(),
+  now = hubNow(),
 ): UsageLimit | null {
   let at = -1;
   for (

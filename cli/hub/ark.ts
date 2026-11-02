@@ -6,6 +6,7 @@ import { gateWaits } from "../retro.ts";
 import { waitingGate } from "../run.ts";
 import type { PlannotatorSession } from "./plannotator.ts";
 import type { Action, Item } from "./types.ts";
+import { now as hubNow } from "./clock.ts";
 
 /** A closed run stays in the hub this long after its last event. */
 const closedRunDays = 7;
@@ -13,7 +14,7 @@ const closedRunDays = 7;
 export type RunInfo = { directory: string; state: RunState; events: ArkEvent[] };
 
 /** Every run of every project that has events, newest first. Closed runs older than a week are left out. */
-export function readRuns(now = Date.now()): RunInfo[] {
+export function readRuns(now = hubNow()): RunInfo[] {
   const runs: RunInfo[] = [];
   for (const project of listProjects()) {
     const runsRoot = runsDirectory(project);

@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { planHash } from "./plan.ts";
+import { now } from "./hub/clock.ts";
 import { assertAllowed } from "./transitions.ts";
 
 // Event payloads differ per type (see the contract), so `data` stays loosely typed.
@@ -89,7 +90,7 @@ export function appendEvent(runDirectory: string, type: string, data: EventData)
   }
   const event: ArkEvent = {
     seq: (events.at(-1)?.seq ?? 0) + 1,
-    time: new Date().toISOString(),
+    time: new Date(now()).toISOString(),
     type,
     data,
   };

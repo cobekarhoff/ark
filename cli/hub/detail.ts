@@ -19,6 +19,7 @@ import { readHistory, type HistoryRecord } from "./history.ts";
 import { readTerminalTail } from "./orca.ts";
 import { loadPlan, type PlanStep } from "../plan.ts";
 import type { Agent } from "./types.ts";
+import { now as hubNow } from "./clock.ts";
 
 const notAvailable = { state: "not available" } as const;
 type Cost = { usd: number | "unknown"; tokens: number };
@@ -291,7 +292,7 @@ function strategiesView(directory: string, chosen: string | null) {
 export async function buildDetail(
   { directory, state, events }: RunInfo,
   agents: Agent[] | undefined,
-  now = Date.now(),
+  now = hubNow(),
 ) {
   const start = Date.parse(events[0].time);
   const end = state.phase === "closed" ? Date.parse(events.at(-1)!.time) : now;

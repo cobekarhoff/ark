@@ -16,14 +16,18 @@ import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
 import {
   ark,
+  isoAgo,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  useFrozenClock,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
+
+useFrozenClock();
 let projectDirectory: string;
 let orcaBinDirectory: string;
 
@@ -894,8 +898,8 @@ test(
     const secondProject = writeProject("other", projectConfigFor(tempGitRepo()));
     const secondRun = startProjectRun("other", "ARK-176-B2", "Newer gate");
     planGate(secondRun.directory);
-    const older = new Date(Date.now() - 60_000).toISOString();
-    const newer = new Date(Date.now() - 30_000).toISOString();
+    const older = isoAgo(60_000);
+    const newer = isoAgo(30_000);
     setEventTime(firstRun.directory, "plan.checked", older);
     setEventTime(secondRun.directory, "plan.checked", newer);
     setOrcaRuns([]);
@@ -943,7 +947,7 @@ test(
       eventFile,
       `${JSON.stringify({
         seq: events.length + 1,
-        time: new Date().toISOString(),
+        time: isoAgo(0),
         type: "strategy.recorded",
         data: {
           count: 2,
@@ -1070,7 +1074,7 @@ test(
       hostname: "127.0.0.1",
       fetch: () =>
         new Response(
-          `event: message\ndata: ${JSON.stringify({ result: { structuredContent: { threads: [{ thread_id: "thread-1", subject: "Inbox question", last_at: new Date().toISOString(), questions: { open: 1 } }] } } })}\n\n`,
+          `event: message\ndata: ${JSON.stringify({ result: { structuredContent: { threads: [{ thread_id: "thread-1", subject: "Inbox question", last_at: isoAgo(0), questions: { open: 1 } }] } } })}\n\n`,
           { headers: { "content-type": "text/event-stream" } },
         ),
     });
@@ -1469,19 +1473,11 @@ test(
   async () => {
     const olderRun = startRun("ARK-176-G1", "Older project run");
     planGate(olderRun.directory);
-    setEventTime(
-      olderRun.directory,
-      "plan.checked",
-      new Date(Date.now() - 150 * 60_000).toISOString(),
-    );
+    setEventTime(olderRun.directory, "plan.checked", isoAgo(150 * 60_000));
     const secondProject = writeProject("other", projectConfigFor(tempGitRepo()));
     const newerRun = startProjectRun("other", "ARK-176-G2", "Newer project run");
     planGate(newerRun.directory);
-    setEventTime(
-      newerRun.directory,
-      "plan.checked",
-      new Date(Date.now() - 45 * 60_000).toISOString(),
-    );
+    setEventTime(newerRun.directory, "plan.checked", isoAgo(45 * 60_000));
     const liveRun = startRun("ARK-176-G3", "Live project run");
     readyRun(liveRun);
     appendEvent(liveRun.directory, "step.finished", {

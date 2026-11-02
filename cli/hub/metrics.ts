@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { deriveState, readEvents } from "../events.ts";
 import { listProjects, runsDirectory } from "../paths.ts";
+import { now as hubNow } from "./clock.ts";
 
 export type Unavailable<T> = T | "unavailable";
 
@@ -56,7 +57,7 @@ export type MetricsAnswer = {
 export function readMetrics(
   week: string | null,
   project: string | null = null,
-  now = Date.now(),
+  now = hubNow(),
 ): MetricsAnswer {
   const requested = week === null ? now : Date.parse(week);
   if (Number.isNaN(requested)) throw new Error("week must be a date such as 2026-11-02");

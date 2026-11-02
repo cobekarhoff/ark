@@ -4,9 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
-import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
+import {
+  ark,
+  codexDay,
+  isoAgo,
+  tempArkHome,
+  tempGitRepo,
+  useFrozenClock,
+  writeProject,
+  writeTicket,
+} from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
+
+useFrozenClock();
 let projectDirectory: string;
 let orcaBinDirectory: string;
 function projectConfigFor(workspace: string): Record<string, unknown> {
@@ -213,7 +224,7 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
     );
   }
 
-  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  const at = (minutesAgo: number) => isoAgo(minutesAgo * 60_000);
 
   test("ARK-180-AC1 map API returns every node kind, node states and needs-you counts", async () => {
     const run = startRun("ARK-180-MAP1", "Map graph");
@@ -570,9 +581,9 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       join(ompRoot, "sessions", "session.jsonl"),
       `${JSON.stringify({ type: "session", version: 3, id: "omp", timestamp: at(20), cwd: join(run.directory, "workspace") })}\n${JSON.stringify({ type: "message", id: "m0", timestamp: at(13 * 60), message: { role: "assistant", provider: "anthropic", model: "claude-sonnet", content: [], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0.02, output: 0.03, cacheRead: 0, cacheWrite: 0, total: 0.05 } } } })}\n${JSON.stringify({ type: "message", id: "m1", timestamp: at(15), message: { role: "assistant", provider: "anthropic", model: "claude-sonnet", content: [], usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 } } } })}\n`,
     );
-    mkdirSync(join(codexRoot, "2026", "11", "01"), { recursive: true });
+    mkdirSync(join(codexRoot, ...codexDay()), { recursive: true });
     writeFileSync(
-      join(codexRoot, "2026", "11", "01", "rollout-session.jsonl"),
+      join(codexRoot, ...codexDay(), "rollout-session.jsonl"),
       `${JSON.stringify({ type: "session_meta", payload: { cwd: join(run.directory, "workspace") } })}\n${JSON.stringify({ type: "event_msg", timestamp: at(10), payload: { type: "token_count", info: { last_token_usage: { input_tokens: 40, output_tokens: 10 }, total_token_usage: { total_tokens: 50 } } } })}\n`,
     );
     await withUi(async (baseUrl) => {
@@ -755,9 +766,9 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
       setOrca([run.runId]);
       const codexRoot = mkdtempSync(join(tmpdir(), "ark-codex-ui-"));
       process.env.ARK_CODEX_SESSIONS = codexRoot;
-      mkdirSync(join(codexRoot, "2026", "11", "01"), { recursive: true });
+      mkdirSync(join(codexRoot, ...codexDay()), { recursive: true });
       writeFileSync(
-        join(codexRoot, "2026", "11", "01", "rollout-ui.jsonl"),
+        join(codexRoot, ...codexDay(), "rollout-ui.jsonl"),
         `${JSON.stringify({ type: "session_meta", payload: { cwd: join(run.directory, "workspace") } })}\n${JSON.stringify({ type: "event_msg", timestamp: at(5), payload: { type: "token_count", info: { last_token_usage: { input_tokens: 4, output_tokens: 2 }, total_token_usage: { total_tokens: 6 } } } })}\n`,
       );
       const ompRoot = mkdtempSync(join(tmpdir(), "ark-omp-ui-"));
@@ -809,9 +820,10 @@ if [ -n "$GH_CHECKS_FILE" ]; then cat "$GH_CHECKS_FILE"; else printf '%s' "$GH_C
           await view.evaluate("document.querySelector('[data-testid=burn]')?.textContent"),
         ).toContain("?");
         // The first priced message in the window counts: $0.25, not $0.00.
-        expect(
-          await view.evaluate("document.querySelector('[data-testid=burn] b')?.textContent"),
-        ).toBe("$0.25");
+        await waitForBrowserValue(
+          view,
+          "document.querySelector('[data-testid=burn] b')?.textContent === '$0.25'",
+        );
       });
     },
   );
