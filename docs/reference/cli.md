@@ -2,7 +2,7 @@
 
 This page describes the `ark` CLI. The command section is generated from `ark --help` by `scripts/cli-reference.ts`. Run `bun scripts/cli-reference.ts` after you change a help text. The sections after it are written by hand.
 
-Every command except `ark run start` takes a run id. `ark` finds the run by scanning `$ARK_HOME/projects/*/runs/<run>`. `ARK_HOME` defaults to `~/.ark`. A run id looks like `2026-10-29-CLARA-512-1`: the date, the ticket id, and the next free number for that ticket and date.
+Every command except `ark run start` takes a run id. `ark` finds the run by scanning `$ARK_HOME/projects/*/runs/<run>`. `ARK_HOME` defaults to `~/.ark`. A run id looks like `2026-10-29-CLARA-512-1`: the date, the ticket id, and the next free number for that ticket and date. Each of these commands takes `--project <name>`: `ark` then looks for the run in that project only, and exits 1 when the project does not exist or does not hold the run. Without it, `ark` scans every project and refuses a run id that exists in several. Only `ark run start` and `ark status` read `ARK_PROJECT`.
 
 `ark run start` finds the project in this order: the `--project <name>` flag, the `ARK_PROJECT` environment variable, then the project whose folder contains the ticket file.
 
@@ -23,7 +23,7 @@ Starts a run from a ticket file. It creates the run folder, copies the ticket an
 ### run step
 
 ```text
-ark run step <run> <step> start|finish [--failed] [--merge]
+ark run step <run> <step> start|finish [--failed] [--merge] [--project <name>]
 
 Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo.
 ```
@@ -31,7 +31,7 @@ Records that a plan step started or finished. Use --failed with finish when the 
 ### run close
 
 ```text
-ark run close <run> <outcome>
+ark run close <run> <outcome> [--project <name>]
 
 Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs.
 ```
@@ -39,7 +39,7 @@ Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refus
 ### evaluation record
 
 ```text
-ark evaluation record <run>
+ark evaluation record <run> [--project <name>]
 
 Reads evaluation.md in the run folder and records its blockers, risks and surfaces (web_ui, cli_output, document or none). It refuses a missing file, a file with no Blockers, Risks or Surfaces list, an unknown surface, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.
 ```
@@ -47,7 +47,7 @@ Reads evaluation.md in the run folder and records its blockers, risks and surfac
 ### criteria amend
 
 ```text
-ark criteria amend <run> <criterion id> <file>
+ark criteria amend <run> <criterion id> <file> [--project <name>]
 
 Writes the text in <file> (trailing whitespace trimmed) as the new text of one criterion in the run's ticket.md: the text line in the frontmatter and the row of the criteria table. It records criteria.amended with the criterion, the old text and the new text. The old text is the frontmatter text, which is the last amended text for a second amendment. It refuses an unknown criterion, an empty file, and a run outside the phases awaiting_strategy and planning. It clears the plan check: run ark plan check again so plan.md lists the amendment, because plan approve is refused until then.
 ```
@@ -55,7 +55,7 @@ Writes the text in <file> (trailing whitespace trimmed) as the new text of one c
 ### strategy record
 
 ```text
-ark strategy record <run>
+ark strategy record <run> [--project <name>]
 
 Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or a project whose ark.yml has no roles.designer. Two or more cards open the strategy gate; one card opens no gate.
 ```
@@ -63,7 +63,7 @@ Reads strategies.md in the run folder and records its strategy cards: the count,
 ### plan check
 
 ```text
-ark plan check <run>
+ark plan check <run> [--project <name>]
 
 Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. It records the number of open decisions.
 ```
@@ -71,7 +71,7 @@ Checks plan.yml in the run folder and renders plan.md. It prints one line for ea
 ### worktree create
 
 ```text
-ark worktree create <run> [<repo>...]
+ark worktree create <run> [<repo>...] [--project <name>]
 
 Builds the run's workspace mirror. Each named repo, or every repo the plan uses, gets a worktree. Every other path is a symlink to the workspace. When `ark.yml` sets `setup`, the command runs it with `sh -c` in each new worktree. If `setup` exits non-zero, the command removes that worktree and its branch, prints the repo, the exit code and the end of stderr, and exits 1. It records the worktree only after `setup` passes, so a retry runs `setup` again.
 ```
@@ -79,7 +79,7 @@ Builds the run's workspace mirror. Each named repo, or every repo the plan uses,
 ### test
 
 ```text
-ark test <run>
+ark test <run> [--project <name>]
 
 Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. It exits 1 unless every AC passes.
 ```
@@ -87,7 +87,7 @@ Runs the project's suites on the run's workspace mirror and records which ACs ha
 ### gate record
 
 ```text
-ark gate record <run> <gate> <answer> [--note <text>]
+ark gate record <run> <gate> <answer> [--note <text>] [--project <name>]
 
 Records your answer to a gate. The gates are criteria, strategy, plan and escalation. The strategy gate takes the ID of a card in the latest strategy record, or abort. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.
 ```
@@ -95,7 +95,7 @@ Records your answer to a gate. The gates are criteria, strategy, plan and escala
 ### escalate
 
 ```text
-ark escalate <run> --reason <text>
+ark escalate <run> --reason <text> [--project <name>]
 
 Opens the escalation gate when the round budget is spent, also when the last ark test passed. Use it for an unresolved review P0 or P1. It records escalation.requested with the reason. It refuses a run that is not in phase building, a round budget that is not spent, and an empty reason. Answer the gate with ark gate record.
 ```
@@ -103,7 +103,7 @@ Opens the escalation gate when the round budget is spent, also when the last ark
 ### merge-request open
 
 ```text
-ark merge-request open <run>
+ark merge-request open <run> [--project <name>]
 
 Pushes each repo's branch and opens one MR for each repo, in dependency order. No command merges.
 ```
@@ -111,7 +111,7 @@ Pushes each repo's branch and opens one MR for each repo, in dependency order. N
 ### merge-request status
 
 ```text
-ark merge-request status <run>
+ark merge-request status <run> [--project <name>]
 
 Prints each MR of the run as merged, open or closed, read from gh or glab. For open MRs, it also prints `checks failing` and failed check or job names. Check retrieval errors fail the command. It changes nothing.
 ```
@@ -119,7 +119,7 @@ Prints each MR of the run as merged, open or closed, read from gh or glab. For o
 ### worktree sync
 
 ```text
-ark worktree sync <run>
+ark worktree sync <run> [--project <name>]
 
 Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge, names the repo and exits 1. A closed run gets a phase error and its worktrees stay unchanged. It never merges an MR.
 ```
@@ -127,7 +127,7 @@ Fetches and merges origin's target branch into each worktree of the run, and pus
 ### workspace sync
 
 ```text
-ark workspace sync <run>
+ark workspace sync <run> [--project <name>]
 
 Fetches and fast-forwards the target branch of the workspace checkout of each repo the run touched. It exits 1 and names the repo when git refuses, for example on a conflicting local change. It prints repo, branch and head.
 ```
@@ -137,13 +137,13 @@ Fetches and fast-forwards the target branch of the workspace checkout of each re
 ```text
 ark status [<run>] [--project <name>]
 
-Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT.
+Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT, and with a run it looks for the run in that project only.
 ```
 
 ### retro
 
 ```text
-ark retro <run>
+ark retro <run> [--project <name>]
 
 Computes the run's cost, time, rework and intervention metrics and writes metrics.json. The `rework` object holds `rounds` (highest round of a non-merge step), `escalations` (escalation gate answers) and `findings_sent_back` (reviewer steps that finished failed). `rework.merge_steps` counts steps started with `--merge`.
 ```

@@ -47,8 +47,13 @@ function rewriteTicket(
   return { ticket: lines.join("\n"), oldText };
 }
 
-export function criteriaAmend(runId: string, criterionId: string, file: string): void {
-  const { directory } = findRun(runId);
+export function criteriaAmend(
+  runId: string,
+  criterionId: string,
+  file: string,
+  inProject?: string,
+): void {
+  const { directory } = findRun(runId, inProject);
   // Refuse a wrong phase or an unknown criterion before reading the file.
   assertAllowed(deriveState(readEvents(directory)), "criteria.amended", { criterion: criterionId });
   if (!existsSync(file)) throw new ArkError(`criteria.amended refused: ${file} not found`);

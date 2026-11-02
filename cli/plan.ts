@@ -385,8 +385,8 @@ export function renderPlanMarkdown(
   return `${lines.join("\n")}\n`;
 }
 
-export function planCheck(runId: string): void {
-  const { project, directory } = findRun(runId);
+export function planCheck(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   // Refuse a run that is not ready for a plan check before reading plan.yml.
   assertAllowed(state, "plan.checked", {});
