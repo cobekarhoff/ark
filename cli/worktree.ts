@@ -38,6 +38,22 @@ function branchName(runId: string, ticket: { id: string; title: string }): strin
   return `ark/${ticket.id}${slug ? `-${slug}` : ""}${number > 1 ? `-${number}` : ""}`;
 }
 
+/** Removes the worktree and its branch, then returns one "left behind" line for each that is still there. */
+function removeWorktree(source: string, path: string, branch: string, forces: number): string[] {
+  const force = Array<string>(forces).fill("--force");
+  Bun.spawnSync(["git", "-C", source, "worktree", "remove", ...force, path]);
+  Bun.spawnSync(["git", "-C", source, "branch", "-D", branch]);
+  const left: string[] = [];
+  if (pathExists(path)) left.push(`left behind  worktree  ${path}`);
+  const branches = Bun.spawnSync(["git", "-C", source, "branch", "--list", branch]);
+  if (branches.stdout.toString().trim() !== "") left.push(`left behind  branch    ${branch}`);
+  if (left.length > 0)
+    left.push(
+      `Remove them with: git -C ${source} worktree remove --force --force ${path} && git -C ${source} branch -D ${branch}`,
+    );
+  return left;
+}
+
 export function worktreeCreate(runId: string, repos: string[], inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
@@ -65,26 +81,41 @@ export function worktreeCreate(runId: string, repos: string[], inProject?: strin
   for (const repo of touched) {
     const path = repo === "." ? mirror : join(mirror, repo);
     const isSymlink = pathExists(path) && lstatSync(path).isSymbolicLink();
+    const source = join(workspace, repo);
+    const branch = branchName(runId, state.ticket);
     if (!isSymlink && existsSync(join(path, ".git"))) {
-      console.log(`exists   ${repo}`);
-      continue;
+      if (state.worktrees.some((worktree) => worktree.repo === repo)) {
+        console.log(`exists   ${repo}`);
+        continue;
+      }
+      // no worktree.created event: an earlier create failed and its cleanup failed too
+      const left = removeWorktree(source, path, branch, 2);
+      if (left.length > 0)
+        throw new ArkError(
+          `could not remove the stale leftover in repo "${repo}"\n${left.join("\n")}`,
+        );
+      console.log(`removed  ${repo} (stale leftover of an earlier failed create)`);
     }
     if (isSymlink) unlinkSync(path); // an earlier call left this repo untouched
     mkdirSync(dirname(path), { recursive: true });
-    const source = join(workspace, repo);
     const base = git(source, "rev-parse", "HEAD");
-    const branch = branchName(runId, state.ticket);
     git(source, "worktree", "add", "-b", branch, path, base);
     console.log(`created  ${repo} -> ${path}`);
     if (config.setup) {
       const setup = Bun.spawnSync(["sh", "-c", config.setup], { cwd: path });
       if (setup.exitCode !== 0) {
-        Bun.spawnSync(["git", "-C", source, "worktree", "remove", "--force", path]);
-        Bun.spawnSync(["git", "-C", source, "branch", "-D", branch]);
-        const stderrTail = setup.stderr.toString().trim().split("\n").slice(-10).join("\n");
-        console.log(`removed  ${repo} (setup failed, worktree and branch deleted)`);
+        const left = removeWorktree(source, path, branch, 1);
+        if (left.length === 0)
+          console.log(`removed  ${repo} (setup failed, worktree and branch deleted)`);
+        // stderr wins when it has text; otherwise the cause is on stdout
+        const stderr = setup.stderr.toString().trim();
+        const cause = (stderr || setup.stdout.toString().trim()).split("\n").slice(-10).join("\n");
         throw new ArkError(
-          `setup failed in repo "${repo}": \`${config.setup}\` exited ${setup.exitCode}${stderrTail ? `\n${stderrTail}` : ""}`,
+          [
+            `setup failed in repo "${repo}": \`${config.setup}\` exited ${setup.exitCode}`,
+            ...(cause ? [cause] : []),
+            ...left,
+          ].join("\n"),
         );
       }
       console.log(`setup    ${repo}: ${config.setup}`);
