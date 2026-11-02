@@ -344,6 +344,8 @@ To send work back, write the findings you accept into `<run folder>/findings/rou
 
 Each return to the implementer after the first build is a round. `ark run step <run> <implementer step> start` refuses once the next round would pass the round budget. The message is `round budget spent: record gate escalation (one_more_round, take_over or abort)`. The same applies when `ark status <run>` shows the phase `escalation`.
 
+If the last `ark test <run>` passed but a review P0 or P1 is unresolved at the spent budget, the phase is still `building`. Open the gate with `ark escalate <run> --reason "<the unresolved finding>"`. Never add a failing test only to open the gate.
+
 1. Do not work around it. Ask Master Chief to put the decision to the human:
 
    ```sh

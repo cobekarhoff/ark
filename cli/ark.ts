@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { ArkError } from "./errors.ts";
 import { evaluationRecord } from "./evaluation.ts";
-import { gateRecord } from "./gate.ts";
+import { escalate, gateRecord } from "./gate.ts";
 import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
 import { planCheck } from "./plan.ts";
 import { retro } from "./retro.ts";
@@ -110,6 +110,15 @@ const commands: Command[] = [
       gateRecord(runId, gate, answer, flags["--note"] as string | undefined),
   },
   {
+    usage: "escalate <run> --reason <text>",
+    description:
+      "Opens the escalation gate when the round budget is spent, also when the last ark test passed. Use it for an unresolved review P0 or P1. It records escalation.requested with the reason. It refuses a run that is not in phase building, a round budget that is not spent, and an empty reason. Answer the gate with ark gate record.",
+    flags: { "--reason": true },
+    minimum: 1,
+    maximum: 1,
+    run: ([runId], flags) => escalate(runId, flags["--reason"] as string | undefined),
+  },
+  {
     usage: "merge-request open <run>",
     description:
       "Pushes each repo's branch and opens one MR for each repo, in dependency order. No command merges.",
@@ -197,7 +206,7 @@ const helpText = ["Usage: ark <command>", ...commands.map((command) => `  ${comm
 );
 
 const commandWords = (command: Command): string[] =>
-  command.usage.split(" ").filter((word) => /^[a-z-]+$/.test(word));
+  command.usage.split(" ").filter((word) => /^[a-z][a-z-]*$/.test(word));
 
 function parseFlags(command: Command, args: string[]): { positionals: string[]; flags: Flags } {
   const positionals: string[] = [];

@@ -122,6 +122,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   const worktrees: RunState["worktrees"] = [];
   let lastTest: RunState["last_test"] = null;
   let escalationAnswered = false;
+  let escalationRequested = false;
   const mergeRequests: RunState["merge_requests"] = [];
   let outcome: string | null = null;
   let human = false;
@@ -180,6 +181,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         if (data.answer === "abort") outcome = "aborted";
         if (data.gate === "escalation") {
           escalationAnswered = true;
+          escalationRequested = false;
           if (data.answer === "one_more_round") roundBudget += 1;
           if (data.answer === "take_over") human = true;
         }
@@ -205,6 +207,9 @@ export function deriveState(events: ArkEvent[]): RunState {
         criteriaStatus = data.criteria;
         lastTest = { passed: data.passed, heads: data.heads };
         escalationAnswered = false;
+        break;
+      case "escalation.requested":
+        escalationRequested = true;
         break;
       case "merge_request.opened":
         if (mergeRequests.length === 0) escalationAnswered = false;
@@ -237,7 +242,12 @@ export function deriveState(events: ArkEvent[]): RunState {
     phase = "awaiting_criteria";
   else if (strategy && strategy.count >= 2 && strategy.chosen === null) phase = "awaiting_strategy";
   else if (!planApproved) phase = "planning";
-  else if (round >= roundBudget && lastTest && !lastTest.passed && !escalationAnswered && !human)
+  else if (
+    round >= roundBudget &&
+    (escalationRequested || (lastTest && !lastTest.passed)) &&
+    !escalationAnswered &&
+    !human
+  )
     phase = "escalation";
   else phase = "building";
 

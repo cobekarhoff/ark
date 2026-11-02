@@ -169,3 +169,13 @@ test("ARK-177-AC7 chief playbook refuses a second live Master Chief and takes ov
   expect(oneChief).toMatch(/If the handle is dead.*take over that Run/i);
   expect(oneChief).toMatch(/run-use --id <run id>/);
 });
+
+test("ARK-210-AC4 run-lead section 9 names ark escalate and forbids a failing test to open the gate", () => {
+  const section = runLeadPlaybook
+    .split("## 9. Escalate when the round budget is spent")[1]
+    ?.split("\n## ")[0];
+  expect(section).toBeDefined();
+  expect(section).toMatch(/ark escalate <run> --reason/);
+  expect(section).toMatch(/P0 or P1/);
+  expect(section).toMatch(/Never add a failing test only to open the gate/);
+});
