@@ -22,7 +22,11 @@ function chromePid(profile: string): string | undefined {
 
 // Kill Chrome and wait for it to go, or it rewrites its profile after removal.
 function stopChrome(pid: number): void {
-  process.kill(pid, "SIGKILL");
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // already gone (ESRCH) or not ours (EPERM): nothing to stop
+  }
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
       process.kill(pid, 0);
@@ -56,6 +60,9 @@ function removeOwnChromeProfiles(): void {
 const cleanupTimeoutMilliseconds = 60_000;
 
 afterAll(() => {
-  removeOwnChromeProfiles();
-  rmSync(tempRoot, { recursive: true, force: true });
+  try {
+    removeOwnChromeProfiles();
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 }, cleanupTimeoutMilliseconds);
