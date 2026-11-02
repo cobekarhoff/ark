@@ -5,22 +5,14 @@ import { agentKey, type HubState, type Selection } from "./model.ts";
 import { Kbd, stateTone, ViewBar, clock, type View } from "./views.tsx";
 
 const column = { project: 0, chief: 1, run: 2, step: 3, agent: 4, mr: 4 };
-const columnTitles = [
-  "Project",
-  "Master Chief",
-  "Runs",
-  "Steps",
-  "Agents · CI",
-];
+const columnTitles = ["Project", "Master Chief", "Runs", "Steps", "Agents · CI"];
 const nodeWidth = 170;
 const nodeHeight = 50;
 const columnGap = 192;
 const rowGap = 64;
 
 const nodeTone = (node: MapNode) =>
-  node.kind === "mr" && node.state === "pending"
-    ? "waiting"
-    : stateTone(node.state);
+  node.kind === "mr" && node.state === "pending" ? "waiting" : stateTone(node.state);
 
 /** The run or project an item or node id belongs to: `gate:<run>:<gate>`, `run:<run>`, `ticket:<project>:<id>`. */
 const ownerOf = (id: string) => id.split(":")[1] ?? "";
@@ -45,24 +37,17 @@ const itemsOf = (node: MapNode, needs: Item[]) =>
   needs.filter((item) => {
     const kind = item.id.split(":")[0];
     if (node.kind === "agent")
-      return (
-        item.id === node.id ||
-        item.id === `limit:${node.id.slice("agent:".length)}`
-      );
+      return item.id === node.id || item.id === `limit:${node.id.slice("agent:".length)}`;
     if (node.kind === "run")
       return (
         ["gate", "mr", "retro", "agent", "limit"].includes(kind) &&
         ownerOf(item.id) === ownerOf(node.id)
       );
-    if (node.kind === "project")
-      return kind === "ticket" && ownerOf(item.id) === ownerOf(node.id);
+    if (node.kind === "project") return kind === "ticket" && ownerOf(item.id) === ownerOf(node.id);
     return false;
   });
 
-const pathD = (
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-) => {
+const pathD = (from: { x: number; y: number }, to: { x: number; y: number }) => {
   const start = from.x + nodeWidth;
   const middle = (start + to.x) / 2;
   const fromY = from.y + nodeHeight / 2;
@@ -81,15 +66,7 @@ type Props = {
   active: boolean;
 };
 
-export function MapView({
-  hub,
-  selection,
-  setSelection,
-  perform,
-  view,
-  setView,
-  active,
-}: Props) {
+export function MapView({ hub, selection, setSelection, perform, view, setView, active }: Props) {
   const [live, setLive] = useState<MapGraph | null>(null);
   const [past, setPast] = useState<MapGraph | null>(null);
   const [at, setAt] = useState<string | null>(null);
@@ -132,12 +109,10 @@ export function MapView({
   const edges = graph?.edges ?? [];
 
   const selectionOf = (node: MapNode): Selection | undefined => {
-    if (node.kind === "run" || node.kind === "step")
-      return { type: "run", id: ownerOf(node.id) };
+    if (node.kind === "run" || node.kind === "step") return { type: "run", id: ownerOf(node.id) };
     if (node.kind !== "agent") return undefined;
     const agent = hub.agents.find(
-      (candidate) =>
-        candidate.run === ownerOf(node.id) && candidate.title === node.label,
+      (candidate) => candidate.run === ownerOf(node.id) && candidate.title === node.label,
     );
     return agent ? { type: "agent", id: agentKey(agent) } : undefined;
   };
@@ -145,51 +120,33 @@ export function MapView({
     if (selection === null) return null;
     if (selection.type === "run") return `run:${selection.id}`;
     if (selection.type === "agent") {
-      const agent = hub.agents.find(
-        (candidate) => agentKey(candidate) === selection.id,
-      );
-      return (
-        nodes.find(
-          (node) => node.kind === "agent" && node.label === agent?.title,
-        )?.id ?? null
-      );
+      const agent = hub.agents.find((candidate) => agentKey(candidate) === selection.id);
+      return nodes.find((node) => node.kind === "agent" && node.label === agent?.title)?.id ?? null;
     }
     const direct = nodes.find((node) => node.id === selection.id)?.id;
     if (direct) return direct;
     const owner = ownerOf(selection.id);
     return (
-      nodes.find(
-        (node) => node.id === `run:${owner}` || node.id === `project:${owner}`,
-      )?.id ?? null
+      nodes.find((node) => node.id === `run:${owner}` || node.id === `project:${owner}`)?.id ?? null
     );
   };
 
-  const current =
-    picked !== null && picked.selection === selection
-      ? picked.node
-      : fromSelection();
+  const current = picked !== null && picked.selection === selection ? picked.node : fromSelection();
   const litNode = current?.startsWith("badge:") ? current.slice(6) : current;
   const node = nodes.find((candidate) => candidate.id === litNode);
 
   function pick(id: string) {
-    const target = nodes.find(
-      (candidate) => candidate.id === id.replace("badge:", ""),
-    );
+    const target = nodes.find((candidate) => candidate.id === id.replace("badge:", ""));
     if (!target) return;
-    const items =
-      id.startsWith("badge:") && at === null
-        ? itemsOf(target, hub.needs_me)
-        : [];
+    const items = id.startsWith("badge:") && at === null ? itemsOf(target, hub.needs_me) : [];
     const next: Selection =
-      items.length > 0
-        ? { type: "need", id: items[0].id }
-        : (selectionOf(target) ?? selection);
+      items.length > 0 ? { type: "need", id: items[0].id } : (selectionOf(target) ?? selection);
     setSelection(next);
     setPicked({ node: id, selection: next });
   }
 
-  const times = (graph?.replay.events ?? live?.replay.events ?? []).map(
-    (event) => Date.parse(event.time),
+  const times = (graph?.replay.events ?? live?.replay.events ?? []).map((event) =>
+    Date.parse(event.time),
   );
   const replay = live?.replay;
   const from = replay?.from ? Date.parse(replay.from) : null;
@@ -235,17 +192,12 @@ export function MapView({
   const place = new Map(
     nodes.map((item) => {
       const index = column[item.kind];
-      return [
-        item.id,
-        { x: 10 + index * columnGap, y: 26 + rows[index]++ * rowGap },
-      ] as const;
+      return [item.id, { x: 10 + index * columnGap, y: 26 + rows[index]++ * rowGap }] as const;
     }),
   );
   const height = 26 + Math.max(1, ...rows) * rowGap;
   const lit = litNode ? pathOf(litNode, edges) : null;
-  const unavailable = nodes.filter(
-    (item) => item.state === "unavailable",
-  ).length;
+  const unavailable = nodes.filter((item) => item.state === "unavailable").length;
   const replaying = at !== null;
 
   const items = node && !replaying ? itemsOf(node, hub.needs_me) : [];
@@ -263,20 +215,17 @@ export function MapView({
             <p className="gcap" aria-live="polite">
               {node ? (
                 <>
-                  <b>{node.label}</b> lit with{" "}
-                  {Math.max(0, (lit?.size ?? 1) - 1)} linked.
+                  <b>{node.label}</b> lit with {Math.max(0, (lit?.size ?? 1) - 1)} linked.
                 </>
               ) : (
                 <>
-                  Click a node or press <Kbd>j</Kbd> <Kbd>k</Kbd> to light its
-                  path. <Kbd>v</Kbd> toggles dimming.
+                  Click a node or press <Kbd>j</Kbd> <Kbd>k</Kbd> to light its path. <Kbd>v</Kbd>{" "}
+                  toggles dimming.
                 </>
               )}
             </p>
             {failed && (
-              <p className="hint">
-                The Map could not be read. The hub may be restarting.
-              </p>
+              <p className="hint">The Map could not be read. The hub may be restarting.</p>
             )}
             <svg
               className={`graph ${lit ? "focus" : ""} ${dim ? "dim" : ""}`}
@@ -293,23 +242,11 @@ export function MapView({
                   patternUnits="userSpaceOnUse"
                 >
                   <rect width="7" height="7" fill="var(--bg)" />
-                  <line
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="7"
-                    stroke="var(--muted)"
-                    strokeWidth="1.6"
-                  />
+                  <line x1="0" y1="0" x2="0" y2="7" stroke="var(--muted)" strokeWidth="1.6" />
                 </pattern>
               </defs>
               {columnTitles.map((title, index) => (
-                <text
-                  key={title}
-                  className="col"
-                  x={10 + index * columnGap}
-                  y="14"
-                >
+                <text key={title} className="col" x={10 + index * columnGap} y="14">
                   {title}
                 </text>
               ))}
@@ -319,8 +256,7 @@ export function MapView({
                 if (!from || !to) return null;
                 const on = lit?.has(source) && lit.has(target);
                 const flowing =
-                  nodes.find((item) => item.id === target)?.state ===
-                    "working" ||
+                  nodes.find((item) => item.id === target)?.state === "working" ||
                   nodes.find((item) => item.id === target)?.state === "live";
                 return (
                   <path
@@ -354,23 +290,11 @@ export function MapView({
                     }}
                   >
                     {tone === "working" && (
-                      <rect
-                        className="ping"
-                        width={nodeWidth}
-                        height={nodeHeight}
-                        rx="10"
-                      />
+                      <rect className="ping" width={nodeWidth} height={nodeHeight} rx="10" />
                     )}
-                    <rect
-                      className="bd"
-                      width={nodeWidth}
-                      height={nodeHeight}
-                      rx="10"
-                    />
+                    <rect className="bd" width={nodeWidth} height={nodeHeight} rx="10" />
                     <text className="b m" x="10" y="21">
-                      {item.label.length > 21
-                        ? `${item.label.slice(0, 20)}…`
-                        : item.label}
+                      {item.label.length > 21 ? `${item.label.slice(0, 20)}…` : item.label}
                     </text>
                     <text className="sub" x="10" y="38">
                       {item.state === "unavailable"
@@ -415,26 +339,22 @@ export function MapView({
                 {replaying ? `replay ${clock(at)}` : "live"}
               </span>
               <span className="hint">
-                <Kbd>[</Kbd> <Kbd>]</Kbd> step to previous / next event{" "}
-                <Kbd>l</Kbd> back to live
+                <Kbd>[</Kbd> <Kbd>]</Kbd> step to previous / next event <Kbd>l</Kbd> back to live
               </span>
             </div>
             {from === null || end === null || moment === null ? (
               <p className="hint">
-                No last visit is saved, so there is no replay window. The Map
-                shows live state.
+                No last visit is saved, so there is no replay window. The Map shows live state.
               </p>
             ) : (
               <>
                 <p className="readout" aria-live="polite">
-                  As of <b>{replaying ? clock(at) : "now"}</b> ·{" "}
-                  {replaying ? "replay" : "live"}
+                  As of <b>{replaying ? clock(at) : "now"}</b> · {replaying ? "replay" : "live"}
                   {unavailable > 0 && (
                     <>
                       {" "}
-                      · <b>{unavailable}</b> of {nodes.length} nodes
-                      UNAVAILABLE: liveness and CI were not collected at this
-                      time.
+                      · <b>{unavailable}</b> of {nodes.length} nodes UNAVAILABLE: liveness and CI
+                      were not collected at this time.
                     </>
                   )}
                 </p>
@@ -485,9 +405,7 @@ export function MapView({
               <dt>State</dt>
               <dd>
                 <span className={`sw s-${nodeTone(node)}`} />{" "}
-                {node.state === "unavailable"
-                  ? "UNAVAILABLE"
-                  : node.state.replaceAll("_", " ")}
+                {node.state === "unavailable" ? "UNAVAILABLE" : node.state.replaceAll("_", " ")}
               </dd>
               <dt>As of</dt>
               <dd className="mono">{graph ? clock(graph.at) : "now"}</dd>
@@ -502,8 +420,7 @@ export function MapView({
             </dl>
             {node.state === "unavailable" && (
               <p className="hint">
-                The hub was not collecting then, so Ark shows no state rather
-                than a guess.
+                The hub was not collecting then, so Ark shows no state rather than a guess.
               </p>
             )}
             {items.map((item) => (
@@ -521,9 +438,7 @@ export function MapView({
           <div className="d-empty">
             Select a node to see it here.
             <br />
-            <span className="hint">
-              Map selection is shared with Home, not with the Timeline.
-            </span>
+            <span className="hint">Map selection is shared with Home, not with the Timeline.</span>
           </div>
         )}
       </aside>

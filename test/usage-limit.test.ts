@@ -1,11 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Item } from "../cli/hub/types.ts";
@@ -33,10 +27,7 @@ const limitLine = (waitSeconds: number) =>
 
 /** The next `orca terminal read` of the worker returns these lines. */
 const setTail = (lines: string[]) =>
-  writeFileSync(
-    join(orcaStateDirectory, `tail-${workerHandle}`),
-    JSON.stringify(lines),
-  );
+  writeFileSync(join(orcaStateDirectory, `tail-${workerHandle}`), JSON.stringify(lines));
 
 const setWorkerVerdict = (verdict: string) =>
   writeFileSync(
@@ -82,9 +73,7 @@ beforeEach(() => {
   terminalLog = join(orcaStateDirectory, "terminal.log");
   process.env.ORCA_STATE_DIRECTORY = orcaStateDirectory;
   process.env.ARK_OMP_SESSIONS = mkdtempSync(join(tmpdir(), "ark199-omp-"));
-  process.env.ARK_CLAUDE_SESSIONS = mkdtempSync(
-    join(tmpdir(), "ark199-claude-"),
-  );
+  process.env.ARK_CLAUDE_SESSIONS = mkdtempSync(join(tmpdir(), "ark199-claude-"));
   process.env.ARK_CODEX_SESSIONS = mkdtempSync(join(tmpdir(), "ark199-codex-"));
 
   const ticketFile = writeTicket("demo", "ARK-199-LIMIT", [
@@ -155,14 +144,11 @@ async function startUi(): Promise<{
   process: Bun.Subprocess;
   baseUrl: string;
 }> {
-  const uiProcess = Bun.spawn(
-    ["bun", join(repositoryRoot, "cli", "ark.ts"), "ui", "--port", "0"],
-    {
-      env: { ...process.env },
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
+  const uiProcess = Bun.spawn(["bun", join(repositoryRoot, "cli", "ark.ts"), "ui", "--port", "0"], {
+    env: { ...process.env },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const reader = uiProcess.stdout.getReader();
   let output = "";
   while (!output.includes("\n")) {
@@ -171,14 +157,11 @@ async function startUi(): Promise<{
     output += new TextDecoder().decode(chunk.value);
   }
   const port = Number(output.match(/127\.0\.0\.1:(\d+)/)?.[1]);
-  if (!port)
-    throw new Error(`ark ui did not print its listening port: ${output}`);
+  if (!port) throw new Error(`ark ui did not print its listening port: ${output}`);
   return { process: uiProcess, baseUrl: `http://127.0.0.1:${port}` };
 }
 
-async function withUi<T>(
-  callback: (baseUrl: string) => Promise<T>,
-): Promise<T> {
+async function withUi<T>(callback: (baseUrl: string) => Promise<T>): Promise<T> {
   const server = await startUi();
   try {
     return await callback(server.baseUrl);
@@ -189,19 +172,13 @@ async function withUi<T>(
 }
 
 const needsMe = async (baseUrl: string): Promise<Item[]> =>
-  ((await (await fetch(`${baseUrl}/api/state`)).json()) as { needs_me: Item[] })
-    .needs_me;
+  ((await (await fetch(`${baseUrl}/api/state`)).json()) as { needs_me: Item[] }).needs_me;
 
 /** Polls the hub until the usage_limit items satisfy `done`; the hub refreshes Orca every 3 seconds. */
-async function waitForLimits(
-  baseUrl: string,
-  done: (limits: Item[]) => boolean,
-): Promise<Item[]> {
+async function waitForLimits(baseUrl: string, done: (limits: Item[]) => boolean): Promise<Item[]> {
   let limits: Item[] = [];
   for (let attempt = 0; attempt < 80; attempt++) {
-    limits = (await needsMe(baseUrl)).filter(
-      (item) => item.kind === "usage_limit",
-    );
+    limits = (await needsMe(baseUrl)).filter((item) => item.kind === "usage_limit");
     if (done(limits)) return limits;
     await Bun.sleep(100);
   }
@@ -212,10 +189,7 @@ test("ARK-199-AC1 a live agent's usage-limit error gives a usage_limit item with
   setTail(["working...", limitLine(4805)]);
   const before = Date.now();
   await withUi(async (baseUrl) => {
-    const [item] = await waitForLimits(
-      baseUrl,
-      (limits) => limits.length === 1,
-    );
+    const [item] = await waitForLimits(baseUrl, (limits) => limits.length === 1);
     const after = Date.now();
     expect(item.project).toBe("demo");
     expect(item.ticket).toBe("ARK-199-LIMIT");
@@ -234,10 +208,7 @@ test("ARK-199-AC1 a live agent's usage-limit error gives a usage_limit item with
 test("ARK-199-AC1 a rate-limit error with no wait time gives a usage_limit item with no reset time", async () => {
   setTail(["Claude AI usage limit reached"]);
   await withUi(async (baseUrl) => {
-    const [item] = await waitForLimits(
-      baseUrl,
-      (limits) => limits.length === 1,
-    );
+    const [item] = await waitForLimits(baseUrl, (limits) => limits.length === 1);
     expect(item.limit).toEqual({ provider: "claude", reset_at: null });
   });
 });
@@ -247,9 +218,7 @@ test("ARK-199-AC2 the usage_limit item is gone once the output no longer shows t
   await withUi(async (baseUrl) => {
     await waitForLimits(baseUrl, (limits) => limits.length === 1);
     setTail(["resumed work", "all green"]);
-    expect(
-      await waitForLimits(baseUrl, (limits) => limits.length === 0),
-    ).toEqual([]);
+    expect(await waitForLimits(baseUrl, (limits) => limits.length === 0)).toEqual([]);
   });
 });
 
@@ -260,9 +229,7 @@ test("ARK-199-AC2 the usage_limit item is gone once the agent exits", async () =
     // The terminal still shows the error, but the agent is dead.
     setWorkerVerdict("dead");
     await waitForLimits(baseUrl, (limits) => limits.length === 0);
-    expect((await needsMe(baseUrl)).some((item) => item.kind === "agent")).toBe(
-      true,
-    );
+    expect((await needsMe(baseUrl)).some((item) => item.kind === "agent")).toBe(true);
   });
 });
 
@@ -270,10 +237,7 @@ test("ARK-199-AC2 a failed terminal read keeps the previous usage_limit item", a
   setTail([limitLine(4805)]);
   const readLog = join(orcaStateDirectory, "read.log");
   await withUi(async (baseUrl) => {
-    const [item] = await waitForLimits(
-      baseUrl,
-      (limits) => limits.length === 1,
-    );
+    const [item] = await waitForLimits(baseUrl, (limits) => limits.length === 1);
     writeFileSync(join(orcaStateDirectory, `fail-${workerHandle}`), "");
     // Two failed reads mean at least one full refresh finished with the failure.
     for (let attempt = 0; attempt < 120; attempt++) {
@@ -283,13 +247,8 @@ test("ARK-199-AC2 a failed terminal read keeps the previous usage_limit item", a
       if (failures >= 2) break;
       await Bun.sleep(100);
     }
-    expect(
-      readFileSync(readLog, "utf8").trim().split("\n").length,
-    ).toBeGreaterThanOrEqual(2);
-    const [kept] = await waitForLimits(
-      baseUrl,
-      (limits) => limits.length === 1,
-    );
+    expect(readFileSync(readLog, "utf8").trim().split("\n").length).toBeGreaterThanOrEqual(2);
+    const [kept] = await waitForLimits(baseUrl, (limits) => limits.length === 1);
     expect(kept).toEqual(item);
   });
 });
@@ -302,17 +261,12 @@ test("ARK-199-AC1 output that only quotes the usage-limit words gives no usage_l
   ]);
   const readsLog = join(orcaStateDirectory, "reads.log");
   const reads = () =>
-    existsSync(readsLog)
-      ? readFileSync(readsLog, "utf8").trim().split("\n").length
-      : 0;
+    existsSync(readsLog) ? readFileSync(readsLog, "utf8").trim().split("\n").length : 0;
   await withUi(async (baseUrl) => {
     // A second read means the refresh that handled the first read has finished.
-    for (let attempt = 0; attempt < 120 && reads() < 2; attempt++)
-      await Bun.sleep(100);
+    for (let attempt = 0; attempt < 120 && reads() < 2; attempt++) await Bun.sleep(100);
     expect(reads()).toBeGreaterThanOrEqual(2);
-    expect(
-      (await needsMe(baseUrl)).filter((item) => item.kind === "usage_limit"),
-    ).toEqual([]);
+    expect((await needsMe(baseUrl)).filter((item) => item.kind === "usage_limit")).toEqual([]);
   });
 });
 
@@ -321,9 +275,7 @@ test("ARK-199-AC2 the usage_limit item is gone once the agent has printed more l
   await withUi(async (baseUrl) => {
     await waitForLimits(baseUrl, (limits) => limits.length === 1);
     setTail([limitLine(4805), "agent resumed", "working... 1", "working... 2"]);
-    expect(
-      await waitForLimits(baseUrl, (limits) => limits.length === 0),
-    ).toEqual([]);
+    expect(await waitForLimits(baseUrl, (limits) => limits.length === 0)).toEqual([]);
   });
 });
 
@@ -353,9 +305,7 @@ test("ARK-199-AC1 an agent terminal outside any Ark run gives a usage_limit item
     const limits = await waitForLimits(baseUrl, (found) =>
       found.some((item) => item.id.endsWith(":term_free")),
     );
-    const item = limits.find((candidate) =>
-      candidate.id.endsWith(":term_free"),
-    )!;
+    const item = limits.find((candidate) => candidate.id.endsWith(":term_free"))!;
     expect(item.limit).toEqual({ provider: "claude", reset_at: null });
     expect(item.title).toContain("side quest");
     expect(item.action).toMatchObject({ params: { handle: "term_free" } });
@@ -380,12 +330,7 @@ test(
         `document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true }))`,
       );
       for (let attempt = 0; attempt < 80; attempt++) {
-        if (
-          await view.evaluate(
-            `document.querySelector('${nodeSelector}') !== null`,
-          )
-        )
-          break;
+        if (await view.evaluate(`document.querySelector('${nodeSelector}') !== null`)) break;
         await Bun.sleep(100);
       }
       await view.evaluate(
@@ -413,12 +358,7 @@ test(
       await view.navigate(baseUrl);
       const rowSelector = `[data-need^="limit:"]`;
       for (let attempt = 0; attempt < 80; attempt++) {
-        if (
-          await view.evaluate(
-            `document.querySelector('${rowSelector}') !== null`,
-          )
-        )
-          break;
+        if (await view.evaluate(`document.querySelector('${rowSelector}') !== null`)) break;
         await Bun.sleep(100);
       }
       const countdown = (await view.evaluate(
@@ -426,9 +366,7 @@ test(
       )) as string;
       // 4805 seconds is 80 minutes and a few seconds, so the page rounds up to 1h 21m or 1h 20m.
       expect(countdown).toMatch(/^codex · resets in 1h 2?[01]m$/);
-      await view.evaluate(
-        `document.querySelector('${rowSelector} button.act').click()`,
-      );
+      await view.evaluate(`document.querySelector('${rowSelector} button.act').click()`);
       for (let attempt = 0; attempt < 40 && !existsSync(terminalLog); attempt++)
         await Bun.sleep(50);
       expect(readFileSync(terminalLog, "utf8")).toContain(

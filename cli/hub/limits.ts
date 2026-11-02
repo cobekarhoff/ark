@@ -43,11 +43,7 @@ export function parseWaitSeconds(text: string): number | null {
   let seconds = 0;
   let found = false;
   durationToken.lastIndex = trigger.index + trigger[0].length;
-  for (
-    let token = durationToken.exec(text);
-    token;
-    token = durationToken.exec(text)
-  ) {
+  for (let token = durationToken.exec(text); token; token = durationToken.exec(text)) {
     if (found && !token[2]) break;
     const unit = token[2] ?? keyUnit;
     const unitKey = /^(ms|milli)/i.test(unit) ? "ms" : unit[0].toLowerCase();
@@ -106,19 +102,11 @@ export async function readUsageLimits(
   await Promise.all(
     agents.map(async (agent) => {
       const handle = agent.terminal;
-      if (!handle || ["dead", "exited", "done"].includes(agent.liveness))
-        return;
+      if (!handle || ["dead", "exited", "done"].includes(agent.liveness)) return;
       const old = previous.get(handle);
-      const tail =
-        agent.liveness === "unknown"
-          ? "unknown"
-          : await readTerminalTail(handle);
+      const tail = agent.liveness === "unknown" ? "unknown" : await readTerminalTail(handle);
       const found =
-        tail === "unknown"
-          ? old
-            ? { ...old, agent }
-            : null
-          : matchUsageLimit(tail, agent, old);
+        tail === "unknown" ? (old ? { ...old, agent } : null) : matchUsageLimit(tail, agent, old);
       if (found) limits.set(handle, found);
     }),
   );
