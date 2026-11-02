@@ -200,17 +200,24 @@ export function worktreeSync(runId: string, inProject?: string): void {
   if (conflicts.length > 0) throw new ArkError(conflicts.join("\n"));
 }
 
-/** `git status` lines of a worktree, minus untracked entries that Ark made itself: a symlink of the mirror, and a folder that is or holds another worktree of the run (a root-repo worktree holds the nested ones). */
+/** Entries of `git status` for a worktree, minus untracked entries Ark made itself: a symlink of the mirror, and a nested worktree of the run. Any other untracked or modified entry counts. */
 function dirtyLines(path: string, worktreePaths: string[]): string[] {
-  return git(path, "status", "--porcelain")
-    .split("\n")
-    .filter((line) => line !== "")
-    .filter((line) => {
-      if (!line.startsWith("?? ")) return true;
-      const entry = join(path, line.slice(3).replace(/\/$/, ""));
-      if (lstatSync(entry).isSymbolicLink()) return false;
-      return !worktreePaths.some((other) => other === entry || other.startsWith(`${entry}/`));
-    });
+  const records = git(path, "status", "--porcelain", "-z", "--untracked-files=all")
+    .split("\0")
+    .filter((record) => record !== "");
+  const dirty: string[] = [];
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (record[0] === "R" || record[0] === "C") index++; // a rename or copy carries its source path as the next record
+    if (!record.startsWith("?? ")) {
+      dirty.push(record);
+      continue;
+    }
+    const entry = join(path, record.slice(3).replace(/\/$/, ""));
+    if (lstatSync(entry).isSymbolicLink() || worktreePaths.includes(entry)) continue;
+    dirty.push(record);
+  }
+  return dirty;
 }
 
 /** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, and for a merged run an unmerged branch, and prints the repo and the reason. */

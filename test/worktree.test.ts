@@ -549,6 +549,21 @@ describe("ARK-276 anchor worktree", () => {
     expect(gitOutput(nested, "branch", "--list", rootBranch)).toBe("");
   });
 
+  test("ARK-276-AC5 closing keeps a root anchor that holds real untracked files next to a nested worktree, and deletes nothing", () => {
+    const { runId, runDirectory } = startRun(tempRootWithNestedWorkspace());
+    expect(ark("worktree", "anchor", runId).code).toBe(0);
+    expect(ark("worktree", "create", runId, "repos/x").code).toBe(0);
+    const rootPath = join(runDirectory, "workspace");
+    writeFileSync(join(rootPath, "repos/mine.txt"), "mine\n");
+    writeFileSync(join(rootPath, "my file.txt"), "mine\n");
+
+    const closed = closeRun(runId, runDirectory, "aborted");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toMatch(/kept\s+\.\s/);
+    expect(existsSync(join(rootPath, "repos/mine.txt"))).toBe(true);
+    expect(existsSync(join(rootPath, "my file.txt"))).toBe(true);
+  });
+
   test("ARK-276-AC3 merge-request open skips an untouched anchor and opens nothing", () => {
     const workspace = tempGitRepo();
     const { runId, runDirectory } = startRun(workspace);

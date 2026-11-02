@@ -376,7 +376,9 @@ test("ARK-276-AC7 run-lead releases the evaluator, the designer and every step w
   expect(record).toMatch(/the evaluator and the designer too/);
 
   const evaluate = section(runLeadPlaybook, "## 2. Evaluate the ticket and open the criteria gate");
-  expect(evaluate.match(/Wait for its `worker_done`, as in section 7/g)).toHaveLength(2);
+  expect(
+    evaluate.match(/Wait for its `worker_done`, then release it, as in section 7/g),
+  ).toHaveLength(2);
 });
 
 test("ARK-276-AC7 chief releases the run lead when not yet released, before the ark run close line", () => {

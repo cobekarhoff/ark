@@ -66,7 +66,7 @@ Skip this part when `ark status <run>` shows that the run has an `evaluation.rec
    orca orchestration worker-start --spec $'/skill:ark worker <run> evaluator\nYou are the EVALUATOR for run <run>.' --task-title "evaluator (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
    ```
 
-   Wait for its `worker_done`, as in section 7. Read `<run folder>/evaluation.md`. If it is missing or malformed, do not fix it yourself: run `ark evaluation record <run>`, read the refusal, and send the evaluator the fix.
+   Wait for its `worker_done`, then release it, as in section 7. Read `<run folder>/evaluation.md`. If it is missing or malformed, do not fix it yourself: run `ark evaluation record <run>`, read the refusal, and send the evaluator the fix.
 
 3. Record it:
 
@@ -115,7 +115,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
       orca orchestration worker-start --spec $'/skill:ark worker <run> designer\nYou are the DESIGNER for run <run>.' --task-title "designer (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
       ```
 
-      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Wait for its `worker_done`, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
+      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Wait for its `worker_done`, then release it, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
 3. Record it:
 
    ```sh
