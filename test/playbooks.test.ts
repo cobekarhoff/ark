@@ -179,3 +179,24 @@ test("ARK-210-AC4 run-lead section 9 names ark escalate and forbids a failing te
   expect(section).toMatch(/P0 or P1/);
   expect(section).toMatch(/Never add a failing test only to open the gate/);
 });
+
+const runLeadStart = runLeadPlaybook.split("## 1. Start")[1]?.split("\n## ")[0];
+
+test("ARK-229-AC1 run-lead section 1 checks the inbox and searches the run folder before run-create", () => {
+  expect(runLeadStart).toBeDefined();
+  const inbox = runLeadStart!.search(/Read your Orca inbox with the `check` command/);
+  const search = runLeadStart!.search(/Search the run folder for a `run_\.\.\.` ID/);
+  const createRun = runLeadStart!.search(/orca orchestration run-create\b/);
+
+  expect(inbox).toBeGreaterThanOrEqual(0);
+  expect(search).toBeGreaterThan(inbox);
+  expect(createRun).toBeGreaterThan(search);
+});
+
+test("ARK-229-AC2 run-lead section 1 binds a found Run with run-use and creates only when none is found", () => {
+  expect(runLeadStart).toBeDefined();
+  expect(runLeadStart).toMatch(/If you found a Run, bind it\. Do not run `run-create`/);
+  expect(runLeadStart).toMatch(/run-use --id <run_id>/);
+  expect(runLeadStart!.match(/run-create\b.*--objective/g)).toHaveLength(1);
+  expect(runLeadStart).toMatch(/Only when no existing Run was found[\s\S]*run-create --objective/);
+});
