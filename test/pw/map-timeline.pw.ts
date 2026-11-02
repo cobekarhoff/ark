@@ -408,7 +408,7 @@ test("ARK-180-AC5 Timeline lane selection stays separate from Home and Map selec
   });
 });
 
-test("ARK-246-AC4 Timeline lanes and Map nodes appear when each API answer takes 3 seconds and the hub pushes every second", async ({
+test("ARK-246-AC4 ARK-246-AC1 ARK-246-AC3 Timeline lanes and Map nodes appear when each API answer takes 3 seconds and the hub pushes every second", async ({
   page,
 }) => {
   const run = startRun("ARK-246-SLOW1", "Slow answers");
