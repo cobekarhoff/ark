@@ -347,7 +347,6 @@ test("ARK-180-AC5 clicking an open Timeline gate runs its Plannotator action", a
   planGate(run.directory);
   writeFileSync(join(run.directory, "plan.md"), "# Plan\n");
   writeFileSync(join(run.directory, "plan.yml"), "steps: []\n");
-  appendEvent(run.directory, "gate.answered", { gate: "plan", answer: "change" });
   setOrca([run.runId]);
   const actionLog = join(tempDirectory("ark-gate-action-"), "actions.log");
   process.env.ORCA_ACTION_LOG = actionLog;

@@ -196,6 +196,8 @@ export function deriveState(events: ArkEvent[]): RunState {
           strategy.chosen = data.answer;
         if (data.gate === "criteria" && data.answer === "accept") blocked = false;
         if (data.gate === "plan" && data.answer === "approve") planApproved = true;
+        // A change answer sends the plan back for edits, so the old check no longer stands.
+        if (data.gate === "plan" && data.answer === "change") plan = null;
         if (data.answer === "abort") outcome = "aborted";
         if (data.gate === "escalation") {
           escalationAnswered = true;
