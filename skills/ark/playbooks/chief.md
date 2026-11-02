@@ -165,6 +165,10 @@ The strategy gate is one of these questions. Its options are the card IDs of `<r
 
 A run lead is blocked. Read the message, tell the human, and decide the next step with them. Use `orca orchestration send --to dispatch:<dispatch id> --subject "<subject>" --body "<guidance>" --json` to steer the run lead.
 
+### An amendment of a criterion
+
+When the human amends a criterion of a run before its plan gate, do not put the new text in free text. Send the run lead the criterion ID and the new text, and ask it to run `ark criteria amend <run> <criterion id> <file>`, so that `ticket.md`, the log and `plan.md` carry it.
+
 ### A `worker_done` from a run lead
 
 1. Check that it is from the run lead you started for that run.

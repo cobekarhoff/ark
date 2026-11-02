@@ -49,6 +49,20 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
       if (!Array.isArray(data.criteria) || data.criteria.length === 0)
         throw new ArkError("criteria.updated refused: the ticket has no criteria");
       return;
+    case "criteria.amended": {
+      const allowed = ["awaiting_strategy", "planning"];
+      // In awaiting_criteria the backlog file is the source: name the gate that moves the run on.
+      if (state.phase === "awaiting_criteria") requirePhase(state, type, allowed);
+      if (!allowed.includes(state.phase))
+        throw new ArkError(
+          `${type} refused: run is in phase ${state.phase}; allowed only in ${allowed.join(" or ")}`,
+        );
+      if (!state.criteria.some((criterion) => criterion.id === data.criterion))
+        throw new ArkError(
+          `${type} refused: ${data.criterion} is not a criterion of this run (${state.criteria.map((criterion) => criterion.id).join(", ")})`,
+        );
+      return;
+    }
     case "evaluation.recorded":
       requirePhase(state, type, ["awaiting_criteria", "planning"]);
       for (const list of ["blockers", "risks", "surfaces"])

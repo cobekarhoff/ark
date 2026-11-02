@@ -44,6 +44,14 @@ ark evaluation record <run> [--project <name>]
 Reads evaluation.md in the run folder and records its blockers, risks and surfaces (web_ui, cli_output, document or none). It refuses a missing file, a file with no Blockers, Risks or Surfaces list, an unknown surface, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.
 ```
 
+### criteria amend
+
+```text
+ark criteria amend <run> <criterion id> <file> [--project <name>]
+
+Writes the text in <file> as the new text of one criterion in the run's ticket.md (frontmatter and table row) and records criteria.amended with the criterion, the old text and the new text. Use it for an amendment the human approved. It refuses an unknown criterion, an empty file, and a run outside the phases awaiting_strategy and planning. It clears the plan check: run ark plan check again so plan.md lists the amendment before the plan gate.
+```
+
 ### strategy record
 
 ```text
@@ -359,6 +367,7 @@ A test proves an AC when its name or tags contain the AC id, for example `CLARA-
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `run.started`          | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file`                                                                     | `ark run start`                           |
 | `criteria.updated`     | `criteria` (ids)                                                                                                                         | `ark gate record` for the `criteria` gate |
+| `criteria.amended`     | `criterion` (id), `old`, `new`                                                                                                           | `ark criteria amend`                      |
 | `evaluation.recorded`  | `blockers` (strings), `risks` (strings), `surfaces` (strings)                                                                            | `ark evaluation record`                   |
 | `strategy.recorded`    | `count`, `recommended`, `cards` (ids), optional `reason`                                                                                 | `ark strategy record`                     |
 | `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`), `open_decisions`                                  | `ark plan check`                          |

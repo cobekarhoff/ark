@@ -27,6 +27,8 @@ export type RunState = {
   round: number;
   round_budget: number;
   criteria: { id: string; status: CriterionStatus }[];
+  /** Each amended criterion: the text before its first amendment and the latest text. */
+  amended_criteria: { id: string; old: string; new: string }[];
   gates: { criteria?: string; strategy?: string; plan?: string; escalation?: string };
   post_mr_escalation_answered: boolean;
   evaluation: { blockers: string[]; risks: string[]; surfaces: string[] } | null;
@@ -116,6 +118,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   let criteriaStatus: Record<string, CriterionStatus> = {};
   const gates: Record<string, string> = {};
   let plan: RunState["plan"] = null;
+  const amendments = new Map<string, { id: string; old: string; new: string }>();
   let planApproved = false;
   let planSteps: { id: string; role: string; repo: string }[] = [];
   const stepStatus = new Map<string, StepStatus>();
@@ -143,6 +146,18 @@ export function deriveState(events: ArkEvent[]): RunState {
         criteriaIds = data.criteria;
         criteriaStatus = {};
         break;
+      case "criteria.amended": {
+        const first = amendments.get(data.criterion);
+        amendments.set(data.criterion, {
+          id: data.criterion,
+          old: first?.old ?? data.old,
+          new: data.new,
+        });
+        // The amendment changes what plan.md must show, so the plan needs a new check.
+        plan = null;
+        planApproved = false;
+        break;
+      }
       case "evaluation.recorded":
         evaluation = { blockers: data.blockers, risks: data.risks, surfaces: data.surfaces ?? [] };
         if (data.blockers.length > 0) blocked = true;
@@ -273,6 +288,7 @@ export function deriveState(events: ArkEvent[]): RunState {
       id,
       status: criteriaStatus[id] ?? (lastTest ? "missing" : "pending"),
     })),
+    amended_criteria: [...amendments.values()],
     gates: {
       ...(gates.criteria === undefined ? {} : { criteria: gates.criteria }),
       ...(gates.strategy === undefined ? {} : { strategy: gates.strategy }),
