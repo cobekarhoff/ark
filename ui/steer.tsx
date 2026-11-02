@@ -75,14 +75,18 @@ function MessageForm({
   );
 }
 
-export const RunLeadMessage = ({ run }: { run: string }) => (
-  <MessageForm
-    action="run-lead-message"
-    params={{ run }}
-    label="Message run lead"
-    placeholder="e.g. skip the review step for the docs change"
-  />
-);
+/** The run-lead message form. `live` false means no run lead is live: say so and render no form. */
+export const RunLeadMessage = ({ run, live = true }: { run: string; live?: boolean }) =>
+  live ? (
+    <MessageForm
+      action="run-lead-message"
+      params={{ run }}
+      label="Message run lead"
+      placeholder="e.g. skip the review step for the docs change"
+    />
+  ) : (
+    <span className="hint">No run lead is live for this run</span>
+  );
 
 const fixedActions: [keyof typeof instructions, string][] = [
   ["approve-and-queue", "Approve and queue"],
