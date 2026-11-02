@@ -44,7 +44,7 @@ beforeEach(() => {
     `echo "$*" >> "${ghLog}"
 case "$*" in
   "pr merge"*) exit 0 ;;
-  *mergeStateStatus*) [ "$3" = 11 ] && echo CLEAN || echo DIRTY ;;
+  *mergeStateStatus*) case "$3" in */11) true ;; *) false ;; esac && echo CLEAN || echo DIRTY ;;
   *) echo '{"state":"OPEN","statusCheckRollup":[]}' ;;
 esac
 `,
@@ -105,8 +105,10 @@ test("ARK-244-AC3 auto-merger merges the CLEAN PR only, reports the conflict and
 
   expect(result.code).toBe(0);
   const calls = readFileSync(ghLog, "utf8").split("\n");
-  expect(calls).toContain("pr merge 11 --merge");
-  expect(calls.filter((call) => call.startsWith("pr merge"))).toEqual(["pr merge 11 --merge"]);
+  expect(calls).toContain("pr merge https://github.com/org/app/pull/11 --merge");
+  expect(calls.filter((call) => call.startsWith("pr merge"))).toEqual([
+    "pr merge https://github.com/org/app/pull/11 --merge",
+  ]);
   const change = result.out.split("\n").find((line) => line.startsWith("CHANGE:"));
   expect(change).toBeDefined();
   expect(change).toContain(`${run} #11 merged`);

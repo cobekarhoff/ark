@@ -85,6 +85,8 @@ export async function chiefState(inProject?: string): Promise<void> {
       "worker-list",
       "--run",
       chiefRunId,
+      "--terminal-state",
+      "active",
       "--include-remote",
     );
     if (answer) {
@@ -94,7 +96,14 @@ export async function chiefState(inProject?: string): Promise<void> {
           ? [[run, worker.dispatchId, worker.agentTerminalHandle!]]
           : [];
       });
-      leadsText = rows.length === 0 ? "none" : table(["Run", "Dispatch", "Terminal"], rows);
+      const leadless = openRuns.filter((state) => !rows.some((row) => row[0] === state.run));
+      leadsText = [
+        rows.length === 0 ? "" : table(["Run", "Dispatch", "Terminal"], rows),
+        ...leadless.map((state) => `Note: open run ${state.run} has no live run lead.`),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      if (!leadsText) leadsText = "none";
     }
   } else if (orcaRuns) leadsText = `unavailable: no Orca Run "Master Chief: ${project} tickets"`;
   sections.push("## Run leads", leadsText);

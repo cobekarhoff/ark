@@ -19,12 +19,12 @@ notify() {
 while true; do
   changes=""
   for runName in $(ark status ${ARK_PROJECT:+--project "$ARK_PROJECT"} | awk '$2=="merge_requests_open"{print $1}'); do
-    statusLines=$(ark merge-request status "$runName")
+    statusLines=$(ark merge-request status ${ARK_PROJECT:+--project "$ARK_PROJECT"} "$runName")
     for url in $(echo "$statusLines" | awk '$2=="open"{print $3}'); do
       number=${url##*/}
-      mergeState=$(gh pr view "$number" --json mergeStateStatus -q .mergeStateStatus)
+      mergeState=$(gh pr view "$url" --json mergeStateStatus -q .mergeStateStatus)
       if [ "$mergeState" = CLEAN ]; then
-        if gh pr merge "$number" --merge >/dev/null 2>&1; then
+        if gh pr merge "$url" --merge >/dev/null 2>&1; then
           changes="$changes $runName #$number merged;"
           notify "Merged PR #$number ($runName)"
         else
