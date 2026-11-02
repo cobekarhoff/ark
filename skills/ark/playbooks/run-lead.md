@@ -45,15 +45,25 @@ Throughout this playbook:
 
 Do this before you write `plan.yml`. `ark plan check` refuses a run that has no `evaluation.recorded` event, and a run that has no `strategy.recorded` event or waits in the phase `awaiting_strategy`.
 
+### Anchor
+
+Your own working folder is the run worktree Master Chief made. Run this before you start the evaluator or the designer, and use its output as their `--worktree`:
+
+```sh
+ark worktree anchor <run>
+```
+
+It prints one line, `path:<absolute path>`, and prints the same line when the worktree already exists. If it exits non-zero (for example `setup` fails), do not continue and never start a worker in the main workspace: send an escalation to Master Chief with `orca orchestration send --type escalation` and the error.
+
 ### Evaluate
 
 Skip this part when `ark status <run>` shows that the run has an `evaluation.recorded` event (you replace a stopped run lead).
 
 1. Read `roles` in `ark.yml`. If it has no `evaluator` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.evaluator`: add its `harness` and `model`, then start a new run lead.
-2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the workspace and reads the ticket and the code. It has no plan step:
+2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the run worktree and reads the ticket and the code. It has no plan step:
 
    ```sh
-   orca orchestration worker-start --spec $'/skill:ark worker <run> evaluator\nYou are the EVALUATOR for run <run>.' --task-title "evaluator (<run>)" --worktree path:<workspace from ark.yml> --agent <harness> --model <model> --json
+   orca orchestration worker-start --spec $'/skill:ark worker <run> evaluator\nYou are the EVALUATOR for run <run>.' --task-title "evaluator (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
    ```
 
    Wait for its `worker_done`, as in section 7. Read `<run folder>/evaluation.md`. If it is missing or malformed, do not fix it yourself: run `ark evaluation record <run>`, read the refusal, and send the evaluator the fix.
@@ -99,10 +109,10 @@ The strategy comes after the evaluation and before the plan. Skip this part when
 1. Write `<run folder>/strategies.md`: 2 or 3 short cards, one level-2 heading for each card (`## <id> <title>`). Each card has these fields, one per line: `Approach:`, `Interfaces:`, `Tradeoffs:` (risk, size, what it leaves out), `Steps:` (a rough list), `Mockup:` (links to files in `<run folder>/mockups/`) and `Recommended: yes` on exactly one card. If only one strategy is possible, write one card with a `Reason:` line that says why there is no alternative.
 2. Read `Surfaces` in `evaluation.md`. When a surface is not `none`, every card needs a `Mockup:` link, and `ark strategy record` refuses a card with none. Exception: when `Surfaces` is only `none`, or when there is one card and `Surfaces` is only `document`, leave out the `Mockup:` line (never write `Mockup: none`, it is refused), skip the Designer and go to step 3. Otherwise start a Designer to make them:
    1. Read `roles` in `ark.yml`. If it has no `designer` entry, stop. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.designer`: add its `harness` and `model`, then start a new run lead.
-   2. Start the Designer with the `harness` and `model` of `roles.designer`. It works in the workspace, has no plan step, and is named `designer`:
+   2. Start the Designer with the `harness` and `model` of `roles.designer`. It works in the run worktree, has no plan step, and is named `designer`:
 
       ```sh
-      orca orchestration worker-start --spec $'/skill:ark worker <run> designer\nYou are the DESIGNER for run <run>.' --task-title "designer (<run>)" --worktree path:<workspace from ark.yml> --agent <harness> --model <model> --json
+      orca orchestration worker-start --spec $'/skill:ark worker <run> designer\nYou are the DESIGNER for run <run>.' --task-title "designer (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
       ```
 
       Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Wait for its `worker_done`, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
@@ -359,7 +369,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
    ark run step <run> <step> finish --failed
    ```
 
-   Use `--failed` when the worker reported `--outcome failed` or the report shows the step did not finish. Then release the worker with `orca orchestration worker-release --dispatch <dispatch id> --json`. Run `finish` for every step a worker completed, reviewer steps too, before you start the same step again: `ark run step ... start` refuses a step that is still `running`.
+   Use `--failed` when the worker reported `--outcome failed` or the report shows the step did not finish. Then release the worker with `orca orchestration worker-release --dispatch <dispatch id> --json`. Release every worker with this command after its `worker_done`, after a failed exit, and after an abnormal exit (the worker is gone and sent no `worker_done`), the evaluator and the designer too. Run `finish` for every step a worker completed, reviewer steps too, before you start the same step again: `ark run step ... start` refuses a step that is still `running`.
 
 If a step fails, read the worker's output with `orca orchestration worker-read --dispatch <dispatch id> --json`, and decide: start the step again, change the plan (run `ark plan check <run>` and go back to section 5), or ask Master Chief.
 

@@ -65,8 +65,9 @@ test("ARK-164-AC1 dispatch starts in an Orca-known worktree and completes the qu
   expect(close).toBeDefined();
 
   expect(dispatch).not.toMatch(/task-update[^\n]*--status dispatched/);
-  expect(dispatch).toContain("--worktree current");
-  expect(dispatch).not.toMatch(/worker-start[^\n]*--worktree path:/);
+  expect(dispatch).toContain("ark worktree anchor <run>");
+  expect(dispatch).toMatch(/worker-start[^\n]*run-lead[^\n]*--worktree path:<printed path>/);
+  expect(dispatch).not.toContain("--worktree current");
   expect(close).toMatch(/orca orchestration task-update[^\n]*--status completed/);
 });
 
