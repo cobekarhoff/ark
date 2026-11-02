@@ -49,7 +49,7 @@ Reads evaluation.md in the run folder and records its blockers, risks and surfac
 ```text
 ark criteria amend <run> <criterion id> <file> [--project <name>]
 
-Writes the text in <file> (trailing whitespace trimmed) as the new text of one criterion in the run's ticket.md: the text line in the frontmatter and the row of the criteria table. It records criteria.amended with the criterion, the old text and the new text. The old text is the frontmatter text, which is the last amended text for a second amendment. It refuses an unknown criterion, an empty file, and a run outside the phases awaiting_strategy and planning. It clears the plan check: run ark plan check again so plan.md lists the amendment, because plan approve is refused until then.
+Writes the text in <file> as the new text of one criterion in the run's ticket.md (frontmatter and table row) and records criteria.amended with the criterion, the old text and the new text. Use it for an amendment the human approved. It refuses an unknown criterion, an empty file, and a run outside the phases awaiting_strategy and planning. It clears the plan check: run ark plan check again so plan.md lists the amendment before the plan gate.
 ```
 
 ### strategy record
