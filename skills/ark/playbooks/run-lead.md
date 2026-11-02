@@ -14,13 +14,30 @@ Throughout this playbook:
 
 1. Run `ark status <run>` and read the phase, the current step and the round budget.
 2. Read `<run folder>/ticket.md` and the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Note `workspace`, `suites`, `roles`, `concurrency` and `round_budget`.
-3. Create your own Orca Run, so your workers report to you and not to Master Chief:
+3. Look for an existing Orca Run for this Ark run before you create one. A replaced lead's Run still holds its workers and messages.
+   - Read your Orca inbox with the `check` command from your preamble, and ack each batch with `--ack <delivery_id>` until `count` is 0. Master Chief's message may name a `run_...` ID.
+   - Search the run folder for a `run_...` ID: `grep -rhoE 'run_[0-9a-f]+' <run folder> --include='*.md' --include='*.yml'`. Never search `events.ndjson` or `state.json`.
+4. If step 3 found no ID, list the Orca Runs and look for the objective `Ark run <run>`:
+
+   ```sh
+   orca orchestration run-list --json
+   ```
+
+   Take the open Run whose objective is exactly `Ark run <run>`. If the list is paged, follow it with `--cursor` until you have read every Run.
+5. If you found a Run, bind it. Do not run `run-create`:
+
+   ```sh
+   orca orchestration run-use --id <run_id> --from <your own handle> --json
+   ```
+
+   If `run-use` fails (the Run is closed, or another lead owns it), do not fall back to `run-create`. Send an escalation to Master Chief with the Run ID and the error text, and stop until Master Chief answers.
+6. Only when no existing Run was found in steps 3 and 4, create your own Orca Run, so your workers report to you and not to Master Chief:
 
    ```sh
    orca orchestration run-create --objective "Ark run <run>" --json
    ```
 
-4. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered.
+7. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered.
 
 ## 2. Evaluate the ticket and open the criteria gate
 
