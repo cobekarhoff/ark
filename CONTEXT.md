@@ -59,7 +59,7 @@ The agent that drives one run across every repo its ticket touches. It plans, st
 _Avoid_: Orchestrator, ticket lead, lead
 
 **Worker**:
-An agent a run lead starts for one step: an implementer, validator or reviewer. The run lead also starts one evaluator before it plans, and one Designer when the ticket changes something a person sees. A worker never starts other agents.
+An agent a run lead starts for one step: an implementer, validator or reviewer. The run lead also starts one evaluator before it plans, and one Designer when the ticket changes something a person sees, unless the surface is only `none`, or there is one card and the surface is only `document`. A worker never starts other agents.
 _Avoid_: Subagent, child agent, helper
 
 **Implementer**:
@@ -79,7 +79,7 @@ The worker that checks a ticket before the run lead plans. It reads the ticket a
 _Avoid_: Pre-reviewer, triage agent
 
 **Designer**:
-The worker that makes mockups for the strategy cards, and for a question about interaction a running prototype in a throwaway worktree. It revises them in each design round and never edits product code. Mockups never go into an MR. `roles.designer` in `ark.yml` sets its harness and model, and it is optional.
+The worker that makes mockups for the strategy cards, and for a question about interaction a running prototype in a throwaway worktree. It revises them in each design round and never edits product code. Mockups never go into an MR. `roles.designer` in `ark.yml` sets its harness and model, and it is optional: it is not needed when the surface is only `none`, or when there is one card and the surface is only `document`.
 _Avoid_: UI agent, artist
 
 **Strategy**:
