@@ -40,7 +40,8 @@ function branchName(runId: string, ticket: { id: string; title: string }): strin
 
 export function worktreeCreate(runId: string, repos: string[]): void {
   const { project, directory } = findRun(runId);
-  const workspace = loadConfig(project).workspace;
+  const config = loadConfig(project);
+  const workspace = config.workspace;
   const knownRepos = discoverRepos(workspace);
 
   const touched = [...new Set(repos.length > 0 ? repos : reposOfLastValidPlan(directory))].sort();
@@ -74,8 +75,21 @@ export function worktreeCreate(runId: string, repos: string[]): void {
     const base = git(source, "rev-parse", "HEAD");
     const branch = branchName(runId, state.ticket);
     git(source, "worktree", "add", "-b", branch, path, base);
-    appendEvent(directory, "worktree.created", { repo, path, branch, base });
     console.log(`created  ${repo} -> ${path}`);
+    if (config.setup) {
+      const setup = Bun.spawnSync(["sh", "-c", config.setup], { cwd: path });
+      if (setup.exitCode !== 0) {
+        Bun.spawnSync(["git", "-C", source, "worktree", "remove", "--force", path]);
+        Bun.spawnSync(["git", "-C", source, "branch", "-D", branch]);
+        const stderrTail = setup.stderr.toString().trim().split("\n").slice(-10).join("\n");
+        console.log(`removed  ${repo} (setup failed, worktree and branch deleted)`);
+        throw new ArkError(
+          `setup failed in repo "${repo}": \`${config.setup}\` exited ${setup.exitCode}${stderrTail ? `\n${stderrTail}` : ""}`,
+        );
+      }
+      console.log(`setup    ${repo}: ${config.setup}`);
+    }
+    appendEvent(directory, "worktree.created", { repo, path, branch, base });
   }
 
   if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror
@@ -98,6 +112,7 @@ export function worktreeSync(runId: string): void {
   const { directory } = findRun(runId);
   const state = deriveState(readEvents(directory));
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
+  assertAllowed(state, "worktree.synced", { repo: state.worktrees[0].repo, conflict: false });
   for (const worktree of state.worktrees) {
     git(worktree.path, "fetch", "origin");
     const target = targetBranch(worktree.path);

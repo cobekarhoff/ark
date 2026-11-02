@@ -32,6 +32,7 @@ You need:
    - The stack, from `bun.lock` and `package.json`: Bun and TypeScript.
    - The suites. In Ark, the tests under `test/` run with `bun test` and tag each test with an AC ID, so they form one integration suite.
    - The compose command: none, because Ark has no compose file.
+   - The setup command: `bun install --frozen-lockfile`, from `bun.lock`.
    - The ticket source: local, because the tickets are Markdown files in `~/.ark/projects/ark/tickets/`.
 
 3. Answer any questions. Master Chief asks one at a time and recommends an answer. For example:
@@ -105,6 +106,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
    workspace: /Users/you/Dev/abbott/clara-agentic-environment
    ticket_source: jira
    compose: docker compose
+   setup: bun install --frozen-lockfile
    suites:
      - name: platform-integration
        level: integration
