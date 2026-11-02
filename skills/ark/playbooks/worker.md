@@ -73,10 +73,11 @@ You make the mockups that let the human choose a strategy before code exists. Yo
 You write the product code.
 
 1. Implement the change the step's AC describe, in this repo only. Keep the change as small as the AC allow.
-2. Use the repo's own checks while you work: its build, lint and unit tests. Unit tests are for you. They never prove an AC.
-3. If a findings file or a failing test list names your step (a rework round), fix exactly what it lists. The file is `<run folder>/findings/round-<round>.md`. Do not widen the change.
-4. Commit your work on the branch `ark/<ticket id>-<slug>` with a clear message. `ark test` runs on the latest commit, so uncommitted work counts for nothing. Do not push, and do not open an MR. `ark merge-request open` does that.
-5. Do not write the AC-tagged integration or E2E tests. The validator writes them.
+2. Use the repo's own checks while you work: its build and unit tests. Unit tests are for you. They never prove an AC.
+3. Before each commit and before `worker_done`, run every check script that the repo's `package.json` lists. For this repo that is `format` (it writes), then `format:check`, `typecheck` and `lint`. Run them in rework rounds too, and for Markdown-only changes. Fix every failure first. Commit the files `format` changed.
+4. If a findings file or a failing test list names your step (a rework round), fix exactly what it lists. The file is `<run folder>/findings/round-<round>.md`. Do not widen the change.
+5. Commit your own work on the branch `ark/<ticket id>-<slug>` before `worker_done`. Do not leave it uncommitted for the reviewer or the run lead. `ark test` runs on the latest commit, so uncommitted work counts for nothing. Do not push, and do not open an MR. `ark merge-request open` does that.
+6. Do not write the AC-tagged integration or E2E tests. The validator writes them.
 
 ### Validator
 
