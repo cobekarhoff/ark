@@ -226,6 +226,8 @@ No code is written before the human approves the plan.
 
 Read your mail with the `check` command from your preamble before you open the gate, and again before you record the human's answer. A message from Master Chief can change the plan, for example a new model policy or a merge that changes the plan schema. If one does, change `plan.yml`, run `ark plan check` again and open a new gate.
 
+When Master Chief sends an amendment the human approved, write the new text to a file and run `ark criteria amend <run> <criterion id> <file>`, then run `ark plan check <run>` again. Re-read the test cases of that criterion and change `plan.yml` when the new text no longer matches them. The command works only before the plan gate.
+
 If `gates.plan` is `auto` in `ark.yml` and `ark plan check` printed `recorded plan approve by auto`, the gate is answered: it needs no Plannotator review and no relay. Check with `ark status <run>` and go to section 6. When the plan has an open decision, the gate stays open and the rules below apply.
 
 Choose how to ask.

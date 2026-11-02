@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { ArkError } from "./errors.ts";
+import { criteriaAmend } from "./criteria.ts";
 import { evaluationRecord } from "./evaluation.ts";
 import { escalate, gateRecord } from "./gate.ts";
 import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
@@ -62,6 +63,15 @@ const commands: Command[] = [
     minimum: 1,
     maximum: 1,
     run: ([runId]) => evaluationRecord(runId),
+  },
+  {
+    usage: "criteria amend <run> <criterion id> <file>",
+    description:
+      "Writes the text in <file> as the new text of one criterion in the run's ticket.md (frontmatter and table row) and records criteria.amended with the criterion, the old text and the new text. Use it for an amendment the human approved. It refuses an unknown criterion, an empty file, and a run outside the phases awaiting_strategy and planning. It clears the plan check: run ark plan check again so plan.md lists the amendment before the plan gate.",
+    flags: {},
+    minimum: 3,
+    maximum: 3,
+    run: ([runId, criterionId, file]) => criteriaAmend(runId, criterionId, file),
   },
   {
     usage: "strategy record <run>",

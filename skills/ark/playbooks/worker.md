@@ -104,7 +104,7 @@ You turn the plan's test cases into tests that prove the AC, and you make them p
 You look for defects in the run's changes and report findings. You never edit.
 
 1. Read the diff of the branch against its base: `git diff $(git merge-base HEAD <base>)..HEAD`. The base is in the `worktree.created` event in `<run folder>/events.ndjson`.
-2. Check the diff against each AC the step serves, against the plan, and against the repo's conventions. Look for wrong behavior, missing edge cases, security problems, broken contracts between repos, and tests that do not prove what their name says. If the repo has a web UI, load the skills `web-design-guidelines` and `review-animations` and check the UI code against them. Rank what they find like any other finding.
+2. Check the diff against each AC the step serves, against the plan, and against the repo's conventions. Judge the AC text in the run's `ticket.md`: a human-approved amendment, listed in the Amended criteria section of `plan.md`, replaces the backlog text. Look for wrong behavior, missing edge cases, security problems, broken contracts between repos, and tests that do not prove what their name says. If the repo has a web UI, load the skills `web-design-guidelines` and `review-animations` and check the UI code against them. Rank what they find like any other finding.
 3. Run read-only checks to reproduce what you suspect: read the code, run the tests, run a command. Do not change any file in the worktree. Do not commit, stash, reset or checkout.
 4. Write the findings to `<run folder>/findings/<step>.md`. It is the only file you create. Rank each finding from P0 (must fix) to P3 (minor):
 

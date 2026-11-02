@@ -293,6 +293,7 @@ export function renderPlanMarkdown(
   plan: Plan,
   risks: string[],
   strategy: RunState["strategy"] = null,
+  amendments: RunState["amended_criteria"] = [],
 ): string {
   const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
   const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
@@ -305,6 +306,23 @@ export function renderPlanMarkdown(
     lines.push(
       `| ${[change.criterion, change.where, change.now, change.fix].map(tableCell).join(" | ")} |`,
     );
+  }
+  if (amendments.length > 0) {
+    lines.push(
+      "",
+      "## Amended criteria",
+      "",
+      "The human approved these amendments. Judge the new text, not the original.",
+    );
+    for (const amendment of amendments) {
+      lines.push(
+        "",
+        `### ${amendment.id}`,
+        "",
+        `- **Old:** ${amendment.old.replaceAll("\n", " ")}`,
+        `- **New:** ${amendment.new.replaceAll("\n", " ")}`,
+      );
+    }
   }
   if (strategy) {
     lines.push("", "## Strategy", "");
@@ -400,7 +418,7 @@ export function planCheck(runId: string): void {
   }
   writeFileSync(
     join(directory, "plan.md"),
-    renderPlanMarkdown(plan, state.evaluation?.risks ?? [], state.strategy),
+    renderPlanMarkdown(plan, state.evaluation?.risks ?? [], state.strategy, state.amended_criteria),
   );
   console.log(
     `plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`,
