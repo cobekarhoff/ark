@@ -6,14 +6,19 @@ import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
 import {
   ark,
+  codexDay,
+  isoAgo,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  useFrozenClock,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
+
+useFrozenClock();
 let projectOneDirectory: string;
 let projectTwoDirectory: string;
 let orcaDirectory: string;
@@ -254,9 +259,7 @@ test("ARK-181-AC1 approve-and-queue sends only the exact live-chief instruction"
 test("ARK-181-AC2 lists every Orca agent and reads measured session usage", async () => {
   const codexSession = join(
     process.env.ARK_CODEX_SESSIONS as string,
-    "2026",
-    "11",
-    "01",
+    ...codexDay(),
     "rollout-codex-1.jsonl",
   );
   mkdirSync(dirname(codexSession), { recursive: true });
@@ -270,7 +273,7 @@ test("ARK-181-AC2 lists every Orca agent and reads measured session usage", asyn
       JSON.stringify({ type: "turn_context", payload: { model: "gpt-6" } }),
       JSON.stringify({
         type: "event_msg",
-        timestamp: "2026-11-01T10:00:00Z",
+        timestamp: isoAgo(3_600_000),
         payload: {
           type: "token_count",
           info: {
@@ -603,8 +606,8 @@ test(
       },
     ]);
     writeFileSync(searchStateFile, "disabled");
-    // The metrics view defaults to the current UTC week, so closed runs must be dated now.
-    const closedAt = new Date().toISOString();
+    // The metrics view defaults to the clock's UTC week, so closed runs must be dated at the clock.
+    const closedAt = isoAgo(0);
     writeMetrics("one", "ARK-181-CHROME-METRICS-ONE", closedAt, "handed_off", {
       cost: { total_usd: 1 },
       time: { wall_seconds: 60, gate_wait_seconds: 10 },

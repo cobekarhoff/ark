@@ -294,8 +294,8 @@ export function Agents({ filter, known, perform, pane }: ViewProps) {
 
 /* Metrics */
 
-export function Metrics({ filter, known, pane }: ViewProps) {
-  const [week, setWeek] = useState(() => new Date().toISOString().slice(0, 10));
+export function Metrics({ hub, filter, known, pane }: ViewProps) {
+  const [week, setWeek] = useState(() => hub.now.slice(0, 10));
   const [selected, setSelected] = useState<string | null>(null);
   const scoped = filter === "all" ? "" : `&project=${encodeURIComponent(filter)}`;
   // No run belongs to "other": the runs live in Ark projects only.

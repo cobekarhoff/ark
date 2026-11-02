@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { arkHome } from "../paths.ts";
 import { exec } from "./exec.ts";
 import { kindLabels, type Item, type Source } from "./types.ts";
+import { now as hubNow } from "./clock.ts";
 
 /** What a notification keeps of its item. The item itself may be gone later. */
 export type NotifiedItem = Pick<Item, "kind" | "project" | "title">;
@@ -43,7 +44,7 @@ export function readNotifications(): Notification[] {
 /** Records that the human opened the hub from the notification of `id`. Unknown or acted IDs change nothing. */
 export function markActed(id: string): void {
   if (readNotifications().some((notification) => notification.id === id && !notification.acted))
-    append({ acted: id, time: new Date().toISOString() });
+    append({ acted: id, time: new Date(hubNow()).toISOString() });
 }
 
 /**
@@ -70,7 +71,7 @@ export function createNotifier(getPort: () => number) {
   };
 
   async function send(item: Item): Promise<void> {
-    const time = new Date().toISOString();
+    const time = new Date(hubNow()).toISOString();
     try {
       append({
         id: item.id,

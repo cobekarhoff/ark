@@ -147,7 +147,7 @@ export function TimelineView({ hub, now, perform, view, setView, active }: Props
               <div className="ax">
                 {ticks.map((tick) => (
                   <i key={tick} style={{ left: `${percent(tick)}%` }}>
-                    {clock(tick)}
+                    {clock(tick, now)}
                   </i>
                 ))}
               </div>
@@ -212,7 +212,7 @@ export function TimelineView({ hub, now, perform, view, setView, active }: Props
                                       data-source={fromHistory(segment.kind) ? "history" : "events"}
                                       style={{ left: `${left}%`, width: `${width}%` }}
                                       title={`${segment.kind} ${segment.item ?? ""}`.trim()}
-                                      aria-label={`${segment.kind} ${segment.item ?? ""}, ${clock(from)} to ${segment.to === null ? "now" : clock(to)}`}
+                                      aria-label={`${segment.kind} ${segment.item ?? ""}, ${clock(from, now)} to ${segment.to === null ? "now" : clock(to, now)}`}
                                       onClick={() => select(lane, index, segment)}
                                     >
                                       {width > 8
@@ -314,9 +314,11 @@ export function TimelineView({ hub, now, perform, view, setView, active }: Props
                 {chosenSegment ? (
                   <>
                     <dt>Start</dt>
-                    <dd className="mono">{clock(chosenSegment.from)}</dd>
+                    <dd className="mono">{clock(chosenSegment.from, now)}</dd>
                     <dt>End</dt>
-                    <dd className="mono">{chosenSegment.to ? clock(chosenSegment.to) : "now"}</dd>
+                    <dd className="mono">
+                      {chosenSegment.to ? clock(chosenSegment.to, now) : "now"}
+                    </dd>
                     <dt>Length</dt>
                     <dd className="mono">
                       {duration(

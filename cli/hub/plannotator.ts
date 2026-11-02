@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { execJson, readerTimeoutMilliseconds } from "./exec.ts";
 import type { Item } from "./types.ts";
+import { now as hubNow } from "./clock.ts";
 
 export type PlannotatorSession = { index: number; target?: string; url?: string };
 type InboxThread = {
@@ -122,7 +123,7 @@ export function plannotatorItems(snapshot: PlannotatorSnapshot): Item[] {
         project,
         ticket: null,
         title: thread.subject ?? "Inbox question",
-        since: thread.last_at ?? new Date().toISOString(),
+        since: thread.last_at ?? new Date(hubNow()).toISOString(),
         action: { name: "plannotator-inbox", label: "Open Inbox", params: {} },
       })),
   );

@@ -1,3 +1,4 @@
+import { afterAll, beforeAll } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -88,4 +89,33 @@ export function recordEvaluation(
     reason: "the only approach fits",
     card_text: { S1: "### S1 Only" },
   });
+}
+
+/** Freezes the hub clock for the calling test file: keeps a caller's ARK_NOW, else sets a fixed mid-week instant, and restores the variable afterwards. `ark ui` subprocesses inherit it. */
+export function useFrozenClock(): void {
+  let previous: string | undefined;
+  beforeAll(() => {
+    previous = process.env.ARK_NOW;
+    if ((previous ?? "") === "") process.env.ARK_NOW = "2026-11-04T12:00:00Z";
+  });
+  afterAll(() => {
+    if (previous === undefined) delete process.env.ARK_NOW;
+    else process.env.ARK_NOW = previous;
+  });
+}
+
+/** The frozen hub clock (ARK_NOW, the variable cli/hub/clock.ts reads), in epoch milliseconds. */
+export function testNow(): number {
+  return Date.parse(process.env.ARK_NOW as string);
+}
+
+/** ISO instant `millisecondsAgo` before the frozen clock. */
+export function isoAgo(millisecondsAgo: number): string {
+  return new Date(testNow() - millisecondsAgo).toISOString();
+}
+
+/** Dated `YYYY/MM/DD` folder segments of the frozen clock's UTC day, as Codex lays out its sessions. */
+export function codexDay(): [string, string, string] {
+  const [year, month, day] = new Date(testNow()).toISOString().slice(0, 10).split("-");
+  return [year, month, day];
 }
