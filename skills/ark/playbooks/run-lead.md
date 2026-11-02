@@ -53,7 +53,7 @@ Skip this part when `ark status <run>` shows that the run has an `evaluation.rec
 2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the workspace and reads the ticket and the code. It has no plan step:
 
    ```sh
-   orca orchestration worker-start --spec "/skill:ark worker <run> evaluator" --task-title "evaluator (<run>)" --worktree path:<workspace from ark.yml> --agent <harness> --model <model> --json
+   orca orchestration worker-start --spec $'/skill:ark worker <run> evaluator\nYou are the EVALUATOR for run <run>.' --task-title "evaluator (<run>)" --worktree path:<workspace from ark.yml> --agent <harness> --model <model> --json
    ```
 
    Wait for its `worker_done`, as in section 7. Read `<run folder>/evaluation.md`. If it is missing or malformed, do not fix it yourself: run `ark evaluation record <run>`, read the refusal, and send the evaluator the fix.
@@ -102,7 +102,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    2. Start the Designer with the `harness` and `model` of `roles.designer`. It works in the workspace, has no plan step, and is named `designer`:
 
       ```sh
-      orca orchestration worker-start --spec "/skill:ark worker <run> designer" --task-title "designer (<run>)" --worktree path:<workspace from ark.yml> --agent <harness> --model <model> --json
+      orca orchestration worker-start --spec $'/skill:ark worker <run> designer\nYou are the DESIGNER for run <run>.' --task-title "designer (<run>)" --worktree path:<workspace from ark.yml> --agent <harness> --model <model> --json
       ```
 
       Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Wait for its `worker_done`, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
@@ -306,7 +306,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 2. Start the worker:
 
    ```sh
-   orca orchestration worker-start --spec "/skill:ark worker <run> <step>" --task-title "<step> (<role>, <repo>)" --worktree path:<run folder>/workspace/<repo> --agent <harness> --model <model> --json
+   orca orchestration worker-start --spec $'/skill:ark worker <run> <step>\nYou are the <ROLE> for step <step> of run <run>.' --task-title "<step> (<role>, <repo>)" --worktree path:<run folder>/workspace/<repo> --agent <harness> --model <model> --json
    ```
 
    Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`, then run `ark run step <run> <step> finish --failed` and decide what to do.
