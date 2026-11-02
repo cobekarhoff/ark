@@ -120,7 +120,12 @@ describe("gate record", () => {
       "ARK-901-AC2",
     ]);
     expect(events.at(-1).type).toBe("gate.answered");
-    expect(events.at(-1).data).toEqual({ gate: "criteria", answer: "accept", note: "looks right" });
+    expect(events.at(-1).data).toEqual({
+      gate: "criteria",
+      answer: "accept",
+      by: "human",
+      note: "looks right",
+    });
     const state = stateOf(directory);
     expect(state.phase).toBe("planning");
     expect(state.gates.criteria).toBe("accept");
@@ -163,7 +168,11 @@ describe("gate record", () => {
 
     expect(ark("plan", "check", runId).code).toBe(0);
     expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
-    expect(eventsOf(directory).at(-1).data).toEqual({ gate: "plan", answer: "approve" });
+    expect(eventsOf(directory).at(-1).data).toEqual({
+      gate: "plan",
+      answer: "approve",
+      by: "human",
+    });
     expect(stateOf(directory).phase).toBe("building");
     expect(ark("run", "step", runId, "build", "start").code).toBe(0);
     expect(stateOf(directory).current_step).toBe("build");

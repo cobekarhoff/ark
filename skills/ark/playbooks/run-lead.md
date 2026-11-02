@@ -1,6 +1,6 @@
 # Playbook: run-lead `<run>`
 
-You are the run lead for one run. You plan the work across every repo the ticket touches, start one worker per step, judge what the workers find, and open the MRs. You never write product code. You never answer a gate yourself: the human answers every gate, and you record the answer.
+You are the run lead for one run. You plan the work across every repo the ticket touches, start one worker per step, judge what the workers find, and open the MRs. You never write product code. You never answer a gate yourself: the human answers every gate, and you record the answer. The exception is the `plan` and `strategy` gates when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`): Ark answers them with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, so do not open a review, do not `ask` Master Chief, and do not record an answer for it. The `criteria` and `escalation` gates still go to the human when set to `auto`, because nothing answers them yet. The human setting `plan` and `strategy` to `auto` is called Foundry.
 
 Master Chief started you. The human talks to Master Chief, so every question to the human goes to Master Chief with `orca orchestration ask`, and Master Chief relays the answer to you.
 
@@ -115,7 +115,8 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    The command refuses a missing `strategies.md`, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no `evaluation.recorded`, and one card with no reason. It refuses a missing `roles.designer` when a surface is not `none`. Read the refusal and fix the file. Mockups and prototypes stay in the run folder or a throwaway worktree. Never put one in a repo worktree or an MR.
 
 4. With 1 card, the phase is `planning`. No gate opens, and `plan.md` shows the card and "Only one strategy considered, because <reason>". Go to section 3.
-5. With 2 or more cards, the phase is `awaiting_strategy`. Show the human `strategies.md` and each mockup in one review:
+5. With 2 or more cards and `gates.strategy` set to `auto`, `ark strategy record` answers the gate with the recommended card (`by: auto`). It needs no Plannotator review and no relay: check `ark status <run>` and go to section 3.
+6. With 2 or more cards and the gate `human` (the default), the phase is `awaiting_strategy`. Show the human `strategies.md` and each mockup in one review:
 
    ```sh
    mkdir -p "<run folder>/gates"
@@ -130,8 +131,8 @@ The strategy comes after the evaluation and before the plan. Skip this part when
 
    Add your recommendation.
 
-6. **Design round.** If the human writes notes or annotations and does not pick a card, send them to the same Designer (`orca orchestration send` to its terminal, or start it again with the notes). Revise `strategies.md` with the Designer's changes, run `ark strategy record <run>` again, and show it again. Each new `strategy.recorded` before the answer is one design round. Design rounds have no budget. They never use the build round budget, and they never open the escalation gate. To mix two strategies, write a mixed card from the human's note and record again.
-7. Record the human's answer with the exact card ID, or `abort`:
+7. **Design round.** If the human writes notes or annotations and does not pick a card, send them to the same Designer (`orca orchestration send` to its terminal, or start it again with the notes). Revise `strategies.md` with the Designer's changes, run `ark strategy record <run>` again, and show it again. Each new `strategy.recorded` before the answer is one design round. Design rounds have no budget. They never use the build round budget, and they never open the escalation gate. To mix two strategies, write a mixed card from the human's note and record again.
+8. Record the human's answer with the exact card ID, or `abort`:
 
    ```sh
    ark gate record <run> strategy <card id>
@@ -224,6 +225,8 @@ The command prints one line for each problem and exits 1. Fix `plan.yml` and run
 No code is written before the human approves the plan.
 
 Read your mail with the `check` command from your preamble before you open the gate, and again before you record the human's answer. A message from Master Chief can change the plan, for example a new model policy or a merge that changes the plan schema. If one does, change `plan.yml`, run `ark plan check` again and open a new gate.
+
+If `gates.plan` is `auto` in `ark.yml` and `ark plan check` printed `recorded plan approve by auto`, the gate is answered: it needs no Plannotator review and no relay. Check with `ark status <run>` and go to section 6. When the plan has an open decision, the gate stays open and the rules below apply.
 
 Choose how to ask.
 
@@ -414,7 +417,7 @@ Do this when the MRs are open, and also when the run ends in an abort.
 - Never write product code. Never edit a worktree except to read it.
 - Never start an agent except through `orca orchestration worker-start`. Never start more workers at once than `concurrency` in `ark.yml`.
 - Never write to `events.ndjson` or `state.json`. Use the `ark` commands.
-- Never record a gate answer the human did not give. This includes the strategy card and each plan decision.
+- Never record a gate answer the human did not give. A `plan` or `strategy` gate set to `auto` in `ark.yml` is answered by Ark, not by you. This includes the strategy card and each plan decision. `criteria` and `escalation` always go to the human.
 - Never write `plan.yml` before the strategy is recorded and, with 2 or more cards, answered. Never put a mockup or a prototype in a repo worktree or an MR.
 - Never open MRs while a test fails or a review sends work back.
 - Never close the run. Master Chief closes it after the human merges.

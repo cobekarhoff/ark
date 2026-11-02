@@ -6,6 +6,7 @@ import { projectDirectory } from "./paths.ts";
 const ticketSources = ["local", "github", "jira"];
 const levels = ["unit", "integration", "e2e"];
 const parserNames = ["bun", "pytest", "behave"];
+export const gateNames = ["criteria", "strategy", "plan", "escalation"] as const;
 const roleNames = ["implementer", "validator", "reviewer"] as const;
 
 type Role = (typeof roleNames)[number];
@@ -30,6 +31,8 @@ export type ProjectConfig = {
   };
   concurrency: number;
   round_budget: number;
+  /** Each gate is answered by the human or by Ark. A missing key is human. */
+  gates: Record<(typeof gateNames)[number], "human" | "auto">;
 };
 
 type Fields = Record<string, unknown>;
@@ -125,6 +128,17 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     };
   }
 
+  const gatesField = asObject(fields.gates ?? {}, "gates");
+  for (const key of Object.keys(gatesField))
+    if (!(gateNames as readonly string[]).includes(key))
+      fail(`gates.${key} is not a gate: use ${gateNames.join(", ")}`);
+  const gates = {} as ProjectConfig["gates"];
+  for (const name of gateNames) {
+    const value = gatesField[name] ?? "human";
+    if (value !== "human" && value !== "auto") fail(`gates.${name} must be one of human, auto`);
+    gates[name] = value as "human" | "auto";
+  }
+
   const config: ProjectConfig = {
     workspace,
     ticket_source: ticketSource,
@@ -132,6 +146,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     roles,
     concurrency: integer(fields, "concurrency", 1, 2),
     round_budget: integer(fields, "round_budget", 0, 2),
+    gates,
   };
   if (fields.compose !== undefined) config.compose = fields.compose as string;
   if (fields.setup !== undefined) config.setup = fields.setup as string;
