@@ -346,6 +346,45 @@ describe("ark retro", () => {
     expect(time.work_seconds).toBe(2310);
   });
 
+  test("ARK-217-AC1 counts each plan wait from the first valid check after the previous answer", () => {
+    writeEvents(runDirectory, [
+      [
+        "14:20:00.000",
+        "run.started",
+        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
+      ],
+      ["14:20:30.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
+      ["14:21:00.000", "gate.answered", { gate: "plan", answer: "change" }],
+      ["14:21:30.000", "plan.checked", { valid: true, problems: [], plan_hash: "b", steps: [] }],
+      ["14:21:50.000", "plan.checked", { valid: true, problems: [], plan_hash: "b", steps: [] }],
+      ["14:22:00.000", "gate.answered", { gate: "plan", answer: "approve" }],
+      ["14:23:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+
+    retro(runId);
+
+    // change wait 30 s, approve wait 30 s from the second check (20 s if it restarted at the third)
+    expect(readMetrics().time.gate_wait_seconds).toBe(60);
+  });
+
+  test("ARK-217-AC2 reports a plan wait of 3601 s for checks at T and T+3600 s and an answer at T+3601 s", () => {
+    writeEvents(runDirectory, [
+      [
+        "14:00:00.000",
+        "run.started",
+        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
+      ],
+      ["14:00:00.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
+      ["15:00:00.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
+      ["15:00:01.000", "gate.answered", { gate: "plan", answer: "approve" }],
+      ["15:01:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+
+    retro(runId);
+
+    expect(readMetrics().time.gate_wait_seconds).toBe(3601);
+  });
+
   test("ARK-160-AC5 reports rework, plan changes and escaped defects linked to the run", () => {
     writeFileSync(
       join(arkHome, "projects", "demo", "escaped-defects.yml"),

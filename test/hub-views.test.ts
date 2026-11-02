@@ -603,11 +603,13 @@ test(
       },
     ]);
     writeFileSync(searchStateFile, "disabled");
-    writeMetrics("one", "ARK-181-CHROME-METRICS-ONE", "2026-10-29T12:00:00.000Z", "handed_off", {
+    // The metrics view defaults to the current UTC week, so closed runs must be dated now.
+    const closedAt = new Date().toISOString();
+    writeMetrics("one", "ARK-181-CHROME-METRICS-ONE", closedAt, "handed_off", {
       cost: { total_usd: 1 },
       time: { wall_seconds: 60, gate_wait_seconds: 10 },
     });
-    writeMetrics("two", "ARK-181-CHROME-METRICS-TWO", "2026-10-29T12:00:00.000Z", "handed_off", {
+    writeMetrics("two", "ARK-181-CHROME-METRICS-TWO", closedAt, "handed_off", {
       cost: { total_usd: 2 },
       time: { wall_seconds: 120, gate_wait_seconds: 20 },
     });
