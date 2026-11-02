@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { ArkError } from "./errors.ts";
 import { evaluationRecord } from "./evaluation.ts";
-import { gateRecord } from "./gate.ts";
+import { escalate, gateRecord } from "./gate.ts";
 import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
 import { planCheck } from "./plan.ts";
 import { retro } from "./retro.ts";
@@ -108,6 +108,15 @@ const commands: Command[] = [
     maximum: 3,
     run: ([runId, gate, answer], flags) =>
       gateRecord(runId, gate, answer, flags["--note"] as string | undefined),
+  },
+  {
+    usage: "escalate <run> --reason <text>",
+    description:
+      "Opens the escalation gate when the round budget is spent, also when the last ark test passed. Use it for an unresolved review P0 or P1. It records escalation.requested with the reason. It refuses a run that is not in phase building, a round budget that is not spent, and an empty reason. Answer the gate with ark gate record.",
+    flags: { "--reason": true },
+    minimum: 1,
+    maximum: 1,
+    run: ([runId], flags) => escalate(runId, flags["--reason"] as string | undefined),
   },
   {
     usage: "merge-request open <run>",

@@ -84,6 +84,14 @@ ark gate record <run> <gate> <answer> [--note <text>]
 Records your answer to a gate. The gates are criteria, strategy, plan and escalation. The strategy gate takes the ID of a card in the latest strategy record, or abort. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.
 ```
 
+### escalate
+
+```text
+ark escalate <run> --reason <text>
+
+Opens the escalation gate when the round budget is spent, also when the last ark test passed. Use it for an unresolved review P0 or P1. It records escalation.requested with the reason. It refuses a run that is not in phase building, a round budget that is not spent, and an empty reason. Answer the gate with ark gate record.
+```
+
 ### merge-request open
 
 ```text
@@ -350,6 +358,7 @@ A test proves an AC when its name or tags contain the AC id, for example `CLARA-
 | `strategy.recorded`    | `count`, `recommended`, `cards` (ids), optional `reason`                                                                                 | `ark strategy record`                     |
 | `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`), `open_decisions`                                  | `ark plan check`                          |
 | `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, or `escalation`), `answer`, optional `note`                                                      | `ark gate record`                         |
+| `escalation.requested` | `reason`                                                                                                                                 | `ark escalate`                            |
 | `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                         | `ark worktree create`                     |
 | `step.started`         | `step`, `role`, `repo`, `round`                                                                                                          | `ark run step ... start`                  |
 | `step.finished`        | `step`, `outcome` (`succeeded` or `failed`)                                                                                              | `ark run step ... finish`                 |

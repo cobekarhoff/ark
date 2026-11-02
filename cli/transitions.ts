@@ -121,6 +121,15 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
       if (state.steps.find((step) => step.id === data.step)?.status !== "running")
         throw new ArkError(`step.finished refused: missing step.started for ${data.step}`);
       return;
+    case "escalation.requested":
+      requirePhase(state, type, ["building"]);
+      if (typeof data.reason !== "string" || data.reason.trim() === "")
+        throw new ArkError("escalation.requested refused: a reason is required");
+      if (state.round < state.round_budget)
+        throw new ArkError(
+          `escalation.requested refused: the round budget is not spent (round ${state.round} of ${state.round_budget}); reason given: ${data.reason}`,
+        );
+      return;
     case "test.completed":
       requirePhase(state, type, buildPhases);
       return;

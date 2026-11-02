@@ -57,3 +57,10 @@ export function gateRecord(runId: string, gate: string, answer: string, note?: s
   );
   console.log(`recorded ${gate} ${answer}`);
 }
+
+export function escalate(runId: string, reason: string | undefined): void {
+  const { directory } = findRun(runId);
+  appendEvent(directory, "escalation.requested", { reason: reason ?? "" });
+  const state = deriveState(readEvents(directory));
+  console.log(`recorded escalation request: round ${state.round} of ${state.round_budget}`);
+}
