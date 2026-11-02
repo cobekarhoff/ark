@@ -147,7 +147,7 @@ A `status` message from a run lead is a notice, not a question. Pass it to the h
 
 ### A `question` from a run lead
 
-Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. A gate that `ark.yml` sets to `auto` (`gates.<gate>`) is answered by Ark with `by: auto`: it needs no Plannotator review and no relay to the human, and no `ask` arrives for it. Setting every gate to `auto` is the Foundry setup.
+Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. The `plan` and `strategy` gates, when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`), are answered by Ark with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, and no `ask` arrives for it. The `criteria` and `escalation` gates stay with the human even when set to `auto`, because nothing answers them yet. Setting `plan` and `strategy` to `auto` is the Foundry setup.
 
 1. Read the question and its options. Say which run and ticket it is for.
 2. Put it to the human with the ask tool. Keep the run lead's options and recommended answer. If the question points to `plan.md` or a findings file, tell the human the path.
@@ -229,7 +229,7 @@ When the human gives you a bug ticket and it traces back to an earlier run, or y
 ## Rules
 
 - Never write product code, edit a worktree, or run a project's tests yourself. Run leads and workers do that.
-- Never answer a gate yourself, and never relay one that `ark.yml` set to `auto`. Every `ask` goes to the human, and the human's words go back with `reply`.
+- Never answer a gate yourself, and never relay a `plan` or `strategy` gate that `ark.yml` set to `auto`. Every other `ask` goes to the human, and the human's words go back with `reply`.
 - Never run `ark gate record`. The run lead records the human's answer.
 - Never queue a ticket the human did not approve.
 - Never start more open runs than `concurrency`.
