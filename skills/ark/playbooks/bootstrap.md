@@ -60,11 +60,12 @@ For each repo, find test locations and classify them:
 
 Pick the runner and parser from the files:
 
-| Signal                                                            | `parser` | `command`                                                           |
-| ----------------------------------------------------------------- | -------- | ------------------------------------------------------------------- |
-| `*.test.ts` files, Bun stack                                      | `bun`    | `bun test <directory> --reporter=junit --reporter-outfile={report}` |
-| `pytest` in `pyproject.toml`, `conftest.py`, or `test_*.py` files | `pytest` | `pytest -o junit_family=xunit1 --junitxml={report} <directory>`     |
-| `features/` with `.feature` files, `behave` in dependencies       | `behave` | `behave --format json -o {report} <directory>`                      |
+| Signal                                                            | `parser` | `command`                                                                     |
+| ----------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------- |
+| `*.test.ts` files, Bun stack                                      | `bun`    | `bun test <directory> --reporter=junit --reporter-outfile={report}`           |
+| `playwright.config.ts`, `@playwright/test` in dependencies        | `bun`    | `PLAYWRIGHT_JUNIT_OUTPUT_FILE={report} bunx playwright test --reporter=junit` |
+| `pytest` in `pyproject.toml`, `conftest.py`, or `test_*.py` files | `pytest` | `pytest -o junit_family=xunit1 --junitxml={report} <directory>`               |
+| `features/` with `.feature` files, `behave` in dependencies       | `behave` | `behave --format json -o {report} <directory>`                                |
 
 If the repo's own tooling wraps the runner (for example `uv run pytest` or `pnpm exec`), put that wrapper in front of the command. `{report}` stays literal: `ark test` replaces it with a path under the run's `results/` folder.
 
@@ -84,7 +85,7 @@ Check that the command parses: `docker compose -f <file> config --quiet` (read-o
 
 ### Setup command
 
-A new worktree has no installed dependencies. Look at the lockfile and manifest in each repo for the install command, for example `bun.lock` gives `bun install --frozen-lockfile`, `uv.lock` gives `uv sync --frozen`, and `package-lock.json` gives `npm ci`. `ark worktree create` runs this one command with `sh -c` in every new worktree, so join several with `&&` only when the repos differ. Check that the tool exists with `command -v`. If the project needs no install step, leave `setup` out.
+A new worktree has no installed dependencies. Look at the lockfile and manifest in each repo for the install command, for example `bun.lock` gives `bun install --frozen-lockfile`, `uv.lock` gives `uv sync --frozen`, and `package-lock.json` gives `npm ci`. `ark worktree create` runs this one command with `sh -c` in every new worktree, so join several with `&&` only when the repos differ. Check that the tool exists with `command -v`. If the project uses Playwright, add `&& bunx playwright install chromium` (or the matching browser) so each worktree has its browser. If the project needs no install step, leave `setup` out.
 
 ### Ticket source
 

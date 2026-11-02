@@ -1,0 +1,15 @@
+<testsuites id="" name="" tests="3" failures="1" skipped="1" errors="0" time="1.5">
+<testsuite name="ui.pw.ts" timestamp="2026-11-02T00:00:00.000Z" hostname="chromium" tests="3" failures="1" skipped="1" time="1.4" errors="0">
+<testcase name="ARK-901-AC1 passes &amp; stays green" classname="ui.pw.ts" time="0.5">
+</testcase>
+<testcase name="ARK-901-AC2 fails with a message" classname="ui.pw.ts" time="0.4">
+<failure message="ui.pw.ts:9:1 ARK-901-AC2 fails" type="FAILURE">
+<![CDATA[Error: expect(received).toBe(expected)]]>
+</failure>
+</testcase>
+<testcase name="ARK-901-AC3 is skipped" classname="ui.pw.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+</testsuites>

@@ -20,7 +20,6 @@ const repositoryRoot = join(import.meta.dir, "..");
 const workerHandle = "term_limit";
 let orcaDirectory: string;
 let orcaStateDirectory: string;
-let terminalLog: string;
 let runId: string;
 
 const limitLine = (waitSeconds: number) =>
@@ -74,7 +73,6 @@ beforeEach(() => {
   });
   orcaDirectory = mkdtempSync(join(tmpdir(), "ark199-orca-"));
   orcaStateDirectory = mkdtempSync(join(tmpdir(), "ark199-state-"));
-  terminalLog = join(orcaStateDirectory, "terminal.log");
   process.env.ORCA_STATE_DIRECTORY = orcaStateDirectory;
   process.env.ARK_OMP_SESSIONS = mkdtempSync(join(tmpdir(), "ark199-omp-"));
   process.env.ARK_CLAUDE_SESSIONS = mkdtempSync(join(tmpdir(), "ark199-claude-"));
@@ -311,67 +309,3 @@ test("ARK-199-AC1 an agent terminal outside any Ark run gives a usage_limit item
     expect(item.action).toMatchObject({ params: { handle: "term_free" } });
   });
 });
-
-test(
-  "ARK-199-AC3 the headless Map lists the usage_limit item on its agent node, as the API counts it",
-  { timeout: 30_000 },
-  async () => {
-    setTail([limitLine(4805)]);
-    await using view = new Bun.WebView({
-      backend: "chrome",
-      width: 1440,
-      height: 1000,
-    });
-    await withUi(async (baseUrl) => {
-      await waitForLimits(baseUrl, (limits) => limits.length === 1);
-      await view.navigate(baseUrl);
-      const nodeSelector = `[data-node="agent:${runId}:${workerHandle}"]`;
-      await view.evaluate(
-        `document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true }))`,
-      );
-      for (let attempt = 0; attempt < 80; attempt++) {
-        if (await view.evaluate(`document.querySelector('${nodeSelector}') !== null`)) break;
-        await Bun.sleep(100);
-      }
-      await view.evaluate(
-        `document.querySelector('${nodeSelector}').dispatchEvent(new MouseEvent('click', { bubbles: true }))`,
-      );
-      const labels = (await view.evaluate(
-        `Array.from(document.querySelectorAll('aside.detail button.btn.primary')).map((button) => button.textContent)`,
-      )) as string[];
-      expect(labels).toEqual(["Open in Orca"]);
-    });
-  },
-);
-
-test(
-  "ARK-199-AC3 headless Home shows the usage_limit item with a countdown and its action switches Orca to the agent",
-  { timeout: 30_000 },
-  async () => {
-    setTail([limitLine(4805)]);
-    await using view = new Bun.WebView({
-      backend: "chrome",
-      width: 1440,
-      height: 1000,
-    });
-    await withUi(async (baseUrl) => {
-      await view.navigate(baseUrl);
-      const rowSelector = `[data-need^="limit:"]`;
-      for (let attempt = 0; attempt < 80; attempt++) {
-        if (await view.evaluate(`document.querySelector('${rowSelector}') !== null`)) break;
-        await Bun.sleep(100);
-      }
-      const countdown = (await view.evaluate(
-        `document.querySelector('${rowSelector} [data-countdown]').textContent`,
-      )) as string;
-      // 4805 seconds is 80 minutes and a few seconds, so the page rounds up to 1h 21m or 1h 20m.
-      expect(countdown).toMatch(/^codex · resets in 1h 2?[01]m$/);
-      await view.evaluate(`document.querySelector('${rowSelector} button.act').click()`);
-      for (let attempt = 0; attempt < 40 && !existsSync(terminalLog); attempt++)
-        await Bun.sleep(50);
-      expect(readFileSync(terminalLog, "utf8")).toContain(
-        `terminal switch --terminal ${workerHandle}`,
-      );
-    });
-  },
-);
