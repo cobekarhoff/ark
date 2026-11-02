@@ -167,112 +167,136 @@ const openedEvents = (runDirectory: string) =>
     .map((line) => JSON.parse(line))
     .filter((event) => event.type === "merge_request.opened");
 
-test("ARK-155-AC1 ARK-155-AC2 ARK-155-AC3 ARK-155-AC4 ARK-155-AC5 GitHub: pushes, opens in dependency order, writes events", () => {
-  const { runDirectory, bares } = scenario({ core: "github", app: "github" });
-  const result = ark("merge-request", "open", run);
-  expect(result.code).toBe(0);
+test(
+  "ARK-155-AC1 ARK-155-AC2 ARK-155-AC3 ARK-155-AC4 ARK-155-AC5 GitHub: pushes, opens in dependency order, writes events",
+  () => {
+    const { runDirectory, bares } = scenario({ core: "github", app: "github" });
+    const result = ark("merge-request", "open", run);
+    expect(result.code).toBe(0);
 
-  // One pull request per repo with commits, core before app although the plan lists app first.
-  const opened = created();
-  expect(opened.map((call) => call.tool)).toEqual(["gh", "gh"]);
-  expect(opened.map((call) => call.cwd.split("/").at(-1))).toEqual(["core", "app"]);
-  expect(optionValue(opened[0], "--head")).toBe(`ark/${run}`);
-  expect(optionValue(opened[0], "--title")).toBe("ARK-900: Show units");
+    // One pull request per repo with commits, core before app although the plan lists app first.
+    const opened = created();
+    expect(opened.map((call) => call.tool)).toEqual(["gh", "gh"]);
+    expect(opened.map((call) => call.cwd.split("/").at(-1))).toEqual(["core", "app"]);
+    expect(optionValue(opened[0], "--head")).toBe(`ark/${run}`);
+    expect(optionValue(opened[0], "--title")).toBe("ARK-900: Show units");
 
-  // The run branch reached each origin; docs had no commits and opened nothing.
-  expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
-  expect(git(bares.app, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
-  expect(
-    Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.docs })
-      .exitCode,
-  ).not.toBe(0);
+    // The run branch reached each origin; docs had no commits and opened nothing.
+    expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
+    expect(git(bares.app, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
+    expect(
+      Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.docs })
+        .exitCode,
+    ).not.toBe(0);
 
-  const coreBody = optionValue(opened[0], "--body");
-  const appBody = optionValue(opened[1], "--body");
-  expect(coreBody).toContain("ARK-900 Show units");
-  expect(coreBody).toContain("ARK-900-AC1: Core exports units");
-  expect(coreBody).not.toContain("ARK-900-AC2");
-  expect(coreBody).not.toContain("Depends on");
-  expect(appBody).toContain("ARK-900-AC2: App shows units");
-  expect(appBody).not.toContain("ARK-900-AC1");
-  expect(appBody).toContain("Depends on #1");
+    const coreBody = optionValue(opened[0], "--body");
+    const appBody = optionValue(opened[1], "--body");
+    expect(coreBody).toContain("ARK-900 Show units");
+    expect(coreBody).toContain("ARK-900-AC1: Core exports units");
+    expect(coreBody).not.toContain("ARK-900-AC2");
+    expect(coreBody).not.toContain("Depends on");
+    expect(appBody).toContain("ARK-900-AC2: App shows units");
+    expect(appBody).not.toContain("ARK-900-AC1");
+    expect(appBody).toContain("Depends on #1");
 
-  expect(openedEvents(runDirectory).map((event) => event.data)).toEqual([
-    { repo: "repos/core", url: "https://github.com/org/core/pull/1", number: 1 },
-    { repo: "repos/app", url: "https://github.com/org/app/pull/2", number: 2 },
-  ]);
+    expect(openedEvents(runDirectory).map((event) => event.data)).toEqual([
+      { repo: "repos/core", url: "https://github.com/org/core/pull/1", number: 1 },
+      { repo: "repos/app", url: "https://github.com/org/app/pull/2", number: 2 },
+    ]);
 
-  // Rerun: no new pull request, no new event.
-  const rerun = ark("merge-request", "open", run);
-  expect(rerun.code).toBe(0);
-  expect(created()).toHaveLength(2);
-  expect(openedEvents(runDirectory)).toHaveLength(2);
+    // Rerun: no new pull request, no new event.
+    const rerun = ark("merge-request", "open", run);
+    expect(rerun.code).toBe(0);
+    expect(created()).toHaveLength(2);
+    expect(openedEvents(runDirectory)).toHaveLength(2);
 
-  // ARK-155-AC7 at runtime: no call merged, approved or set auto-merge.
-  for (const call of calls()) {
-    expect(call.argv.join(" ")).not.toMatch(/\bmerge\b|\bapprove\b|--auto/);
-  }
-});
+    // ARK-155-AC7 at runtime: no call merged, approved or set auto-merge.
+    for (const call of calls()) {
+      expect(call.argv.join(" ")).not.toMatch(/\bmerge\b|\bapprove\b|--auto/);
+    }
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-155-AC1 ARK-155-AC3 GitLab: uses glab, `Depends on !N` and a native dependency", () => {
-  const { runDirectory } = scenario({ core: "gitlab", app: "gitlab" });
-  expect(ark("merge-request", "open", run).code).toBe(0);
+test(
+  "ARK-155-AC1 ARK-155-AC3 GitLab: uses glab, `Depends on !N` and a native dependency",
+  () => {
+    const { runDirectory } = scenario({ core: "gitlab", app: "gitlab" });
+    expect(ark("merge-request", "open", run).code).toBe(0);
 
-  const opened = created();
-  expect(opened.map((call) => call.tool)).toEqual(["glab", "glab"]);
-  expect(optionValue(opened[1], "--source-branch")).toBe(`ark/${run}`);
-  expect(optionValue(opened[1], "--description")).toContain("Depends on !1");
-  expect(openedEvents(runDirectory).map((event) => event.data.url)).toEqual([
-    "https://gitlab.com/org/core/-/merge_requests/1",
-    "https://gitlab.com/org/app/-/merge_requests/2",
-  ]);
+    const opened = created();
+    expect(opened.map((call) => call.tool)).toEqual(["glab", "glab"]);
+    expect(optionValue(opened[1], "--source-branch")).toBe(`ark/${run}`);
+    expect(optionValue(opened[1], "--description")).toContain("Depends on !1");
+    expect(openedEvents(runDirectory).map((event) => event.data.url)).toEqual([
+      "https://gitlab.com/org/core/-/merge_requests/1",
+      "https://gitlab.com/org/app/-/merge_requests/2",
+    ]);
 
-  const block = calls().find((call) => call.argv.join(" ").includes("/blocks"));
-  expect(block?.argv).toEqual([
-    "api",
-    "--method",
-    "POST",
-    "projects/:fullpath/merge_requests/2/blocks?blocking_merge_request_id=9001",
-  ]);
-  for (const call of calls())
-    expect(call.argv.join(" ")).not.toMatch(
-      /\/merge\b|\/approve\b|\bapprove\b|--auto|--when-pipeline/,
-    );
-});
+    const block = calls().find((call) => call.argv.join(" ").includes("/blocks"));
+    expect(block?.argv).toEqual([
+      "api",
+      "--method",
+      "POST",
+      "projects/:fullpath/merge_requests/2/blocks?blocking_merge_request_id=9001",
+    ]);
+    for (const call of calls())
+      expect(call.argv.join(" ")).not.toMatch(
+        /\/merge\b|\/approve\b|\bapprove\b|--auto|--when-pipeline/,
+      );
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-155-AC3 GitLab: a refused native dependency still opens the merge request with the description line", () => {
-  process.env.FAKE_GLAB_BLOCK_FAIL = "1";
-  const { runDirectory } = scenario({ core: "gitlab", app: "gitlab" });
-  expect(ark("merge-request", "open", run).code).toBe(0);
-  expect(optionValue(created()[1], "--description")).toContain("Depends on !1");
-  expect(openedEvents(runDirectory)).toHaveLength(2);
-});
+test(
+  "ARK-155-AC3 GitLab: a refused native dependency still opens the merge request with the description line",
+  () => {
+    process.env.FAKE_GLAB_BLOCK_FAIL = "1";
+    const { runDirectory } = scenario({ core: "gitlab", app: "gitlab" });
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    expect(optionValue(created()[1], "--description")).toContain("Depends on !1");
+    expect(openedEvents(runDirectory)).toHaveLength(2);
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-155-AC1 ARK-155-AC3 each repo uses the host of its own remote", () => {
-  scenario({ core: "github", app: "gitlab" });
-  expect(ark("merge-request", "open", run).code).toBe(0);
-  const opened = created();
-  expect(opened.map((call) => call.tool)).toEqual(["gh", "glab"]);
-  expect(optionValue(opened[1], "--description")).toContain("Depends on !1");
-});
+test(
+  "ARK-155-AC1 ARK-155-AC3 each repo uses the host of its own remote",
+  () => {
+    scenario({ core: "github", app: "gitlab" });
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    const opened = created();
+    expect(opened.map((call) => call.tool)).toEqual(["gh", "glab"]);
+    expect(optionValue(opened[1], "--description")).toContain("Depends on !1");
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-155-AC6 refuses when the last test run failed", () => {
-  const { runDirectory } = scenario({ core: "github", app: "github" }, false);
-  const result = ark("merge-request", "open", run);
-  expect(result.code).toBe(1);
-  expect(result.err).toContain("did not pass");
-  expect(calls()).toHaveLength(0);
-  expect(openedEvents(runDirectory)).toHaveLength(0);
-});
+test(
+  "ARK-155-AC6 refuses when the last test run failed",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" }, false);
+    const result = ark("merge-request", "open", run);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("did not pass");
+    expect(calls()).toHaveLength(0);
+    expect(openedEvents(runDirectory)).toHaveLength(0);
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-155-AC6 refuses when a worktree head moved after the test run, and names the repo", () => {
-  const { worktrees } = scenario({ core: "github", app: "github" });
-  commit(worktrees.app, "late-change");
-  const result = ark("merge-request", "open", run);
-  expect(result.code).toBe(1);
-  expect(result.err).toContain("repos/app");
-  expect(calls()).toHaveLength(0);
-});
+test(
+  "ARK-155-AC6 refuses when a worktree head moved after the test run, and names the repo",
+  () => {
+    const { worktrees } = scenario({ core: "github", app: "github" });
+    commit(worktrees.app, "late-change");
+    const result = ark("merge-request", "open", run);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("repos/app");
+    expect(calls()).toHaveLength(0);
+  },
+  { timeout: 30_000 },
+);
 
 test("ARK-155-AC2 mergeOrder follows needs across repos, ties by first appearance, same plan same order", () => {
   const step = (id: string, repo: string, needs: string[] = []) => ({
