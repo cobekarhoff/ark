@@ -79,6 +79,17 @@ test("ARK-166-AC3 opens Plannotator on plan.md only", () => {
   expect(annotateCommand).not.toContain("plan.yml");
 });
 
+test("ARK-231-AC1 run-lead section 5 backgrounds the Plannotator review and stops it when Master Chief relays the answer", () => {
+  const planGate = runLeadPlaybook.split("## 5. Plan gate")[1]?.split("\n## ")[0];
+  expect(planGate).toBeDefined();
+  expect(planGate).toMatch(/plannotator annotate "<run folder>\/plan\.md"[^\n]*&\n/);
+  expect(planGate).toMatch(/echo \$! > "<run folder>\/gates\/plan-<n>\.pid"/);
+  const relay = planGate!.match(/If Master Chief relays[^\n]*/)?.[0];
+  expect(relay).toBeDefined();
+  expect(relay).toMatch(/kill "\$\(cat "<run folder>\/gates\/plan-<n>\.pid"\)"/);
+  expect(relay!.indexOf("kill")).toBeLessThan(relay!.indexOf("ark gate record"));
+});
+
 test("ARK-171-AC5 run-lead section 4 asks for callers of each interface and an output example", () => {
   const writePlan = runLeadPlaybook.split("## 4. Write the plan")[1]?.split("\n## ")[0];
   expect(writePlan).toBeDefined();
