@@ -104,7 +104,7 @@ export function useFrozenClock(): void {
   });
 }
 
-/** The frozen hub clock (ARK_NOW, the variable cli/hub/clock.ts reads), in epoch milliseconds. */
+/** The frozen hub clock (ARK_NOW, the variable cli/clock.ts reads), in epoch milliseconds. */
 export function testNow(): number {
   return Date.parse(process.env.ARK_NOW as string);
 }

@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { loadConfig } from "../config.ts";
 import { isInside, readUsageIn, type SessionWithKey } from "../usage/index.ts";
 import { listProjects, projectDirectory } from "../paths.ts";
-import { execJson } from "./exec.ts";
+import { execJson } from "../exec.ts";
 import type { OrcaTerminal } from "./orca.ts";
 import { switchTerminal, type Action } from "./types.ts";
 

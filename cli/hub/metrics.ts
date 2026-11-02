@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { deriveState, readEvents } from "../events.ts";
 import { listProjects, runsDirectory } from "../paths.ts";
-import { now as hubNow } from "./clock.ts";
+import { now as hubNow } from "../clock.ts";
 
 export type Unavailable<T> = T | "unavailable";
 

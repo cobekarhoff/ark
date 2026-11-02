@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { execJson, readerTimeoutMilliseconds } from "./exec.ts";
+import { execJson, readerTimeoutMilliseconds } from "../exec.ts";
 import type { Item } from "./types.ts";
-import { now as hubNow } from "./clock.ts";
+import { now as hubNow } from "../clock.ts";
 
 export type PlannotatorSession = { index: number; target?: string; url?: string };
 type InboxThread = {

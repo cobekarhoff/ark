@@ -4,7 +4,7 @@ import { readUsageIn, type SessionWithKey } from "../usage/index.ts";
 import { readRuns } from "./ark.ts";
 import { collectedIntervals, readHistory, type HistoryEvent } from "./changes.ts";
 import type { HubView } from "./map.ts";
-import { now as hubNow } from "./clock.ts";
+import { now as hubNow } from "../clock.ts";
 
 export const timelineWindows = [1, 12, 24];
 

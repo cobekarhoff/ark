@@ -1,9 +1,9 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { arkHome } from "../paths.ts";
-import { exec } from "./exec.ts";
+import { exec } from "../exec.ts";
 import { kindLabels, type Item, type Source } from "./types.ts";
-import { now as hubNow } from "./clock.ts";
+import { now as hubNow } from "../clock.ts";
 
 /** What a notification keeps of its item. The item itself may be gone later. */
 export type NotifiedItem = Pick<Item, "kind" | "project" | "title">;

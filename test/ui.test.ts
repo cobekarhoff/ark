@@ -160,7 +160,7 @@ test("ARK-177-AC2 a stray workspace terminal with no Master Chief Run is not a M
   });
 });
 
-test("ARK-177-AC1 accepted ADR 0008 supersedes ADR 0007's read-only rule and leaves ADR 0005 accepted", () => {
+test("ARK-177-AC1 ADR 0008 supersedes ADR 0007's read-only rule and leaves ADR 0005 accepted", () => {
   const adr0008 = readFileSync(
     join(repositoryRoot, "docs/adr/0008-hub-steers-through-master-chief.md"),
     "utf8",
@@ -171,7 +171,7 @@ test("ARK-177-AC1 accepted ADR 0008 supersedes ADR 0007's read-only rule and lea
     "utf8",
   );
 
-  expect(adr0008).toMatch(/^status: accepted$/m);
+  expect(adr0008).toMatch(/^status: superseded by ADR 0009$/m);
   expect(adr0008).toMatch(/hub steers.*Master Chief/i);
   expect(adr0005).toMatch(/Plannotator/);
   expect(adr0007).toMatch(/superseded/i);

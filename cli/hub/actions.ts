@@ -4,8 +4,9 @@ import { resolve } from "node:path";
 import { loadConfig } from "../config.ts";
 import { findRun, listProjects, projectDirectory } from "../paths.ts";
 import { proposedTickets, readRuns } from "./ark.ts";
-import { exec, execJson } from "./exec.ts";
-import { findLiveChief, findRunLead, readTerminals } from "./orca.ts";
+import { exec, execJson } from "../exec.ts";
+import { findLiveChief, readTerminals } from "../orca.ts";
+import { findRunLead } from "./orca.ts";
 import { abortInstruction, approveInstruction, instructions } from "./types.ts";
 
 const idPattern = /^[\w.-]+$/;

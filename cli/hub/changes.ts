@@ -1,8 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { arkHome } from "../paths.ts";
-import { execJson } from "./exec.ts";
-import { now as hubNow } from "./clock.ts";
+import { execJson } from "../exec.ts";
+import { now as hubNow } from "../clock.ts";
 
 /**
  * The hub's own history, `$ARK_HOME/hub/history.ndjson`. Orca, gh and Plannotator report only

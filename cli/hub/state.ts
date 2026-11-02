@@ -9,7 +9,8 @@ import { collectHistory } from "./history.ts";
 import { arkItems, readRuns, type RunInfo } from "./ark.ts";
 import { readNotifications } from "./notify.ts";
 import { createCollector, readCi, type Observed } from "./changes.ts";
-import { emptyOrca, findLiveChief, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
+import { findLiveChief } from "../orca.ts";
+import { emptyOrca, orcaItems, readOrca, type OrcaSnapshot } from "./orca.ts";
 import { limitAgents, limitItems, readUsageLimits, type UsageLimit } from "./limits.ts";
 import { projectOfPath } from "./agents.ts";
 import {
@@ -19,7 +20,7 @@ import {
   type PlannotatorSnapshot,
 } from "./plannotator.ts";
 import type { Agent } from "./types.ts";
-import { now as hubNow } from "./clock.ts";
+import { now as hubNow } from "../clock.ts";
 
 type Cost = { usd: number | "unknown"; tokens: number };
 type ChiefState =

@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { loadConfig, type ProjectConfig } from "../config.ts";
 import { listProjects } from "../paths.ts";
-import { findLiveChief, readTerminals } from "./orca.ts";
+import { findLiveChief, readTerminals } from "../orca.ts";
 
 export type ProjectView = {
   name: string;

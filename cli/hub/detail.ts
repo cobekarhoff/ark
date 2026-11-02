@@ -19,7 +19,7 @@ import { readHistory, type HistoryRecord } from "./history.ts";
 import { readTerminalTail } from "./orca.ts";
 import { loadPlan, type PlanStep } from "../plan.ts";
 import type { Agent } from "./types.ts";
-import { now as hubNow } from "./clock.ts";
+import { now as hubNow } from "../clock.ts";
 
 const notAvailable = { state: "not available" } as const;
 type Cost = { usd: number | "unknown"; tokens: number };

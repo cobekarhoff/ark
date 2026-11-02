@@ -1,4 +1,4 @@
-import { now as hubNow } from "./hub/clock.ts";
+import { now as hubNow } from "./clock.ts";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { loadConfig } from "./config.ts";

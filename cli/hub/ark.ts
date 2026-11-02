@@ -6,7 +6,8 @@ import { gateWaits } from "../retro.ts";
 import { waitingGate } from "../run.ts";
 import type { PlannotatorSession } from "./plannotator.ts";
 import type { Action, Item } from "./types.ts";
-import { now as hubNow } from "./clock.ts";
+import { retroUnanswered } from "../orca.ts";
+import { now as hubNow } from "../clock.ts";
 
 /** A closed run stays in the hub this long after its last event. */
 const closedRunDays = 7;
@@ -30,21 +31,6 @@ export function readRuns(now = hubNow()): RunInfo[] {
     }
   }
   return runs.sort((left, right) => right.state.run.localeCompare(left.state.run));
-}
-
-/** A closed run whose `retro.md` Close check lacks a non-empty answer to any of the three questions. */
-export function retroUnanswered(directory: string): boolean {
-  try {
-    const closeCheck = readFileSync(join(directory, "retro.md"), "utf8").split(
-      /^## Close check\s*$/m,
-    )[1];
-    if (closeCheck === undefined) return false;
-    return !["Biggest pain", "Change now", "Surprise"].every((label) =>
-      new RegExp(`^- ${label}:[ \\t]*\\S`, "m").test(closeCheck),
-    );
-  } catch {
-    return false;
-  }
 }
 
 export function proposedTickets(project: string): { id: string; title: string; since: string }[] {

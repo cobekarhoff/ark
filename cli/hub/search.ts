@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { listProjects, runsDirectory } from "../paths.ts";
 import { projectOfPath } from "./agents.ts";
 import { readTicketFiles } from "./backlog.ts";
-import { execJson } from "./exec.ts";
+import { execJson } from "../exec.ts";
 
 export type Hit = {
   kind: "ticket" | "run" | "plan" | "retro" | "session";
