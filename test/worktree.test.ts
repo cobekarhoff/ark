@@ -569,3 +569,18 @@ describe("ARK-276 anchor worktree", () => {
     expect(events).not.toContain('"merge_request.opened"');
   });
 });
+
+describe("ARK-276 anchor path is resolved", () => {
+  test("ARK-276-AC9 anchor and step-worker paths are real paths under the run folder", () => {
+    const workspace = tempGitRepo();
+    const { runId, runDirectory } = startRun(workspace);
+    const printed = ark("worktree", "anchor", runId).out;
+    expect(printed).toMatch(/^path:\/[^\n]+\n$/);
+    const anchor = printed.slice("path:".length, -1);
+    expect(anchor).toBe(realpathSync(anchor));
+    expect(anchor).toBe(join(runDirectory, "workspace"));
+    const stepWorker = join(anchor, "repos/a");
+    mkdirSync(stepWorker, { recursive: true });
+    expect(stepWorker).toBe(realpathSync(stepWorker));
+  });
+});

@@ -112,3 +112,11 @@ test("ARK-209-AC3 --help and docs/reference/cli.md list --project for each run-i
   Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
   expect(readFileSync(join(repositoryRoot, "docs/reference/cli.md"), "utf8")).toBe(before);
 });
+
+test("ARK-276-AC8 docs/reference/cli.md lists worktree anchor and matches the generator", () => {
+  const path = join(repositoryRoot, "docs/reference/cli.md");
+  expect(readFileSync(path, "utf8")).toContain("ark worktree anchor <run> [--project <name>]");
+  const before = readFileSync(path, "utf8");
+  Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
+  expect(readFileSync(path, "utf8")).toBe(before);
+});
