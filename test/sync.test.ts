@@ -547,3 +547,69 @@ test(
   },
   { timeout: 30_000 },
 );
+
+/** Three repos where only repos/b conflicts; repos/a and repos/c get new commits on origin. */
+function threeRepoScenario() {
+  const scenario = startRun(["repos/a", "repos/b", "repos/c"]);
+  commitFile(scenario.worktreePath("repos/b"), "shared.txt", "worktree\n");
+  const heads = {
+    "repos/a": advanceOrigin(scenario.workspace, "repos/a", "target.txt", "a\n"),
+    "repos/b": advanceOrigin(scenario.workspace, "repos/b", "shared.txt", "target\n"),
+    "repos/c": advanceOrigin(scenario.workspace, "repos/c", "target.txt", "c\n"),
+  };
+  return { ...scenario, heads };
+}
+
+const containsCommit = (directory: string, commit: string) =>
+  Bun.spawnSync(["git", "-C", directory, "merge-base", "--is-ancestor", commit, "HEAD"])
+    .exitCode === 0;
+
+test(
+  "ARK-241-AC1 sync with only repo B conflicting syncs A and C, exits 1 and names B",
+  () => {
+    const scenario = threeRepoScenario();
+    const url = "https://github.com/acme/c/pull/5";
+    appendEvent(scenario.runDirectory, "merge_request.opened", { repo: "repos/c", url, number: 5 });
+
+    const synced = ark("worktree", "sync", scenario.runId);
+    expect(synced.code).toBe(1);
+    expect(synced.err).toContain("repo repos/b: merging origin/main failed");
+    expect(synced.err).not.toContain("repo repos/a");
+    expect(synced.err).not.toContain("repo repos/c");
+
+    expect(containsCommit(scenario.worktreePath("repos/a"), scenario.heads["repos/a"])).toBe(true);
+    expect(containsCommit(scenario.worktreePath("repos/c"), scenario.heads["repos/c"])).toBe(true);
+    expect(containsCommit(scenario.worktreePath("repos/b"), scenario.heads["repos/b"])).toBe(false);
+    expect(synced.out).toContain("repos/c  main");
+    expect(synced.out).toContain("pushed");
+
+    // The clean repo after the conflicting one is pushed to its origin.
+    const worktreeC = scenario.worktreePath("repos/c");
+    const originC = git(worktreeC, "remote", "get-url", "origin");
+    expect(git(originC, "rev-parse", git(worktreeC, "branch", "--show-current"))).toBe(
+      git(worktreeC, "rev-parse", "HEAD"),
+    );
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-241-AC2 sync with one conflicting repo records a conflict for that repo only",
+  () => {
+    const scenario = threeRepoScenario();
+    expect(ark("worktree", "sync", scenario.runId).code).toBe(1);
+
+    const events = readEventLines(scenario.runDirectory).filter(
+      (event) => event.type === "worktree.synced",
+    );
+    expect(events.map((event) => [event.data.repo, event.data.conflict])).toEqual([
+      ["repos/a", false],
+      ["repos/b", true],
+      ["repos/c", false],
+    ]);
+    expect(
+      JSON.parse(readFileSync(join(scenario.runDirectory, "state.json"), "utf8")).sync_conflicts,
+    ).toEqual(["repos/b"]);
+  },
+  { timeout: 30_000 },
+);
