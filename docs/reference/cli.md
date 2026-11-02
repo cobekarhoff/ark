@@ -113,7 +113,7 @@ Prints each MR of the run as merged, open or closed, read from gh or glab. For o
 ```text
 ark worktree sync <run>
 
-Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge, names the repo and exits 1. It never merges an MR.
+Fetches and merges origin's target branch into each worktree of the run, and pushes the branch of each repo that has an MR. It records worktree.synced for each repo. On a conflict it records it, undoes the merge, names the repo and exits 1. A closed run gets a phase error and its worktrees stay unchanged. It never merges an MR.
 ```
 
 ### workspace sync
@@ -137,7 +137,7 @@ Prints the state of one run: phase, round, first unfinished step, waiting gate, 
 ```text
 ark retro <run>
 
-Computes the run's cost, time, rework and intervention metrics and writes metrics.json.
+Computes the run's cost, time, rework and intervention metrics and writes metrics.json. The `rework` object holds `rounds` (highest round of a non-merge step), `escalations` (escalation gate answers) and `findings_sent_back` (reviewer steps that finished failed). `rework.merge_steps` counts steps started with `--merge`.
 ```
 
 ### ui

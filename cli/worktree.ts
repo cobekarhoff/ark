@@ -98,6 +98,7 @@ export function worktreeSync(runId: string): void {
   const { directory } = findRun(runId);
   const state = deriveState(readEvents(directory));
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
+  assertAllowed(state, "worktree.synced", { repo: state.worktrees[0].repo, conflict: false });
   for (const worktree of state.worktrees) {
     git(worktree.path, "fetch", "origin");
     const target = targetBranch(worktree.path);

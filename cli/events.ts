@@ -206,9 +206,13 @@ export function deriveState(events: ArkEvent[]): RunState {
           startedSteps.push({ id: data.step, role: data.role, repo: data.repo });
         if (mergeRequests.length > 0 && data.role === "implementer") escalationAnswered = false;
         break;
-      case "step.finished":
+      case "step.finished": {
         stepStatus.set(data.step, data.outcome);
+        const finishedStep = startedSteps.find((step) => step.id === data.step);
+        if (data.merge && data.outcome === "succeeded" && finishedStep)
+          syncConflicts.delete(finishedStep.repo);
         break;
+      }
       case "test.completed":
         criteriaStatus = data.criteria;
         lastTest = { passed: data.passed, heads: data.heads };
