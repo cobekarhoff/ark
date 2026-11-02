@@ -433,6 +433,12 @@ export function App() {
                   key={name}
                   project={name}
                   live={chief.state === "unknown" ? null : chief.state === "live"}
+                  proposed={hub.needs_me
+                    .filter((item) => item.kind === "ticket" && item.project === name)
+                    .map((item) => ({
+                      id: item.ticket ?? "",
+                      title: item.title.replace(/^Proposed ticket: /, ""),
+                    }))}
                 />
               ))}
 

@@ -3,10 +3,10 @@ import { join } from "node:path";
 import { resolve } from "node:path";
 import { loadConfig } from "../config.ts";
 import { findRun, listProjects, projectDirectory } from "../paths.ts";
-import { readRuns } from "./ark.ts";
+import { proposedTickets, readRuns } from "./ark.ts";
 import { exec, execJson } from "./exec.ts";
 import { findLiveChief, findRunLead, readTerminals } from "./orca.ts";
-import { abortInstruction, instructions } from "./types.ts";
+import { abortInstruction, approveInstruction, instructions } from "./types.ts";
 
 const idPattern = /^[\w.-]+$/;
 const handlePattern = /^term_[\w-]+$/;
@@ -98,6 +98,21 @@ const steering: Record<string, (params: Params) => Promise<Reply>> = {
       if (owner !== project) throw new Error(`run ${run} is not in project ${project}`);
       if (confirmed !== true) throw new Error("abort needs confirmed: true");
       return toChief(project, abortInstruction(run));
+    }
+    if (instruction === "approve-and-queue") {
+      const { tickets } = params;
+      if (
+        !Array.isArray(tickets) ||
+        tickets.length === 0 ||
+        tickets.some((id) => typeof id !== "string") ||
+        new Set(tickets).size !== tickets.length
+      )
+        throw new Error("tickets must be a non-empty list of unique ticket ids");
+      const proposed = new Set(proposedTickets(project).map(({ id }) => id));
+      const unknown = tickets.find((id) => !proposed.has(id));
+      if (unknown !== undefined)
+        throw new Error(`${unknown} is not a proposed ticket of ${project}`);
+      return toChief(project, approveInstruction(tickets));
     }
     if (typeof instruction !== "string" || !Object.hasOwn(instructions, instruction))
       throw new Error("bad instruction");

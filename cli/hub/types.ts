@@ -51,8 +51,6 @@ export const kindLabels: Record<ItemKind, string> = {
 
 /** The fixed lines the steering buttons type into Master Chief. The abort line names the run, so the page shows it before the human confirms. */
 export const instructions = {
-  "approve-and-queue":
-    "Hub: approve and queue the proposed tickets in the order shown. The human asked for it.",
   "reorder-queue":
     "Hub: reorder the queue by priority, highest first, and tell the human the new order.",
   pause: "Hub: pause. Do not start new runs. Let running runs finish their current step.",
@@ -60,4 +58,6 @@ export const instructions = {
   "retry-stuck-agent":
     "Hub: retry the stuck agent. Nudge it, and if it does not respond, restart its step.",
 } as const;
+export const approveInstruction = (ids: string[]) =>
+  `Hub: approve and queue ${ids.join(", ")}. The human asked for exactly these tickets. Do not approve any other proposed ticket.`;
 export const abortInstruction = (run: string) => `Hub: abort run ${run}. The human confirmed it.`;
