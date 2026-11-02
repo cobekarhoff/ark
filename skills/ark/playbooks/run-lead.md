@@ -388,6 +388,8 @@ Run the reviewer steps after the tests pass. Each reviewer writes its findings t
 
 To send work back, write the findings you accept into `<run folder>/findings/round-<round>.md`, start the implementer step again, run `ark test <run>` when it finishes, and then start the reviewer step again to check the fixes. Stop when a review sends nothing back and the tests pass.
 
+`ark retro` counts `rework.findings_sent_back` from these files. Only files named `round-` plus digits plus `.md` count. It counts each line that starts, after optional `#` marks, one list marker (`N.`, `-` or `*`) and bold marks, with `P0`, `P1`, `P2` or `P3`. Start every accepted finding with its rank, for example `### P1: export drops the unit` or `- P2 (cli/report.ts): wrong label`. Lines without a rank (test failures, CI logs) count 0. No findings folder counts 0.
+
 A findings file never forbids an implementer commit. The implementer commits its own work in every round, even when `findings/round-<round>.md` says "no edits" to the reviewer.
 
 ## 9. Escalate when the round budget is spent
