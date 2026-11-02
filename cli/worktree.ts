@@ -107,12 +107,13 @@ export function worktreeCreate(runId: string, repos: string[], inProject?: strin
   }
 }
 
-/** Merges origin/<target> into every worktree and pushes the branch of each repo with an open MR. */
+/** Merges origin/<target> into every worktree and pushes the branch of each repo with an open MR. A conflicting repo is recorded and skipped; after the last repo one error names every conflicting repo. */
 export function worktreeSync(runId: string, inProject?: string): void {
   const { directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
   assertAllowed(state, "worktree.synced", { repo: state.worktrees[0].repo, conflict: false });
+  const conflicts: string[] = [];
   for (const worktree of state.worktrees) {
     git(worktree.path, "fetch", "origin");
     const target = targetBranch(worktree.path);
@@ -130,9 +131,10 @@ export function worktreeSync(runId: string, inProject?: string): void {
     });
     if (merged.exitCode !== 0) {
       Bun.spawnSync(["git", "-C", worktree.path, "merge", "--abort"]);
-      throw new ArkError(
+      conflicts.push(
         `repo ${worktree.repo}: merging origin/${target} failed, worktree left unchanged: ${merged.stdout.toString().trim()}${merged.stderr.toString().trim()}`,
       );
+      continue;
     }
     const pushed = state.merge_requests.some((merge) => merge.repo === worktree.repo);
     if (pushed) git(worktree.path, "push", "origin", worktree.branch);
@@ -140,6 +142,7 @@ export function worktreeSync(runId: string, inProject?: string): void {
       `${worktree.repo}  ${target}  ${git(worktree.path, "rev-parse", "HEAD")}${pushed ? "  pushed" : ""}`,
     );
   }
+  if (conflicts.length > 0) throw new ArkError(conflicts.join("\n"));
 }
 
 /** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, and for a merged run an unmerged branch, and prints the repo and the reason. */
