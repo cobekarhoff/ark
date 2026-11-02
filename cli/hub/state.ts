@@ -214,7 +214,7 @@ export function createHub() {
     },
 
     state() {
-      const now = new Date(hubNow()).toISOString();
+      const now = new Date(Math.floor(hubNow() / 1000) * 1000).toISOString();
       const runs = readRuns();
       const projects = listProjects().map((name) => ({
         name,
