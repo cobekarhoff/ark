@@ -82,6 +82,10 @@ Look for `docker-compose.yml`, `docker-compose.yaml`, `compose.yml` or `compose.
 
 Check that the command parses: `docker compose -f <file> config --quiet` (read-only). If no compose file exists, leave `compose` out.
 
+### Setup command
+
+A new worktree has no installed dependencies. Look at the lockfile and manifest in each repo for the install command, for example `bun.lock` gives `bun install --frozen-lockfile`, `uv.lock` gives `uv sync --frozen`, and `package-lock.json` gives `npm ci`. `ark worktree create` runs this one command with `sh -c` in every new worktree, so join several with `&&` only when the repos differ. Check that the tool exists with `command -v`. If the project needs no install step, leave `setup` out.
+
 ### Ticket source
 
 Choose the first rule that matches:
