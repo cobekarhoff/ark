@@ -293,7 +293,11 @@ export function renderPlanMarkdown(
   strategy: RunState["strategy"] = null,
 ): string {
   const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
-  const lines = ["# Plan", "", "## Summary", "", plan.summary.why, "", "## Changes", ""];
+  const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
+  const lines = openDecisions
+    ? [`${openDecisions} decisions need an answer before approval`, ""]
+    : [];
+  lines.push("# Plan", "", "## Summary", "", plan.summary.why, "", "## Changes", "");
   lines.push("| Criterion | Where | Now | Fix |", "| --- | --- | --- | --- |");
   for (const change of plan.summary.changes) {
     lines.push(
