@@ -24,6 +24,7 @@ export type OrcaTerminal = {
   connected?: boolean;
   agentIdentity?: string;
   model?: string;
+  title?: string;
 };
 
 export type OrcaSnapshot = {

@@ -36,10 +36,12 @@ function pathOf(id: string, edges: [string, string][]): Set<string> {
 const itemsOf = (node: MapNode, needs: Item[]) =>
   needs.filter((item) => {
     const kind = item.id.split(":")[0];
-    if (node.kind === "agent") return item.id === node.id;
+    if (node.kind === "agent")
+      return item.id === node.id || item.id === `limit:${node.id.slice("agent:".length)}`;
     if (node.kind === "run")
       return (
-        ["gate", "mr", "retro", "agent"].includes(kind) && ownerOf(item.id) === ownerOf(node.id)
+        ["gate", "mr", "retro", "agent", "limit"].includes(kind) &&
+        ownerOf(item.id) === ownerOf(node.id)
       );
     if (node.kind === "project") return kind === "ticket" && ownerOf(item.id) === ownerOf(node.id);
     return false;
@@ -71,7 +73,10 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
   const [failed, setFailed] = useState(false);
   const [dim, setDim] = useState(true);
   // The node the human clicked. It holds only while the shared selection is the one it set.
-  const [picked, setPicked] = useState<{ node: string; selection: Selection } | null>(null);
+  const [picked, setPicked] = useState<{
+    node: string;
+    selection: Selection;
+  } | null>(null);
 
   useEffect(() => {
     let stale = false;
@@ -358,7 +363,9 @@ export function MapView({ hub, selection, setSelection, perform, view, setView, 
                     <i
                       key={time}
                       className="ev"
-                      style={{ left: `${((time - from) / Math.max(1, end - from)) * 100}%` }}
+                      style={{
+                        left: `${((time - from) / Math.max(1, end - from)) * 100}%`,
+                      }}
                     />
                   ))}
                   <input
