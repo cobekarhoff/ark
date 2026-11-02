@@ -473,8 +473,18 @@ export function App() {
                     <Kbd>k</Kbd> move <Kbd>↵</Kbd> open
                   </span>
                 </div>
+                {hub.readers.plannotator !== "ok" && (
+                  <p className="hint" role="status">
+                    Plannotator {hub.readers.plannotator}
+                    {hub.readers.plannotator_error && ` — ${hub.readers.plannotator_error}`}
+                  </p>
+                )}
                 {needs.length === 0 ? (
-                  <div className="empty">Nothing is waiting on you. Master Chief has it.</div>
+                  <div className="empty">
+                    {hub.readers.plannotator === "ok"
+                      ? "Nothing is waiting on you. Master Chief has it."
+                      : "No items available."}
+                  </div>
                 ) : (
                   <ul className={`list ${focus ? "big" : ""}`}>
                     {needs.map((item) => {

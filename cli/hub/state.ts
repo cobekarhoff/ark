@@ -269,7 +269,8 @@ export function createHub() {
         agents,
         readers: {
           orca: orca.ok ? "ok" : "unknown",
-          plannotator: plannotator.sessions === null ? "unknown" : "ok",
+          plannotator: plannotator.status,
+          plannotator_error: plannotator.error,
         },
         tiles: {
           agents_working: agents.filter((agent) => agent.liveness === "live").length,
