@@ -94,6 +94,7 @@ const decisionPlan = (decisions: unknown[]) => ({
     level: "integration",
     given: ["a run"],
     when: ["run the command"],
+    // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
     then: ["observe the result"],
     expected: "When used, the system shall behave as specified.",
   })),
