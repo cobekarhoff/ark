@@ -44,9 +44,11 @@ function removeOwnChromeProfiles(): void {
     if (!entry.endsWith(".bun-chrome")) continue;
     const profile = join(originalTmpdir, entry);
     const pid = chromePid(profile);
-    const parentPid = pid && Bun.spawnSync(["ps", "-o", "ppid=", "-p", pid]).stdout.toString().trim();
+    const parentPid =
+      pid && Bun.spawnSync(["ps", "-o", "ppid=", "-p", pid]).stdout.toString().trim();
     if (parentPid === `${process.pid}`) stopChrome(Number(pid));
-    if (!parentPid || parentPid === `${process.pid}`) rmSync(profile, { recursive: true, force: true });
+    if (!parentPid || parentPid === `${process.pid}`)
+      rmSync(profile, { recursive: true, force: true });
   }
 }
 

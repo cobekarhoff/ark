@@ -19,7 +19,12 @@ function writeFixture(name: string, source: string): string {
   return path;
 }
 
-function spawnBunTest(fixturePath: string, scratch: string, extraArguments: string[] = [], extraEnvironment = {}) {
+function spawnBunTest(
+  fixturePath: string,
+  scratch: string,
+  extraArguments: string[] = [],
+  extraEnvironment = {},
+) {
   return Bun.spawn(["bun", "test", ...extraArguments, fixturePath], {
     cwd: repositoryRoot,
     env: { ...process.env, ...extraEnvironment, TMPDIR: scratch },
@@ -52,7 +57,10 @@ test.each(["pass", "fail"] as const)(
   "ARK-235-AC1 a bun test process that ends with a %s leaves nothing in the temporary directory",
   async (outcome) => {
     const scratch = scratchDirectory();
-    const { exitCode, output } = await runBunTest(writeFixture(`suite-${outcome}`, makesTempDirectory(outcome)), scratch);
+    const { exitCode, output } = await runBunTest(
+      writeFixture(`suite-${outcome}`, makesTempDirectory(outcome)),
+      scratch,
+    );
     expect(exitCode === 0).toBe(outcome === "pass");
     expect(output).toContain(outcome === "pass" ? " 1 pass" : " 1 fail");
     expect(readdirSync(scratch)).toEqual([]);
@@ -118,8 +126,14 @@ test(
     // Cross-process signal files: no in-process event to await.
     const signalDirectory = mkdtempSync(join(fixtureRoot, "signal-"));
     const scratch = scratchDirectory();
-    const first = spawnBunTest(writeFixture("concurrent-a", concurrentFixture(signalDirectory, "a")), scratch);
-    const second = spawnBunTest(writeFixture("concurrent-b", concurrentFixture(signalDirectory, "b")), scratch);
+    const first = spawnBunTest(
+      writeFixture("concurrent-a", concurrentFixture(signalDirectory, "a")),
+      scratch,
+    );
+    const second = spawnBunTest(
+      writeFixture("concurrent-b", concurrentFixture(signalDirectory, "b")),
+      scratch,
+    );
 
     await waitFor(join(signalDirectory, "a.dir"));
     await waitFor(join(signalDirectory, "b.dir"));
