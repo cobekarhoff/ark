@@ -498,3 +498,41 @@ describe("plan check", () => {
     expect(designSection()).not.toContain("No example given.");
   });
 });
+
+describe("plan.md open-decisions line", () => {
+  const decision = (id: string, chosen = "") => ({
+    id,
+    question: `Which ${id}?`,
+    options: ["A", "B"],
+    recommended: "A",
+    chosen,
+  });
+  const planMarkdown = () => readFileSync(join(runDirectory, "plan.md"), "utf8");
+  const check = (decisions: unknown[]) => {
+    writePlan({ ...validPlan(), decisions });
+    expect(ark("plan", "check", runId).code).toBe(0);
+    return planMarkdown();
+  };
+
+  test("ARK-214-AC1 first line counts the decisions with no chosen value, before the title", () => {
+    const markdown = check([decision("one"), decision("two"), decision("three", "B")]);
+    expect(markdown.startsWith("2 decisions need an answer before approval\n\n# Plan\n")).toBe(
+      true,
+    );
+  });
+
+  test("ARK-214-AC2 the line goes away once the last decision is answered", () => {
+    expect(check([decision("one")]).split("\n")[0]).toBe(
+      "1 decisions need an answer before approval",
+    );
+    const markdown = check([decision("one", "A")]);
+    expect(markdown.split("\n")[0]).toBe("# Plan");
+    expect(markdown).not.toContain("need an answer before approval");
+  });
+
+  test("ARK-214-AC2 a plan with no decisions has no such line", () => {
+    const markdown = check([]);
+    expect(markdown.split("\n")[0]).toBe("# Plan");
+    expect(markdown).not.toContain("need an answer before approval");
+  });
+});
