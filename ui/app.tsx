@@ -50,15 +50,6 @@ function useHub(): HubState | null {
   return state;
 }
 
-function useNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
-
 const Wait = ({ since, now, big }: { since: string; now: number; big?: boolean }) => {
   const minutes = minutesSince(since, now);
   return (
@@ -89,7 +80,8 @@ const Dots = ({ run }: { run: RunView }) => (
 
 export function App() {
   const hub = useHub();
-  const now = useNow();
+  // The hub's clock as the server last sent it: ARK_NOW freezes it, so the browser never reads its own.
+  const now = hub === null ? Date.now() : Date.parse(hub.now);
   const [filter, setFilter] = useState<Filter>("all");
   const [selection, setSelection] = useState<Selection>(null);
   const [view, setView] = useState<View>("home");

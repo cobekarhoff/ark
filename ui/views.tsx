@@ -53,11 +53,11 @@ export function stateTone(state: string): string {
   return "working";
 }
 
-/** Time of day, with the date when it is not today. */
-export function clock(time: string | number): string {
+/** Time of day, with the date when it is not today. `now` is the hub's clock. */
+export function clock(time: string | number, now: number): string {
   const date = new Date(time);
   const hours = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  return date.toDateString() === new Date().toDateString()
+  return date.toDateString() === new Date(now).toDateString()
     ? hours
     : `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${hours}`;
 }

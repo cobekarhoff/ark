@@ -5,6 +5,7 @@ import { listProjects, projectDirectory } from "../paths.ts";
 import { execJson } from "./exec.ts";
 import type { OrcaTerminal } from "./orca.ts";
 import { switchTerminal, type Action } from "./types.ts";
+import { now as hubNow } from "./clock.ts";
 
 export type AgentCost = {
   /** `unavailable` when no usage reader can measure this agent. It is never 0. */
@@ -61,7 +62,7 @@ const costCache = new Map<string, { at: number; sessions: SessionWithKey[] }>();
 
 /** Sessions per folder. Scans the session roots once for the folders not cached in the last 30 seconds. */
 function sessionsIn(folders: string[]): Map<string, SessionWithKey[]> {
-  const now = Date.now();
+  const now = hubNow();
   const stale = folders.filter(
     (folder) => now - (costCache.get(folder)?.at ?? 0) > costTtlMilliseconds,
   );
