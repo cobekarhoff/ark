@@ -750,7 +750,11 @@ test("ARK-278-AC4 run close --sweep releases closed runs once, records no event,
     workers: Object.fromEntries(
       [first, second, open].map((run) => [
         `orca_${run.runId}`,
-        [worker(`ctx_${run.runId}`, "succeeded", "reclaimable")],
+        [
+          worker(`ctx_${run.runId}`, "succeeded", "reclaimable"),
+          // real Orca keeps a retained row retained after a release, so a sweep must not retry it
+          worker(`ctx_kept_${run.runId}`, "stopped", "retained"),
+        ],
       ]),
     ),
   });
