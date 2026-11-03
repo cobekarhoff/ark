@@ -54,6 +54,8 @@ export type Agent = {
   terminal: string | null;
   /** True when Orca lists the terminal as connected: only then can the hub focus it in Orca. */
   live: boolean;
+  /** True when Orca's worker-list shows the agent working but `terminal list` does not list its terminal (a `structworker_*` agent session): the page says to open it from its chat tab. Never true with `live`. */
+  running: boolean;
 };
 
 export type MergeRequestView = {

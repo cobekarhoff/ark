@@ -114,7 +114,8 @@ export function Agents({ agents }: { agents: Agent[] | "unknown" }) {
       data-role={agent.role}
       data-live={agent.live}
     >
-      <span className="pill">{agent.role}</span>{" "}
+      <span className="pill">{agent.role}</span>
+      {agent.step && <span className="mono"> {agent.step}</span>}{" "}
       <Field
         reported={agent.harness}
         planned={agent.planned?.harness}

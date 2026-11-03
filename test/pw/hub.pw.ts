@@ -829,12 +829,18 @@ function orcaWithReleasedWorker(run: string) {
     workers: [
       ...answers.workers!,
       { taskId: "task-2", state: "released", agentTerminalHandle: "term-gone" },
+      // Working, but `terminal list` never lists a `structworker_*` agent session.
+      { taskId: "task-3", state: "running", agentTerminalHandle: "structworker_unlisted" },
     ],
-    tasks: [...answers.tasks!, { id: "task-2", title: "hub-docs (implementer, .)" }],
+    tasks: [
+      ...answers.tasks!,
+      { id: "task-2", title: "hub-docs (implementer, .)" },
+      { id: "task-3", title: "hub-run-page (validator, .)" },
+    ],
   };
 }
 
-test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, Master Chief included, and ended for a released one", async ({
+test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, Master Chief included, ended for a released one and a no-button label for one running but not listed", async ({
   page,
 }) => {
   isolate();
@@ -854,14 +860,21 @@ test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, M
     .poll(async () => {
       const snapshot = await (await fetch(`${baseUrl}/api/snapshot`)).json();
       const agents = Array.isArray(snapshot.runs) ? snapshot.runs[0]?.agents : null;
-      return Array.isArray(agents) ? agents.map((agent: any) => [agent.terminal, agent.live]) : [];
+      return Array.isArray(agents)
+        ? agents.map((agent: { terminal: string; live: boolean; running: boolean }) => [
+            agent.terminal,
+            agent.live,
+            agent.running,
+          ])
+        : [];
     })
     .toEqual(
       expect.arrayContaining([
-        ["term-chief", true],
-        ["term-lead", true],
-        ["term-worker", true],
-        ["term-gone", false],
+        ["term-chief", true, false],
+        ["term-lead", true, false],
+        ["term-worker", true, false],
+        ["term-gone", false, false],
+        ["structworker_unlisted", false, true],
       ]),
     );
 
@@ -869,10 +882,18 @@ test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, M
   for (const handle of ["term-chief", "term-lead", "term-worker"])
     await expect(home.locator(`[data-terminal="${handle}"]`)).toHaveText("Open in Orca");
   await expect(home.locator('[data-testid="agent"][data-role="Master Chief"]')).toHaveCount(1);
-  const ended = home.locator('[data-testid="agent"][data-live="false"]');
+  const ended = home.locator('[data-testid="agent"][data-live="false"]', {
+    hasText: "ended, not in Orca",
+  });
   await expect(ended).toHaveCount(1);
-  await expect(ended).toContainText("ended, not in Orca");
   await expect(ended.getByRole("button")).toHaveCount(0);
+  const running = home.locator('[data-testid="agent"]', {
+    hasText: "running in Orca, open it from its chat tab",
+  });
+  await expect(running).toHaveCount(1);
+  await expect(running).toContainText("validator");
+  await expect(running).toContainText("hub-run-page");
+  await expect(running.getByRole("button")).toHaveCount(0);
   await expect(home.getByTestId("open-in-orca")).toHaveCount(3);
 
   // One click, one `terminal switch` with the live handle: nothing else is run.
@@ -885,6 +906,9 @@ test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, M
   await open(page, baseUrl, `run/${run}`);
   await expect(page.getByTestId("open-in-orca")).toHaveCount(3);
   await expect(page.getByTestId("orca-ended")).toHaveText("ended, not in Orca");
+  await expect(page.getByTestId("orca-running")).toHaveText(
+    "running in Orca, open it from its chat tab",
+  );
   await button("term-chief").click();
   await expect
     .poll(() => switchCalls(state))

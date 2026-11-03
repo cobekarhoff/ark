@@ -18,6 +18,16 @@ function reasonFor(status: number): string {
  */
 export function OpenInOrca({ agent }: { agent: Agent }) {
   const [state, setState] = useState<State>({ kind: "idle" });
+  if (agent.running)
+    return (
+      <span
+        className="mut ended"
+        data-testid="orca-running"
+        title="Orca has no terminal to switch to for this agent."
+      >
+        running in Orca, open it from its chat tab
+      </span>
+    );
   if (!agent.live || agent.terminal === null)
     return (
       <span

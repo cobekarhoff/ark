@@ -278,15 +278,19 @@ export async function readOrca(
           planned: null,
           terminal: chief!.coordinator_handle ?? null,
           live: true,
+          running: false,
         });
       const leadHandle = orcaRun.coordinator_handle;
       const leadTerminal = leadHandle ? byHandle.get(leadHandle) : undefined;
-      const leadLive =
-        leadTerminal?.connected === true ||
+      const leadConnected = leadTerminal?.connected === true;
+      // Orca lists a run lead started as a worker (`structworker_*`) only in Master Chief's
+      // worker-list: it runs, but `terminal switch` cannot address it.
+      const leadRunning =
+        !leadConnected &&
         (chiefWorkers.get(project) ?? []).some(
           (worker) => worker.terminal === leadHandle && isLive(worker),
         );
-      if (leadLive)
+      if (leadConnected || leadRunning)
         list.push({
           role: "run lead",
           harness: leadTerminal?.agentIdentity ?? null,
@@ -295,7 +299,8 @@ export async function readOrca(
           step: null,
           planned: null,
           terminal: leadHandle ?? null,
-          live: leadHandle !== undefined,
+          live: leadConnected && leadHandle !== undefined,
+          running: leadRunning,
         });
       // A released or disconnected worker stays in the list with `live: false`: the page says
       // "ended, not in Orca" instead of hiding it.
@@ -303,6 +308,7 @@ export async function readOrca(
         const handle = worker.agentTerminalHandle ?? worker.terminal ?? null;
         const terminal = byHandle.get(handle ?? "");
         const title = titles.get(worker.taskId ?? "") ?? worker.taskId ?? "worker";
+        const live = handle !== null && isLive(worker) && terminal?.connected === true;
         list.push({
           role: roleOfTask(title),
           harness: terminal?.agentIdentity ?? null,
@@ -311,7 +317,8 @@ export async function readOrca(
           step: title.match(stepTask)?.[1] ?? null,
           planned: null,
           terminal: handle,
-          live: handle !== null && isLive(worker) && terminal?.connected === true,
+          live,
+          running: !live && isLive(worker),
         });
       }
       agents.set(run, list);
