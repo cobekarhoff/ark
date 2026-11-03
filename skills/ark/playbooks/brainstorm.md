@@ -6,10 +6,10 @@ The human opens you in a terminal. Take the project from the current directory, 
 
 ## Rules
 
-- Your output is tickets, prototypes and a paste-ready prompt for Master Chief.
+- Your output is tickets, prototypes and a handoff message for Master Chief.
 - The ticket `status` you write is always `proposed`. Never write `ready`.
 - Product code, `ark.yml`, ADRs and docs change only through a ticket's run. Put those changes in the ticket's Change section.
-- Starting work is the human's act. Never run an `orca orchestration` command. Never run `orca terminal send` to Master Chief. Never queue a ticket. Never send anything to Master Chief's terminal.
+- Starting work is the human's act. You may run `orca orchestration run-list` and the one `orca orchestration send` of section 8, and only after the human answers 'Send it'. Never run any other `orca orchestration` command. Never run `orca terminal send`. Never queue a ticket. Never send anything to Master Chief's terminal.
 - Answers are the human's decisions. Never answer a question for the human.
 - Write ticket text in ASD-STE100 Simplified Technical English: short sentences, active voice, one instruction per sentence, approved words.
 
@@ -58,12 +58,35 @@ Then re-read `README.md`, because other sessions edit it. For each ticket, add:
 
 ## 8. Hand off
 
-When the human wants work to start, write a paste-ready message for Master Chief. Show it to the human. Do not send it. It holds:
+When the human wants work to start, write a handoff message for Master Chief. The body of the message starts with the line `Human approval: "<the human's answer, word for word>" at <ISO time>`, then holds:
 
-- The tickets and the dependency order.
+- The ticket ids and the dependency order.
 - What may run in parallel.
 - The models. Check the `ark.yml` roles and the harness configs for the real model ids.
 - The gates to bring to the human.
+
+Show the message to the human. Then ask with the ask tool whether to send it. Offer two options: 'Send it' and 'Do not send'. Send only when the answer is 'Send it'. Never send for an answer the human did not give. Write the human's answer in the approval line word for word, with the ISO time of the answer.
+
+To send:
+
+1. Find the Run with the objective `Master Chief: <project> tickets`. Run `orca orchestration run-list --limit 100 --json`. The default page holds 10 Runs and the maximum is 100. When the output has a `nextCursor`, get the next page, until you find the Run or there is no `nextCursor`.
+2. Put the message in a shell variable with a quoted heredoc, so quotes and `$` in the message stay as written:
+
+   ```sh
+   message=$(cat <<'EOF'
+   Human approval: "Send it" at 2026-11-03T20:15:00Z
+   ...
+   EOF
+   )
+   ```
+
+3. Run this one command. Add no `--from` and no other flag:
+
+   ```sh
+   orca orchestration send --to run:<id of the Run 'Master Chief: <project> tickets'> --type status --subject "Brainstorm handoff: <ticket ids>" --body "$message" --json
+   ```
+
+When no Run has the objective 'Master Chief: <project> tickets', or the send exits non-zero, do not retry with another command. Show the paste-ready message and tell the human why it was not sent. The human pastes it into Master Chief.
 
 ## Ticket format
 

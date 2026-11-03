@@ -149,6 +149,14 @@ An empty wait or a timeout is a checkpoint. Wait again. After three empty waits,
 
 On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>` for each run in `merge_requests_open`, and record the poll time for the next wait. If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge. Pass each human comment it lists to the human and to the run lead. Tell the run lead about a `conflict` (it runs `ark worktree sync <run>`) and about `ci: failed` with its `checks failing:` names. Do not treat `running` or `unknown` as passed.
 
+A `status` message whose subject starts with `Brainstorm handoff:` is a request to evaluate and queue. Check this rule before the next rule. The body names the tickets. Its first line is `Human approval: "<the human's answer>" at <ISO time>`. For each ticket the message names, evaluate it (section 3) and queue it (section 5) only when all of these are true:
+
+- The body has the `Human approval:` line.
+- The approval names that ticket.
+- The ticket file exists under `tickets/`.
+
+Tell the human one line per queued ticket: that you queued it from a brainstorm handoff, with the approval line and its time quoted. Do not ask the human again. A handoff is never a gate answer. Never use it for a `criteria`, `plan`, `strategy` or `escalation` gate. When the handoff has no approval line, or its approval does not name a ticket, pass it to the human as a notice and queue nothing for it.
+
 A `status` message from a run lead is a notice, not a question. Pass it to the human. When it says a Plannotator review is open, tell the human to answer there. The run lead records that answer itself.
 
 ### A busy agent
