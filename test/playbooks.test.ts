@@ -597,3 +597,25 @@ test("ARK-287-AC5 run-lead.md tells the lead to re-test a stale head before aski
     /validator commits its evidence files (?:\(.*?\) )?before the last `ark test <run>`, so that no commit follows that test/,
   );
 });
+
+test("ARK-283-AC5 cli.md and run-lead.md name the manual gate, cli.md equals the generator output, and the ticket playbooks keep manual: true", () => {
+  const root = join(import.meta.dir, "..");
+  const path = join(root, "docs/reference/cli.md");
+  const reference = readFileSync(path, "utf8");
+  expect(reference).toContain("manual");
+  expect(reference).toContain("ark gate record <run> manual <criterion id> ok|problem");
+  for (const status of ["manual pending", "manual ok", "manual problem"])
+    expect(reference).toContain(status);
+
+  const runLead = readFileSync(join(playbookDirectory, "run-lead.md"), "utf8");
+  expect(runLead).toContain("manual");
+  expect(runLead).toContain("ark gate record <run> manual <criterion id> ok|problem");
+  expect(runLead).toContain("manual pending");
+  expect(runLead).toContain("Master Chief");
+
+  for (const name of ["run-lead.md", "chief.md", "brainstorm.md", "retro.md"])
+    expect(readFileSync(join(playbookDirectory, name), "utf8"), name).toContain("manual: true");
+
+  Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root });
+  expect(readFileSync(path, "utf8")).toBe(reference);
+});

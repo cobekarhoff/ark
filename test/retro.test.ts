@@ -608,4 +608,87 @@ describe("ark retro", () => {
     retro(runId);
     expect(readMetrics().orchestration.stalled_workers).toBe(1);
   });
+
+  const started: EventRow = [
+    "14:00:00.000",
+    "run.started",
+    {
+      run: runId,
+      project: "demo",
+      ticket: { id: "ARK-901" },
+      criteria: ["ARK-901-AC1", "ARK-901-AC2"],
+    },
+  ];
+  const testRun = (time: string, criteria: Record<string, string>): EventRow => [
+    time,
+    "test.completed",
+    { passed: true, heads: {}, suites: [], criteria },
+  ];
+  const manualAnswer = (time: string, criterion: string, answer = "ok"): EventRow => [
+    time,
+    "gate.answered",
+    { gate: "manual", criterion, answer, by: "human" },
+  ];
+
+  test("ARK-283-AC3 counts the wait from manual pending to the manual answer as gate wait, not work time (600 s)", () => {
+    writeEvents(runDirectory, [
+      started,
+      testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
+      manualAnswer("14:20:00.000", "ARK-901-AC1"),
+      ["14:30:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+    retro(runId);
+    const { time } = readMetrics();
+    expect(time.gate_wait_seconds).toBe(600);
+    expect(time.work_seconds).toBe(time.wall_seconds - 600);
+    expect(time.wall_seconds).toBe(1800);
+  });
+
+  test("ARK-283-AC3 the wait starts at the first manual pending, not at a repeated one", () => {
+    writeEvents(runDirectory, [
+      started,
+      testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
+      testRun("14:15:00.000", { "ARK-901-AC1": "manual pending" }),
+      manualAnswer("14:20:00.000", "ARK-901-AC1"),
+      ["14:30:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+    retro(runId);
+    expect(readMetrics().time.gate_wait_seconds).toBe(600);
+  });
+
+  test("ARK-283-AC3 a problem answer closes the wait and a later manual pending opens a new one", () => {
+    writeEvents(runDirectory, [
+      started,
+      testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
+      manualAnswer("14:12:00.000", "ARK-901-AC1", "problem"),
+      testRun("14:20:00.000", { "ARK-901-AC1": "manual pending" }),
+      manualAnswer("14:21:00.000", "ARK-901-AC1"),
+      ["14:30:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+    retro(runId);
+    expect(readMetrics().time.gate_wait_seconds).toBe(180);
+  });
+
+  test("ARK-283-AC3 two manual criteria keep separate waits", () => {
+    writeEvents(runDirectory, [
+      started,
+      testRun("14:10:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
+      manualAnswer("14:11:00.000", "ARK-901-AC1"),
+      manualAnswer("14:15:00.000", "ARK-901-AC2"),
+      ["14:30:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+    retro(runId);
+    // AC1 waited 60 s and AC2 waited 300 s; an answer for AC1 must not close the AC2 wait.
+    expect(readMetrics().time.gate_wait_seconds).toBe(360);
+  });
+
+  test("ARK-283-AC3 an unanswered manual pending adds no gate wait", () => {
+    writeEvents(runDirectory, [
+      started,
+      testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
+      ["14:30:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+    retro(runId);
+    expect(readMetrics().time.gate_wait_seconds).toBe(0);
+  });
 });
