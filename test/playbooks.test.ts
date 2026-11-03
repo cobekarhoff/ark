@@ -65,8 +65,9 @@ test("ARK-164-AC1 dispatch starts in an Orca-known worktree and completes the qu
   expect(close).toBeDefined();
 
   expect(dispatch).not.toMatch(/task-update[^\n]*--status dispatched/);
-  expect(dispatch).toContain("--worktree current");
-  expect(dispatch).not.toMatch(/worker-start[^\n]*--worktree path:/);
+  expect(dispatch).toContain("ark worktree anchor <run>");
+  expect(dispatch).toMatch(/worker-start[^\n]*run-lead[^\n]*--worktree path:<printed path>/);
+  expect(dispatch).not.toContain("--worktree current");
   expect(close).toMatch(/orca orchestration task-update[^\n]*--status completed/);
 });
 
@@ -312,4 +313,83 @@ test("ARK-244-AC4 chief takes over from live state and hands over at 70% context
     /(write|keep|update|add)[^.\n]*State section[^.\n]*handoff\.md/i,
   );
   expect(chiefPlaybook).toMatch(/Do not write a State section/);
+});
+
+/** Command lines that run `orca orchestration worker-start`; prose that only names `worker-start` is left out. */
+function workerStartLines(playbook: string): string[] {
+  return playbook
+    .split("\n")
+    .filter((line) => line.includes("orca orchestration worker-start --spec"));
+}
+
+function section(playbook: string, heading: string): string {
+  return playbook.split(heading)[1]?.split("\n## ")[0] ?? "";
+}
+
+test("ARK-276-AC1 no worker-start line in chief.md or run-lead.md starts in the main workspace", () => {
+  const lines = [...workerStartLines(chiefPlaybook), ...workerStartLines(runLeadPlaybook)];
+  expect(lines).toHaveLength(4); // run lead, evaluator, designer, step worker
+  for (const line of lines) {
+    expect(line).toMatch(/--worktree path:<[^>]+>/);
+    expect(line).not.toContain("--worktree current");
+    expect(line).not.toContain("--worktree path:<workspace");
+  }
+});
+
+test("ARK-276-AC6 chief and run-lead start their early workers in the printed anchor selector", () => {
+  const dispatch = section(chiefPlaybook, "## 6. Start a run lead for each ready ticket");
+  const runStart = dispatch.indexOf("ark run start");
+  const anchor = dispatch.indexOf("ark worktree anchor <run>");
+  const workerStart = dispatch.indexOf("orca orchestration worker-start");
+  expect(runStart).toBeGreaterThanOrEqual(0);
+  expect(anchor).toBeGreaterThan(runStart);
+  expect(workerStart).toBeGreaterThan(anchor);
+  expect(dispatch).toMatch(/printed `path:<\.\.\.>`/);
+  expect(dispatch).toMatch(/worker-start[^\n]*run-lead[^\n]*--worktree path:<printed path>/);
+  expect(dispatch).toMatch(/stay in the main workspace/);
+
+  const evaluate = section(runLeadPlaybook, "## 2. Evaluate the ticket and open the criteria gate");
+  expect(evaluate).toContain("ark worktree anchor <run>");
+  const anchorAt = evaluate.indexOf("ark worktree anchor <run>");
+  expect(anchorAt).toBeLessThan(evaluate.indexOf("orca orchestration worker-start"));
+  const early = evaluate
+    .split("\n")
+    .filter((line) => line.includes("orca orchestration worker-start --spec"));
+  expect(early).toHaveLength(2);
+  expect(early[0]).toContain("worker <run> evaluator");
+  expect(early[1]).toContain("worker <run> designer");
+  for (const line of early) expect(line).toContain("--worktree path:<printed path>");
+});
+
+test("ARK-276-AC6 every worker-start line keeps its --agent <harness> --model <model> from ark.yml or plan.yml", () => {
+  for (const line of [...workerStartLines(chiefPlaybook), ...workerStartLines(runLeadPlaybook)])
+    expect(line).toMatch(/--agent <harness> --model <model> --json$/);
+});
+
+test("ARK-276-AC7 run-lead releases the evaluator, the designer and every step worker after done, failed and abnormal exits", () => {
+  const release = "orca orchestration worker-release --dispatch <dispatch id> --json";
+  const record = runLeadPlaybook.split("5. Record the result:")[1]?.split("\n## ")[0] ?? "";
+  expect(record).toContain(release);
+  expect(record).toMatch(/after its `worker_done`/);
+  expect(record).toMatch(/after a failed exit/);
+  expect(record).toMatch(/after an abnormal exit \(the worker is gone and sent no `worker_done`\)/);
+  expect(record).toMatch(/the evaluator and the designer too/);
+
+  const evaluate = section(runLeadPlaybook, "## 2. Evaluate the ticket and open the criteria gate");
+  expect(
+    evaluate.match(/Wait for its `worker_done`, then release it, as in section 7/g),
+  ).toHaveLength(2);
+});
+
+test("ARK-276-AC7 chief releases the run lead when not yet released, before the ark run close line", () => {
+  const close = section(chiefPlaybook, "## 8. Close the run");
+  const release = close.indexOf(
+    "orca orchestration worker-release --dispatch <dispatch id> --json",
+  );
+  const closeCommand = close.indexOf("`ark run close <run>");
+  expect(release).toBeGreaterThanOrEqual(0);
+  expect(closeCommand).toBeGreaterThan(release);
+  expect(close).toMatch(/Release the run lead before you close the run/);
+  expect(close).toMatch(/Do it when it is not yet released/);
+  expect(close).toMatch(/worker-list --include-remote --json/);
 });
