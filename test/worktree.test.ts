@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -624,6 +625,171 @@ describe("ARK-278 close removes workspace/", () => {
     ])
       expect(existsSync(join(runDirectory, name))).toBe(true);
   });
+});
+
+describe("ARK-280 worker permission setting", () => {
+  const settingFile = "tools:\n  approvalMode: yolo\n";
+
+  /** Every file under `directory` as `relative path -> content or link target`, skipping `skip` prefixes. */
+  function snapshot(directory: string, skip: string[] = []): Record<string, string> {
+    const files: Record<string, string> = {};
+    const walk = (current: string) => {
+      for (const entry of readdirSync(current, { withFileTypes: true })) {
+        const full = join(current, entry.name);
+        const relative = full.slice(directory.length + 1);
+        if (skip.includes(relative)) continue;
+        if (entry.isSymbolicLink()) files[relative] = `-> ${readlinkSync(full)}`;
+        else if (entry.isDirectory()) {
+          files[`${relative}/`] = "";
+          walk(full);
+        } else files[relative] = readFileSync(full, "utf8");
+      }
+    };
+    walk(directory);
+    return files;
+  }
+
+  /** The state of the main workspace that a worktree must not change: files, refs-free git config, exclude, status. */
+  function workspaceState(workspace: string, repo: string) {
+    const root = join(workspace, repo);
+    return {
+      files: snapshot(root, [".git"]),
+      config: readFileSync(join(root, ".git/config"), "utf8"),
+      exclude: readFileSync(join(root, ".git/info/exclude"), "utf8"),
+      status: gitOutput(root, "status", "--porcelain", "--ignored"),
+    };
+  }
+
+  function assertHiddenFromGit(worktree: string): void {
+    expect(gitOutput(worktree, "status", "--porcelain")).toBe("");
+    gitOutput(worktree, "add", "-A");
+    expect(gitOutput(worktree, "diff", "--cached", "--name-only")).toBe("");
+  }
+
+  test("ARK-280-AC2 anchor and create write the setting in the run worktree and keep it out of git status and git add", () => {
+    const workspace = tempGitRepo({ "src/main.txt": "x" });
+    const { runId, runDirectory } = startRun(workspace);
+    const mirror = join(runDirectory, "workspace");
+
+    const anchor = ark("worktree", "anchor", runId);
+    expect(anchor.code).toBe(0);
+    expect(anchor.out).toContain(`path:${mirror}`);
+    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    assertHiddenFromGit(mirror);
+
+    // create after anchor keeps the file and the clean status
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    assertHiddenFromGit(mirror);
+  });
+
+  test("ARK-280-AC2 create alone also writes the setting", () => {
+    const workspace = tempGitRepo();
+    const { runId, runDirectory } = startRun(workspace);
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const mirror = join(runDirectory, "workspace");
+    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    assertHiddenFromGit(mirror);
+  });
+
+  test("ARK-280-AC2 ARK-280-AC3 a meta-repo run writes the setting in each real worktree and not in a linked folder or the workspace", () => {
+    const workspace = tempMetaWorkspace();
+    const { runId, runDirectory } = startRun(workspace);
+    const before = {
+      a: workspaceState(workspace, "repos/a"),
+      c: workspaceState(workspace, "repos/b/c"),
+    };
+    const result = ark("worktree", "create", runId, "repos/a");
+    expect(result.code).toBe(0);
+
+    const mirror = join(runDirectory, "workspace");
+    expect(readFileSync(join(mirror, "repos/a/.omp/config.yml"), "utf8")).toBe(settingFile);
+    assertHiddenFromGit(join(mirror, "repos/a"));
+
+    // repos/b/c is a link to the workspace: a write through it would land in the main workspace
+    expect(lstatSync(join(mirror, "repos/b/c")).isSymbolicLink()).toBe(true);
+    for (const path of ["repos/b/c/.omp", "repos/b/.omp", "repos/.omp", ".omp"]) {
+      expect(existsSync(join(mirror, path)), path).toBe(false);
+      expect(existsSync(join(workspace, path)), path).toBe(false);
+    }
+    expect(existsSync(join(workspace, "repos/a/.omp"))).toBe(false);
+    expect(workspaceState(workspace, "repos/a")).toEqual(before.a);
+    expect(workspaceState(workspace, "repos/b/c")).toEqual(before.c);
+
+    // a second repo gets its own file
+    expect(ark("worktree", "create", runId, "repos/b/c").code).toBe(0);
+    expect(readFileSync(join(mirror, "repos/b/c/.omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(existsSync(join(workspace, "repos/b/c/.omp"))).toBe(false);
+  });
+
+  test("ARK-280-AC3 anchor and create change no file in the home folders or the main workspace, including info/exclude and git config", () => {
+    const home = mkdtempSync(join(tmpdir(), "ark-userhome-"));
+    mkdirSync(join(home, ".omp/agent"), { recursive: true });
+    writeFileSync(join(home, ".omp/agent/config.yml"), "tools:\n  approvalMode: always-ask\n");
+    const realHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const workspace = tempGitRepo({ "src/main.txt": "x", ".gitignore": "dist\n" });
+      writeFileSync(join(workspace, "untracked.txt"), "u");
+      const { runId, runDirectory } = startRun(workspace);
+      const arkHome = process.env.ARK_HOME as string;
+      const runs = join("projects", "demo", "runs");
+      const before = {
+        home: snapshot(home),
+        arkHome: snapshot(arkHome, [runs]),
+        workspace: workspaceState(workspace, "."),
+      };
+
+      expect(ark("worktree", "anchor", runId).code).toBe(0);
+      expect(ark("worktree", "create", runId, ".").code).toBe(0);
+
+      expect(snapshot(home)).toEqual(before.home);
+      expect(snapshot(arkHome, [runs])).toEqual(before.arkHome);
+      expect(workspaceState(workspace, ".")).toEqual(before.workspace);
+      expect(existsSync(join(workspace, ".omp"))).toBe(false);
+      // only the run worktree got the file
+      expect(existsSync(join(runDirectory, "workspace/.omp/config.yml"))).toBe(true);
+    } finally {
+      process.env.HOME = realHome;
+    }
+  });
+
+  test("ARK-280-AC3 the written file holds one key, tools.approvalMode, and nothing else", () => {
+    const { runId, runDirectory } = startRun(tempGitRepo());
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const mirror = join(runDirectory, "workspace");
+    expect(readdirSync(join(mirror, ".omp")).sort()).toEqual([".gitignore", "config.yml"]);
+    expect(readFileSync(join(mirror, ".omp/.gitignore"), "utf8")).toBe("*\n");
+    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual({
+      tools: { approvalMode: "yolo" },
+    });
+  });
+
+  test("ARK-280-AC1 ARK-280-AC5 the how-to names the value the worktree command writes, where it applies and how to turn it off", () => {
+    const { runId, runDirectory } = startRun(tempGitRepo());
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const written = readFileSync(join(runDirectory, "workspace/.omp/config.yml"), "utf8").match(
+      /approvalMode: (\S+)/,
+    )![1];
+
+    const howTo = readFileSync(join(import.meta.dir, "../docs/how-to/run-a-ticket.md"), "utf8");
+    const named = howTo.match(/`tools\.approvalMode: (\S+?)`/);
+    expect(named?.[1]).toBe(written);
+    expect(howTo).toContain("`.omp/config.yml`");
+    expect(howTo).toMatch(/only to the worktrees Ark makes/);
+    expect(howTo).toMatch(/nothing in your `~\/\.omp`/);
+    expect(howTo).toMatch(/delete its `\.omp\/config\.yml`/);
+  });
+});
+
+test("ARK-280-AC5 docs/reference/cli.md matches the generator", () => {
+  const root = join(import.meta.dir, "..");
+  const path = join(root, "docs/reference/cli.md");
+  const before = readFileSync(path, "utf8");
+  expect(
+    Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
+  ).toBe(0);
+  expect(readFileSync(path, "utf8")).toBe(before);
 });
 
 /** Runs `body` with a fake `gh` first on PATH, then restores PATH. */

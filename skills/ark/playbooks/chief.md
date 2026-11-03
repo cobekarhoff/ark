@@ -119,7 +119,7 @@ Do these steps in order for one ready ticket.
    ark worktree anchor <run>
    ```
 
-   It prints one line, `path:<absolute path>`. If it exits non-zero, do not start the run lead: tell the human. Start the run lead with that printed `path:<...>` as `--worktree`. The queue Task stays `ready` until close (section 8), where you complete it.
+   It writes `.omp/config.yml` with `tools.approvalMode: yolo` in the new worktree, so workers run with no permission prompt; a worker that still stops at one is a defect to fix, never to click through. It prints one line, `path:<absolute path>`. If it exits non-zero, do not start the run lead: tell the human. Start the run lead with that printed `path:<...>` as `--worktree`. The queue Task stays `ready` until close (section 8), where you complete it.
 
    ```sh
    orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree path:<printed path> --agent <harness> --model <model> --json
