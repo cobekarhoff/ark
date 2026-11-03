@@ -36,8 +36,10 @@ A run is not closed until `retro.md` exists. `ark run close` records the outcome
 Ask the run lead to write it:
 
 ```sh
-orca orchestration send --to <run-lead-handle> --subject "Write retro.md for <run>" --type handoff --body "Read metrics.json and events.ndjson in <run-folder>. Write retro.md as the retro playbook describes." --json
+orca orchestration send --retry-request <id> --to <run-lead-handle> --subject "Write retro.md for <run>" --type handoff --body "Read metrics.json and events.ndjson in <run-folder>. Write retro.md as the retro playbook describes." --json
 ```
+
+If the send answers `already processing`, follow the rule "A busy agent" in `playbooks/chief.md` section 7: the same `--retry-request <id>` for every try, 30 seconds between tries, up to 5 times.
 
 If the run lead has stopped, start a new run lead with the run folder. The event log is the record, so a fresh run lead can write the retro from `events.ndjson`, `state.json` and `metrics.json`.
 
