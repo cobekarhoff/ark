@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { appendEvent } from "../cli/events.ts";
+import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
 import {
   ark,
   recordEvaluation,
@@ -541,5 +543,68 @@ describe("plan.md open-decisions line", () => {
     const markdown = check([]);
     expect(markdown.split("\n")[0]).toBe("# Plan");
     expect(markdown).not.toContain("need an answer before approval");
+  });
+});
+
+describe("plan check UI skills", () => {
+  const surfaceRun = (surfaces: string[]) =>
+    appendEvent(runDirectory, "evaluation.recorded", { blockers: [], risks: [], surfaces });
+  const withSkills = (skills: string[] | undefined, overrides: Record<string, unknown> = {}) => {
+    const plan = validPlan();
+    if (skills) plan.steps[0].skills = skills;
+    Object.assign(plan.steps[0], overrides);
+    writePlan(plan);
+    return ark("plan", "check", runId);
+  };
+  const planMd = () => readFileSync(join(runDirectory, "plan.md"), "utf8");
+  const stepsHeader = () =>
+    planMd()
+      .split("\n")
+      .find((line) => line.startsWith("| Step |"));
+
+  test("ARK-279-AC4 a plan with no skills list is refused when Surfaces is not none", () => {
+    surfaceRun(["cli_output"]);
+    const result = withSkills(undefined);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("skills");
+  });
+
+  test("ARK-279-AC4 a skills entry that ark ui-skills does not list is refused", () => {
+    surfaceRun(["cli_output"]);
+    const result = withSkills([...requiredUiSkills, "made-up-skill"]);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("step build");
+    expect(result.out).toContain("made-up-skill");
+  });
+
+  test("ARK-279-AC4 a non-empty skills list that lacks a required skill is refused", () => {
+    surfaceRun(["web_ui"]);
+    for (const missing of requiredUiSkills) {
+      const result = withSkills(requiredUiSkills.filter((skill) => skill !== missing));
+      expect(result.code).toBe(1);
+      expect(result.out).toContain(missing);
+    }
+  });
+
+  test("ARK-279-AC4 a valid list passes, the React skill is allowed, and plan.md gets a Skills column", () => {
+    surfaceRun(["web_ui"]);
+    expect(withSkills(requiredUiSkills).code).toBe(0);
+    expect(stepsHeader()).toBe("| Step | Role | Repo | Needs | Criteria | Skills |");
+    expect(planMd()).toContain(requiredUiSkills.join(", "));
+    expect(withSkills([...requiredUiSkills, reactSkill]).code).toBe(0);
+    expect(planMd()).toContain(reactSkill);
+  });
+
+  test("ARK-279-AC4 a step without a list passes when another step has a valid one", () => {
+    surfaceRun(["document"]);
+    expect(withSkills(requiredUiSkills).code).toBe(0);
+    expect(planMd()).toMatch(/\| check \|.*\| {2}\|$/m);
+  });
+
+  test("ARK-279-AC4 Surfaces none: skills are not checked and plan.md has no Skills column", () => {
+    expect(withSkills(undefined).code).toBe(0);
+    expect(stepsHeader()).toBe("| Step | Role | Repo | Needs | Criteria |");
+    expect(withSkills(["made-up-skill"]).code).toBe(0);
+    expect(stepsHeader()).not.toContain("Skills");
   });
 });

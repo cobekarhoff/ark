@@ -1,4 +1,12 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
@@ -225,10 +233,14 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   const workspace = loadConfig(project).workspace;
+  let kept = false;
   for (const { repo, path, branch } of [...state.worktrees].reverse()) {
     // newest first: the anchor of a root repo holds the nested worktrees
     const source = join(workspace, repo);
-    const keep = (reason: string) => console.log(`kept     ${repo}  ${branch}: ${reason}`);
+    const keep = (reason: string) => {
+      kept = true;
+      console.log(`kept     ${repo}  ${branch}: ${reason}`);
+    };
     if (!existsSync(path)) {
       Bun.spawnSync(["git", "-C", source, "worktree", "prune"]);
     } else {
@@ -264,4 +276,6 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
     Bun.spawnSync(["git", "-C", source, "branch", "-D", branch]);
     console.log(`removed  ${repo}  ${branch}`);
   }
+  // What is left of workspace/ is Ark's own symlinks and empty folders; rmSync does not follow links.
+  if (!kept) rmSync(mirrorRoot(directory), { recursive: true, force: true });
 }

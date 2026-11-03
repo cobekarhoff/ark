@@ -7,9 +7,10 @@ import { escalate, gateRecord } from "./gate.ts";
 import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
 import { planCheck } from "./plan.ts";
 import { retro } from "./retro.ts";
-import { runClose, runStart, runStep, status } from "./run.ts";
+import { runClose, runCloseSweep, runStart, runStep, status } from "./run.ts";
 import { strategyRecord } from "./strategy.ts";
 import { testRun } from "./test-run.ts";
+import { uiSkills } from "./ui-skills.ts";
 import { ui, uiInstall, uiUninstall } from "./ui.ts";
 import { workspaceSync } from "./workspace.ts";
 import { worktreeAnchor, worktreeCreate, worktreeSync } from "./worktree.ts";
@@ -55,14 +56,24 @@ const commands: Command[] = [
       ),
   },
   {
-    usage: "run close <run> <outcome> [--project <name>]",
+    usage: "run close [<run> <outcome>] [--sweep] [--project <name>]",
     description:
-      "Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs.",
-    flags: { "--project": true },
-    minimum: 2,
+      "Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs. After the close it releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each; it prints `<dispatch id> still active, not released` for an active one, and one `orca: workers not released: <reason>` line when Orca fails, and the close still exits 0. `ark run close --sweep [--project <name>]` does the same release for every closed run of the project (ARK_PROJECT when --project is not given), records no event, and prints nothing for a run with nothing to report. --sweep takes no run argument.",
+    flags: { "--project": true, "--sweep": false },
+    minimum: 0,
     maximum: 2,
-    run: ([runId, outcome], flags) =>
-      runClose(runId, outcome, flags["--project"] as string | undefined),
+    run: (positionals, flags) => {
+      const project = flags["--project"] as string | undefined;
+      if (flags["--sweep"] === true) {
+        if (positionals.length > 0) throw new ArkError("--sweep takes no run argument");
+        return runCloseSweep(project);
+      }
+      if (positionals.length !== 2)
+        throw new ArkError(
+          "wrong number of arguments\nusage: ark run close [<run> <outcome>] [--sweep] [--project <name>]",
+        );
+      return runClose(positionals[0], positionals[1], project);
+    },
   },
   {
     usage: "evaluation record <run> [--project <name>]",
@@ -86,16 +97,25 @@ const commands: Command[] = [
   {
     usage: "strategy record <run> [--project <name>]",
     description:
-      "Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or a project whose ark.yml has no roles.designer. A mockup and roles.designer are not needed when the surface is only none, or when there is one card and the surface is only document. Two or more cards open the strategy gate; one card opens no gate.",
+      "Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or no Skills line, a Skills line that names a skill `ark ui-skills <run>` does not list, or a project whose ark.yml has no roles.designer. A mockup, a Skills line and roles.designer are not needed when the surface is only none, or when there is one card and the surface is only document. Two or more cards open the strategy gate; one card opens no gate.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,
     run: ([runId], flags) => strategyRecord(runId, flags["--project"] as string | undefined),
   },
   {
+    usage: "ui-skills <run> [--project <name>]",
+    description:
+      "Prints the UI skills of the run, one line for each. When the Surfaces list in the recorded evaluation is not none, it prints the required skills, then one more line for the React skill, which is only for a change that touches React code. When Surfaces is none, it prints none. It exits 1 for a run with no recorded evaluation. The Designer, the implementer, the validator and the reviewer read these skills; strategy record and plan check refuse a Skills line or a skills list that names any other skill.",
+    flags: { "--project": true },
+    minimum: 1,
+    maximum: 1,
+    run: ([runId], flags) => uiSkills(runId, flags["--project"] as string | undefined),
+  },
+  {
     usage: "plan check <run> [--project <name>]",
     description:
-      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. It records the number of open decisions.",
+      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,
@@ -207,7 +227,7 @@ const commands: Command[] = [
   {
     usage: "retro <run> [--project <name>]",
     description:
-      "Computes the run's cost, time, rework and intervention metrics and writes metrics.json. The `rework` object holds `rounds` (highest round of a non-merge step), `escalations` (escalation gate answers) and `findings_sent_back` (lines in each `findings/round-<n>.md` file that start, after optional `#` marks, one list marker (`N.`, `-` or `*`) and bold marks, with `P0`, `P1`, `P2` or `P3`; no findings folder counts 0). `rework.merge_steps` counts steps started with `--merge`.",
+      "Computes the run's cost, time, rework and intervention metrics and writes metrics.json. The `rework` object holds `rounds` (highest round of a non-merge step), `escalations` (escalation gate answers) and `findings_sent_back` (lines in each `findings/round-<n>.md` file that start, after optional `#` marks, one list marker (`N.`, `-` or `*`) and bold marks, with `P0`, `P1`, `P2` or `P3`; no findings folder counts 0). `rework.merge_steps` counts steps started with `--merge`. `human_intervention.plan_changes` counts the plan `change` answers plus every plan `approve` answer after the first, whoever gave it (`by` human or auto): `plan_changes: 0` for a plan approved once, `plan_changes: 2` for one change and a second approve.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,

@@ -80,7 +80,7 @@ The next number is one above the highest `ARK-*.md` in the tickets folder.
 ## UI ideas
 
 1. Write one shared data file with a realistic made-up scenario in real project data shapes. It covers every state the UI must show.
-2. Dispatch 3 parallel agents, one visual direction each. Each writes one self-contained `variant-<letter>.html` in `~/.ark/projects/<project>/prototypes/<topic>/`. Brief them with the `impeccable` skill (direction, critique, craft floor; not `generate` or live mode), the `emil-design-eng` skill and the `prototype` skill. Ask for full-word variable names and a headless-browser check with screenshots.
+2. Dispatch 3 parallel agents, one visual direction each. Each writes one self-contained `variant-<letter>.html` in `~/.ark/projects/<project>/prototypes/<topic>/`. Brief them with the `impeccable` skill (direction, critique, craft floor; not `generate` or live mode), the other UI skills the project uses (for a run, `ark ui-skills <run>`) and the `prototype` skill. Ask for full-word variable names and a headless-browser check with screenshots.
 3. Serve the folder on a local port. Check the screenshots yourself. Show the human the links with a short critique of each.
 4. Iterate: make hybrids of the variants the human likes, then one revision with their notes. Keep each version as its own file.
 5. The ticket that builds the UI copies the winner into the repo (for example `docs/design/<topic>/`) as the design reference.

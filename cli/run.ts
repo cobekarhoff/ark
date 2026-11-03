@@ -1,6 +1,7 @@
 import { now as hubNow } from "./clock.ts";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
+import { releaseSettledWorkers } from "./orca-release.ts";
 import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, writeState, type RunState } from "./events.ts";
@@ -145,11 +146,32 @@ export function runStep(
   );
 }
 
-export function runClose(runId: string, outcome: string, inProject?: string): void {
+export async function runClose(runId: string, outcome: string, inProject?: string): Promise<void> {
   const { directory } = findRun(runId, inProject);
   appendEvent(directory, "run.closed", { outcome });
   console.log(`${runId} closed: ${outcome}`);
   worktreeCleanup(runId, inProject);
+  // After the record and the cleanup, so an Orca failure cannot fail the close.
+  for (const line of await releaseSettledWorkers(runId)) console.log(line);
+}
+
+/** Releases the settled workers of every closed run. Read-only for Ark: records no event. */
+export async function runCloseSweep(inProject?: string): Promise<void> {
+  const projects = listProjects();
+  const requested = inProject ?? process.env.ARK_PROJECT;
+  if (requested && !projects.includes(requested))
+    throw new ArkError(`project ${requested} does not exist under ${arkHome()}/projects`);
+  for (const project of requested ? [requested] : projects) {
+    const runsRoot = runsDirectory(project);
+    for (const name of existsSync(runsRoot) ? readdirSync(runsRoot).sort() : []) {
+      const events = join(runsRoot, name, "events.ndjson");
+      if (!existsSync(events) || deriveState(readEvents(join(runsRoot, name))).phase !== "closed")
+        continue;
+      const lines = await releaseSettledWorkers(name);
+      if (lines.length > 0)
+        console.log([`${name}:`, ...lines.map((line) => `  ${line}`)].join("\n"));
+    }
+  }
 }
 
 export function waitingGate(state: RunState): string {

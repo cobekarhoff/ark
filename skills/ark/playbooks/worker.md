@@ -16,6 +16,7 @@ Throughout this playbook:
 2. Read `<run folder>/plan.yml`. Find the step named `<step>`. Note its `role`, `repo`, `needs` and `criteria`. Read the test cases for those criteria.
 3. Read `<run folder>/ticket.md` for the text of each AC the step serves.
 4. Read the context of the repo and the workspace: `AGENTS.md`, `CLAUDE.md` and the files that the step touches. Work from the repo's own conventions.
+   - If the step has a `skills` list in `plan.yml`, read each skill with `skill://<name>` before you work, and apply it. Name the skills you applied in your `worker_done` report. This covers the implementer and the validator. The reviewer uses the list as in its section.
 5. Read what the earlier steps left, if you are not the first: `git log --oneline`, and any file in `<run folder>/findings/` that names your step.
 
 Do only your step. Do not edit another repo's worktree. Do not touch the run's state: never run `ark run step`, `ark evaluation record`, `ark gate record`, `ark merge-request open` or `ark plan check`. The run lead does that.
@@ -62,7 +63,7 @@ You make the mockups that let the human choose a strategy before code exists. Yo
    - `cli_output` or `document`: a sample of the real output, as a text or Markdown file.
    - A state change: the logic page from `skill://prototype`.
 3. For a question about interaction, also make a running prototype with the UI branch of `skill://prototype`. Put it in a throwaway worktree, never in the run's worktrees. It runs on `localhost`. Name its address in your report.
-4. Read these skills for direction and craft: `impeccable` (direction, mode and critique only), `emil-design-eng`, `prototype` and `plannotator-visual-explainer` (for diagrams and tables).
+4. Read these skills for direction and craft: the UI skills of `ark ui-skills <run>` (`impeccable`: direction, mode and critique only), `prototype` and `plannotator-visual-explainer` (for diagrams and tables). Apply them, and write on each card a `Skills:` line with the UI skills that guided it.
    - Never run `impeccable generate`, and never use impeccable live mode. They write variants into the product source and wait for a pick in their own browser overlay.
 5. Mockups and prototypes never go into an MR. Do not copy them into any repo worktree.
 6. A design round: when the run lead sends the human's annotations, revise the same mockups and cards, keep the card IDs, and report again. Do not start over.
@@ -105,7 +106,7 @@ You turn the plan's test cases into tests that prove the AC, and you make them p
 You look for defects in the run's changes and report findings. You never edit.
 
 1. Read the diff of the branch against its base: `git diff $(git merge-base HEAD <base>)..HEAD`. The base is in the `worktree.created` event in `<run folder>/events.ndjson`.
-2. Check the diff against each AC the step serves, against the plan, and against the repo's conventions. Judge the AC text in the run's `ticket.md`: a human-approved amendment, listed in the Amended criteria section of `plan.md`, replaces the backlog text. Look for wrong behavior, missing edge cases, security problems, broken contracts between repos, and tests that do not prove what their name says. If the repo has a web UI, load the skills `web-design-guidelines` and `review-animations` and check the UI code against them. Rank what they find like any other finding.
+2. Check the diff against each AC the step serves, against the plan, and against the repo's conventions. Judge the AC text in the run's `ticket.md`: a human-approved amendment, listed in the Amended criteria section of `plan.md`, replaces the backlog text. Look for wrong behavior, missing edge cases, security problems, broken contracts between repos, and tests that do not prove what their name says. If the step has a `skills` list in `plan.yml`, read each skill with `skill://<name>` and check the diff against every skill in it. Rank what they find like any other finding.
 3. Run read-only checks to reproduce what you suspect: read the code, run the tests, run a command. Do not change any file in the worktree. Do not commit, stash, reset or checkout.
 4. Write the findings to `<run folder>/findings/<step>.md`. It is the only file you create. Rank each finding from P0 (must fix) to P3 (minor):
 
@@ -127,6 +128,8 @@ You look for defects in the run's changes and report findings. You never edit.
    - **Problem:** <what is wrong and what it breaks>
    - **Suggested fix:** <the direction, not a patch>
    ```
+
+   A finding from a skill in the `skills` list of your step also has the lines `- **Skill:** <skill>` and `- **Rule:** <name of the rule or guideline>`, after `**Line:**`.
 
    A finding without a file, a line and evidence is not a finding. Do not pad the list. If you find nothing, write `No findings.` in the file.
 

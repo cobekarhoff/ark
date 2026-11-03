@@ -1,9 +1,10 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors";
 import { appendEvent, deriveState, readEvents } from "./events";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
+import { uiSkillsFor } from "./ui-skills";
 
 type PlanStep = { id: string; repo: string; needs: string[]; criteria: string[] };
 type PlanSteps = { steps: PlanStep[] };
@@ -89,11 +90,38 @@ function defaultBranch(worktree: Worktree): string {
   return result.ok ? result.stdout.replace(/^origin\//, "") : worktree.base;
 }
 
+/**
+ * UI findings of the reviewer steps: `### <rank>: <title>` headings with `**File:**`, `**Line:**`,
+ * `**Skill:**` and `**Rule:**` lines. A finding with no Skill line is not a UI finding.
+ */
+function uiFindings(runDirectory: string, reviewers: string[]): string[] {
+  const bullets: string[] = [];
+  for (const step of reviewers) {
+    const file = join(runDirectory, "findings", `${step}.md`);
+    if (!existsSync(file)) continue;
+    for (const block of readFileSync(file, "utf8").split(/^(?=### )/m)) {
+      const heading = block.match(/^###\s+([^:\n]+):\s*(.*)$/m);
+      const field = (name: string) =>
+        block
+          .match(new RegExp(`\\*\\*${name}:\\*\\*\\s*(.*)$`, "m"))?.[1]
+          .replaceAll("`", "")
+          .trim() ?? "";
+      const skill = field("Skill");
+      if (!heading || !skill) continue;
+      bullets.push(
+        `- ${heading[1].trim()} ${heading[2].trim()} (${skill}: ${field("Rule")}, ${field("File")}:${field("Line")})`,
+      );
+    }
+  }
+  return bullets;
+}
+
 function description(
   ticket: { id: string; title: string },
   criteriaIds: string[],
   texts: Map<string, string>,
   dependencyLines: string[],
+  ui: { skills: string[]; findings: string[] } | null = null,
 ): string {
   const criteria = criteriaIds.map((id) => `- ${id}${texts.has(id) ? `: ${texts.get(id)}` : ""}`);
   return [
@@ -102,6 +130,16 @@ function description(
     "Acceptance criteria this repo serves:",
     ...(criteria.length > 0 ? criteria : ["- none"]),
     ...(dependencyLines.length > 0 ? ["", ...dependencyLines] : []),
+    ...(ui
+      ? [
+          "",
+          "## UI/UX checks",
+          "",
+          `Skills applied: ${ui.skills.join(", ")}`,
+          "",
+          ...(ui.findings.length > 0 ? ui.findings : ["- No UI/UX findings."]),
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -205,11 +243,22 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
     }
   }
 
-  const plan: PlanSteps = loadPlan(directory);
+  const plan = loadPlan(directory);
   const upstream = upstreamRepos(plan);
   const order = mergeOrder(plan);
   const repos = [...order, ...[...worktrees.keys()].filter((repo) => !order.includes(repo))];
   const texts = criterionTexts(directory);
+  // A run with no recorded evaluation counts as Surfaces none.
+  const ui =
+    uiSkillsFor(state.evaluation?.surfaces ?? ["none"]).length > 0
+      ? {
+          skills: [...new Set(plan.steps.flatMap((step) => step.skills))],
+          findings: uiFindings(
+            directory,
+            plan.steps.filter((step) => step.role === "reviewer").map((step) => step.id),
+          ),
+        }
+      : null;
   const ticket = state.ticket;
   const opened = new Map<string, OpenedMergeRequest>();
   for (const event of events)
@@ -244,7 +293,7 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
       worktree,
       defaultBranch(worktree),
       `${ticket.id}: ${ticket.title}`,
-      description(ticket, criteriaIds, texts, dependencyLines),
+      description(ticket, criteriaIds, texts, dependencyLines, ui),
     );
     if (host === "gitlab") {
       for (const merge of upstreamOpened)
