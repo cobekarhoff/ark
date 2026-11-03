@@ -244,7 +244,7 @@ test("ARK-200-AC2 --since lists only human comments after the time, from GitHub 
       [
         {
           user: user("general-gary"),
-          body: "Please rebase",
+          body: `Please rebase ${"onto main ".repeat(12)}`,
           html_url: "https://github.com/example/core/pull/1#issuecomment-3",
           created_at: "2026-11-01T09:00:00Z",
         },
@@ -305,7 +305,7 @@ test("ARK-200-AC2 --since lists only human comments after the time, from GitHub 
   expect(withSince.code).toBe(0);
   expect(withSince.out.trim().split("\n")).toEqual([
     `.  open  ${GH_CORE}/1  ci: none`,
-    "  @general-gary  (general)  Please rebase  https://github.com/example/core/pull/1#issuecomment-3",
+    `  @general-gary  (general)  Please rebase ${"onto main ".repeat(12).trim()}  https://github.com/example/core/pull/1#issuecomment-3`,
     "  @maria  src/status.ts:42  Should this fall back to unknown?  https://github.com/example/core/pull/1#discussion_r1",
     `gitlab  open  ${GL}/5  ci: none`,
     `  @lena  lib/x.ts:7  Nit here  ${GL}/5#note_77`,
@@ -317,7 +317,7 @@ test("ARK-200-AC2 --since lists only human comments after the time, from GitHub 
       author: "general-gary",
       path: null,
       line: null,
-      body: "Please rebase",
+      body: `Please rebase ${"onto main ".repeat(12)}`,
       url: "https://github.com/example/core/pull/1#issuecomment-3",
       createdAt: "2026-11-01T09:00:00Z",
     },
@@ -368,7 +368,7 @@ test("ARK-200-AC3 status prints conflict for a conflicting GitHub MR and a GitLa
   expect(json.map((entry: { conflict: boolean }) => entry.conflict)).toEqual([false, true, true]);
 });
 
-test("ARK-200-AC4 a failed gh or glab call prints unknown for that value, exits 0, and leaves the other MRs printing normally", () => {
+test("ARK-200-AC4 a failed gh call prints unknown for that value, a failed glab jobs call on a failed pipeline still prints ci failed, and the other MRs print normally", () => {
   const runId = openRun([
     merge("gh-down", "https://github.com/example/d/pull/2", 2),
     merge("gl-jobs-down", `${GL}/3`, 3),
@@ -393,10 +393,11 @@ test("ARK-200-AC4 a failed gh or glab call prints unknown for that value, exits 
     "  comments: unknown",
     "gh-down  unknown  https://github.com/example/d/pull/2  ci: unknown  conflict: unknown",
     "  comments: unknown",
-    `gl-jobs-down  open  ${GL}/3  ci: unknown`,
+    `gl-jobs-down  open  ${GL}/3  ci: failed`,
     "  comments: unknown",
   ]);
   const json = JSON.parse(ark("merge-request", "status", runId, "--json").out);
-  expect(json.map((entry: { ci: string }) => entry.ci)).toEqual(["passed", "unknown", "unknown"]);
+  expect(json.map((entry: { ci: string }) => entry.ci)).toEqual(["passed", "unknown", "failed"]);
+  expect(json[2].failedChecks).toEqual([]);
   expect(json[1]).toMatchObject({ state: "unknown", conflict: null });
 });

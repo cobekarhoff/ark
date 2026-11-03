@@ -147,7 +147,7 @@ orca orchestration check --ack <delivery id> --wait --types "worker_done,escalat
 
 An empty wait or a timeout is a checkpoint. Wait again. After three empty waits, run `orca orchestration worker-list --include-remote --json` and read each row's `projection.nextAction`. Do not stop, release or restart a run lead unless a row shows it has exited.
 
-On every wait, including an empty one, run `ark merge-request status <run>` for each run in `merge_requests_open`. If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge.
+On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>` for each run in `merge_requests_open`, and record the poll time for the next wait. If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge. Pass each human comment it lists to the human and to the run lead. Tell the run lead about a `conflict` (it runs `ark worktree sync <run>`) and about `ci: failed` with its `checks failing:` names. Do not treat `running` or `unknown` as passed.
 
 A `status` message from a run lead is a notice, not a question. Pass it to the human. When it says a Plannotator review is open, tell the human to answer there. The run lead records that answer itself.
 
@@ -191,7 +191,7 @@ When `ark merge-request status <run>` shows every MR merged (section 7), when th
 ark merge-request status <run>
 ```
 
-It prints `<repo>  merged|open|closed  <url>` for each MR.
+It prints `<repo>  merged|open|closed  <url>` for each MR, then `ci:`, `conflict` and `checks failing:` as in `docs/reference/cli.md`.
 
 Release the run lead before you close the run, so that the removal of its worktree does not end a live agent. Do it when it is not yet released: its row in `orca orchestration worker-list --include-remote --json` is still listed as running, and section 7 (`worker_done` from a run lead, step 5) has not released it. If it was released there, skip this.
 

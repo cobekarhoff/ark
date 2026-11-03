@@ -436,15 +436,20 @@ function gitlabCi(
     return { ci: "none", failedChecks: [] };
   if (pipelineStatus !== "failed" && pipelineStatus !== "canceled")
     return { ci: "running", failedChecks: [] };
-  const jobs = parseJsonArrays(
-    run(
-      ["glab", "api", `projects/:id/pipelines/${pipeline.id}/jobs?scope[]=failed`, "--paginate"],
-      cwd,
-    ),
-  ) as { name: string; web_url?: string }[];
+  let failedJobs: { name: string; web_url?: string }[] = [];
+  try {
+    failedJobs = parseJsonArrays(
+      run(
+        ["glab", "api", `projects/:id/pipelines/${pipeline.id}/jobs?scope[]=failed`, "--paginate"],
+        cwd,
+      ),
+    ) as { name: string; web_url?: string }[];
+  } catch {
+    // pipeline.status already says failed; only the check names are unknown
+  }
   return {
     ci: "failed",
-    failedChecks: jobs.map((job) => ({ name: job.name, url: job.web_url ?? "" })),
+    failedChecks: failedJobs.map((job) => ({ name: job.name, url: job.web_url ?? "" })),
   };
 }
 
@@ -597,9 +602,7 @@ function plainLines(report: MergeRequestReport): string[] {
         : comment.line === null
           ? comment.path
           : `${comment.path}:${comment.line}`;
-    lines.push(
-      `  @${comment.author}  ${place}  ${text.length > 80 ? `${text.slice(0, 79)}…` : text}  ${comment.url}`,
-    );
+    lines.push(`  @${comment.author}  ${place}  ${text}  ${comment.url}`);
   }
   return lines;
 }
