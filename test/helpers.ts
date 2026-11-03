@@ -87,13 +87,14 @@ export function writeFakeCommand(name: string, script: string): string {
   return directory;
 }
 
-/** A fresh state folder for the fake `orca`, `gh` and `plannotator`; puts the three on PATH. */
+/** A fresh state folder for the fake `orca`, `gh`, `omp` and `plannotator`; puts the four on PATH. */
 export function installFakeTools(options: FakeToolOptions): string {
   const state = mkdtempSync(join(tmpdir(), "ark-fake-tools-"));
   writeFakeToolState(state, options);
   const scripts = fakeToolScripts(state);
   writeFakeCommand("orca", scripts.orca);
   writeFakeCommand("gh", scripts.gh);
+  writeFakeCommand("omp", scripts.omp);
   writeFakeCommand("plannotator", scripts.plannotator);
   return state;
 }

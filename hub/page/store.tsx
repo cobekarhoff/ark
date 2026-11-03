@@ -67,6 +67,9 @@ export function Stale({ name }: { name: SourceName }) {
   );
 }
 
+/** Browser time in ms, ticking each second: for a time the provider names itself (a limit's reset). */
+export const useNow = () => useSyncExternalStore(subscribeSecond, wholeSecond);
+
 /**
  * Age of a server timestamp in milliseconds, ticking each second. Like `Stale`, it adds the time
  * since the page got the snapshot to `generated_at - time` (server clock), so no clock of the
@@ -84,18 +87,27 @@ export function useAge(): (time: string) => number {
     );
 }
 
-export const sourceNames: SourceName[] = ["ark", "orca", "plannotator", "github", "usage"];
+export const sourceNames: SourceName[] = [
+  "ark",
+  "orca",
+  "plannotator",
+  "github",
+  "usage",
+  "providerLimits",
+  "agentWait",
+  "evidence",
+];
 
 /** Hash routes: client-side, so a view change never reaches the server. */
 export type Route = {
-  view: "home" | "run" | "backlog" | "map";
+  view: "home" | "runs" | "run" | "backlog" | "ticket";
   run: string | null;
   /**
    * `#/run/<run>/step/<id>`, `/lead`, `/session/<file>` open a transcript; `/file/<path>` shows a run
    * file. Each argument is one URL-encoded segment.
    */
   sub: { kind: "step" | "lead" | "session" | "file"; arg: string | null } | null;
-  /** `#/backlog/<ticket>` marks a row; `#/map/finished` shows finished tickets. */
+  /** `#/ticket/<id>`: the ticket of the page. A ticket id is taken as unique across projects. */
   arg: string | null;
 };
 
@@ -108,17 +120,47 @@ const decode = (part: string): string => {
   }
 };
 
+/** The Map is gone: its route, and a bare `#/run` with no run to pick, open Runs. */
+export const isRetiredRoute = (hash: string): boolean => /^#\/(map(\/|$)|run\/?$)/.test(hash);
+
 export function parseRoute(hash: string): Route {
   const [, view, part, kind, subArg] = hash.split("/");
   const arg = part ? decode(part) : null;
-  if (view === "run") {
+  if (view === "run" && arg !== null) {
     const subKinds = ["step", "lead", "session", "file"] as const;
     const subKind = subKinds.find((candidate) => candidate === kind);
     const sub = subKind ? { kind: subKind, arg: subArg ? decode(subArg) : null } : null;
     return { view, run: arg, sub, arg: null };
   }
-  if (view === "backlog" || view === "map") return { view, run: null, sub: null, arg };
+  if (view === "runs" || view === "run" || view === "map")
+    return { view: "runs", run: null, sub: null, arg: null };
+  if (view === "backlog") return { view, run: null, sub: null, arg: null };
+  if (view === "ticket" && arg !== null) return { view, run: null, sub: null, arg };
   return { view: "home", run: null, sub: null, arg: null };
+}
+
+export type ThemeChoice = "auto" | "light" | "dark";
+const themeKey = "ark-hub-theme";
+
+/** The saved choice. The browser keeps it: choosing a theme sends no request. */
+export function savedTheme(): ThemeChoice {
+  try {
+    const value = localStorage.getItem(themeKey);
+    return value === "light" || value === "dark" ? value : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+/** `auto` removes the pin, so `prefers-color-scheme` decides. */
+export function applyTheme(choice: ThemeChoice): void {
+  if (choice === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.dataset.theme = choice;
+  try {
+    localStorage.setItem(themeKey, choice);
+  } catch {
+    // A browser that refuses storage still switches the theme for this page.
+  }
 }
 
 const subscribeHash = (notify: () => void) => {

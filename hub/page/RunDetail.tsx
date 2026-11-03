@@ -1,6 +1,7 @@
 // test ids: timeline (ol), timeline-entry (data-type), timeline-counts, run-file-link (data-path),
 // run-lead-link, unassigned-file (data-file), closed-banner, session-link (data-step)
 import { useEffect, useState } from "react";
+import { ExternalLink } from "./format.tsx";
 import type { RunDetail, SessionFile, TimelineEntry } from "../types.ts";
 
 export type DetailState =
@@ -66,13 +67,7 @@ export function Timeline({ entries }: { entries: TimelineEntry[] }) {
                 {entry.counts.missing > 0 && <> {entry.counts.missing} missing</>}{" "}
               </span>
             )}
-            {entry.url ? (
-              <a href={entry.url} target="_blank" rel="noreferrer">
-                {entry.why}
-              </a>
-            ) : (
-              entry.why
-            )}
+            {entry.url ? <ExternalLink url={entry.url}>{entry.why}</ExternalLink> : entry.why}
           </span>
         </li>
       ))}
