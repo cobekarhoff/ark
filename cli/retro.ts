@@ -540,28 +540,40 @@ export function retro(runId: string, inProject?: string): void {
         `model changed: step ${step.id} planned ${step.model}, ran ${actualModels[step.id].join(", ")}`,
     );
   // Vendor from the model name: claude- is anthropic, gpt- is openai, else none.
-  const vendorsOf = (id: string): Set<string> =>
-    new Set(
-      (bareModels[id] ?? []).flatMap((name) =>
-        name.startsWith("claude-") ? ["anthropic"] : name.startsWith("gpt-") ? ["openai"] : [],
-      ),
-    );
+  // Same vendor review: judged on the executed step windows (the repo and role the messages ran in), not on plan.yml.
+  const vendorsByRepoStep = new Map<string, Map<string, { role: string; vendors: Set<string> }>>();
+  for (const [message, window] of stepOf) {
+    const vendorName = message.model.slice(message.model.lastIndexOf("/") + 1);
+    const vendor = vendorName.startsWith("claude-")
+      ? "anthropic"
+      : vendorName.startsWith("gpt-")
+        ? "openai"
+        : null;
+    if (!vendor) continue;
+    const stepsInRepo = vendorsByRepoStep.get(window.repo) ?? new Map();
+    const entry = stepsInRepo.get(window.id) ?? { role: window.role, vendors: new Set<string>() };
+    entry.vendors.add(vendor);
+    stepsInRepo.set(window.id, entry);
+    vendorsByRepoStep.set(window.repo, stepsInRepo);
+  }
   const sameVendorGroups: string[] = [];
-  for (const repo of new Set(planSteps.map((step) => step.repo))) {
-    const inRepo = planSteps.filter((step) => step.repo === repo);
-    const builders = inRepo.filter((step) => step.role === "implementer");
-    const checkers = inRepo.filter((step) => step.role === "validator" || step.role === "reviewer");
-    const sharing = (candidates: typeof inRepo, others: typeof inRepo) =>
-      candidates.filter((step) =>
-        others.some((other) =>
-          [...vendorsOf(step.id)].some((vendor) => vendorsOf(other.id).has(vendor)),
-        ),
+  for (const [repo, stepsInRepo] of [...vendorsByRepoStep].sort(([left], [right]) =>
+    left < right ? -1 : 1,
+  )) {
+    const entries = [...stepsInRepo].sort(([left], [right]) => (left < right ? -1 : 1));
+    const builders = entries.filter(([, entry]) => entry.role === "implementer");
+    const checkers = entries.filter(
+      ([, entry]) => entry.role === "validator" || entry.role === "reviewer",
+    );
+    const sharing = (candidates: typeof entries, others: typeof entries) =>
+      candidates.filter(([, entry]) =>
+        others.some(([, other]) => [...entry.vendors].some((vendor) => other.vendors.has(vendor))),
       );
     const checkersShared = sharing(checkers, builders);
     if (checkersShared.length > 0)
       sameVendorGroups.push(
-        `${checkersShared.map((step) => step.id).join(", ")} with ${sharing(builders, checkers)
-          .map((step) => step.id)
+        `${checkersShared.map(([id]) => id).join(", ")} with ${sharing(builders, checkers)
+          .map(([id]) => id)
           .join(", ")} in ${repo}`,
       );
   }

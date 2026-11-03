@@ -708,8 +708,25 @@ describe("ark retro models and vendors", () => {
     expect(out).toContain("same vendor review: false");
   });
 
+  /** Runs the review step in repos/platform, next to build: the events and the review session both say so. */
+  function reviewInPlatform(): void {
+    installSession(ompRoot, "platform/session-build.jsonl", "omp/build.jsonl");
+    const text = readFileSync(join(fixtures, "omp", "review.jsonl"), "utf8")
+      .replaceAll("__RUN__", runDirectory)
+      .replaceAll("/workspace/repos/shared", "/workspace/repos/platform");
+    writeFileSync(join(ompRoot, "platform", "session-review.jsonl"), text);
+    writeEvents(
+      runDirectory,
+      scenario.map(([time, type, data]): EventRow => [
+        time,
+        type,
+        data.step === "review" ? { ...data, repo: "repos/platform" } : data,
+      ]),
+    );
+  }
+
   test("ARK-186-AC3 same vendor review is true and names both steps when reviewer and implementer share a vendor and repo", () => {
-    installAllSessions();
+    reviewInPlatform();
     writePlan([
       ["build", "implementer", "repos/platform", "claude-haiku-4-5"],
       ["review", "reviewer", "repos/platform", "claude-opus-5-5"],
@@ -717,6 +734,26 @@ describe("ark retro models and vendors", () => {
     const out = runRetro();
     expect(readMetrics().same_vendor_review).toBe(true);
     expect(out).toContain("same vendor review: true (review with build in repos/platform)");
+  });
+
+  test("ARK-186-AC3 same vendor review follows the executed repos: plan repos that agree but runs in different repos is false", () => {
+    installAllSessions(); // build ran in repos/platform, review in repos/shared
+    writePlan([
+      ["build", "implementer", "repos/platform", "claude-haiku-4-5"],
+      ["review", "reviewer", "repos/platform", "claude-opus-5-5"],
+    ]);
+    expect(runRetro()).toContain("same vendor review: false");
+    expect(readMetrics().same_vendor_review).toBe(false);
+  });
+
+  test("ARK-186-AC3 same vendor review follows the executed repos: plan repos that differ but runs in one repo is true", () => {
+    reviewInPlatform();
+    writePlan([
+      ["build", "implementer", "repos/platform", "claude-haiku-4-5"],
+      ["review", "reviewer", "repos/shared", "claude-opus-5-5"],
+    ]);
+    expect(runRetro()).toContain("same vendor review: true (review with build in repos/platform)");
+    expect(readMetrics().same_vendor_review).toBe(true);
   });
 
   test("ARK-186-AC3 same vendor review is false for a gpt reviewer and a claude implementer", () => {
