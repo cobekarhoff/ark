@@ -470,7 +470,7 @@ describe("plan check", () => {
     expect(existsSync(join(runDirectory, "plan.md"))).toBe(true);
   });
 
-  test("ARK-171-AC3 renders the Design section before Steps with approach, table and example", () => {
+  test("ARK-171-AC3 ARK-171-AC5 renders the Design section before Steps with approach, table and example", () => {
     const plan = validPlan();
     plan.design = {
       approach: "Read the design block in loadPlan.",
@@ -524,6 +524,84 @@ describe("plan check", () => {
     expect(designSection()).toContain("No approach given.");
     expect(designSection()).toContain("```text\nonly example\n```");
     expect(designSection()).not.toContain("No example given.");
+  });
+
+  test("ARK-185-AC1 plan check --help names the design reasons that make a plan not valid", () => {
+    const result = ark("plan", "check", "--help");
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("A plan with no `design.interfaces` is invalid");
+    expect(result.out).toContain(
+      "an interface with no name or with no `callers`, or with a blank caller",
+    );
+    expect(result.out).toContain("a duplicate step id, an unknown role");
+    expect(result.out).toContain("A summary with no why, no changes");
+    expect(result.out).toContain("A decision with no id, a duplicate id");
+    expect(result.out).toContain("A test case with a level");
+  });
+
+  test("ARK-185-AC2 refuses a bare `- ` caller in the YAML file", () => {
+    const plan = validPlan();
+    plan.design.interfaces = [{ name: "renderPlanMarkdown", callers: ["planCheck", "BLANK"] }];
+    const yml = Bun.YAML.stringify(plan, null, 2);
+    expect(yml).toMatch(/- BLANK\n/);
+    writeFileSync(join(runDirectory, "plan.yml"), yml.replace(/- BLANK\n/, "- \n"));
+    const result = ark("plan", "check", runId);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("design interface renderPlanMarkdown has a blank caller");
+  });
+
+  for (const [name, callers] of [
+    ["an empty caller", [""]],
+    ["a blank caller", ["   "]],
+    ["a blank caller after a named one", ["run-lead.md", "\t"]],
+  ] as const) {
+    test(`ARK-185-AC2 refuses ${name} and names the interface`, () => {
+      const plan = validPlan();
+      plan.design.interfaces = [{ name: "renderPlanMarkdown", callers: [...callers] }];
+      writePlan(plan);
+      const result = ark("plan", "check", runId);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain("design interface renderPlanMarkdown has a blank caller");
+      expect(existsSync(join(runDirectory, "plan.md"))).toBe(false);
+    });
+  }
+
+  test("ARK-185-AC2 accepts the same interface once every caller is named", () => {
+    const plan = validPlan();
+    plan.design.interfaces = [{ name: "renderPlanMarkdown", callers: ["planCheck"] }];
+    writePlan(plan);
+    expect(ark("plan", "check", runId).code).toBe(0);
+  });
+
+  test("ARK-185-AC3 keeps the Steps heading and table outside every fence when the example holds a fence", () => {
+    const plan = validPlan();
+    plan.design.example = 'Output:\n```json\n{"unit": "mmol/L"}\n```\n';
+    writePlan(plan);
+    expect(ark("plan", "check", runId).code).toBe(0);
+    const lines = readFileSync(join(runDirectory, "plan.md"), "utf8").split("\n");
+
+    // CommonMark: a fence closes on a line of backticks at least as long as the opener.
+    let open: string | undefined;
+    const outside: string[] = [];
+    for (const line of lines) {
+      const fence = line.match(/^(`{3,})/)?.[1];
+      if (open === undefined && fence) open = fence;
+      else if (open !== undefined && fence && fence.length >= open.length && line.trim() === fence)
+        open = undefined;
+      else if (open === undefined) outside.push(line);
+    }
+    expect(outside).toContain("## Steps");
+    expect(outside.some((line) => line.startsWith("| Step "))).toBe(true);
+    expect(open).toBeUndefined();
+  });
+
+  test("ARK-185-AC4 architecture.md and run-a-ticket.md name design.interfaces, callers and the Design section", () => {
+    for (const file of ["docs/explanation/architecture.md", "docs/how-to/run-a-ticket.md"]) {
+      const text = readFileSync(join(import.meta.dir, "..", file), "utf8");
+      expect(text).toContain("design.interfaces");
+      expect(text).toContain("callers");
+      expect(text).toContain("Design section");
+    }
   });
 });
 
