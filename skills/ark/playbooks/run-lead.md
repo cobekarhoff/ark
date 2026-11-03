@@ -395,6 +395,7 @@ The command runs the integration and E2E suites on the composed workspace. Exit 
 - **A tagged test fails.** Read `<run folder>/results/`. Decide whether the product code or the test is wrong. If the code is wrong, send the implementer step back: write the failing test names and output into `<run folder>/findings/round-<round>.md`, then start the implementer step again (section 7). That is a new round. If the test is wrong, start the validator step again. A validator restart is not a round.
 - **An AC is `missing`.** No tagged test passed for it. Start the validator step again.
 - After any rework, run `ark test <run>` again. Tests must pass at the latest commit.
+- A validator commits its evidence files (for example a file written after a human check) before the last `ark test <run>`, so that no commit follows that test. A commit after the last test makes `ark status <run>` show `test head: stale`, and `ark merge-request open <run>` refuses the changed head.
 
 Run the reviewer steps after the tests pass. Each reviewer writes its findings to `<run folder>/findings/<step>.md`, ranked from P0 (must fix) to P3 (minor).
 
@@ -419,6 +420,8 @@ Each return to the implementer after the first build is a round. `ark run step <
 If the last `ark test <run>` passed but a review P0 or P1 is unresolved at the spent budget, the phase is still `building`. Open the gate with `ark escalate <run> --reason "<the unresolved finding>"`. Never add a failing test only to open the gate.
 
 After `ark escalate`, continue with steps 1 to 3 below, as for any spent budget.
+
+If the phase is `escalation` because the last test failed, first read `test head:` in `ark status <run>`. If it says `stale`, work was committed after that test: run `ark test <run>` once before the question to the human. Ask the human only when the phase is still `escalation` after that test. If the phase is no longer `escalation`, the question is not needed: go on with section 8.
 
 1. Do not work around it. Ask Master Chief to put the decision to the human:
 
@@ -450,6 +453,8 @@ ark merge-request open <run>
 ```
 
 The command pushes each repo's branch and opens one MR for each repo, in dependency order. If it fails, read the error. Fix what you can: for example, a push that needs a rebase goes back to the implementer. If it needs the human, such as a missing login for `gh` or `glab`, ask Master Chief.
+
+If `ark merge-request open <run>` refuses with `changed since the last test run`, a commit followed the last test. Run `ark test <run>` and open again. This needs no gate and no escalation answer.
 
 After the MRs open, run `ark merge-request status <run>` and read every MR. Read `ci:` (`passed`, `failed`, `running`, `none`, `unknown`), `conflict` and `conflict: unknown`. Only `ci: passed` with no `conflict` is a pass: treat `running`, `none` and `unknown` as not passed, and an error retrieving checks is not a pass. Wait for `running`; for `failed`, read CI logs for every failure and write the evidence into `<run folder>/findings/round-<round>.md`. Restart the validator for test-only fixes or the implementer for product fixes through the logged steps in section 7. Before each post-MR implementer round, ask the human through Master Chief and record a fresh escalation answer as in section 9; do not bypass the round budget. Re-run `ark test <run>` and the reviewer steps after repair, then run `ark worktree sync <run>` to push the repair. Recheck MR status and repeat until checks pass and no review sends work back. Do not report success while CI is failing, running, or unknown.
 

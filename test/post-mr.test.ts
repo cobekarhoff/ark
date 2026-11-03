@@ -18,7 +18,7 @@ afterEach(() => {
   process.env.PATH = originalPath;
 });
 
-function openRun() {
+function openRun(withMergeRequest = true) {
   tempArkHome();
   const workspace = tempGitRepo({
     "contract.test.ts":
@@ -67,11 +67,12 @@ function openRun() {
   expect(ark("worktree", "create", runId).code).toBe(0);
   expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
   expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
-  appendEvent(directory, "merge_request.opened", {
-    repo: ".",
-    url: "https://github.com/example/core/pull/1",
-    number: 1,
-  });
+  if (withMergeRequest)
+    appendEvent(directory, "merge_request.opened", {
+      repo: ".",
+      url: "https://github.com/example/core/pull/1",
+      number: 1,
+    });
   return { runId, directory, workspace };
 }
 
@@ -114,6 +115,48 @@ test("ARK-208-AC2 every post-MR implementer round needs a fresh escalation answe
     });
     expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
   }
+});
+
+test("ARK-287-AC1 an escalation answer survives ark test after an MR is open and the next implementer start uses it up", () => {
+  const { runId, directory } = openRun();
+  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+  expect(ark("test", runId).code).toBe(0);
+  expect(readEvents(directory).at(-1)?.type).toBe("test.completed");
+  const answers = () => readEvents(directory).filter((event) => event.type === "gate.answered");
+  const answered = answers().length;
+
+  expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
+  expect(answers()).toHaveLength(answered);
+  expect(readEvents(directory).at(-1)).toMatchObject({
+    type: "step.started",
+    data: { step: "implementer", round: 2 },
+  });
+  expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
+
+  const before = readEvents(directory);
+  const refused = ark("run", "step", runId, "implementer", "start");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("record gate escalation");
+  expect(readEvents(directory)).toEqual(before);
+});
+
+test("ARK-287-AC1 before any MR is open a test.completed event still clears the escalation answer", () => {
+  const { runId, directory } = openRun(false);
+  const failedTest = () =>
+    appendEvent(directory, "test.completed", {
+      passed: false,
+      heads: {},
+      suites: [],
+      criteria: { "ARK-900-AC1": "failing" },
+    });
+  failedTest();
+  expect(ark("status", runId).out).toContain("phase: escalation");
+  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+  expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
+  expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
+  expect(ark("status", runId).out).toContain("phase: building");
+  failedTest();
+  expect(ark("status", runId).out).toContain("phase: escalation");
 });
 
 function emulateHosts(workspace: string, failJobs = false) {

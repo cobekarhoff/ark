@@ -89,7 +89,7 @@ You turn the plan's test cases into tests that prove the AC, and you make them p
    - Is an integration or E2E test, at the level the test case names. Never write a unit test to prove an AC.
    - Carries its AC ID so the suite's parser can read it. Put the ID in the test name for the `bun` parser, for example `test("ARK-156-AC1 lists the five playbooks", ...)`. Use the AC marker or tag your parser reads for `pytest` and `behave`.
    - Exercises the real system or an emulated dependency you own. Never mock the thing the test proves.
-3. Run the suites and make the tests pass: `ark test <run>`. It runs every suite on the composed workspace and lists each AC as passing, failing or missing. It is the only command that proves an AC.
+3. Run the suites and make the tests pass: `ark test <run>`. It runs every suite on the composed workspace and lists each AC as passing, failing or missing. It is the only command that proves an AC. Commit your tests and any evidence files before the last `ark test <run>`, so that no commit follows that test: a later commit makes the test head stale.
 4. If a test fails because the product code is wrong, do not fix the product code. Write the failing test names, the output and your evidence in `<run folder>/findings/<step>.md`, and report `--outcome failed`. The run lead sends the work back to the implementer.
 5. Audit each test you wrote against the test gate (`rules/test-audit.md` in the Ark repo), as your last step. Answer these for every test:
    - What observable behavior or contract does it protect?

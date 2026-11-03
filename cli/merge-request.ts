@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors";
-import { appendEvent, deriveState, readEvents } from "./events";
+import { appendEvent, deriveState, readEvents, type ArkEvent } from "./events";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
 import { uiSkillsFor } from "./ui-skills";
@@ -218,6 +218,22 @@ function blockOnGitLab(
   }
 }
 
+export type StaleHead = { repo: string; tested: string | undefined; current: string };
+
+/** Repos whose worktree head differs from the head the last test.completed event recorded. */
+export function staleHeads(events: ArkEvent[]): StaleHead[] {
+  const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
+  if (lastTest === undefined) return [];
+  const stale: StaleHead[] = [];
+  for (const event of events) {
+    if (event.type !== "worktree.created" || !existsSync(event.data.path)) continue;
+    const current = run(["git", "rev-parse", "HEAD"], event.data.path);
+    const tested: string | undefined = lastTest.data.heads?.[event.data.repo];
+    if (tested !== current) stale.push({ repo: event.data.repo, tested, current });
+  }
+  return stale;
+}
+
 export function mergeRequestOpen(runId: string, inProject?: string): void {
   const { directory } = findRun(runId, inProject);
   const events = readEvents(directory);
@@ -233,14 +249,11 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
   if (!lastTest.data.passed)
     throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
-  for (const worktree of worktrees.values()) {
-    const head = run(["git", "rev-parse", "HEAD"], worktree.path);
-    const tested: string | undefined = lastTest.data.heads?.[worktree.repo];
-    if (tested !== head) {
-      throw new ArkError(
-        `repo ${worktree.repo} changed since the last test run (tested ${tested?.slice(0, 8) ?? "nothing"}, now ${head.slice(0, 8)}): run \`ark test\` again`,
-      );
-    }
+  const [first] = staleHeads(events);
+  if (first !== undefined) {
+    throw new ArkError(
+      `repo ${first.repo} changed since the last test run (tested ${first.tested?.slice(0, 8) ?? "nothing"}, now ${first.current.slice(0, 8)}): run ark test ${runId} again`,
+    );
   }
 
   const plan = loadPlan(directory);

@@ -133,3 +133,22 @@ test("ARK-282-AC6 ark run step --help and docs/reference/cli.md name --not-start
   Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
   expect(readFileSync(path, "utf8")).toBe(before);
 });
+
+test("ARK-287-AC6 status and merge-request open help describe the test head line and the refusal, and docs/reference/cli.md matches the generator", () => {
+  const path = join(repositoryRoot, "docs/reference/cli.md");
+  const committed = readFileSync(path, "utf8");
+  const help = (...args: string[]) =>
+    Bun.spawnSync(["bun", join(repositoryRoot, "cli/ark.ts"), ...args, "--help"], {
+      cwd: repositoryRoot,
+    }).stdout.toString();
+  const status = help("status");
+  expect(status).toContain("test head: current");
+  expect(status).toContain("test head: stale (<repo> tested <8 characters>, now <8 characters>)");
+  const open = help("merge-request", "open");
+  expect(open).toContain("refuses");
+  expect(open).toContain("run ark test <run> again");
+  for (const text of ["test head: current", "run ark test <run> again"])
+    expect(committed).toContain(text);
+  Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
+  expect(readFileSync(path, "utf8")).toBe(committed);
+});
