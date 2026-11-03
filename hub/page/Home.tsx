@@ -67,8 +67,17 @@ function NeedsMe({ gates, waiting }: { gates: Gate[] | "unknown"; waiting: Waiti
   );
 }
 
-/** What Orca reports wins; the plan fills a gap and says so, and a difference shows both. */
-function Field({ reported, planned }: { reported: string | null; planned: string | undefined }) {
+/** What Orca reports wins; the plan or `ark.yml` fills a gap and says so, and a difference shows both. */
+function Field({
+  reported,
+  planned,
+  source,
+}: {
+  reported: string | null;
+  planned: string | undefined;
+  source: "plan" | "configured";
+}) {
+  const label = source === "plan" ? "planned" : "configured";
   if (reported === null && planned === undefined)
     return (
       <span className="mut" title="Orca did not report it and no plan step names it">
@@ -78,13 +87,16 @@ function Field({ reported, planned }: { reported: string | null; planned: string
   if (reported === null)
     return (
       <>
-        {planned} <span className="mut">(planned)</span>
+        {planned} <span className="mut">({label})</span>
       </>
     );
   if (planned === undefined || planned === reported) return <>{reported}</>;
   return (
     <>
-      {reported} <span className="mut">(planned {planned})</span>
+      {reported}{" "}
+      <span className="mut">
+        ({label} {planned})
+      </span>
     </>
   );
 }
@@ -95,9 +107,18 @@ function Agents({ agents }: { agents: Agent[] | "unknown" }) {
   return agents.map((agent, index) => (
     <div key={index} data-testid="agent" data-role={agent.role}>
       <span className="pill">{agent.role}</span>{" "}
-      <Field reported={agent.harness} planned={agent.planned?.harness} /> ·{" "}
+      <Field
+        reported={agent.harness}
+        planned={agent.planned?.harness}
+        source={agent.planned?.source ?? "plan"}
+      />{" "}
+      ·{" "}
       <span className="mono">
-        <Field reported={agent.model} planned={agent.planned?.model} />
+        <Field
+          reported={agent.model}
+          planned={agent.planned?.model}
+          source={agent.planned?.source ?? "plan"}
+        />
       </span>
     </div>
   ));
@@ -145,6 +166,14 @@ function Runs({ runs }: { runs: RunView[] }) {
               <div className="mut" data-testid="run-age">
                 last event {duration(age(run.updated_at))} ago
               </div>
+              {attentionOf(run, age)
+                .filter((item) => item.kind === "idle")
+                .slice(0, 1)
+                .map((item) => (
+                  <div className="mut" data-testid="run-idle" key={item.step}>
+                    {item.label}
+                  </div>
+                ))}
             </td>
             <td className="wrap">
               <Agents agents={run.agents} />
@@ -182,7 +211,12 @@ export function Home() {
     );
   const { runs, gates } = snapshot;
   const waiting = known(runs)
-    ? runs.flatMap((run) => attentionOf(run, age).map((item) => ({ run, item })))
+    ? runs.flatMap((run) =>
+        // An idle step is a guess, not a gate: it shows in the run row and the DAG, never here.
+        attentionOf(run, age)
+          .filter((item) => item.kind === "waiting")
+          .map((item) => ({ run, item })),
+      )
     : [];
   return (
     <>

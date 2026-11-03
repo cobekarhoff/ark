@@ -18,6 +18,7 @@ import {
   tempArkHome,
   tempDirectory,
   useCleanup,
+  writeProject,
 } from "./helpers.ts";
 
 useCleanup();
@@ -496,7 +497,7 @@ test("ARK-277-AC10 the Map draws one node for each ticket and one edge for each 
   await open(page, baseUrl, "map");
 
   // Default: tickets whose newest run is not closed (901, 903) and their direct neighbours (902,
-  // 904), live work first. 905 has no run and no neighbour in a run: hidden until Show finished.
+  // 904), live work first. 905 has no run and no neighbour in a run: hidden until Show all tickets.
   const nodes = page.getByTestId("map-node");
   await expect(nodes).toHaveCount(4);
   await expect(page.locator('[data-testid="map-node"][data-ticket="ARK-905"]')).toHaveCount(0);
@@ -510,7 +511,7 @@ test("ARK-277-AC10 the Map draws one node for each ticket and one edge for each 
     page.locator(`[data-testid="map-node"][data-ticket="${ticket}"] a`).getAttribute("href");
   expect(await hrefOf("ARK-901")).toBe(`#/run/${encodeURIComponent(runId("ARK-901", 2))}`);
   expect(await hrefOf("ARK-902")).toBe("#/backlog/ARK-902");
-  await page.getByRole("button", { name: "Show finished" }).click();
+  await page.getByRole("button", { name: "Show all tickets" }).click();
   await expect(nodes).toHaveCount(5);
   const expectedPhase: Record<string, string> = {
     "ARK-901": "building",
@@ -637,6 +638,126 @@ test("ARK-277-AC7 an agent that Orca reports without harness and model shows the
   const agent = page.locator('[data-testid="agent"][data-role="validator"]');
   await expect(agent).toContainText("omp (planned)");
   await expect(agent).toContainText("plan/model-x (planned)");
+});
+
+test("ARK-277-AC7 an MR whose gh pr view fails shows unknown, never open", async ({ page }) => {
+  isolate();
+  const mergeRequest = "https://github.com/example/repo/pull/72";
+  writeRun({
+    project: "p",
+    run: runId("ARK-720"),
+    ticket: { id: "ARK-720", title: "Run with a mute gh" },
+    phase: "merge_requests_open",
+    mergeRequests: [{ repo: ".", url: mergeRequest, number: 72 }],
+  });
+  installFakeTools({ failingMergeRequestViews: [mergeRequest] });
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+
+  const request = page.getByTestId("mr");
+  await expect(request).toContainText("!72");
+  await expect(request).toHaveAttribute("data-state", "unknown");
+  await expect(request.getByTestId("mr-state")).toHaveText("unknown");
+  // pr checks still answers: its fact is shown, the state is not made up.
+  await expect(request.getByTestId("ci")).toHaveAttribute("data-ci", "passing");
+});
+
+test("ARK-277-AC7 an unread question and an escalation of live workers wait on Home, a finished worker's do not", async ({
+  page,
+}) => {
+  isolate();
+  const run = runId("ARK-721");
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-721", title: "Run with questions" },
+    phase: "building",
+  });
+  const message = (type: string, from: string, subject: string, read = 0) => ({
+    type,
+    from_handle: `dispatch:${from}`,
+    to_handle: `run:orca-${run}`,
+    subject,
+    read,
+    created_at: new Date().toISOString(),
+  });
+  installFakeTools({
+    orca: {
+      ...orcaAnswersFor(run),
+      workers: [
+        {
+          taskId: "task-1",
+          dispatchId: "ctx_live",
+          state: "running",
+          agentTerminalHandle: "term-worker",
+        },
+        { taskId: "task-2", dispatchId: "ctx_done", state: "succeeded" },
+        {
+          taskId: "task-3",
+          dispatchId: "ctx_other",
+          state: "running",
+          agentTerminalHandle: "term-worker",
+        },
+      ],
+      tasks: [
+        { id: "task-1", title: "hub-server (implementer, .)" },
+        { id: "task-2", title: "hub-page (implementer, .)" },
+        { id: "task-3", title: "hub-tests (validator, .)" },
+      ],
+      messages: [
+        message("question", "ctx_live", "which port?"),
+        message("escalation", "ctx_other", "tests will not run"),
+        message("question", "ctx_done", "finished worker asks"),
+        message("question", "ctx_live", "already read", 1),
+      ],
+    },
+  });
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+
+  const rows = page.getByTestId("waiting");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: "asked the run lead: which port?" })).toContainText(
+    "hub-server",
+  );
+  await expect(rows.filter({ hasText: "blocked: tests will not run" })).toContainText("hub-tests");
+  await expect(page.getByText("Needs me · 2")).toBeVisible();
+});
+
+test("ARK-277-AC7 a run lead without harness and model shows roles.chief of ark.yml, marked configured", async ({
+  page,
+}) => {
+  isolate();
+  writeProject("p", {
+    workspace: tempDirectory("ark-workspace-"),
+    ticket_source: "local",
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    roles: {
+      implementer: { harness: "omp", model: "m" },
+      validator: { harness: "omp", model: "m" },
+      reviewer: { harness: "omp", model: "m" },
+      chief: { harness: "claude", model: "claude-opus" },
+    },
+  });
+  const run = runId("ARK-722");
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-722", title: "Lead without facts" },
+    phase: "building",
+  });
+  installFakeTools({
+    orca: {
+      terminals: [{ handle: "term-lead", connected: true }],
+      runs: [{ id: `orca-${run}`, objective: `Ark run ${run}`, coordinator_handle: "term-lead" }],
+    },
+  });
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+
+  const lead = page.locator('[data-testid="agent"][data-role="run lead"]');
+  await expect(lead).toContainText("claude (configured)");
+  await expect(lead).toContainText("claude-opus (configured)");
 });
 
 test("ARK-277-AC9 a file in the tickets folder that is not named like a ticket is not listed", async ({

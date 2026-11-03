@@ -212,7 +212,14 @@ export function writeOmpSession(
 
 export type FakeToolOptions = {
   /** Orca answers: terminals, orchestration runs, workers and tasks, as the JSON each command prints. */
-  orca?: { terminals?: unknown[]; runs?: unknown[]; workers?: unknown[]; tasks?: unknown[] };
+  orca?: {
+    terminals?: unknown[];
+    runs?: unknown[];
+    workers?: unknown[];
+    tasks?: unknown[];
+    /** `inbox` messages; none by default. */
+    messages?: unknown[];
+  };
   /** Seconds each Orca call sleeps before it answers. */
   orcaSleepSeconds?: number;
   /** `up` answers, `down` fails every call, `twice` answers each command twice and then fails. */
@@ -221,6 +228,8 @@ export type FakeToolOptions = {
   plannotatorSessions?: { index: number; target: string; url: string }[];
   /** Merge request URLs whose `gh pr checks` reports a failing check. */
   failingMergeRequests?: string[];
+  /** Merge request URLs whose `gh pr view` fails. */
+  failingMergeRequestViews?: string[];
 };
 
 /** Writes the state files the fake `orca`, `gh` and `plannotator` read. Call again to change an answer. */
@@ -233,11 +242,13 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   put("orca.runs", wrap(options.orca?.runs, "runs"));
   put("orca.workers", wrap(options.orca?.workers, "workers"));
   put("orca.tasks", wrap(options.orca?.tasks, "tasks"));
+  put("orca.inbox", wrap(options.orca?.messages, "messages"));
   put("orca.sleep", String(options.orcaSleepSeconds ?? 0));
   put("orca.mode", options.orcaMode ?? "up");
   put("plannotator.mode", options.plannotatorMode ?? "up");
   put("plannotator.sessions", JSON.stringify(options.plannotatorSessions ?? []));
   put("gh.failing", `${(options.failingMergeRequests ?? []).join("\n")}\n`);
+  put("gh.viewfailing", `${(options.failingMergeRequestViews ?? []).join("\n")}\n`);
 }
 
 /** The mode switch both fakes share. `twice` counts calls per command in the state folder. */
@@ -267,6 +278,7 @@ case "$1 $2" in
   "orchestration run-list") cat '${state}/orca.runs' ;;
   "orchestration worker-list") cat '${state}/orca.workers' ;;
   "orchestration task-list") cat '${state}/orca.tasks' ;;
+  "orchestration inbox") cat '${state}/orca.inbox' ;;
   *) exit 1 ;;
 esac`,
     // `gh pr checks` exits 1 for a failing check and 8 for a pending one, and still prints the checks.
@@ -275,7 +287,9 @@ case "$1 $2" in
   "pr checks")
     if grep -qxF "$3" '${state}/gh.failing'; then echo '[{"bucket":"fail"},{"bucket":"pass"}]'; exit 1; fi
     echo '[{"bucket":"pass"}]' ;;
-  "pr view") echo '{"state":"OPEN"}' ;;
+  "pr view")
+    if grep -qxF "$3" '${state}/gh.viewfailing'; then exit 1; fi
+    echo '{"state":"OPEN"}' ;;
   *) exit 1 ;;
 esac`,
     plannotator: `${modeGate(state, "plannotator", "sessions")}

@@ -1,5 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
+import { loadConfig } from "../cli/config.ts";
 import { waitingGate } from "../cli/run.ts";
 import {
   createArkReader,
@@ -31,6 +32,17 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   github: 15_000,
   usage: 5000,
 };
+
+const usageTimeoutMilliseconds = 30_000;
+
+/** Harness and model of `roles.chief` in the project's `ark.yml`, or null when unset or unreadable. */
+function chiefRole(project: string): { harness: string; model: string } | null {
+  try {
+    return loadConfig(project).roles.chief ?? null;
+  } catch {
+    return null;
+  }
+}
 
 type Slot<T> = { ok: boolean; readAt: string | null; value: T | null };
 const emptySlot = <T>(): Slot<T> => ({ ok: false, readAt: null, value: null });
@@ -157,13 +169,20 @@ export function createSnapshotReader() {
           })) ?? null,
         merge_requests: state.merge_requests.map((request) => {
           const facts = githubFacts.get(request.url);
-          return { ...request, state: facts?.state ?? "open", ci: facts?.ci ?? "unknown" };
+          return { ...request, state: facts?.state ?? "unknown", ci: facts?.ci ?? "unknown" };
         }),
         agents: slots.orca.value
           ? (slots.orca.value.agents.get(state.run) ?? []).map((agent) => {
               const step = run.plan?.find((candidate) => candidate.id === agent.step);
-              return step
-                ? { ...agent, planned: { harness: step.harness, model: step.model } }
+              if (step)
+                return {
+                  ...agent,
+                  planned: { harness: step.harness, model: step.model, source: "plan" as const },
+                };
+              // A run lead starts with the harness and model of `roles.chief` (chief playbook).
+              const chief = agent.step === null ? chiefRole(state.project) : null;
+              return chief
+                ? { ...agent, planned: { ...chief, source: "configured" as const } }
                 : agent;
             })
           : "unknown",
@@ -254,8 +273,16 @@ export function createSnapshotReader() {
     usage: () =>
       read("usage", async () => {
         if (!slots.ark.value) return null;
-        await usage.refresh(openRunsOf().map((run) => run.directory));
-        return true;
+        const directories = openRunsOf().map((run) => run.directory);
+        const { promise: timeout, resolve } = Promise.withResolvers<null>();
+        const timer = setTimeout(resolve, usageTimeoutMilliseconds, null);
+        // A hung refresh is a failed read: the slot keeps its last good value and shows its age.
+        const done = await Promise.race([
+          usage.refresh(directories).then(() => true as const),
+          timeout,
+        ]);
+        clearTimeout(timer);
+        return done;
       }),
   };
 

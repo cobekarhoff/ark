@@ -48,15 +48,16 @@ export type Agent = {
   title: string;
   /** The plan step this agent works on, from its Orca task title; null for a lead or Chief. */
   step: string | null;
-  /** Harness and model of that plan step: shown when Orca reports none, labelled when they differ. */
-  planned: { harness: string; model: string } | null;
+  /** Harness and model from the plan step or, for a run lead and Master Chief, `roles.chief` of `ark.yml`: shown when Orca reports none, labelled when they differ. */
+  planned: { harness: string; model: string; source: "plan" | "configured" } | null;
 };
 
 export type MergeRequestView = {
   repo: string;
   url: string;
   number: number;
-  state: "open" | "merged" | "closed";
+  /** `unknown` when `gh pr view` has never answered for this MR: never a guess. */
+  state: "open" | "merged" | "closed" | "unknown";
   ci: "passing" | "failing" | "pending" | "unknown";
 };
 

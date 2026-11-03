@@ -193,9 +193,9 @@ const isLive = (worker: OrcaWorker): boolean => {
 /**
  * The live agents of each open Ark run, and what each run waits for. Orca commands that feed it:
  * `terminal list`, `run-list --full` and `inbox --full`, and per open run `worker-list` and
- * `task-list`. Null when `run-list` or `terminal list` fails (a failure of `worker-list` or
- * `task-list` for one run drops that run, never invents agents; a failed `inbox` only means no
- * run is shown as waiting).
+ * `task-list`. Null when `run-list`, `terminal list` or `inbox` fails (a failure of `worker-list`
+ * or `task-list` for one run drops that run, never invents agents): the page then keeps the last
+ * answer and shows its age, never an empty list of waits.
  *
  * A pending question is a message of type `question` or `escalation` that the run lead has not
  * read (`ask` from a worker, or a blocked report): the step of its sender waits.
@@ -214,7 +214,7 @@ export async function readOrca(
     orcaOrchestration<{ messages?: OrcaMessage[] }>("inbox", "--limit", "200", "--full"),
   ]);
   const terminals = terminalList?.result?.terminals;
-  if (!runList || !terminals) return null;
+  if (!runList || !terminals || !inbox) return null;
   const byHandle = new Map(terminals.map((terminal) => [terminal.handle, terminal]));
   const orcaRuns = runList.runs ?? [];
   const leadOf = new Map(
@@ -319,13 +319,24 @@ export async function readOrca(
         const title = worker ? (titles.get(worker.taskId ?? "") ?? worker.taskId) : undefined;
         return title?.match(stepTask)?.[1] ?? null;
       };
-      const pending = (inbox?.messages ?? []).filter(
-        (message) =>
+      const pending = (inbox.messages ?? []).filter((message) => {
+        const sender = message.from_handle?.replace(/^dispatch:/, "");
+        const worker = (workers.workers ?? []).find(
+          (candidate) =>
+            sender !== undefined &&
+            (candidate.dispatchId === sender ||
+              candidate.terminal === sender ||
+              candidate.agentTerminalHandle === sender),
+        );
+        return (
           (message.type === "question" || message.type === "escalation") &&
           message.to_handle === `run:${orcaRun.id}` &&
           !message.read &&
-          message.created_at,
-      );
+          message.created_at &&
+          // A worker that finished no longer waits for an answer.
+          !(worker && !isLive(worker))
+        );
+      });
       waits.set(
         run,
         pending.map((message) => ({
@@ -406,8 +417,10 @@ export async function readGithub(
   await Promise.all(
     urls.map(async (url) => {
       const fresh = await readMergeRequest(url);
-      const kept = fresh ?? known.get(url);
-      if (!fresh) ok = false;
+      const last = known.get(url);
+      // `pr view` did not answer: keep the last good state (none: the page says unknown) and go stale.
+      if (!fresh?.state) ok = false;
+      const kept = fresh?.state ? fresh : fresh ? { ...fresh, state: last?.state ?? null } : last;
       if (kept) facts.set(url, kept);
     }),
   );

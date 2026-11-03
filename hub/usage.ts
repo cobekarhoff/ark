@@ -46,6 +46,8 @@ function roots(): { harness: Harness; root: string; pattern: string }[] {
 }
 
 const workerCount = 3;
+/** A worker that has not answered this long is hung: it is dropped and its requests fail. */
+const requestTimeoutMilliseconds = 60_000;
 
 /** The folder and its symlink-resolved path: a session records whichever the agent started in. */
 function parentsOf(directory: string): string[] {
@@ -90,10 +92,16 @@ export class UsageIndex {
   /** Grows each time a refresh changed what the index holds. */
   version = 0;
   #entries = new Map<string, Entry>();
-  #workers: Worker[] = [];
-  #waiting = new Map<number, (reply: WorkerReply) => void>();
+  #workers: (Worker | undefined)[] = [];
+  #waiting = new Map<number, { slot: number; resolve: (reply: WorkerReply) => void }>();
   #nextId = 0;
   #queue: Promise<void> = Promise.resolve();
+  #workerUrl: URL;
+
+  /** `workerUrl` exists so a test can crash the worker; the hub uses the default. */
+  constructor(workerUrl = new URL("./usage-worker.ts", import.meta.url)) {
+    this.#workerUrl = workerUrl;
+  }
 
   /** Brings the index up to date for the open runs of `directories`. Calls run one after the other. */
   refresh(directories: string[]): Promise<void> {
@@ -198,26 +206,60 @@ export class UsageIndex {
     return { total: incomplete ? null : sum(all), steps };
   }
 
+  /**
+   * Sends one request to the worker of its slot. It always resolves: a worker that errors, closes,
+   * sends an unreadable message or stays silent past the timeout is dropped (the next request
+   * makes a new one) and every request it held resolves with `error`, so the caller marks that file failed.
+   */
   #ask(request: Omit<WorkerRequest, "id">): Promise<WorkerReply> {
-    if (this.#workers.length === 0) {
-      for (let i = 0; i < workerCount; i++) {
-        const worker = new Worker(new URL("./usage-worker.ts", import.meta.url));
-        worker.onmessage = (event: MessageEvent<WorkerReply>) => {
-          this.#waiting.get(event.data.id)?.(event.data);
-          this.#waiting.delete(event.data.id);
-        };
-        this.#workers.push(worker);
-      }
-    }
     const id = this.#nextId++;
+    const slot = id % workerCount;
     const { promise, resolve } = Promise.withResolvers<WorkerReply>();
-    this.#waiting.set(id, resolve);
-    this.#workers[id % workerCount].postMessage({ ...request, id });
+    const worker = this.#workerOf(slot);
+    const timer = setTimeout(
+      () => this.#drop(slot, worker, "the usage worker did not answer in time"),
+      requestTimeoutMilliseconds,
+    );
+    this.#waiting.set(id, {
+      slot,
+      resolve: (reply) => {
+        clearTimeout(timer);
+        resolve(reply);
+      },
+    });
+    worker.postMessage({ ...request, id });
     return promise;
   }
 
+  #workerOf(slot: number): Worker {
+    const known = this.#workers[slot];
+    if (known) return known;
+    const worker = new Worker(this.#workerUrl);
+    const lost = () => this.#drop(slot, worker, "the usage worker stopped");
+    worker.onmessage = (event: MessageEvent<WorkerReply>) => {
+      const entry = this.#waiting.get(event.data.id);
+      this.#waiting.delete(event.data.id);
+      entry?.resolve(event.data);
+    };
+    worker.onerror = lost;
+    worker.onmessageerror = lost;
+    worker.addEventListener("close", lost);
+    this.#workers[slot] = worker;
+    return worker;
+  }
+
+  #drop(slot: number, worker: Worker, error: string): void {
+    if (this.#workers[slot] !== worker) return;
+    this.#workers[slot] = undefined;
+    worker.terminate();
+    for (const [id, entry] of this.#waiting) {
+      if (entry.slot !== slot) continue;
+      this.#waiting.delete(id);
+      entry.resolve({ id, error });
+    }
+  }
+
   close(): void {
-    for (const worker of this.#workers) worker.terminate();
-    this.#workers = [];
+    this.#workers.forEach((worker, slot) => worker && this.#drop(slot, worker, "closed"));
   }
 }

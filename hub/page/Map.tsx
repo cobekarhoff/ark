@@ -94,7 +94,7 @@ export function MapView() {
           aria-pressed={finished}
           onClick={() => (location.hash = finished ? "#/map" : "#/map/finished")}
         >
-          Show finished
+          Show all tickets
         </button>
         <span className="mut">
           {finished
@@ -111,7 +111,7 @@ export function MapView() {
         ))}
       </p>
       {sorted.length === 0 ? (
-        <p className="mut">No open work. Show finished lists every ticket.</p>
+        <p className="mut">No open work. Show all tickets lists every ticket.</p>
       ) : (
         <div
           ref={box}
