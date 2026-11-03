@@ -114,6 +114,8 @@ export function deriveState(events: ArkEvent[]): RunState {
   let strategy: RunState["strategy"] = null;
   let blocked = false;
   let round = 1;
+  // Rounds of the non-merge starts, so a finish with not_started can take its start back.
+  const startedRounds: { step: string; round: number }[] = [];
   let roundBudget = 0;
   let criteriaIds: string[] = [];
   let criteriaStatus: Record<string, CriterionStatus> = {};
@@ -219,6 +221,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "step.started":
         stepStatus.set(data.step, "running");
+        if (!data.merge) startedRounds.push({ step: data.step, round: data.round });
         round = Math.max(round, data.round);
         if (!startedSteps.some((step) => step.id === data.step))
           startedSteps.push({ id: data.step, role: data.role, repo: data.repo });
@@ -226,6 +229,11 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "step.finished": {
         stepStatus.set(data.step, data.outcome);
+        if (data.not_started) {
+          const last = startedRounds.findLastIndex((started) => started.step === data.step);
+          if (last !== -1) startedRounds.splice(last, 1);
+          round = Math.max(1, ...startedRounds.map((started) => started.round));
+        }
         const finishedStep = startedSteps.find((step) => step.id === data.step);
         if (data.merge && data.outcome === "succeeded" && finishedStep)
           syncConflicts.delete(finishedStep.repo);

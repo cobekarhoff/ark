@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig } from "./config.ts";
+import { type ProjectConfig, loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { type RunState, appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
@@ -195,8 +195,12 @@ function findCycles(plan: Plan): string[][] {
 export function findProblems(
   plan: Plan,
   ticketCriteria: string[],
-  surfaces: string[] = ["none"],
+  surfaces: string[],
+  configuredRoles: ProjectConfig["roles"],
 ): string[] {
+  const allowedPairs = [
+    ...new Set(Object.values(configuredRoles).map((role) => `${role.harness}/${role.model}`)),
+  ];
   const problems: string[] = [];
   const stepIds = new Set<string>();
   plan.steps.forEach((step, i) => {
@@ -211,6 +215,11 @@ export function findProblems(
     if (!step.repo) problems.push(`step ${name} has no repo`);
     if (!step.harness) problems.push(`step ${name} has no harness`);
     if (!step.model) problems.push(`step ${name} has no model`);
+    if (step.harness && step.model && !allowedPairs.includes(`${step.harness}/${step.model}`)) {
+      problems.push(
+        `step ${name} uses ${step.harness}/${step.model}, which is not in ark.yml roles: ${allowedPairs.join(", ")}`,
+      );
+    }
   });
   for (const step of plan.steps) {
     for (const need of step.needs) {
@@ -428,6 +437,7 @@ export function planCheck(runId: string, inProject?: string): void {
     plan,
     state.criteria.map((criterion) => criterion.id),
     surfaces,
+    loadConfig(project).roles,
   );
   const valid = problems.length === 0;
   const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;

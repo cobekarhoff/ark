@@ -395,9 +395,25 @@ function countFindingsSentBack(runDirectory: string): number {
   return count;
 }
 
+/** A step that finished with not_started never ran: drop its last start and that finish. */
+function withoutNotStarted(events: ArkEvent[]): ArkEvent[] {
+  const dropped = new Set<ArkEvent>();
+  events.forEach((event, index) => {
+    if (event.type !== "step.finished" || !event.data.not_started) return;
+    dropped.add(event);
+    const started = events
+      .slice(0, index)
+      .findLast(
+        (candidate) => candidate.type === "step.started" && candidate.data.step === event.data.step,
+      );
+    if (started) dropped.add(started);
+  });
+  return events.filter((event) => !dropped.has(event));
+}
+
 export function retro(runId: string, inProject?: string): void {
   const { project, directory: runDirectory } = findRun(runId, inProject);
-  const events = readEvents(runDirectory);
+  const events = withoutNotStarted(readEvents(runDirectory));
   if (events.length === 0) throw new ArkError(`run ${runId} has no events`);
 
   const firstTime = toMilliseconds(events[0].time);
