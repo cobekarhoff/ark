@@ -83,3 +83,14 @@ test("ARK-279-AC2 skill names live only in cli/ui-skills.ts", () => {
   const own = readFileSync(join(root, "cli/ui-skills.ts"), "utf8");
   for (const name of names) expect(own).toContain(name);
 });
+
+test("ARK-279-AC9 docs/reference/cli.md lists ui-skills, Skills: and skills and matches the generator", () => {
+  const path = join(import.meta.dir, "..", "docs/reference/cli.md");
+  const before = readFileSync(path, "utf8");
+  expect(before).toContain("### ui-skills");
+  expect(before).toContain("ark ui-skills <run>");
+  expect(before).toContain("`Skills:`");
+  expect(before).toContain("| `skills`");
+  Bun.spawnSync(["bun", join(import.meta.dir, "..", "scripts/cli-reference.ts")]);
+  expect(readFileSync(path, "utf8")).toBe(before);
+});
