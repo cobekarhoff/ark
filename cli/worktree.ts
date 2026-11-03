@@ -174,14 +174,18 @@ function checkClean(
     .map((entry) => ({ ...entry, lines: dirtyLines(entry.source, nested) }))
     .filter(({ lines }) => lines.length > 0);
   if (dirty.length === 0) return;
+  const shown = 10;
   if (allowDirty) {
     for (const { repo, source, lines } of dirty)
       console.log(
-        `warning  ${repo.padEnd(8)} ${source} has ${lines.length} uncommitted ${lines.length === 1 ? "change" : "changes"}, not in the worktree`,
+        [
+          `warning  ${repo.padEnd(8)} ${source} has ${lines.length} uncommitted ${lines.length === 1 ? "change" : "changes"}, not in the worktree`,
+          ...lines.slice(0, shown).map((line) => `             ${line}`),
+          ...(lines.length > shown ? [`             ... and ${lines.length - shown} more`] : []),
+        ].join("\n"),
       );
     return;
   }
-  const shown = 10;
   const report = dirty.flatMap(({ repo, source, lines }) => [
     `  dirty    ${repo.padEnd(8)} ${source}  (${lines.length} changed ${lines.length === 1 ? "file" : "files"})`,
     ...lines.slice(0, shown).map((line) => `             ${line}`),
