@@ -14,12 +14,14 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { RunView, Snapshot } from "../hub/types.ts";
+import { readTranscriptPage } from "../hub/transcript.ts";
 import { UsageIndex } from "../hub/usage.ts";
 import {
   ompSessionText,
   orcaAnswersFor,
   today,
   writeBacklogTicket,
+  writeFakeToolState,
   writeOmpSession,
   writeRun,
 } from "./hub-fixtures.ts";
@@ -85,7 +87,7 @@ test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 00
 
 // ---------------------------------------------------------------- AC2
 
-test("ARK-277-AC2 every route of the hub answers POST, PUT, PATCH and DELETE with 404 or 405", async () => {
+test("ARK-277-AC2 every route of the hub but open-in-orca answers POST, PUT, PATCH and DELETE with 404 or 405", async () => {
   isolatedEnvironment();
   const run = `${today()}-ARK-801-1`;
   writeRun({ project: "p", run, ticket: { id: "ARK-801", title: "Open" }, phase: "building" });
@@ -112,6 +114,72 @@ test("ARK-277-AC2 every route of the hub answers POST, PUT, PATCH and DELETE wit
       const response = await fetch(`${baseUrl}${route}`, { method, body: "{}" });
       expect([404, 405], `${method} ${route}`).toContain(response.status);
     }
+  // The one route that takes a POST (ADR 0009) still refuses every other method.
+  for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
+    const response = await fetch(`${baseUrl}/api/open-in-orca`, { method });
+    expect(response.status, `${method} /api/open-in-orca`).toBe(405);
+  }
+});
+
+// ---------------------------------------------------------------- ARK-284
+
+/** One raw HTTP request, so a test can set a `Host` that `fetch` would not send. */
+async function rawPost(baseUrl: string, host: string, origin: string, body: string) {
+  const { port } = new URL(baseUrl);
+  const { promise, resolve } = Promise.withResolvers<string>();
+  let answer = "";
+  const socket = await Bun.connect({
+    hostname: "127.0.0.1",
+    port: Number(port),
+    socket: {
+      data: (_socket, data) => void (answer += data.toString()),
+      close: () => resolve(answer),
+    },
+  });
+  socket.write(
+    `POST /api/open-in-orca HTTP/1.1\r\nHost: ${host}\r\nOrigin: ${origin}\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n${body}`,
+  );
+  return Number((await promise).match(/^HTTP\/1\.1 (\d+)/)?.[1]);
+}
+
+test("ARK-284-AC1 open-in-orca answers 200, 403, 400 and 502, runs only terminal switch, and never sends text", async () => {
+  isolatedEnvironment();
+  const run = `${today()}-ARK-805-1`;
+  writeRun({ project: "p", run, ticket: { id: "ARK-805", title: "Open" }, phase: "building" });
+  const state = installFakeTools({ orca: orcaAnswersFor(run) });
+  const { baseUrl } = await start();
+  const own = new URL(baseUrl).host;
+  const post = (terminal: unknown, origin: string | null = baseUrl) =>
+    fetch(`${baseUrl}/api/open-in-orca`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(origin ? { origin } : {}) },
+      body: JSON.stringify({ terminal }),
+    });
+  const switches = () =>
+    readFileSync(join(state, "orca.log"), "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("terminal switch"));
+  // The snapshot lists the terminals as live after the first Orca read.
+  for (let tries = 0; tries < 50; tries++) {
+    const snapshot = (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
+    if (Array.isArray(snapshot.runs) && Array.isArray(snapshot.runs[0]?.agents)) break;
+    await Bun.sleep(100);
+  }
+
+  expect((await post("term-worker")).status).toBe(200);
+  expect(switches()).toEqual(["terminal switch --terminal term-worker"]);
+  expect((await post("term-worker", "http://evil.example")).status).toBe(403);
+  expect((await post("term-worker", null)).status).toBe(403);
+  expect(await rawPost(baseUrl, "evil.example", baseUrl, '{"terminal":"term-worker"}')).toBe(403);
+  expect(await rawPost(baseUrl, own, baseUrl, '{"terminal":"term-worker"}')).toBe(200);
+  expect((await post("term-unlisted")).status).toBe(400);
+  expect((await post("--help; rm -rf /")).status).toBe(400);
+  expect((await post(42)).status).toBe(400);
+  expect(switches()).toHaveLength(2);
+  expect(readFileSync(join(state, "orca.log"), "utf8")).not.toContain("terminal send");
+
+  writeFakeToolState(state, { orca: orcaAnswersFor(run), orcaSwitchFails: true });
+  expect((await post("term-worker")).status).toBe(502);
 });
 
 // ---------------------------------------------------------------- AC5
@@ -293,6 +361,53 @@ test("ARK-277-AC6 a cold hub serves a full snapshot within 5 s of its start and 
   expect(runViews).toHaveLength(runCount);
   for (const run of runViews) expect(run.cost_usd).toBeCloseTo(expectedCost, 6);
 }, 60_000);
+
+test("ARK-284-AC7 a transcript page holds 200 entries, a tool call at the page end gets its result, and a crashed worker fails the request", async () => {
+  const directory = scratch("ark-transcript-");
+  const file = join(directory, "big.jsonl");
+  const record = (message: unknown) =>
+    JSON.stringify({ type: "message", timestamp: "2026-01-01T00:00:00Z", message });
+  const lines = [JSON.stringify({ type: "session", cwd: directory })];
+  for (let i = 0; i < 199; i++)
+    lines.push(record({ role: "user", content: [{ type: "text", text: `m${i}` }] }));
+  // Entry 200 is a tool call whose result is the next line, so the page ends between them.
+  lines.push(
+    record({
+      role: "assistant",
+      content: [{ type: "toolCall", id: "t", name: "bash", arguments: {} }],
+    }),
+  );
+  lines.push(
+    record({
+      role: "toolResult",
+      toolCallId: "t",
+      isError: true,
+      content: [{ type: "text", text: `first\n${"x".repeat(100_000)}` }],
+    }),
+  );
+  for (let i = 0; i < 50; i++)
+    lines.push(record({ role: "user", content: [{ type: "text", text: `n${i}` }] }));
+  writeFileSync(file, `${lines.join("\n")}\n`);
+
+  const first = readTranscriptPage(file, "omp", 0);
+  expect(first.entries).toHaveLength(200);
+  expect(first.entries[199]).toMatchObject({ kind: "tool", status: "error", result: "first" });
+  expect(JSON.stringify(first).length).toBeLessThan(40_000);
+  const second = readTranscriptPage(file, "omp", first.next!);
+  expect(second.entries).toHaveLength(50);
+  expect(second.next).toBeNull();
+
+  // A worker that dies on the request rejects it, and the next request gets a new worker.
+  const stub = join(directory, "worker.ts");
+  writeFileSync(
+    stub,
+    'self.onmessage = () => setTimeout(() => { throw new Error("crash"); }, 0);\n',
+  );
+  const index = new UsageIndex(pathToFileURL(stub));
+  indexes.push(index);
+  const failure = await index.transcript(file, "omp", 0).catch((err: unknown) => err);
+  expect(failure).toBeInstanceOf(Error);
+});
 
 // ---------------------------------------------------------------- AC12
 

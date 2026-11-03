@@ -222,6 +222,8 @@ export type FakeToolOptions = {
   };
   /** Seconds each Orca call sleeps before it answers. */
   orcaSleepSeconds?: number;
+  /** `orca terminal switch` exits 1. Every call is logged in `orca.log` either way. */
+  orcaSwitchFails?: boolean;
   /** `up` answers, `down` fails every call, `twice` answers each command twice and then fails. */
   orcaMode?: "up" | "down" | "twice";
   plannotatorMode?: "up" | "down" | "twice";
@@ -244,6 +246,7 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   put("orca.tasks", wrap(options.orca?.tasks, "tasks"));
   put("orca.inbox", wrap(options.orca?.messages, "messages"));
   put("orca.sleep", String(options.orcaSleepSeconds ?? 0));
+  put("orca.switchfails", options.orcaSwitchFails ? "1" : "0");
   put("orca.mode", options.orcaMode ?? "up");
   put("plannotator.mode", options.plannotatorMode ?? "up");
   put("plannotator.sessions", JSON.stringify(options.plannotatorSessions ?? []));
@@ -275,6 +278,7 @@ cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
 ${modeGate(state, "orca", "$cmd")}
 case "$1 $2" in
   "terminal list") cat '${state}/orca.terminals' ;;
+  "terminal switch") [ "$(cat '${state}/orca.switchfails')" = 1 ] && exit 1; echo '{"result":{}}' ;;
   "orchestration run-list") cat '${state}/orca.runs' ;;
   "orchestration worker-list") cat '${state}/orca.workers' ;;
   "orchestration task-list") cat '${state}/orca.tasks' ;;

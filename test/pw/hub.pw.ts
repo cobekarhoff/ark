@@ -213,7 +213,10 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
     await page.waitForTimeout(Math.max(0, 30_000 - (Date.now() - viewStartedAt)));
   }
 
-  expect(requests.slice(firstLoad).map((request) => request.url())).toEqual([]);
+  // The one request after it is the Run view's read of its run (`GET /api/run/<run>`, ARK-284).
+  const later = requests.slice(firstLoad).map((request) => new URL(request.url()).pathname);
+  expect(later.length).toBeGreaterThan(0);
+  for (const path of later) expect(path).toBe(`/api/run/${run}`);
 });
 
 // ---------------------------------------------------------------- AC7

@@ -1,11 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { execJson } from "../cli/exec.ts";
-import { deriveState, readEvents, type ArkEvent, type RunState } from "../cli/events.ts";
+import { deriveState, type ArkEvent, type RunState } from "../cli/events.ts";
 import { orcaOrchestration, type OrcaRun, type OrcaTerminal } from "../cli/orca.ts";
 import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
 import { loadPlan, type PlanStep } from "../cli/plan.ts";
 import { stepWindows, type StepWindow } from "../cli/retro.ts";
+import { readEventsLeniently } from "./run-detail.ts";
 import type { Agent, TicketView, Wait } from "./types.ts";
 
 /** Each reader is given a hard timeout, so a hung tool delays its own source and nothing else. */
@@ -50,7 +51,7 @@ export function createArkReader() {
     const known = runCache.get(directory);
     if (known?.signature === signature) return known.run;
     try {
-      const events = readEvents(directory);
+      const events = readEventsLeniently(directory);
       if (events.length === 0) return null;
       let plan: PlanStep[] | null = null;
       try {
@@ -191,7 +192,7 @@ const isLive = (worker: OrcaWorker): boolean => {
 };
 
 /**
- * The live agents of each open Ark run, and what each run waits for. Orca commands that feed it:
+ * The agents of each open Ark run (`live` is false for one that Orca released or disconnected), and what each run waits for. Orca commands that feed it:
  * `terminal list`, `run-list --full` and `inbox --full`, and per open run `worker-list` and
  * `task-list`. Null when `run-list`, `terminal list` or `inbox` fails (a failure of `worker-list`
  * or `task-list` for one run drops that run, never invents agents): the page then keeps the last
@@ -275,6 +276,8 @@ export async function readOrca(
           title: chief!.objective ?? chief!.id,
           step: null,
           planned: null,
+          terminal: chief!.coordinator_handle ?? null,
+          live: true,
         });
       const leadHandle = orcaRun.coordinator_handle;
       const leadTerminal = leadHandle ? byHandle.get(leadHandle) : undefined;
@@ -291,11 +294,14 @@ export async function readOrca(
           title: orcaRun.objective ?? orcaRun.id,
           step: null,
           planned: null,
+          terminal: leadHandle ?? null,
+          live: leadHandle !== undefined,
         });
+      // A released or disconnected worker stays in the list with `live: false`: the page says
+      // "ended, not in Orca" instead of hiding it.
       for (const worker of workers.workers ?? []) {
-        if (!isLive(worker)) continue;
-        const terminal = byHandle.get(worker.agentTerminalHandle ?? worker.terminal ?? "");
-        if (terminal && terminal.connected === false) continue;
+        const handle = worker.agentTerminalHandle ?? worker.terminal ?? null;
+        const terminal = byHandle.get(handle ?? "");
         const title = titles.get(worker.taskId ?? "") ?? worker.taskId ?? "worker";
         list.push({
           role: roleOfTask(title),
@@ -304,6 +310,8 @@ export async function readOrca(
           title,
           step: title.match(stepTask)?.[1] ?? null,
           planned: null,
+          terminal: handle,
+          live: handle !== null && isLive(worker) && terminal?.connected === true,
         });
       }
       agents.set(run, list);

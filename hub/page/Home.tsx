@@ -1,6 +1,8 @@
 // test ids: gate (data-gate), gate-link, run (data-run), agent (data-role), mr (data-state),
-// ci (data-ci), cost, waiting (data-run, data-kind), run-age, stale-label (in the header, data-source)
+// ci (data-ci), cost, waiting (data-run, data-kind), run-age, stale-label (in the header, data-source),
+// open-in-orca (data-terminal), orca-ended, orca-status
 import { Cost, Phase, Unknown, attentionOf, duration, known, type Attention } from "./format.tsx";
+import { OpenInOrca } from "./OrcaButton.tsx";
 import { useAge, useLive } from "./store.tsx";
 import type { Agent, Gate, MergeRequestView, RunView } from "../types.ts";
 
@@ -101,11 +103,17 @@ function Field({
   );
 }
 
-function Agents({ agents }: { agents: Agent[] | "unknown" }) {
+export function Agents({ agents }: { agents: Agent[] | "unknown" }) {
   if (!known(agents)) return <Unknown />;
   if (agents.length === 0) return <span className="mut">no live agent</span>;
   return agents.map((agent, index) => (
-    <div key={index} data-testid="agent" data-role={agent.role}>
+    <div
+      key={index}
+      className="agentrow"
+      data-testid="agent"
+      data-role={agent.role}
+      data-live={agent.live}
+    >
       <span className="pill">{agent.role}</span>{" "}
       <Field
         reported={agent.harness}
@@ -120,6 +128,7 @@ function Agents({ agents }: { agents: Agent[] | "unknown" }) {
           source={agent.planned?.source ?? "plan"}
         />
       </span>
+      <OpenInOrca agent={agent} />
     </div>
   ));
 }
@@ -149,7 +158,7 @@ function Runs({ runs }: { runs: RunView[] }) {
           <th>Ticket</th>
           <th>Title</th>
           <th>Phase</th>
-          <th>Live agents (role · harness · model)</th>
+          <th>Agents (role · harness · model)</th>
           <th>MRs · CI</th>
           <th>Cost</th>
         </tr>

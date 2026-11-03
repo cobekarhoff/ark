@@ -34,7 +34,7 @@ function Shell() {
         </nav>
         <span className="mut">
           {projects.length > 0 ? `project ${projects.join(", ")} · ` : ""}
-          {connected ? "live" : "connecting…"} · read-only
+          {connected ? "live" : "connecting…"} · view only · focuses Orca
         </span>
         <span className="asof-list">
           {sourceNames.map((name) => (
@@ -44,7 +44,7 @@ function Shell() {
       </header>
       <main id="main" tabIndex={-1}>
         {route.view === "home" && <Home />}
-        {route.view === "run" && <Run run={route.run} />}
+        {route.view === "run" && <Run run={route.run} sub={route.sub} />}
         {route.view === "backlog" && <Backlog focus={route.arg} />}
         {route.view === "map" && <MapView />}
       </main>
