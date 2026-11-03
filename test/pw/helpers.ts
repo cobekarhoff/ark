@@ -120,13 +120,14 @@ export function writeFakeCommand(name: string, script: string): string {
 /** Writes an executable `orca` with the given shell script and puts it first on PATH. Returns its directory. */
 export const writeFakeOrca = (script: string): string => writeFakeCommand("orca", script);
 
-/** A fresh scratch folder for the fake `orca`, `gh` and `plannotator`; puts the three on PATH. */
+/** A fresh scratch folder for the fake `orca`, `gh`, `omp` and `plannotator`; puts the four on PATH. */
 export function installFakeTools(options: FakeToolOptions): string {
   const state = tempDirectory("ark-fake-tools-");
   writeFakeToolState(state, options);
   const scripts = fakeToolScripts(state);
   writeFakeCommand("orca", scripts.orca);
   writeFakeCommand("gh", scripts.gh);
+  writeFakeCommand("omp", scripts.omp);
   writeFakeCommand("plannotator", scripts.plannotator);
   return state;
 }

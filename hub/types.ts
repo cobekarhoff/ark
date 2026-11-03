@@ -12,10 +12,103 @@
  * or the usage index has not finished its first build). Times are ISO strings.
  */
 
-export type SourceName = "ark" | "orca" | "plannotator" | "github" | "usage";
+export type SourceName =
+  | "ark"
+  | "orca"
+  | "plannotator"
+  | "github"
+  | "usage"
+  | "providerLimits"
+  | "agentWait"
+  | "evidence";
 export type SourceStatus = { ok: boolean; read_at: string | null };
 
 export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "stopped";
+
+/** One provider and window (`5h` or `7d`) of `omp usage --json`. A field the tool did not give is null, never a guess. */
+export type ProviderWindow = {
+  provider: string;
+  window: "5h" | "7d";
+  used_fraction: number | null;
+  /** ISO time the window resets. */
+  resets_at: string | null;
+  /** ISO time `omp` fetched the figure from the provider. */
+  fetched_at: string | null;
+};
+
+/**
+ * What an agent does now, from `orca worktree ps --agent-wait --json`:
+ * `waiting on a prompt`, `idle N min`, `working`, or `unknown` when Orca did not list the agent
+ * or the field it needs is missing.
+ */
+export type AgentActivity = {
+  kind: "waiting" | "idle" | "working" | "unknown";
+  text: string;
+  /** Last non-empty line of the agent's last message, for the Stuck agents list. */
+  last_line: string | null;
+};
+
+export type CheckView = {
+  name: string;
+  /** Only an http(s) link: anything else is dropped. */
+  url: string | null;
+  result: "pass" | "fail" | "pending";
+};
+
+/** One JUnit testcase whose name starts with an AC id of the run. */
+export type ProofCase = {
+  name: string;
+  file: string | null;
+  line: number | null;
+  result: "pass" | "fail" | "skipped";
+};
+
+export type CriterionEvidence = {
+  id: string;
+  /** The status in `state.json`. */
+  status: string;
+  proof: ProofCase[];
+};
+
+/** P1, P2 and P3 headings of the newest reviewer findings file. Whether a finding is open or fixed is not recorded. */
+export type FindingsView = {
+  /** Path inside the run folder, e.g. `findings/hub-review.md`. */
+  path: string;
+  /** The route that serves the file. */
+  link: string;
+  p1: number;
+  p2: number;
+  p3: number;
+};
+
+/** Evidence of a run in `merge_requests_open`; other runs have none. */
+export type RunEvidence = {
+  criteria: CriterionEvidence[];
+  findings: FindingsView | null;
+};
+
+/**
+ * Steps done of the plan, the round, and the time in the current step against the median and p90 of
+ * its role across closed runs. There is no ETA.
+ */
+export type RunProgress = {
+  steps_done: number;
+  steps_total: number;
+  round: number;
+  round_budget: number;
+  /** The running step; null when no step runs. */
+  current: {
+    step: string;
+    role: string;
+    started_at: string;
+    /** Median and p90 in seconds; null when no closed run has a finished step of the role. */
+    typical_seconds: number | null;
+    slow_above_seconds: number | null;
+  } | null;
+};
+
+/** Seconds of a finished step by role, across closed runs. */
+export type RoleTimes = Record<string, { median: number; p90: number; count: number }>;
 
 /** One step of `plan.yml`: harness and model come from the plan, status from the run events. */
 export type PlanStepView = {
@@ -56,6 +149,7 @@ export type Agent = {
   live: boolean;
   /** True when Orca's worker-list shows the agent working but `terminal list` does not list its terminal (a `structworker_*` agent session): the page says to open it from its chat tab. Never true with `live`. */
   running: boolean;
+  activity: AgentActivity;
 };
 
 export type MergeRequestView = {
@@ -65,6 +159,11 @@ export type MergeRequestView = {
   /** `unknown` when `gh pr view` has never answered for this MR: never a guess. */
   state: "open" | "merged" | "closed" | "unknown";
   ci: "passing" | "failing" | "pending" | "unknown";
+  checks: CheckView[];
+  additions: number | null;
+  deletions: number | null;
+  changed_files: number | null;
+  created_at: string | null;
 };
 
 export type GateKind = "criteria" | "strategy" | "plan" | "escalation";
@@ -97,7 +196,17 @@ export type RunView = {
   agents: Agent[] | "unknown";
   /** What the run waits for (empty while Orca is unknown). */
   waiting: Wait[];
+  progress: RunProgress | null;
+  /** Only for a run in `merge_requests_open`; null until the evidence source has read it. */
+  evidence: RunEvidence | null;
   cost_usd: number | null;
+};
+
+/** The text sections of one backlog ticket, as plain strings, read in the background and sent in the snapshot. */
+export type TicketDocument = {
+  problem: string;
+  change: string;
+  criteria: { id: string; text: string }[];
 };
 
 export type TicketView = {
@@ -107,6 +216,8 @@ export type TicketView = {
   status: string;
   milestone: string | null;
   depends_on: string[];
+  /** Null for an unreadable ticket. */
+  document: TicketDocument | null;
 };
 
 /** The newest run of a ticket, open or closed, for the Map. A ticket with no entry has no run. */
@@ -131,6 +242,10 @@ export type Snapshot = {
   gates: Gate[] | "unknown";
   tickets: TicketView[] | "unknown";
   ticket_runs: TicketRunView[] | "unknown";
+  /** Per provider and window of `omp usage --json`. */
+  provider_limits: ProviderWindow[] | "unknown";
+  /** Median and p90 of step time by role, from closed runs. */
+  role_times: RoleTimes;
 };
 
 /** One decision of a run, from `events.ndjson`: `why` is a plain sentence made from the event payload. */

@@ -4,27 +4,40 @@ import { loadConfig } from "../cli/config.ts";
 import { waitingGate } from "../cli/run.ts";
 import {
   createArkReader,
+  createEvidenceReader,
+  parseAgentTitle,
+  readAgentWait,
   readGithub,
   readOrca,
   readPlannotator,
+  readProviderLimits,
   signatureOf,
   type ArkRun,
   type ArkValue,
+  type EvidenceValue,
   type MergeRequestFacts,
+  unknownActivity,
   type OrcaValue,
   type PlannotatorSession,
+  type PsAgent,
 } from "./sources.ts";
 import type {
+  Agent,
   Gate,
   GateKind,
+  ProviderWindow,
+  RoleTimes,
   RunDetail,
+  RunEvidence,
+  RunProgress,
   RunView,
   Snapshot,
   SourceName,
   StepStatus,
-  TranscriptPage,
   TicketRunView,
+  TranscriptPage,
 } from "./types.ts";
+import { roleTimesOf } from "./progress.ts";
 import { listRunFiles, timelineOf } from "./run-detail.ts";
 import { UsageIndex, type RunCost } from "./usage.ts";
 
@@ -34,6 +47,9 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   plannotator: 5000,
   github: 15_000,
   usage: 5000,
+  providerLimits: 60_000,
+  agentWait: 3000,
+  evidence: 5000,
 };
 
 const usageTimeoutMilliseconds = 30_000;
@@ -79,7 +95,11 @@ export function createSnapshotReader() {
     plannotator: emptySlot<PlannotatorSession[]>(),
     github: emptySlot<true>(),
     usage: emptySlot<true>(),
+    providerLimits: emptySlot<ProviderWindow[]>(),
+    agentWait: emptySlot<Map<string, PsAgent[]>>(),
+    evidence: emptySlot<EvidenceValue>(),
   };
+  const evidenceReader = createEvidenceReader();
   let githubFacts = new Map<string, MergeRequestFacts>();
   const costs = new Map<string, { key: string; cost: RunCost }>();
   const listeners = new Set<(json: string) => void>();
@@ -102,6 +122,105 @@ export function createSnapshotReader() {
         : usage.runCost(run.directory, closed, run.windows);
     costs.set(run.directory, { key, cost });
     return cost;
+  }
+
+  /**
+   * The agents of an open run: Orca's lists joined to `orca worktree ps` by step (or `run lead`, or
+   * role). An agent that only `ps` lists is added as running; one that only the other lists name has
+   * an `unknown` activity. While `ps` has never answered, every activity is `unknown`.
+   */
+  function agentsOf(run: ArkRun): Agent[] | "unknown" {
+    const orca = slots.orca.value;
+    if (!orca) return "unknown";
+    const unmatched = [...(slots.agentWait.value?.get(run.state.run) ?? [])];
+    const agents = (orca.agents.get(run.state.run) ?? []).map((agent): Agent => {
+      const index = unmatched.findIndex(
+        (listed) => parseAgentTitle(listed.title).key === (agent.step ?? agent.role),
+      );
+      const [listed] = index >= 0 ? unmatched.splice(index, 1) : [];
+      return { ...agent, activity: listed?.activity ?? unknownActivity };
+    });
+    for (const listed of unmatched) {
+      const { role, step } = parseAgentTitle(listed.title);
+      agents.push({
+        role,
+        harness: listed.harness,
+        model: null,
+        title: listed.title,
+        step,
+        planned: null,
+        terminal: null,
+        live: false,
+        running: true,
+        activity: listed.activity,
+      });
+    }
+    return agents.map((agent) => {
+      const step = run.plan?.find((candidate) => candidate.id === agent.step);
+      if (step)
+        return {
+          ...agent,
+          planned: { harness: step.harness, model: step.model, source: "plan" as const },
+        };
+      // A run lead starts with the harness and model of `roles.chief` (chief playbook).
+      const chief = agent.step === null ? chiefRole(run.state.project) : null;
+      return chief ? { ...agent, planned: { ...chief, source: "configured" as const } } : agent;
+    });
+  }
+
+  let roleTimesMemo: { ark: ArkValue; times: RoleTimes } | null = null;
+  /** Median and p90 of step time by role, from the closed runs: recomputed when Ark's files were read again. */
+  function roleTimes(): RoleTimes {
+    const ark = slots.ark.value;
+    if (!ark) return {};
+    if (roleTimesMemo?.ark !== ark)
+      roleTimesMemo = {
+        ark,
+        times: roleTimesOf(
+          ark.runs.filter((run) => run.state.phase === "closed").map((run) => run.windows),
+        ),
+      };
+    return roleTimesMemo.times;
+  }
+
+  function progressOf(run: ArkRun, startOf: (id: string) => string | null): RunProgress | null {
+    if (!run.plan) return null;
+    const status = (id: string) => run.state.steps.find((step) => step.id === id)?.status;
+    const running = run.plan.findLast((step) => status(step.id) === "running");
+    const startedAt = running ? startOf(running.id) : null;
+    const typical = running ? roleTimes()[running.role] : undefined;
+    return {
+      steps_done: run.plan.filter((step) => status(step.id) === "succeeded").length,
+      steps_total: run.plan.length,
+      round: run.state.round,
+      round_budget: run.state.round_budget,
+      current:
+        running && startedAt
+          ? {
+              step: running.id,
+              role: running.role,
+              started_at: startedAt,
+              typical_seconds: typical?.median ?? null,
+              slow_above_seconds: typical?.p90 ?? null,
+            }
+          : null,
+    };
+  }
+
+  /** The ACs of a run in `merge_requests_open` with their `state.json` status and JUnit proof. */
+  function evidenceOf(run: ArkRun): RunEvidence | null {
+    const found =
+      run.state.phase === "merge_requests_open" && slots.evidence.value?.get(run.state.run);
+    return found
+      ? {
+          criteria: run.state.criteria.map((criterion) => ({
+            id: criterion.id,
+            status: criterion.status,
+            proof: found.proof.get(criterion.id) ?? [],
+          })),
+          findings: found.findings,
+        }
+      : null;
   }
 
   /** One run as the page draws it. A closed run has no Orca agents and nothing it waits for. */
@@ -137,26 +256,21 @@ export function createSnapshotReader() {
         })) ?? null,
       merge_requests: state.merge_requests.map((request) => {
         const facts = githubFacts.get(request.url);
-        return { ...request, state: facts?.state ?? "unknown", ci: facts?.ci ?? "unknown" };
+        return {
+          ...request,
+          state: facts?.state ?? "unknown",
+          ci: facts?.ci ?? "unknown",
+          checks: facts?.checks ?? [],
+          additions: facts?.additions ?? null,
+          deletions: facts?.deletions ?? null,
+          changed_files: facts?.changed_files ?? null,
+          created_at: facts?.created_at ?? null,
+        };
       }),
-      agents: closed
-        ? []
-        : slots.orca.value
-          ? (slots.orca.value.agents.get(state.run) ?? []).map((agent) => {
-              const step = run.plan?.find((candidate) => candidate.id === agent.step);
-              if (step)
-                return {
-                  ...agent,
-                  planned: { harness: step.harness, model: step.model, source: "plan" as const },
-                };
-              // A run lead starts with the harness and model of `roles.chief` (chief playbook).
-              const chief = agent.step === null ? chiefRole(state.project) : null;
-              return chief
-                ? { ...agent, planned: { ...chief, source: "configured" as const } }
-                : agent;
-            })
-          : "unknown",
+      agents: closed ? [] : agentsOf(run),
       waiting,
+      progress: progressOf(run, startOf),
+      evidence: evidenceOf(run),
       cost_usd: cost.total,
     };
   }
@@ -173,6 +287,8 @@ export function createSnapshotReader() {
         gates: "unknown",
         tickets: "unknown",
         ticket_runs: "unknown",
+        provider_limits: slots.providerLimits.value ?? "unknown",
+        role_times: {},
       };
 
     const openRuns = ark.runs.filter((run) => run.state.phase !== "closed");
@@ -229,6 +345,8 @@ export function createSnapshotReader() {
       gates,
       tickets: ark.tickets,
       ticket_runs: [...newest.values()],
+      provider_limits: slots.providerLimits.value ?? "unknown",
+      role_times: roleTimes(),
     };
   }
 
@@ -300,6 +418,23 @@ export function createSnapshotReader() {
         clearTimeout(timer);
         return done;
       }),
+    providerLimits: () => read("providerLimits", () => readProviderLimits()),
+    agentWait: () => read("agentWait", () => readAgentWait()),
+    // Only runs in `merge_requests_open` have evidence; an unchanged file is never parsed again.
+    evidence: () =>
+      read("evidence", () =>
+        evidenceReader.read(
+          openRunsOf()
+            .filter((run) => run.state.phase === "merge_requests_open")
+            .map((run) => ({
+              run: run.state.run,
+              directory: run.directory,
+              reviewerSteps: (run.plan ?? [])
+                .filter((step) => step.role === "reviewer")
+                .map((step) => step.id),
+            })),
+        ),
+      ),
   };
 
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
@@ -347,7 +482,16 @@ export function createSnapshotReader() {
       await readers.ark();
       const timer = setInterval(() => void readers.ark(), intervalMilliseconds.ark);
       timers.add(timer as unknown as ReturnType<typeof setTimeout>);
-      for (const name of ["orca", "plannotator", "github", "usage"] as const) loop(name);
+      for (const name of [
+        "orca",
+        "plannotator",
+        "github",
+        "usage",
+        "providerLimits",
+        "agentWait",
+        "evidence",
+      ] as const)
+        loop(name);
     },
     stop(): void {
       stopped = true;

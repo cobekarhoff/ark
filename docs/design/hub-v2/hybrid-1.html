@@ -1,0 +1,3788 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ark hub v2 · hybrid 1 (PROTOTYPE)</title>
+    <style>
+      :root {
+        color-scheme: light dark; /* follows prefers-color-scheme; the nav toggle pins it for testing */
+        /* one token set: light-dark(light, dark). dark = variant A, light = variant B/C warm paper */
+        --bg: light-dark(#f6f4ef, #090b0f);
+        --nav: light-dark(#fbfaf6, #0d1015);
+        --panel: light-dark(#ffffff, #11141a);
+        --panel-2: light-dark(#f8f6f0, #171b23);
+        --panel-3: light-dark(#efece4, #1d222c);
+        --line: light-dark(#e6e2d8, #222833);
+        --line-2: light-dark(#d3cdbf, #2e3644);
+        --line-3: light-dark(#b3ac9b, #3b4658);
+        --text: light-dark(#1d1c1a, #dde2ea);
+        --dim: light-dark(#4f4c45, #a0abba);
+        --mute: light-dark(#65615a, #8591a2);
+        --prose: light-dark(#2b2a27, #cdd4de);
+        --red: light-dark(#c2371f, #ff6b5e);
+        --amber: light-dark(#c27a0e, #f2b04a);
+        --green: light-dark(#2d8a57, #46c48a);
+        --blue: light-dark(#2f62d8, #6aa6ff);
+        --violet: light-dark(#7048c8, #a58bff);
+        --red-t: light-dark(#b0301a, #ff9a90);
+        --amber-t: light-dark(#85500a, #f5c26b);
+        --green-t: light-dark(#23693f, #74d8a8);
+        --blue-t: light-dark(#2553c7, #94bfff);
+        --violet-t: light-dark(#6a3fc2, #c0acff);
+        --link: light-dark(#2553c7, #9cc3ff);
+        --on-red: light-dark(#ffffff, #1a0907);
+        --primary: light-dark(#1d1c1a, #2d6cdf);
+        --primary-hover: light-dark(#34322e, #3a7af0);
+        --on-primary: #ffffff;
+        --code-fg: light-dark(#7a4a05, #e6c98c);
+        --term-bg: light-dark(#17191e, #07090c);
+        --term-fg: #d6dbe4;
+        --ease: cubic-bezier(0.23, 1, 0.32, 1);
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+        --serif: "Iowan Old Style", "Charter", "Palatino Linotype", Georgia, serif;
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.4 var(--sans);
+        font-variant-numeric: tabular-nums;
+        min-width: 1280px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        scrollbar-color: var(--line-2) transparent;
+        scrollbar-width: thin;
+      }
+      * {
+        scrollbar-color: var(--line-2) transparent;
+        scrollbar-width: thin;
+      }
+      ::selection {
+        background: color-mix(in srgb, var(--blue) 35%, transparent);
+        color: var(--text);
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+      .mono {
+        font-family: var(--mono);
+      }
+      .dim {
+        color: var(--dim);
+      }
+      .mute {
+        color: var(--mute);
+      }
+      :focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+
+      /* ---------- nav ---------- */
+      .nav {
+        height: 44px;
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 16px;
+        background: var(--nav);
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-right: 18px;
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .brand .mono {
+        letter-spacing: -0.02em;
+      }
+      .brand small {
+        font-weight: 500;
+        color: var(--mute);
+        font-size: 11px;
+      }
+      .tab {
+        position: relative;
+        height: 44px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        color: var(--dim);
+        font-weight: 500;
+        transition: color 120ms;
+      }
+      .tab[aria-current="page"] {
+        color: var(--text);
+      }
+      .tab[aria-current="page"]::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: -1px;
+        height: 2px;
+        background: var(--blue);
+        border-radius: 2px;
+      }
+      @media (hover: hover) {
+        .tab:hover {
+          color: var(--text);
+        }
+      }
+      .badge {
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: var(--red);
+        color: var(--on-red);
+        font-size: 11px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .nav-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+      }
+      .pill.alarm {
+        border-color: color-mix(in srgb, var(--red) 60%, transparent);
+        background: color-mix(in srgb, var(--red) 14%, transparent);
+        color: var(--red-t);
+      }
+      .pill.alarm b {
+        color: var(--text);
+      }
+      .live {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .live i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+
+      /* ---------- shared ---------- */
+      .host {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: clip;
+      }
+      .view {
+        height: 100%;
+        overflow: clip;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+      }
+      .panel > header {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        height: 36px;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel h2 {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      .count {
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: var(--panel-3);
+        color: var(--dim);
+        font-size: 11px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .hint {
+        margin-left: auto;
+        color: var(--mute);
+        font-size: 11px;
+      }
+      .body {
+        overflow: auto;
+        min-height: 0;
+      }
+      .item {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .item:last-child {
+        border-bottom: 0;
+      }
+      .empty {
+        padding: 18px 12px;
+        color: var(--mute);
+        font-size: 12px;
+      }
+      .panel.flash {
+        animation: flash 900ms var(--ease);
+      }
+      @keyframes flash {
+        0% {
+          box-shadow: 0 0 0 2px var(--blue);
+        }
+        100% {
+          box-shadow: 0 0 0 2px transparent;
+        }
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+        background: var(--chip-bg, color-mix(in srgb, var(--dim) 16%, transparent));
+        color: var(--chip-fg, var(--dim));
+        flex: none;
+      }
+      .chip.red {
+        --chip-bg: color-mix(in srgb, var(--red) 16%, transparent);
+        --chip-fg: var(--red-t);
+      }
+      .chip.amber {
+        --chip-bg: color-mix(in srgb, var(--amber) 15%, transparent);
+        --chip-fg: var(--amber-t);
+      }
+      .chip.green {
+        --chip-bg: color-mix(in srgb, var(--green) 15%, transparent);
+        --chip-fg: var(--green-t);
+      }
+      .chip.blue {
+        --chip-bg: color-mix(in srgb, var(--blue) 15%, transparent);
+        --chip-fg: var(--blue-t);
+      }
+      .chip.violet {
+        --chip-bg: color-mix(in srgb, var(--violet) 15%, transparent);
+        --chip-fg: var(--violet-t);
+      }
+      .chip.outline {
+        background: transparent;
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+
+      .btn {
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        font-size: 12px;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          background-color 120ms,
+          border-color 120ms,
+          transform 120ms var(--ease);
+      }
+      .btn.primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: var(--on-primary);
+      }
+      .btn.ghost {
+        background: transparent;
+        border-color: transparent;
+        color: var(--dim);
+      }
+      .btn:active {
+        transform: scale(0.97);
+      }
+      @media (hover: hover) {
+        .btn:hover {
+          background: var(--panel-3);
+          border-color: var(--line-3);
+        }
+        .btn.primary:hover {
+          background: var(--primary-hover);
+          border-color: var(--primary-hover);
+        }
+        .btn.ghost:hover {
+          color: var(--text);
+          background: var(--panel-2);
+        }
+      }
+      .actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .ic {
+        width: 14px;
+        height: 14px;
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .link {
+        color: var(--link);
+      }
+      @media (hover: hover) {
+        .link:hover {
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+        background: var(--mute);
+      }
+      .dot.running,
+      .dot.building,
+      .dot.in_progress {
+        background: var(--blue);
+      }
+      .dot.succeeded,
+      .dot.done,
+      .dot.ready,
+      .dot.closed {
+        background: var(--green);
+      }
+      .dot.escalation,
+      .dot.waiting {
+        background: var(--amber);
+      }
+      .dot.failed {
+        background: var(--red);
+      }
+      .dot.pending,
+      .dot.proposed,
+      .dot.queued {
+        background: transparent;
+        box-shadow: inset 0 0 0 1.5px var(--mute);
+      }
+      .dot.closed,
+      .dot.done {
+        background: var(--mute);
+      }
+      .dot.ghost {
+        background: transparent;
+        box-shadow: inset 0 0 0 1.5px var(--line-2);
+      }
+
+      .pips {
+        display: inline-flex;
+        gap: 2px;
+        flex: none;
+      }
+      .pip {
+        width: 14px;
+        height: 6px;
+        border-radius: 2px;
+        background: var(--panel-3);
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      .pip.succeeded {
+        background: var(--green);
+        box-shadow: none;
+      }
+      .pip.running {
+        background: var(--blue);
+        box-shadow: none;
+        animation: breathe 1.8s ease-in-out infinite;
+      }
+      .pip.failed {
+        background: var(--red);
+        box-shadow: none;
+      }
+      .pip.waiting {
+        background: var(--amber);
+        box-shadow: none;
+      }
+      @keyframes breathe {
+        50% {
+          opacity: 0.45;
+        }
+      }
+
+      .timer {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--dim);
+        min-width: 0;
+        white-space: nowrap;
+      }
+      .timer .bar {
+        position: relative;
+        width: 44px;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--panel-3);
+        flex: none;
+        overflow: visible;
+      }
+      .timer .bar i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 3px;
+        background: var(--blue);
+      }
+      .timer .bar u {
+        position: absolute;
+        left: 50%;
+        top: -2px;
+        bottom: -2px;
+        width: 1px;
+        background: var(--dim);
+      }
+      .timer.amber .bar i {
+        background: var(--amber);
+      }
+      .timer.amber {
+        color: var(--amber-t);
+      }
+      .timer.red .bar i {
+        background: var(--red);
+      }
+      .timer.red {
+        color: var(--red-t);
+      }
+      .round {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--dim);
+      }
+      .round.last {
+        color: var(--amber-t);
+        font-weight: 600;
+      }
+
+      /* ---------- home ---------- */
+      .home {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px 16px;
+      }
+      .tiles {
+        flex: none;
+        display: grid;
+        grid-template-columns: 1.05fr 1.05fr 1fr 1.45fr 1.25fr 1fr;
+        gap: 8px;
+      }
+      .tile {
+        position: relative;
+        height: 62px;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-align: left;
+        cursor: pointer;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        transition:
+          border-color 120ms,
+          background-color 120ms,
+          transform 120ms var(--ease);
+        overflow: hidden;
+      }
+      .tile:active {
+        transform: scale(0.98);
+      }
+      @media (hover: hover) {
+        .tile:hover {
+          border-color: var(--line-2);
+          background: var(--panel-2);
+        }
+      }
+      .tile .val {
+        font: 600 26px/1 var(--mono);
+        letter-spacing: -0.03em;
+      }
+      .tile .txt {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .tile .txt b {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .tile .txt small {
+        font-size: 11px;
+        color: var(--dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tile.amber .val,
+      .tile.amber .ic {
+        color: var(--amber-t);
+      }
+      .tile.amber {
+        border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+        background: color-mix(in srgb, var(--amber) 7%, transparent);
+      }
+      .tile.red .val {
+        color: var(--red-t);
+      }
+      .tile.red {
+        border-color: color-mix(in srgb, var(--red) 45%, transparent);
+        background: color-mix(in srgb, var(--red) 7%, transparent);
+      }
+      .tile.blue .val {
+        color: var(--blue-t);
+      }
+      .tile.zero .val {
+        color: var(--mute);
+      }
+      .tile.alarm {
+        border-color: var(--red);
+        background: color-mix(in srgb, var(--red) 16%, transparent);
+      }
+      .tile.alarm .val {
+        color: var(--text);
+      }
+      .tile.alarm small {
+        color: var(--red-t);
+      }
+      .tile.alarm::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 7px;
+        box-shadow: inset 0 0 0 2px var(--red);
+        animation: alarm 1.6s ease-in-out infinite;
+        pointer-events: none;
+      }
+      @keyframes alarm {
+        0%,
+        100% {
+          opacity: 0.15;
+        }
+        50% {
+          opacity: 0.9;
+        }
+      }
+      .tile .meter {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 4px;
+        background: var(--panel-3);
+      }
+      .tile .meter i {
+        display: block;
+        height: 100%;
+        background: var(--red);
+      }
+      .tile .meter u {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: var(--text);
+        opacity: 0.6;
+      }
+
+      .cols {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 350px minmax(0, 1fr) 440px;
+        gap: 12px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 0;
+        min-width: 0;
+      }
+      .col > .panel {
+        flex: 0 1 auto;
+      }
+
+      .gate-q {
+        font-size: 12.5px;
+        line-height: 1.45;
+        color: var(--text);
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .rowtop {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .rowtop .push {
+        margin-left: auto;
+      }
+      .age {
+        font: 600 12px var(--mono);
+        color: var(--dim);
+      }
+      .age.hot {
+        color: var(--red-t);
+      }
+      .age.warm {
+        color: var(--amber-t);
+      }
+      .term {
+        margin: 0;
+        padding: 7px 9px;
+        border-radius: 6px;
+        background: var(--term-bg);
+        border: 1px solid var(--line);
+        font: 11.5px/1.4 var(--mono);
+        color: var(--term-fg);
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .term .caret {
+        display: inline-block;
+        width: 6px;
+        height: 12px;
+        margin-left: 2px;
+        vertical-align: -2px;
+        background: var(--amber);
+        animation: blink 1.1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      /* review queue */
+      .rv-top {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .order {
+        flex: none;
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: var(--panel-3);
+        font: 700 12px/22px var(--mono);
+        text-align: center;
+        color: var(--dim);
+      }
+      .rv-title {
+        flex: 1;
+        min-width: 0;
+        font-size: 12.5px;
+        line-height: 1.4;
+      }
+      .rv-title .mono {
+        font-weight: 700;
+        margin-right: 6px;
+      }
+      .rv-title span.t {
+        color: var(--text);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .kvs {
+        display: grid;
+        grid-template-columns: 1fr 1.1fr 1.1fr 1.5fr 0.9fr;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: var(--panel-2);
+      }
+      .kv {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+      }
+      .kv span {
+        font-size: 11px;
+        color: var(--mute);
+      }
+      .kv b {
+        font: 600 12px var(--mono);
+        white-space: nowrap;
+      }
+      .kv b.good {
+        color: var(--green-t);
+      }
+      .kv b.bad {
+        color: var(--red-t);
+      }
+      .kv b.warn {
+        color: var(--amber-t);
+      }
+      .kv .sub {
+        font: 11px var(--mono);
+        color: var(--dim);
+      }
+      .diffbar {
+        display: flex;
+        height: 4px;
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 3px;
+        background: var(--panel-3);
+      }
+      .diffbar i {
+        display: block;
+      }
+      .diffbar i:first-child {
+        background: var(--green);
+      }
+      .diffbar i:last-child {
+        background: var(--red);
+      }
+      .acrow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .acrow .lbl {
+        font-size: 11px;
+        color: var(--mute);
+        width: 88px;
+        flex: none;
+      }
+      .acs {
+        display: flex;
+        gap: 3px;
+      }
+      .ac {
+        width: 22px;
+        height: 22px;
+        border-radius: 5px;
+        font: 600 11px/20px var(--mono);
+        text-align: center;
+        border: 1px solid color-mix(in srgb, var(--green) 50%, transparent);
+        color: var(--green-t);
+        background: color-mix(in srgb, var(--green) 8%, transparent);
+      }
+      .ac.fail {
+        background: var(--red);
+        border-color: var(--red);
+        color: var(--on-red);
+      }
+      .aclist {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 12px;
+      }
+      .aclist div {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .aclist .pass {
+        color: var(--green-t);
+      }
+      .aclist .fail {
+        color: var(--red-t);
+      }
+      .blockers {
+        color: var(--red-t);
+        font-size: 12px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      /* run progress rows */
+      .runrow {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--line);
+        transition: background-color 120ms;
+      }
+      .runrow:last-child {
+        border-bottom: 0;
+      }
+      @media (hover: hover) {
+        .runrow:hover {
+          background: var(--panel-2);
+        }
+      }
+      .runrow .r1 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .runrow .r1 .mono {
+        font-weight: 700;
+        flex: none;
+      }
+      .ttl {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--dim);
+      }
+      .eta {
+        flex: none;
+        font: 600 11px var(--mono);
+        color: var(--text);
+      }
+      .runrow .r2 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .steps-n {
+        font: 600 11px var(--mono);
+        color: var(--dim);
+        width: 26px;
+      }
+
+      /* usage */
+      .limit {
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        border-bottom: 1px solid var(--line);
+      }
+      .limit:last-of-type {
+        border-bottom: 0;
+      }
+      .limit .lt {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .limit .lt b {
+        font-size: 12px;
+      }
+      .limit .pct {
+        margin-left: auto;
+        font: 700 20px/1 var(--mono);
+      }
+      .meter-bar {
+        position: relative;
+        height: 8px;
+        border-radius: 4px;
+        background: var(--panel-3);
+        overflow: visible;
+      }
+      .meter-bar i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 4px;
+        background: var(--green);
+      }
+      .meter-bar u {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        left: 80%;
+        width: 1px;
+        background: var(--dim);
+      }
+      .limit.over {
+        background: color-mix(in srgb, var(--red) 10%, transparent);
+      }
+      .limit.over .pct {
+        color: var(--red);
+      }
+      .limit.over .meter-bar i {
+        background: var(--red);
+      }
+      .limit .note {
+        font-size: 11.5px;
+        color: var(--dim);
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .limit.over .note {
+        color: var(--red-t);
+      }
+      .chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        height: 96px;
+        padding: 10px 12px 8px;
+      }
+      .chart .bar {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 3px;
+        height: 100%;
+        font: 11px var(--mono);
+        color: var(--dim);
+      }
+      .chart .bar i {
+        display: block;
+        width: 100%;
+        border-radius: 3px 3px 0 0;
+        background: var(--panel-3);
+        min-height: 2px;
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      .chart .bar.today i {
+        background: var(--blue);
+        box-shadow: none;
+      }
+      .chart .bar.today {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .chart .bar small {
+        color: var(--mute);
+        font-size: 10.5px;
+      }
+
+      /* ---------- runs ---------- */
+      .runs-view {
+        height: 100%;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px 16px 20px;
+      }
+      .page-head {
+        flex: none;
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+      .page-head h1 {
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .board {
+        flex: none;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .lane {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+      }
+      .lane > header {
+        flex: none;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 10px;
+        font-size: 12px;
+        font-weight: 600;
+        border-bottom: 1px solid var(--line);
+      }
+      .lane > header .sub {
+        margin-left: auto;
+        font-weight: 400;
+        color: var(--mute);
+        font-size: 11px;
+      }
+      .lane-body {
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        overflow: auto;
+        min-height: 0;
+        flex: 0 1 auto;
+        max-height: 280px;
+      }
+      .rcard {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 7px 9px;
+        border-radius: 6px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        transition:
+          border-color 120ms,
+          background-color 120ms,
+          transform 120ms var(--ease);
+        flex: none;
+      }
+      .rcard:active {
+        transform: scale(0.985);
+      }
+      @media (hover: hover) {
+        .rcard:hover {
+          border-color: var(--line-3);
+          background: var(--panel-3);
+        }
+      }
+      .rcard.escalation {
+        border-color: color-mix(in srgb, var(--amber) 55%, transparent);
+      }
+      .rc-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .rc-top .mono {
+        font-weight: 700;
+        font-size: 12px;
+        flex: none;
+      }
+      .rc-bot {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        font-size: 11px;
+      }
+      .rc-bot .timer .bar {
+        width: 30px;
+      }
+      .rc-line {
+        font-size: 11px;
+        color: var(--dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .rc-line.amber {
+        color: var(--amber-t);
+      }
+      .rc-line.red {
+        color: var(--red-t);
+      }
+      .lane-foot {
+        margin-top: auto;
+        padding: 8px 10px;
+        border-top: 1px solid var(--line);
+      }
+
+      .dag-panel {
+        flex: none;
+        height: 420px;
+        min-height: 0;
+      }
+      .dag-panel > header {
+        height: 40px;
+        gap: 12px;
+      }
+      .seg {
+        display: inline-flex;
+        padding: 2px;
+        gap: 2px;
+        border-radius: 7px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+      }
+      .seg button {
+        height: 22px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--dim);
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition:
+          background-color 120ms,
+          color 120ms,
+          transform 120ms var(--ease);
+      }
+      .seg button:active {
+        transform: scale(0.96);
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--panel-3);
+        color: var(--text);
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      @media (hover: hover) {
+        .seg button:hover {
+          color: var(--text);
+        }
+      }
+      .seg .n {
+        font: 11px var(--mono);
+        color: var(--mute);
+      }
+      .legend {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 11px;
+        color: var(--mute);
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .legend .ln {
+        width: 18px;
+        height: 0;
+        border-top: 2px solid var(--line-2);
+      }
+      .legend .ln.amber {
+        border-color: var(--amber);
+      }
+      .dag-body {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+      }
+      .dag-scroll {
+        overflow: auto;
+        min-height: 0;
+        padding: 14px;
+      }
+      .dag {
+        position: relative;
+      }
+      .dag > svg {
+        position: absolute;
+        inset: 0;
+        overflow: visible;
+        pointer-events: none;
+      }
+      .edge {
+        fill: none;
+        stroke-width: 1.5;
+      }
+      .edge.dim {
+        stroke: var(--line-3);
+      }
+      .edge.amber {
+        stroke: var(--amber);
+        stroke-dasharray: 5 3;
+      }
+      .edge.green {
+        stroke: var(--line-3);
+      }
+      .node {
+        position: absolute;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 2px;
+        padding: 0 10px;
+        border-radius: 7px;
+        background: var(--panel-2);
+        border: 1px solid var(--line-2);
+        overflow: hidden;
+        transition:
+          border-color 120ms,
+          background-color 120ms,
+          transform 120ms var(--ease);
+      }
+      a.node:active,
+      button.node:active {
+        transform: scale(0.985);
+      }
+      @media (hover: hover) {
+        a.node:hover,
+        button.node:hover {
+          border-color: var(--line-3);
+          background: var(--panel-3);
+        }
+      }
+      .node .n1 {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+      }
+      .node .n1 b {
+        font: 700 12px var(--mono);
+        flex: none;
+      }
+      .node .n1 .meta {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .node .n2 {
+        font-size: 11.5px;
+        color: var(--dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .node.active {
+        border-color: color-mix(in srgb, var(--blue) 55%, transparent);
+      }
+      .node.escalation {
+        border-color: color-mix(in srgb, var(--amber) 70%, transparent);
+        background: color-mix(in srgb, var(--amber) 7%, transparent);
+      }
+      .node.queued {
+        border-style: dashed;
+      }
+      .node.old {
+        opacity: 0.8;
+      }
+      .node.ghost {
+        border-style: dashed;
+        color: var(--mute);
+        background: transparent;
+      }
+      .node.focus {
+        border-color: var(--blue);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 35%, transparent);
+      }
+      .node.selected {
+        border-color: var(--blue);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 35%, transparent);
+      }
+      .node.compact {
+        flex-direction: row;
+        align-items: center;
+        gap: 7px;
+        padding: 0 8px;
+        border-radius: 6px;
+      }
+      .node.compact b {
+        font: 600 11.5px var(--mono);
+      }
+      .node.compact .meta {
+        margin-left: auto;
+        font: 11px var(--mono);
+        color: var(--mute);
+      }
+      .unblocks {
+        border-left: 1px solid var(--line);
+        overflow: auto;
+        min-height: 0;
+      }
+      .unblocks h3 {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--mute);
+        padding: 10px 12px 4px;
+      }
+      .ub {
+        padding: 8px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border-bottom: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .ub:last-child {
+        border-bottom: 0;
+      }
+      .ub .lead {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .ub .lead .mono {
+        font-weight: 700;
+      }
+      .ub .to {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .idchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 20px;
+        padding: 0 6px;
+        border-radius: 4px;
+        background: var(--panel-3);
+        font: 600 11px var(--mono);
+        color: var(--text);
+        transition: background-color 120ms;
+      }
+      .idchip.open {
+        color: var(--amber-t);
+        background: color-mix(in srgb, var(--amber) 12%, transparent);
+      }
+      .idchip.ghost {
+        color: var(--mute);
+        box-shadow: inset 0 0 0 1px var(--line-2);
+        background: transparent;
+      }
+      @media (hover: hover) {
+        a.idchip:hover {
+          background: var(--line-2);
+        }
+      }
+      .empty-graph {
+        padding: 30px;
+        color: var(--mute);
+      }
+
+      /* ---------- backlog ---------- */
+      .bl {
+        position: relative;
+        height: 100%;
+      }
+      .bl-main {
+        height: 100%;
+        padding: 12px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .toolbar {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .search {
+        position: relative;
+        width: 280px;
+      }
+      .search .ic {
+        position: absolute;
+        left: 9px;
+        top: 7px;
+        color: var(--mute);
+      }
+      .search input {
+        width: 100%;
+        height: 28px;
+        padding: 0 10px 0 28px;
+        border-radius: 6px;
+        border: 1px solid var(--line-2);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+      }
+      .search input::placeholder {
+        color: var(--mute);
+      }
+      .search input:focus {
+        outline: none;
+        border-color: var(--blue);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 25%, transparent);
+      }
+      .toolbar label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--dim);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .toolbar input[type="checkbox"] {
+        accent-color: var(--blue);
+        width: 14px;
+        height: 14px;
+        margin: 0;
+      }
+      .toolbar .summary {
+        margin-left: auto;
+        font-size: 11.5px;
+        color: var(--mute);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+      }
+      .tbl {
+        flex: 1;
+        min-height: 0;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: auto;
+        container-type: inline-size;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr) 92px 40px 200px 62px 40px 150px;
+        align-items: center;
+        gap: 10px;
+        height: 32px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--line);
+        transition: background-color 100ms;
+      }
+      .row.head {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        height: 28px;
+        background: var(--panel-2);
+        color: var(--mute);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      a.row:last-child {
+        border-bottom: 0;
+      }
+      @media (hover: hover) {
+        a.row:hover {
+          background: var(--panel-2);
+        }
+      }
+      a.row[aria-current="true"] {
+        background: color-mix(in srgb, var(--blue) 12%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 40%, transparent);
+      }
+      .row .id {
+        font: 700 12px var(--mono);
+      }
+      .row .title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .row .num {
+        font: 12px var(--mono);
+        color: var(--dim);
+        text-align: right;
+      }
+      .row .deps {
+        display: flex;
+        gap: 4px;
+        overflow: hidden;
+      }
+      .row.group {
+        height: 30px;
+        background: var(--bg);
+        position: sticky;
+        z-index: 1;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+        grid-template-columns: auto auto 1fr;
+      }
+      .row.group .count {
+        margin-left: 0;
+      }
+      .row.group .gnote {
+        color: var(--mute);
+        font-weight: 400;
+        font-size: 11px;
+      }
+      .row.done .title,
+      .row.done .id {
+        color: var(--mute);
+      }
+      @container (max-width: 840px) {
+        .row {
+          grid-template-columns: 76px minmax(0, 1fr) 92px 40px;
+        }
+        .row > .c-deps,
+        .row > .c-down,
+        .row > .c-ac,
+        .row > .c-run {
+          display: none;
+        }
+      }
+      /* toast */
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 20px;
+        transform: translate(-50%, 12px);
+        opacity: 0;
+        pointer-events: none;
+        background: var(--text);
+        color: var(--bg);
+        padding: 9px 14px;
+        border-radius: 8px;
+        font-size: 12.5px;
+        font-weight: 500;
+        box-shadow: 0 8px 28px color-mix(in srgb, #000 30%, transparent);
+        transition:
+          opacity 160ms var(--ease),
+          transform 160ms var(--ease);
+        z-index: 20;
+        max-width: 620px;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      /* ---------- hybrid additions ---------- */
+      .nav-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .nav-status i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+      .theme {
+        height: 26px;
+      }
+      .theme button {
+        height: 20px;
+        padding: 0 7px;
+        font-size: 11.5px;
+      }
+      .ttl2 {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+      }
+
+      /* progress ring (variant C): one segment per step, coloured by run state */
+      .ring {
+        flex: none;
+        display: block;
+        color: var(--blue);
+      }
+      .ring.amber {
+        color: var(--amber);
+      }
+      .ring.red {
+        color: var(--red);
+      }
+      .ring.violet {
+        color: var(--violet);
+      }
+      .ring.green {
+        color: var(--green);
+      }
+      .ring.mute {
+        color: var(--mute);
+      }
+      .ring .seg {
+        fill: none;
+        stroke: var(--line-2);
+      }
+      .ring .seg.done {
+        stroke: currentColor;
+      }
+      .ring .seg.run {
+        stroke: currentColor;
+        stroke-opacity: 0.45;
+        animation: breathe 1.8s ease-in-out infinite;
+      }
+      .ring .base {
+        fill: none;
+        stroke: var(--line-3);
+        stroke-dasharray: 3 4;
+      }
+      .ring text {
+        fill: var(--text);
+        font: 700 13px var(--sans);
+        text-anchor: middle;
+      }
+      .ring .glyph {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      /* runs: lane cards with ring + 2-line title */
+      .rcard {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        padding: 8px 10px;
+      }
+      .rc-main {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+      }
+      .rc-top {
+        align-items: baseline;
+      }
+      .rc-top .eta {
+        margin-left: auto;
+      }
+      .rc-title {
+        font-size: 12.5px;
+        line-height: 1.35;
+        color: var(--text);
+      }
+      .rc-bot {
+        gap: 8px;
+        color: var(--dim);
+      }
+      .rc-bot .timer .bar {
+        width: 30px;
+      }
+      .rcard.escalation {
+        border-color: color-mix(in srgb, var(--amber) 60%, transparent);
+      }
+      .lane > header {
+        height: 34px;
+      }
+
+      /* graph nodes: ring left, id + meta, 2-line title */
+      .node {
+        flex-direction: row;
+        align-items: center;
+        gap: 9px;
+        padding: 0 10px 0 8px;
+        overflow: hidden;
+      }
+      .node .ring {
+        width: 38px;
+        height: 38px;
+      }
+      .node .nb {
+        min-width: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .node .n1 {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        min-width: 0;
+      }
+      .node .n2 {
+        font-size: 11.5px;
+        line-height: 1.3;
+        color: var(--dim);
+        white-space: normal;
+      }
+      .node.compact {
+        gap: 7px;
+      }
+      .node .ck {
+        color: var(--green);
+      }
+      .edge.dim {
+        stroke: var(--line-3);
+      }
+      .edge.amber {
+        stroke: var(--amber);
+        stroke-dasharray: 5 3;
+      }
+      .mk-dim {
+        fill: var(--line-3);
+      }
+      .mk-amber {
+        fill: var(--amber);
+      }
+      .legend .ln.amber {
+        border-top-style: dashed;
+      }
+      .legend .ln.solid {
+        border-color: var(--line-3);
+      }
+      .tbl a.row {
+        scroll-margin-top: 62px;
+      }
+      .dagbox .dag {
+        margin: 0 auto;
+      }
+      .node.tnode .n2 {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        -webkit-line-clamp: unset;
+      }
+      .node.tnode .ring {
+        width: 32px;
+        height: 32px;
+      }
+      .node.compact .meta {
+        margin-left: auto;
+      }
+
+      /* backlog */
+      .row.sel {
+        background: color-mix(in srgb, var(--blue) 12%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 40%, transparent);
+      }
+      .row .title {
+        font-size: 12.5px;
+      }
+
+      /* ---------- run detail ---------- */
+      .page-scroll {
+        height: 100%;
+        overflow: auto;
+      }
+      .detail {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 14px 24px 40px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        height: auto;
+      }
+      .d-title {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        min-width: 0;
+      }
+      .d-title .chip {
+        margin-top: 4px;
+      }
+      .d-title h1 {
+        flex: 1;
+        min-width: 0;
+        white-space: normal;
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 1.3;
+        text-wrap: balance;
+      }
+      .d-title h1 .mono {
+        margin-right: 10px;
+        font-weight: 700;
+      }
+      .strip {
+        display: grid;
+        grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .strip > div {
+        padding: 10px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        justify-content: center;
+        min-width: 0;
+        border-left: 1px solid var(--line);
+      }
+      .strip > div:first-child {
+        border-left: 0;
+      }
+      .strip > div.lead {
+        flex-direction: row;
+        align-items: center;
+        gap: 12px;
+      }
+      .strip .k {
+        font-size: 11px;
+        color: var(--mute);
+      }
+      .strip .v {
+        font: 600 15px var(--mono);
+      }
+      .strip .v small {
+        font: 400 11.5px var(--sans);
+        color: var(--dim);
+      }
+      .budget {
+        display: inline-flex;
+        gap: 3px;
+        vertical-align: 1px;
+        margin-left: 6px;
+      }
+      .budget i {
+        width: 12px;
+        height: 6px;
+        border-radius: 2px;
+        background: var(--line-2);
+      }
+      .budget i.used {
+        background: var(--blue);
+      }
+      .budget i.last {
+        background: var(--amber);
+      }
+      .stepbar {
+        position: relative;
+        height: 7px;
+        border-radius: 4px;
+        background: var(--panel-3);
+      }
+      .stepbar i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 4px;
+        background: var(--blue);
+      }
+      .stepbar.amber i {
+        background: var(--amber);
+      }
+      .stepbar.red i {
+        background: var(--red);
+      }
+      .stepbar u {
+        position: absolute;
+        left: 50%;
+        top: -3px;
+        bottom: -3px;
+        width: 2px;
+        border-radius: 1px;
+        background: var(--text);
+      }
+      .d-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 14px;
+        align-items: start;
+      }
+      .d-left,
+      .d-right {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 0;
+      }
+      .plan-body {
+        padding: 14px 16px 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      .plan-svg {
+        max-width: 100%;
+      }
+      .plan-svg .step {
+        cursor: pointer;
+        outline: none;
+      }
+      .plan-svg .step rect.bx {
+        fill: var(--panel);
+        stroke: var(--line-2);
+        stroke-width: 1.5;
+        transition:
+          stroke 120ms,
+          fill 120ms;
+      }
+      @media (hover: hover) {
+        .plan-svg .step:hover rect.bx {
+          fill: var(--panel-2);
+        }
+      }
+      .plan-svg .step:focus-visible rect.bx {
+        stroke: var(--blue);
+        stroke-width: 2.5;
+      }
+      .plan-svg .step.s-succeeded rect.bx {
+        fill: color-mix(in srgb, var(--green) 9%, var(--panel));
+        stroke: color-mix(in srgb, var(--green) 45%, var(--line-2));
+      }
+      .plan-svg .step.s-running rect.bx {
+        fill: color-mix(in srgb, var(--blue) 9%, var(--panel));
+        stroke: var(--blue);
+      }
+      .plan-svg .step.s-pending rect.bx {
+        stroke-dasharray: 4 3;
+      }
+      .plan-svg .step.picked rect.bx {
+        stroke: var(--text);
+        stroke-width: 2.5;
+        stroke-dasharray: none;
+      }
+      .plan-svg .step.stuckstep rect.bx {
+        stroke: var(--red);
+      }
+      .plan-svg text {
+        font-family: var(--sans);
+      }
+      .plan-svg .role {
+        font-size: 11px;
+        fill: var(--dim);
+      }
+      .plan-svg .sid {
+        font: 600 12px var(--mono);
+        fill: var(--text);
+      }
+      .plan-svg .meta {
+        font: 11px var(--mono);
+        fill: var(--dim);
+        text-anchor: end;
+      }
+      .plan-svg path.e {
+        fill: none;
+        stroke: var(--line-3);
+        stroke-width: 1.6;
+      }
+      .plan-svg .mk {
+        fill: var(--line-3);
+      }
+      .plan-svg .gl-done {
+        fill: var(--green);
+      }
+      .plan-svg .gl-tick {
+        fill: none;
+        stroke: var(--bg);
+        stroke-width: 2.4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .plan-svg .gl-run-track {
+        fill: none;
+        stroke: color-mix(in srgb, var(--blue) 30%, transparent);
+        stroke-width: 2.5;
+      }
+      .plan-svg .gl-run {
+        fill: none;
+        stroke: var(--blue);
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: spin 1.6s linear infinite;
+      }
+      .plan-svg .gl-todo {
+        fill: none;
+        stroke: var(--mute);
+        stroke-width: 2;
+      }
+      .plan-svg .gl-stuck {
+        fill: var(--red);
+      }
+      .plan-svg .gl-stuck-p {
+        fill: none;
+        stroke: var(--on-red);
+        stroke-width: 2.2;
+        stroke-linecap: round;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .stepdetail {
+        align-self: stretch;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 2px 10px;
+        align-items: center;
+      }
+      .stepdetail .sd-title {
+        font: 600 12.5px var(--mono);
+      }
+      .stepdetail .sd-meta {
+        color: var(--dim);
+        font-size: 12px;
+        grid-column: 1;
+      }
+      .stepdetail .btn {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+      }
+      .agent {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .agent:last-child {
+        border-bottom: 0;
+      }
+      .agent .who {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .agent .who b {
+        font-size: 12px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .agent .who span {
+        font-size: 11px;
+        color: var(--mute);
+        font-family: var(--mono);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .alertbox {
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .panel.warn {
+        border-color: color-mix(in srgb, var(--amber) 55%, transparent);
+        background: color-mix(in srgb, var(--amber) 7%, var(--panel));
+      }
+      .panel.warn > header {
+        border-color: color-mix(in srgb, var(--amber) 30%, transparent);
+      }
+      .ticket-link {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+      }
+      .ticket-link .t {
+        font: 500 15px/1.35 var(--serif);
+      }
+
+      /* ---------- ticket reader (variant B) ---------- */
+      .reader-page {
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 22px 40px 96px;
+      }
+      .back {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--mute);
+        font-size: 13px;
+        margin-bottom: 20px;
+        transition: color 120ms;
+      }
+      @media (hover: hover) {
+        .back:hover {
+          color: var(--text);
+        }
+      }
+      .reader {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 400px;
+        gap: 56px;
+        align-items: start;
+      }
+      .reader .head-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .reader .head-meta .tid {
+        font: 700 13px var(--mono);
+        color: var(--dim);
+      }
+      .reader h1 {
+        font: 500 34px/1.2 var(--serif);
+        letter-spacing: -0.012em;
+        text-wrap: balance;
+        max-width: 760px;
+      }
+      .reader .head-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 18px;
+      }
+      .prose {
+        max-width: 700px;
+      }
+      .prose h2 {
+        font: 600 13px var(--sans);
+        color: var(--mute);
+        margin: 36px 0 12px;
+      }
+      .prose p,
+      .prose li {
+        font: 400 16px/1.7 var(--serif);
+        color: var(--prose);
+      }
+      .prose p + p {
+        margin-top: 12px;
+      }
+      .prose ol,
+      .prose ul {
+        margin: 10px 0;
+        padding-left: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .prose code {
+        font: 0.82em var(--mono);
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--panel-3);
+        color: var(--code-fg);
+        overflow-wrap: anywhere;
+      }
+      .prose .note {
+        font: 400 14px var(--sans);
+        color: var(--mute);
+      }
+      .crit {
+        list-style: none;
+        padding: 0 !important;
+        margin: 0 !important;
+        gap: 0 !important;
+      }
+      .crit li {
+        display: grid;
+        grid-template-columns: 50px minmax(0, 1fr);
+        gap: 14px;
+        padding: 14px 0;
+        border-top: 1px solid var(--line);
+      }
+      .crit li:first-child {
+        border-top: 0;
+        padding-top: 4px;
+      }
+      .crit .acid {
+        font: 700 12.5px var(--mono);
+        color: var(--mute);
+        padding-top: 5px;
+      }
+      .reader-aside {
+        position: sticky;
+        top: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-height: calc(100vh - 44px - 28px);
+        overflow: auto;
+        padding-bottom: 2px;
+      }
+      .side-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+      .side-card h4 {
+        margin: 0 0 10px;
+        font: 600 13px var(--sans);
+        color: var(--mute);
+      }
+      .side-card .empty {
+        padding: 0;
+      }
+      .dagbox {
+        overflow: auto;
+      }
+      .linklist {
+        list-style: none;
+        margin: 0 -8px;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .linklist a {
+        display: grid;
+        grid-template-columns: 10px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 7px 8px;
+        border-radius: 8px;
+        transition: background-color 120ms;
+      }
+      .linklist .t {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+      .linklist .t b {
+        font: 700 12px var(--mono);
+        margin-right: 8px;
+        color: var(--dim);
+      }
+      @media (hover: hover) {
+        .linklist a:hover {
+          background: var(--panel-3);
+        }
+      }
+
+      /* ---------- detail enter: one authored moment ---------- */
+      .enter {
+        animation: rise 220ms var(--ease) both;
+      }
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="nav" id="nav"></nav>
+    <div class="host">
+      <main class="view" id="view"></main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="data.js"></script>
+    <script>
+      "use strict";
+      /* PROTOTYPE (throwaway): hub-v2 hybrid 1. A's Home/Runs/Backlog, C's rings + blocking edges, B's ticket reader. State is in memory; action buttons just toast. */
+      const DATA = window.HUB_DATA;
+      const NOW = Date.parse(DATA.generated_at);
+      const ticketById = new Map(DATA.tickets.map((ticket) => [ticket.id, ticket]));
+      const runById = new Map(DATA.runs.map((run) => [run.run, run]));
+      const activeRunByTicket = new Map(DATA.runs.map((run) => [run.ticket.id, run]));
+      const reviewByRun = new Map(DATA.review_queue.map((item) => [item.run, item]));
+      const stuckByRun = new Map();
+      DATA.stuck.forEach((entry) =>
+        stuckByRun.set(entry.run, [...(stuckByRun.get(entry.run) || []), entry]),
+      );
+      const dependantsById = new Map();
+      DATA.tickets.forEach((ticket) =>
+        ticket.depends_on.forEach((dependencyId) => {
+          dependantsById.set(dependencyId, [
+            ...(dependantsById.get(dependencyId) || []),
+            ticket.id,
+          ]);
+        }),
+      );
+      const closedRuns = DATA.ticket_runs.filter((entry) => entry.phase === "closed");
+      const queuedTicketIds = DATA.queued.map((entry) => entry.ticket);
+
+      const state = {
+        dagFilter: new Set(["active", "queued"]),
+        backlogGroup: "status",
+        backlogShowDone: false,
+        backlogQuery: "",
+        expandedReviews: new Set(),
+        selectedStepByRun: new Map(),
+        backlogScroll: 0,
+        backlogSelected: null,
+        origins: new Map(),
+        lastHash: null,
+        theme: "system",
+      };
+
+      /* ---------- helpers ---------- */
+      const escapeHtml = (value) =>
+        String(value ?? "").replace(
+          /[&<>"]/g,
+          (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char],
+        );
+      const minutesSince = (iso) => Math.max(0, Math.round((NOW - Date.parse(iso)) / 60000));
+      function formatMinutes(minutes) {
+        if (minutes < 1) return "<1m";
+        if (minutes < 60) return `${minutes}m`;
+        if (minutes < 2880)
+          return `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
+        return `${Math.floor(minutes / 1440)}d ${Math.round((minutes % 1440) / 60)}h`;
+      }
+      const shortModel = (model) =>
+        model ? model.replace(/^.*\//, "").replace(/^claude-/, "") : "—";
+      const ticketNumber = (ticketId) => Number(ticketId.split("-")[1]);
+      const money = (value) => (value == null ? "no cost" : `$${value.toFixed(2)}`);
+      const titleOfRun = (run) => ticketById.get(run.ticket.id)?.title ?? run.ticket.title;
+      const openDependencies = (ticketId) =>
+        (ticketById.get(ticketId)?.depends_on ?? []).filter((dependencyId) => {
+          const dependency = ticketById.get(dependencyId);
+          return dependency && dependency.status !== "done";
+        });
+      function closedLabel(runId) {
+        const day = runId.slice(0, 10);
+        const today = new Date(NOW).toISOString().slice(0, 10);
+        const yesterday = new Date(NOW - 86400000).toISOString().slice(0, 10);
+        return day === today ? "today" : day === yesterday ? "yesterday" : day.slice(5);
+      }
+      function formatClock(milliseconds) {
+        return new Date(milliseconds).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+
+      const ICONS = {
+        alert:
+          '<path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+        bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/>',
+        clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+        merge:
+          '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v3a6 6 0 0 0 6 6h3.5"/>',
+        terminal:
+          '<path d="m5 8 5 4-5 4M13 17h6"/><rect x="2.5" y="3.5" width="19" height="17" rx="2.5"/>',
+        check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+        x: '<path d="M6 6l12 12M18 6 6 18"/>',
+        ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>',
+        search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/>',
+        back: '<path d="m15 6-6 6 6 6"/>',
+        bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+        dollar: '<path d="M12 3v18M16.5 7.5H10a2.5 2.5 0 0 0 0 5h4a2.5 2.5 0 0 1 0 5H7.5"/>',
+        eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
+        pulse: '<path d="M3 12h4l2.5-7 5 14 2.5-7h4"/>',
+        chevron: '<path d="m9 6 6 6-6 6"/>',
+        pause: '<path d="M8 5v14M16 5v14"/>',
+      };
+      const icon = (name, size = 14) =>
+        `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+
+      function renderInline(text) {
+        return escapeHtml(text)
+          .replace(/`([^`]+)`/g, "<code>$1</code>")
+          .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+      }
+      function renderRichText(text) {
+        const blocks = [];
+        let current = null;
+        for (const rawLine of text.split("\n")) {
+          if (!rawLine.trim()) {
+            current = null;
+            continue;
+          }
+          const bullet = /^\s*[-*]\s+(.*)/.exec(rawLine);
+          const numbered = /^\s*\d+\.\s+(.*)/.exec(rawLine);
+          const kind = bullet ? "ul" : numbered ? "ol" : "p";
+          const content = (bullet || numbered)?.[1] ?? rawLine.trim();
+          if (kind === "p" || !current || current.kind !== kind) {
+            current = { kind, items: [] };
+            blocks.push(current);
+          }
+          current.items.push(content);
+        }
+        return blocks
+          .map((block) =>
+            block.kind === "p"
+              ? `<p>${renderInline(block.items[0])}</p>`
+              : `<${block.kind}>${block.items.map((item) => `<li>${renderInline(item)}</li>`).join("")}</${block.kind}>`,
+          )
+          .join("");
+      }
+
+      function showToast(message) {
+        const toast = document.getElementById("toast");
+        toast.textContent = message;
+        toast.classList.add("show");
+        clearTimeout(showToast.timer);
+        showToast.timer = setTimeout(() => toast.classList.remove("show"), 2400);
+      }
+
+      /* ---------- small components ---------- */
+      function pips(run) {
+        return `<span class="pips" aria-label="steps">${run.plan.map((step) => `<i class="pip ${step.status}" title="${escapeHtml(step.id)} · ${step.status}"></i>`).join("")}</span>`;
+      }
+      function timerBar(progress) {
+        const ratio = progress.current_step_minutes / progress.median_step_minutes;
+        const level = ratio > 1.3 ? "red" : ratio > 1 ? "amber" : "ok";
+        const fill = Math.min(ratio / 2, 1) * 100;
+        return `<span class="timer ${level}" title="${progress.current_step_minutes}m in current step, median step takes ${progress.median_step_minutes}m"><span class="bar"><i style="width:${fill}%"></i><u></u></span>${progress.current_step_minutes}m / ${progress.median_step_minutes}m</span>`;
+      }
+      const roundLabel = (progress) =>
+        `<span class="round ${progress.round >= progress.round_budget ? "last" : ""}" title="round ${progress.round} of ${progress.round_budget}${progress.round >= progress.round_budget ? " (last round)" : ""}">r${progress.round}/${progress.round_budget}</span>`;
+      function phaseChip(phase) {
+        const color =
+          { building: "blue", escalation: "amber", closed: "gray", queued: "violet" }[phase] ??
+          "gray";
+        return `<span class="chip ${color}">${escapeHtml(phase)}</span>`;
+      }
+      function statusChip(status) {
+        const map = {
+          in_progress: ["blue", "in progress"],
+          ready: ["green", "ready"],
+          proposed: ["gray", "proposed"],
+          done: ["gray outline", "done"],
+        };
+        const [color, label] = map[status] ?? ["gray", status];
+        return `<span class="chip ${color}">${label}</span>`;
+      }
+      const orcaButton = (terminal, label = "Open in Orca", extra = "primary") =>
+        `<button class="btn ${extra}" data-toast="Would open ${escapeHtml(terminal)} in Orca (prototype)">${icon("terminal")}${label}</button>`;
+      function idChip(ticketId) {
+        const ticket = ticketById.get(ticketId);
+        if (!ticket)
+          return `<span class="idchip ghost" title="Not in this backlog snapshot">${ticketId}</span>`;
+        const blocking = ticket.status !== "done";
+        return `<a class="idchip ${blocking ? "open" : ""}" href="#/backlog/${ticketId}" title="${escapeHtml(ticket.title)}${blocking ? " (not done)" : " (done)"}">${ticketId}</a>`;
+      }
+
+      /* ---------- progress ring (variant C): one arc per step ---------- */
+      const stepCounts = (run) => ({
+        done: run.plan.filter((step) => step.status === "succeeded").length,
+        running: run.plan.filter((step) => step.status === "running").length,
+        total: run.plan.length,
+      });
+      const runTone = (run) =>
+        stuckByRun.has(run.run) ? "red" : run.phase === "escalation" ? "amber" : "blue";
+      function ringSvg({ done = 0, running = 0, total = 0, tone = "blue", size = 40, label }) {
+        const center = 23,
+          radius = 18.5;
+        const point = (angle) => [
+          center + radius * Math.cos((angle * Math.PI) / 180),
+          center + radius * Math.sin((angle * Math.PI) / 180),
+        ];
+        const arc = (from, to) => {
+          const [x1, y1] = point(from),
+            [x2, y2] = point(to);
+          return `M${x1.toFixed(2)} ${y1.toFixed(2)}A${radius} ${radius} 0 ${to - from > 180 ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+        };
+        const slice = 360 / total,
+          gap = total > 1 ? 16 : 0;
+        const segments = Array.from({ length: total }, (_, index) => {
+          const kind = index < done ? "done" : index < done + running ? "run" : "";
+          return total === 1
+            ? `<circle class="seg ${kind}" cx="${center}" cy="${center}" r="${radius}" stroke-width="5"/>`
+            : `<path class="seg ${kind}" d="${arc(-90 + index * slice + gap / 2, -90 + (index + 1) * slice - gap / 2)}" stroke-width="5"/>`;
+        }).join("");
+        return `<svg class="ring ${tone}" width="${size}" height="${size}" viewBox="0 0 46 46" role="img" aria-label="${done} of ${total} steps done">${segments}<text x="${center}" y="${center + 4.5}">${label ?? `${done}/${total}`}</text></svg>`;
+      }
+      function glyphRing(kind, size = 40, text = "") {
+        const glyph = { queued: ICONS.clock, done: ICONS.check }[kind];
+        const tone = { queued: "mute", done: "green", review: "violet", idle: "mute" }[kind];
+        const circle =
+          kind === "done" || kind === "review"
+            ? `<circle class="seg done" cx="23" cy="23" r="18.5" stroke-width="${kind === "done" ? 2.5 : 5}"/>`
+            : `<circle class="base" cx="23" cy="23" r="18.5" stroke-width="2"/>`;
+        return `<svg class="ring ${tone}" width="${size}" height="${size}" viewBox="0 0 46 46" aria-hidden="true">${circle}${glyph ? `<g class="glyph" transform="translate(14.5 14.5) scale(.76)">${glyph}</g>` : ""}${text ? `<text x="23" y="27.5">${text}</text>` : ""}</svg>`;
+      }
+      const runRing = (run, size = 40) => ringSvg({ ...stepCounts(run), tone: runTone(run), size });
+      function ticketRing(ticketId, size = 40) {
+        const run = activeRunByTicket.get(ticketId);
+        if (run) return runRing(run, size);
+        const review = DATA.review_queue.find((item) => item.ticket === ticketId);
+        if (review) return glyphRing("review", size, `#${review.merge_order}`);
+        if (
+          closedRuns.some((entry) => entry.ticket === ticketId) ||
+          ticketById.get(ticketId)?.status === "done"
+        )
+          return glyphRing("done", size);
+        return glyphRing(queuedTicketIds.includes(ticketId) ? "queued" : "idle", size);
+      }
+
+      /* ---------- dag layout ---------- */
+      function layoutDag({ nodes, edges, nodeWidth, nodeHeight, gapX, gapY, containerWidth }) {
+        const ids = new Set(nodes.map((node) => node.id));
+        const links = edges.filter(([from, to]) => ids.has(from) && ids.has(to) && from !== to);
+        const predecessors = new Map(nodes.map((node) => [node.id, []]));
+        const successors = new Map(nodes.map((node) => [node.id, []]));
+        links.forEach(([from, to]) => {
+          predecessors.get(to).push(from);
+          successors.get(from).push(to);
+        });
+        const layerOf = new Map();
+        const visit = (id) => {
+          if (layerOf.has(id)) return layerOf.get(id);
+          layerOf.set(id, 0); // guards against cycles
+          const layer = predecessors.get(id).length
+            ? 1 + Math.max(...predecessors.get(id).map(visit))
+            : 0;
+          layerOf.set(id, layer);
+          return layer;
+        };
+        nodes.forEach((node) => visit(node.id));
+        const connected = nodes.filter(
+          (node) => predecessors.get(node.id).length || successors.get(node.id).length,
+        );
+        const loose = nodes.filter(
+          (node) => !predecessors.get(node.id).length && !successors.get(node.id).length,
+        );
+        const layers = [];
+        connected.forEach((node) => {
+          (layers[layerOf.get(node.id)] ||= []).push(node);
+        });
+        const rowOf = new Map();
+        layers.forEach((layer) => layer.forEach((node, row) => rowOf.set(node.id, row)));
+        const barycenter = (node, neighbours) => {
+          const rows = neighbours.get(node.id).map((id) => rowOf.get(id));
+          return rows.length
+            ? rows.reduce((sum, row) => sum + row, 0) / rows.length
+            : rowOf.get(node.id);
+        };
+        for (let pass = 0; pass < 3; pass += 1) {
+          for (let layerIndex = 1; layerIndex < layers.length; layerIndex += 1) {
+            layers[layerIndex].sort(
+              (a, b) => barycenter(a, predecessors) - barycenter(b, predecessors),
+            );
+            layers[layerIndex].forEach((node, row) => rowOf.set(node.id, row));
+          }
+          for (let layerIndex = layers.length - 2; layerIndex >= 0; layerIndex -= 1) {
+            layers[layerIndex].sort(
+              (a, b) => barycenter(a, successors) - barycenter(b, successors),
+            );
+            layers[layerIndex].forEach((node, row) => rowOf.set(node.id, row));
+          }
+        }
+        const positions = new Map();
+        let width = 0;
+        let height = 0;
+        layers.forEach((layer, layerIndex) =>
+          layer.forEach((node, row) => {
+            const x = layerIndex * (nodeWidth + gapX);
+            const y = row * (nodeHeight + gapY);
+            positions.set(node.id, { x, y, width: nodeWidth, height: nodeHeight });
+            width = Math.max(width, x + nodeWidth);
+            height = Math.max(height, y + nodeHeight);
+          }),
+        );
+        let cursorX = 0;
+        let cursorY = connected.length ? height + 22 : 0;
+        let rowHeight = 0;
+        loose.forEach((node) => {
+          const w = node.width ?? nodeWidth;
+          const h = node.height ?? nodeHeight;
+          if (cursorX > 0 && cursorX + w > containerWidth) {
+            cursorX = 0;
+            cursorY += rowHeight + gapY;
+            rowHeight = 0;
+          }
+          positions.set(node.id, { x: cursorX, y: cursorY, width: w, height: h });
+          cursorX += w + 10;
+          rowHeight = Math.max(rowHeight, h);
+          width = Math.max(width, cursorX - 10);
+          height = Math.max(height, cursorY + h);
+        });
+        return { positions, links, width, height };
+      }
+      function reduceEdges(edges) {
+        const outgoing = new Map();
+        edges.forEach(([from, to]) => {
+          if (!outgoing.has(from)) outgoing.set(from, []);
+          outgoing.get(from).push(to);
+        });
+        const reaches = (start, goal, skipTo) => {
+          const seen = new Set();
+          const stack = [...(outgoing.get(start) ?? [])].filter((next) => next !== skipTo);
+          while (stack.length) {
+            const current = stack.pop();
+            if (current === goal) return true;
+            if (seen.has(current)) continue;
+            seen.add(current);
+            (outgoing.get(current) ?? []).forEach((next) => stack.push(next));
+          }
+          return false;
+        };
+        return edges.filter(([from, to]) => !reaches(from, to, to));
+      }
+
+      function layeredLayout({ items, edges, direction, gapMain, gapCross, center }) {
+        const horizontal = direction === "lr";
+        const mainOf = (item) => (horizontal ? item.w : item.h);
+        const crossOf = (item) => (horizontal ? item.h : item.w);
+        const byId = new Map(items.map((item) => [item.id, item]));
+        const incoming = new Map(items.map((item) => [item.id, []]));
+        edges.forEach(([from, to]) => {
+          if (byId.has(from) && byId.has(to)) incoming.get(to).push(from);
+        });
+        const layerOf = new Map();
+        const visiting = new Set();
+        const depth = (id) => {
+          if (layerOf.has(id)) return layerOf.get(id);
+          if (visiting.has(id)) return 0;
+          visiting.add(id);
+          let level = 0;
+          incoming.get(id).forEach((parent) => {
+            level = Math.max(level, depth(parent) + 1);
+          });
+          visiting.delete(id);
+          layerOf.set(id, level);
+          return level;
+        };
+        items.forEach((item) => depth(item.id));
+        const layers = [];
+        items.forEach((item) => {
+          (layers[layerOf.get(item.id)] ??= []).push(item);
+        });
+        const crossCenter = new Map();
+        layers.forEach((layer) => {
+          const barycenter = (item) => {
+            const parents = incoming.get(item.id);
+            return parents.length
+              ? parents.reduce((sum, parent) => sum + crossCenter.get(parent), 0) / parents.length
+              : Infinity;
+          };
+          if (layer !== layers[0]) layer.sort((a, b) => barycenter(a) - barycenter(b));
+          let cursor = 0;
+          layer.forEach((item) => {
+            crossCenter.set(item.id, cursor + crossOf(item) / 2);
+            cursor += crossOf(item) + gapCross;
+          });
+          layer.extent = cursor - gapCross;
+        });
+        const maxExtent = Math.max(...layers.map((layer) => layer.extent));
+        const positions = new Map();
+        let mainCursor = 0;
+        layers.forEach((layer) => {
+          const layerMain = Math.max(...layer.map(mainOf));
+          let crossCursor = center ? (maxExtent - layer.extent) / 2 : 0;
+          layer.forEach((item) => {
+            const mainPos = mainCursor + (layerMain - mainOf(item)) / 2;
+            positions.set(
+              item.id,
+              horizontal ? { x: mainPos, y: crossCursor } : { x: crossCursor, y: mainPos },
+            );
+            crossCursor += crossOf(item) + gapCross;
+          });
+          mainCursor += layerMain + gapMain;
+        });
+        const mainTotal = mainCursor - gapMain;
+        return {
+          positions,
+          width: horizontal ? mainTotal : maxExtent,
+          height: horizontal ? maxExtent : mainTotal,
+        };
+      }
+
+      function mountDag(
+        container,
+        {
+          nodes,
+          edges,
+          nodeWidth,
+          nodeHeight,
+          gapX = 80,
+          gapY = 10,
+          edgeTone,
+          direction = "right",
+        },
+      ) {
+        if (!nodes.length) {
+          container.innerHTML = '<div class="empty-graph">Nothing to draw for this filter.</div>';
+          return;
+        }
+        const down = direction === "down";
+        let layout;
+        if (down) {
+          const ids = new Set(nodes.map((node) => node.id));
+          const links = reduceEdges(
+            edges.filter(([from, to]) => ids.has(from) && ids.has(to) && from !== to),
+          );
+          const placed = layeredLayout({
+            items: nodes.map((node) => ({ id: node.id, w: nodeWidth, h: nodeHeight })),
+            edges: links,
+            direction: "tb",
+            gapMain: gapY,
+            gapCross: gapX,
+            center: true,
+          });
+          const positions = new Map(
+            [...placed.positions].map(([id, point]) => [
+              id,
+              { ...point, width: nodeWidth, height: nodeHeight },
+            ]),
+          );
+          layout = { positions, links, width: placed.width, height: placed.height };
+        } else {
+          layout = layoutDag({
+            nodes,
+            edges,
+            nodeWidth,
+            nodeHeight,
+            gapX,
+            gapY,
+            containerWidth: Math.max(container.clientWidth - 28, 400),
+          });
+        }
+        const paths = layout.links
+          .map(([from, to]) => {
+            const source = layout.positions.get(from);
+            const target = layout.positions.get(to);
+            const tone = edgeTone(from, to);
+            if (down) {
+              const x1 = source.x + source.width / 2,
+                y1 = source.y + source.height,
+                x2 = target.x + target.width / 2,
+                y2 = target.y,
+                curve = Math.max(16, (y2 - y1) / 2);
+              return `<path class="edge ${tone}" d="M${x1} ${y1}C${x1} ${y1 + curve} ${x2} ${y2 - curve} ${x2} ${y2 - 2}" marker-end="url(#arrow-${tone})"/>`;
+            }
+            const x1 = source.x + source.width,
+              y1 = source.y + source.height / 2,
+              x2 = target.x,
+              y2 = target.y + target.height / 2,
+              curve = Math.max(24, (x2 - x1) / 2);
+            return `<path class="edge ${tone}" d="M${x1} ${y1}C${x1 + curve} ${y1} ${x2 - curve} ${y2} ${x2 - 2} ${y2}" marker-end="url(#arrow-${tone})"/>`;
+          })
+          .join("");
+        const nodeHtml = nodes
+          .map((node) => {
+            const position = layout.positions.get(node.id);
+            const style = `left:${position.x}px;top:${position.y}px;width:${position.width}px;height:${position.height}px`;
+            const attributes = `class="node ${node.className ?? ""}" style="${style}"${node.title ? ` title="${escapeHtml(node.title)}"` : ""}`;
+            if (node.href) return `<a ${attributes} href="${node.href}">${node.html}</a>`;
+            if (node.step)
+              return `<button ${attributes} data-step="${escapeHtml(node.step)}" style="${style};text-align:left">${node.html}</button>`;
+            return `<div ${attributes}>${node.html}</div>`;
+          })
+          .join("");
+        const marker = (tone) =>
+          `<marker id="arrow-${tone}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="mk-${tone}" d="M0 0 8 4 0 8z"/></marker>`;
+        container.innerHTML = `<div class="dag" style="width:${layout.width}px;height:${layout.height}px">
+    <svg width="${layout.width}" height="${layout.height}" aria-hidden="true"><defs>${marker("dim")}${marker("amber")}</defs>${paths}</svg>${nodeHtml}</div>`;
+      }
+
+      /* ---------- HOME ---------- */
+      function homeTiles() {
+        const gates = DATA.gates;
+        const oldestReview = Math.max(0, ...DATA.review_queue.map((item) => item.waiting_minutes));
+        const blockedReviews = DATA.review_queue.filter(
+          (item) => reviewBlockers(item).length,
+        ).length;
+        const oldestStuck = Math.max(0, ...DATA.stuck.map((entry) => entry.since_minutes));
+        const limit = DATA.usage.limits[0];
+        const worstLimit = [...DATA.usage.limits].sort((a, b) => b.used_pct - a.used_pct)[0];
+        const yesterdayKey = Object.keys(DATA.usage.daily_cost_usd).sort().at(-1);
+        const tile = (className, target, iconName, value, label, detail, extra = "") =>
+          `<button class="tile ${className}" data-focus="${target}">${icon(iconName, 18)}<span class="val">${value}</span><span class="txt"><b>${label}</b><small>${detail}</small></span>${extra}</button>`;
+        return `<div class="tiles">
+    ${tile(gates.length ? "amber" : "zero", "panel-needs", "bell", gates.length, "Needs me", gates.length ? `${gates.map((gate) => `${gate.kind} · ${gate.ticket}`).join(", ")}` : "nothing waiting")}
+    ${tile(DATA.review_queue.length ? "blue" : "zero", "panel-review", "merge", DATA.review_queue.length, "Reviews waiting", `oldest ${formatMinutes(oldestReview)} · ${blockedReviews} blocked`)}
+    ${tile(DATA.stuck.length ? "red" : "zero", "panel-stuck", "alert", DATA.stuck.length, "Stuck agents", DATA.stuck.length ? `oldest ${formatMinutes(oldestStuck)}` : "all moving")}
+    ${tile(worstLimit.used_pct >= 80 ? "alarm" : "", "panel-usage", "bolt", `${limit.used_pct}%`, `${limit.provider} ${limit.window} limit`, `resets in ${formatMinutes(limit.resets_in_minutes)} · ${limit.used_pct >= 80 ? "near limit" : "ok"}`, `<span class="meter"><i style="width:${limit.used_pct}%"></i><u style="left:80%"></u></span>`)}
+    ${tile("", "panel-usage", "dollar", money(DATA.usage.today_usd), "Cost today", `vs ${money(DATA.usage.daily_cost_usd[yesterdayKey])} yesterday`)}
+    ${tile("", "panel-runs", "pulse", DATA.runs.length, "Active runs", `${DATA.queued.length} queued · ${DATA.runs.filter((run) => run.phase === "escalation").length} escalated`)}
+  </div>`;
+      }
+      function reviewBlockers(item) {
+        const blockers = [];
+        if (item.ci !== "passing") blockers.push(`CI ${item.ci}`);
+        const failing = item.criteria.filter((criterion) => criterion.status !== "pass");
+        if (failing.length)
+          blockers.push(
+            `${failing.map((criterion) => `AC${item.criteria.indexOf(criterion) + 1}`).join(", ")} failing`,
+          );
+        if (item.tests.failed) blockers.push(`${item.tests.failed} tests failing`);
+        if (item.findings.open) blockers.push(`${item.findings.open} open finding`);
+        return blockers;
+      }
+      function needsPanel() {
+        const rows = DATA.gates
+          .map((gate) => {
+            const waiting = minutesSince(gate.since);
+            const run = runById.get(gate.run);
+            const progress = DATA.progress[gate.run];
+            return `<div class="item">
+      <div class="rowtop"><span class="chip amber">${escapeHtml(gate.kind)}</span><a class="mono link" href="#/runs/${gate.run}"><b>${gate.ticket}</b></a>
+        ${progress ? roundLabel(progress) : ""}<span class="age push ${waiting > 10 ? "hot" : ""}" title="waiting since ${formatClock(Date.parse(gate.since))}">${formatMinutes(waiting)}</span></div>
+      <p class="gate-q">${escapeHtml(gate.question)}</p>
+      <div class="actions"><a class="btn primary" href="#/runs/${gate.run}">Open run</a>${gate.review_url ? `<button class="btn" data-toast="Would open ${escapeHtml(gate.review_url)} (prototype)">${icon("ext")}Open PR</button>` : ""}
+      ${orcaButton(`the ${run ? run.ticket.id : ""} lead terminal`, "Answer in Orca", "")}</div>
+    </div>`;
+          })
+          .join("");
+        return `<section class="panel" id="panel-needs"><header><h2>Needs me</h2><span class="count">${DATA.gates.length}</span><span class="hint">gates, oldest first</span></header>
+    <div class="body">${rows || '<div class="empty">Nothing is waiting on you. Gates and escalations appear here.</div>'}</div></section>`;
+      }
+      function stuckPanel() {
+        const rows = [...DATA.stuck]
+          .sort((a, b) => b.since_minutes - a.since_minutes)
+          .map((entry) => {
+            const kindLabel =
+              entry.kind === "waiting_on_prompt" ? "Waiting on a prompt" : "Idle, no output";
+            const severity = entry.since_minutes >= 15 ? "hot" : "warm";
+            return `<div class="item">
+      <div class="rowtop"><span class="chip ${entry.kind === "waiting_on_prompt" ? "red" : "amber"}">${kindLabel}</span>
+        <a class="mono link" href="#/runs/${entry.run}"><b>${entry.ticket}</b></a><span class="dim">${escapeHtml(entry.role)}</span><span class="age push ${severity}">${formatMinutes(entry.since_minutes)}</span></div>
+      <pre class="term">${escapeHtml(entry.last_line)}<span class="caret"></span></pre>
+      <div class="actions">${orcaButton(entry.terminal)}<a class="btn" href="#/runs/${entry.run}">Open run</a><span class="mute mono" style="margin-left:auto;font-size:11px">${escapeHtml(entry.terminal)}</span></div>
+    </div>`;
+          })
+          .join("");
+        return `<section class="panel" id="panel-stuck"><header><h2>Stuck agents</h2><span class="count">${DATA.stuck.length}</span><span class="hint">no progress for 15m+ is red</span></header>
+    <div class="body">${rows || '<div class="empty">No agent is waiting on a prompt or idle.</div>'}</div></section>`;
+      }
+      function reviewEvidence(item, expanded) {
+        const blockers = reviewBlockers(item);
+        const failing = item.criteria.filter((criterion) => criterion.status !== "pass");
+        const total = item.diff.added + item.diff.removed;
+        return `<div class="kvs">
+        <div class="kv"><span>CI</span><b class="${item.ci === "passing" ? "good" : "bad"}">${item.ci}</b></div>
+        <div class="kv"><span>Tests</span><b class="${item.tests.failed ? "bad" : "good"}">${item.tests.passed} pass</b><div class="sub">${item.tests.failed} fail</div></div>
+        <div class="kv"><span>Findings</span><b class="${item.findings.open ? "warn" : "good"}">${item.findings.open} open</b><div class="sub">${item.findings.fixed} fixed</div></div>
+        <div class="kv"><span>Diff · ${item.diff.files} files</span><b><span style="color:var(--green-t)">+${item.diff.added}</span> <span style="color:var(--red-t)">−${item.diff.removed}</span></b><div class="diffbar"><i style="width:${(item.diff.added / total) * 100}%"></i><i style="width:${(item.diff.removed / total) * 100}%"></i></div></div>
+        <div class="kv"><span>Waiting</span><b class="${item.waiting_minutes >= 30 ? "warn" : ""}">${formatMinutes(item.waiting_minutes)}</b></div>
+      </div>
+      <div class="acrow"><span class="lbl">Acceptance ${item.criteria.length - failing.length}/${item.criteria.length}</span>
+        <div class="acs">${item.criteria.map((criterion, criterionIndex) => `<span class="ac ${criterion.status === "pass" ? "" : "fail"}" title="${criterion.id} · proof: ${criterion.proof} · ${criterion.status}">${criterionIndex + 1}</span>`).join("")}</div></div>
+      ${blockers.length ? `<div class="blockers">${icon("alert")}${blockers.join(" · ")}</div>` : ""}
+      ${expanded ? `<div class="aclist">${item.criteria.map((criterion) => `<div class="${criterion.status}">${icon(criterion.status === "pass" ? "check" : "x")}<span class="mono" style="color:var(--text)">${criterion.id}</span><span class="dim">proof: ${criterion.proof}</span></div>`).join("")}</div>` : ""}`;
+      }
+      function reviewPanel() {
+        const items = [...DATA.review_queue]
+          .sort((a, b) => a.merge_order - b.merge_order)
+          .map((item, index, list) => {
+            const blockers = reviewBlockers(item);
+            const expanded = state.expandedReviews.has(item.run);
+            const prNumber = item.url.split("/").pop();
+            return `<div class="item">
+      <div class="rv-top"><span class="order" title="merge order">${item.merge_order}</span>
+        <div class="rv-title"><a class="mono link" href="#/runs/${item.run}">${item.ticket}</a><span class="t">${escapeHtml(item.title)}</span></div>
+        ${blockers.length ? '<span class="chip red">Blocked</span>' : '<span class="chip green">Ready to merge</span>'}</div>
+      ${reviewEvidence(item, expanded)}
+      <div class="actions"><button class="btn primary" data-toast="Would open PR #${prNumber} (prototype)">${icon("ext")}Open PR #${prNumber}</button>
+        <button class="btn ghost" data-expand-review="${item.run}">${expanded ? "Hide" : "Show"} all ACs</button>
+        <span class="hint">${index === 0 ? "merge first" : `merge after #${list[index - 1].merge_order}`}</span></div>
+    </div>`;
+          })
+          .join("");
+        return `<section class="panel" id="panel-review"><header><h2>Review queue</h2><span class="count">${DATA.review_queue.length}</span><span class="hint">merge order</span></header><div class="body">${items || '<div class="empty">No merge requests are waiting for review.</div>'}</div></section>`;
+      }
+      function progressRows() {
+        const attentionRank = (run) =>
+          run.phase === "escalation" ? 0 : stuckByRun.has(run.run) ? 1 : 2;
+        return [...DATA.runs]
+          .sort(
+            (a, b) =>
+              attentionRank(a) - attentionRank(b) ||
+              DATA.progress[a.run].eta_minutes - DATA.progress[b.run].eta_minutes,
+          )
+          .map((run) => {
+            const progress = DATA.progress[run.run];
+            const stuck = stuckByRun.get(run.run);
+            return `<a class="runrow" href="#/runs/${run.run}">
+      <div class="r1"><span class="dot ${run.phase}"></span><span class="mono">${run.ticket.id}</span><span class="ttl" title="${escapeHtml(titleOfRun(run))}">${escapeHtml(titleOfRun(run))}</span>
+        ${run.phase === "escalation" ? '<span class="chip amber">needs me</span>' : ""}${stuck ? `<span class="chip red" title="${stuck[0].kind}">${icon("alert", 12)}stuck</span>` : ""}
+        <span class="eta" title="estimated time to merge-ready">ETA ${formatMinutes(progress.eta_minutes)}</span></div>
+      <div class="r2">${pips(run)}<span class="steps-n">${stepCounts(run).done}/${run.plan.length}</span>${roundLabel(progress)}${timerBar(progress)}</div>
+    </a>`;
+          })
+          .join("");
+      }
+      function usagePanel() {
+        const limits = DATA.usage.limits
+          .map((limit) => {
+            const over = limit.used_pct >= 80;
+            return `<div class="limit ${over ? "over" : ""}"><div class="lt"><b>${limit.provider}</b><span class="mute">${limit.window} window</span><span class="pct">${limit.used_pct}%</span></div>
+      <div class="meter-bar" role="meter" aria-valuenow="${limit.used_pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${limit.used_pct}%"></i><u></u></div>
+      <div class="note">${over ? icon("alert") : icon("clock")}<span>${over ? `Near the limit. Agents will stall until it resets in ${formatMinutes(limit.resets_in_minutes)}.` : `Resets in ${formatMinutes(limit.resets_in_minutes)}`}</span></div></div>`;
+          })
+          .join("");
+        const days = Object.entries(DATA.usage.daily_cost_usd).sort();
+        const max = Math.max(...days.map(([, cost]) => cost), DATA.usage.today_usd);
+        const bars = [...days, ["today", DATA.usage.today_usd]]
+          .map(
+            ([day, cost]) =>
+              `<div class="bar ${day === "today" ? "today" : ""}" title="${day}: ${money(cost)}">${money(cost).replace(/\.00$/, "")}<i style="height:${Math.max(2, (cost / max) * 56)}px"></i><small>${day === "today" ? "today" : day.slice(5)}</small></div>`,
+          )
+          .join("");
+        return `<section class="panel" id="panel-usage"><header><h2>Usage and cost</h2><span class="hint">daily cost, USD</span></header>
+    <div class="body">${limits}<div class="chart" style="border-top:1px solid var(--line)">${bars}</div></div></section>`;
+      }
+      function renderHome() {
+        return `<div class="home">${homeTiles()}
+    <div class="cols">
+      <div class="col">${needsPanel()}${stuckPanel()}</div>
+      <div class="col">${reviewPanel()}</div>
+      <div class="col">
+        <section class="panel" id="panel-runs"><header><h2>Run progress</h2><span class="count">${DATA.runs.length}</span><span class="hint">step bar · round · time in step / median</span></header><div class="body">${progressRows()}</div></section>
+        ${usagePanel()}
+      </div>
+    </div></div>`;
+      }
+
+      /* ---------- RUNS ---------- */
+      function runCard(run) {
+        const progress = DATA.progress[run.run];
+        const stuck = stuckByRun.get(run.run);
+        const review = reviewByRun.get(run.run);
+        return `<a class="rcard ${run.phase}" href="#/runs/${run.run}" title="${escapeHtml(titleOfRun(run))}">${runRing(run)}
+    <div class="rc-main"><div class="rc-top"><span class="mono">${run.ticket.id}</span>${roundLabel(progress)}<span class="eta" title="estimated time to merge-ready">ETA ${formatMinutes(progress.eta_minutes)}</span></div>
+    <div class="rc-title ttl2">${escapeHtml(titleOfRun(run))}</div>
+    <div class="rc-bot">${timerBar(progress)}</div>
+    ${stuck ? `<div class="rc-line red">${icon("alert", 12)} ${stuck[0].kind === "waiting_on_prompt" ? "waiting on a prompt" : "idle"} ${formatMinutes(stuck[0].since_minutes)}</div>` : ""}
+    ${review ? `<div class="rc-line ${review.ci === "passing" ? "" : "red"}">MR #${review.merge_order} in review · CI ${review.ci}</div>` : ""}
+    ${run.phase === "escalation" ? '<div class="rc-line amber">escalation: waiting for you</div>' : ""}</div>
+  </a>`;
+      }
+      function queuedBlockers(ticketId) {
+        const declared = DATA.queued.find((entry) => entry.ticket === ticketId)?.blocked_by ?? [];
+        return [...new Set([...declared, ...openDependencies(ticketId)])];
+      }
+      function blockerState(ticketId) {
+        const run = activeRunByTicket.get(ticketId);
+        if (run) return run.phase;
+        return queuedTicketIds.includes(ticketId)
+          ? "queued"
+          : (ticketById.get(ticketId)?.status ?? "unknown");
+      }
+      function queuedCard(ticketId) {
+        const ticket = ticketById.get(ticketId);
+        const blockers = queuedBlockers(ticketId);
+        return `<a class="rcard" href="#/backlog/${ticketId}" title="${escapeHtml(ticket?.title ?? "")}">${ticketRing(ticketId)}
+    <div class="rc-main"><div class="rc-top"><span class="mono">${ticketId}</span></div><div class="rc-title ttl2">${escapeHtml(ticket?.title ?? "")}</div>
+    <div class="rc-line ${blockers.length ? "" : "green"}">${blockers.length ? `waits on ${blockers.map((id) => `${id} (${blockerState(id)})`).join(", ")}` : "ready, waits for a free slot"}</div></div></a>`;
+      }
+      function simpleCard(ticketId, runId, lineHtml, ringHtml = ticketRing(ticketId)) {
+        const ticket = ticketById.get(ticketId);
+        return `<a class="rcard" href="#/runs/${runId}" title="${escapeHtml(ticket?.title ?? "")}">${ringHtml}
+    <div class="rc-main"><div class="rc-top"><span class="mono">${ticketId}</span></div><div class="rc-title ttl2">${escapeHtml(ticket?.title ?? "no ticket record in this snapshot")}</div>
+    <div class="rc-line">${lineHtml}</div></div></a>`;
+      }
+      function unblocksList() {
+        const sources = [...DATA.runs.map((run) => run.ticket.id), ...queuedTicketIds];
+        const entries = sources
+          .map((ticketId) => ({
+            ticketId,
+            downstream: (dependantsById.get(ticketId) ?? []).filter(
+              (id) => ticketById.get(id)?.status !== "done",
+            ),
+          }))
+          .filter((entry) => entry.downstream.length);
+        const rows = entries
+          .map((entry) => {
+            const run = activeRunByTicket.get(entry.ticketId);
+            const progress = run && DATA.progress[run.run];
+            const when = run
+              ? run.phase === "escalation"
+                ? `needs you · ETA ${formatMinutes(progress.eta_minutes)}`
+                : `ETA ${formatMinutes(progress.eta_minutes)}`
+              : "queued";
+            return `<div class="ub"><div class="lead"><span class="dot ${run ? run.phase : "queued"}"></span><a class="mono link" href="${run ? `#/runs/${run.run}` : `#/backlog/${entry.ticketId}`}">${entry.ticketId}</a><span class="dim">${when}</span></div>
+      <div class="to"><span class="mute" style="font-size:11px;padding-top:2px">unblocks</span>${entry.downstream.map(idChip).join("")}</div></div>`;
+          })
+          .join("");
+        return `<aside class="unblocks"><h3>What finishing unblocks</h3>${rows || '<div class="empty">No queued ticket waits on a run.</div>'}</aside>`;
+      }
+      function renderRuns() {
+        const closedLatest = closedRuns.slice(0, 5);
+        const lanes = [
+          {
+            name: "Queued",
+            dot: "queued",
+            sub: "waiting for a slot",
+            cards: queuedTicketIds.map(queuedCard),
+          },
+          {
+            name: "Building",
+            dot: "building",
+            sub: "agents working",
+            cards: DATA.runs.filter((run) => run.phase === "building").map(runCard),
+          },
+          {
+            name: "Needs me",
+            dot: "escalation",
+            sub: "gate or escalation",
+            cards: DATA.runs.filter((run) => run.phase === "escalation").map(runCard),
+          },
+          {
+            name: "Awaiting merge",
+            dot: "ready",
+            sub: "MR in review queue",
+            cards: DATA.review_queue
+              .filter((item) => !runById.has(item.run))
+              .map((item) =>
+                simpleCard(
+                  item.ticket,
+                  item.run,
+                  `<span class="${item.ci === "passing" ? "" : "red"}">MR #${item.merge_order} · CI ${item.ci} · waiting ${formatMinutes(item.waiting_minutes)}</span>`,
+                  ticketRing(item.ticket),
+                ),
+              ),
+          },
+          {
+            name: "Closed",
+            dot: "closed",
+            sub: `last 5 of ${closedRuns.length}`,
+            cards: closedLatest.map((entry) =>
+              simpleCard(
+                entry.ticket,
+                entry.run,
+                `closed ${closedLabel(entry.run)} · ${money(entry.cost_usd)}`,
+              ),
+            ),
+            foot: `<button class="btn" data-dag-only="old">${closedRuns.length - 5} older runs in graph</button>`,
+          },
+        ];
+        const board = lanes
+          .map(
+            (
+              lane,
+            ) => `<section class="lane"><header><span class="dot ${lane.dot}"></span>${lane.name}<span class="count">${lane.cards.length}</span><span class="sub">${lane.sub}</span></header>
+    <div class="lane-body">${lane.cards.join("") || '<div class="empty" style="padding:8px">none</div>'}</div>${lane.foot ? `<div class="lane-foot">${lane.foot}</div>` : ""}</section>`,
+          )
+          .join("");
+        const filterButton = (key, label, count) =>
+          `<button data-dag-filter="${key}" aria-pressed="${state.dagFilter.has(key)}">${label}<span class="n">${count}</span></button>`;
+        return `<div class="runs-view">
+    <div class="page-head"><h1>Runs</h1><span class="dim">${DATA.runs.length} active · ${DATA.queued.length} queued · ${closedRuns.length} closed. Click a run for its plan.</span></div>
+    <div class="board">${board}</div>
+    <section class="panel dag-panel"><header><h2>Cross-run dependency graph</h2>
+      <div class="seg" role="group" aria-label="Filter runs">${filterButton("active", "Active", DATA.runs.length)}${filterButton("queued", "Queued", DATA.queued.length)}${filterButton("old", "Old", closedRuns.length)}</div>
+      <div class="legend"><span><i class="dot building"></i>running</span><span><i class="dot escalation"></i>needs me</span><span><i class="dot queued"></i>queued</span><span><i class="ln amber"></i>still blocking</span><span><i class="ln solid"></i>satisfied</span></div></header>
+      <div class="dag-body"><div class="dag-scroll" id="dag-host"></div>${unblocksList()}</div></section>
+  </div>`;
+      }
+      function graphNode(ticketId, meta, title) {
+        return `${ticketRing(ticketId, 38)}<div class="nb"><div class="n1"><b>${ticketId}</b><span class="meta">${meta}</span></div><div class="n2 ttl2">${escapeHtml(title)}</div></div>`;
+      }
+      function mountRunsDag() {
+        const nodes = [];
+        const seen = new Set();
+        const push = (node) => {
+          if (!seen.has(node.id)) {
+            seen.add(node.id);
+            nodes.push(node);
+          }
+        };
+        if (state.dagFilter.has("active")) {
+          DATA.runs.forEach((run) => {
+            const progress = DATA.progress[run.run];
+            push({
+              id: run.ticket.id,
+              className: run.phase === "escalation" ? "escalation" : "active",
+              href: `#/runs/${run.run}`,
+              title: titleOfRun(run),
+              html: graphNode(
+                run.ticket.id,
+                `ETA ${formatMinutes(progress.eta_minutes)}`,
+                titleOfRun(run),
+              ),
+            });
+          });
+        }
+        if (state.dagFilter.has("queued")) {
+          queuedTicketIds.forEach((ticketId) =>
+            push({
+              id: ticketId,
+              className: "queued",
+              href: `#/backlog/${ticketId}`,
+              title: ticketById.get(ticketId)?.title,
+              html: graphNode(
+                ticketId,
+                queuedBlockers(ticketId).length ? "blocked" : "ready",
+                ticketById.get(ticketId)?.title ?? "",
+              ),
+            }),
+          );
+        }
+        if (state.dagFilter.has("old")) {
+          closedRuns.forEach((entry) => {
+            const ticket = ticketById.get(entry.ticket);
+            push({
+              id: entry.ticket,
+              className: "old compact",
+              href: `#/runs/${entry.run}`,
+              title: ticket?.title ?? `${entry.ticket}, no ticket record in this snapshot`,
+              width: 176,
+              height: 28,
+              html: `<span class="ck">${icon("check", 13)}</span><b>${entry.ticket}</b><span class="meta">${closedLabel(entry.run)} · ${money(entry.cost_usd)}</span>`,
+            });
+          });
+        }
+        const edges = [];
+        nodes.forEach((node) =>
+          (ticketById.get(node.id)?.depends_on ?? []).forEach((dependencyId) =>
+            edges.push([dependencyId, node.id]),
+          ),
+        );
+        const closedIds = new Set(closedRuns.map((entry) => entry.ticket));
+        mountDag(document.getElementById("dag-host"), {
+          nodes,
+          edges,
+          nodeWidth: 300,
+          nodeHeight: 56,
+          gapX: 90,
+          gapY: 10,
+          edgeTone: (from) =>
+            closedIds.has(from) || ticketById.get(from)?.status === "done" ? "dim" : "amber",
+        });
+      }
+
+      /* ---------- RUN DETAIL ---------- */
+      const defaultStepId = (steps) =>
+        (
+          steps.find((step) => step.status === "running") ??
+          steps.find((step) => step.status !== "succeeded") ??
+          steps[0]
+        )?.id;
+      const stuckStepOf = (run, stuckEntries) =>
+        run.plan.find(
+          (step) =>
+            step.status === "running" && stuckEntries.some((entry) => entry.role === step.role),
+        )?.id;
+      function planSvg(run, selectedId, stuckId) {
+        const width = 340,
+          height = 52,
+          pad = 4;
+        const edges = reduceEdges(
+          run.plan.flatMap((step) => step.needs.map((need) => [need, step.id])),
+        );
+        const layout = layeredLayout({
+          items: run.plan.map((step) => ({ id: step.id, w: width, h: height })),
+          edges,
+          direction: "tb",
+          gapMain: 26,
+          gapCross: 16,
+          center: true,
+        });
+        const glyph = (status, x, y) =>
+          status === "succeeded"
+            ? `<circle class="gl-done" cx="${x}" cy="${y}" r="9"/><path class="gl-tick" d="m${x - 4} ${y + 0.5} 3 3 5-6"/>`
+            : status === "running"
+              ? `<circle class="gl-run-track" cx="${x}" cy="${y}" r="8"/><path class="gl-run" d="M${x} ${y - 8}A8 8 0 0 1 ${x + 8} ${y}"/>`
+              : `<circle class="gl-todo" cx="${x}" cy="${y}" r="8"/>`;
+        const stuckGlyph = (x, y) =>
+          `<circle class="gl-stuck" cx="${x}" cy="${y}" r="9"/><path class="gl-stuck-p" d="M${x - 2.5} ${y - 3.5}v7M${x + 2.5} ${y - 3.5}v7"/>`;
+        const paths = edges
+          .map(([from, to]) => {
+            const a = layout.positions.get(from),
+              b = layout.positions.get(to);
+            const x1 = a.x + width / 2 + pad,
+              y1 = a.y + height + pad,
+              x2 = b.x + width / 2 + pad,
+              y2 = b.y + pad - 3,
+              handle = (y2 - y1) / 2;
+            return `<path class="e" d="M${x1} ${y1}C${x1} ${y1 + handle} ${x2} ${y2 - handle} ${x2} ${y2}" marker-end="url(#plan-arrow)"/>`;
+          })
+          .join("");
+        const steps = run.plan
+          .map((step) => {
+            const point = layout.positions.get(step.id);
+            const x = point.x + pad,
+              y = point.y + pad;
+            const cost = step.cost_usd == null ? "" : money(step.cost_usd);
+            const clock =
+              step.status === "running" && step.started_at
+                ? formatMinutes(minutesSince(step.started_at))
+                : "";
+            return `<g class="step s-${step.status} ${step.id === selectedId ? "picked" : ""} ${step.id === stuckId ? "stuckstep" : ""}" data-step="${escapeHtml(step.id)}" role="button" tabindex="0" aria-label="${escapeHtml(step.id)}, ${step.role}, ${step.status}">
+      <title>${escapeHtml(step.id)}</title><rect class="bx" x="${x}" y="${y}" width="${width}" height="${height}" rx="9"/>${step.id === stuckId ? stuckGlyph(x + 24, y + height / 2) : glyph(step.status, x + 24, y + height / 2)}
+      <text class="role" x="${x + 44}" y="${y + 20}">${step.role}${step.status === "pending" ? " · waiting" : step.status === "running" ? " · running" : ""}</text>
+      <text class="sid" x="${x + 44}" y="${y + 37}">${escapeHtml(step.id.length > 30 ? step.id.slice(0, 29) + "…" : step.id)}</text>
+      <text class="meta" x="${x + width - 12}" y="${y + 20}">${clock}</text><text class="meta" x="${x + width - 12}" y="${y + 37}">${cost}</text>
+</g>`;
+          })
+          .join("");
+        const svgWidth = layout.width + pad * 2,
+          svgHeight = layout.height + pad * 2;
+        return `<svg class="plan-svg" viewBox="0 0 ${svgWidth} ${svgHeight}" width="${svgWidth}" height="${svgHeight}" role="group" aria-label="Step plan"><defs><marker id="plan-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M1 1.5 9 5 1 8.5z"/></marker></defs>${paths}${steps}</svg>`;
+      }
+      function stepDetail(run, selectedId, progress) {
+        const step = run.plan.find((entry) => entry.id === selectedId);
+        if (!step) return "";
+        const stateText =
+          {
+            succeeded: "done",
+            running: step.started_at
+              ? `running ${formatMinutes(minutesSince(step.started_at))}${progress ? ` of ~${progress.median_step_minutes}m median` : ""}`
+              : "running",
+            pending: "waiting for its prerequisites",
+          }[step.status] ?? step.status;
+        return `<div class="stepdetail"><span class="sd-title">${escapeHtml(step.id)}</span>${step.status === "running" ? orcaButton(`${step.id} worker`, "Open in Orca") : ""}
+    <span class="sd-meta">${step.role} · ${escapeHtml(step.harness)} · ${escapeHtml(shortModel(step.model))} · ${stateText}${step.cost_usd ? ` · ${money(step.cost_usd)}` : ""}<br>${step.needs.length ? `after ${step.needs.map(escapeHtml).join(", ")}` : "no prerequisites"}</span></div>`;
+      }
+      function planBody(runId) {
+        const run = runById.get(runId);
+        const selectedId = state.selectedStepByRun.get(runId) ?? defaultStepId(run.plan);
+        return (
+          planSvg(run, selectedId, stuckStepOf(run, stuckByRun.get(runId) ?? [])) +
+          stepDetail(run, selectedId, DATA.progress[runId])
+        );
+      }
+      function runStrip(run, progress, cost) {
+        if (!run)
+          return `<div class="strip" style="--cols:2"><div><span class="k">Cost</span><span class="v">${money(cost)}</span></div><div><span class="k">Plan</span><span class="v"><small>not kept for closed runs</small></span></div></div>`;
+        const counts = stepCounts(run);
+        const ratio = progress.current_step_minutes / progress.median_step_minutes;
+        const level = ratio > 1.3 ? "red" : ratio > 1 ? "amber" : "";
+        const budget = Array.from(
+          { length: progress.round_budget },
+          (_, index) =>
+            `<i class="${index < progress.round ? (progress.round >= progress.round_budget ? "last" : "used") : ""}"></i>`,
+        ).join("");
+        return `<div class="strip" style="--cols:6">
+    <div class="lead">${runRing(run, 46)}<span><span class="k">Steps</span><br><span class="v">${counts.done} of ${counts.total}</span></span></div>
+    <div><span class="k">Round</span><span class="v">${progress.round}<small> of ${progress.round_budget}</small><span class="budget" title="${progress.round >= progress.round_budget ? "last round" : "rounds used"}">${budget}</span></span></div>
+    <div><span class="k">Time in step vs median</span><span class="stepbar ${level}"><i style="width:${Math.min(ratio / 2, 1) * 100}%"></i><u></u></span><span class="v">${progress.current_step_minutes}m <small>/ ${progress.median_step_minutes}m median${ratio > 1 ? `, +${progress.current_step_minutes - progress.median_step_minutes}m over` : ""}</small></span></div>
+    <div><span class="k">ETA to merge-ready</span><span class="v">${formatMinutes(progress.eta_minutes)}</span></div>
+    <div><span class="k">Cost so far</span><span class="v">${money(cost)}</span></div>
+    <div><span class="k">Started</span><span class="v">${formatMinutes(minutesSince(run.started_at))}<small> ago</small></span></div></div>`;
+      }
+      function renderRunDetail(runId) {
+        const liveRun = runById.get(runId);
+        const closedEntry = DATA.ticket_runs.find((entry) => entry.run === runId);
+        if (!liveRun && !closedEntry)
+          return `<div class="page-scroll"><div class="detail"><a class="back" href="#/runs">${icon("back", 14)}Runs</a><div class="empty">No run ${escapeHtml(runId)}.</div></div></div>`;
+        const ticketId = liveRun ? liveRun.ticket.id : closedEntry.ticket;
+        const ticket = ticketById.get(ticketId);
+        const title = liveRun
+          ? titleOfRun(liveRun)
+          : (ticket?.title ?? "No ticket record in this snapshot");
+        const phase = liveRun ? liveRun.phase : "closed";
+        const progress = DATA.progress[runId];
+        const cost = liveRun ? liveRun.cost_usd : closedEntry.cost_usd;
+        const gate = DATA.gates.find((entry) => entry.run === runId);
+        const stuckEntries = stuckByRun.get(runId) ?? [];
+        const review = reviewByRun.get(runId);
+        const agents = (liveRun?.agents ?? [])
+          .filter((agent) => agent.role !== "Master Chief")
+          .map((agent) => {
+            const terminal =
+              stuckEntries.find((entry) => entry.role === agent.role)?.terminal ??
+              `${agent.role} of ${runId}`;
+            return `<div class="agent"><span class="dot ${agent.step ? "running" : "ready"}"></span><div class="who"><b>${escapeHtml(agent.role)}${agent.step ? ` · ${escapeHtml(agent.step)}` : ""}</b><span>${escapeHtml(agent.harness ?? agent.planned.harness)} · ${escapeHtml(shortModel(agent.model ?? agent.planned.model))}</span></div>
+      <button class="btn" data-toast="Would open ${escapeHtml(terminal)} in Orca (prototype)">${icon("terminal")}Open in Orca</button></div>`;
+          })
+          .join("");
+        const criteriaCount = ticket?.body.criteria.length ?? 0;
+        const dependencyCount = ticket?.depends_on.length ?? 0;
+        const dependantCount = (dependantsById.get(ticketId) ?? []).length;
+        const planPanel = liveRun
+          ? `<section class="panel"><header><h2>Plan</h2><span class="count">${liveRun.plan.length} steps</span><span class="hint">click a step for detail</span></header><div class="plan-body" id="plan-body">${planBody(runId)}</div></section>`
+          : `<section class="panel"><header><h2>Plan</h2></header><div class="empty">This run is closed and the snapshot keeps no plan for it. Its cost, ticket and merge request are on the right.</div></section>`;
+        const mergePanel = `<section class="panel"><header><h2>Merge request</h2>${review ? `<span class="chip ${reviewBlockers(review).length ? "red" : "green"}" style="margin-left:auto">${reviewBlockers(review).length ? "Blocked" : "Ready to merge"} · #${review.merge_order} in merge order</span>` : ""}</header>${
+          review
+            ? `<div class="item">${reviewEvidence(review, true)}<div class="actions"><button class="btn primary" data-toast="Would open ${escapeHtml(review.url)} (prototype)">${icon("ext")}Open PR #${review.url.split("/").pop()}</button><a class="btn ghost" href="#/">In review queue</a></div></div>`
+            : `<div class="empty">${liveRun ? "No merge request yet. It opens after the review step passes." : "No open merge request for this run."}</div>`
+        }</section>`;
+        return `<div class="page-scroll"><div class="detail enter">
+    <div><a class="back" href="${backHref()}" style="margin-bottom:10px">${icon("back", 14)}${backLabel()}</a>
+      <div class="d-title">${phaseChip(phase)}<h1><span class="mono">${ticketId}</span>${escapeHtml(title)}</h1>
+        ${ticket ? `<a class="btn" href="#/backlog/${ticketId}" style="margin-left:auto">Read ticket${icon("chevron", 12)}</a>` : ""}</div>
+      <div class="mute mono" style="margin-top:6px;font-size:11.5px">${runId}</div></div>
+    ${runStrip(liveRun, progress, cost)}
+    <div class="d-grid">
+      <div class="d-left">${planPanel}</div>
+      <div class="d-right">
+        ${gate ? `<section class="panel warn"><header><h2>Needs me · ${escapeHtml(gate.kind)}</h2><span class="age hot" style="margin-left:auto">${formatMinutes(minutesSince(gate.since))}</span></header><div class="alertbox"><p class="gate-q" style="-webkit-line-clamp:5">${escapeHtml(gate.question)}</p><div class="actions">${orcaButton("the run lead terminal", "Answer in Orca")}</div></div></section>` : ""}
+        ${stuckEntries.map((entry) => `<section class="panel warn"><header><h2>Stuck · ${escapeHtml(entry.role)}</h2><span class="age hot" style="margin-left:auto">${formatMinutes(entry.since_minutes)}</span></header><div class="alertbox"><pre class="term">${escapeHtml(entry.last_line)}<span class="caret"></span></pre><div class="actions">${orcaButton(entry.terminal)}</div></div></section>`).join("")}
+        ${liveRun ? `<section class="panel"><header><h2>Agents</h2><span class="count">${liveRun.agents.filter((agent) => agent.role !== "Master Chief").length}</span><span class="hint">run lead and workers</span></header><div class="body">${agents}</div></section>` : ""}
+        ${mergePanel}
+        ${ticket ? `<section class="panel"><header><h2>Ticket</h2><span class="mono dim">${ticketId}</span></header><div class="ticket-link"><div class="t">${escapeHtml(ticket.title)}</div><div class="dim">${criteriaCount} acceptance criteria · depends on ${dependencyCount} · unblocks ${dependantCount}</div><div class="actions"><a class="btn" href="#/backlog/${ticketId}">Read ticket and dependency graph${icon("chevron", 12)}</a></div></div></section>` : ""}
+      </div>
+    </div></div></div>`;
+      }
+
+      /* ---------- BACKLOG ---------- */
+      function backlogGroups() {
+        const query = state.backlogQuery.trim().toLowerCase();
+        const visible = DATA.tickets.filter(
+          (ticket) =>
+            (state.backlogShowDone || ticket.status !== "done") &&
+            (!query || `${ticket.id} ${ticket.title}`.toLowerCase().includes(query)),
+        );
+        const sorter = (a, b) =>
+          (openDependencies(a.id).length ? 1 : 0) - (openDependencies(b.id).length ? 1 : 0) ||
+          ticketNumber(a.id) - ticketNumber(b.id);
+        const groupDefinitions =
+          state.backlogGroup === "milestone"
+            ? [...new Set(DATA.tickets.map((ticket) => ticket.milestone))]
+                .sort()
+                .map((milestone) => ({
+                  name: milestone,
+                  note: "",
+                  match: (ticket) => ticket.milestone === milestone,
+                }))
+            : state.backlogGroup === "flat"
+              ? [{ name: "", note: "", match: () => true }]
+              : [
+                  {
+                    name: "In a run",
+                    note: "an agent is on it right now",
+                    match: (ticket) => activeRunByTicket.has(ticket.id),
+                  },
+                  {
+                    name: "In progress",
+                    note: "started by hand",
+                    match: (ticket) =>
+                      ticket.status === "in_progress" && !activeRunByTicket.has(ticket.id),
+                  },
+                  {
+                    name: "Ready",
+                    note: "unblocked tickets first",
+                    match: (ticket) =>
+                      ticket.status === "ready" && !activeRunByTicket.has(ticket.id),
+                  },
+                  {
+                    name: "Proposed",
+                    note: "not approved yet",
+                    match: (ticket) => ticket.status === "proposed",
+                  },
+                  { name: "Done", note: "", match: (ticket) => ticket.status === "done" },
+                ];
+        const claimed = new Set();
+        return groupDefinitions
+          .map((definition) => {
+            const tickets = visible
+              .filter((ticket) => !claimed.has(ticket.id) && definition.match(ticket))
+              .sort(sorter);
+            tickets.forEach((ticket) => claimed.add(ticket.id));
+            return { ...definition, tickets };
+          })
+          .filter((group) => group.tickets.length);
+      }
+      function backlogRow(ticket, selectedId) {
+        const run = activeRunByTicket.get(ticket.id);
+        const progress = run && DATA.progress[run.run];
+        const blockers = openDependencies(ticket.id);
+        const dependants = dependantsById.get(ticket.id) ?? [];
+        return `<a class="row ${ticket.status === "done" ? "done" : ""} ${ticket.id === selectedId ? "sel" : ""}" href="#/backlog/${ticket.id}" data-ticket="${ticket.id}" ${ticket.id === selectedId ? 'aria-current="true"' : ""}>
+    <span class="id">${ticket.id}</span><span class="title" title="${escapeHtml(ticket.title)}">${escapeHtml(ticket.title)}</span><span>${statusChip(ticket.status)}</span><span class="mono dim">${ticket.milestone}</span>
+    <span class="deps c-deps">${ticket.depends_on.length ? ticket.depends_on.map((id) => `<span class="idchip ${blockers.includes(id) ? "open" : ticketById.has(id) ? "" : "ghost"}" title="${blockers.includes(id) ? "blocking" : ticketById.has(id) ? "done" : "not in snapshot"}">${id.replace("ARK-", "")}</span>`).join("") : '<span class="mute">none</span>'}</span>
+    <span class="num c-down">${dependants.length || ""}</span><span class="num c-ac">${ticket.body.criteria.length || ""}</span>
+    <span class="c-run">${run ? `<span class="chip ${run.phase === "escalation" ? "amber" : "blue"}">${run.phase === "escalation" ? "needs me" : "building"} ${formatMinutes(progress.eta_minutes)}</span>` : blockers.length ? '<span class="chip amber">blocked</span>' : ""}</span></a>`;
+      }
+      function renderBacklogRows(selectedId) {
+        const groups = backlogGroups();
+        if (!groups.length)
+          return '<div class="empty">No ticket matches. Clear the search or show done tickets.</div>';
+        return (
+          `<div class="row head" role="presentation"><span>ID</span><span>Title</span><span>Status</span><span>M</span><span class="c-deps">Depends on</span><span class="c-down num" title="tickets that wait on this one">Unblocks</span><span class="c-ac num">ACs</span><span class="c-run">Run</span></div>` +
+          groups
+            .map(
+              (group) =>
+                `${group.name ? `<div class="row group" style="top:28px"><span>${group.name}</span><span class="count">${group.tickets.length}</span><span class="gnote">${group.note}</span></div>` : ""}${group.tickets.map((ticket) => backlogRow(ticket, selectedId)).join("")}`,
+            )
+            .join("")
+        );
+      }
+      function renderBacklog(selectedId) {
+        const total = DATA.tickets.length;
+        const doneCount = DATA.tickets.filter((ticket) => ticket.status === "done").length;
+        const blockedCount = DATA.tickets.filter(
+          (ticket) => ticket.status !== "done" && openDependencies(ticket.id).length,
+        ).length;
+        const groupButton = (key, label) =>
+          `<button data-bl-group="${key}" aria-pressed="${state.backlogGroup === key}">${label}</button>`;
+        return `<div class="bl" id="bl"><div class="bl-main">
+    <div class="page-head"><h1>Backlog</h1><span class="dim">Done tickets are hidden. <span class="mute">j / k to move, Enter to read, / to search</span></span></div>
+    <div class="toolbar"><label class="search">${icon("search")}<input id="bl-search" type="search" placeholder="Search id or title" value="${escapeHtml(state.backlogQuery)}" aria-label="Search tickets"></label>
+      <div class="seg" role="group" aria-label="Group by">${groupButton("status", "Status")}${groupButton("milestone", "Milestone")}${groupButton("flat", "Flat")}</div>
+      <label><input type="checkbox" id="bl-done" ${state.backlogShowDone ? "checked" : ""}>Show done (${doneCount})</label>
+      <span class="summary">${total - doneCount} open · ${blockedCount} blocked by an unfinished dependency · ${DATA.runs.length} in a run</span></div>
+    <div class="tbl" id="bl-table">${renderBacklogRows(selectedId)}</div></div></div>`;
+      }
+      function ticketGraph(ticketId) {
+        const ancestors = new Set();
+        const collectAncestors = (id) =>
+          (ticketById.get(id)?.depends_on ?? []).forEach((dependencyId) => {
+            if (!ancestors.has(dependencyId)) {
+              ancestors.add(dependencyId);
+              collectAncestors(dependencyId);
+            }
+          });
+        const descendants = new Set();
+        const collectDescendants = (id) =>
+          (dependantsById.get(id) ?? []).forEach((dependantId) => {
+            if (!descendants.has(dependantId)) {
+              descendants.add(dependantId);
+              collectDescendants(dependantId);
+            }
+          });
+        collectAncestors(ticketId);
+        collectDescendants(ticketId);
+        const included = [...ancestors, ticketId, ...descendants];
+        const includedSet = new Set(included);
+        const nodes = included.map((id) => {
+          const ticket = ticketById.get(id);
+          const run = activeRunByTicket.get(id);
+          return {
+            id,
+            className: `tnode ${id === ticketId ? "focus" : ""} ${ticket ? "" : "ghost"} ${ticket?.status === "done" ? "old" : ""}`,
+            href: ticket && id !== ticketId ? `#/backlog/${id}` : null,
+            title: ticket?.title ?? "Not in this backlog snapshot",
+            html: `${ticketRing(id, 32)}<div class="nb"><div class="n1"><b>${id}</b></div><div class="n2">${ticket ? (run ? run.phase : ticket.status === "done" ? "done" : openDependencies(id).length ? "blocked" : ticket.status.replace("_", " ")) : "not in snapshot"}</div></div>`,
+          };
+        });
+        const edges = included.flatMap((id) =>
+          (ticketById.get(id)?.depends_on ?? [])
+            .filter((dependencyId) => includedSet.has(dependencyId))
+            .map((dependencyId) => [dependencyId, id]),
+        );
+        return { nodes, edges, hasEdges: edges.length > 0 };
+      }
+      /* ---------- TICKET READER (variant B) ---------- */
+      function linkItem(id) {
+        const ticket = ticketById.get(id);
+        const run = activeRunByTicket.get(id);
+        const chip = !ticket
+          ? '<span class="chip outline">not in snapshot</span>'
+          : run
+            ? phaseChip(run.phase)
+            : ticket.status !== "done" && openDependencies(id).length
+              ? '<span class="chip amber">blocked</span>'
+              : statusChip(ticket.status);
+        const blocked =
+          ticket && !run && ticket.status !== "done" && openDependencies(id).length > 0;
+        const inner = `<span class="dot ${run ? run.phase : blocked ? "waiting" : (ticket?.status ?? "ghost")}"></span><span class="t"><b>${id}</b>${escapeHtml(ticket?.title ?? "Not in this backlog snapshot")}</span>${chip}`;
+        return `<li>${ticket ? `<a href="#/backlog/${id}" title="${escapeHtml(ticket.title)}">${inner}</a>` : `<a style="pointer-events:none">${inner}</a>`}</li>`;
+      }
+      function renderReader(ticketId) {
+        const ticket = ticketById.get(ticketId);
+        const back = `<a class="back" href="${backHref()}">${icon("back", 14)}${backLabel()}</a>`;
+        if (!ticket)
+          return `<div class="page-scroll"><div class="reader-page enter">${back}<div class="prose"><p class="note">${escapeHtml(ticketId)} is not in this backlog snapshot.</p></div></div></div>`;
+        const run = activeRunByTicket.get(ticketId);
+        const dependants = dependantsById.get(ticketId) ?? [];
+        const { problem, change, criteria } = ticket.body;
+        const body =
+          problem || change || criteria.length
+            ? `${problem ? `<h2>Problem</h2>${renderRichText(problem)}` : ""}${change ? `<h2>Change</h2>${renderRichText(change)}` : ""}${criteria.length ? `<h2>Acceptance criteria · ${criteria.length}</h2><ol class="crit">${criteria.map((criterion) => `<li><span class="acid">${criterion.id.replace(/^.*-(AC\d+)$/, "$1")}</span><p>${renderInline(criterion.text)}</p></li>`).join("")}</ol>` : ""}`
+            : '<p class="note" style="margin-top:30px">This ticket has no written problem, change or criteria yet. Only its title and dependencies exist.</p>';
+        return `<div class="page-scroll"><div class="reader-page">${back}
+    <div class="reader">
+      <article class="prose enter">
+        <div class="head-meta"><span class="tid">${ticket.id}</span>${run ? phaseChip(run.phase) : statusChip(ticket.status)}<span class="chip outline">${ticket.milestone}</span></div>
+        <h1>${escapeHtml(ticket.title)}</h1>
+        ${run ? `<div class="head-actions"><a class="btn primary" href="#/runs/${run.run}">Open run</a>${orcaButton(`${ticket.id} run lead`, "Open in Orca", "")}</div>` : ""}
+        <div>${body}</div>
+      </article>
+      <aside class="reader-aside enter" aria-label="Dependencies">
+        <section class="side-card"><h4>Dependency graph</h4><div class="dagbox" id="ticket-graph"></div></section>
+        <section class="side-card"><h4>Depends on · ${ticket.depends_on.length}</h4>${ticket.depends_on.length ? `<ul class="linklist">${ticket.depends_on.map(linkItem).join("")}</ul>` : '<p class="empty">Nothing. It can start any time.</p>'}</section>
+        <section class="side-card"><h4>Unblocks · ${dependants.length}</h4>${dependants.length ? `<ul class="linklist">${dependants.map(linkItem).join("")}</ul>` : '<p class="empty">Nothing waits on this ticket.</p>'}</section>
+      </aside>
+    </div></div></div>`;
+      }
+      function mountTicketGraph(ticketId) {
+        const host = document.getElementById("ticket-graph");
+        if (!host) return;
+        const graph = ticketGraph(ticketId);
+        if (!graph.hasEdges) {
+          host.innerHTML =
+            '<p class="empty">No dependencies and no dependants. This ticket stands alone.</p>';
+          return;
+        }
+        mountDag(host, {
+          nodes: graph.nodes,
+          edges: graph.edges,
+          nodeWidth: 164,
+          nodeHeight: 48,
+          gapX: 12,
+          gapY: 34,
+          direction: "down",
+          edgeTone: (from) =>
+            ticketById.get(from)?.status === "done" || !ticketById.has(from) ? "dim" : "amber",
+        });
+      }
+
+      /* ---------- shell and routing ---------- */
+      const isDetailHash = (hash) => /^#\/(runs|backlog)\/[^/]+/.test(hash);
+      const isReaderHash = (hash) => /^#\/backlog\/[^/]+/.test(hash);
+      const backHref = () =>
+        state.origins.get(location.hash) ?? (isReaderHash(location.hash) ? "#/backlog" : "#/runs");
+      function backLabel() {
+        const target = backHref();
+        const run = /^#\/runs\/(.+)/.exec(target);
+        if (run) return `Run ${runById.get(decodeURIComponent(run[1]))?.ticket.id ?? ""}`.trim();
+        return target === "#/runs" ? "Runs" : target.startsWith("#/backlog") ? "Backlog" : "Home";
+      }
+      function applyTheme() {
+        if (state.theme === "system") document.documentElement.removeAttribute("data-theme");
+        else document.documentElement.dataset.theme = state.theme;
+      }
+      function renderNav(routeName) {
+        const limit = DATA.usage.limits[0];
+        const attention = DATA.gates.length + DATA.stuck.length;
+        const tab = (name, href, label, badge = "") =>
+          `<a class="tab" href="${href}" ${routeName === name ? 'aria-current="page"' : ""}>${label}${badge}</a>`;
+        const themeButton = (key, label) =>
+          `<button data-theme-set="${key}" aria-pressed="${state.theme === key}">${label}</button>`;
+        document.getElementById("nav").innerHTML =
+          `<div class="brand"><span class="mono">ark</span><span>hub</span></div>
+    ${tab("home", "#/", "Home", attention ? `<span class="badge" title="${DATA.gates.length} gate, ${DATA.stuck.length} stuck">${attention}</span>` : "")}${tab("runs", "#/runs", "Runs")}${tab("backlog", "#/backlog", "Backlog")}
+    <div class="nav-right"><span class="nav-status" title="snapshot ${formatClock(NOW)}"><i></i>Master Chief · ${DATA.runs.length} runs</span>
+      <a class="pill ${limit.used_pct >= 80 ? "alarm" : ""}" href="#/" title="resets in ${formatMinutes(limit.resets_in_minutes)}">${icon("bolt")}${limit.provider} ${limit.window} <b>${limit.used_pct}%</b></a>
+      <span class="mono">${money(DATA.usage.today_usd)} today</span>
+      <div class="seg theme" role="group" aria-label="Theme">${themeButton("system", "Auto")}${themeButton("light", "Light")}${themeButton("dark", "Dark")}</div></div>`;
+      }
+      function currentRoute() {
+        const [, name = "", argument] = location.hash.slice(1).split("/");
+        return { name: name || "home", argument: argument ? decodeURIComponent(argument) : null };
+      }
+      function route() {
+        const { name, argument } = currentRoute();
+        const view = document.getElementById("view");
+        const routeName = ["home", "runs", "backlog"].includes(name) ? name : "home";
+        if (view.dataset.key === "backlog")
+          state.backlogScroll =
+            document.getElementById("bl-table")?.scrollTop ?? state.backlogScroll;
+        const hash = location.hash || "#/";
+        const previous = state.lastHash;
+        // remember where a detail page was opened from, so its back link and Esc return there
+        if (
+          previous &&
+          previous !== hash &&
+          isDetailHash(hash) &&
+          (!isDetailHash(previous) || (isReaderHash(hash) && !isReaderHash(previous)))
+        )
+          state.origins.set(hash, previous);
+        state.lastHash = hash;
+        renderNav(routeName);
+        view.dataset.key =
+          routeName === "backlog" && argument
+            ? `ticket:${argument}`
+            : routeName === "runs" && argument
+              ? `run:${argument}`
+              : routeName;
+        if (routeName === "home") view.innerHTML = renderHome();
+        else if (routeName === "runs" && argument) view.innerHTML = renderRunDetail(argument);
+        else if (routeName === "runs") {
+          view.innerHTML = renderRuns();
+          mountRunsDag();
+        } else if (argument) {
+          state.backlogSelected = argument;
+          view.innerHTML = renderReader(argument);
+          mountTicketGraph(argument);
+        } else {
+          view.innerHTML = renderBacklog(state.backlogSelected);
+          document.getElementById("bl-table").scrollTop = state.backlogScroll;
+        }
+      }
+      window.addEventListener("hashchange", route);
+
+      function selectStep(runId, stepId) {
+        state.selectedStepByRun.set(runId, stepId);
+        document.getElementById("plan-body").innerHTML = planBody(runId);
+        document
+          .querySelector(`[data-step="${CSS.escape(stepId)}"]`)
+          ?.focus({ preventScroll: true });
+      }
+      function moveBacklogSelection(delta) {
+        const rows = [...document.querySelectorAll("#bl-table a.row[data-ticket]")];
+        if (!rows.length) return;
+        const currentIndex = rows.findIndex((row) => row.dataset.ticket === state.backlogSelected);
+        const next = rows[Math.min(rows.length - 1, Math.max(0, currentIndex + delta))];
+        rows.forEach((row) => {
+          row.classList.remove("sel");
+          row.removeAttribute("aria-current");
+        });
+        next.classList.add("sel");
+        next.setAttribute("aria-current", "true");
+        state.backlogSelected = next.dataset.ticket;
+        next.scrollIntoView({ block: "nearest" });
+      }
+      const refreshBacklogRows = () => {
+        document.getElementById("bl-table").innerHTML = renderBacklogRows(state.backlogSelected);
+      };
+
+      document.addEventListener("click", (event) => {
+        const target = event.target;
+        const toastTarget = target.closest("[data-toast]");
+        if (toastTarget) {
+          event.preventDefault();
+          showToast(toastTarget.dataset.toast);
+          return;
+        }
+        const themeTarget = target.closest("[data-theme-set]");
+        if (themeTarget) {
+          state.theme = themeTarget.dataset.themeSet;
+          applyTheme();
+          renderNav(currentRoute().name);
+          return;
+        }
+        const focusTarget = target.closest("[data-focus]");
+        if (focusTarget) {
+          const panel = document.getElementById(focusTarget.dataset.focus);
+          if (panel) {
+            panel.scrollIntoView({ block: "nearest" });
+            panel.classList.remove("flash");
+            void panel.offsetWidth;
+            panel.classList.add("flash");
+          }
+          return;
+        }
+        const reviewTarget = target.closest("[data-expand-review]");
+        if (reviewTarget) {
+          const runId = reviewTarget.dataset.expandReview;
+          state.expandedReviews.has(runId)
+            ? state.expandedReviews.delete(runId)
+            : state.expandedReviews.add(runId);
+          document.getElementById("view").innerHTML = renderHome();
+          return;
+        }
+        const onlyTarget = target.closest("[data-dag-only]");
+        if (onlyTarget) {
+          state.dagFilter = new Set([onlyTarget.dataset.dagOnly]);
+          document
+            .querySelectorAll("[data-dag-filter]")
+            .forEach((button) =>
+              button.setAttribute(
+                "aria-pressed",
+                String(state.dagFilter.has(button.dataset.dagFilter)),
+              ),
+            );
+          mountRunsDag();
+          return;
+        }
+        const filterTarget = target.closest("[data-dag-filter]");
+        if (filterTarget) {
+          const key = filterTarget.dataset.dagFilter;
+          state.dagFilter.has(key) ? state.dagFilter.delete(key) : state.dagFilter.add(key);
+          filterTarget.setAttribute("aria-pressed", String(state.dagFilter.has(key)));
+          mountRunsDag();
+          return;
+        }
+        const groupTarget = target.closest("[data-bl-group]");
+        if (groupTarget) {
+          state.backlogGroup = groupTarget.dataset.blGroup;
+          groupTarget.parentElement
+            .querySelectorAll("button")
+            .forEach((button) =>
+              button.setAttribute("aria-pressed", String(button === groupTarget)),
+            );
+          refreshBacklogRows();
+          return;
+        }
+        const stepTarget = target.closest("[data-step]");
+        if (stepTarget) selectStep(currentRoute().argument, stepTarget.dataset.step);
+      });
+      document.addEventListener("input", (event) => {
+        if (event.target.id === "bl-search") {
+          state.backlogQuery = event.target.value;
+          refreshBacklogRows();
+        }
+      });
+      document.addEventListener("change", (event) => {
+        if (event.target.id === "bl-done") {
+          state.backlogShowDone = event.target.checked;
+          refreshBacklogRows();
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        const stepTarget = event.target.closest?.("[data-step]");
+        if (stepTarget && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          selectStep(currentRoute().argument, stepTarget.dataset.step);
+          return;
+        }
+        const { name, argument } = currentRoute();
+        const typing = event.target.tagName === "INPUT";
+        if (event.key === "Escape") {
+          if (typing) event.target.blur();
+          else if ((name === "runs" || name === "backlog") && argument) location.hash = backHref();
+          return;
+        }
+        if (name !== "backlog" || argument || typing) return;
+        if (event.key === "/") {
+          event.preventDefault();
+          document.getElementById("bl-search")?.focus();
+        } else if (event.key === "j" || event.key === "k")
+          moveBacklogSelection(event.key === "j" ? 1 : -1);
+        else if (
+          event.key === "Enter" &&
+          state.backlogSelected &&
+          !event.target.closest?.("a, button")
+        )
+          location.hash = `#/backlog/${state.backlogSelected}`;
+      });
+      applyTheme();
+      route();
+    </script>
+  </body>
+</html>
