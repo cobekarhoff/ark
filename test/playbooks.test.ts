@@ -393,3 +393,12 @@ test("ARK-276-AC7 chief releases the run lead when not yet released, before the 
   expect(close).toMatch(/Do it when it is not yet released/);
   expect(close).toMatch(/worker-list --include-remote --json/);
 });
+
+test("ARK-278-AC6 cli.md lists --sweep for run close; chief.md section 8 names the release and the one-time sweep", () => {
+  const reference = readFileSync(join(import.meta.dir, "../docs/reference/cli.md"), "utf8");
+  expect(reference).toMatch(/ark run close \[<run> <outcome>\] \[--sweep\]/);
+
+  const close = section(chiefPlaybook, "## 8. Close the run");
+  expect(close).toMatch(/`ark run close`[^\n]*releases[^\n]*Orca workers/);
+  expect(close).toContain("`ark run close --sweep`");
+});

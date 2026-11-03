@@ -805,3 +805,31 @@ test("ARK-278-AC4 run close --sweep releases closed runs once, records no event,
   expect(eventLines(open.directory)).toHaveLength(eventCounts[2]);
   expect(ark("run", "close", open.runId).code).toBe(1);
 });
+
+test("ARK-278-AC7 a released worker that stays listed is never released again and the sweep stays silent", () => {
+  const closed = startRun("demo", "ARK-911");
+  appendEvent(closed.directory, "run.closed", { outcome: "aborted" });
+  useFakeOrca({
+    runs: [{ id: "orca_closed", objective: `Ark run ${closed.runId}` }],
+    workers: {
+      orca_closed: [
+        worker("ctx_old", "succeeded", "released"),
+        worker("ctx_new", "failed", "reclaimable"),
+      ],
+    },
+  });
+
+  const first = ark("run", "close", "--sweep", "--project", "demo");
+  expect(first.code).toBe(0);
+  expect(first.out).toBe(`${closed.runId}:\n  ctx_new released (failed)\n`);
+  expect(orcaCalls("worker-release")).toEqual([
+    "orchestration worker-release --dispatch ctx_new --json",
+  ]);
+
+  const second = ark("run", "close", "--sweep", "--project", "demo");
+  expect(second.code).toBe(0);
+  expect(second.out).toBe("");
+  expect(orcaCalls("worker-release")).toHaveLength(1);
+  // both rows are still listed after the sweeps
+  expect(orcaCalls("worker-list").length).toBeGreaterThanOrEqual(2);
+});
