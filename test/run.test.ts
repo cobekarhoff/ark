@@ -88,7 +88,9 @@ test("ARK-152-AC1 run start creates the run folder, copies the ticket, logs run.
     "tickets",
     "ARK-900.md",
   );
-  expect(readFileSync(join(directory, "ticket.md"), "utf8")).toBe(readFileSync(ticketFile, "utf8"));
+  expect(readFileSync(join(directory, "ticket.md"), "utf8")).toBe(
+    readFileSync(ticketFile, "utf8").replace("status: in_progress", "status: ready"),
+  );
   const lines = eventLines(directory);
   expect(lines).toHaveLength(1);
   const first = JSON.parse(lines[0]);
