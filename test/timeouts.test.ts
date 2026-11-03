@@ -164,3 +164,46 @@ test("ARK-292-AC3 every test file calls setDefaultTimeout with at least 30_000, 
   );
   expect(missing).toEqual([]);
 });
+
+test(
+  "ARK-292-AC4 without ARK_LOAD_PROOF the heavy AC2 test is skipped and the branch changes only tests and evidence",
+  async () => {
+    const env = { ...process.env };
+    delete env.ARK_LOAD_PROOF;
+    // -t filters out every other test in the file, so the child never re-runs this test.
+    const child = Bun.spawn(["bun", "test", "test/timeouts.test.ts", "-t", "ARK-292-AC2 heavy"], {
+      cwd: repositoryRoot,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    expect(code).toBe(0);
+    expect(out + err).toMatch(/\b1 skip\b/);
+    expect(out + err).not.toMatch(/\b[1-9]\d* pass\b/);
+    expect(Bun.spawnSync(["pgrep", "-f", "while :; do :; done"]).stdout.toString().trim()).toBe("");
+
+    const base = ["origin/main", "main"]
+      .map((ref) => Bun.spawnSync(["git", "merge-base", "HEAD", ref], { cwd: repositoryRoot }))
+      .find((result) => result.exitCode === 0)
+      ?.stdout.toString()
+      .trim();
+    if (!base) return;
+    const changed = Bun.spawnSync(["git", "diff", "--name-only", base], { cwd: repositoryRoot })
+      .stdout.toString()
+      .split("\n")
+      .filter(Boolean);
+    const outside = changed.filter(
+      (file) =>
+        !file.startsWith("test/") &&
+        file !== "bunfig.toml" &&
+        file !== "docs/evidence/ARK-292-ac2.md",
+    );
+    expect(outside).toEqual([]);
+  },
+  { timeout: 60_000 },
+);
