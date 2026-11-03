@@ -98,7 +98,7 @@ The gate opens when the phase is `awaiting_criteria`. That means the ticket has 
    Add your recommendation to the question. If the ask times out, resume it with `--resume <message id>`. Never send a second question.
 
 3. On `edit`, the human's reply holds the changes. Revise the draft, and ask again.
-4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`. Put them in its frontmatter as `acceptance_criteria: [{id, text}]`. Then record the answer:
+4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`. Put them in its frontmatter as `acceptance_criteria: [{id, text}]`. Keep `manual: true` on every criterion that has it. Then record the answer:
 
    ```sh
    ark gate record <run> criteria accept
@@ -390,10 +390,11 @@ After the validator and implementer steps succeed:
 ark test <run>
 ```
 
-The command runs the integration and E2E suites on the composed workspace. Exit 0 means every AC has a passing tagged test. Exit 1 lists the failing or missing AC.
+The command runs the integration and E2E suites on the composed workspace. Exit 0 means every AC has a passing tagged test, and every criterion with `manual: true` is `manual ok`. Exit 1 lists the failing or missing AC and each manual criterion that is not `manual ok`.
 
 - **A tagged test fails.** Read `<run folder>/results/`. Decide whether the product code or the test is wrong. If the code is wrong, send the implementer step back: write the failing test names and output into `<run folder>/findings/round-<round>.md`, then start the implementer step again (section 7). That is a new round. If the test is wrong, start the validator step again. A validator restart is not a round.
 - **An AC is `missing`.** No tagged test passed for it. Start the validator step again.
+- **A criterion is `manual pending`.** A person proves it, so a validator step has no test to write: never restart the validator for it. Ask the human through Master Chief to check each criterion with `manual: true`, one question for each criterion id, and wait for the answer. Record it as the human's answer, never your own: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]`. Then run `ark test <run>` again. `manual ok` counts as proved. `manual problem` is a defect: write the human's note into `<run folder>/findings/round-<round>.md` and send the implementer step back (section 7). The wait for the human counts as gate wait in `ark retro`. A `manual pending` never opens the escalation gate and `ark merge-request open` refuses until each manual criterion is `manual ok`. In the validator spec, say that a manual criterion gets no test. Tell the implementer the literal strings `manual: true`, `manual pending`, `manual ok` and `manual problem`.
 - After any rework, run `ark test <run>` again. Tests must pass at the latest commit.
 - A validator commits its evidence files (for example a file written after a human check) before the last `ark test <run>`, so that no commit follows that test. A commit after the last test makes `ark status <run>` show `test head: stale`, and `ark merge-request open <run>` refuses the changed head.
 

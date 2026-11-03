@@ -223,14 +223,18 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
       ask("strategy", event.time, true);
     if (event.type === "step.finished" && event.data.outcome === "failed")
       ask("escalation", event.time);
+    if (event.type === "test.completed")
+      for (const [criterion, status] of Object.entries(event.data.criteria ?? {}))
+        if (status === "manual pending") ask(`manual:${criterion}`, event.time, true);
     if (event.type === "gate.answered") {
-      const wait = waiting.get(event.data.gate);
+      const key = event.data.gate === "manual" ? `manual:${event.data.criterion}` : event.data.gate;
+      const wait = waiting.get(key);
       if (wait) {
         wait.answered = event.time;
         wait.answer = event.data.answer ?? null;
         wait.by = event.data.by === "auto" ? "auto" : "human";
       }
-      waiting.delete(event.data.gate);
+      waiting.delete(key);
     }
   }
   return waits;

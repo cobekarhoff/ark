@@ -25,7 +25,7 @@ export function writeProject(name: string, config: Record<string, unknown>): str
 export function writeTicket(
   project: string,
   id: string,
-  criteria: { id: string; text: string }[],
+  criteria: { id: string; text: string; manual?: boolean }[],
   title = `Ticket ${id}`,
 ): string {
   const file = join(process.env.ARK_HOME as string, "projects", project, "tickets", `${id}.md`);
@@ -37,7 +37,11 @@ export function writeTicket(
     ...(criteria.length === 0 ? ["acceptance_criteria: []"] : ["acceptance_criteria:"]),
   ];
   for (const criterion of criteria)
-    frontmatter.push(`  - id: ${criterion.id}`, `    text: ${JSON.stringify(criterion.text)}`);
+    frontmatter.push(
+      `  - id: ${criterion.id}`,
+      `    text: ${JSON.stringify(criterion.text)}`,
+      ...(criterion.manual ? ["    manual: true"] : []),
+    );
   writeFileSync(file, `${frontmatter.join("\n")}\n---\n## Why\n\nTest ticket.\n`);
   return file;
 }

@@ -69,12 +69,12 @@ When the human wants work to start, write a paste-ready message for Master Chief
 
 Copy the newest ticket's structure:
 
-- Frontmatter: `id`, `title`, `status: proposed`, `milestone`, `traces` (PRD requirement IDs), `depends_on`, and `acceptance_criteria` with IDs `<ticket>-AC<k>`.
+- Frontmatter: `id`, `title`, `status: proposed`, `milestone`, `traces` (PRD requirement IDs), `depends_on`, and `acceptance_criteria` with IDs `<ticket>-AC<k>`. A criterion that only a person can prove gets `manual: true`; leave the field out for every other criterion.
 - Sections: Problem, Change, Acceptance criteria (a table), Evidence.
 
 The next number is one above the highest `ARK-*.md` in the tickets folder.
 
-- Every AC is provable by an integration or E2E test (ADR 0006), or says plainly "live human check".
+- Every AC is provable by an integration or E2E test (ADR 0006), or has `manual: true` and is proved by the `manual` gate.
 - Evidence quotes the human's words and the date, and names the brainstorm choices.
 
 ## UI ideas

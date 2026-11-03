@@ -86,6 +86,7 @@ Do these steps in order for one ready ticket.
    acceptance_criteria:
      - id: ARK-156-AC1
        text: "The statement, copied word for word"
+       manual: true # only when the ticket says a person proves the criterion; omit otherwise
    ---
 
    ## Problem
@@ -103,7 +104,7 @@ Do these steps in order for one ready ticket.
    | ARK-156-AC1 | The statement, copied word for word |
    ```
 
-   If the ticket lists criteria without IDs, number them `<ticket id>-AC1`, `<ticket id>-AC2` and so on, in order. Do not invent or reword criteria. If the ticket has none, write `acceptance_criteria: []`. The run lead then opens the criteria gate.
+   If the ticket lists criteria without IDs, number them `<ticket id>-AC1`, `<ticket id>-AC2` and so on, in order. Do not invent or reword criteria. Keep `manual: true` on a criterion that has it. If the ticket has none, write `acceptance_criteria: []`. The run lead then opens the criteria gate.
 
 2. **Start the run.**
 
