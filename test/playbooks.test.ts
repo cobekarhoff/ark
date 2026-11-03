@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { outcomes } from "../cli/transitions.ts";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
@@ -578,4 +578,85 @@ test("ARK-286-AC5 chief leaves a close of an aborted run to the run lead unless 
 test("ARK-286-AC6 package.json defines the typecheck, lint and format:check scripts", () => {
   const { scripts } = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8"));
   for (const name of ["typecheck", "lint", "format:check"]) expect(scripts[name]).toBeTruthy();
+});
+
+const brainstormPlaybook = readFileSync(join(playbookDirectory, "brainstorm.md"), "utf8");
+const brainstormHandoff = brainstormPlaybook.split("\n## 8. Hand off")[1]?.split("\n## ")[0] ?? "";
+const brainstormRules = brainstormPlaybook.split("\n## Rules")[1]?.split("\n## ")[0] ?? "";
+const chiefWaitSection = chiefPlaybook.split("\n## 7. ")[1]?.split("\n## ")[0] ?? "";
+
+test("ARK-289-AC1 brainstorm section 8 asks 'Send it' or 'Do not send' and sends only on 'Send it'", () => {
+  expect(brainstormHandoff).toMatch(/Show the message to the human\. Then ask with the ask tool/);
+  expect(brainstormHandoff).toContain("'Send it'");
+  expect(brainstormHandoff).toContain("'Do not send'");
+  expect(brainstormHandoff).toContain("Send only when the answer is 'Send it'.");
+  expect(brainstormHandoff).toContain("Never send for an answer the human did not give.");
+});
+
+test("ARK-289-AC2 brainstorm gives the one send command and the rules allow only it", () => {
+  expect(brainstormHandoff).toContain(
+    `orca orchestration send --to run:<id of the Run 'Master Chief: <project> tickets'> --type status --subject "Brainstorm handoff: <ticket ids>" --body "$message" --json`,
+  );
+  expect(brainstormHandoff).toContain(
+    'starts with the line `Human approval: "<the human\'s answer, word for word>" at <ISO time>`',
+  );
+  for (const item of [
+    "ticket ids and the dependency order",
+    "What may run in parallel",
+    "The models",
+    "The gates",
+  ]) {
+    expect(brainstormHandoff).toContain(item);
+  }
+  expect(brainstormRules).toContain("`orca orchestration run-list`");
+  expect(brainstormRules).toContain("the one `orca orchestration send` of section 8");
+  expect(brainstormRules).toContain("Never run any other `orca orchestration` command.");
+  expect(brainstormRules).toContain("Never run `orca terminal send`.");
+  expect(brainstormRules).toContain("Never queue a ticket.");
+});
+
+test("ARK-289-AC3 brainstorm falls back to the paste-ready message without retry", () => {
+  expect(brainstormHandoff).toContain(
+    "When no Run has the objective 'Master Chief: <project> tickets', or the send exits non-zero, do not retry with another command. Show the paste-ready message and tell the human why it was not sent.",
+  );
+});
+
+test("ARK-289-AC4 chief queues a Brainstorm handoff only with a named approval and an existing ticket", () => {
+  const handoff = chiefWaitSection.indexOf("`Brainstorm handoff:`");
+  const notice = chiefWaitSection.indexOf("A `status` message from a run lead is a notice");
+  expect(handoff).toBeGreaterThanOrEqual(0);
+  expect(notice).toBeGreaterThan(handoff);
+  expect(chiefWaitSection).toContain("is a request to evaluate and queue");
+  expect(chiefWaitSection).toContain("evaluate it (section 3) and queue it (section 5)");
+  expect(chiefWaitSection).toContain("The body has the `Human approval:` line.");
+  expect(chiefWaitSection).toContain("The approval names that ticket.");
+  expect(chiefWaitSection).toContain("The ticket file exists under `tickets/`.");
+  expect(chiefWaitSection).toContain(
+    "Tell the human one line per queued ticket: that you queued it from a brainstorm handoff, with the approval line and its time quoted. Do not ask the human again.",
+  );
+  expect(chiefWaitSection).toContain("A handoff is never a gate answer.");
+  expect(chiefWaitSection).toContain("pass it to the human as a notice and queue nothing for it");
+});
+
+test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
+  const root = join(import.meta.dir, "..");
+  const files = [
+    "skills/ark/playbooks/brainstorm.md",
+    "skills/ark/playbooks/chief.md",
+    "test/playbooks.test.ts",
+    "test/brainstorm.test.ts",
+    "docs/evidence/ARK-289-ac6.md",
+  ].filter((file) => existsSync(join(root, file)));
+  const result = Bun.spawnSync(["bunx", "oxfmt", "--check", ...files], { cwd: root });
+  expect(result.exitCode).toBe(0);
+});
+
+test("ARK-289-AC6 the live check records the message id, Master Chief's quoted approval and human: ok", () => {
+  const lines = readFileSync(
+    join(import.meta.dir, "../docs/evidence/ARK-289-ac6.md"),
+    "utf8",
+  ).split("\n");
+  expect(lines.some((line) => /^message id: \S+/.test(line))).toBe(true);
+  expect(lines.some((line) => /^Master Chief: .*Human approval:/.test(line))).toBe(true);
+  expect(lines).toContain("human: ok");
 });
