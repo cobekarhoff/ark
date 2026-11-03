@@ -239,12 +239,9 @@ describe("plan approval survives only an unchanged valid recheck", () => {
 
   test("ARK-187-AC2 a recheck of an edited plan clears approval and step start names the plan gate", () => {
     const { runId, directory } = approvedRun();
-    writeFileSync(
-      join(directory, "plan.yml"),
-      JSON.stringify({ ...plan, steps: [{ ...plan.steps[0], model: "other" }] }),
-    );
-    // The edit is checked against the project roles; the result may be invalid, the hash differs either way.
-    ark("plan", "check", runId);
+    // Pretty-printing keeps the plan valid but changes its bytes, so only the hash compare can clear approval.
+    writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan, null, 2));
+    expect(ark("plan", "check", runId).code).toBe(0);
     const before = eventsOf(directory).length;
     const refused = ark("run", "step", runId, "build", "start");
     expect(refused.code).toBe(1);
