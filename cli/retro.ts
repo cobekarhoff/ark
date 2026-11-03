@@ -523,26 +523,28 @@ export function retro(runId: string, inProject?: string): void {
   } catch (err) {
     if (!(err instanceof ArkError)) throw err; // no plan.yml, or one that does not parse: nothing to compare
   }
+  // plan.yml says anthropic/claude-x, session messages say claude-x: compare and judge vendors on the name after the last "/".
+  const bareModels = Object.fromEntries(
+    Object.entries(actualModels).map(([stepId, models]) => [
+      stepId,
+      models.map((model) => model.slice(model.lastIndexOf("/") + 1)),
+    ]),
+  );
   const modelChangedLines = planSteps
     .filter((step) => {
-      const ran = actualModels[step.id] ?? [];
-      return ran.some((model) => model !== step.model);
+      const planned = step.model.slice(step.model.lastIndexOf("/") + 1);
+      return (bareModels[step.id] ?? []).some((model) => model !== planned);
     })
     .map(
       (step) =>
         `model changed: step ${step.id} planned ${step.model}, ran ${actualModels[step.id].join(", ")}`,
     );
-  // Vendor from the model ID, ignoring a provider prefix: claude- is anthropic, gpt- is openai, else none.
+  // Vendor from the model name: claude- is anthropic, gpt- is openai, else none.
   const vendorsOf = (id: string): Set<string> =>
     new Set(
-      (actualModels[id] ?? []).flatMap((model) => {
-        const name = model.slice(model.lastIndexOf("/") + 1);
-        return name.startsWith("claude-")
-          ? ["anthropic"]
-          : name.startsWith("gpt-")
-            ? ["openai"]
-            : [];
-      }),
+      (bareModels[id] ?? []).flatMap((name) =>
+        name.startsWith("claude-") ? ["anthropic"] : name.startsWith("gpt-") ? ["openai"] : [],
+      ),
     );
   const sameVendorGroups: string[] = [];
   for (const repo of new Set(planSteps.map((step) => step.repo))) {
