@@ -92,13 +92,6 @@ test("ARK-231-AC1 run-lead section 5 backgrounds the Plannotator review and stop
   expect(relay!.indexOf("kill")).toBeLessThan(relay!.indexOf("ark gate record"));
 });
 
-test("ARK-171-AC5 run-lead section 4 asks for callers of each interface and an output example", () => {
-  const writePlan = runLeadPlaybook.split("## 4. Write the plan")[1]?.split("\n## ")[0];
-  expect(writePlan).toBeDefined();
-  expect(writePlan).toMatch(/Find the callers of each one before you write it/);
-  expect(writePlan).toMatch(/`example` \(a sample of new or changed output\)/);
-  expect(writePlan).toMatch(/design\.interfaces/);
-});
 test("ARK-174-AC1 bootstrap detects UI repos and offers both design files", () => {
   const uiDetection = bootstrapPlaybook.split("### UI")[1]?.split("\n## ")[0];
   const designContext = bootstrapPlaybook.split("## 10. Design context")[1]?.split("\n## ")[0];

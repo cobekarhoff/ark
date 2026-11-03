@@ -50,13 +50,13 @@ The run lead asks for your decision at a gate. Master Chief shows you each quest
 
 **Criteria gate.** This opens only when the ticket has no testable AC. The run lead proposes AC. Accept them, edit them, or abort the run.
 
-**Plan gate.** This opens before any code is written. The run lead shows you `plan.md`: a summary, a table of changes, a diagram of the steps, and the test cases.
+**Plan gate.** This opens before any code is written. The run lead shows you `plan.md`: a summary, a Design section, a table of changes, a diagram of the steps, and the test cases.
 
 1. If Plannotator opens, read the plan there. Approve it, or annotate what to change and submit. Annotated feedback sends the plan back for changes.
 2. If it is shown in Master Chief's session, answer `approve`, `change` or `abort`.
 3. You can edit `plan.yml` yourself. The run lead checks the file again with `ark plan check` and asks you again.
 
-Check that every AC has an integration or E2E test case. Unit tests never prove an AC. Check that each repo the ticket touches has a step. Check which model reviews each step. By default, the reviewer is a different vendor from the implementer.
+Check the Design section: every interface in `design.interfaces` must list its `callers`, and no caller may be blank, or `ark plan check` refuses the plan. The section also shows the approach and an example of the new output in a code fence. Check that every AC has an integration or E2E test case. Unit tests never prove an AC. Check that each repo the ticket touches has a step. Check which model reviews each step. By default, the reviewer is a different vendor from the implementer.
 
 **Escalation gate.** This opens when the run spends its round budget, which defaults to two rounds. The run lead shows what still fails. Choose one of:
 
