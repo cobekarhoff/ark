@@ -47,7 +47,7 @@ Do this before you write `plan.yml`. `ark plan check` refuses a run that has no 
 
 ### A busy agent
 
-A send to Master Chief or to a worker can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn. Pick a retry id once for the message and use that same `--retry-request <id>` for every try. Wait 30 seconds, then send the same message again, up to 5 times. Every `orca orchestration send` in this playbook follows this rule.
+A send to Master Chief or to a worker can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn. Pick a retry id once for the message, unique for each message and each target, such as `<run>-<subject slug>-<target dispatch id>`, and use that same `--retry-request <id>` for every try. Wait 30 seconds, then send the same message again, up to 5 times. Every `orca orchestration send` in this playbook follows this rule.
 
 After 5 sends that all fail, for a worker: wait for its `worker_done` with `orca orchestration check --wait`, then send once more. For Master Chief: record the undelivered message (subject and body) in the final report. Never treat the message as delivered until a send succeeds.
 

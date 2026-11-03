@@ -153,7 +153,7 @@ A `status` message from a run lead is a notice, not a question. Pass it to the h
 
 ### A busy agent
 
-A send can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn and refused the message. Pick a retry id once for the message, such as `<run>-<subject slug>`, and use that same `--retry-request <id>` for every try. Wait 30 seconds, then send the same message again with `orca orchestration send --retry-request <id>`, up to 5 times. The same id keeps Orca from delivering the message twice when a try landed and its answer was lost; `orca orchestration request-show` tells whether a request took effect.
+A send can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn and refused the message. Pick a retry id once for the message, unique for each message and each target, such as `<run>-<subject slug>-<target dispatch id>`, and use that same `--retry-request <id>` for every try. Wait 30 seconds, then send the same message again with `orca orchestration send --retry-request <id>`, up to 5 times. The same id keeps Orca from delivering the message twice when a try landed and its answer was lost; `orca orchestration request-show` tells whether a request took effect.
 
 When the agent is still busy after 5 times, tell the human the target, the subject and that the message is not delivered. Send the message again on your next wait. Never treat the message as delivered until a send succeeds.
 
