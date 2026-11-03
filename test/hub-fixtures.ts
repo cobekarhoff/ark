@@ -27,6 +27,8 @@ export type FixtureRun = {
   metricsCostUsd?: number;
   /** Start of the run. Default: one hour ago. */
   startedAt?: Date;
+  /** The ACs of the ticket. Default: `<ticket id>-AC1`. */
+  criteria?: string[];
 };
 
 /** `YYYY-MM-DD` of today, for run ids. */
@@ -60,7 +62,10 @@ export function writeRun(fixture: FixtureRun): string {
     project: fixture.project,
     ticket: fixture.ticket,
     // No criteria at start: the run waits at the criteria gate.
-    criteria: fixture.phase === "awaiting_criteria" ? [] : [`${fixture.ticket.id}-AC1`],
+    criteria:
+      fixture.phase === "awaiting_criteria"
+        ? []
+        : (fixture.criteria ?? [`${fixture.ticket.id}-AC1`]),
     round_budget: 3,
   });
   if (fixture.phase !== "awaiting_criteria") {
@@ -219,6 +224,8 @@ export type FakeToolOptions = {
     tasks?: unknown[];
     /** `inbox` messages; none by default. */
     messages?: unknown[];
+    /** `worktree ps` worktrees, each with a path and agents. */
+    worktrees?: unknown[];
   };
   /** Seconds each Orca call sleeps before it answers. */
   orcaSleepSeconds?: number;
@@ -228,10 +235,18 @@ export type FakeToolOptions = {
   orcaMode?: "up" | "down" | "twice";
   plannotatorMode?: "up" | "down" | "twice";
   plannotatorSessions?: { index: number; target: string; url: string }[];
-  /** Merge request URLs whose `gh pr checks` reports a failing check. */
+  /** Merge request URLs whose `gh pr view` reports a failing check. */
   failingMergeRequests?: string[];
   /** Merge request URLs whose `gh pr view` fails. */
   failingMergeRequestViews?: string[];
+  /** The `gh pr view` answer for a URL, as the JSON gh prints (default: one passing and one other check). */
+  mergeRequestViews?: Record<string, unknown>;
+  /** `orca worktree ps --agent-wait --json` exits 1. */
+  orcaPsFails?: boolean;
+  /** `up` answers `omp usage --json`, `down` fails, `once` answers once and then exits 1. */
+  ompMode?: "up" | "down" | "once";
+  /** The JSON `omp usage --json` prints. */
+  ompUsage?: unknown;
 };
 
 /** Writes the state files the fake `orca`, `gh` and `plannotator` read. Call again to change an answer. */
@@ -252,6 +267,30 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   put("plannotator.sessions", JSON.stringify(options.plannotatorSessions ?? []));
   put("gh.failing", `${(options.failingMergeRequests ?? []).join("\n")}\n`);
   put("gh.viewfailing", `${(options.failingMergeRequestViews ?? []).join("\n")}\n`);
+  const checkRun = (conclusion: string) => ({
+    __typename: "CheckRun",
+    name: "ci",
+    status: "COMPLETED",
+    conclusion,
+    detailsUrl: "https://ci.example/run/1",
+  });
+  const view = (conclusion: string) =>
+    JSON.stringify({
+      state: "OPEN",
+      statusCheckRollup: [checkRun("SUCCESS"), checkRun(conclusion)],
+      additions: 12,
+      deletions: 3,
+      changedFiles: 4,
+      createdAt: new Date().toISOString(),
+    });
+  put("gh.pass", view("SUCCESS"));
+  put("gh.fail", view("FAILURE"));
+  for (const [url, answer] of Object.entries(options.mergeRequestViews ?? {}))
+    put(`gh.view.${url.replace(/[^A-Za-z0-9]/g, "_")}`, JSON.stringify(answer));
+  put("orca.ps", JSON.stringify({ result: { worktrees: options.orca?.worktrees ?? [] } }));
+  put("orca.psfails", options.orcaPsFails ? "1" : "0");
+  put("omp.mode", options.ompMode ?? "up");
+  put("omp.usage", JSON.stringify(options.ompUsage ?? { reports: [] }));
 }
 
 /** The mode switch both fakes share. `twice` counts calls per command in the state folder. */
@@ -270,6 +309,7 @@ export function fakeToolScripts(state: string): {
   orca: string;
   gh: string;
   plannotator: string;
+  omp: string;
 } {
   return {
     orca: `echo "$*" >> '${state}/orca.log'
@@ -283,19 +323,28 @@ case "$1 $2" in
   "orchestration worker-list") cat '${state}/orca.workers' ;;
   "orchestration task-list") cat '${state}/orca.tasks' ;;
   "orchestration inbox") cat '${state}/orca.inbox' ;;
+  "worktree ps") [ "$(cat '${state}/orca.psfails')" = 1 ] && exit 1; cat '${state}/orca.ps' ;;
   *) exit 1 ;;
 esac`,
-    // `gh pr checks` exits 1 for a failing check and 8 for a pending one, and still prints the checks.
+    // `gh pr view` is the one call the hub makes: state, the checks, diff size and creation time.
     gh: `echo "$*" >> '${state}/gh.log'
 case "$1 $2" in
-  "pr checks")
-    if grep -qxF "$3" '${state}/gh.failing'; then echo '[{"bucket":"fail"},{"bucket":"pass"}]'; exit 1; fi
-    echo '[{"bucket":"pass"}]' ;;
   "pr view")
     if grep -qxF "$3" '${state}/gh.viewfailing'; then exit 1; fi
-    echo '{"state":"OPEN"}' ;;
+    key=$(printf '%s' "$3" | tr -c 'A-Za-z0-9' _)
+    if [ -f "${state}/gh.view.$key" ]; then cat "${state}/gh.view.$key"; exit 0; fi
+    if grep -qxF "$3" '${state}/gh.failing'; then cat '${state}/gh.fail'; else cat '${state}/gh.pass'; fi ;;
   *) exit 1 ;;
 esac`,
+    // Answers `usage --json` once, then exits 1 in mode `once` (counted in the state folder).
+    omp: `[ "$1 $2" = "usage --json" ] || exit 1
+mode=$(cat '${state}/omp.mode' 2>/dev/null || echo up)
+[ "$mode" = down ] && exit 1
+count=$(cat '${state}/omp.count' 2>/dev/null || echo 0)
+count=$((count + 1))
+printf '%s' "$count" > '${state}/omp.count'
+[ "$mode" = once ] && [ "$count" -gt 1 ] && exit 1
+cat '${state}/omp.usage'`,
     plannotator: `${modeGate(state, "plannotator", "sessions")}
 cat '${state}/plannotator.sessions'`,
   };

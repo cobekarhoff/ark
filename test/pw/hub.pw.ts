@@ -669,8 +669,8 @@ test("ARK-277-AC7 an MR whose gh pr view fails shows unknown, never open", async
   await expect(request).toContainText("!72");
   await expect(request).toHaveAttribute("data-state", "unknown");
   await expect(request.getByTestId("mr-state")).toHaveText("unknown");
-  // pr checks still answers: its fact is shown, the state is not made up.
-  await expect(request.getByTestId("ci")).toHaveAttribute("data-ci", "passing");
+  // The checks come from the same `gh pr view`: with no answer there is no CI fact either.
+  await expect(request.getByTestId("ci")).toHaveAttribute("data-ci", "unknown");
 });
 
 test("ARK-277-AC7 an unread question and an escalation of live workers wait on Home, a finished worker's do not", async ({
