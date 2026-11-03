@@ -150,6 +150,16 @@ function designRoundCount(events: ArkEvent[]): number {
   return Math.max(0, before.filter((event) => event.type === "strategy.recorded").length - 1);
 }
 
+/** Plan change answers, plus every plan approve after the first (by human or auto). */
+function planChanges(events: ArkEvent[]): number {
+  const planAnswers = events.filter(
+    (event) => event.type === "gate.answered" && event.data.gate === "plan",
+  );
+  const changes = planAnswers.filter((event) => event.data.answer === "change").length;
+  const approves = planAnswers.filter((event) => event.data.answer === "approve").length;
+  return changes + Math.max(0, approves - 1);
+}
+
 /** A strategy answer or a decided plan decision is overridden when it is not the recommended one. */
 function decisionCounts(
   runDirectory: string,
@@ -529,12 +539,7 @@ export function retro(runId: string, inProject?: string): void {
     design_rounds: designRounds,
     decisions: decisionCounts(runDirectory, events),
     human_intervention: {
-      plan_changes: events.filter(
-        (event) =>
-          event.type === "gate.answered" &&
-          event.data.gate === "plan" &&
-          event.data.answer === "change",
-      ).length,
+      plan_changes: planChanges(events),
       mr_comments: mergeRequests.comments,
       mr_commits_after_open: mergeRequests.commits,
     },

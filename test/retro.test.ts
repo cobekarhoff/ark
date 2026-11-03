@@ -386,6 +386,40 @@ describe("ark retro", () => {
     expect(readMetrics().time.gate_wait_seconds).toBe(3601);
   });
 
+  /** An event log of plan answers only; each answer is one gate.answered event, in order. */
+  const writePlanAnswers = (answers: string[]) => {
+    writeEvents(runDirectory, [
+      [
+        "14:20:00.000",
+        "run.started",
+        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
+      ],
+      ...answers.map((answer, index): EventRow => {
+        const minute = String(21 + index).padStart(2, "0");
+        return [`14:${minute}:00.000`, "gate.answered", { gate: "plan", answer }];
+      }),
+      ["14:50:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+  };
+
+  test("ARK-183-AC1 writes plan_changes: 2 for one change answer and two approve answers", () => {
+    writePlanAnswers(["change", "approve", "approve"]);
+    retro(runId);
+    expect(readMetrics().human_intervention.plan_changes).toBe(2);
+  });
+
+  test("ARK-183-AC2 writes plan_changes: 0 for one approve answer and no change answer", () => {
+    writePlanAnswers(["approve"]);
+    retro(runId);
+    expect(readMetrics().human_intervention.plan_changes).toBe(0);
+  });
+
+  test("ARK-183-AC3 writes plan_changes: 2 for approve answers at three sequence numbers and no change", () => {
+    writePlanAnswers(["approve", "approve", "approve"]);
+    retro(runId);
+    expect(readMetrics().human_intervention.plan_changes).toBe(2);
+  });
+
   test("ARK-240-AC1 counts the ranked findings of every round file into rework.findings_sent_back", () => {
     const findings = join(runDirectory, "findings");
     mkdirSync(findings, { recursive: true });
