@@ -598,8 +598,12 @@ test("ARK-289-AC2 brainstorm gives the one send command and the rules allow only
     `orca orchestration send --to run:<id of the Run 'Master Chief: <project> tickets'> --type status --subject "Brainstorm handoff: <ticket ids>" --body "$message" --json`,
   );
   expect(brainstormHandoff).toContain(
-    'starts with the line `Human approval: "<the human\'s answer, word for word>" at <ISO time>`',
+    'starts with the line `Human approval: "<the human\'s answer, word for word>" for <ticket ids> at <ISO time>`',
   );
+  expect(brainstormHandoff).toContain(
+    "The question lists the ticket ids that the answer approves.",
+  );
+  expect(brainstormHandoff).toContain('Human approval: "Send it" for ARK-290, ARK-291 at ');
   for (const item of [
     "ticket ids and the dependency order",
     "What may run in parallel",
@@ -629,7 +633,10 @@ test("ARK-289-AC4 chief queues a Brainstorm handoff only with a named approval a
   expect(chiefWaitSection).toContain("is a request to evaluate and queue");
   expect(chiefWaitSection).toContain("evaluate it (section 3) and queue it (section 5)");
   expect(chiefWaitSection).toContain("The body has the `Human approval:` line.");
-  expect(chiefWaitSection).toContain("The approval names that ticket.");
+  expect(chiefWaitSection).toContain(
+    "The ticket id is in the `for <ticket ids>` list of that line.",
+  );
+  expect(chiefWaitSection).toContain("A ticket that is not in the list is not queued.");
   expect(chiefWaitSection).toContain("The ticket file exists under `tickets/`.");
   expect(chiefWaitSection).toContain(
     "Tell the human one line per queued ticket: that you queued it from a brainstorm handoff, with the approval line and its time quoted. Do not ask the human again.",

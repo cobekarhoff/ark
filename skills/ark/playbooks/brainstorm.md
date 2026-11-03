@@ -58,14 +58,14 @@ Then re-read `README.md`, because other sessions edit it. For each ticket, add:
 
 ## 8. Hand off
 
-When the human wants work to start, write a handoff message for Master Chief. The body of the message starts with the line `Human approval: "<the human's answer, word for word>" at <ISO time>`, then holds:
+When the human wants work to start, write a handoff message for Master Chief. The body of the message starts with the line `Human approval: "<the human's answer, word for word>" for <ticket ids> at <ISO time>`, then holds:
 
 - The ticket ids and the dependency order.
 - What may run in parallel.
 - The models. Check the `ark.yml` roles and the harness configs for the real model ids.
 - The gates to bring to the human.
 
-Show the message to the human. Then ask with the ask tool whether to send it. Offer two options: 'Send it' and 'Do not send'. Send only when the answer is 'Send it'. Never send for an answer the human did not give. Write the human's answer in the approval line word for word, with the ISO time of the answer.
+Show the message to the human. Then ask with the ask tool whether to send it. The question lists the ticket ids that the answer approves. Offer two options: 'Send it' and 'Do not send'. Send only when the answer is 'Send it'. Never send for an answer the human did not give. Write the human's answer in the approval line word for word, then the ticket ids the question listed, then the ISO time of the answer.
 
 To send:
 
@@ -74,7 +74,7 @@ To send:
 
    ```sh
    message=$(cat <<'EOF'
-   Human approval: "Send it" at 2026-11-03T20:15:00Z
+   Human approval: "Send it" for ARK-290, ARK-291 at 2026-11-03T20:15:00Z
    ...
    EOF
    )
