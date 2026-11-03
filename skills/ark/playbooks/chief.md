@@ -212,6 +212,8 @@ If some MRs are merged and others are still open, tell the human and wait. Do no
 
 Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.md` exists. The run lead writes it. If it does not exist, the run is not ready to close: message the run lead with `orca orchestration send`, or ask the human what to do.
 
+A `HELD: <run> #<number> ticket superseded` line from the auto-merger (section 12) means nobody wants the PR. Tell the human. With the human, close the run `aborted` or `abandoned` (table above) and close the PR with `gh pr close <url>`. Never merge it. `no final report` needs nothing: the PR merges when `retro.md` exists. `ticket done`: check the run and the PR with the human.
+
 `ark run close` also releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each. It leaves an active dispatch and says `<dispatch id> still active, not released`. An Orca failure prints one `orca: workers not released: <reason>` line and the close still exits 0. After the ARK-278 ticket merges, run `ark run close --sweep` once to release the workers of runs closed earlier (it records no event; a second run prints nothing; it never releases a `release_unknown` row).
 
 After `ark run close`:
@@ -262,7 +264,7 @@ At 70% or more context use, as your status line shows, do these steps in order. 
 
 Two loops run in the Ark repo's `scripts/` folder. Start each one in its own background job in a terminal, with the workspace and the interval in seconds as arguments:
 
-- `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again.
+- `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN and 3 rules hold: it merges only after `retro.md` exists in the run folder (the run lead sent its final report), it skips a run whose ticket is `superseded` or `done`, and it re-reads `ark status <run>` right before `gh pr merge`. It prints `HELD: <run> #<number> <reason>` lines to stderr, once for each held PR. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again.
 - `scripts/temp-cleaner.sh <workspace> 300` removes Ark test temp directories older than 12 minutes from `$TMPDIR`. It prints `LOW DISK` and exits when `/` has less than 15 GB free.
 
 ## Rules
