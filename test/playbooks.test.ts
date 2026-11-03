@@ -690,3 +690,12 @@ test("ARK-287-AC5 run-lead.md tells the lead to re-test a stale head before aski
     /validator commits its evidence files (?:\(.*?\) )?before the last `ark test <run>`, so that no commit follows that test/,
   );
 });
+
+test("ARK-298-AC5 ADR 0009 names --name and *.localhost", () => {
+  const adr = readFileSync(
+    join(import.meta.dir, "../docs/adr/0009-hub-is-a-read-only-live-view.md"),
+    "utf8",
+  );
+  expect(adr).toContain("--name");
+  expect(adr).toContain("*.localhost");
+});
