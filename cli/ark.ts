@@ -7,7 +7,7 @@ import { escalate, gateRecord } from "./gate.ts";
 import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
 import { planCheck } from "./plan.ts";
 import { retro } from "./retro.ts";
-import { runClose, runStart, runStep, status } from "./run.ts";
+import { runClose, runCloseSweep, runStart, runStep, status } from "./run.ts";
 import { strategyRecord } from "./strategy.ts";
 import { testRun } from "./test-run.ts";
 import { ui, uiInstall, uiUninstall } from "./ui.ts";
@@ -55,14 +55,24 @@ const commands: Command[] = [
       ),
   },
   {
-    usage: "run close <run> <outcome> [--project <name>]",
+    usage: "run close [<run> <outcome>] [--sweep] [--project <name>]",
     description:
-      "Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs.",
-    flags: { "--project": true },
-    minimum: 2,
+      "Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs. After the close it releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each; it prints `<dispatch id> still active, not released` for an active one, and one `orca: workers not released: <reason>` line when Orca fails, and the close still exits 0. `ark run close --sweep [--project <name>]` does the same release for every closed run of the project (ARK_PROJECT when --project is not given), records no event, and prints nothing for a run with nothing to report. --sweep takes no run argument.",
+    flags: { "--project": true, "--sweep": false },
+    minimum: 0,
     maximum: 2,
-    run: ([runId, outcome], flags) =>
-      runClose(runId, outcome, flags["--project"] as string | undefined),
+    run: (positionals, flags) => {
+      const project = flags["--project"] as string | undefined;
+      if (flags["--sweep"] === true) {
+        if (positionals.length > 0) throw new ArkError("--sweep takes no run argument");
+        return runCloseSweep(project);
+      }
+      if (positionals.length !== 2)
+        throw new ArkError(
+          "wrong number of arguments\nusage: ark run close [<run> <outcome>] [--sweep] [--project <name>]",
+        );
+      return runClose(positionals[0], positionals[1], project);
+    },
   },
   {
     usage: "evaluation record <run> [--project <name>]",

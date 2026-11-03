@@ -212,6 +212,8 @@ If some MRs are merged and others are still open, tell the human and wait. Do no
 
 Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.md` exists. The run lead writes it. If it does not exist, the run is not ready to close: message the run lead with `orca orchestration send`, or ask the human what to do.
 
+`ark run close` also releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each. It leaves an active dispatch and says `<dispatch id> still active, not released`. An Orca failure prints one `orca: workers not released: <reason>` line and the close still exits 0. After the ARK-278 ticket merges, run `ark run close --sweep` once to release the workers of runs closed earlier (it records no event; a second run prints nothing).
+
 After `ark run close`:
 
 1. Mark the Task: `orca orchestration task-update --id <task id> --status completed --result "<outcome>" --json`. Tasks that depend on it become ready. Use `--status failed` for `abandoned` and `aborted`.

@@ -1,5 +1,14 @@
-import { beforeEach, expect, test } from "bun:test";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
@@ -574,4 +583,196 @@ test("ARK-228-AC2 ark escalate stores the reason without outer whitespace", () =
     type: "escalation.requested",
     data: { reason: "P1 unresolved" },
   });
+});
+
+// Fake `orca`: a bun script over $FAKE_ORCA_DIR/state.json. It logs each call to calls.log, pages lists
+// by `pageSize`, turns a released worker into terminalState "released", and sleeps when `hang` is set.
+const fakeOrca = `#!/usr/bin/env bun
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+const dir = process.env.FAKE_ORCA_DIR;
+const args = process.argv.slice(2);
+appendFileSync(dir + "/calls.log", args.join(" ") + "\\n");
+const state = JSON.parse(readFileSync(dir + "/state.json", "utf8"));
+if (state.hang) await Bun.sleep(30000);
+const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+const page = (rows, key) => {
+  const start = Number(flag("--cursor") ?? 0), size = state.pageSize ?? 100;
+  const nextCursor = start + size < rows.length ? String(start + size) : null;
+  console.log(JSON.stringify({ ok: true, result: { [key]: rows.slice(start, start + size), nextCursor } }));
+};
+if (args[1] === "run-list") page(state.runs, "runs");
+else if (args[1] === "worker-list") page(state.workers[flag("--run")] ?? [], "workers");
+else if (args[1] === "worker-release") {
+  for (const rows of Object.values(state.workers))
+    for (const row of rows) if (row.dispatchId === flag("--dispatch")) row.terminalState = "released";
+  writeFileSync(dir + "/state.json", JSON.stringify(state));
+  console.log(JSON.stringify({ ok: true, result: {} }));
+} else process.exit(2);
+`;
+
+type FakeWorker = { dispatchId: string; state: string; terminalState: string };
+type FakeState = {
+  runs: { id: string; objective: string }[];
+  workers: Record<string, FakeWorker[]>;
+  pageSize?: number;
+  hang?: boolean;
+};
+
+const originalPath = process.env.PATH;
+let fakeDirectory = "";
+
+afterEach(() => {
+  process.env.PATH = originalPath;
+  delete process.env.FAKE_ORCA_DIR;
+  delete process.env.ARK_ORCA_TIMEOUT_MS;
+});
+
+function useFakeOrca(state: FakeState): void {
+  fakeDirectory = mkdtempSync(join(tmpdir(), "ark-fake-orca-"));
+  mkdirSync(join(fakeDirectory, "bin"));
+  writeFileSync(join(fakeDirectory, "bin/orca"), fakeOrca);
+  chmodSync(join(fakeDirectory, "bin/orca"), 0o755);
+  writeFileSync(join(fakeDirectory, "state.json"), JSON.stringify(state));
+  process.env.PATH = `${join(fakeDirectory, "bin")}:${originalPath}`;
+  process.env.FAKE_ORCA_DIR = fakeDirectory;
+}
+
+const orcaCalls = (verb: string): string[] =>
+  existsSync(join(fakeDirectory, "calls.log"))
+    ? readFileSync(join(fakeDirectory, "calls.log"), "utf8")
+        .split("\n")
+        .filter((call) => call.startsWith(`orchestration ${verb} `))
+    : [];
+
+const worker = (dispatchId: string, state: string, terminalState: string): FakeWorker => ({
+  dispatchId,
+  state,
+  terminalState,
+});
+
+test("ARK-278-AC1 run close releases each settled unreleased dispatch over paged lists and prints one line each", () => {
+  const { runId } = startRun();
+  useFakeOrca({
+    pageSize: 2,
+    runs: [
+      { id: "orca_other", objective: "Ark run something-else" },
+      { id: "orca_a", objective: "Ark run something-else-2" },
+      { id: "orca_run", objective: `Ark run ${runId}` },
+    ],
+    workers: {
+      orca_run: [
+        worker("ctx_1", "succeeded", "reclaimable"),
+        worker("ctx_2", "failed", "release_pending"),
+        worker("ctx_3", "stopped", "release_unknown"),
+        worker("ctx_4", "succeeded", "released"),
+        worker("ctx_5", "succeeded", "retained"),
+      ],
+    },
+  });
+  const closed = ark("run", "close", runId, "aborted");
+  expect(closed.code).toBe(0);
+  expect(closed.out).toContain(
+    `${runId} closed: aborted\nctx_1 released (succeeded)\nctx_2 released (failed)\nctx_3 released (stopped)\n`,
+  );
+  expect(closed.out).not.toContain("ctx_4");
+  expect(closed.out).not.toContain("ctx_5");
+  expect(orcaCalls("worker-release")).toHaveLength(3);
+});
+
+test("ARK-278-AC2 run close keeps an active dispatch and says so", () => {
+  const { runId } = startRun();
+  useFakeOrca({
+    runs: [{ id: "orca_run", objective: `Ark run ${runId}` }],
+    workers: {
+      orca_run: [
+        worker("ctx_live", "ready", "active"),
+        worker("ctx_done", "succeeded", "reclaimable"),
+      ],
+    },
+  });
+  const closed = ark("run", "close", runId, "aborted");
+  expect(closed.code).toBe(0);
+  expect(closed.out).toContain("ctx_live still active, not released");
+  expect(closed.out).toContain("ctx_done released (succeeded)");
+  expect(orcaCalls("worker-release")).toEqual([
+    "orchestration worker-release --dispatch ctx_done --json",
+  ]);
+});
+
+test("ARK-278-AC3 an Orca failure prints one orca line and the close still records and exits 0", () => {
+  const closedEvent = (directory: string) =>
+    JSON.parse(eventLines(directory).at(-1) as string).type === "run.closed";
+
+  // no orca on PATH
+  const missing = startRun();
+  const bare = mkdtempSync(join(tmpdir(), "ark-no-orca-"));
+  symlinkBun(bare);
+  process.env.PATH = `${bare}:/usr/bin:/bin`;
+  const noOrca = ark("run", "close", missing.runId, "aborted");
+  expect(noOrca.code).toBe(0);
+  expect(noOrca.out).toContain("orca: workers not released: orca not found on PATH");
+  expect(closedEvent(missing.directory)).toBe(true);
+
+  // orca hangs past the timeout
+  const hung = startRun("demo", "ARK-901");
+  useFakeOrca({ runs: [], workers: {}, hang: true });
+  process.env.ARK_ORCA_TIMEOUT_MS = "300";
+  const hang = ark("run", "close", hung.runId, "aborted");
+  expect(hang.code).toBe(0);
+  expect(hang.out).toMatch(/orca: workers not released: .*timed out after 0\.3s/);
+  expect(hang.out.match(/orca:/g)).toHaveLength(1);
+  expect(closedEvent(hung.directory)).toBe(true);
+
+  // no Orca Run for the objective
+  const none = startRun("demo", "ARK-902");
+  useFakeOrca({ runs: [{ id: "orca_x", objective: "Ark run other" }], workers: {} });
+  const nothing = ark("run", "close", none.runId, "aborted");
+  expect(nothing.code).toBe(0);
+  expect(nothing.out).toBe(`${none.runId} closed: aborted\n`);
+});
+
+function symlinkBun(directory: string): void {
+  Bun.spawnSync(["ln", "-s", process.execPath, join(directory, "bun")]);
+}
+
+test("ARK-278-AC4 run close --sweep releases closed runs once, records no event, and refuses a run argument", () => {
+  const first = startRun("demo", "ARK-901");
+  const second = startRun("demo", "ARK-902");
+  const open = startRun("demo", "ARK-903");
+  for (const run of [first, second])
+    appendEvent(run.directory, "run.closed", { outcome: "aborted" });
+  const eventCounts = [first, second, open].map((run) => eventLines(run.directory).length);
+  useFakeOrca({
+    runs: [first, second, open].map((run) => ({
+      id: `orca_${run.runId}`,
+      objective: `Ark run ${run.runId}`,
+    })),
+    workers: Object.fromEntries(
+      [first, second, open].map((run) => [
+        `orca_${run.runId}`,
+        [worker(`ctx_${run.runId}`, "succeeded", "reclaimable")],
+      ]),
+    ),
+  });
+
+  const swept = ark("run", "close", "--sweep", "--project", "demo");
+  expect(swept.code).toBe(0);
+  expect(swept.out).toBe(
+    [first, second]
+      .map((run) => `${run.runId}:\n  ctx_${run.runId} released (succeeded)\n`)
+      .join(""),
+  );
+  expect(orcaCalls("worker-release")).toHaveLength(2);
+  expect([first, second, open].map((run) => eventLines(run.directory).length)).toEqual(eventCounts);
+
+  const again = ark("run", "close", "--sweep");
+  expect(again.code).toBe(0);
+  expect(again.out).toBe("");
+  expect(orcaCalls("worker-release")).toHaveLength(2);
+
+  const refused = ark("run", "close", open.runId, "aborted", "--sweep");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("--sweep takes no run argument");
+  expect(eventLines(open.directory)).toHaveLength(eventCounts[2]);
+  expect(ark("run", "close", open.runId).code).toBe(1);
 });

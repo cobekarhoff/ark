@@ -599,3 +599,27 @@ describe("ARK-276 anchor path is resolved", () => {
     expect(stepWorker).toBe(realpathSync(stepWorker));
   });
 });
+
+describe("ARK-278 close removes workspace/", () => {
+  test("ARK-278-AC5 a clean close removes workspace/ and keeps the other run files", () => {
+    const { runId, runDirectory } = startRun(tempMetaWorkspace());
+    expect(ark("worktree", "create", runId, "repos/a").code).toBe(0);
+    mkdirSync(join(runDirectory, "results"));
+    for (const name of ["ticket.md", "plan.md", "retro.md", "metrics.json", "results/r.json"])
+      writeFileSync(join(runDirectory, name), "x\n");
+    expect(existsSync(join(runDirectory, "workspace"))).toBe(true);
+
+    const closed = closeRun(runId, runDirectory, "aborted");
+    expect(closed.code).toBe(0);
+    expect(existsSync(join(runDirectory, "workspace"))).toBe(false);
+    for (const name of [
+      "events.ndjson",
+      "ticket.md",
+      "plan.md",
+      "retro.md",
+      "metrics.json",
+      "results/r.json",
+    ])
+      expect(existsSync(join(runDirectory, name))).toBe(true);
+  });
+});
