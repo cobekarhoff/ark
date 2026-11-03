@@ -7,6 +7,7 @@ import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, writeState, type RunState } from "./events.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
+import { staleHeads } from "./merge-request.ts";
 import { assertAllowed } from "./transitions.ts";
 import { worktreeCleanup } from "./worktree.ts";
 
@@ -238,6 +239,17 @@ export function status(runId?: string, project?: string): void {
   if (invalidCount > 0) throw new ArkError(`${invalidCount} project config(s) invalid`);
 }
 
+function testHeadLines(directory: string): string[] {
+  const events = readEvents(directory);
+  if (!events.some((event) => event.type === "test.completed")) return [];
+  const stale = staleHeads(events);
+  if (stale.length === 0) return ["test head: current"];
+  return stale.map(
+    ({ repo, tested, current }) =>
+      `test head: stale (${repo} tested ${tested?.slice(0, 8) ?? "nothing"}, now ${current.slice(0, 8)})`,
+  );
+}
+
 function printRun(runId: string, inProject?: string): void {
   const { directory } = findRun(runId, inProject);
   const state = writeState(directory);
@@ -258,6 +270,7 @@ function printRun(runId: string, inProject?: string): void {
     `waiting gate: ${waitingGate(state)}`,
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
+    ...testHeadLines(directory),
     `merge requests: ${state.merge_requests.length === 0 ? "none" : ""}`,
     ...state.merge_requests.map((request) => `  ${request.repo} ${request.url}`),
     costLine(directory),
