@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { mergeOrder } from "../cli/merge-request";
+import { reactSkill, requiredUiSkills } from "../cli/ui-skills";
 import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers";
 
 const fixtures = resolve(import.meta.dir, "fixtures/merge-request");
@@ -158,6 +159,37 @@ function scenario(hosts: Record<"core" | "app", Host>, testPassed = true) {
       .join("\n") + "\n",
   );
   return { runDirectory, worktrees, bares };
+}
+
+/** Adds an evaluation of `surfaces`, skills on every plan step and a reviewer step with `findings`. */
+function uiRun(surfaces: string[], findings?: string) {
+  const setup = scenario({ core: "github", app: "github" });
+  // The run is past planning, so the evaluation goes in right after run.started, as the real order has it.
+  const eventsFile = join(setup.runDirectory, "events.ndjson");
+  const lines = readFileSync(eventsFile, "utf8").split("\n").filter(Boolean);
+  lines.splice(
+    1,
+    0,
+    JSON.stringify({
+      time: "2026-10-29T00:00:00.000Z",
+      type: "evaluation.recorded",
+      data: { blockers: [], risks: [], surfaces },
+    }),
+  );
+  writeFileSync(
+    eventsFile,
+    lines.map((line, i) => JSON.stringify({ ...JSON.parse(line), seq: i + 1 })).join("\n") + "\n",
+  );
+  const plan = JSON.parse(readFileSync(join(setup.runDirectory, "plan.yml"), "utf8"));
+  plan.steps[0].skills = [...requiredUiSkills, reactSkill];
+  plan.steps[1].skills = requiredUiSkills;
+  plan.steps.push({ ...plan.steps[1], id: "ui-review", role: "reviewer", needs: [] });
+  writeFileSync(join(setup.runDirectory, "plan.yml"), JSON.stringify(plan));
+  if (findings !== undefined) {
+    mkdirSync(join(setup.runDirectory, "findings"), { recursive: true });
+    writeFileSync(join(setup.runDirectory, "findings", "ui-review.md"), findings);
+  }
+  return setup;
 }
 
 const openedEvents = (runDirectory: string) =>
@@ -345,3 +377,64 @@ test("ARK-155-AC7 no source under cli/ runs a merge, approve or auto-merge comma
       match: undefined,
     });
 });
+
+const findingsFile = `# Findings
+
+### P1: Button has no focus ring
+- **File:** src/button.tsx
+- **Line:** 12
+- **Skill:** ${requiredUiSkills.at(-1)}
+- **Rule:** Interactive elements need visible focus
+
+### P2: Off-by-one in pager
+- **File:** src/pager.ts
+- **Line:** 40
+`;
+
+test(
+  "ARK-279-AC7 the description has the UI/UX checks section with the skills and the skill finding",
+  () => {
+    uiRun(["web_ui"], findingsFile);
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    for (const call of created()) {
+      const body = optionValue(call, "--body");
+      expect(body).toContain("\n\n## UI/UX checks\n\n");
+      expect(body).toContain(`Skills applied: ${[...requiredUiSkills, reactSkill].join(", ")}`);
+      expect(body).toContain(
+        `- P1 Button has no focus ring (${requiredUiSkills.at(-1)}: Interactive elements need visible focus, src/button.tsx:12)`,
+      );
+      expect(body).not.toContain("Off-by-one");
+      expect(body).not.toContain("No UI/UX findings.");
+    }
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-279-AC7 with no skill finding the description has the No UI/UX findings. bullet",
+  () => {
+    uiRun(["web_ui"], "### P2: Off-by-one in pager\n- **File:** src/pager.ts\n- **Line:** 40\n");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    const body = optionValue(created()[0], "--body");
+    expect(body).toContain("## UI/UX checks");
+    expect(body).toContain("- No UI/UX findings.");
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-279-AC8 Surfaces none: no UI/UX checks heading and the description is unchanged",
+  () => {
+    uiRun(["none"], findingsFile);
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    const [core, app] = created().map((call) => optionValue(call, "--body"));
+    expect(core).toBe(
+      "Ticket: ARK-900 Show units\n\nAcceptance criteria this repo serves:\n- ARK-900-AC1: Core exports units",
+    );
+    expect(app).toBe(
+      "Ticket: ARK-900 Show units\n\nAcceptance criteria this repo serves:\n- ARK-900-AC2: App shows units\n\nDepends on #1",
+    );
+    expect(`${core}${app}`).not.toContain("UI/UX");
+  },
+  { timeout: 30_000 },
+);
