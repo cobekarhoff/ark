@@ -100,7 +100,7 @@ The gate opens when the phase is `awaiting_criteria`. That means the ticket has 
 
    The command re-reads the ticket file and copies it to `<run folder>/ticket.md`. It refuses when the file has no criteria. Blockers that the human accepts stay in `evaluation.md`: treat each as a risk in your plan. Then go to the strategy part below.
 
-5. On `abort`, run `ark gate record <run> criteria abort`, then go to section 11 with outcome `failed`.
+5. On `abort`, run `ark gate record <run> criteria abort`, then run `ark run close <run> aborted` and go to section 11 with outcome `aborted`.
 
 ### Strategy and design rounds
 
@@ -149,7 +149,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    ark gate record <run> strategy abort
    ```
 
-   The command refuses a card ID that is not in the latest `strategy.recorded`. After a card ID, the phase is `planning`: go to section 3, and write the plan for that card only. On `abort`, go to section 11 with outcome `failed`.
+   The command refuses a card ID that is not in the latest `strategy.recorded`. After a card ID, the phase is `planning`: go to section 3, and write the plan for that card only. On `abort`, run `ark run close <run> aborted` and go to section 11 with outcome `aborted`.
 
 ## 3. Read the workspace and the learnings
 
@@ -289,7 +289,7 @@ ark gate record <run> plan abort
 - If the human edits `plan.yml` after approving, run `ark plan check <run>` again. The approval is then cleared. Show the plan again.
 - `approve` is refused unless the last `ark plan check` was valid and `plan.yml` has not changed since. It is also refused while the latest `plan.checked` has `open_decisions` above 0. Fix the cause. Never edit the log to get around it.
 - Open decisions are part of the plan gate. Ask the human to answer each one in the Plannotator review, or in the Master Chief question. Write each answer into `chosen` in `plan.yml` as the exact option label, run `ark plan check <run>` again, and show the plan again. Record `approve` only after the human said so and `open_decisions` is 0.
-- `abort`: go to section 11 with outcome `failed`.
+- `abort`: run `ark run close <run> aborted` and go to section 11 with outcome `aborted`.
 
 Never record `approve` unless the human said so, in Plannotator (exit 0) or through Master Chief.
 
@@ -433,7 +433,7 @@ After `ark escalate`, continue with steps 1 to 3 below, as for any spent budget.
 3. What follows:
    - `one_more_round`: the budget grows by one. Start the implementer step again.
    - `take_over`: the human becomes the implementer. Run `ark run step <run> <implementer step> start`, but start no worker. Ask Master Chief to tell the human the worktree path and wait for "done". When the human says done, run `ark run step <run> <implementer step> finish`, then `ark test <run>` and the reviewer steps as in section 8.
-   - `abort`: go to section 11 with outcome `failed`.
+   - `abort`: run `ark run close <run> aborted` and go to section 11 with outcome `aborted`.
 
 ## 10. Open the MRs
 
@@ -449,7 +449,7 @@ After the MRs open, run `ark merge-request status <run>` and read the checks for
 
 ## 11. Retro and final report
 
-Do this when the MRs are open, and also when the run ends in an abort.
+Do this when the MRs are open, and also when the run ends in an abort. The human can abort in any phase before an MR opens. The run lead then runs `ark run close <run> aborted`, then does the steps below.
 
 1. Run `ark retro <run>`. It writes `<run folder>/metrics.json`.
 2. Write `<run folder>/retro.md` on top of those numbers. Read `playbooks/retro.md` and follow "Part 1: Close check", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
@@ -464,4 +464,4 @@ Do this when the MRs are open, and also when the run ends in an abort.
 - Never record a gate answer the human did not give. A `plan` or `strategy` gate set to `auto` in `ark.yml` is answered by Ark, not by you. This includes the strategy card and each plan decision. `criteria` and `escalation` always go to the human.
 - Never write `plan.yml` before the strategy is recorded and, with 2 or more cards, answered. Never put a mockup or a prototype in a repo worktree or an MR.
 - Never open MRs while a test fails or a review sends work back.
-- Never close the run. Master Chief closes it after the human merges.
+- Never close the run, except after an abort: then run `ark run close <run> aborted`. Master Chief closes every other run after the human merges.

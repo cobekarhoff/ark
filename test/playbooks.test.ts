@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { outcomes } from "../cli/transitions.ts";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
 
 const playbookDirectory = join(import.meta.dir, "../skills/ark/playbooks");
@@ -504,4 +505,23 @@ test("ARK-281-AC5 chief.md states the 3 auto-merger rules in section 12 and the 
   expect(held).toMatch(/close the run `aborted` or `abandoned`/);
   expect(held).toContain("`gh pr close <url>`");
   expect(chiefPlaybook.split(/^## 8\./m)[1]?.split(/^## 9\./m)[0]).toContain(held!);
+});
+
+test("ARK-187-AC3 every literal `ark run close <run> <outcome>` in the playbooks uses a known outcome", () => {
+  const closes: { file: string; outcome: string }[] = [];
+  for (const file of readdirSync(playbookDirectory).filter((name) => name.endsWith(".md"))) {
+    const text = readFileSync(join(playbookDirectory, file), "utf8");
+    for (const [, outcome] of text.matchAll(/ark run close <run> ([a-z_]+)/g))
+      closes.push({ file, outcome });
+  }
+  expect(closes.filter(({ file }) => file === "run-lead.md").length).toBeGreaterThan(0);
+  for (const { file, outcome } of closes) {
+    expect({ file, known: outcomes.includes(outcome) }).toEqual({ file, known: true });
+  }
+});
+
+// ARK-187-AC4 is also a live human check: abort a real run at a gate before any MR opens.
+test("ARK-187-AC4 run-lead lets the human abort in any phase before an MR opens and closes as aborted", () => {
+  expect(runLeadPlaybook).toContain("The human can abort in any phase before an MR opens");
+  expect(runLeadPlaybook).toContain("ark run close <run> aborted");
 });
