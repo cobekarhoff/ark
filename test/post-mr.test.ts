@@ -172,7 +172,7 @@ test("ARK-208-AC3 status attributes GitHub checks and GitLab head-pipeline job f
   expect(readEvents(directory)).toEqual(before);
 });
 
-test("ARK-208-AC3 status prints unknown, never passed, when a host cannot answer", () => {
+test("ARK-208-AC3 status prints ci: failed when the GitLab pipeline failed, never passed", () => {
   const { runId, directory, workspace } = openRun();
   const mergeRequest = emulateHosts(workspace, true).find(
     (candidate) => candidate.repo === "gitlab",
@@ -187,7 +187,7 @@ test("ARK-208-AC3 status prints unknown, never passed, when a host cannot answer
   expect(result.code).toBe(0);
   expect(result.out.trim().split("\n")).toEqual([
     ".  open  https://github.com/example/core/pull/1  ci: failed  checks failing: linux-test, legacy-lint",
-    "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: unknown",
+    "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: failed",
   ]);
 });
 
@@ -197,6 +197,6 @@ test("ARK-208-AC4 run-lead orders MR checks, repair verification and sync before
     "utf8",
   );
   expect(playbook).toMatch(
-    /ark merge-request open <run>[\s\S]*`ark merge-request status <run>`[\s\S]*`gh pr checks <url>`[\s\S]*`ark test <run>`[\s\S]*`ark worktree sync <run>`[\s\S]*`worker_done`/,
+    /ark merge-request open <run>[\s\S]*`ark merge-request status <run>`[\s\S]*`ark test <run>`[\s\S]*`ark worktree sync <run>`[\s\S]*Do not report success while CI is failing/,
   );
 });
