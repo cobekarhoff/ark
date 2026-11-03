@@ -1,14 +1,22 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import {
   appendRawEvent,
+  ompMessagesText,
   orcaAnswersFor,
   today,
+  transcriptText,
+  transcriptTexts,
   writeBacklogTicket,
+  writeEventLog,
+  writeFakeToolState,
   writeOmpSession,
   writeRun,
+  writeSessionFile,
   type FixtureRun,
+  type SessionHarness,
 } from "../hub-fixtures.ts";
 import {
   installFakeTools,
@@ -213,7 +221,10 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
     await page.waitForTimeout(Math.max(0, 30_000 - (Date.now() - viewStartedAt)));
   }
 
-  expect(requests.slice(firstLoad).map((request) => request.url())).toEqual([]);
+  // The one request after it is the Run view's read of its run (`GET /api/run/<run>`, ARK-284).
+  const later = requests.slice(firstLoad).map((request) => new URL(request.url()).pathname);
+  expect(later.length).toBeGreaterThan(0);
+  for (const path of later) expect(path).toBe(`/api/run/${run}`);
 });
 
 // ---------------------------------------------------------------- AC7
@@ -789,4 +800,543 @@ test("ARK-277-AC11 a hash that does not decode shows the page and a later hash s
   await expect(page.locator("main")).toContainText("No open run");
   await page.getByRole("link", { name: "Backlog" }).click();
   await expect(page.getByRole("heading", { name: "Backlog" })).toBeVisible();
+});
+
+// ---------------------------------------------------------------- ARK-284
+
+const switchCalls = (state: string): string[] => {
+  const log = join(state, "orca.log");
+  return existsSync(log)
+    ? readFileSync(log, "utf8")
+        .split("\n")
+        .filter((line) => line.startsWith("terminal switch"))
+    : [];
+};
+
+/** The Orca answers of one open run plus Master Chief, and one worker Orca released. */
+function orcaWithReleasedWorker(run: string) {
+  const answers = orcaAnswersFor(run);
+  return {
+    terminals: [
+      ...answers.terminals!,
+      { handle: "term-chief", connected: true, agentIdentity: "omp", model: "chief-model" },
+      { handle: "term-gone", connected: false, agentIdentity: "codex" },
+    ],
+    runs: [
+      ...answers.runs!,
+      { id: "orca-chief", objective: "Master Chief: p tickets", coordinator_handle: "term-chief" },
+    ],
+    workers: [
+      ...answers.workers!,
+      { taskId: "task-2", state: "released", agentTerminalHandle: "term-gone" },
+      // Working, but `terminal list` never lists a `structworker_*` agent session.
+      { taskId: "task-3", state: "running", agentTerminalHandle: "structworker_unlisted" },
+    ],
+    tasks: [
+      ...answers.tasks!,
+      { id: "task-2", title: "hub-docs (implementer, .)" },
+      { id: "task-3", title: "hub-run-page (validator, .)" },
+    ],
+  };
+}
+
+test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, Master Chief included, ended for a released one and a no-button label for one running but not listed", async ({
+  page,
+}) => {
+  isolate();
+  const run = runId("ARK-831");
+  writeRun({ project: "p", run, ticket: { id: "ARK-831", title: "Agents" }, phase: "building" });
+  const answers = orcaWithReleasedWorker(run);
+  const state = installFakeTools({ orca: answers });
+  const baseUrl = await launch();
+  const home = page.locator(`[data-testid="run"][data-run="${run}"]`);
+  const button = (handle: string) =>
+    page.locator(`[data-testid="open-in-orca"][data-terminal="${handle}"]`);
+
+  await open(page, baseUrl, "");
+  await expect(home).toBeVisible();
+  // Each agent of the snapshot has its handle and live flag.
+  await expect
+    .poll(async () => {
+      const snapshot = await (await fetch(`${baseUrl}/api/snapshot`)).json();
+      const agents = Array.isArray(snapshot.runs) ? snapshot.runs[0]?.agents : null;
+      return Array.isArray(agents)
+        ? agents.map((agent: { terminal: string; live: boolean; running: boolean }) => [
+            agent.terminal,
+            agent.live,
+            agent.running,
+          ])
+        : [];
+    })
+    .toEqual(
+      expect.arrayContaining([
+        ["term-chief", true, false],
+        ["term-lead", true, false],
+        ["term-worker", true, false],
+        ["term-gone", false, false],
+        ["structworker_unlisted", false, true],
+      ]),
+    );
+
+  // Home: a button for the live agents, Master Chief too; the released one says why it has none.
+  for (const handle of ["term-chief", "term-lead", "term-worker"])
+    await expect(home.locator(`[data-terminal="${handle}"]`)).toHaveText("Open in Orca");
+  await expect(home.locator('[data-testid="agent"][data-role="Master Chief"]')).toHaveCount(1);
+  const ended = home.locator('[data-testid="agent"][data-live="false"]', {
+    hasText: "ended, not in Orca",
+  });
+  await expect(ended).toHaveCount(1);
+  await expect(ended.getByRole("button")).toHaveCount(0);
+  const running = home.locator('[data-testid="agent"]', {
+    hasText: "running in Orca, open it from its chat tab",
+  });
+  await expect(running).toHaveCount(1);
+  await expect(running).toContainText("validator");
+  await expect(running).toContainText("hub-run-page");
+  await expect(running.getByRole("button")).toHaveCount(0);
+  await expect(home.getByTestId("open-in-orca")).toHaveCount(3);
+
+  // One click, one `terminal switch` with the live handle: nothing else is run.
+  expect(switchCalls(state)).toEqual([]);
+  await button("term-worker").click();
+  await expect.poll(() => switchCalls(state)).toEqual(["terminal switch --terminal term-worker"]);
+  expect(readFileSync(join(state, "orca.log"), "utf8")).not.toContain("terminal send");
+
+  // The run page shows the same.
+  await open(page, baseUrl, `run/${run}`);
+  await expect(page.getByTestId("open-in-orca")).toHaveCount(3);
+  await expect(page.getByTestId("orca-ended")).toHaveText("ended, not in Orca");
+  await expect(page.getByTestId("orca-running")).toHaveText(
+    "running in Orca, open it from its chat tab",
+  );
+  await button("term-chief").click();
+  await expect
+    .poll(() => switchCalls(state))
+    .toEqual(["terminal switch --terminal term-worker", "terminal switch --terminal term-chief"]);
+});
+
+test("ARK-284-AC2 a failing Orca leaves the button usable and says why, and a closed run has no button", async ({
+  page,
+}) => {
+  isolate();
+  const run = runId("ARK-832");
+  writeRun({ project: "p", run, ticket: { id: "ARK-832", title: "Failing" }, phase: "building" });
+  const closed = runId("ARK-833");
+  writeRun({
+    project: "p",
+    run: closed,
+    ticket: { id: "ARK-833", title: "Done" },
+    phase: "closed",
+  });
+  const state = installFakeTools({ orca: orcaAnswersFor(run) });
+  const baseUrl = await launch();
+  await open(page, baseUrl, `run/${run}`);
+  const worker = page.locator('[data-testid="open-in-orca"][data-terminal="term-worker"]');
+  await expect(worker).toBeVisible();
+
+  writeFakeToolState(state, { orca: orcaAnswersFor(run), orcaSwitchFails: true });
+  await worker.click();
+  await expect(worker.locator("xpath=following-sibling::*[1]")).toHaveText("Orca did not answer");
+  await expect(worker).toBeEnabled();
+  expect(switchCalls(state)).toHaveLength(1);
+
+  // A closed run has no agent in Orca: no button, and the banner says so.
+  await open(page, baseUrl, `run/${closed}`);
+  await expect(page.getByTestId("closed-banner")).toContainText("no agents in Orca");
+  await expect(page.getByTestId("open-in-orca")).toHaveCount(0);
+});
+
+test("ARK-284-AC3 a closed run opens from its Backlog row and from its Map node, and both lead to the newest run", async ({
+  page,
+}) => {
+  isolate();
+  const ticket = (id: string) => ({ id, title: `Ticket ${id}` });
+  for (const id of ["ARK-841", "ARK-842"])
+    writeBacklogTicket({ project: "p", id, title: `Ticket ${id}`, status: "ready" });
+  // ARK-841: a closed run and a newer open one. ARK-842: one closed run only.
+  const older = runId("ARK-841", 1);
+  const newer = runId("ARK-841", 2);
+  const only = runId("ARK-842");
+  writeRun({
+    project: "p",
+    run: older,
+    ticket: ticket("ARK-841"),
+    phase: "closed",
+    startedAt: ago(20_000),
+  });
+  writeRun({
+    project: "p",
+    run: newer,
+    ticket: ticket("ARK-841"),
+    phase: "building",
+    startedAt: ago(5_000),
+  });
+  writeRun({
+    project: "p",
+    run: only,
+    ticket: ticket("ARK-842"),
+    phase: "closed",
+    startedAt: ago(9_000),
+  });
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  // Backlog: the runs of a ticket, newest first; a link opens the closed one.
+  await open(page, baseUrl, "backlog");
+  const row = page.locator('[data-testid="ticket-row"][data-ticket="ARK-841"]');
+  await expect(row.getByTestId("ticket-run")).toHaveCount(2);
+  await expect(row.getByTestId("ticket-run")).toHaveText([newer, older]);
+  await row.locator(`[data-testid="ticket-run"][data-run="${older}"]`).click();
+  await expect(page.locator("main h1")).toContainText("ARK-841");
+  await expect(page.getByTestId("closed-banner")).toContainText(older);
+  await expect(page.getByTestId("timeline-entry").first()).toBeVisible();
+
+  // Map: the node of a ticket with a run links to its newest run; a closed one opens too.
+  await open(page, baseUrl, "map");
+  await expect(page.locator('[data-testid="map-node"][data-ticket="ARK-841"] a')).toHaveAttribute(
+    "href",
+    `#/run/${newer}`,
+  );
+  await page.getByTestId("map-finished").click();
+  const node = page.locator('[data-testid="map-node"][data-ticket="ARK-842"] a');
+  await expect(node).toHaveAttribute("href", `#/run/${only}`);
+  await node.click();
+  await expect(page.locator("main h1")).toContainText("ARK-842");
+  await expect(page.getByTestId("closed-banner")).toContainText(only);
+  // The open run still opens, with no closed banner.
+  await open(page, baseUrl, `run/${newer}`);
+  await expect(page.locator("main h1")).toContainText("ARK-841");
+  await expect(page.getByTestId("closed-banner")).toHaveCount(0);
+});
+
+test("ARK-284-AC4 the run page lists each decision of events.ndjson oldest first with its time, and skips a damaged line", async ({
+  page,
+}) => {
+  isolate();
+  const run = runId("ARK-851");
+  const started = ago(7_200);
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-851", title: "Decisions" },
+    phase: "closed",
+    startedAt: started,
+  });
+  const url = "https://github.com/example/repo/pull/851";
+  writeEventLog(
+    directory,
+    started,
+    [
+      {
+        after: 0,
+        type: "run.started",
+        data: {
+          run,
+          project: "p",
+          ticket: { id: "ARK-851", title: "Decisions" },
+          criteria: ["ARK-851-AC1"],
+          round_budget: 3,
+        },
+      },
+      {
+        after: 60,
+        type: "evaluation.recorded",
+        data: { blockers: [], risks: ["r1", "r2"], surfaces: ["ui"] },
+      },
+      {
+        after: 120,
+        type: "strategy.recorded",
+        data: { count: 2, recommended: "S2", cards: ["S1", "S2"] },
+      },
+      { after: 180, type: "gate.answered", data: { gate: "strategy", answer: "S2", by: "human" } },
+      {
+        after: 240,
+        type: "plan.checked",
+        data: { valid: true, steps: [{ id: "a" }, { id: "b" }] },
+      },
+      {
+        after: 300,
+        type: "step.started",
+        data: { step: "a", role: "implementer", repo: ".", round: 1 },
+      },
+      { after: 600, type: "step.finished", data: { step: "a", outcome: "succeeded" } },
+      {
+        after: 700,
+        type: "test.completed",
+        data: {
+          passed: false,
+          criteria: {
+            "ARK-851-AC1": "passing",
+            "ARK-851-AC2": "passing",
+            "ARK-851-AC3": "failing",
+          },
+        },
+      },
+      { after: 800, type: "escalation.requested", data: { reason: "the fixture needs a human" } },
+      { after: 900, type: "merge_request.opened", data: { repo: ".", url, number: 851 } },
+      { after: 1000, type: "run.closed", data: { outcome: "handed_off" } },
+    ],
+    [{ before: 5, text: '{"seq": 99, "time": "broken' }],
+  );
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, `run/${run}`);
+
+  const entries = page.getByTestId("timeline-entry");
+  await expect(page.getByTestId("timeline")).toBeVisible();
+  const expected = [
+    [60, "evaluation.recorded"],
+    [120, "strategy.recorded"],
+    [180, "gate.answered"],
+    [240, "plan.checked"],
+    [700, "test.completed"],
+    [800, "escalation.requested"],
+    [900, "merge_request.opened"],
+    [1000, "run.closed"],
+  ] as const;
+  // One entry per decision type, oldest first; the step events and the damaged line are not there.
+  await expect(entries).toHaveCount(expected.length);
+  expect(
+    await entries.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-type"))),
+  ).toEqual(expected.map(([, type]) => type));
+  // Each entry shows its time (the event's own).
+  expect(
+    await entries
+      .locator("time")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("datetime"))),
+  ).toEqual(expected.map(([after]) => new Date(started.getTime() + after * 1000).toISOString()));
+  const entry = (type: string) =>
+    page.locator(`[data-testid="timeline-entry"][data-type="${type}"]`);
+  await expect(entry("gate.answered")).toContainText("strategy gate: S2");
+  await expect(entry("strategy.recorded")).toContainText("2 cards, recommended S2");
+  await expect(entry("plan.checked")).toContainText("2 steps");
+  await expect(entry("evaluation.recorded")).toContainText("2 risks");
+  await expect(entry("escalation.requested")).toContainText("the fixture needs a human");
+  await expect(entry("test.completed").getByTestId("timeline-counts")).toContainText("1 fail");
+  await expect(entry("test.completed").getByTestId("timeline-counts")).toContainText("2 pass");
+  await expect(entry("merge_request.opened").getByRole("link")).toHaveAttribute("href", url);
+  await expect(entry("run.closed")).toContainText("handed_off");
+});
+
+const toolNames: Record<SessionHarness, string> = { omp: "bash", claude: "Bash", codex: "shell" };
+
+/** What a transcript of `transcriptText(harness)` shows: messages, 2 tool calls, folded thinking. */
+async function expectTranscript(page: Page, harness: SessionHarness): Promise<void> {
+  const text = transcriptTexts(harness);
+  const entries = page.getByTestId("transcript-entry");
+  await expect(entries).toHaveCount(5);
+  expect(
+    await entries.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-kind"))),
+  ).toEqual(["message", "thinking", "message", "tool", "tool"]);
+
+  // Messages: role and time.
+  const messages = page.locator('[data-testid="transcript-entry"][data-kind="message"]');
+  await expect(messages.nth(0).locator(".role")).toHaveText("user");
+  await expect(messages.nth(0)).toContainText(text.user);
+  await expect(messages.nth(1).locator(".role")).toHaveText("assistant");
+  await expect(messages.nth(1)).toContainText(text.assistant);
+  for (const index of [0, 1])
+    await expect(messages.nth(index).locator("time")).toHaveAttribute(
+      "datetime",
+      /^\d{4}-\d\d-\d\dT/,
+    );
+
+  // Tool calls: name, arguments, ok or error, the first line of the result, never the rest.
+  const tools = page.getByTestId("transcript-tool");
+  await expect(tools).toHaveCount(2);
+  await expect(tools.nth(0)).toHaveAttribute("data-status", "ok");
+  await expect(tools.nth(0).locator(".name")).toHaveText(toolNames[harness]);
+  await expect(tools.nth(0).locator(".args")).toContainText(text.command);
+  await expect(tools.nth(0).locator(".pill")).toHaveText("ok");
+  await expect(tools.nth(0).getByTestId("tool-result")).toHaveText(text.okFirstLine);
+  await expect(tools.nth(1)).toHaveAttribute("data-status", "error");
+  await expect(tools.nth(1).locator(".pill")).toHaveText("error");
+  await expect(tools.nth(1).getByTestId("tool-result")).toHaveText(text.failFirstLine);
+  await expect(page.locator("body")).not.toContainText(text.tail);
+  await expect(page.locator("body")).not.toContainText("second line");
+
+  // Thinking is folded until a click.
+  const thinking = page.getByTestId("thinking");
+  await expect(thinking).toHaveJSProperty("open", false);
+  await expect(thinking.locator("p")).toBeHidden();
+  await thinking.locator("summary").click();
+  await expect(thinking).toHaveJSProperty("open", true);
+  await expect(thinking.locator("p")).toHaveText(text.thinking);
+  await expect(page.getByTestId("load-more")).toBeDisabled();
+}
+
+test("ARK-284-AC6 a DAG node, the run lead and an unassigned file open their transcript for an omp, a Claude and a Codex session file", async ({
+  page,
+}) => {
+  const { sessions } = isolate();
+  const run = runId("ARK-871");
+  const started = ago(7_200);
+  const at = (seconds: number) => new Date(started.getTime() + seconds * 1000);
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-871", title: "Transcripts" },
+    phase: "closed",
+    startedAt: started,
+    steps: [
+      {
+        id: "omp-step",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 60,
+        finishedAfter: 600,
+      },
+    ],
+  });
+  const cwd = join(directory, "workspace");
+  // The step's file starts inside its window, the lead's before the first step, the third after the window.
+  writeSessionFile(sessions, "step.jsonl", transcriptText("omp", { cwd, start: at(100) }));
+  writeSessionFile(
+    process.env.ARK_CLAUDE_SESSIONS as string,
+    "lead.jsonl",
+    transcriptText("claude", { cwd, start: at(10) }),
+  );
+  writeSessionFile(
+    process.env.ARK_CODEX_SESSIONS as string,
+    "loose.jsonl",
+    transcriptText("codex", { cwd, start: at(900) }),
+  );
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, `run/${run}`);
+  await page.locator('[data-testid="step-node"][data-step="omp-step"] a').click();
+  await expect(page.locator("main h1")).toHaveText("omp-step");
+  await expectTranscript(page, "omp");
+
+  await open(page, baseUrl, `run/${run}`);
+  await page.getByTestId("run-lead-link").click();
+  await expect(page.locator("main h1")).toHaveText("Run lead");
+  await expectTranscript(page, "claude");
+
+  await open(page, baseUrl, `run/${run}`);
+  await expect(page.getByTestId("unassigned-file")).toHaveCount(1);
+  await page.getByTestId("unassigned-file").getByRole("link").click();
+  await expectTranscript(page, "codex");
+});
+
+test("ARK-284-AC7 a transcript shows 200 entries a page and Load more adds the next page until the end of the file", async ({
+  page,
+}) => {
+  const { sessions } = isolate();
+  const run = runId("ARK-872");
+  const started = ago(7_200);
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-872", title: "Paging" },
+    phase: "closed",
+    startedAt: started,
+  });
+  writeSessionFile(
+    sessions,
+    "long.jsonl",
+    ompMessagesText(join(directory, "workspace"), started, 450),
+  );
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, `run/${run}`);
+  await page.getByTestId("run-lead-link").click();
+  const entries = page.getByTestId("transcript-entry");
+  const more = page.getByTestId("load-more");
+  await expect(entries).toHaveCount(200);
+  await expect(more).toBeEnabled();
+  await more.click();
+  await expect(entries).toHaveCount(400);
+  await more.click();
+  await expect(entries).toHaveCount(450);
+  await expect(more).toBeDisabled();
+  await expect(page.getByText("End of file · 450 entries")).toBeVisible();
+  await expect(entries.last()).toContainText("m449");
+});
+
+/** One GET with the path sent as written: a browser or `fetch` would normalize `../` away. */
+function rawGet(baseUrl: string, path: string): Promise<{ status: number; body: string }> {
+  const { port } = new URL(baseUrl);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ host: "127.0.0.1", port: Number(port), path }, (response) => {
+      let body = "";
+      response.on("data", (chunk) => (body += chunk));
+      response.on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+test("ARK-284-AC8 the run page links the run files that exist and shows them as text, a missing file has no link, and a path outside the run folder answers 404", async ({
+  page,
+}) => {
+  isolate();
+  const run = runId("ARK-881");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-881", title: "Run files" },
+    phase: "closed",
+  });
+  writeFileSync(join(directory, "plan.md"), "# Plan\n\nPLAN-BODY <b>not markup</b>\n");
+  mkdirSync(join(directory, "findings"));
+  writeFileSync(join(directory, "findings", "note.md"), "FINDING-BODY\n");
+  // Files outside the run folder, reached through symlinks inside it.
+  const outside = tempDirectory("ark-outside-");
+  writeFileSync(join(outside, "secret.txt"), "TOPSECRET\n");
+  symlinkSync(join(outside, "secret.txt"), join(directory, "findings", "leak.md"));
+  symlinkSync(outside, join(directory, "results"));
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, `run/${run}`);
+  const links = page.getByTestId("run-file-link");
+  await expect(links.first()).toBeVisible();
+  // Present files have a link; strategies.md, retro.md and both symlinks that leave the folder have none.
+  expect(
+    await links.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-path"))),
+  ).toEqual(["ticket.md", "plan.md", "findings/note.md"]);
+  await links.filter({ hasText: /^plan\.md$/ }).click();
+  await expect(page.getByTestId("run-file-text")).toContainText("PLAN-BODY");
+  // Text, not markup.
+  await expect(page.getByTestId("run-file-text")).toContainText("<b>not markup</b>");
+  await expect(page.locator("pre b")).toHaveCount(0);
+  await open(page, baseUrl, `run/${run}`);
+  await links.filter({ hasText: "note.md" }).click();
+  await expect(page.getByTestId("run-file-text")).toContainText("FINDING-BODY");
+
+  // A path that leaves the run folder shows no file.
+  await page.goto(`${baseUrl}/#/run/${run}/file/${encodeURIComponent("../ticket.md")}`);
+  await expect(page.getByTestId("file-missing")).toBeVisible();
+
+  // The server: the control answers 200, every path out of the folder or to a missing file 404.
+  const file = (path: string) => `/api/run/${run}/file?path=${encodeURIComponent(path)}`;
+  expect(await rawGet(baseUrl, file("plan.md"))).toMatchObject({ status: 200 });
+  const refused = [
+    file("../ticket.md"),
+    file("../../secret.txt"),
+    file("findings/../plan.md"),
+    file("./plan.md"),
+    file("/etc/passwd"),
+    file(join(outside, "secret.txt")),
+    file("findings/leak.md"),
+    file("results/secret.txt"),
+    file("strategies.md"),
+    file("retro.md"),
+    `/api/run/${run}/file?path=..%2F..%2Fsecret.txt`,
+    `/api/run/${run}/../${run}/file?path=../ticket.md`,
+    `/api/run/${run}/file/../../../etc/passwd`,
+    `/api/run/..%2F${run}/file?path=plan.md`,
+    `/api/run/${run}/file`,
+  ];
+  for (const path of refused) {
+    const answer = await rawGet(baseUrl, path);
+    expect(answer.status, path).toBe(404);
+    expect(answer.body, path).not.toContain("TOPSECRET");
+  }
 });

@@ -4,6 +4,7 @@ import { parseClaudeSession } from "../cli/usage/claude.ts";
 import { parseCodexSession, readCodexText } from "../cli/usage/codex.ts";
 import { parseOmpSession } from "../cli/usage/omp.ts";
 import type { SessionUsage } from "../cli/usage/index.ts";
+import { readTranscriptPage } from "./transcript.ts";
 import type { Harness, WorkerReply, WorkerRequest } from "./usage.ts";
 
 const parsers = {
@@ -12,8 +13,11 @@ const parsers = {
   codex: parseCodexSession,
 } satisfies Record<Harness, (file: string) => SessionUsage>;
 
-/** First `cwd` in the first 64 KiB of a session file; every format writes it near the top. */
-function readCwd(file: string): string | null {
+/**
+ * First `cwd` and first timestamp in the first 64 KiB of a session file; every format writes both
+ * near the top. The timestamp is when the session began.
+ */
+function readHead(file: string): { cwd: string | null; start: number | null } {
   let head: string;
   if (file.endsWith(".zst")) {
     head = readCodexText(file).slice(0, 65536);
@@ -26,8 +30,10 @@ function readCwd(file: string): string | null {
       closeSync(descriptor);
     }
   }
-  const match = head.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
-  return match ? JSON.parse(`"${match[1]}"`) : null;
+  const cwd = head.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+  const time = head.match(/"timestamp":"([^"]+)"/);
+  const start = time ? Date.parse(time[1]) : Number.NaN;
+  return { cwd: cwd ? JSON.parse(`"${cwd[1]}"`) : null, start: Number.isNaN(start) ? null : start };
 }
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
@@ -35,7 +41,12 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   let reply: WorkerReply;
   try {
     if (request.kind === "head") {
-      reply = { id: request.id, cwd: readCwd(request.file) };
+      reply = { id: request.id, ...readHead(request.file) };
+    } else if (request.kind === "transcript") {
+      reply = {
+        id: request.id,
+        page: readTranscriptPage(request.file, request.harness, request.cursor ?? 0),
+      };
     } else {
       const session = parsers[request.harness](request.file);
       reply = {

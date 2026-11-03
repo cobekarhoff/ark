@@ -50,6 +50,12 @@ export type Agent = {
   step: string | null;
   /** Harness and model from the plan step or, for a run lead and Master Chief, `roles.chief` of `ark.yml`: shown when Orca reports none, labelled when they differ. */
   planned: { harness: string; model: string; source: "plan" | "configured" } | null;
+  /** The Orca terminal handle, or null when Orca named none. */
+  terminal: string | null;
+  /** True when Orca lists the terminal as connected: only then can the hub focus it in Orca. */
+  live: boolean;
+  /** True when Orca's worker-list shows the agent working but `terminal list` does not list its terminal (a `structworker_*` agent session): the page says to open it from its chat tab. Never true with `live`. */
+  running: boolean;
 };
 
 export type MergeRequestView = {
@@ -113,6 +119,8 @@ export type TicketRunView = {
   waiting: boolean;
   /** Closed run: from `metrics.json`. Open run: from the usage index. */
   cost_usd: number | null;
+  /** Every run of the ticket, newest first: names and phases only, so a long history stays small. */
+  all: { run: string; phase: string }[];
 };
 
 export type Snapshot = {
@@ -124,3 +132,65 @@ export type Snapshot = {
   tickets: TicketView[] | "unknown";
   ticket_runs: TicketRunView[] | "unknown";
 };
+
+/** One decision of a run, from `events.ndjson`: `why` is a plain sentence made from the event payload. */
+export type TimelineEntry = {
+  time: string;
+  type: string;
+  why: string;
+  /** Test counts of `test.completed`; null for every other type. */
+  counts: { pass: number; fail: number; missing: number } | null;
+  /** The merge request of `merge_request.opened`; null for every other type. */
+  url: string | null;
+};
+
+/** Who a session file belongs to: a plan step, the run lead, or no one (shown, never hidden). */
+export type SessionOwner =
+  | { kind: "step"; step: string }
+  | { kind: "lead" }
+  | { kind: "unassigned" };
+
+export type SessionFile = {
+  /** The session file path: the transcript request names it, the server checks it belongs to the run. */
+  file: string;
+  harness: "omp" | "claude" | "codex";
+  /** First timestamp of the file (ISO), or null when the head holds none. */
+  start: string | null;
+  /** Last write (ISO). */
+  end: string;
+  size: number;
+  cwd: string;
+  owner: SessionOwner;
+};
+
+/** What `GET /api/run/<run>` answers: any run, open or closed, read on request and never part of the snapshot. */
+export type RunDetail = {
+  view: RunView;
+  closed: boolean;
+  outcome: string | null;
+  /** Time of `run.closed`, or null for an open run. */
+  closed_at: string | null;
+  timeline: TimelineEntry[];
+  /** Run files that exist, relative to the run folder: plan.md, strategies.md, retro.md, findings/*, results/*. */
+  files: string[];
+  /** Session files under the run folder, each mapped whole to a step, the run lead or unassigned. */
+  sessions: SessionFile[];
+  /** False until the usage index has read the session roots once: an empty list then means unknown. */
+  sessions_ready: boolean;
+};
+
+export type TranscriptEntry =
+  | { kind: "message"; role: string; time: string | null; text: string }
+  | { kind: "thinking"; time: string | null; text: string }
+  | {
+      kind: "tool";
+      time: string | null;
+      name: string;
+      args: string;
+      status: "ok" | "error" | "unknown";
+      /** The first line of the result, cut to 300 characters. A full result never leaves the worker. */
+      result: string;
+    };
+
+/** One page of a transcript: at most 200 entries. `next` is the byte offset of the next page, or null at the end. */
+export type TranscriptPage = { entries: TranscriptEntry[]; next: number | null; size: number };

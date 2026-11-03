@@ -1,16 +1,27 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { isInside } from "../cli/usage/index.ts";
 import type { StepWindow } from "../cli/retro.ts";
+import type { SessionFile, TranscriptPage } from "./types.ts";
 
 export type Harness = "omp" | "claude" | "codex";
 export type CompactMessage = { time: number; cost: number | null };
-export type WorkerRequest = { id: number; kind: "head" | "parse"; file: string; harness: Harness };
+export type WorkerRequest = {
+  id: number;
+  kind: "head" | "parse" | "transcript";
+  file: string;
+  harness: Harness;
+  /** Byte offset of the first line of a transcript page. */
+  cursor?: number;
+};
 export type WorkerReply = {
   id: number;
   cwd?: string | null;
+  /** First timestamp of the file head (ms), or null when the head holds none. */
+  start?: number | null;
   messages?: CompactMessage[];
+  page?: TranscriptPage;
   error?: string;
 };
 
@@ -19,6 +30,11 @@ export type RunCost = { total: number | null; steps: Record<string, number | nul
 type Entry = {
   signature: string;
   cwd: string | null;
+  /** First timestamp of the file (ms): when its session began. Null until the head is read. */
+  start: number | null;
+  size: number;
+  /** Last write (ms): the end of the session. */
+  mtime: number;
   harness: Harness;
   /** Null until the file is parsed. Only files of open runs are ever parsed. */
   messages: CompactMessage[] | null;
@@ -118,16 +134,28 @@ export class UsageIndex {
       if (!existsSync(root)) continue;
       for await (const relative of new Bun.Glob(pattern).scan({ cwd: root, dot: true })) {
         const file = join(root, relative);
-        let signature: string;
+        let stat: Stats;
         try {
-          const stat = statSync(file);
-          signature = `${stat.size}:${stat.mtimeMs}`;
+          stat = statSync(file);
         } catch {
           continue;
         }
+        const signature = `${stat.size}:${stat.mtimeMs}`;
         seen.add(file);
         if (this.#entries.get(file)?.signature === signature) continue;
-        changed.push([file, { signature, cwd: null, harness, messages: null, failed: false }]);
+        changed.push([
+          file,
+          {
+            signature,
+            cwd: null,
+            start: null,
+            size: stat.size,
+            mtime: stat.mtimeMs,
+            harness,
+            messages: null,
+            failed: false,
+          },
+        ]);
       }
     }
     let didChange = changed.length > 0;
@@ -141,6 +169,7 @@ export class UsageIndex {
       changed.map(async ([file, entry]) => {
         const reply = await this.#ask({ kind: "head", file, harness: entry.harness });
         entry.cwd = reply.cwd ?? null;
+        entry.start = reply.start ?? null;
         entry.failed = reply.error !== undefined;
         this.#entries.set(file, entry);
       }),
@@ -207,13 +236,78 @@ export class UsageIndex {
   }
 
   /**
+   * Every session file whose cwd is inside the run folder, each mapped whole to one owner, by these
+   * rules in this order (never message by message, unlike `runCost`):
+   * 1. a step, when the file starts inside that step's window and its cwd is in that step's worktree
+   *    (of two overlapping windows, the later one);
+   * 2. the run lead: the one file that starts before the first step and was last written at or
+   *    after it (the earliest-starting if several do). While no step has started there is no first
+   *    step: the lead is then the earliest-starting file last written at or after the run's first event;
+   * 3. otherwise unassigned.
+   * A file with no timestamp in its head cannot start inside a window: it is unassigned.
+   */
+  sessionsOf(directory: string, windows: StepWindow[], runStarted: number): SessionFile[] {
+    const parents = parentsOf(directory);
+    const firstStep = Math.min(...windows.map((window) => window.start));
+    const sessions: SessionFile[] = [];
+    for (const [file, entry] of this.#entries) {
+      const cwd = entry.cwd;
+      if (cwd === null || !parents.some((parent) => isInside(cwd, parent))) continue;
+      const start = entry.start;
+      const window =
+        start === null
+          ? undefined
+          : windows.findLast(
+              (candidate) =>
+                start >= candidate.start &&
+                start <= (candidate.end ?? Infinity) &&
+                parents.some((parent) => isInside(cwd, join(parent, "workspace", candidate.repo))),
+            );
+      sessions.push({
+        file,
+        harness: entry.harness,
+        start: start === null ? null : new Date(start).toISOString(),
+        end: new Date(entry.mtime).toISOString(),
+        size: entry.size,
+        cwd,
+        owner: window ? { kind: "step", step: window.id } : { kind: "unassigned" },
+      });
+    }
+    const leadFrom = windows.length > 0 ? firstStep : runStarted;
+    const lead = sessions
+      .filter(
+        (session) =>
+          session.owner.kind === "unassigned" &&
+          session.start !== null &&
+          (windows.length === 0 || Date.parse(session.start) < firstStep) &&
+          Date.parse(session.end) >= leadFrom,
+      )
+      .sort((left, right) => left.start!.localeCompare(right.start!))[0];
+    if (lead) lead.owner = { kind: "lead" };
+    return sessions.sort((left, right) =>
+      (left.start ?? "9999").localeCompare(right.start ?? "9999"),
+    );
+  }
+
+  /**
+   * One page of a session file, read in the usage worker thread (never in the server's event loop).
+   * It uses its own worker slot, so it never waits behind the cost parse of an open run. Rejects when
+   * the worker fails, crashes or does not answer in time.
+   */
+  async transcript(file: string, harness: Harness, cursor: number): Promise<TranscriptPage> {
+    const reply = await this.#ask({ kind: "transcript", file, harness, cursor }, workerCount);
+    if (reply.error !== undefined || !reply.page) throw new Error(reply.error ?? "no page");
+    return reply.page;
+  }
+
+  /**
    * Sends one request to the worker of its slot. It always resolves: a worker that errors, closes,
    * sends an unreadable message or stays silent past the timeout is dropped (the next request
    * makes a new one) and every request it held resolves with `error`, so the caller marks that file failed.
    */
-  #ask(request: Omit<WorkerRequest, "id">): Promise<WorkerReply> {
+  #ask(request: Omit<WorkerRequest, "id">, slot?: number): Promise<WorkerReply> {
     const id = this.#nextId++;
-    const slot = id % workerCount;
+    slot ??= id % workerCount;
     const { promise, resolve } = Promise.withResolvers<WorkerReply>();
     const worker = this.#workerOf(slot);
     const timer = setTimeout(

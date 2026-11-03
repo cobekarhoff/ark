@@ -185,7 +185,7 @@ Starts a new Master Chief for the project with `orca agent launch --surface term
 ```text
 ark ui [--port <number>]
 
-Serves the read-only hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port). One background reader builds a snapshot of the runs, plans, models, MRs, usage cost and backlog; requests read only that snapshot, and the page gets it over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). Views: Home (Needs me, then open runs), Run (plan DAG), Backlog and Map. The hub changes nothing and steers no agent.
+Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port). One background reader builds a snapshot of the runs, plans, models, MRs, usage cost and backlog; the page gets it over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). A closed run, its decisions, files and agent transcripts are read when the page asks, not kept in the snapshot. Views: Home (Needs me, then open runs), Run (any run: plan DAG, decisions, files, transcripts), Backlog and Map. The hub's one action is POST /api/open-in-orca, which runs orca terminal switch for a live terminal; it sends no text to a terminal, changes no run state and steers no agent.
 ```
 
 ### ui install
