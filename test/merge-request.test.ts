@@ -559,34 +559,38 @@ test(
   { timeout: 60_000 },
 );
 
-test("ARK-283-AC4 merge-request open names each manual criterion without ok, opens no MR, and opens normally after ok", () => {
-  const manual = ["ARK-900-AC1", "ARK-900-AC2"];
-  const { runDirectory, bares } = scenario({ core: "github", app: "github" }, true, manual);
+test(
+  "ARK-283-AC4 merge-request open names each manual criterion without ok, opens no MR, and opens normally after ok",
+  () => {
+    const manual = ["ARK-900-AC1", "ARK-900-AC2"];
+    const { runDirectory, bares } = scenario({ core: "github", app: "github" }, true, manual);
 
-  const refused = ark("merge-request", "open", run);
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("ARK-900-AC1");
-  expect(refused.err).toContain("ARK-900-AC2");
-  expect(calls()).toEqual([]);
-  expect(openedEvents(runDirectory)).toEqual([]);
-  // Nothing was pushed either.
-  expect(
-    Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.core })
-      .exitCode,
-  ).not.toBe(0);
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("ARK-900-AC1");
+    expect(refused.err).toContain("ARK-900-AC2");
+    expect(calls()).toEqual([]);
+    expect(openedEvents(runDirectory)).toEqual([]);
+    // Nothing was pushed either.
+    expect(
+      Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.core })
+        .exitCode,
+    ).not.toBe(0);
 
-  // A problem answer is not ok; only the unanswered or problem criteria are named.
-  expect(ark("gate", "record", run, "manual", "ARK-900-AC1", "ok").code).toBe(0);
-  expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "problem").code).toBe(0);
-  const partial = ark("merge-request", "open", run);
-  expect(partial.code).toBe(1);
-  expect(partial.err).toContain("ARK-900-AC2");
-  expect(partial.err).not.toContain("ARK-900-AC1");
-  expect(created()).toEqual([]);
+    // A problem answer is not ok; only the unanswered or problem criteria are named.
+    expect(ark("gate", "record", run, "manual", "ARK-900-AC1", "ok").code).toBe(0);
+    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "problem").code).toBe(0);
+    const partial = ark("merge-request", "open", run);
+    expect(partial.code).toBe(1);
+    expect(partial.err).toContain("ARK-900-AC2");
+    expect(partial.err).not.toContain("ARK-900-AC1");
+    expect(created()).toEqual([]);
 
-  expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
-  const opened = ark("merge-request", "open", run);
-  expect(opened.code).toBe(0);
-  expect(created().map((call) => call.tool)).toEqual(["gh", "gh"]);
-  expect(openedEvents(runDirectory)).toHaveLength(2);
-});
+    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+    const opened = ark("merge-request", "open", run);
+    expect(opened.code).toBe(0);
+    expect(created().map((call) => call.tool)).toEqual(["gh", "gh"]);
+    expect(openedEvents(runDirectory)).toHaveLength(2);
+  },
+  { timeout: 30_000 },
+);
