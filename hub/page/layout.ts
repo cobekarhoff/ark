@@ -38,3 +38,11 @@ export function edgePath(x1: number, y1: number, x2: number, y2: number): string
   const middle = (x1 + x2) / 2;
   return `M${x1},${y1} C${middle},${y1} ${middle},${y2} ${x2},${y2}`;
 }
+
+/**
+ * Path for an edge that skips columns: it leaves the box, rises into the lane above every box, runs
+ * along it and drops into the target, so it never passes behind a box of a column between.
+ */
+export function detourPath(x1: number, y1: number, x2: number, y2: number, lane: number): string {
+  return `M${x1},${y1} C${x1 + 30},${y1} ${x1 + 30},${lane} ${x1 + 60},${lane} L${x2 - 60},${lane} C${x2 - 30},${lane} ${x2 - 30},${y2} ${x2},${y2}`;
+}

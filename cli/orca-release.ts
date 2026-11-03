@@ -1,4 +1,4 @@
-import { execJson } from "./hub/exec.ts";
+import { execJson } from "./exec.ts";
 
 type Worker = { dispatchId: string; state: string; terminalState: string };
 

@@ -1,3 +1,4 @@
+import { Component, type ReactNode } from "react";
 import { Backlog } from "./Backlog.tsx";
 import { Home } from "./Home.tsx";
 import { MapView } from "./Map.tsx";
@@ -44,7 +45,7 @@ function Shell() {
       <main id="main" tabIndex={-1}>
         {route.view === "home" && <Home />}
         {route.view === "run" && <Run run={route.run} />}
-        {route.view === "backlog" && <Backlog />}
+        {route.view === "backlog" && <Backlog focus={route.arg} />}
         {route.view === "map" && <MapView />}
       </main>
     </>
@@ -57,8 +58,41 @@ function skipTo(event: React.MouseEvent) {
   document.getElementById("main")?.focus();
 }
 
-export const App = () => (
-  <LiveProvider>
-    <Shell />
-  </LiveProvider>
-);
+/**
+ * A crash in a view must not leave a blank page: it shows the error and a way out. The error clears
+ * when the hash changes, so a bad link never traps the tab.
+ */
+class Boundary extends Component<
+  { resetKey: string; children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError = (error: Error) => ({ error });
+  componentDidUpdate(previous: { resetKey: string }) {
+    if (this.state.error && previous.resetKey !== this.props.resetKey)
+      this.setState({ error: null });
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <main role="alert">
+        <h1>This page failed</h1>
+        <p className="mut">
+          {this.state.error.message}. <button onClick={() => location.reload()}>Reload</button>{" "}
+          <a href="#/">Home</a>
+        </p>
+      </main>
+    );
+  }
+}
+
+export function App() {
+  const hash = useHash();
+  return (
+    <Boundary resetKey={hash}>
+      <LiveProvider>
+        <Shell />
+      </LiveProvider>
+    </Boundary>
+  );
+}

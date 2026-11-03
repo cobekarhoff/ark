@@ -111,6 +111,11 @@ export function createSnapshotReader() {
       const cost = costOf(run, false);
       const statusOf = (id: string): StepStatus =>
         state.steps.find((step) => step.id === id)?.status ?? "pending";
+      const startOf = (id: string): string | null => {
+        const start = run.windows.findLast((window) => window.id === id)?.start;
+        return start === undefined ? null : new Date(start).toISOString();
+      };
+      const waiting = slots.orca.value?.waits.get(state.run) ?? [];
       const kind = waitingGate(state);
       if (kind !== "none") {
         const gateKind = kind as GateKind;
@@ -147,12 +152,22 @@ export function createSnapshotReader() {
             needs: step.needs,
             status: statusOf(step.id),
             cost_usd: cost.steps[step.id] ?? null,
+            started_at: startOf(step.id),
+            waiting: waiting.find((wait) => wait.step === step.id) ?? null,
           })) ?? null,
         merge_requests: state.merge_requests.map((request) => {
           const facts = githubFacts.get(request.url);
           return { ...request, state: facts?.state ?? "open", ci: facts?.ci ?? "unknown" };
         }),
-        agents: slots.orca.value ? (slots.orca.value.agents.get(state.run) ?? []) : "unknown",
+        agents: slots.orca.value
+          ? (slots.orca.value.agents.get(state.run) ?? []).map((agent) => {
+              const step = run.plan?.find((candidate) => candidate.id === agent.step);
+              return step
+                ? { ...agent, planned: { harness: step.harness, model: step.model } }
+                : agent;
+            })
+          : "unknown",
+        waiting,
         cost_usd: cost.total,
       };
     });
@@ -169,6 +184,7 @@ export function createSnapshotReader() {
         ticket: run.state.ticket.id,
         run: run.state.run,
         phase: run.state.phase,
+        waiting: !closed && (slots.orca.value?.waits.get(run.state.run)?.length ?? 0) > 0,
         cost_usd: costOf(run, closed).total,
       });
     }
@@ -223,7 +239,10 @@ export function createSnapshotReader() {
       syncWatchers();
       return result;
     },
-    orca: () => read("orca", () => readOrca(openRunsOf().map((run) => run.state.run))),
+    orca: () =>
+      read("orca", () =>
+        readOrca(openRunsOf().map(({ state }) => ({ run: state.run, project: state.project }))),
+      ),
     plannotator: () => read("plannotator", () => readPlannotator()),
     github: () =>
       read("github", async () => {

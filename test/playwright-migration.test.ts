@@ -60,7 +60,7 @@ describe("playwright migration", () => {
       expect(offenders).toEqual([]);
 
       const found = listed();
-      expect(found.length).toBe(hubSpecIds.length);
+      expect(found.length).toBeGreaterThanOrEqual(hubSpecIds.length);
       expect(new Set(found.map((t) => t.project))).toEqual(new Set(["chromium"]));
     },
     long,

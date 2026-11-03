@@ -82,14 +82,26 @@ th {
   color: #8b93a1;
   font-size: 12px;
   padding: 6px 10px;
+  white-space: nowrap;
   border-bottom: 1px solid #2a303b;
 }
 td {
   padding: 8px 10px;
   border-bottom: 1px solid #1f242d;
   vertical-align: top;
-  min-width: 0;
+}
+/* Ids, phases, statuses and costs never break inside a token; only free text does. */
+.nw {
+  white-space: nowrap;
+}
+tr[aria-current="true"] td {
+  background: #1a2233;
+}
+td.wrap {
   overflow-wrap: anywhere;
+}
+.amber {
+  color: #e3b341;
 }
 .needs {
   border: 1px solid #6b5420;
@@ -229,8 +241,11 @@ main {
 .graph .m {
   font-family: ui-monospace, Menlo, monospace;
 }
+.graph .arrow {
+  fill: #7d8799;
+}
 .graph .edge {
-  stroke: #4a5365;
+  stroke: #7d8799;
   fill: none;
   stroke-width: 1.5;
 }
@@ -244,6 +259,19 @@ main {
 }
 .graph .cost {
   font-family: ui-monospace, Menlo, monospace;
+}
+.graph text.tphase {
+  font-size: 11px;
+}
+.graph a {
+  cursor: pointer;
+}
+.graph a:focus-visible {
+  outline: none;
+}
+.graph a:focus-visible .tbox {
+  stroke: #7cb7ff;
+  stroke-width: 3;
 }
 .graph .tbox {
   fill: var(--c);
@@ -264,6 +292,19 @@ main {
 }
 .s-pending {
   --c: #8b93a1;
+}
+.s-waiting {
+  --c: #e3b341;
+}
+button.toggle {
+  background: #222936;
+  border: 1px solid #333b48;
+  color: #d8dce3;
+}
+button.toggle[aria-pressed="true"] {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
 }
 .legend {
   display: flex;
@@ -294,6 +335,12 @@ select:focus-visible,
   }
   button:not(:disabled):hover {
     background: #1858c4;
+  }
+  button.toggle:not([aria-pressed="true"]):hover {
+    background: #2a3242;
+  }
+  .graph a:hover .tbox {
+    fill-opacity: 0.32;
   }
   tbody tr:hover td,
   table tr:hover td {

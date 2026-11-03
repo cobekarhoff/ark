@@ -1,6 +1,6 @@
 // test ids: ticket-row (data-ticket), ticket-select, filter-text, filter-status, copy-button,
 // copy-preview, copy-status. No control here changes a ticket.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Unknown, known } from "./format.tsx";
 import { useLive } from "./store.tsx";
 import type { TicketView } from "../types.ts";
@@ -42,13 +42,21 @@ export function dependencyOrder(selected: string[], tickets: TicketView[]): stri
 
 export const promptFor = (ids: string[]) => `Queue ${ids.join(", ")} in this order.`;
 
-export function Backlog() {
+/** `focus` is the ticket of `#/backlog/<ticket>`: its row is marked and scrolled into view. */
+export function Backlog({ focus }: { focus: string | null }) {
   const { snapshot } = useLive();
   const [text, setText] = useState("");
   const [status, setStatus] = useState("");
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [copied, setCopied] = useState("");
   const tickets = snapshot && known(snapshot.tickets) ? snapshot.tickets : null;
+  const loaded = tickets !== null;
+  useEffect(() => {
+    if (focus && loaded)
+      document
+        .querySelector(`[data-testid="ticket-row"][data-ticket="${CSS.escape(focus)}"]`)
+        ?.scrollIntoView({ block: "center" });
+  }, [focus, loaded]);
   const statuses = useMemo(
     () => [...new Set((tickets ?? []).map((ticket) => ticket.status))].sort(),
     [tickets],
@@ -153,6 +161,7 @@ export function Backlog() {
               key={`${ticket.project}/${ticket.id}`}
               data-testid="ticket-row"
               data-ticket={ticket.id}
+              aria-current={ticket.id === focus ? "true" : undefined}
             >
               <td>
                 <input
@@ -163,14 +172,21 @@ export function Backlog() {
                   onChange={() => toggle(ticket.id)}
                 />
               </td>
-              <td className="id">{ticket.id}</td>
-              <td>{ticket.title}</td>
-              <td>
+              <td className="id nw">{ticket.id}</td>
+              <td className="wrap">{ticket.title}</td>
+              <td className="nw">
                 <span className="pill">{ticket.status}</span>
               </td>
-              <td>{ticket.milestone ?? "—"}</td>
+              <td className="nw">{ticket.milestone ?? "—"}</td>
               <td className="mono">
-                {ticket.depends_on.length === 0 ? "—" : ticket.depends_on.join(", ")}
+                {ticket.depends_on.length === 0
+                  ? "—"
+                  : ticket.depends_on.map((id, index) => (
+                      <span key={id}>
+                        {index > 0 && ", "}
+                        <span className="nw">{id}</span>
+                      </span>
+                    ))}
               </td>
             </tr>
           ))}

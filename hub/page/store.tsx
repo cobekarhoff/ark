@@ -67,16 +67,48 @@ export function Stale({ name }: { name: SourceName }) {
   );
 }
 
+/**
+ * Age of a server timestamp in milliseconds, ticking each second. Like `Stale`, it adds the time
+ * since the page got the snapshot to `generated_at - time` (server clock), so no clock of the
+ * browser is compared with the server's.
+ */
+export function useAge(): (time: string) => number {
+  const { snapshot, receivedAt } = useLive();
+  const now = useSyncExternalStore(subscribeSecond, wholeSecond);
+  return (time) =>
+    Math.max(
+      0,
+      (snapshot ? Date.parse(snapshot.generated_at) : 0) -
+        Date.parse(time) +
+        Math.max(0, now - receivedAt),
+    );
+}
+
 export const sourceNames: SourceName[] = ["ark", "orca", "plannotator", "github", "usage"];
 
 /** Hash routes: client-side, so a view change never reaches the server. */
-export type Route = { view: "home" | "run" | "backlog" | "map"; run: string | null };
+export type Route = {
+  view: "home" | "run" | "backlog" | "map";
+  run: string | null;
+  /** `#/backlog/<ticket>` marks a row; `#/map/finished` shows finished tickets. */
+  arg: string | null;
+};
+
+/** A hash that does not decode (a truncated pasted link) keeps its raw text instead of crashing. */
+const decode = (part: string): string => {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return part;
+  }
+};
 
 export function parseRoute(hash: string): Route {
-  const [, view, run] = hash.split("/");
-  if (view === "run") return { view, run: run ? decodeURIComponent(run) : null };
-  if (view === "backlog" || view === "map") return { view, run: null };
-  return { view: "home", run: null };
+  const [, view, part] = hash.split("/");
+  const arg = part ? decode(part) : null;
+  if (view === "run") return { view, run: arg, arg: null };
+  if (view === "backlog" || view === "map") return { view, run: null, arg };
+  return { view: "home", run: null, arg: null };
 }
 
 const subscribeHash = (notify: () => void) => {

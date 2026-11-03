@@ -26,6 +26,18 @@ export type PlanStepView = {
   needs: string[];
   status: StepStatus;
   cost_usd: number | null;
+  /** When the step started (ISO), or null while it has not started. */
+  started_at: string | null;
+  /** Why the human or the run lead must act before this step goes on, or null. */
+  waiting: Wait | null;
+};
+
+/** Something an open run waits for: a worker's question or a blocked report that nobody has read yet. */
+export type Wait = {
+  /** The plan step that asked, or null when Orca could not tell which step. */
+  step: string | null;
+  reason: string;
+  since: string;
 };
 
 export type Agent = {
@@ -34,6 +46,10 @@ export type Agent = {
   harness: string | null;
   model: string | null;
   title: string;
+  /** The plan step this agent works on, from its Orca task title; null for a lead or Chief. */
+  step: string | null;
+  /** Harness and model of that plan step: shown when Orca reports none, labelled when they differ. */
+  planned: { harness: string; model: string } | null;
 };
 
 export type MergeRequestView = {
@@ -72,6 +88,8 @@ export type RunView = {
   merge_requests: MergeRequestView[];
   /** Live agents of the run, or "unknown" until Orca has answered once. */
   agents: Agent[] | "unknown";
+  /** What the run waits for (empty while Orca is unknown). */
+  waiting: Wait[];
   cost_usd: number | null;
 };
 
@@ -90,6 +108,8 @@ export type TicketRunView = {
   ticket: string;
   run: string;
   phase: string;
+  /** An open run with a question or blocked report nobody has read. */
+  waiting: boolean;
   /** Closed run: from `metrics.json`. Open run: from the usage index. */
   cost_usd: number | null;
 };

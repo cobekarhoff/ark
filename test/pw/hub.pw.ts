@@ -495,7 +495,22 @@ test("ARK-277-AC10 the Map draws one node for each ticket and one edge for each 
   const baseUrl = await launch();
   await open(page, baseUrl, "map");
 
+  // Default: tickets whose newest run is not closed (901, 903) and their direct neighbours (902,
+  // 904), live work first. 905 has no run and no neighbour in a run: hidden until Show finished.
   const nodes = page.getByTestId("map-node");
+  await expect(nodes).toHaveCount(4);
+  await expect(page.locator('[data-testid="map-node"][data-ticket="ARK-905"]')).toHaveCount(0);
+  expect(
+    await nodes.evaluateAll((all) =>
+      all.slice(0, 2).map((node) => node.getAttribute("data-ticket")),
+    ),
+  ).toEqual(["ARK-901", "ARK-903"]);
+  // A node is a link: to the newest run, or to the Backlog row when there is none.
+  const hrefOf = (ticket: string) =>
+    page.locator(`[data-testid="map-node"][data-ticket="${ticket}"] a`).getAttribute("href");
+  expect(await hrefOf("ARK-901")).toBe(`#/run/${encodeURIComponent(runId("ARK-901", 2))}`);
+  expect(await hrefOf("ARK-902")).toBe("#/backlog/ARK-902");
+  await page.getByRole("button", { name: "Show finished" }).click();
   await expect(nodes).toHaveCount(5);
   const expectedPhase: Record<string, string> = {
     "ARK-901": "building",
@@ -592,4 +607,65 @@ test("ARK-277-AC11 a source that stops answering keeps its last good value and s
     Number((await label("orca").textContent())!.match(/as of (\d+) s ago/)![1]);
   const first = await ageOf();
   await expect.poll(ageOf, { timeout: 10_000 }).toBeGreaterThan(first);
+});
+
+// ---------------------------------------------------------------- Regressions of the QE review (F1, F2, F3)
+
+test("ARK-277-AC7 an agent that Orca reports without harness and model shows the plan's, marked planned", async ({
+  page,
+}) => {
+  isolate();
+  const run = runId("ARK-710");
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-710", title: "Agent without harness" },
+    phase: "building",
+    steps: [{ id: "build", role: "validator", harness: "omp", model: "plan/model-x", needs: [] }],
+  });
+  installFakeTools({
+    orca: {
+      terminals: [{ handle: "term-w", connected: true }],
+      runs: [{ id: `orca-${run}`, objective: `Ark run ${run}`, coordinator_handle: null }],
+      workers: [{ taskId: "task-1", state: "running", agentTerminalHandle: "term-w" }],
+      tasks: [{ id: "task-1", title: "build (validator, .)" }],
+    },
+  });
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+
+  const agent = page.locator('[data-testid="agent"][data-role="validator"]');
+  await expect(agent).toContainText("omp (planned)");
+  await expect(agent).toContainText("plan/model-x (planned)");
+});
+
+test("ARK-277-AC9 a file in the tickets folder that is not named like a ticket is not listed", async ({
+  page,
+}) => {
+  isolate();
+  writeBacklogTicket({ project: "p", id: "ARK-930", title: "A ticket", status: "ready" });
+  writeFileSync(
+    join(process.env.ARK_HOME as string, "projects", "p", "tickets", "README.md"),
+    "# Tickets\n\n| id | title |\n",
+  );
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "backlog");
+
+  await expect(page.getByTestId("ticket-row")).toHaveCount(1);
+  await expect(page.getByTestId("ticket-row")).toHaveAttribute("data-ticket", "ARK-930");
+});
+
+test("ARK-277-AC11 a hash that does not decode shows the page and a later hash still works", async ({
+  page,
+}) => {
+  isolate();
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "run/%E0%A4%A");
+
+  await expect(page.getByRole("link", { name: "Home" })).toBeVisible();
+  await expect(page.locator("main")).toContainText("No open run");
+  await page.getByRole("link", { name: "Backlog" }).click();
+  await expect(page.getByRole("heading", { name: "Backlog" })).toBeVisible();
 });
