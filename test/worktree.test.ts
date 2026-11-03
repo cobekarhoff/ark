@@ -9,6 +9,7 @@ import {
   readlinkSync,
   realpathSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -995,6 +996,19 @@ describe("ARK-294 handed_off close keeps branches with commits", () => {
     const closed = closeRun(runId, runDirectory, "handed_off");
     expect(closed.code).toBe(0);
     expect(closed.out).toContain(`kept     a  ${branch}: handed off`);
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
+  });
+
+  test("ARK-294-AC3 a handed_off branch with commits stays when its worktree directory is already gone", () => {
+    const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
+    commitIn(a, "work.txt");
+    rmSync(a, { recursive: true, force: true });
+
+    const closed = closeRun(runId, runDirectory, "handed_off");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(
+      `kept     a  ${branch}: handed off, 1 commit ahead of ${base.slice(0, 8)}\n`,
+    );
     expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
   });
 
