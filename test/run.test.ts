@@ -949,3 +949,156 @@ test("ARK-282-AC3 a failed start at the last round keeps phase building and open
   expect(lastRound(directory)).toBe(3);
   expect(eventLines(directory).filter((line) => line.includes('"gate.'))).toEqual(gatesBefore);
 });
+
+/** A building run in a real git worktree. Its one suite is a real `bun test` file that proves ARK-900-AC1. */
+function worktreeRun(): { runId: string; directory: string; worktree: string } {
+  const workspace = tempGitRepo({
+    "ac.test.ts": `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
+  });
+  writeProject(
+    "demo",
+    validConfig({
+      workspace,
+      suites: [
+        {
+          name: "e2e",
+          level: "e2e",
+          repo: ".",
+          command: "bun test --reporter=junit --reporter-outfile={report} ./ac.test.ts",
+          parser: "bun",
+        },
+      ],
+    }),
+  );
+  const { runId, directory } = startRun();
+  recordEvaluation(directory);
+  writeFileSync(
+    join(directory, "plan.yml"),
+    JSON.stringify({
+      design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
+      summary: {
+        why: "Fixture.",
+        changes: [{ criterion: "ARK-900-AC1", where: "tests", now: "None.", fix: "A test." }],
+      },
+      steps: workspaceSteps.map((step) => ({ ...step, harness: "claude", model: "claude-sonnet" })),
+      test_cases: [
+        {
+          id: "proves-ARK-900-AC1",
+          criterion: "ARK-900-AC1",
+          level: "e2e",
+          given: [],
+          when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+          then: ["it works"],
+          expected: "it works",
+        },
+      ],
+    }),
+  );
+  for (const args of [
+    ["plan", "check", runId],
+    ["gate", "record", runId, "plan", "approve"],
+    ["worktree", "create", runId, "."],
+  ]) {
+    const result = ark(...args);
+    if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.err}`);
+  }
+  const worktree = (
+    JSON.parse(
+      eventLines(directory).find((line) => line.includes('"worktree.created"')) as string,
+    ) as { data: { path: string } }
+  ).data.path;
+  return { runId, directory, worktree };
+}
+
+function commitIn(worktree: string, name: string): string {
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", ...args], { cwd: worktree, stdout: "pipe" })
+      .stdout.toString()
+      .trim();
+  writeFileSync(join(worktree, `${name}.txt`), name);
+  git("add", "-A");
+  git("commit", "-q", "-m", name);
+  return git("rev-parse", "HEAD");
+}
+
+const testHeadLines = (runId: string) =>
+  ark("status", runId)
+    .out.split("\n")
+    .filter((line) => line.startsWith("test head:"));
+
+test("ARK-287-AC2 ark status prints no test head line before the first test, current after it and stale after one new commit", () => {
+  const { runId, worktree } = worktreeRun();
+  expect(testHeadLines(runId)).toEqual([]);
+
+  expect(ark("test", runId).code).toBe(0);
+  const tested = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: worktree })
+    .stdout.toString()
+    .trim();
+  expect(testHeadLines(runId)).toEqual(["test head: current"]);
+
+  const now = commitIn(worktree, "late");
+  expect(testHeadLines(runId)).toEqual([
+    `test head: stale (. tested ${tested.slice(0, 8)}, now ${now.slice(0, 8)})`,
+  ]);
+});
+
+test("ARK-287-AC2 ark status skips a worktree whose path is gone and says tested nothing for a repo the test did not record", () => {
+  const { runId, directory, worktree } = worktreeRun();
+  const sibling = tempGitRepo();
+  appendEvent(directory, "worktree.created", {
+    repo: "docs",
+    path: join(sibling, "removed"),
+    branch: "x",
+  });
+  expect(ark("test", runId).code).toBe(0);
+  // The missing path is skipped: status exits 0 and the run is current.
+  const missing = ark("status", runId);
+  expect(missing.code).toBe(0);
+  expect(testHeadLines(runId)).toEqual(["test head: current"]);
+
+  // A repo with a worktree but no tested head is stale with `tested nothing`.
+  appendEvent(directory, "worktree.created", { repo: "docs", path: sibling, branch: "main" });
+  const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: sibling })
+    .stdout.toString()
+    .trim();
+  expect(testHeadLines(runId)).toEqual([
+    `test head: stale (docs tested nothing, now ${head.slice(0, 8)})`,
+  ]);
+  expect(worktree).not.toBe(sibling);
+});
+
+test("ARK-287-AC3 a spent budget with a failed last test is escalation, and a passing ark test at a new head returns to building with no answer", () => {
+  const { runId, directory, worktree } = worktreeRun();
+  for (let round = 1; round <= 2; round++) {
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  }
+  const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: worktree })
+    .stdout.toString()
+    .trim();
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: { ".": head },
+    suites: [],
+    criteria: { "ARK-900-AC1": "failing" },
+  });
+  const escalated = ark("status", runId).out;
+  expect(escalated).toContain("phase: escalation");
+  expect(escalated).toContain("waiting gate: escalation");
+
+  commitIn(worktree, "fix");
+  expect(testHeadLines(runId)).toEqual([expect.stringContaining("test head: stale (.")]);
+  expect(ark("test", runId).code).toBe(0);
+
+  const status = ark("status", runId).out;
+  expect(status).toContain("phase: building");
+  expect(status).toContain("waiting gate: none");
+  expect(status).toContain("test head: current");
+  const eventsBefore = eventLines(directory);
+  const opened = ark("merge-request", "open", runId);
+  expect(opened.err).not.toContain("changed since the last test run");
+  expect(opened.err).not.toContain("escalation");
+  expect(eventLines(directory).some((line) => line.includes('"gate":"escalation"'))).toBe(false);
+  expect(eventLines(directory).slice(0, eventsBefore.length)).toEqual(eventsBefore);
+});

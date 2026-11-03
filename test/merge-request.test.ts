@@ -11,7 +11,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { mergeOrder } from "../cli/merge-request";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills";
-import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers";
+import {
+  ark,
+  recordEvaluation,
+  tempArkHome,
+  tempGitRepo,
+  writeProject,
+  writeTicket,
+} from "./helpers";
 
 const fixtures = resolve(import.meta.dir, "fixtures/merge-request");
 const run = "2026-10-29-ARK-900-1";
@@ -437,4 +444,117 @@ test(
     expect(`${core}${app}`).not.toContain("UI/UX");
   },
   { timeout: 30_000 },
+);
+
+// One real repo with a real suite, run through plan check, worktree create and ark test.
+function testedRun() {
+  tempArkHome();
+  const workspace = tempGitRepo({
+    "ac.test.ts": `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
+  });
+  const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
+  git(bare, "init", "--bare");
+  git(workspace, "remote", "add", "origin", "https://github.com/org/core.git");
+  git(workspace, "config", "remote.origin.pushurl", bare);
+  writeProject("demo", {
+    workspace,
+    ticket_source: "local",
+    suites: [
+      {
+        name: "e2e",
+        level: "e2e",
+        repo: ".",
+        command: "bun test --reporter=junit --reporter-outfile={report} ./ac.test.ts",
+        parser: "bun",
+      },
+    ],
+    roles: {
+      implementer: { harness: "claude", model: "claude-sonnet" },
+      validator: { harness: "codex", model: "gpt-codex" },
+      reviewer: { harness: "codex", model: "gpt-codex" },
+    },
+  });
+  const ticket = writeTicket("demo", "ARK-900", [{ id: "ARK-900-AC1", text: "It works" }]);
+  const runId = ark("run", "start", ticket, "--project", "demo").out.trim();
+  const runDirectory = join(process.env.ARK_HOME as string, "projects", "demo", "runs", runId);
+  recordEvaluation(runDirectory);
+  writeFileSync(
+    join(runDirectory, "plan.yml"),
+    JSON.stringify({
+      design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
+      summary: {
+        why: "Fixture.",
+        changes: [{ criterion: "ARK-900-AC1", where: "tests", now: "None.", fix: "A test." }],
+      },
+      steps: [
+        {
+          id: "build",
+          role: "implementer",
+          repo: ".",
+          harness: "claude",
+          model: "claude-sonnet",
+          needs: [],
+          criteria: ["ARK-900-AC1"],
+        },
+      ],
+      test_cases: [
+        {
+          id: "proves-ARK-900-AC1",
+          criterion: "ARK-900-AC1",
+          level: "e2e",
+          given: [],
+          when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+          then: ["it works"],
+          expected: "it works",
+        },
+      ],
+    }),
+  );
+  for (const args of [
+    ["plan", "check", runId],
+    ["gate", "record", runId, "plan", "approve"],
+    ["worktree", "create", runId, "."],
+    ["test", runId],
+  ]) {
+    const result = ark(...args);
+    if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.out}${result.err}`);
+  }
+  return { runId, runDirectory, bare, worktree: join(runDirectory, "workspace") };
+}
+
+test(
+  "ARK-287-AC4 refuses a head that changed since the test with the run id in the next command, then opens after a passing ark test",
+  () => {
+    const { runId, runDirectory, bare, worktree } = testedRun();
+    const tested = git(worktree, "rev-parse", "HEAD");
+    commit(worktree, "late-change");
+    const now = git(worktree, "rev-parse", "HEAD");
+    const eventsBefore = readFileSync(join(runDirectory, "events.ndjson"), "utf8");
+
+    const refused = ark("merge-request", "open", runId);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("repo .");
+    expect(refused.err).toContain(`tested ${tested.slice(0, 8)}`);
+    expect(refused.err).toContain(`now ${now.slice(0, 8)}`);
+    expect(refused.err.trim().endsWith(`run ark test ${runId} again`)).toBe(true);
+    expect(calls()).toHaveLength(0);
+    expect(readFileSync(join(runDirectory, "events.ndjson"), "utf8")).toBe(eventsBefore);
+    expect(
+      Bun.spawnSync(["git", "rev-parse", "--verify", "--quiet", "refs/heads/ark/ARK-900"], {
+        cwd: bare,
+      }).exitCode,
+    ).not.toBe(0);
+    expect(git(bare, "branch", "--list")).toBe("");
+
+    expect(ark("test", runId).code).toBe(0);
+    const reopened = ark("merge-request", "open", runId);
+    expect(reopened.code, reopened.err).toBe(0);
+    expect(created()).toHaveLength(1);
+    expect(openedEvents(runDirectory)).toHaveLength(1);
+    expect(readFileSync(join(runDirectory, "events.ndjson"), "utf8")).not.toContain(
+      '"gate":"escalation"',
+    );
+  },
+  { timeout: 60_000 },
 );
