@@ -305,6 +305,33 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
   }
 }
 
+/** Reads one MR from the host in `cwd`. Throws when `gh` or `glab` fails. `status` is `open`, `merged`, `closed` or another host state, lowercase. */
+function viewMergeRequest(merge: OpenedMergeRequest, cwd: string) {
+  const github = detectHost(merge.url) === "github";
+  const output = run(
+    github
+      ? ["gh", "pr", "view", merge.url, "--json", "state,statusCheckRollup"]
+      : ["glab", "mr", "view", String(merge.number), "--output", "json"],
+    cwd,
+  );
+  const view = JSON.parse(output);
+  const raw = String(view.state).toLowerCase();
+  return { view, status: raw === "opened" ? "open" : raw, github };
+}
+
+/** State of one MR: `merged`, `open`, `closed`, or `unknown` when the host call fails or answers something else. Returns a value and prints nothing; run it before the worktree in `cwd` is removed. */
+export function mergeRequestState(
+  merge: OpenedMergeRequest,
+  cwd: string,
+): "merged" | "open" | "closed" | "unknown" {
+  try {
+    const { status } = viewMergeRequest(merge, cwd);
+    return status === "merged" || status === "open" || status === "closed" ? status : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 /** Prints MR state and failed check names for each MR the run opened. Read-only. */
 export function mergeRequestStatus(runId: string, inProject?: string): void {
   const { directory } = findRun(runId, inProject);
@@ -313,16 +340,7 @@ export function mergeRequestStatus(runId: string, inProject?: string): void {
   for (const merge of state.merge_requests) {
     const worktree = state.worktrees.find((candidate) => candidate.repo === merge.repo);
     if (worktree === undefined) throw new ArkError(`no worktree for repo ${merge.repo}`);
-    const github = detectHost(merge.url) === "github";
-    const output = run(
-      github
-        ? ["gh", "pr", "view", merge.url, "--json", "state,statusCheckRollup"]
-        : ["glab", "mr", "view", String(merge.number), "--output", "json"],
-      worktree.path,
-    );
-    const view = JSON.parse(output);
-    const raw = String(view.state).toLowerCase();
-    const status = raw === "opened" ? "open" : raw;
+    const { view, status, github } = viewMergeRequest(merge, worktree.path);
     let failures: string[] = [];
     if (status === "open" && github) {
       if (
