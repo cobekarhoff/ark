@@ -123,6 +123,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   let plan: RunState["plan"] = null;
   const amendments = new Map<string, { id: string; old: string; new: string }>();
   let planApproved = false;
+  let approvedPlanHash: string | null = null;
   let planSteps: { id: string; role: string; repo: string }[] = [];
   const stepStatus = new Map<string, StepStatus>();
   const startedSteps: { id: string; role: string; repo: string }[] = [];
@@ -172,7 +173,7 @@ export function deriveState(events: ArkEvent[]): RunState {
           plan_hash: data.plan_hash,
           open_decisions: data.open_decisions ?? 0,
         };
-        planApproved = false;
+        planApproved = planApproved && data.valid && data.plan_hash === approvedPlanHash;
         if (data.valid)
           planSteps = data.steps.map(
             ({ id, role, repo }: { id: string; role: string; repo: string }) => ({
@@ -197,7 +198,10 @@ export function deriveState(events: ArkEvent[]): RunState {
         if (data.gate === "strategy" && strategy && strategy.cards.includes(data.answer))
           strategy.chosen = data.answer;
         if (data.gate === "criteria" && data.answer === "accept") blocked = false;
-        if (data.gate === "plan" && data.answer === "approve") planApproved = true;
+        if (data.gate === "plan" && data.answer === "approve") {
+          planApproved = true;
+          approvedPlanHash = plan?.plan_hash ?? null;
+        }
         // A change answer sends the plan back for edits, so the old check no longer stands.
         if (data.gate === "plan" && data.answer === "change") plan = null;
         if (data.answer === "abort") outcome = "aborted";
