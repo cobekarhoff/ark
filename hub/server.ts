@@ -28,6 +28,7 @@ async function buildPage(): Promise<Map<string, Blob> | null> {
   const build = await Bun.build({
     entrypoints: [pageEntry],
     minify: true,
+    define: { "process.env.NODE_ENV": '"production"' },
     target: "browser",
     publicPath: "/assets/",
     naming: { entry: "[name].[ext]", chunk: "[name]-[hash].[ext]", asset: "[name]-[hash].[ext]" },
