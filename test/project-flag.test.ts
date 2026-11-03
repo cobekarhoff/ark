@@ -120,3 +120,16 @@ test("ARK-276-AC8 docs/reference/cli.md lists worktree anchor and matches the ge
   Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
   expect(readFileSync(path, "utf8")).toBe(before);
 });
+
+test("ARK-282-AC6 ark run step --help and docs/reference/cli.md name --not-started, not_started and the pair rule, and the docs match the generator", () => {
+  const path = join(repositoryRoot, "docs/reference/cli.md");
+  const help = Bun.spawnSync(["bun", join(repositoryRoot, "cli/ark.ts"), "run", "step", "--help"], {
+    cwd: repositoryRoot,
+  }).stdout.toString();
+  expect(help).toContain("--not-started");
+  expect(help).toContain("not_started");
+  const before = readFileSync(path, "utf8");
+  expect(before).toContain("it must equal the pair of an entry in `roles`");
+  Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
+  expect(readFileSync(path, "utf8")).toBe(before);
+});

@@ -23,9 +23,9 @@ Starts a run from a ticket file. It creates the run folder, copies the ticket an
 ### run step
 
 ```text
-ark run step <run> <step> start|finish [--failed] [--merge] [--project <name>]
+ark run step <run> <step> start|finish [--failed] [--not-started] [--merge] [--project <name>]
 
-Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo.
+Records that a plan step started or finished. Use --failed with finish when the step failed. Use --not-started with finish --failed when the worker never ran (worker-start exited non-zero and no worker is running): it records not_started: true on step.finished, takes back the round of that start, and the retro does not count the step. It is a usage error without --failed, and with start or --merge. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo.
 ```
 
 ### run close
@@ -73,7 +73,7 @@ Prints the UI skills of the run, one line for each. When the Surfaces list in th
 ```text
 ark plan check <run> [--project <name>]
 
-Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. A step whose harness and model are not the pair of any entry in roles in ark.yml is invalid: the problem names the step, its pair and the allowed pairs. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions.
 ```
 
 ### worktree anchor
@@ -258,7 +258,7 @@ Each entry in `steps`:
 | `id`       | string           | Name of the step. Other steps refer to it in `needs`.                                                                                                                                                                                                                                                      |
 | `role`     | string           | `implementer`, `validator`, or `reviewer`.                                                                                                                                                                                                                                                                 |
 | `repo`     | string           | The repo the step works in, as a path relative to the workspace.                                                                                                                                                                                                                                           |
-| `harness`  | string           | The agent harness, for example `claude`, `codex`, `omp`, or `pi`.                                                                                                                                                                                                                                          |
+| `harness`  | string           | The agent harness, for example `claude`, `codex`, or `omp`. With `model` it must equal the pair of an entry in `roles` in `ark.yml`; `ark plan check` refuses other pairs.                                                                                                                                 |
 | `model`    | string           | The model the harness uses.                                                                                                                                                                                                                                                                                |
 | `needs`    | list of step ids | Steps that must finish first. An empty list means the step can start at once.                                                                                                                                                                                                                              |
 | `criteria` | list of strings  | The AC the step serves.                                                                                                                                                                                                                                                                                    |
@@ -385,20 +385,20 @@ A test proves an AC when its name or tags contain the AC id, for example `CLARA-
 
 `events.ndjson` holds one JSON object for each line: `{ "seq": 1, "time": "<ISO time>", "type": "<type>", "data": { ... } }`. `seq` counts up from 1. Every command checks that an event is allowed in the run's current state before it appends the event, then rewrites `state.json`.
 
-| Type                   | Data                                                                                                                                     | Written by                                |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `run.started`          | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file`                                                                     | `ark run start`                           |
-| `criteria.updated`     | `criteria` (ids)                                                                                                                         | `ark gate record` for the `criteria` gate |
-| `criteria.amended`     | `criterion` (id), `old`, `new`                                                                                                           | `ark criteria amend`                      |
-| `evaluation.recorded`  | `blockers` (strings), `risks` (strings), `surfaces` (strings)                                                                            | `ark evaluation record`                   |
-| `strategy.recorded`    | `count`, `recommended`, `cards` (ids), optional `reason`                                                                                 | `ark strategy record`                     |
-| `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`), `open_decisions`                                  | `ark plan check`                          |
-| `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, or `escalation`), `answer`, optional `note`                                                      | `ark gate record`                         |
-| `escalation.requested` | `reason`                                                                                                                                 | `ark escalate`                            |
-| `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                         | `ark worktree create`                     |
-| `worktree.synced`      | `repo`, `conflict`                                                                                                                       | `ark worktree sync`                       |
-| `step.started`         | `step`, `role`, `repo`, `round`, optional `merge` (true)                                                                                 | `ark run step ... start`                  |
-| `step.finished`        | `step`, `outcome` (`succeeded` or `failed`), optional `merge` (true)                                                                     | `ark run step ... finish`                 |
-| `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, or `missing`) | `ark test`                                |
-| `merge_request.opened` | `repo`, `url`, `number`                                                                                                                  | `ark merge-request open`                  |
-| `run.closed`           | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`)                                                                            | `ark run close`                           |
+| Type                   | Data                                                                                                                                                   | Written by                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `run.started`          | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file`                                                                                   | `ark run start`                           |
+| `criteria.updated`     | `criteria` (ids)                                                                                                                                       | `ark gate record` for the `criteria` gate |
+| `criteria.amended`     | `criterion` (id), `old`, `new`                                                                                                                         | `ark criteria amend`                      |
+| `evaluation.recorded`  | `blockers` (strings), `risks` (strings), `surfaces` (strings)                                                                                          | `ark evaluation record`                   |
+| `strategy.recorded`    | `count`, `recommended`, `cards` (ids), optional `reason`                                                                                               | `ark strategy record`                     |
+| `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`), `open_decisions`                                                | `ark plan check`                          |
+| `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, or `escalation`), `answer`, optional `note`                                                                    | `ark gate record`                         |
+| `escalation.requested` | `reason`                                                                                                                                               | `ark escalate`                            |
+| `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                                       | `ark worktree create`                     |
+| `worktree.synced`      | `repo`, `conflict`                                                                                                                                     | `ark worktree sync`                       |
+| `step.started`         | `step`, `role`, `repo`, `round`, optional `merge` (true)                                                                                               | `ark run step ... start`                  |
+| `step.finished`        | `step`, `outcome` (`succeeded` or `failed`), optional `merge` (true), optional `not_started` (true: the worker never ran, so the start costs no round) | `ark run step ... finish`                 |
+| `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, or `missing`)               | `ark test`                                |
+| `merge_request.opened` | `repo`, `url`, `number`                                                                                                                                | `ark merge-request open`                  |
+| `run.closed`           | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`)                                                                                          | `ark run close`                           |
