@@ -330,3 +330,16 @@ test("ARK-277-AC12 ark ui serves the hub in hub/", async () => {
   ]);
   expect(await (await fetch(`${baseUrl}/`)).text()).toContain('<div id="root"></div>');
 });
+
+// ---------------------------------------------------------------- AC13
+
+test("ARK-277-AC13 the human check on the real ARK_HOME shows 4 view times below 1 s and human: ok", () => {
+  const lines = readDoc("docs/evidence/ARK-277-ac13.md").split("\n");
+  for (const view of ["home", "run", "backlog", "map"]) {
+    const line = lines.find((candidate) => candidate.startsWith(`${view}: `));
+    const milliseconds = Number(line?.slice(view.length + 2));
+    expect(Number.isFinite(milliseconds), `${view}: ${line}`).toBe(true);
+    expect(milliseconds, view).toBeLessThan(1000);
+  }
+  expect(lines).toContain("human: ok");
+});
