@@ -75,7 +75,8 @@ test("ARK-182-AC4 the brainstorm playbook writes proposed tickets with a README 
   expect(rules).toContain("always `proposed`");
   expect(rules).toContain("Never write `ready`.");
   expect(rules).toContain("Never queue a ticket.");
-  expect(rules).toContain("Never run an `orca orchestration` command.");
+  expect(rules).toContain("Never run any other `orca orchestration` command.");
+  expect(rules).toContain("Never run `orca terminal send`.");
   expect(rules).toContain("Never send anything to Master Chief's terminal.");
 
   const writeTickets = section(brainstormPlaybook, "7. Write tickets");
