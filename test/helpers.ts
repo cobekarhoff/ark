@@ -1,8 +1,10 @@
 import { afterAll, beforeAll } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import type { Subprocess } from "bun";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
+import { fakeToolScripts, writeFakeToolState, type FakeToolOptions } from "./hub-fixtures.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
 
@@ -69,6 +71,54 @@ export function ark(...args: string[]): { code: number; out: string; err: string
     out: result.stdout.toString(),
     err: result.stderr.toString(),
   };
+}
+
+/** Writes an executable `<name>` with the given shell script and puts it first on PATH. Callers restore PATH. */
+export function writeFakeCommand(name: string, script: string): string {
+  const directory = mkdtempSync(join(tmpdir(), `ark-${name}-`));
+  const file = join(directory, name);
+  writeFileSync(file, `#!/bin/sh\n${script}\n`);
+  chmodSync(file, 0o755);
+  process.env.PATH = `${directory}:${process.env.PATH}`;
+  return directory;
+}
+
+/** A fresh state folder for the fake `orca`, `gh` and `plannotator`; puts the three on PATH. */
+export function installFakeTools(options: FakeToolOptions): string {
+  const state = mkdtempSync(join(tmpdir(), "ark-fake-tools-"));
+  writeFakeToolState(state, options);
+  const scripts = fakeToolScripts(state);
+  writeFakeCommand("orca", scripts.orca);
+  writeFakeCommand("gh", scripts.gh);
+  writeFakeCommand("plannotator", scripts.plannotator);
+  return state;
+}
+
+export type StartedHub = {
+  process: Subprocess<"ignore", "pipe", "pipe">;
+  baseUrl: string;
+};
+
+/** Starts `bun hub/main.ts --port 0` and resolves once it prints its address. The caller stops it with `stopHub`. */
+export async function startHub(): Promise<StartedHub> {
+  const hub = Bun.spawn(["bun", join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
+    env: process.env,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  let output = "";
+  for await (const chunk of hub.stdout) {
+    output += new TextDecoder().decode(chunk);
+    const port = output.match(/127\.0\.0\.1:(\d+)/)?.[1];
+    if (port) return { process: hub, baseUrl: `http://127.0.0.1:${port}` };
+  }
+  throw new Error(`the hub exited before serving: ${output}`);
+}
+
+export async function stopHub(hub: { kill(): void; exited: Promise<number> }): Promise<void> {
+  hub.kill();
+  await hub.exited;
 }
 
 /**

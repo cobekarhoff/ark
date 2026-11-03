@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../../cli/events.ts";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
+import { fakeToolScripts, writeFakeToolState, type FakeToolOptions } from "../hub-fixtures.ts";
 
 export const repositoryRoot = join(import.meta.dirname, "..", "..");
 
@@ -106,18 +107,34 @@ export function ark(...args: string[]): { code: number; out: string; err: string
   return { code: result.status ?? 1, out: result.stdout, err: result.stderr };
 }
 
-/** Writes an executable `orca` with the given shell script and puts it first on PATH. Returns its directory. */
-export function writeFakeOrca(script: string): string {
-  const directory = tempDirectory("ark-orca-");
-  const file = join(directory, "orca");
+/** Writes an executable `<name>` with the given shell script and puts it first on PATH. Returns its directory. */
+export function writeFakeCommand(name: string, script: string): string {
+  const directory = tempDirectory(`ark-${name}-`);
+  const file = join(directory, name);
   writeFileSync(file, `#!/bin/sh\n${script}\n`);
   chmodSync(file, 0o755);
   process.env.PATH = `${directory}:${process.env.PATH}`;
   return directory;
 }
 
+/** Writes an executable `orca` with the given shell script and puts it first on PATH. Returns its directory. */
+export const writeFakeOrca = (script: string): string => writeFakeCommand("orca", script);
+
+/** A fresh scratch folder for the fake `orca`, `gh` and `plannotator`; puts the three on PATH. */
+export function installFakeTools(options: FakeToolOptions): string {
+  const state = tempDirectory("ark-fake-tools-");
+  writeFakeToolState(state, options);
+  const scripts = fakeToolScripts(state);
+  writeFakeCommand("orca", scripts.orca);
+  writeFakeCommand("gh", scripts.gh);
+  writeFakeCommand("plannotator", scripts.plannotator);
+  return state;
+}
+
+export type StartedHub = { process: ChildProcess; baseUrl: string };
+
 /** Starts `bun hub/main.ts --port 0` and resolves once it prints its address. `useCleanup` kills it. */
-export async function startHub(): Promise<{ process: ChildProcess; baseUrl: string }> {
+export async function startHub(): Promise<StartedHub> {
   const hub = spawn("bun", [join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],

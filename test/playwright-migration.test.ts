@@ -6,9 +6,13 @@ import { parseBun } from "../cli/parsers/bun.ts";
 
 const root = resolve(import.meta.dir, "..");
 const long = 300_000;
-// The Playwright suite can be empty between hub specs: then these checks hold vacuously.
+// The whole suite includes the 4 x 30 s of ARK-277-AC4.
+const wholeSuite = 900_000;
 // Built, not written, so this file does not match its own "no browser API" check.
 const forbidden = "Web" + "View";
+
+// The hub specs of ARK-277: the whole Playwright suite, in test/pw/hub.pw.ts.
+const hubSpecIds = ["AC3", "AC4", "AC7", "AC8", "AC9", "AC10", "AC11"].map((ac) => `ARK-277-${ac}`);
 
 function playwright(args: string[], options: { cwd?: string; env?: Record<string, string> } = {}) {
   const env: Record<string, string | undefined> = { ...process.env, ...options.env };
@@ -31,8 +35,7 @@ type Suite = { specs?: Spec[]; suites?: Suite[] };
 
 function listed(): { project: string; title: string }[] {
   const { code, out, err } = playwright(["test", "--list", "--reporter=json"]);
-  if (code !== 0 && !`${out}${err}`.includes("No tests found")) throw new Error(err || out);
-  if (code !== 0) return [];
+  if (code !== 0) throw new Error(err || out);
   const found: { project: string; title: string }[] = [];
   const walk = (suite: Suite) => {
     for (const spec of suite.specs ?? [])
@@ -57,12 +60,15 @@ describe("playwright migration", () => {
       expect(offenders).toEqual([]);
 
       const found = listed();
-      expect(found.every((t) => t.project === "chromium")).toBe(true);
+      expect(found.length).toBe(hubSpecIds.length);
+      expect(new Set(found.map((t) => t.project))).toEqual(new Set(["chromium"]));
     },
     long,
   );
 
   test("ARK-243-AC1 bun test discovers no *.pw.ts file", () => {
+    const pw = [...new Bun.Glob("test/pw/*.pw.ts").scanSync({ cwd: root })];
+    expect(pw).toEqual(["test/pw/hub.pw.ts"]);
     const result = Bun.spawnSync(["bun", "test", "--dry-run", "test/pw"], {
       cwd: root,
       stdout: "pipe",
@@ -76,6 +82,11 @@ describe("playwright migration", () => {
     "ARK-243-AC2 every migrated criterion id appears in a Playwright test title",
     () => {
       const titles = listed().map((t) => t.title);
+      for (const id of hubSpecIds)
+        expect(
+          titles.some((title) => title.startsWith(`${id} `)),
+          id,
+        ).toBe(true);
       expect(titles.every((title) => /^ARK-\d+-AC\d+ /.test(title))).toBe(true);
     },
     long,
@@ -155,7 +166,6 @@ describe("playwright migration", () => {
   test(
     "ARK-243-AC6 the Playwright suite leaves nothing in the temporary folder",
     () => {
-      if (listed().length === 0) return;
       const dir = scratch();
       try {
         const result = playwright(["test", "--reporter=line"], { env: { TMPDIR: dir } });
@@ -165,6 +175,6 @@ describe("playwright migration", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     },
-    long,
+    wholeSuite,
   );
 });
