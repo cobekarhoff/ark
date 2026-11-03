@@ -1,10 +1,25 @@
 import { now as hubNow } from "./clock.ts";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
-import { appendEvent, deriveState, readEvents, writeState, type RunState } from "./events.ts";
+import {
+  appendEvent,
+  deriveState,
+  readEvents,
+  writeState,
+  type EventData,
+  type RunState,
+} from "./events.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { staleHeads } from "./merge-request.ts";
@@ -55,6 +70,29 @@ function today(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+/** Sets the first `status:` line of the ticket front matter. Changes no other byte. Returns false when there is no such line. */
+function setTicketStatus(ticketFile: string, status: string): boolean {
+  const text = readFileSync(ticketFile, "utf8");
+  const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!frontmatter) return false;
+  const line = /^status:[^\r\n]*/m.exec(frontmatter[0]);
+  if (!line) return false;
+  const start = line.index + (frontmatter.index ?? 0);
+  writeFileSync(
+    ticketFile,
+    text.slice(0, start) + `status: ${status}` + text.slice(start + line[0].length),
+  );
+  return true;
+}
+
+/** Largest whole unit only: Nm, Nh or Nd. */
+function formatAge(milliseconds: number): string {
+  const minutes = Math.max(0, Math.floor(milliseconds / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
 export function runStart(ticketFile: string, project?: string): void {
   if (!existsSync(ticketFile)) throw new ArkError(`ticket file not found: ${ticketFile}`);
   const absoluteTicketFile = resolve(ticketFile);
@@ -91,6 +129,7 @@ export function runStart(ticketFile: string, project?: string): void {
     rmSync(directory, { recursive: true, force: true });
     throw err;
   }
+  if (config.ticket_source === "local") setTicketStatus(absoluteTicketFile, "in_progress");
   console.log(run);
 }
 
@@ -163,10 +202,32 @@ export function runStep(
   );
 }
 
+/** Keeps a local ticket's status in step with its run. handed_off leaves the file as it is. A failure only warns: the run is already closed. */
+function syncClosedTicket(started: EventData | undefined, outcome: string): void {
+  const status =
+    outcome === "merged"
+      ? "done"
+      : outcome === "aborted" || outcome === "abandoned"
+        ? "ready"
+        : undefined;
+  if (!status || !started?.ticket_file) return;
+  try {
+    if (loadConfig(started.project).ticket_source !== "local") return;
+    if (existsSync(started.ticket_file) && setTicketStatus(started.ticket_file, status)) return;
+    console.warn(`warning: could not set status ${status} in ${started.ticket_file}`);
+  } catch (err) {
+    console.warn(
+      `warning: ticket status not updated: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 export async function runClose(runId: string, outcome: string, inProject?: string): Promise<void> {
   const { directory } = findRun(runId, inProject);
+  const started = readEvents(directory).find((event) => event.type === "run.started");
   appendEvent(directory, "run.closed", { outcome });
   console.log(`${runId} closed: ${outcome}`);
+  syncClosedTicket(started?.data, outcome);
   worktreeCleanup(runId, inProject);
   // After the record and the cleanup, so an Orca failure cannot fail the close.
   for (const line of await releaseSettledWorkers(runId)) console.log(line);
@@ -231,8 +292,13 @@ export function status(runId?: string, project?: string): void {
       const directory = join(runsRoot, name);
       if (!existsSync(join(directory, "events.ndjson"))) continue;
       const state = writeState(directory);
-      if (state.phase !== "closed")
-        lines.push(`${name}  ${state.phase}  ${state.current_step ?? "-"}`);
+      if (state.phase !== "closed") {
+        const newest = readEvents(directory).at(-1);
+        const age = newest ? hubNow() - Date.parse(newest.time) : 0;
+        lines.push(
+          `${name}  ${state.phase}  ${state.current_step ?? "-"}  ${formatAge(age)}${age > 24 * 3_600_000 ? "  stale" : ""}`,
+        );
+      }
     }
   }
   console.log(lines.length > 0 ? lines.join("\n") : "no open runs");

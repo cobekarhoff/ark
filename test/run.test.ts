@@ -288,8 +288,8 @@ test("ARK-152-AC6 status without a run lists every open run with phase and curre
   const listing = ark("status");
   expect(listing.code).toBe(0);
   const lines = listing.out.trim().split("\n");
-  expect(lines).toContain(`${first.runId}  building  build`);
-  expect(lines).toContain(`${second.runId}  planning  -`);
+  expect(lines).toContain(`${first.runId}  building  build  0m`);
+  expect(lines).toContain(`${second.runId}  planning  -  0m`);
   expect(listing.out).not.toContain(closed.runId);
 });
 
