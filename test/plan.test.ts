@@ -529,8 +529,25 @@ describe("plan check", () => {
   test("ARK-185-AC1 plan check --help names the design reasons that make a plan not valid", () => {
     const result = ark("plan", "check", "--help");
     expect(result.code).toBe(0);
-    expect(result.out).toContain("design.interfaces");
-    expect(result.out).toContain("callers");
+    expect(result.out).toContain("A plan with no `design.interfaces` is invalid");
+    expect(result.out).toContain(
+      "an interface with no name or with no `callers`, or with a blank caller",
+    );
+    expect(result.out).toContain("a duplicate step id, an unknown role");
+    expect(result.out).toContain("A summary with no why, no changes");
+    expect(result.out).toContain("A decision with no id, a duplicate id");
+    expect(result.out).toContain("A test case with a level");
+  });
+
+  test("ARK-185-AC2 refuses a bare `- ` caller in the YAML file", () => {
+    const plan = validPlan();
+    plan.design.interfaces = [{ name: "renderPlanMarkdown", callers: ["planCheck", "BLANK"] }];
+    const yml = Bun.YAML.stringify(plan, null, 2);
+    expect(yml).toMatch(/- BLANK\n/);
+    writeFileSync(join(runDirectory, "plan.yml"), yml.replace(/- BLANK\n/, "- \n"));
+    const result = ark("plan", "check", runId);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("design interface renderPlanMarkdown has a blank caller");
   });
 
   for (const [name, callers] of [
