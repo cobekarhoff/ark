@@ -305,12 +305,47 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
   }
 }
 
-/** Reads one MR from the host in `cwd`. Throws when `gh` or `glab` fails. `status` is `open`, `merged`, `closed` or another host state, lowercase. */
-function viewMergeRequest(merge: OpenedMergeRequest, cwd: string) {
+type CiState = "passed" | "failed" | "running" | "none" | "unknown";
+type FailedCheck = { name: string; url: string };
+type MergeRequestComment = {
+  author: string;
+  path: string | null;
+  line: number | null;
+  body: string;
+  url: string;
+  createdAt: string;
+};
+type MergeRequestReport = {
+  repo: string;
+  url: string;
+  state: string;
+  ci: CiState;
+  failedChecks: FailedCheck[];
+  conflict: boolean | null;
+  comments: MergeRequestComment[] | null;
+};
+type GithubCheck = {
+  name?: string;
+  context?: string;
+  conclusion?: string | null;
+  state?: string | null;
+  detailsUrl?: string;
+  targetUrl?: string;
+};
+
+/** Reads one MR from the host in `cwd`. Throws when `gh` or `glab` fails. `status` is `open`, `merged`, `closed` or another host state, lowercase. `forStatus` also asks GitHub for `mergeable`. */
+function viewMergeRequest(merge: OpenedMergeRequest, cwd: string, forStatus = false) {
   const github = detectHost(merge.url) === "github";
   const output = run(
     github
-      ? ["gh", "pr", "view", merge.url, "--json", "state,statusCheckRollup"]
+      ? [
+          "gh",
+          "pr",
+          "view",
+          merge.url,
+          "--json",
+          forStatus ? "state,statusCheckRollup,mergeable" : "state,statusCheckRollup",
+        ]
       : ["glab", "mr", "view", String(merge.number), "--output", "json"],
     cwd,
   );
@@ -332,59 +367,262 @@ export function mergeRequestState(
   }
 }
 
-/** Prints MR state and failed check names for each MR the run opened. Read-only. */
-export function mergeRequestStatus(runId: string, inProject?: string): void {
+/** Parses one or more concatenated JSON arrays, the output of `gh api --paginate` and `glab api --paginate`, into one list. */
+function parseJsonArrays(text: string): unknown[] {
+  const items: unknown[] = [];
+  let parts = 0;
+  let depth = 0;
+  let start = 0;
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      if (char === "\\") i++;
+      else if (char === '"') inString = false;
+    } else if (char === '"') inString = true;
+    else if (char === "[" || char === "{") {
+      if (depth++ === 0) start = i;
+    } else if (char === "]" || char === "}") {
+      if (--depth === 0) {
+        const part = JSON.parse(text.slice(start, i + 1));
+        if (!Array.isArray(part)) throw new ArkError("host answered something other than a list");
+        items.push(...part);
+        parts++;
+      }
+    }
+  }
+  if (parts === 0 || depth !== 0 || inString) throw new ArkError("host answered no JSON list");
+  return items;
+}
+
+function githubCi(rollup: unknown): { ci: CiState; failedChecks: FailedCheck[] } {
+  if (rollup === undefined || (rollup !== null && !Array.isArray(rollup)))
+    throw new ArkError("could not read checks");
+  const checks = (rollup ?? []) as GithubCheck[];
+  const failed = [
+    "FAILURE",
+    "ERROR",
+    "TIMED_OUT",
+    "CANCELLED",
+    "ACTION_REQUIRED",
+    "STARTUP_FAILURE",
+  ];
+  const finished = ["SUCCESS", "NEUTRAL", "SKIPPED"];
+  const failedChecks = checks
+    .filter((check) => failed.includes(check.conclusion || check.state || ""))
+    .map((check) => ({
+      name: check.name ?? check.context ?? "unnamed check",
+      url: check.detailsUrl ?? check.targetUrl ?? "",
+    }));
+  if (failedChecks.length > 0) return { ci: "failed", failedChecks };
+  if (checks.length === 0) return { ci: "none", failedChecks };
+  const running = checks.some((check) => !finished.includes(check.conclusion || check.state || ""));
+  return { ci: running ? "running" : "passed", failedChecks };
+}
+
+function gitlabCi(
+  view: {
+    head_pipeline?: { id?: number; status?: string };
+    pipeline?: { id?: number; status?: string };
+  },
+  cwd: string,
+): { ci: CiState; failedChecks: FailedCheck[] } {
+  const pipeline = view.head_pipeline ?? view.pipeline;
+  if (!pipeline) return { ci: "none", failedChecks: [] };
+  if (!pipeline.id) throw new ArkError("could not read head pipeline");
+  const pipelineStatus = String(pipeline.status);
+  if (pipelineStatus === "success") return { ci: "passed", failedChecks: [] };
+  if (pipelineStatus === "skipped" || pipelineStatus === "manual")
+    return { ci: "none", failedChecks: [] };
+  if (pipelineStatus !== "failed" && pipelineStatus !== "canceled")
+    return { ci: "running", failedChecks: [] };
+  let failedJobs: { name: string; web_url?: string }[] = [];
+  try {
+    failedJobs = parseJsonArrays(
+      run(
+        ["glab", "api", `projects/:id/pipelines/${pipeline.id}/jobs?scope[]=failed`, "--paginate"],
+        cwd,
+      ),
+    ) as { name: string; web_url?: string }[];
+  } catch {
+    // pipeline.status already says failed; only the check names are unknown
+  }
+  return {
+    ci: "failed",
+    failedChecks: failedJobs.map((job) => ({ name: job.name, url: job.web_url ?? "" })),
+  };
+}
+
+type RawComment = {
+  login: string;
+  isBot: boolean;
+  path: string | null;
+  line: number | null;
+  body: string;
+  url: string;
+  createdAt: string;
+};
+
+/** Human comments written after `sinceTime`, oldest first. Throws when the host or the login lookup fails. */
+function readComments(
+  merge: OpenedMergeRequest,
+  github: boolean,
+  cwd: string,
+  sinceTime: number,
+): MergeRequestComment[] {
+  let me: string;
+  let raw: RawComment[];
+  if (github) {
+    me = run(["gh", "api", "user", "--jq", ".login"], cwd);
+    const [owner, repo] = new URL(merge.url).pathname.split("/").filter(Boolean);
+    const fetch = (kind: string) =>
+      parseJsonArrays(
+        run(
+          ["gh", "api", `repos/${owner}/${repo}/${kind}/${merge.number}/comments`, "--paginate"],
+          cwd,
+        ),
+      ) as {
+        user: { login: string; type: string };
+        path?: string;
+        line?: number | null;
+        body: string;
+        html_url: string;
+        created_at: string;
+      }[];
+    raw = [...fetch("pulls"), ...fetch("issues")].map((comment) => ({
+      login: comment.user.login,
+      isBot: comment.user.type === "Bot" || comment.user.login.endsWith("[bot]"),
+      path: comment.path ?? null,
+      line: comment.line ?? null,
+      body: comment.body,
+      url: comment.html_url,
+      createdAt: comment.created_at,
+    }));
+  } else {
+    const user: { username: string } = JSON.parse(run(["glab", "api", "user"], cwd));
+    me = user.username;
+    raw = (
+      parseJsonArrays(
+        run(
+          [
+            "glab",
+            "api",
+            `projects/:id/merge_requests/${merge.number}/notes?per_page=100`,
+            "--paginate",
+          ],
+          cwd,
+        ),
+      ) as {
+        id: number;
+        system: boolean;
+        author: { username: string; bot?: boolean };
+        position?: { new_path?: string; new_line?: number };
+        body: string;
+        created_at: string;
+      }[]
+    )
+      .filter((note) => !note.system)
+      .map((note) => ({
+        login: note.author.username,
+        isBot: note.author.bot === true,
+        path: note.position?.new_path ?? null,
+        line: note.position?.new_line ?? null,
+        body: note.body,
+        url: `${merge.url}#note_${note.id}`,
+        createdAt: note.created_at,
+      }));
+  }
+  if (!me) throw new ArkError("could not read the logged-in user");
+  return raw
+    .filter(
+      (comment) =>
+        !comment.isBot && comment.login !== me && Date.parse(comment.createdAt) > sinceTime,
+    )
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .map(({ login, isBot: _isBot, ...comment }) => ({ author: login, ...comment }));
+}
+
+/** Reads every signal of one MR. A signal the host cannot answer is `unknown` (`null` for conflict and comments); the others still show. */
+function reportMergeRequest(
+  merge: OpenedMergeRequest,
+  cwd: string,
+  sinceTime: number | undefined,
+): MergeRequestReport {
+  const report: MergeRequestReport = {
+    repo: merge.repo,
+    url: merge.url,
+    state: "unknown",
+    ci: "unknown",
+    failedChecks: [],
+    conflict: null,
+    comments: sinceTime === undefined ? [] : null,
+  };
+  let github = detectHost(merge.url) === "github";
+  try {
+    const viewed = viewMergeRequest(merge, cwd, true);
+    github = viewed.github;
+    report.state = viewed.status;
+    const { view } = viewed;
+    try {
+      Object.assign(report, github ? githubCi(view.statusCheckRollup) : gitlabCi(view, cwd));
+    } catch {
+      // ci stays unknown
+    }
+    if (viewed.status !== "open") report.conflict = false;
+    else if (github) {
+      if (view.mergeable === "CONFLICTING") report.conflict = true;
+      else if (view.mergeable === "MERGEABLE") report.conflict = false;
+    } else if (typeof view.has_conflicts === "boolean") report.conflict = view.has_conflicts;
+  } catch {
+    // state, ci and conflict stay unknown
+  }
+  if (sinceTime !== undefined) {
+    try {
+      report.comments = readComments(merge, github, cwd, sinceTime);
+    } catch {
+      // comments stay unknown
+    }
+  }
+  return report;
+}
+
+function plainLines(report: MergeRequestReport): string[] {
+  const tokens = [`${report.repo}  ${report.state}  ${report.url}  ci: ${report.ci}`];
+  if (report.conflict === true) tokens.push("conflict");
+  else if (report.conflict === null) tokens.push("conflict: unknown");
+  if (report.failedChecks.length)
+    tokens.push(`checks failing: ${report.failedChecks.map((check) => check.name).join(", ")}`);
+  const lines = [tokens.join("  ")];
+  if (report.comments === null) lines.push("  comments: unknown");
+  for (const comment of report.comments ?? []) {
+    const text = comment.body.replace(/\s+/g, " ").trim();
+    const place =
+      comment.path === null
+        ? "(general)"
+        : comment.line === null
+          ? comment.path
+          : `${comment.path}:${comment.line}`;
+    lines.push(`  @${comment.author}  ${place}  ${text}  ${comment.url}`);
+  }
+  return lines;
+}
+
+/** Prints state, CI, conflict and (with `since`) new human comments for each MR the run opened. `json` prints one JSON array instead. Read-only. A value the host cannot answer prints `unknown`; the command still exits 0. */
+export function mergeRequestStatus(
+  runId: string,
+  inProject?: string,
+  options: { since?: string; json?: boolean } = {},
+): void {
+  const sinceTime = options.since === undefined ? undefined : Date.parse(options.since);
+  if (sinceTime !== undefined && Number.isNaN(sinceTime))
+    throw new ArkError(`--since ${options.since} is not an ISO 8601 time`);
   const { directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   if (state.merge_requests.length === 0) throw new ArkError(`${runId} has no merge requests`);
-  for (const merge of state.merge_requests) {
+  const reports = state.merge_requests.map((merge) => {
     const worktree = state.worktrees.find((candidate) => candidate.repo === merge.repo);
     if (worktree === undefined) throw new ArkError(`no worktree for repo ${merge.repo}`);
-    const { view, status, github } = viewMergeRequest(merge, worktree.path);
-    let failures: string[] = [];
-    if (status === "open" && github) {
-      if (
-        view.statusCheckRollup === undefined ||
-        (view.statusCheckRollup !== null && !Array.isArray(view.statusCheckRollup))
-      )
-        throw new ArkError(`could not read checks for ${merge.url}`);
-      const failed = [
-        "FAILURE",
-        "ERROR",
-        "TIMED_OUT",
-        "CANCELLED",
-        "ACTION_REQUIRED",
-        "STARTUP_FAILURE",
-      ];
-      failures = (view.statusCheckRollup ?? [])
-        .filter((check: { conclusion?: string; state?: string }) =>
-          failed.includes(check.conclusion ?? check.state ?? ""),
-        )
-        .map(
-          (check: { name?: string; context?: string }) =>
-            check.name ?? check.context ?? "unnamed check",
-        );
-    } else if (status === "open") {
-      const pipeline = view.head_pipeline ?? view.pipeline;
-      if (pipeline) {
-        if (!pipeline.id) throw new ArkError(`could not read head pipeline for ${merge.url}`);
-        const jobs = JSON.parse(
-          run(
-            [
-              "glab",
-              "api",
-              `projects/:id/pipelines/${pipeline.id}/jobs?scope[]=failed`,
-              "--paginate",
-            ],
-            worktree.path,
-          ),
-        );
-        if (!Array.isArray(jobs)) throw new ArkError(`could not read jobs for ${merge.url}`);
-        failures = jobs.map((job: { name: string }) => job.name);
-      }
-    }
-    console.log(
-      `${merge.repo}  ${status}  ${merge.url}${failures.length ? `  checks failing: ${failures.join(", ")}` : ""}`,
-    );
-  }
+    return reportMergeRequest(merge, worktree.path, sinceTime);
+  });
+  console.log(options.json ? JSON.stringify(reports) : reports.flatMap(plainLines).join("\n"));
 }

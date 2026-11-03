@@ -147,9 +147,15 @@ orca orchestration check --ack <delivery id> --wait --types "worker_done,escalat
 
 An empty wait or a timeout is a checkpoint. Wait again. After three empty waits, run `orca orchestration worker-list --include-remote --json` and read each row's `projection.nextAction`. Do not stop, release or restart a run lead unless a row shows it has exited.
 
-On every wait, including an empty one, run `ark merge-request status <run>` for each run in `merge_requests_open`. If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge.
+On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>` for each run in `merge_requests_open`, and record the poll time for the next wait. If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge. Pass each human comment it lists to the human and to the run lead. Tell the run lead about a `conflict` (it runs `ark worktree sync <run>`) and about `ci: failed` with its `checks failing:` names. Do not treat `running` or `unknown` as passed.
 
 A `status` message from a run lead is a notice, not a question. Pass it to the human. When it says a Plannotator review is open, tell the human to answer there. The run lead records that answer itself.
+
+### A busy agent
+
+A send can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn and refused the message. Pick a retry id once for the message, unique for each message and each target, such as `<run>-<subject slug>-<target dispatch id>`, and use that same `--retry-request <id>` for every try. Wait 30 seconds, then send the same message again with `orca orchestration send --retry-request <id>`, up to 5 times. The same id keeps Orca from delivering the message twice when a try landed and its answer was lost; `orca orchestration request-show` tells whether a request took effect.
+
+When the agent is still busy after 5 times, tell the human the target, the subject and that the message is not delivered. Send the message again on your next wait. Never treat the message as delivered until a send succeeds.
 
 ### A `question` from a run lead
 
@@ -169,7 +175,7 @@ The strategy gate is one of these questions. Its options are the card IDs of `<r
 
 ### An `escalation` from a run lead
 
-A run lead is blocked. Read the message, tell the human, and decide the next step with them. Use `orca orchestration send --to dispatch:<dispatch id> --subject "<subject>" --body "<guidance>" --json` to steer the run lead.
+A run lead is blocked. Read the message, tell the human, and decide the next step with them. Use `orca orchestration send --retry-request <id> --to dispatch:<dispatch id> --subject "<subject>" --body "<guidance>" --json` to steer the run lead.
 
 ### An amendment of a criterion
 
@@ -191,7 +197,7 @@ When `ark merge-request status <run>` shows every MR merged (section 7), when th
 ark merge-request status <run>
 ```
 
-It prints `<repo>  merged|open|closed  <url>` for each MR.
+It prints `<repo>  merged|open|closed  <url>` for each MR, then `ci:`, `conflict` and `checks failing:` as in `docs/reference/cli.md`.
 
 Release the run lead before you close the run, so that the removal of its worktree does not end a live agent. Do it when it is not yet released: its row in `orca orchestration worker-list --include-remote --json` is still listed as running, and section 7 (`worker_done` from a run lead, step 5) has not released it. If it was released there, skip this.
 
@@ -206,11 +212,13 @@ Choose the outcome:
 | Every MR merged                              | `ark run close <run> merged`                                      |
 | MRs opened, then closed without merging      | `ark run close <run> abandoned`                                   |
 | The human took the branches and wants no MRs | `ark run close <run> handed_off` (the last test must have passed) |
-| The human stops the run before any MR exists | `ark run close <run> aborted`                                     |
+| The human stops the run before any MR exists | `ark run close <run> aborted`, see below                          |
 
 If some MRs are merged and others are still open, tell the human and wait. Do not close the run.
 
-Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.md` exists. The run lead writes it. If it does not exist, the run is not ready to close: message the run lead with `orca orchestration send`, or ask the human what to do.
+Abort row: when the human aborts through the run lead, the run lead runs `ark run close <run> aborted` itself. Run it yourself only when `ark status <run>` shows a phase other than `closed` and no run lead is alive; a second close is refused.
+
+Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.md` exists. The run lead writes it. If it does not exist, the run is not ready to close: message the run lead with `orca orchestration send --retry-request <id>`, or ask the human what to do.
 
 A `HELD: <run> #<number> ticket superseded` line from the auto-merger (section 12) means nobody wants the PR. Tell the human. With the human, close the run `aborted` or `abandoned` (table above) and close the PR with `gh pr close <url>`. Never merge it. `no final report` needs nothing: the PR merges when `retro.md` exists. `ticket done`: check the run and the PR with the human.
 
@@ -224,7 +232,7 @@ After `ark run close`:
    2. For every other open run, send its lead a `status` message with the target branch and the head that `ark workspace sync` printed:
 
       ```sh
-      orca orchestration send --to dispatch:<run lead dispatch id> --type status --subject "<repo>: <branch> moved" --body "Run <closed run> merged. <repo> <branch> is now at <head>. Run \`ark worktree sync <run>\` before your next step." --json
+      orca orchestration send --retry-request <id> --to dispatch:<run lead dispatch id> --type status --subject "<repo>: <branch> moved" --body "Run <closed run> merged. <repo> <branch> is now at <head>. Run \`ark worktree sync <run>\` before your next step." --json
       ```
 3. Run the close check with the human: read `playbooks/retro.md` and follow "Part 1: Close check", steps 3 and 4, which are the Master Chief steps. Steps 1 and 2 are done: `ark run close` ran, and `retro.md` exists.
 4. Start the next ready ticket, if `concurrency` allows.
