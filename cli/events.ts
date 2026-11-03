@@ -247,7 +247,7 @@ export function deriveState(events: ArkEvent[]): RunState {
       case "test.completed":
         criteriaStatus = data.criteria;
         lastTest = { passed: data.passed, heads: data.heads };
-        escalationAnswered = false;
+        if (mergeRequests.length === 0) escalationAnswered = false;
         break;
       case "escalation.requested":
         escalationRequested = true;
