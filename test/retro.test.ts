@@ -669,7 +669,7 @@ describe("ark retro", () => {
     expect(readMetrics().time.gate_wait_seconds).toBe(180);
   });
 
-  test("ARK-283-AC3 two manual criteria keep separate waits", () => {
+  test("ARK-283-AC3 two manual criteria keep separate waits but count elapsed time once", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:10:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
@@ -678,8 +678,22 @@ describe("ark retro", () => {
       ["14:30:00.000", "run.closed", { outcome: "aborted" }],
     ]);
     retro(runId);
-    // AC1 waited 60 s and AC2 waited 300 s; an answer for AC1 must not close the AC2 wait.
-    expect(readMetrics().time.gate_wait_seconds).toBe(360);
+    // AC1 waits 60 s inside AC2's 300 s; an answer for AC1 must not close AC2, and the union is 300 s.
+    expect(readMetrics().time.gate_wait_seconds).toBe(300);
+  });
+
+  test("ARK-283-AC3 work time is never negative when manual waits overlap", () => {
+    writeEvents(runDirectory, [
+      started,
+      testRun("14:00:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
+      manualAnswer("14:10:00.000", "ARK-901-AC1"),
+      manualAnswer("14:10:00.000", "ARK-901-AC2"),
+      ["14:10:00.000", "run.closed", { outcome: "aborted" }],
+    ]);
+    retro(runId);
+    const time = readMetrics().time;
+    expect(time.gate_wait_seconds).toBeLessThanOrEqual(time.wall_seconds);
+    expect(time.work_seconds).toBeGreaterThanOrEqual(0);
   });
 
   test("ARK-283-AC3 an unanswered manual pending adds no gate wait", () => {

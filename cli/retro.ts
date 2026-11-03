@@ -247,13 +247,17 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
  * at the failed step that spent the round budget. An unanswered gate adds nothing.
  */
 function gateWaitSeconds(events: ArkEvent[]): number {
-  return gateWaits(events).reduce(
-    (total, wait) =>
-      wait.answered === null
-        ? total
-        : total + secondsBetween(toMilliseconds(wait.asked), toMilliseconds(wait.answered)),
-    0,
-  );
+  const intervals = gateWaits(events)
+    .filter((wait) => wait.answered !== null)
+    .map((wait) => [toMilliseconds(wait.asked), toMilliseconds(wait.answered as string)])
+    .sort((left, right) => left[0] - right[0]);
+  let coveredMilliseconds = 0;
+  let coveredUntil = -Infinity;
+  for (const [start, end] of intervals) {
+    coveredMilliseconds += Math.max(0, end - Math.max(start, coveredUntil));
+    coveredUntil = Math.max(coveredUntil, end);
+  }
+  return secondsBetween(0, coveredMilliseconds);
 }
 
 function runCommand(command: string[], cwd: string): unknown {
