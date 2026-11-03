@@ -1,0 +1,357 @@
+:root {
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  background: #0f1115;
+  color: #d8dce3;
+}
+body {
+  margin: 0;
+  font:
+    14px/1.45 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  background: #0f1115;
+  color: #d8dce3;
+}
+a {
+  color: #7cb7ff;
+  text-decoration: none;
+}
+h1 {
+  font-size: 22px;
+  margin: 0 0 12px;
+  text-wrap: balance;
+}
+h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8b93a1;
+  margin: 24px 0 8px;
+}
+.mono,
+td.id,
+.id {
+  font-family: ui-monospace, Menlo, monospace;
+}
+td.id,
+.mono,
+td:last-child {
+  font-variant-numeric: tabular-nums;
+}
+.pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 12px;
+  border: 1px solid #333b48;
+}
+.ok {
+  color: #5fd38d;
+  border-color: #2c6b47;
+}
+.bad {
+  color: #ff7b72;
+  border-color: #7a3430;
+}
+.warn {
+  color: #e3b341;
+  border-color: #6b5420;
+}
+.mut {
+  color: #8b93a1;
+}
+.unk {
+  color: #8b93a1;
+  border-style: dashed;
+}
+.asof {
+  color: #e3b341;
+  font-size: 12px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th {
+  text-align: left;
+  font-weight: 500;
+  color: #8b93a1;
+  font-size: 12px;
+  padding: 6px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid #2a303b;
+}
+td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1f242d;
+  vertical-align: top;
+}
+/* Ids, phases, statuses and costs never break inside a token; only free text does. */
+.nw {
+  white-space: nowrap;
+}
+tr[aria-current="true"] td {
+  background: #1a2233;
+}
+td.wrap {
+  overflow-wrap: anywhere;
+}
+.amber {
+  color: #e3b341;
+}
+.needs {
+  border: 1px solid #6b5420;
+  background: #1c1810;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+.needs.quiet {
+  border-color: #2a303b;
+  background: #161a21;
+}
+.needs td {
+  border-bottom: 0;
+  padding-left: 0;
+}
+input,
+select {
+  background: #161a21;
+  border: 1px solid #2a303b;
+  color: inherit;
+  border-radius: 5px;
+  padding: 5px 8px;
+  font: inherit;
+}
+button {
+  background: #1f6feb;
+  border: 0;
+  color: #fff;
+  border-radius: 5px;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+button:disabled {
+  background: #222936;
+  color: #8b93a1;
+  cursor: default;
+}
+.p-plan {
+  --c: #8b93a1;
+}
+.p-build {
+  --c: #58a6ff;
+}
+.p-review {
+  --c: #bc8cff;
+}
+.p-gate {
+  --c: #e3b341;
+}
+.p-done {
+  --c: #5fd38d;
+}
+.p-none {
+  --c: #3a4150;
+}
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+  margin-right: 6px;
+}
+header {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  height: 44px;
+  padding: 0 20px;
+  border-bottom: 1px solid #2a303b;
+  background: #12151b;
+}
+header .asof-list {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+}
+nav {
+  display: flex;
+  gap: 4px;
+}
+nav a {
+  padding: 5px 12px;
+  border-radius: 5px;
+  color: #aab2bf;
+}
+nav a[aria-current="page"] {
+  background: #222936;
+  color: #fff;
+}
+main {
+  padding: 20px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.skip {
+  position: absolute;
+  left: -999px;
+}
+.skip:focus-visible {
+  left: 8px;
+  top: 8px;
+  background: #fff;
+  color: #000;
+  padding: 6px 10px;
+  z-index: 9;
+}
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+.toolbar .end {
+  margin-left: auto;
+}
+.graph {
+  overflow-x: auto;
+}
+.graph svg {
+  display: block;
+}
+.graph text {
+  font-size: 12px;
+  fill: #aab2bf;
+}
+.graph text.name {
+  fill: #fff;
+  font-weight: 600;
+  font-size: 14px;
+}
+.graph text.tid {
+  fill: #fff;
+  font-size: 13px;
+}
+.graph .m {
+  font-family: ui-monospace, Menlo, monospace;
+}
+.graph .arrow {
+  fill: #7d8799;
+}
+.graph .edge {
+  stroke: #7d8799;
+  fill: none;
+  stroke-width: 1.5;
+}
+.graph .box {
+  fill: #161a21;
+  stroke: var(--c);
+}
+.graph .status,
+.graph .cost {
+  fill: var(--c);
+}
+.graph .cost {
+  font-family: ui-monospace, Menlo, monospace;
+}
+.graph text.tphase {
+  font-size: 11px;
+}
+.graph a {
+  cursor: pointer;
+}
+.graph a:focus-visible {
+  outline: none;
+}
+.graph a:focus-visible .tbox {
+  stroke: #7cb7ff;
+  stroke-width: 3;
+}
+.graph .tbox {
+  fill: var(--c);
+  fill-opacity: 0.18;
+  stroke: var(--c);
+}
+.s-succeeded {
+  --c: #5fd38d;
+}
+.s-running {
+  --c: #58a6ff;
+}
+.s-failed {
+  --c: #ff7b72;
+}
+.s-stopped {
+  --c: #e3b341;
+}
+.s-pending {
+  --c: #8b93a1;
+}
+.s-waiting {
+  --c: #e3b341;
+}
+button.toggle {
+  background: #222936;
+  border: 1px solid #333b48;
+  color: #d8dce3;
+}
+button.toggle[aria-pressed="true"] {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+a,
+button,
+input,
+select {
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+.graph:focus-visible {
+  outline: 2px solid #7cb7ff;
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  nav a:hover {
+    background: #1a202a;
+    color: #fff;
+  }
+  button:not(:disabled):hover {
+    background: #1858c4;
+  }
+  button.toggle:not([aria-pressed="true"]):hover {
+    background: #2a3242;
+  }
+  .graph a:hover .tbox {
+    fill-opacity: 0.32;
+  }
+  tbody tr:hover td,
+  table tr:hover td {
+    background: #141821;
+  }
+}
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}

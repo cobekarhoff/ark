@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR 0009
 ---
 
 # The hub steers agents through Master Chief

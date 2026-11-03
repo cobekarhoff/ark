@@ -1,176 +1,23 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import index from "../ui/index.html";
-import { isLocalRequest, runAction } from "./hub/actions.ts";
 import { arkHome } from "./paths.ts";
-import { readAgents } from "./hub/agents.ts";
-import { readBacklog } from "./hub/backlog.ts";
-import { readMetrics } from "./hub/metrics.ts";
-import { readProjects } from "./hub/projects.ts";
-import { search } from "./hub/search.ts";
-import { createNotifier, markActed } from "./hub/notify.ts";
-import { buildMap } from "./hub/map.ts";
-import { buildTimeline, timelineWindows } from "./hub/timeline.ts";
-import { createHub, knownUrls, markSeen } from "./hub/state.ts";
 
-const stateIntervalMilliseconds = 1000;
-const refreshIntervalMilliseconds = 3000;
-const heartbeatMilliseconds = 10_000;
-
-/**
- * Serves the hub. Port 0 picks a free port. Runs until the process ends.
- *
- * Ark's files are read every second, so a change in `events.ndjson` reaches the page at once.
- * Orca and Plannotator are read every 3 seconds in the background, each with a hard timeout,
- * and never delay that push.
- */
-export function ui(port: number): void {
-  const hub = createHub();
-  const encoder = new TextEncoder();
-  const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
-  const notifier = createNotifier(() => server.port!);
-  let lastPushed = "";
-  let refreshedOnce = false;
-
-  const push = () => {
-    const state = hub.state();
-    notifier.poll(state.needs_me, {
-      ark: refreshedOnce,
-      orca: state.readers.orca === "ok",
-      plannotator: state.readers.plannotator === "ok",
-    });
-    const json = JSON.stringify(state);
-    if (json === lastPushed) return;
-    lastPushed = json;
-    for (const client of clients) client.enqueue(encoder.encode(`data: ${json}\n\n`));
-  };
-
-  // ponytail: re-reads every run's log each second; watch the files if hundreds of runs make this slow.
-  setInterval(push, stateIntervalMilliseconds);
-  setInterval(() => {
-    for (const client of clients) client.enqueue(encoder.encode(": keep-alive\n\n"));
-  }, heartbeatMilliseconds);
-  let refreshing = false;
-  const refresh = async () => {
-    if (refreshing) return;
-    refreshing = true;
-    try {
-      await hub.refresh();
-      refreshedOnce = true;
-    } finally {
-      refreshing = false;
-    }
-  };
-  void refresh();
-  setInterval(() => void refresh(), refreshIntervalMilliseconds);
-
-  const server = Bun.serve({
-    port,
-    hostname: "127.0.0.1",
-    idleTimeout: 0,
-    routes: {
-      "/": index,
-      "/api/state": () => Response.json(hub.state()),
-      "/api/runs/:run": async (request) => {
-        if (!isLocalRequest(request, server.port!))
-          return Response.json({ error: "foreign origin" }, { status: 403 });
-        const detail = await hub.detail(request.params.run);
-        return detail
-          ? Response.json(detail)
-          : Response.json({ error: "no such run" }, { status: 404 });
-      },
-      "/api/needs-me": () => Response.json(hub.state().needs_me),
-      "/api/backlog": () => Response.json(readBacklog()),
-      "/api/agents": async () => Response.json(await readAgents()),
-      "/api/projects": async () => Response.json(await readProjects()),
-      "/api/metrics": (request) => {
-        try {
-          const { searchParams } = new URL(request.url);
-          return Response.json(readMetrics(searchParams.get("week"), searchParams.get("project")));
-        } catch (err) {
-          return Response.json({ error: (err as Error).message }, { status: 400 });
-        }
-      },
-      "/api/search": async (request) => {
-        const query = new URL(request.url).searchParams.get("q")?.trim() ?? "";
-        if (query === "") return Response.json({ error: "q is required" }, { status: 400 });
-        return Response.json(await search(query));
-      },
-      "/api/map": (request) => {
-        const at = new URL(request.url).searchParams.get("at");
-        if (at !== null && Number.isNaN(Date.parse(at)))
-          return Response.json({ error: "at must be an ISO time" }, { status: 400 });
-        return Response.json(buildMap(hub.state(), at));
-      },
-      "/api/timeline": (request) => {
-        const hours = Number(new URL(request.url).searchParams.get("hours") ?? 12);
-        if (!timelineWindows.includes(hours))
-          return Response.json({ error: "hours must be 1, 12 or 24" }, { status: 400 });
-        return Response.json(buildTimeline(hub.state(), hours));
-      },
-      "/api/events": () => {
-        let controller: ReadableStreamDefaultController<Uint8Array>;
-        return new Response(
-          new ReadableStream<Uint8Array>({
-            start(streamController) {
-              controller = streamController;
-              clients.add(controller);
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(hub.state())}\n\n`));
-            },
-            cancel() {
-              clients.delete(controller);
-            },
-          }),
-          {
-            headers: {
-              "content-type": "text/event-stream",
-              "cache-control": "no-cache",
-            },
-          },
-        );
-      },
-      "/api/seen": {
-        POST: (request) => {
-          if (!isLocalRequest(request, server.port!))
-            return Response.json({ error: "foreign origin" }, { status: 403 });
-          markSeen();
-          return Response.json({ ok: true });
-        },
-      },
-      "/api/notifications/acted": {
-        POST: async (request) => {
-          if (!isLocalRequest(request, server.port!))
-            return Response.json({ error: "foreign origin" }, { status: 403 });
-          const { id } = (await request.json().catch(() => ({}))) as {
-            id?: unknown;
-          };
-          if (typeof id !== "string") return Response.json({ error: "id needed" }, { status: 400 });
-          markActed(id);
-          return Response.json({ ok: true });
-        },
-      },
-      "/api/actions/:name": {
-        POST: async (request) => {
-          if (!isLocalRequest(request, server.port!))
-            return Response.json({ error: "foreign origin" }, { status: 403 });
-          const params = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-          const { status, body } = await runAction(
-            request.params.name,
-            params,
-            knownUrls(hub.state()),
-          );
-          return Response.json(body, { status });
-        },
-      },
+/** Serves the hub in `hub/` as a child process and ends with it. Port 0 picks a free port. */
+export async function ui(port: number): Promise<void> {
+  const child = Bun.spawn(
+    [process.execPath, join(import.meta.dir, "..", "hub", "main.ts"), "--port", `${port}`],
+    {
+      stdin: "ignore",
+      stdout: "inherit",
+      stderr: "inherit",
     },
-    fetch: () => new Response("not found", { status: 404 }),
-  });
-  console.log(`Ark hub on http://127.0.0.1:${server.port}`);
+  );
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => child.kill(signal));
+  process.exitCode = await child.exited;
 }
 
 const label = "dev.ark.hub";
-const notifierCommand = () => process.env.ARK_NOTIFIER || "terminal-notifier";
 const plistPath = () => join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
 const launchctl = (...arguments_: string[]): { ok: boolean; error: string } => {
   try {
@@ -195,11 +42,10 @@ const xml = (value: string) =>
 
 function plistFor(port: number, log: string): string {
   const arguments_ = [process.execPath, join(import.meta.dir, "ark.ts"), "ui", "--port", `${port}`];
-  // launchd starts with a bare PATH, so hand over this one: the hub finds orca and the notifier by it.
+  // launchd starts with a bare PATH, so hand over this one: the hub finds orca by it.
   const environment = {
     PATH: process.env.PATH ?? "",
     ARK_HOME: process.env.ARK_HOME ?? "",
-    ARK_NOTIFIER: notifierCommand(),
   };
   const entries = Object.entries(environment)
     .filter(([, value]) => value !== "")
@@ -228,14 +74,6 @@ ${entries.join("\n")}
 
 /** Writes the LaunchAgent that starts the hub at login and loads it. A second run with the same plist changes nothing. */
 export function uiInstall(port: number): void {
-  const notifier = notifierCommand();
-  if (!Bun.which(notifier)) {
-    console.error(
-      `${notifier} is not installed. Notifications cannot open the hub on click without it.\nInstall it, then run this again:\n  brew install terminal-notifier\nNothing was written.`,
-    );
-    process.exitCode = 1;
-    return;
-  }
   const path = plistPath();
   const log = join(arkHome(), "hub", "hub.log");
   const plist = plistFor(port, log);
@@ -282,7 +120,7 @@ export function uiInstall(port: number): void {
   );
 }
 
-/** Unloads and deletes the LaunchAgent. The notification history stays. */
+/** Unloads and deletes the LaunchAgent. */
 export function uiUninstall(): void {
   const path = plistPath();
   if (!existsSync(path)) {
@@ -292,6 +130,6 @@ export function uiUninstall(): void {
   launchctl("unload", path);
   rmSync(path);
   console.log(
-    `Removed LaunchAgent ${label}\n  plist:  ${path} (deleted)\nThe hub is stopped and will not start at login.\nNotification history in ${join(arkHome(), "hub", "notifications.ndjson")} is kept.`,
+    `Removed LaunchAgent ${label}\n  plist:  ${path} (deleted)\nThe hub is stopped and will not start at login.`,
   );
 }

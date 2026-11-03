@@ -185,7 +185,7 @@ Starts a new Master Chief for the project with `orca agent launch --surface term
 ```text
 ark ui [--port <number>]
 
-Serves the hub on 127.0.0.1, port 4317 unless --port says otherwise. The page is a React app that Bun bundles. The server reads Ark's files every second and Orca and Plannotator every 3 seconds, each with a hard timeout, and pushes changes over Server-Sent Events. Home shows what needs you (oldest first), live runs, Master Chief per project and the agents. A live agent terminal (of an open run or not; the run is empty for an agent Ark did not start) whose last 3 output lines show a provider usage-limit or rate-limit error is a `usage_limit` Needs-me item (id `limit:<run>:<terminal>`, field `limit: {provider, reset_at}`; `reset_at` is null when the output gives no wait time). Home shows a countdown to `reset_at`, and the action switches Orca to the agent terminal. The item goes when the error leaves the output or the agent exits; a failed read keeps it. Keys: j/k move, Enter opens, an item's action key runs its action, Cmd-K opens the palette, ? the shortcut sheet, z focus mode, Esc closes. A view bar switches views (keys 1 Home, 2 Map, 3 Timeline). Map: a graph of project, Master Chief, run, step, agent and MR with a needs-you badge on each node that waits for you; click a node or badge, or press j/k, to light its path; v turns dimming of the other nodes on or off; [ and ] step the replay to the previous or next event since your last visit and l returns to live; Map shares its selection with Home. Timeline: one lane for each Master Chief, run and standalone agent; w cycles the window 12h, 24h, 1h; b shows the cost burn, where a bucket with no provider cost shows ?; a click on a waiting gate block runs the action of its item; Timeline keeps its own selection. Time with no history shows UNAVAILABLE. Both views stop pulses under prefers-reduced-motion. Endpoints: GET /api/state and /api/events (SSE) feed Home; GET /api/map?at=<ISO time> returns {at, replay:{from?,to,events}, nodes:[{id,kind,label,state,needs_you}], edges:[[from,to]]} with state not_started, unavailable or unknown where nothing is known; GET /api/timeline?hours=1|12|24 returns {hours, lanes:[{id,kind,label,segments:[{kind,from,to|null,item?,state?}],cost:{usd,series:[{at,usd}]}}]} and refuses any other hours with 400. History: the hub appends to $ARK_HOME/hub/history.ndjson, one JSON object a line: collector.started when the hub starts, collector.tick each minute, and state.changed {time,key,state,activity?} when an agent (key agent:<run>:<terminal>), a Master Chief (chief:<project>) or the CI of an MR (ci:<MR url>) changes; a refresh with no change writes nothing, and time before the first start or between the last tick and the next start is unavailable. POST actions open an Orca terminal, a Plannotator review or the Inbox, or an MR URL, and steer by typing one line into an Orca terminal with `orca terminal send`: a free message or a fixed instruction (approve and queue, reorder queue, pause, resume, retry stuck agent, and abort after a confirm dialog) to the project's live Master Chief (the connected coordinator of the Orca Run "Master Chief: <project> tickets" in the project workspace), and a free message to a run's lead. The server picks the terminal and the hub never changes run state; with no live Master Chief it returns 409 and sends nothing. Approve and queue takes a list of proposed ticket ids and answers 400 otherwise; the Master Chief box confirms the list first. A project with no live Master Chief shows Spawn Master Chief, which opens a terminal that runs `/skill:ark chief` with `roles.chief` from ark.yml and switches Orca to it. The server refuses a foreign Origin and any unknown action. ARK_NOW=<ISO instant> freezes the hub clock, for reproducible demos and bug reports.
+Serves the read-only hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port). One background reader builds a snapshot of the runs, plans, models, MRs, usage cost and backlog; requests read only that snapshot, and the page gets it over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). Views: Home (Needs me, then open runs), Run (plan DAG), Backlog and Map. The hub changes nothing and steers no agent.
 ```
 
 ### ui install
@@ -193,7 +193,7 @@ Serves the hub on 127.0.0.1, port 4317 unless --port says otherwise. The page is
 ```text
 ark ui install [--port <number>]
 
-Writes the LaunchAgent dev.ark.hub in ~/Library/LaunchAgents and loads it, so the hub starts at login and restarts after a crash (port 4317 unless --port says otherwise). The hub sends a macOS notification for each new Needs-me item through terminal-notifier (or the command in ARK_NOTIFIER), and a click opens the hub at that item. Install refuses, and writes nothing, when terminal-notifier is missing: run brew install terminal-notifier. A second run with the same settings changes nothing; with a new port it rewrites the plist and reloads. If loading an update fails, install restores and reloads the previous plist, reports any reload failure, and exits 1. If loading a new install fails, it removes the new plist and exits 1.
+Writes the LaunchAgent dev.ark.hub in ~/Library/LaunchAgents and loads it, so the hub starts at login and restarts after a crash (port 4317 unless --port says otherwise). A second run with the same settings changes nothing; with a new port it rewrites the plist and reloads. If loading an update fails, install restores and reloads the previous plist, reports any reload failure, and exits 1. If loading a new install fails, it removes the new plist and exits 1.
 ```
 
 ### ui uninstall
@@ -201,26 +201,10 @@ Writes the LaunchAgent dev.ark.hub in ~/Library/LaunchAgents and loads it, so th
 ```text
 ark ui uninstall
 
-Unloads and deletes the LaunchAgent dev.ark.hub. It does nothing, and exits 0, when the agent is not installed. The notification history in ~/.ark/hub/notifications.ndjson is kept.
+Unloads and deletes the LaunchAgent dev.ark.hub. It does nothing, and exits 0, when the agent is not installed.
 ```
 
 <!-- generated:commands:end -->
-
-### Run detail API
-
-`GET /api/runs/<run>` returns one run's detail as JSON (404 for an unknown run). The pushed state also carries `details`, the same object for each open run, rebuilt every 3 seconds. Fields:
-
-| Field                              | Content                                                                                                                                                                                                                                                                                |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `timeline`                         | `{phase, at}` for each phase change in `events.ndjson`                                                                                                                                                                                                                                 |
-| `gates`                            | `{gate, asked, answered, answer, wait_seconds}`; an open gate has `answered: null` and waits until now                                                                                                                                                                                 |
-| `rounds`                           | `{round, at, steps}` from `step.started`, merge steps skipped                                                                                                                                                                                                                          |
-| `steps`                            | each plan step with `status`, `cost` and `wall_seconds`                                                                                                                                                                                                                                |
-| `ac_proof`                         | the latest `test.completed`: each AC with its status and test cases (`name`, `status`, `suite`, `report`). Cases come from the `results/` reports; a missing or unreadable report gives a case with `status: "unavailable"`, never a pass. `not available` before the first `ark test` |
-| `cost`                             | `{usd, tokens}` for the run, and for each step and agent. It uses the readers and the step assignment of `ark retro`; a cost that cannot be measured is `"unknown"`, never 0                                                                                                           |
-| `agents`                           | each Orca agent of the run with `cost`, `wall_seconds` and `output`: the last 20 lines from `orca terminal read` (2 second timeout), or `"unknown"` when the agent is not live or the read fails                                                                                       |
-| `time_split`                       | seconds in `working`, `waiting_human` (an open gate), `waiting_ci_or_paused`, `stalled` and `unavailable`; the parts add up to `wall_seconds`. Time before the first `history.ndjson` line is `unavailable` unless a gate was open                                                     |
-| `plan`, `evaluation`, `strategies` | `{state: "ok", ...}` (`plan.html` is the rendered `plan.md`; `evaluation` has `blockers`, `risks`, `surfaces`; `strategies.cards` has each card with its `mockups` links), or `{state: "not available"}` when the file is missing                                                      |
 
 ## Run folder
 
@@ -230,7 +214,6 @@ A run lives at `$ARK_HOME/projects/<project>/runs/<run>/`:
 ticket.md          copy of the ticket file
 events.ndjson      append-only event log
 state.json         derived from the events, rebuilt by any command
-history.ndjson     written by the hub only: timestamped changes of MR CI state and agent liveness
 evaluation.md      written by the evaluator
 strategies.md      written by the run lead (strategy cards)
 mockups/           written by the Designer, never in an MR
@@ -243,8 +226,6 @@ retro.md           written by the run lead
 ```
 
 `workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<ticket id>-<slug>` (slug: the ticket title in lowercase with hyphens, at most 40 characters; `-<run number>` is added from the second run) at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace.
-
-`history.ndjson` holds one JSON line per change: `{"time","kind","subject","state"}`. `kind` is `ci` (subject: the MR URL; state: `pending`, `passing` or `failing`, read from `gh` or `glab` with a 5 second timeout; a failed read writes nothing) or `liveness` (subject: the terminal handle; state: `live`, `stuck`, `dead`, `exited`, `paused` or `unknown`). Orca has no run-level pause flag, so a pause shows as the `paused` verdict. The hub appends a line only when a state differs from the last line for the same kind and subject. Time before the first line is unavailable and is never counted as zero. `ark retro` and the event log do not read it.
 
 ## `evaluation.md` format
 

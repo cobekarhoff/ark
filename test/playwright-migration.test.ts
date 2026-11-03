@@ -6,24 +6,13 @@ import { parseBun } from "../cli/parsers/bun.ts";
 
 const root = resolve(import.meta.dir, "..");
 const long = 300_000;
+// The whole suite includes the 4 x 30 s of ARK-277-AC4.
+const wholeSuite = 900_000;
 // Built, not written, so this file does not match its own "no browser API" check.
 const forbidden = "Web" + "View";
 
-const migratedIds = [
-  "ARK-181-AC6",
-  "ARK-180-AC4",
-  "ARK-180-AC5",
-  "ARK-179-AC7",
-  "ARK-177-AC4",
-  "ARK-177-AC6",
-  "ARK-176-AC7",
-  "ARK-176-AC8",
-  "ARK-178-AC3",
-  "ARK-178-AC4",
-  "ARK-215-AC1",
-  "ARK-215-AC2",
-  "ARK-199-AC3",
-];
+// The hub specs of ARK-277: the whole Playwright suite, in test/pw/hub.pw.ts.
+const hubSpecIds = ["AC3", "AC4", "AC7", "AC8", "AC9", "AC10", "AC11"].map((ac) => `ARK-277-${ac}`);
 
 function playwright(args: string[], options: { cwd?: string; env?: Record<string, string> } = {}) {
   const env: Record<string, string | undefined> = { ...process.env, ...options.env };
@@ -71,7 +60,7 @@ describe("playwright migration", () => {
       expect(offenders).toEqual([]);
 
       const found = listed();
-      expect(found.length).toBe(31);
+      expect(found.length).toBeGreaterThanOrEqual(hubSpecIds.length);
       expect(new Set(found.map((t) => t.project))).toEqual(new Set(["chromium"]));
     },
     long,
@@ -79,7 +68,7 @@ describe("playwright migration", () => {
 
   test("ARK-243-AC1 bun test discovers no *.pw.ts file", () => {
     const pw = [...new Bun.Glob("test/pw/*.pw.ts").scanSync({ cwd: root })];
-    expect(pw.length).toBeGreaterThan(0);
+    expect(pw).toEqual(["test/pw/hub.pw.ts"]);
     const result = Bun.spawnSync(["bun", "test", "--dry-run", "test/pw"], {
       cwd: root,
       stdout: "pipe",
@@ -93,7 +82,7 @@ describe("playwright migration", () => {
     "ARK-243-AC2 every migrated criterion id appears in a Playwright test title",
     () => {
       const titles = listed().map((t) => t.title);
-      for (const id of migratedIds)
+      for (const id of hubSpecIds)
         expect(
           titles.some((title) => title.startsWith(`${id} `)),
           id,
@@ -186,6 +175,6 @@ describe("playwright migration", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     },
-    long,
+    wholeSuite,
   );
 });

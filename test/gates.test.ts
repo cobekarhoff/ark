@@ -2,7 +2,6 @@ import { beforeEach, expect, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
-import { buildDetail } from "../cli/hub/detail.ts";
 import {
   ark,
   recordEvaluation,
@@ -226,17 +225,6 @@ test("ARK-234-AC5 an answer from before the by field reads as human", () => {
   expect(checkPlan(runId, directory).code).toBe(0);
   appendEvent(directory, "gate.answered", { gate: "plan", answer: "approve" });
   expect(ark("status", runId).out).toContain("plan approve by human");
-});
-
-test("ARK-234-AC5 hub run detail gives each gate answer its by value", async () => {
-  const { runId, directory } = startRun({ plan: "auto" });
-  recordEvaluation(directory);
-  expect(checkPlan(runId, directory).code).toBe(0);
-  const events = eventsOf(directory);
-  const detail = await buildDetail({ directory, state: deriveState(events), events }, []);
-  expect(detail.gates).toContainEqual(
-    expect.objectContaining({ gate: "plan", answer: "approve", by: "auto" }),
-  );
 });
 
 test("ARK-234-AC6 run-lead and chief playbooks say an auto gate needs no Plannotator review and no relay", () => {

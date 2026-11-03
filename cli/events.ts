@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { planHash } from "./plan.ts";
-import { now } from "./hub/clock.ts";
+import { now } from "./clock.ts";
 import { assertAllowed } from "./transitions.ts";
 
 // Event payloads differ per type (see the contract), so `data` stays loosely typed.
