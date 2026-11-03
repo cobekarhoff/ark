@@ -6,6 +6,7 @@ import {
   rmSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.ts";
@@ -96,6 +97,12 @@ function addRepoWorktree(
   const base = git(source, "rev-parse", "HEAD");
   git(source, "worktree", "add", "-b", branch, path, base);
   log(`created  ${repo} -> ${path}`);
+  // yolo: lower tools.approvalMode values stopped a worker at its first shell call (findings/permission-modes.md).
+  // `.omp/.gitignore` ("*") hides the folder, itself included, from status and `git add`; it touches no shared git file.
+  mkdirSync(join(path, ".omp"), { recursive: true });
+  writeFileSync(join(path, ".omp", "config.yml"), "tools:\n  approvalMode: yolo\n");
+  writeFileSync(join(path, ".omp", ".gitignore"), "*\n");
+  log(`setting  ${repo}: .omp/config.yml`);
   if (setup) {
     const result = Bun.spawnSync(["sh", "-c", setup], { cwd: path });
     if (result.exitCode !== 0) {

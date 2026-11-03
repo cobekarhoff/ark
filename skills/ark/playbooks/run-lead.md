@@ -60,7 +60,7 @@ It prints one line, `path:<absolute path>`, and prints the same line when the wo
 Skip this part when `ark status <run>` shows that the run has an `evaluation.recorded` event (you replace a stopped run lead).
 
 1. Read `roles` in `ark.yml`. If it has no `evaluator` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.evaluator`: add its `harness` and `model`, then start a new run lead.
-2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the run worktree and reads the ticket and the code. It has no plan step:
+2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the run worktree and reads the ticket and the code. It has no plan step. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
 
    ```sh
    orca orchestration worker-start --spec $'/skill:ark worker <run> evaluator\nYou are the EVALUATOR for run <run>.' --task-title "evaluator (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
@@ -115,7 +115,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
       orca orchestration worker-start --spec $'/skill:ark worker <run> designer\nYou are the DESIGNER for run <run>.' --task-title "designer (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
       ```
 
-      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Tell it to read and apply the UI skills of `ark ui-skills <run>`, and to write a `Skills:` line on each card. Wait for its `worker_done`, then release it, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
+      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Tell it to read and apply the UI skills of `ark ui-skills <run>`, and to write a `Skills:` line on each card. Wait for its `worker_done`, then release it, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
 3. Record it:
 
    ```sh
@@ -299,7 +299,7 @@ Never record `approve` unless the human said so, in Plannotator (exit 0) or thro
 ark worktree create <run>
 ```
 
-This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the plan uses is a worktree on the branch `ark/<ticket id>-<slug>`. Every other path is a link to the workspace. A repo named `.` is the workspace folder itself. A worker's working folder is `<run folder>/workspace/<repo>`.
+This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the plan uses is a worktree on the branch `ark/<ticket id>-<slug>`. Every other path is a link to the workspace. A repo named `.` is the workspace folder itself. A worker's working folder is `<run folder>/workspace/<repo>`. Ark also writes `.omp/config.yml` with `tools.approvalMode: yolo` in each repo worktree it makes (`ark worktree anchor` too), so workers run with no permission prompt. The file is hidden from `git status` and `git add` by a `.omp/.gitignore`, and nothing outside the run worktree changes.
 
 ## 7. Run the steps
 
@@ -327,7 +327,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
    orca orchestration worker-start --spec $'/skill:ark worker <run> <step>\nYou are the <ROLE> for step <step> of run <run>.' --task-title "<step> (<role>, <repo>)" --worktree path:<worktree path> --agent <harness> --model <model> --json
    ```
 
-   The worktree path is `<run folder>/workspace/<repo>`. For a repo named `.` it is `<run folder>/workspace`, with no trailing `/.`.
+   The worktree path is `<run folder>/workspace/<repo>`. For a repo named `.` it is `<run folder>/workspace`, with no trailing `/.`. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
 
    In the worker spec, copy every literal string an AC names (a field, flag or message) word for word. Do not paraphrase it. Example: `Literal strings: field "owner_id", flag --dry-run, message "Run not found".`
 

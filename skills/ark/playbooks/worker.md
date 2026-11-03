@@ -19,7 +19,7 @@ Throughout this playbook:
    - If the step has a `skills` list in `plan.yml`, read each skill with `skill://<name>` before you work, and apply it. Name the skills you applied in your `worker_done` report. This covers the implementer and the validator. The reviewer uses the list as in its section.
 5. Read what the earlier steps left, if you are not the first: `git log --oneline`, and any file in `<run folder>/findings/` that names your step.
 
-Do only your step. Do not edit another repo's worktree. Do not touch the run's state: never run `ark run step`, `ark evaluation record`, `ark gate record`, `ark merge-request open` or `ark plan check`. The run lead does that.
+Do only your step. Do not edit another repo's worktree. Do not touch the run's state: never run `ark run step`, `ark evaluation record`, `ark gate record`, `ark merge-request open` or `ark plan check`. The run lead does that. A worker that still stops at a permission prompt is a defect: tell the run lead, and never approve it in the worker.
 
 ## 2. Work as your role
 
