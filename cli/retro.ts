@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { type ArkEvent, readEvents } from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
-import { type PlanDecision, loadPlan } from "./plan.ts";
+import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
 import { type SessionWithKey, type UsageMessage, isInside, readUsage } from "./usage/index.ts";
 
 const IDLE_GAP_SECONDS = 600;
@@ -513,6 +513,78 @@ export function retro(runId: string, inProject?: string): void {
   const stepSessions = new Map<string, Set<string>>();
   for (const [message, window] of stepOf)
     stepSessions.set(window.id, (stepSessions.get(window.id) ?? new Set()).add(message.sessionKey));
+
+  // Actual models per step ID; rework rounds share an ID. A step with no session has an empty list.
+  const actualModels = sortedObject(
+    stepIds.map((id): [string, string[]] => [
+      id,
+      [
+        ...new Set(
+          [...stepOf].filter(([, window]) => window.id === id).map(([message]) => message.model),
+        ),
+      ].sort(),
+    ]),
+  );
+  let planSteps: PlanStep[] = [];
+  try {
+    planSteps = loadPlan(runDirectory).steps;
+  } catch (err) {
+    if (!(err instanceof ArkError)) throw err; // no plan.yml, or one that does not parse: nothing to compare
+  }
+  // plan.yml says anthropic/claude-x, session messages say claude-x: compare and judge vendors on the name after the last "/".
+  const bareModels = Object.fromEntries(
+    Object.entries(actualModels).map(([stepId, models]) => [
+      stepId,
+      models.map((model) => model.slice(model.lastIndexOf("/") + 1)),
+    ]),
+  );
+  const modelChangedLines = planSteps
+    .filter((step) => {
+      const planned = step.model.slice(step.model.lastIndexOf("/") + 1);
+      return (bareModels[step.id] ?? []).some((model) => model !== planned);
+    })
+    .map(
+      (step) =>
+        `model changed: step ${step.id} planned ${step.model}, ran ${actualModels[step.id].join(", ")}`,
+    );
+  // Vendor from the model name: claude- is anthropic, gpt- is openai, else none.
+  // Same vendor review: judged on the executed step windows (the repo and role the messages ran in), not on plan.yml.
+  const vendorsByRepoStep = new Map<string, Map<string, { role: string; vendors: Set<string> }>>();
+  for (const [message, window] of stepOf) {
+    const vendorName = message.model.slice(message.model.lastIndexOf("/") + 1);
+    const vendor = vendorName.startsWith("claude-")
+      ? "anthropic"
+      : vendorName.startsWith("gpt-")
+        ? "openai"
+        : null;
+    if (!vendor) continue;
+    const stepsInRepo = vendorsByRepoStep.get(window.repo) ?? new Map();
+    const entry = stepsInRepo.get(window.id) ?? { role: window.role, vendors: new Set<string>() };
+    entry.vendors.add(vendor);
+    stepsInRepo.set(window.id, entry);
+    vendorsByRepoStep.set(window.repo, stepsInRepo);
+  }
+  const sameVendorGroups: string[] = [];
+  for (const [repo, stepsInRepo] of [...vendorsByRepoStep].sort(([left], [right]) =>
+    left < right ? -1 : 1,
+  )) {
+    const entries = [...stepsInRepo].sort(([left], [right]) => (left < right ? -1 : 1));
+    const builders = entries.filter(([, entry]) => entry.role === "implementer");
+    const checkers = entries.filter(
+      ([, entry]) => entry.role === "validator" || entry.role === "reviewer",
+    );
+    const sharing = (candidates: typeof entries, others: typeof entries) =>
+      candidates.filter(([, entry]) =>
+        others.some(([, other]) => [...entry.vendors].some((vendor) => other.vendors.has(vendor))),
+      );
+    const checkersShared = sharing(checkers, builders);
+    if (checkersShared.length > 0)
+      sameVendorGroups.push(
+        `${checkersShared.map(([id]) => id).join(", ")} with ${sharing(builders, checkers)
+          .map(([id]) => id)
+          .join(", ")} in ${repo}`,
+      );
+  }
   const closed = events.some((event) => event.type === "run.closed");
   const findingsSentBack = countFindingsSentBack(runDirectory);
   const mergeRequests = mergeRequestActivity(runDirectory, events);
@@ -529,6 +601,8 @@ export function retro(runId: string, inProject?: string): void {
   const gateAnswers = events.filter((event) => event.type === "gate.answered");
   const metrics = {
     run: runId,
+    actual_models: actualModels,
+    same_vendor_review: sameVendorGroups.length > 0,
     cost: {
       total_usd: total.usd,
       tokens: total.tokens,
@@ -602,6 +676,8 @@ export function retro(runId: string, inProject?: string): void {
       `rework: ${metrics.rework.rounds} rounds, ${metrics.rework.escalations} escalations, ${metrics.rework.findings_sent_back} findings sent back, ${metrics.rework.merge_steps} merge steps`,
       `orchestration: ${metrics.orchestration.restarts} restarts, ${metrics.orchestration.tool_errors} tool errors, ${metrics.orchestration.context_overflows} context overflows, ${metrics.orchestration.idle_gaps} idle gaps`,
       `gate answers: ${metrics.gates.auto_answers} auto, ${metrics.gates.human_answers} human`,
+      ...modelChangedLines,
+      `same vendor review: ${sameVendorGroups.length > 0 ? `true (${sameVendorGroups.join("; ")})` : "false"}`,
       `compared with ${comparison.runs_compared} earlier closed runs`,
       `wrote ${metricsFile}`,
     ].join("\n"),
