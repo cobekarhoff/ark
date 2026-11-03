@@ -123,7 +123,7 @@ function emulateHosts(workspace: string, failJobs = false) {
     github,
     `#!/usr/bin/env bun
 const number = process.argv[4].split("/").at(-1);
-console.log(JSON.stringify({ state: "OPEN", statusCheckRollup: number === "1" ? [
+console.log(JSON.stringify({ state: "OPEN", mergeable: "MERGEABLE", statusCheckRollup: number === "1" ? [
   { name: "linux-test", conclusion: "FAILURE" },
   { context: "legacy-lint", state: "ERROR" },
   { name: "passing-build", conclusion: "SUCCESS" },
@@ -136,7 +136,7 @@ console.log(JSON.stringify({ state: "OPEN", statusCheckRollup: number === "1" ? 
     gitlab,
     `#!/usr/bin/env bun
 if (process.argv[2] === "mr") {
-  console.log(JSON.stringify({ state: "opened", head_pipeline: { id: 42 }, pipeline: { id: 41 } }));
+  console.log(JSON.stringify({ state: "opened", has_conflicts: false, head_pipeline: { id: 42, status: "failed" }, pipeline: { id: 41 } }));
 } else if (process.argv[3] === "projects/:id/pipelines/42/jobs?scope[]=failed") {
   ${failJobs ? 'console.error("pipeline access denied"); process.exit(1);' : 'console.log(JSON.stringify([{ name: "gitlab-test" }, { name: "gitlab-lint" }]));'}
 } else { console.error("unknown host request"); process.exit(1); }
@@ -165,14 +165,14 @@ test("ARK-208-AC3 status attributes GitHub checks and GitLab head-pipeline job f
   const result = ark("merge-request", "status", runId);
   expect(result.code).toBe(0);
   expect(result.out.trim().split("\n")).toEqual([
-    ".  open  https://github.com/example/core/pull/1  checks failing: linux-test, legacy-lint",
-    "github-other  open  https://github.com/example/other/pull/2  checks failing: other-repo-test",
-    "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  checks failing: gitlab-test, gitlab-lint",
+    ".  open  https://github.com/example/core/pull/1  ci: failed  checks failing: linux-test, legacy-lint",
+    "github-other  open  https://github.com/example/other/pull/2  ci: failed  checks failing: other-repo-test",
+    "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: failed  checks failing: gitlab-test, gitlab-lint",
   ]);
   expect(readEvents(directory)).toEqual(before);
 });
 
-test("ARK-208-AC3 status preserves host errors rather than treating unavailable checks as passing", () => {
+test("ARK-208-AC3 status prints unknown, never passed, when a host cannot answer", () => {
   const { runId, directory, workspace } = openRun();
   const mergeRequest = emulateHosts(workspace, true).find(
     (candidate) => candidate.repo === "gitlab",
@@ -184,9 +184,11 @@ test("ARK-208-AC3 status preserves host errors rather than treating unavailable 
   });
   appendEvent(directory, "merge_request.opened", mergeRequest);
   const result = ark("merge-request", "status", runId);
-  expect(result.code).toBe(1);
-  expect(result.err).toContain("pipeline access denied");
-  expect(result.out).not.toContain("gitlab  open");
+  expect(result.code).toBe(0);
+  expect(result.out.trim().split("\n")).toEqual([
+    ".  open  https://github.com/example/core/pull/1  ci: failed  checks failing: linux-test, legacy-lint",
+    "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: unknown",
+  ]);
 });
 
 test("ARK-208-AC4 run-lead orders MR checks, repair verification and sync before its final report", () => {
