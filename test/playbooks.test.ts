@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
 
 const playbookDirectory = join(import.meta.dir, "../skills/ark/playbooks");
 const chiefPlaybook = readFileSync(join(playbookDirectory, "chief.md"), "utf8");
@@ -401,4 +402,48 @@ test("ARK-278-AC6 cli.md lists --sweep for run close; chief.md section 8 names t
   const close = section(chiefPlaybook, "## 8. Close the run");
   expect(close).toMatch(/`ark run close`[^\n]*releases[^\n]*Orca workers/);
   expect(close).toContain("`ark run close --sweep`");
+});
+
+const flat = (text: string) => text.replaceAll(/\s+/g, " ");
+
+test("ARK-279-AC5 run-lead.md has the four UI skills texts and names no skill", () => {
+  const lead = flat(runLeadPlaybook);
+  // (a) Designer brief and the card line
+  expect(lead).toMatch(/read and apply the UI skills of `ark ui-skills <run>`/);
+  expect(lead).toMatch(/`Skills:` line on each card/);
+  // (b) plan section
+  expect(lead).toMatch(
+    /give a `skills` list .*to every implementer, validator and reviewer step that touches the UI/,
+  );
+  expect(lead).toMatch(/Add the React skill .* to a step that touches React code/);
+  // (c) step worker spec
+  expect(lead).toContain("add a line `UI skills: <the skills of the step>` to the worker spec");
+  // (d) UI finding ranked like any other
+  expect(lead).toMatch(
+    /UI finding .*`\*\*Skill:\*\*`.* is a finding like any other: treat it by its rank/,
+  );
+  for (const name of [...requiredUiSkills, reactSkill]) expect(runLeadPlaybook).not.toContain(name);
+});
+
+test("ARK-279-AC6 worker.md has the read-apply-report, Designer and Reviewer skills texts", () => {
+  const worker = flat(workerPlaybook);
+  // (a) section 1
+  const section1 = flat(workerPlaybook.split(/^## 2\./m)[0]);
+  expect(section1).toMatch(
+    /If the step has a `skills` list in `plan.yml`, read each skill with `skill:\/\/<name>` before you work, and apply it\. Name the skills you applied in your `worker_done` report\. This covers the implementer and the validator/,
+  );
+  // (b) Designer step takes the skills from ark ui-skills, adds the two extras, keeps the rules
+  const designer =
+    worker.match(/Read these skills for direction and craft: [^]*?(?= \d+\. |$)/)?.[0] ?? "";
+  expect(designer).toContain("the UI skills of `ark ui-skills <run>`");
+  expect(designer).toContain("`prototype`");
+  expect(designer).toContain("`plannotator-visual-explainer`");
+  expect(worker).toContain("impeccable generate");
+  expect(worker).toMatch(/live mode/i);
+  // (c) Reviewer
+  expect(worker).toMatch(
+    /read each skill with `skill:\/\/<name>` and check the diff against every skill in it/,
+  );
+  expect(worker).toContain("`- **Skill:** <skill>`");
+  expect(worker).toContain("`- **Rule:** <name of the rule or guideline>`");
 });

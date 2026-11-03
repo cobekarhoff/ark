@@ -4,6 +4,7 @@ import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
+import { allowedUiSkills } from "./ui-skills.ts";
 
 type Card = { id: string; fields: Record<string, string>; text: string };
 
@@ -14,13 +15,14 @@ const fieldNames = [
   "steps",
   "mockup",
   "mockups",
+  "skills",
   "recommended",
   "reason",
 ];
 
 /**
  * strategies.md has one level-2 heading for each card: `## <id> <title>`. A card is a list of
- * `Name: text` fields (Approach, Interfaces, Tradeoffs, Steps, Mockup, Recommended, Reason). A
+ * `Name: text` fields (Approach, Interfaces, Tradeoffs, Steps, Mockup, Skills, Recommended, Reason). A
  * field runs until the next field or heading.
  */
 export function parseCards(content: string): Card[] {
@@ -102,6 +104,23 @@ export function strategyRecord(runId: string, inProject?: string): void {
       throw new ArkError(
         `strategy card ${card.id} has no mockup link: the evaluation lists surface ${state.evaluation.surfaces.join(", ")}, so add a "Mockup:" line`,
       );
+    }
+    if (needsMockups) {
+      const skills =
+        card.fields.skills
+          ?.replaceAll("`", "")
+          .split(/[\s,]+/)
+          .filter(Boolean) ?? [];
+      const allowed = allowedUiSkills(surfaces);
+      if (skills.length === 0)
+        throw new ArkError(
+          `strategy card ${card.id} has no skills: add a "Skills:" line with skills from \`ark ui-skills ${runId}\``,
+        );
+      const unknown = skills.filter((skill) => !allowed.includes(skill));
+      if (unknown.length > 0)
+        throw new ArkError(
+          `strategy card ${card.id} has a "Skills:" line with ${unknown.join(", ")}, which \`ark ui-skills ${runId}\` does not list`,
+        );
     }
     for (const mockup of mockups) {
       const path = resolve(directory, mockup);

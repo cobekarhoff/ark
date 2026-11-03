@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { requiredUiSkills } from "../cli/ui-skills";
 import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
 
 const criteria = Array.from({ length: 14 }, (_, index) => ({
@@ -86,6 +87,7 @@ const decisionPlan = (decisions: unknown[]) => ({
       model: "pi/task",
       needs: [],
       criteria: criteria.map(({ id }) => id),
+      skills: requiredUiSkills,
     },
   ],
   test_cases: criteria.map(({ id }) => ({
@@ -312,7 +314,12 @@ test("ARK-173-AC9 a visible surface requires every strategy card to link a mocku
   expect(result.err).toContain("S1");
   mkdirSync(join(runDirectory, "mockups"), { recursive: true });
   writeFileSync(join(runDirectory, "mockups", "s1.html"), "<h1>CLI output</h1>");
-  strategies(card("S1", "Mockup: mockups/s1.html\nReason: only.\n"));
+  strategies(
+    card(
+      "S1",
+      "Mockup: mockups/s1.html\nSkills: impeccable, emil-design-eng, web-design-guidelines\nReason: only.\n",
+    ),
+  );
   expect(ark("strategy", "record", runId).code).toBe(0);
 });
 
@@ -322,7 +329,12 @@ test("ARK-173-AC10 old config loads but visible work requires a configured Desig
   writeProject("demo", oldConfig);
   expect(ark("status", runId).code).toBe(0);
   expect(evaluation(["web_ui"]).code).toBe(0);
-  strategies(card("S1", "Mockup: mockups/s1.html\nReason: only.\n"));
+  strategies(
+    card(
+      "S1",
+      "Mockup: mockups/s1.html\nSkills: impeccable, emil-design-eng, web-design-guidelines\nReason: only.\n",
+    ),
+  );
   const refused = ark("strategy", "record", runId);
   expect(refused.code).toBe(1);
   expect(refused.err).toContain("roles.designer");
@@ -385,7 +397,12 @@ test("ARK-173-AC13 mockups remain outside actual worktrees and use one human rev
   evaluation(["web_ui"]);
   mkdirSync(join(runDirectory, "mockups"), { recursive: true });
   writeFileSync(join(runDirectory, "mockups", "s1.html"), "<h1>mockup</h1>");
-  strategies(card("S1", "Mockup: mockups/s1.html\nReason: only.\n"));
+  strategies(
+    card(
+      "S1",
+      "Mockup: mockups/s1.html\nSkills: impeccable, emil-design-eng, web-design-guidelines\nReason: only.\n",
+    ),
+  );
   expect(ark("strategy", "record", runId).code).toBe(0);
   writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(decisionPlan([])));
   expect(ark("plan", "check", runId).code).toBe(0);
@@ -538,4 +555,56 @@ test("ARK-173-AC12 retro counts strategy and plan decision overrides", () => {
     total: 3,
     overridden: 2,
   });
+});
+
+function writeMockup() {
+  mkdirSync(join(runDirectory, "mockups"), { recursive: true });
+  writeFileSync(join(runDirectory, "mockups", "s1.html"), "<h1>Mockup</h1>");
+}
+
+const skilledCard = (skills?: string) =>
+  card(
+    "S1",
+    `Mockup: mockups/s1.html\n${skills === undefined ? "" : `Skills: ${skills}\n`}Reason: only.\n`,
+  );
+
+test("ARK-279-AC3 a card with no Skills line is refused when a mockup is needed", () => {
+  expect(evaluation(["web_ui"]).code).toBe(0);
+  writeMockup();
+  strategies(skilledCard());
+  const result = ark("strategy", "record", runId);
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("S1");
+  expect(result.err).toContain("Skills:");
+});
+
+test("ARK-279-AC3 a card that names a skill ark ui-skills does not list is refused", () => {
+  expect(evaluation(["web_ui"]).code).toBe(0);
+  writeMockup();
+  strategies(skilledCard(`${requiredUiSkills.join(", ")}, made-up-skill`));
+  const result = ark("strategy", "record", runId);
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("S1");
+  expect(result.err).toContain("Skills:");
+  expect(result.err).toContain("made-up-skill");
+});
+
+test("ARK-279-AC3 a card with a valid Skills line is recorded", () => {
+  expect(evaluation(["web_ui"]).code).toBe(0);
+  writeMockup();
+  strategies(skilledCard(requiredUiSkills.join(", ")));
+  expect(ark("strategy", "record", runId).code).toBe(0);
+  expect(events().at(-1).type).toBe("strategy.recorded");
+});
+
+test("ARK-279-AC3 Surfaces none needs no Skills line", () => {
+  expect(evaluation(["none"]).code).toBe(0);
+  strategies(card("S1", "Reason: only.\n"));
+  expect(ark("strategy", "record", runId).code).toBe(0);
+});
+
+test("ARK-279-AC3 one card with only the surface document needs no Skills line", () => {
+  expect(evaluation(["document"]).code).toBe(0);
+  strategies(card("S1", "Reason: only.\n"));
+  expect(ark("strategy", "record", runId).code).toBe(0);
 });

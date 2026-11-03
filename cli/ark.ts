@@ -10,6 +10,7 @@ import { retro } from "./retro.ts";
 import { runClose, runCloseSweep, runStart, runStep, status } from "./run.ts";
 import { strategyRecord } from "./strategy.ts";
 import { testRun } from "./test-run.ts";
+import { uiSkills } from "./ui-skills.ts";
 import { ui, uiInstall, uiUninstall } from "./ui.ts";
 import { workspaceSync } from "./workspace.ts";
 import { worktreeAnchor, worktreeCreate, worktreeSync } from "./worktree.ts";
@@ -96,16 +97,25 @@ const commands: Command[] = [
   {
     usage: "strategy record <run> [--project <name>]",
     description:
-      "Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or a project whose ark.yml has no roles.designer. A mockup and roles.designer are not needed when the surface is only none, or when there is one card and the surface is only document. Two or more cards open the strategy gate; one card opens no gate.",
+      "Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or no Skills line, a Skills line that names a skill `ark ui-skills <run>` does not list, or a project whose ark.yml has no roles.designer. A mockup, a Skills line and roles.designer are not needed when the surface is only none, or when there is one card and the surface is only document. Two or more cards open the strategy gate; one card opens no gate.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,
     run: ([runId], flags) => strategyRecord(runId, flags["--project"] as string | undefined),
   },
   {
+    usage: "ui-skills <run> [--project <name>]",
+    description:
+      "Prints the UI skills of the run, one line for each. When the Surfaces list in the recorded evaluation is not none, it prints the required skills, then one more line for the React skill, which is only for a change that touches React code. When Surfaces is none, it prints none. It exits 1 for a run with no recorded evaluation. The Designer, the implementer, the validator and the reviewer read these skills; strategy record and plan check refuse a Skills line or a skills list that names any other skill.",
+    flags: { "--project": true },
+    minimum: 1,
+    maximum: 1,
+    run: ([runId], flags) => uiSkills(runId, flags["--project"] as string | undefined),
+  },
+  {
     usage: "plan check <run> [--project <name>]",
     description:
-      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. It records the number of open decisions.",
+      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,

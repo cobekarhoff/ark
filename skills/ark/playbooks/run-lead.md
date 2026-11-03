@@ -106,7 +106,7 @@ The gate opens when the phase is `awaiting_criteria`. That means the ticket has 
 
 The strategy comes after the evaluation and before the plan. Skip this part when `ark status <run>` shows the run has a `strategy.recorded` event and the phase is not `awaiting_strategy` (you replace a stopped run lead). If the phase is `awaiting_strategy`, go to step 5.
 
-1. Write `<run folder>/strategies.md`: 2 or 3 short cards, one level-2 heading for each card (`## <id> <title>`). Each card has these fields, one per line: `Approach:`, `Interfaces:`, `Tradeoffs:` (risk, size, what it leaves out), `Steps:` (a rough list), `Mockup:` (links to files in `<run folder>/mockups/`) and `Recommended: yes` on exactly one card. If only one strategy is possible, write one card with a `Reason:` line that says why there is no alternative.
+1. Write `<run folder>/strategies.md`: 2 or 3 short cards, one level-2 heading for each card (`## <id> <title>`). Each card has these fields, one per line: `Approach:`, `Interfaces:`, `Tradeoffs:` (risk, size, what it leaves out), `Steps:` (a rough list), `Mockup:` (links to files in `<run folder>/mockups/`), `Skills:` (the UI skills that guided the card, from `ark ui-skills <run>`) and `Recommended: yes` on exactly one card. If only one strategy is possible, write one card with a `Reason:` line that says why there is no alternative.
 2. Read `Surfaces` in `evaluation.md`. When a surface is not `none`, every card needs a `Mockup:` link, and `ark strategy record` refuses a card with none. Exception: when `Surfaces` is only `none`, or when there is one card and `Surfaces` is only `document`, leave out the `Mockup:` line (never write `Mockup: none`, it is refused), skip the Designer and go to step 3. Otherwise start a Designer to make them:
    1. Read `roles` in `ark.yml`. If it has no `designer` entry, stop. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.designer`: add its `harness` and `model`, then start a new run lead.
    2. Start the Designer with the `harness` and `model` of `roles.designer`. It works in the run worktree, has no plan step, and is named `designer`:
@@ -115,7 +115,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
       orca orchestration worker-start --spec $'/skill:ark worker <run> designer\nYou are the DESIGNER for run <run>.' --task-title "designer (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
       ```
 
-      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Wait for its `worker_done`, then release it, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
+      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. Tell it to read and apply the UI skills of `ark ui-skills <run>`, and to write a `Skills:` line on each card. Wait for its `worker_done`, then release it, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
 3. Record it:
 
    ```sh
@@ -220,6 +220,7 @@ Rules for the plan:
 - `design` is required. `ark plan check` rejects a plan with no `design.interfaces`, or with an interface that has no `callers`. `interfaces` lists each interface the change touches: a command, a playbook section, an event, a file format or an exported function. Find the callers of each one before you write it: search the repo, and read the playbooks and docs that name it. A removed or changed interface with a caller you did not list is how earlier runs broke. `approach` (the method, in a few sentences) and `example` (a sample of new or changed output) are optional, but give both. Plan.md shows "No approach given." or "No example given." for a missing part, and the human can ask for it with `change` at the plan gate.
 - `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
+- When `Surfaces` is not `none`, give a `skills` list (the UI skills of `ark ui-skills <run>`) to every implementer, validator and reviewer step that touches the UI. Add the React skill that command lists to a step that touches React code. You decide which steps touch the UI and React code.
 - Keep each step small enough for one worker. Do not put two repos in one step.
 
 Then check it:
@@ -330,6 +331,8 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 
    In the worker spec, copy every literal string an AC names (a field, flag or message) word for word. Do not paraphrase it. Example: `Literal strings: field "owner_id", flag --dry-run, message "Run not found".`
 
+   When the step has a `skills` list in `plan.yml`, add a line `UI skills: <the skills of the step>` to the worker spec.
+
    Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`, then run `ark run step <run> <step> finish --failed` and decide what to do.
 
 3. Keep the terminal handle from the `worker-start --json` output: the `id` of the entry in `result.effects[]` with `"kind": "terminal"` (`term_...`). About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds, then read its terminal, without waiting for the long wait below:
@@ -391,6 +394,7 @@ Run the reviewer steps after the tests pass. Each reviewer writes its findings t
 
 **Judge every finding.** You decide which ones send work back. Read the evidence in the file and check it yourself in the code. Then:
 
+- A UI finding (it has `**Skill:**` and `**Rule:**` lines) is a finding like any other: treat it by its rank, as below.
 - P0 sends work back. Tell the implementer to fix it.
 - P1 sends work back unless you can show it is wrong or out of scope. Reproduce a P0 or P1 with a test or a command before you send work back; do not send it on the reviewer's evidence alone.
 - P2 and P3 do not send work back unless several of them point at one real problem. Record them in the retro. A P2 that names a CI risk on another platform sends work back, because you cannot test it locally.

@@ -6,6 +6,7 @@ import { ArkError } from "./errors.ts";
 import { type RunState, appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
+import { allowedUiSkills, uiSkillsFor } from "./ui-skills.ts";
 
 export type PlanStep = {
   id: string;
@@ -15,6 +16,7 @@ export type PlanStep = {
   model: string;
   needs: string[];
   criteria: string[];
+  skills: string[];
 };
 
 export type PlanTestCase = {
@@ -122,6 +124,7 @@ export function loadPlan(runDirectory: string): Plan {
       model: text(step.model),
       needs: textList(step.needs),
       criteria: textList(step.criteria),
+      skills: textList(step.skills),
     })),
     test_cases: objectList(test_cases).map((testCase) => {
       const name = text(testCase.id) || "(no id)";
@@ -189,7 +192,11 @@ function findCycles(plan: Plan): string[][] {
   return cycles;
 }
 
-export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
+export function findProblems(
+  plan: Plan,
+  ticketCriteria: string[],
+  surfaces: string[] = ["none"],
+): string[] {
   const problems: string[] = [];
   const stepIds = new Set<string>();
   plan.steps.forEach((step, i) => {
@@ -285,6 +292,21 @@ export function findProblems(plan: Plan, ticketCriteria: string[]): string[] {
       problems.push(`decision ${name} chosen "${decision.chosen}" is not an option`);
     }
   });
+  const required = uiSkillsFor(surfaces);
+  if (required.length > 0) {
+    if (plan.steps.every((step) => step.skills.length === 0))
+      problems.push("no step has a skills list: add one with the skills of `ark ui-skills <run>`");
+    const allowed = allowedUiSkills(surfaces);
+    for (const step of plan.steps) {
+      for (const skill of step.skills.filter((skill) => !allowed.includes(skill)))
+        problems.push(
+          `step ${step.id} skills has "${skill}", which \`ark ui-skills <run>\` does not list`,
+        );
+      const missing = required.filter((skill) => !step.skills.includes(skill));
+      if (step.skills.length > 0 && missing.length > 0)
+        problems.push(`step ${step.id} skills lacks ${missing.join(", ")}`);
+    }
+  }
   return problems;
 }
 
@@ -294,6 +316,7 @@ export function renderPlanMarkdown(
   risks: string[],
   strategy: RunState["strategy"] = null,
   amendments: RunState["amended_criteria"] = [],
+  withSkills = false,
 ): string {
   const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
   const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
@@ -364,11 +387,20 @@ export function renderPlanMarkdown(
   if (risks.length === 0) lines.push("No risks.");
   else for (const risk of risks) lines.push(`- ${risk.replaceAll("\n", " ")}`);
   lines.push("", "## Steps", "", "```mermaid", renderMermaid(plan).trimEnd(), "```", "");
-  lines.push("| Step | Role | Repo | Needs | Criteria |", "| --- | --- | --- | --- | --- |");
+  lines.push(
+    `| Step | Role | Repo | Needs | Criteria |${withSkills ? " Skills |" : ""}`,
+    `| --- | --- | --- | --- | --- |${withSkills ? " --- |" : ""}`,
+  );
   for (const step of plan.steps) {
-    lines.push(
-      `| ${[step.id, step.role, step.repo, step.needs.join(", ") || "none", step.criteria.join(", ")].map(tableCell).join(" | ")} |`,
-    );
+    const cells = [
+      step.id,
+      step.role,
+      step.repo,
+      step.needs.join(", ") || "none",
+      step.criteria.join(", "),
+    ];
+    if (withSkills) cells.push(step.skills.join(", "));
+    lines.push(`| ${cells.map(tableCell).join(" | ")} |`);
   }
   lines.push("", "## Test cases", "");
   for (const testCase of plan.test_cases) {
@@ -391,9 +423,11 @@ export function planCheck(runId: string, inProject?: string): void {
   // Refuse a run that is not ready for a plan check before reading plan.yml.
   assertAllowed(state, "plan.checked", {});
   const plan = loadPlan(directory);
+  const surfaces = state.evaluation?.surfaces ?? ["none"];
   const problems = findProblems(
     plan,
     state.criteria.map((criterion) => criterion.id),
+    surfaces,
   );
   const valid = problems.length === 0;
   const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
@@ -418,7 +452,13 @@ export function planCheck(runId: string, inProject?: string): void {
   }
   writeFileSync(
     join(directory, "plan.md"),
-    renderPlanMarkdown(plan, state.evaluation?.risks ?? [], state.strategy, state.amended_criteria),
+    renderPlanMarkdown(
+      plan,
+      state.evaluation?.risks ?? [],
+      state.strategy,
+      state.amended_criteria,
+      uiSkillsFor(surfaces).length > 0,
+    ),
   );
   console.log(
     `plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`,
