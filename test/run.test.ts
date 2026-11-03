@@ -603,6 +603,7 @@ const page = (rows, key) => {
 if (args[1] === "run-list") page(state.runs, "runs");
 else if (args[1] === "worker-list") page(state.workers[flag("--run")] ?? [], "workers");
 else if (args[1] === "worker-release") {
+  if ((state.failRelease ?? []).includes(flag("--dispatch"))) process.exit(1);
   for (const rows of Object.values(state.workers))
     for (const row of rows) if (row.dispatchId === flag("--dispatch")) row.terminalState = "released";
   writeFileSync(dir + "/state.json", JSON.stringify(state));
@@ -616,6 +617,7 @@ type FakeState = {
   workers: Record<string, FakeWorker[]>;
   pageSize?: number;
   hang?: boolean;
+  failRelease?: string[];
 };
 
 const originalPath = process.env.PATH;
@@ -672,11 +674,12 @@ test("ARK-278-AC1 run close releases each settled unreleased dispatch over paged
   const closed = ark("run", "close", runId, "aborted");
   expect(closed.code).toBe(0);
   expect(closed.out).toContain(
-    `${runId} closed: aborted\nctx_1 released (succeeded)\nctx_2 released (failed)\nctx_3 released (stopped)\n`,
+    `${runId} closed: aborted\nctx_1 released (succeeded)\nctx_2 released (failed)\n`,
   );
+  expect(closed.out).not.toContain("ctx_3");
   expect(closed.out).not.toContain("ctx_4");
   expect(closed.out).not.toContain("ctx_5");
-  expect(orcaCalls("worker-release")).toHaveLength(3);
+  expect(orcaCalls("worker-release")).toHaveLength(2);
 });
 
 test("ARK-278-AC2 run close keeps an active dispatch and says so", () => {
@@ -719,9 +722,29 @@ test("ARK-278-AC3 an Orca failure prints one orca line and the close still recor
   process.env.ARK_ORCA_TIMEOUT_MS = "300";
   const hang = ark("run", "close", hung.runId, "aborted");
   expect(hang.code).toBe(0);
-  expect(hang.out).toMatch(/orca: workers not released: .*timed out after 0\.3s/);
+  expect(hang.out).toMatch(/orca: workers not released: .*timed out$/m);
   expect(hang.out.match(/orca:/g)).toHaveLength(1);
   expect(closedEvent(hung.directory)).toBe(true);
+
+  // one failing dispatch: later dispatches of the run are still released, one orca line
+  const partial = startRun("demo", "ARK-903");
+  useFakeOrca({
+    runs: [{ id: "orca_p", objective: `Ark run ${partial.runId}` }],
+    workers: {
+      orca_p: [
+        worker("ctx_bad", "failed", "reclaimable"),
+        worker("ctx_bad2", "failed", "reclaimable"),
+        worker("ctx_good", "succeeded", "reclaimable"),
+      ],
+    },
+    failRelease: ["ctx_bad", "ctx_bad2"],
+  });
+  const part = ark("run", "close", partial.runId, "aborted");
+  expect(part.code).toBe(0);
+  expect(part.out).toBe(
+    `${partial.runId} closed: aborted\nctx_good released (succeeded)\norca: workers not released: orca orchestration worker-release failed or timed out\n`,
+  );
+  expect(orcaCalls("worker-release")).toHaveLength(3);
 
   // no Orca Run for the objective
   const none = startRun("demo", "ARK-902");
@@ -754,6 +777,8 @@ test("ARK-278-AC4 run close --sweep releases closed runs once, records no event,
           worker(`ctx_${run.runId}`, "succeeded", "reclaimable"),
           // real Orca keeps a retained row retained after a release, so a sweep must not retry it
           worker(`ctx_kept_${run.runId}`, "stopped", "retained"),
+          // a release of an unresolved terminal fails and keeps the row, so a sweep must not make it
+          worker(`ctx_unknown_${run.runId}`, "failed", "release_unknown"),
         ],
       ]),
     ),
