@@ -198,6 +198,8 @@ describe("ark retro", () => {
     expect(first).not.toMatch(/\d\.\d{7,}/); // rounded to 6 decimals
     expect(Object.keys(JSON.parse(first))).toEqual([
       "run",
+      "actual_models",
+      "same_vendor_review",
       "cost",
       "time",
       "rework",
