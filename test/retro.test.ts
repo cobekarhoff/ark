@@ -611,3 +611,144 @@ describe("ark retro", () => {
     expect(readMetrics().orchestration.stalled_workers).toBe(1);
   });
 });
+
+describe("ark retro models and vendors", () => {
+  const buildFixture = "omp/build.jsonl";
+  const reviewFixture = "omp/review.jsonl";
+
+  /** Installs a fixture session with its model renamed, so a step can run on any model. */
+  function installModel(path: string, fixture: string, from: string, to: string): void {
+    const text = readFileSync(join(fixtures, fixture), "utf8")
+      .replaceAll("__RUN__", runDirectory)
+      .replaceAll(`"model":"${from}"`, `"model":"${to}"`);
+    mkdirSync(dirname(join(ompRoot, path)), { recursive: true });
+    writeFileSync(join(ompRoot, path), text);
+  }
+
+  function writePlan(steps: [id: string, role: string, repo: string, model: string][]): void {
+    const rows = steps.map(
+      ([id, role, repo, model]) =>
+        `  - {id: ${id}, role: ${role}, repo: ${repo}, model: ${model}, needs: [], criteria: []}`,
+    );
+    writeFileSync(join(runDirectory, "plan.yml"), `steps:\n${rows.join("\n")}\n`);
+  }
+
+  function runRetro(): string {
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => void lines.push(args.join(" "));
+    try {
+      retro(runId);
+    } finally {
+      console.log = original;
+    }
+    return lines.join("\n");
+  }
+
+  test("ARK-186-AC1 writes actual_models sorted and de-duplicated, and [] for a step with no session", () => {
+    installAllSessions();
+    installModel(
+      "platform/session-build-2.jsonl",
+      buildFixture,
+      "claude-haiku-4-5",
+      "claude-sonnet-5",
+    );
+    installModel(
+      "platform/session-build-3.jsonl",
+      buildFixture,
+      "claude-haiku-4-5",
+      "claude-sonnet-5",
+    );
+    writeEvents(runDirectory, [
+      ...scenario.slice(0, -1),
+      [
+        "14:58:00.000",
+        "step.started",
+        { step: "docs", role: "implementer", repo: "repos/platform", round: 1 },
+      ],
+      ["14:58:30.000", "step.finished", { step: "docs", outcome: "succeeded" }],
+      scenario[scenario.length - 1],
+    ]);
+    runRetro();
+    const { actual_models } = readMetrics();
+    expect(actual_models.build).toEqual(["claude-haiku-4-5", "claude-sonnet-5"]);
+    expect(actual_models.review).toEqual(["claude-opus-5-5"]);
+    expect(actual_models.docs).toEqual([]);
+  });
+
+  test("ARK-186-AC2 prints no model changed line when plan and run differ only by provider prefix", () => {
+    installAllSessions();
+    writePlan([
+      ["build", "implementer", "repos/platform", "anthropic/claude-haiku-4-5"],
+      ["review", "reviewer", "repos/shared", "anthropic/claude-opus-5-5"],
+    ]);
+    expect(runRetro()).not.toContain("model changed:");
+  });
+
+  test("ARK-186-AC2 prints one model changed line naming step, plan model and actual models on real failover", () => {
+    installAllSessions();
+    writePlan([
+      ["build", "implementer", "repos/platform", "anthropic/claude-haiku-4-5"],
+      ["review", "reviewer", "repos/shared", "openai-codex/gpt-6.1-sol"],
+    ]);
+    const out = runRetro();
+    expect(out.match(/model changed:/g)).toHaveLength(1);
+    expect(out).toContain(
+      "model changed: step review planned openai-codex/gpt-6.1-sol, ran claude-opus-5-5",
+    );
+  });
+
+  test("ARK-186-AC1 ARK-186-AC2 ARK-186-AC3 without plan.yml still writes metrics.json, same_vendor_review false, no change line", () => {
+    installAllSessions();
+    const out = runRetro();
+    const metrics = readMetrics();
+    expect(metrics.same_vendor_review).toBe(false);
+    expect(metrics.actual_models.build).toEqual(["claude-haiku-4-5"]);
+    expect(out).not.toContain("model changed:");
+    expect(out).toContain("same vendor review: false");
+  });
+
+  test("ARK-186-AC3 same vendor review is true and names both steps when reviewer and implementer share a vendor and repo", () => {
+    installAllSessions();
+    writePlan([
+      ["build", "implementer", "repos/platform", "claude-haiku-4-5"],
+      ["review", "reviewer", "repos/platform", "claude-opus-5-5"],
+    ]);
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(true);
+    expect(out).toContain("same vendor review: true (review with build in repos/platform)");
+  });
+
+  test("ARK-186-AC3 same vendor review is false for a gpt reviewer and a claude implementer", () => {
+    installAllSessions();
+    installModel("shared/session-review.jsonl", reviewFixture, "claude-opus-5-5", "gpt-6.1-sol");
+    writePlan([
+      ["build", "implementer", "repos/platform", "claude-haiku-4-5"],
+      ["review", "reviewer", "repos/platform", "gpt-6.1-sol"],
+    ]);
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(out).toContain("same vendor review: false");
+  });
+
+  test("ARK-186-AC3 same vendor review is false when the same-vendor reviewer is in another repo", () => {
+    installAllSessions();
+    writePlan([
+      ["build", "implementer", "repos/platform", "claude-haiku-4-5"],
+      ["review", "reviewer", "repos/shared", "claude-opus-5-5"],
+    ]);
+    expect(runRetro()).toContain("same vendor review: false");
+    expect(readMetrics().same_vendor_review).toBe(false);
+  });
+
+  test("ARK-186-AC3 a model with an unknown prefix has no vendor, so same vendor review is false", () => {
+    installModel("platform/session-build.jsonl", buildFixture, "claude-haiku-4-5", "llama-3");
+    installModel("shared/session-review.jsonl", reviewFixture, "claude-opus-5-5", "llama-3");
+    writePlan([
+      ["build", "implementer", "repos/platform", "llama-3"],
+      ["review", "reviewer", "repos/platform", "llama-3"],
+    ]);
+    runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+  });
+});
