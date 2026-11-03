@@ -151,3 +151,11 @@ test("ARK-292-AC2 the recorded load proof passed", () => {
   const evidence = readFileSync(join(repositoryRoot, "docs/evidence/ARK-292-ac2.md"), "utf8");
   expect(evidence).toMatch(/^proof: passed$/m);
 });
+
+test("ARK-292-AC3 every test file calls setDefaultTimeout(30_000), because bun applies the preload default to the first file only", () => {
+  const missing = [...new Bun.Glob("test/*.test.ts").scanSync({ cwd: repositoryRoot })].filter(
+    (file) =>
+      !readFileSync(join(repositoryRoot, file), "utf8").includes("setDefaultTimeout(30_000);"),
+  );
+  expect(missing).toEqual([]);
+});
