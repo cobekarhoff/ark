@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
@@ -114,6 +114,15 @@ test("ARK-191-AC1 run start leaves the ticket file alone when ticket_source is n
   const before = readFileSync(file, "utf8");
   startRun(file);
   expect(readFileSync(file, "utf8")).toBe(before);
+});
+
+test("ARK-191-AC1 run start still prints the run ID and warns when the ticket file is read-only", () => {
+  const file = ticketWithStatus("ARK-920", "ready");
+  chmodSync(file, 0o444);
+  const started = ark("run", "start", file, "--project", "demo");
+  expect(started.code).toBe(0);
+  expect(started.out.trim()).toMatch(/^\d{4}-\d{2}-\d{2}-ARK-920-1$/);
+  expect(started.err).toContain("warning: ticket status not updated:");
 });
 
 test("ARK-191-AC2 run close sets done for merged and ready for aborted and abandoned", () => {

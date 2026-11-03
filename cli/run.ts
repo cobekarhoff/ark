@@ -129,7 +129,7 @@ export function runStart(ticketFile: string, project?: string): void {
     rmSync(directory, { recursive: true, force: true });
     throw err;
   }
-  if (config.ticket_source === "local") setTicketStatus(absoluteTicketFile, "in_progress");
+  warnSetTicketStatus(absoluteTicketFile, projectName, "in_progress");
   console.log(run);
 }
 
@@ -202,7 +202,20 @@ export function runStep(
   );
 }
 
-/** Keeps a local ticket's status in step with its run. handed_off leaves the file as it is. A failure only warns: the run is already closed. */
+/** Sets a local ticket's status. A failure only warns: the run is already recorded. */
+function warnSetTicketStatus(ticketFile: string, project: string, status: string): void {
+  try {
+    if (loadConfig(project).ticket_source !== "local") return;
+    if (existsSync(ticketFile) && setTicketStatus(ticketFile, status)) return;
+    console.warn(`warning: could not set status ${status} in ${ticketFile}`);
+  } catch (err) {
+    console.warn(
+      `warning: ticket status not updated: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/** Keeps a local ticket's status in step with its run. handed_off leaves the file as it is. */
 function syncClosedTicket(started: EventData | undefined, outcome: string): void {
   const status =
     outcome === "merged"
@@ -211,15 +224,7 @@ function syncClosedTicket(started: EventData | undefined, outcome: string): void
         ? "ready"
         : undefined;
   if (!status || !started?.ticket_file) return;
-  try {
-    if (loadConfig(started.project).ticket_source !== "local") return;
-    if (existsSync(started.ticket_file) && setTicketStatus(started.ticket_file, status)) return;
-    console.warn(`warning: could not set status ${status} in ${started.ticket_file}`);
-  } catch (err) {
-    console.warn(
-      `warning: ticket status not updated: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
+  warnSetTicketStatus(started.ticket_file, started.project, status);
 }
 
 export async function runClose(runId: string, outcome: string, inProject?: string): Promise<void> {
