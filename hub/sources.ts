@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { execJson } from "../cli/exec.ts";
 import { deriveState, type ArkEvent, type RunState } from "../cli/events.ts";
@@ -7,7 +8,17 @@ import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
 import { loadPlan, type PlanStep } from "../cli/plan.ts";
 import { stepWindows, type StepWindow } from "../cli/retro.ts";
 import { readEventsLeniently } from "./run-detail.ts";
-import type { Agent, TicketView, Wait } from "./types.ts";
+import { parseTicketDocument } from "./ticket-document.ts";
+import type {
+  Agent,
+  AgentActivity,
+  CheckView,
+  FindingsView,
+  ProofCase,
+  ProviderWindow,
+  TicketView,
+  Wait,
+} from "./types.ts";
 
 /** Each reader is given a hard timeout, so a hung tool delays its own source and nothing else. */
 const githubTimeoutMilliseconds = 10_000;
@@ -85,10 +96,12 @@ export function createArkReader() {
       status: "unreadable",
       milestone: null,
       depends_on: [],
+      document: null,
     };
     let ticket = unreadable;
     try {
-      const match = readFileSync(file, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      const source = readFileSync(file, "utf8");
+      const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
       const fields = match ? (Bun.YAML.parse(match[1]) as Record<string, unknown> | null) : null;
       if (fields && typeof fields.id === "string" && typeof fields.title === "string") {
         ticket = {
@@ -98,6 +111,8 @@ export function createArkReader() {
           status: typeof fields.status === "string" ? fields.status : "unknown",
           milestone: typeof fields.milestone === "string" ? fields.milestone : null,
           depends_on: Array.isArray(fields.depends_on) ? fields.depends_on.map(String) : [],
+          // From the file this reader opened, never from a path built out of the front-matter id.
+          document: parseTicketDocument(source),
         };
       }
     } catch {
@@ -179,6 +194,9 @@ const finishedWorkerStates = ["succeeded", "failed", "stopped", "cancelled", "re
 const deadVerdicts = ["exited", "dead"];
 /** A step task is titled `<step id> [note] (<role>, <repo>)`: the first word is the step id. */
 const stepTask = /^([\w.-]+)[^(]*\((?:implementer|validator|reviewer),/;
+
+/** Until `orca worktree ps` has listed the agent, what it does is not known. */
+export const unknownActivity: AgentActivity = { kind: "unknown", text: "unknown", last_line: null };
 
 /** `hub-server (implementer, .)` is a step task and `evaluator (<run>)` a stage task: both name the role. */
 function roleOfTask(title: string | undefined): string {
@@ -279,6 +297,7 @@ export async function readOrca(
           terminal: chief!.coordinator_handle ?? null,
           live: true,
           running: false,
+          activity: unknownActivity,
         });
       const leadHandle = orcaRun.coordinator_handle;
       const leadTerminal = leadHandle ? byHandle.get(leadHandle) : undefined;
@@ -301,6 +320,7 @@ export async function readOrca(
           terminal: leadHandle ?? null,
           live: leadConnected && leadHandle !== undefined,
           running: leadRunning,
+          activity: unknownActivity,
         });
       // A released or disconnected worker stays in the list with `live: false`: the page says
       // "ended, not in Orca" instead of hiding it.
@@ -319,6 +339,7 @@ export async function readOrca(
           terminal: handle,
           live,
           running: !live && isLive(worker),
+          activity: unknownActivity,
         });
       }
       agents.set(run, list);
@@ -385,37 +406,92 @@ export const readPlannotator = (): Promise<PlannotatorSession[] | null> =>
 export type MergeRequestFacts = {
   state: "open" | "merged" | "closed" | null;
   ci: "passing" | "failing" | "pending" | "unknown";
+  checks: CheckView[];
+  additions: number | null;
+  deletions: number | null;
+  changed_files: number | null;
+  created_at: string | null;
 };
 
-/** `gh pr checks` exits 1 for a failing check and 8 for a pending one, and still prints the checks. */
-const ghChecksExitCodes = [0, 1, 8];
+/** A CheckRun has `name`, `status` and `conclusion`; a StatusContext has `context` and `state`. */
+type RollupItem = {
+  name?: string;
+  context?: string;
+  status?: string;
+  conclusion?: string;
+  state?: string;
+  detailsUrl?: string;
+  targetUrl?: string;
+};
 
+const upper = (value: unknown): string => (typeof value === "string" ? value.toUpperCase() : "");
+const finiteOrNull = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+function checkOf(item: RollupItem): CheckView {
+  const isStatusContext = item.context !== undefined && item.name === undefined;
+  const result: CheckView["result"] = isStatusContext
+    ? upper(item.state) === "SUCCESS"
+      ? "pass"
+      : ["PENDING", "EXPECTED"].includes(upper(item.state))
+        ? "pending"
+        : "fail"
+    : upper(item.status) !== "COMPLETED"
+      ? "pending"
+      : ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(upper(item.conclusion))
+        ? "pass"
+        : "fail";
+  const link = item.detailsUrl ?? item.targetUrl;
+  return {
+    name: String(item.name ?? item.context ?? "check"),
+    url: typeof link === "string" && /^https?:\/\//.test(link) ? link : null,
+    result,
+  };
+}
+
+type PullRequestView = {
+  state?: string;
+  statusCheckRollup?: RollupItem[];
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
+  createdAt?: string;
+};
+
+/** The one `gh pr view` call: state, the checks (`statusCheckRollup`), diff size and creation time. */
 async function readMergeRequest(url: string): Promise<MergeRequestFacts | null> {
-  const [checks, view] = await Promise.all([
-    execJson<{ bucket?: string }[]>(
-      ["gh", "pr", "checks", url, "--json", "bucket"],
-      githubTimeoutMilliseconds,
-      ghChecksExitCodes,
-    ),
-    execJson<{ state?: string }>(
-      ["gh", "pr", "view", url, "--json", "state"],
-      githubTimeoutMilliseconds,
-    ),
-  ]);
-  if (!checks && !view) return null;
-  const buckets = new Set((checks ?? []).map((check) => check.bucket));
-  const state = view?.state?.toLowerCase();
+  const view = await execJson<PullRequestView>(
+    [
+      "gh",
+      "pr",
+      "view",
+      url,
+      "--json",
+      "state,statusCheckRollup,additions,deletions,changedFiles,createdAt",
+    ],
+    githubTimeoutMilliseconds,
+  );
+  if (!view) return null;
+  const state = view.state?.toLowerCase();
+  const checks = Array.isArray(view.statusCheckRollup) ? view.statusCheckRollup.map(checkOf) : [];
+  const results = new Set(checks.map((check) => check.result));
   return {
     state: state === "open" || state === "merged" || state === "closed" ? state : null,
-    ci: !checks
-      ? "unknown"
-      : buckets.has("fail")
-        ? "failing"
-        : buckets.has("pending")
-          ? "pending"
-          : buckets.size > 0
-            ? "passing"
-            : "unknown",
+    ci: results.has("fail")
+      ? "failing"
+      : results.has("pending")
+        ? "pending"
+        : checks.length > 0
+          ? "passing"
+          : "unknown",
+    checks,
+    additions: finiteOrNull(view.additions),
+    deletions: finiteOrNull(view.deletions),
+    changed_files: finiteOrNull(view.changedFiles),
+    created_at:
+      typeof view.createdAt === "string" && !Number.isNaN(Date.parse(view.createdAt))
+        ? view.createdAt
+        : null,
   };
 }
 
@@ -440,4 +516,297 @@ export async function readGithub(
     }),
   );
   return { facts, ok };
+}
+
+// ---------------------------------------------------------------- Provider limits (`omp usage`)
+
+const providerLimitsTimeoutMilliseconds = 10_000;
+
+type OmpUsage = {
+  reports?: {
+    provider?: string;
+    fetchedAt?: number;
+    limits?: {
+      window?: { id?: string; resetsAt?: number };
+      amount?: { usedFraction?: number };
+      scope?: { provider?: string };
+    }[];
+  }[];
+};
+
+const isoOrNull = (milliseconds: unknown): string | null =>
+  typeof milliseconds === "number" && Number.isFinite(milliseconds)
+    ? new Date(milliseconds).toISOString()
+    : null;
+
+/**
+ * Used fraction, reset time and fetch time for each provider and window (`5h`, `7d`) of
+ * `omp usage --json`. Several limits of one window (a model or an account each): the fullest
+ * counts. Null when the command fails, so the slot keeps its last good value with its age.
+ */
+export async function readProviderLimits(): Promise<ProviderWindow[] | null> {
+  const usage = await execJson<OmpUsage>(
+    ["omp", "usage", "--json"],
+    providerLimitsTimeoutMilliseconds,
+  );
+  if (!usage || !Array.isArray(usage.reports)) return null;
+  const windows = new Map<string, ProviderWindow>();
+  for (const report of usage.reports) {
+    for (const limit of Array.isArray(report.limits) ? report.limits : []) {
+      const window = limit.window?.id;
+      const provider = report.provider ?? limit.scope?.provider;
+      if ((window !== "5h" && window !== "7d") || typeof provider !== "string") continue;
+      const usedFraction = finiteOrNull(limit.amount?.usedFraction);
+      const key = `${provider}/${window}`;
+      const known = windows.get(key);
+      if (known && (known.used_fraction ?? -1) >= (usedFraction ?? -1)) continue;
+      windows.set(key, {
+        provider,
+        window,
+        used_fraction: usedFraction,
+        resets_at: isoOrNull(limit.window?.resetsAt),
+        fetched_at: isoOrNull(report.fetchedAt),
+      });
+    }
+  }
+  return [...windows.values()];
+}
+
+// ---------------------------------------------------------------- Agent activity (`orca worktree ps`)
+
+const agentWaitTimeoutMilliseconds = 10_000;
+/** An agent in `working` with no update for this long is idle (unless it is in `wait`). */
+const idleAfterMilliseconds = 5 * 60_000;
+
+/** Orca does not document these fields: each one is read defensively, and a missing one is `unknown`. */
+type OrcaPsAgent = {
+  state?: unknown;
+  toolName?: unknown;
+  taskTitle?: unknown;
+  agentType?: unknown;
+  updatedAt?: unknown;
+  lastOutputAt?: unknown;
+  agentWait?: unknown;
+  lastAssistantMessage?: unknown;
+};
+type OrcaPs = { result?: { worktrees?: { path?: unknown; agents?: unknown }[] } };
+
+export type PsAgent = { title: string; harness: string | null; activity: AgentActivity };
+
+/**
+ * `agentWait` is an object while Orca sees an approval or input prompt, and null when there is
+ * none (Orca's own CLI prints "none" for it): any truthy value counts. A state of `waiting` or
+ * `blocked` counts too.
+ */
+export function activityOf(agent: OrcaPsAgent, now: number): AgentActivity {
+  const lastLine =
+    typeof agent.lastAssistantMessage === "string"
+      ? (agent.lastAssistantMessage
+          .split("\n")
+          .map((line) => line.trim())
+          .findLast((line) => line !== "")
+          ?.slice(0, 200) ?? null)
+      : null;
+  const state = typeof agent.state === "string" ? agent.state : null;
+  if (agent.agentWait || state === "waiting" || state === "blocked")
+    return { kind: "waiting", text: "waiting on a prompt", last_line: lastLine };
+  if (state === null) return { kind: "unknown", text: "unknown", last_line: lastLine };
+  if (state === "working" && agent.toolName !== "wait") {
+    const stamps = [agent.updatedAt, agent.lastOutputAt].filter(
+      (stamp): stamp is number => typeof stamp === "number" && Number.isFinite(stamp),
+    );
+    if (stamps.length > 0) {
+      const quiet = now - Math.max(...stamps);
+      if (quiet >= idleAfterMilliseconds)
+        return {
+          kind: "idle",
+          text: `idle ${Math.floor(quiet / 60_000)} min`,
+          last_line: lastLine,
+        };
+    }
+  }
+  return { kind: "working", text: "working", last_line: lastLine };
+}
+
+const runWorkspace = /\/runs\/([^/]+)\/workspace(?:\/|$)/;
+
+/**
+ * The agents of each run, from the worktrees whose path is under `runs/<run>/workspace`. An agent
+ * with no task title cannot be joined to a step and is left out. Null when the command fails.
+ */
+export async function readAgentWait(now = Date.now()): Promise<Map<string, PsAgent[]> | null> {
+  const ps = await execJson<OrcaPs>(
+    ["orca", "worktree", "ps", "--agent-wait", "--json"],
+    agentWaitTimeoutMilliseconds,
+  );
+  const worktrees = ps?.result?.worktrees;
+  if (!Array.isArray(worktrees)) return null;
+  const byRun = new Map<string, PsAgent[]>();
+  for (const worktree of worktrees) {
+    const run = typeof worktree.path === "string" ? worktree.path.match(runWorkspace)?.[1] : null;
+    if (!run || !Array.isArray(worktree.agents)) continue;
+    const list = byRun.get(run) ?? [];
+    for (const agent of worktree.agents as OrcaPsAgent[]) {
+      if (typeof agent.taskTitle !== "string") continue;
+      list.push({
+        title: agent.taskTitle,
+        harness: typeof agent.agentType === "string" ? agent.agentType : null,
+        activity: activityOf(agent, now),
+      });
+    }
+    byRun.set(run, list);
+  }
+  return byRun;
+}
+
+/** What an Orca task title says: the step id, the role (`run lead` included) and their join key (the step id, else the role). */
+export function parseAgentTitle(title: string): { key: string; role: string; step: string | null } {
+  const step = title.match(stepTask)?.[1] ?? null;
+  const role = /\brun lead\b/.test(title) ? "run lead" : roleOfTask(title);
+  return { key: step ?? role, role, step };
+}
+
+// ---------------------------------------------------------------- AC evidence and findings
+
+export type EvidenceValue = Map<
+  string,
+  { proof: Map<string, ProofCase[]>; findings: FindingsView | null }
+>;
+
+const unescapeXml = (text: string): string =>
+  text
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+
+const testcasePattern = /<testcase((?:\s+[\w:.-]+="[^"]*")*)\s*(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+const attributePattern = /([\w:.-]+)="([^"]*)"/g;
+const criterionPrefix = /^([A-Z][A-Z0-9]*-\d+-AC\d+)\b/;
+
+/** The testcases of a JUnit report whose name starts with an AC id, by AC id: other cases are dropped. */
+export function readJunitProof(xml: string): Map<string, ProofCase[]> {
+  const proof = new Map<string, ProofCase[]>();
+  for (const match of xml.matchAll(testcasePattern)) {
+    const attributes = new Map(
+      [...match[1].matchAll(attributePattern)].map(([, key, value]) => [key, unescapeXml(value)]),
+    );
+    const name = attributes.get("name") ?? "";
+    const id = name.match(criterionPrefix)?.[1];
+    if (!id) continue;
+    const line = Number(attributes.get("line"));
+    const body = match[2] ?? "";
+    const list = proof.get(id) ?? [];
+    list.push({
+      name,
+      file: attributes.get("file") ?? null,
+      line: Number.isInteger(line) && attributes.has("line") ? line : null,
+      result: /<(?:failure|error)\b/.test(body)
+        ? "fail"
+        : /<skipped\b/.test(body)
+          ? "skipped"
+          : "pass",
+    });
+    proof.set(id, list);
+  }
+  return proof;
+}
+
+/** Counts the `### P1`, `### P2` and `### P3` headings of a findings file. */
+export function countFindings(markdown: string): { p1: number; p2: number; p3: number } {
+  const count = (rank: number) => markdown.match(new RegExp(`^### P${rank}\\b`, "gm"))?.length ?? 0;
+  return { p1: count(1), p2: count(2), p3: count(3) };
+}
+
+export type EvidenceRun = { run: string; directory: string; reviewerSteps: string[] };
+
+/**
+ * Proof and findings of the runs it is given (the runs in `merge_requests_open`). A report with
+ * about 17,000 cases is parsed once: the parsed cases are cached by size and mtime, and an
+ * unchanged file is never read again. A run whose files cannot be read keeps its last good value.
+ */
+export function createEvidenceReader() {
+  const reports = new Map<string, { signature: string; proof: Map<string, ProofCase[]> }>();
+  const findings = new Map<
+    string,
+    { signature: string; counts: { p1: number; p2: number; p3: number } }
+  >();
+  const last: EvidenceValue = new Map();
+
+  async function proofOf(directory: string): Promise<Map<string, ProofCase[]>> {
+    const merged = new Map<string, ProofCase[]>();
+    let names: string[] = [];
+    try {
+      names = (await readdir(join(directory, "results"))).filter((name) =>
+        name.endsWith(".report"),
+      );
+    } catch {
+      // No results folder yet: the run has no proof.
+    }
+    for (const name of names.sort()) {
+      const file = join(directory, "results", name);
+      const signature = signatureOf(file);
+      if (signature === null) continue;
+      let known = reports.get(file);
+      if (known?.signature !== signature) {
+        known = { signature, proof: readJunitProof(await Bun.file(file).text()) };
+        reports.set(file, known);
+      }
+      for (const [id, cases] of known.proof) merged.set(id, [...(merged.get(id) ?? []), ...cases]);
+    }
+    return merged;
+  }
+
+  async function findingsOf({
+    run,
+    directory,
+    reviewerSteps,
+  }: EvidenceRun): Promise<FindingsView | null> {
+    const newest = reviewerSteps
+      .map((step) => `findings/${step}.md`)
+      .flatMap((path) => {
+        try {
+          return [{ path, modified: statSync(join(directory, path)).mtimeMs }];
+        } catch {
+          return [];
+        }
+      })
+      .sort((left, right) => right.modified - left.modified)[0];
+    if (!newest) return null;
+    const file = join(directory, newest.path);
+    const signature = signatureOf(file) ?? "";
+    let known = findings.get(file);
+    if (known?.signature !== signature) {
+      known = { signature, counts: countFindings(await Bun.file(file).text()) };
+      findings.set(file, known);
+    }
+    return {
+      path: newest.path,
+      link: `/api/run/${encodeURIComponent(run)}/file?path=${encodeURIComponent(newest.path)}`,
+      ...known.counts,
+    };
+  }
+
+  return {
+    async read(runs: EvidenceRun[]): Promise<EvidenceValue> {
+      const value: EvidenceValue = new Map();
+      await Promise.all(
+        runs.map(async (evidenceRun) => {
+          try {
+            const entry = {
+              proof: await proofOf(evidenceRun.directory),
+              findings: await findingsOf(evidenceRun),
+            };
+            value.set(evidenceRun.run, entry);
+            last.set(evidenceRun.run, entry);
+          } catch {
+            const kept = last.get(evidenceRun.run);
+            if (kept) value.set(evidenceRun.run, kept);
+          }
+        }),
+      );
+      return value;
+    },
+  };
 }

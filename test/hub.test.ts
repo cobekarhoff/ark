@@ -4,6 +4,7 @@ import {
   appendFileSync,
   closeSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -18,9 +19,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { RunDetail, RunView, Snapshot, TranscriptPage } from "../hub/types.ts";
+import { stuckAgents } from "../hub/page/derive.ts";
+import { stepTimeText } from "../hub/progress.ts";
 import { readTranscriptPage } from "../hub/transcript.ts";
 import { UsageIndex } from "../hub/usage.ts";
 import {
+  appendRawEvent,
   ompSessionText,
   orcaAnswersFor,
   today,
@@ -72,11 +76,11 @@ async function start() {
 
 const readDoc = (path: string) => readFileSync(join(root, path), "utf8");
 const statusOf = (path: string) => readDoc(path).match(/^status: (.*)$/m)?.[1] ?? "";
-const viewNames = ["Home", "Run", "Backlog", "Map"];
+const viewNames = ["Home", "Runs", "Backlog"];
 const namesViews = (text: string) =>
   viewNames.every((name) => new RegExp(`\\b${name}\\b`).test(text));
 
-test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 0007, R13 and M4 name the four views", () => {
+test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 0007, R13 and M4 name the views", () => {
   expect(statusOf("docs/adr/0009-hub-is-a-read-only-live-view.md")).toBe("accepted");
   const superseded = statusOf("docs/adr/0008-hub-steers-through-master-chief.md");
   expect(superseded).toStartWith("superseded");
@@ -488,10 +492,13 @@ test("ARK-277-AC12 ark ui serves the hub in hub/", async () => {
   expect(baseUrl, output).not.toBe("");
   const snapshot = await (await fetch(`${baseUrl}/api/snapshot`)).json();
   expect(Object.keys(snapshot.sources).sort()).toEqual([
+    "agentWait",
     "ark",
+    "evidence",
     "github",
     "orca",
     "plannotator",
+    "providerLimits",
     "usage",
   ]);
   expect(await (await fetch(`${baseUrl}/`)).text()).toContain('<div id="root"></div>');
@@ -499,9 +506,9 @@ test("ARK-277-AC12 ark ui serves the hub in hub/", async () => {
 
 // ---------------------------------------------------------------- AC13
 
-test("ARK-277-AC13 the human check on the real ARK_HOME shows 4 view times below 1 s and human: ok", () => {
+test("ARK-277-AC13 the human check on the real ARK_HOME shows 3 view times below 1 s and human: ok", () => {
   const lines = readDoc("docs/evidence/ARK-277-ac13.md").split("\n");
-  for (const view of ["home", "run", "backlog", "map"]) {
+  for (const view of ["home", "run", "backlog"]) {
     const line = lines.find((candidate) => candidate.startsWith(`${view}: `));
     const milliseconds = Number(line?.slice(view.length + 2));
     expect(Number.isFinite(milliseconds), `${view}: ${line}`).toBe(true);
@@ -760,4 +767,720 @@ test("ARK-284-AC9 typecheck, lint and format:check exit 0 (bun test is this run)
 
 test("ARK-284-AC10 the human check on the real ARK_HOME is recorded in docs/evidence/ARK-284-ac10.md with human: ok", () => {
   expect(readDoc("docs/evidence/ARK-284-ac10.md").split("\n")).toContain("human: ok");
+});
+
+// ---------------------------------------------------------------- ARK-285
+
+/** Polls `/api/snapshot` until `ready` holds; fails with the last snapshot after the timeout. */
+async function snapshotWhen(
+  baseUrl: string,
+  ready: (snapshot: Snapshot) => boolean,
+  timeoutMilliseconds = 20_000,
+): Promise<Snapshot> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  let snapshot: Snapshot;
+  do {
+    await Bun.sleep(100);
+    snapshot = (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
+    if (ready(snapshot)) return snapshot;
+  } while (Date.now() < deadline);
+  throw new Error(`the snapshot never reached the state: ${JSON.stringify(snapshot)}`);
+}
+
+const openRunOf = (snapshot: Snapshot, run: string): RunView => {
+  if (snapshot.runs === "unknown") throw new Error("runs are unknown");
+  const found = snapshot.runs.find((candidate) => candidate.run === run);
+  if (!found) throw new Error(`no open run ${run}`);
+  return found;
+};
+
+test("ARK-285-AC2 omp usage is read in the background for each provider and window, and a failed read keeps the last value with its age", async () => {
+  isolatedEnvironment();
+  const resetsAt = Date.now() + 3_600_000;
+  const fetchedAt = Date.now() - 5000;
+  const limit = (id: string, usedFraction: number) => ({
+    window: { id, resetsAt: resetsAt + (id === "7d" ? 86_400_000 : 0) },
+    amount: { usedFraction },
+  });
+  const state = installFakeTools({
+    ompMode: "once",
+    ompUsage: {
+      reports: [
+        {
+          provider: "anthropic",
+          fetchedAt,
+          // Two limits of the 7d window: the fuller one counts. A 1h window is not shown.
+          limits: [limit("5h", 0.25), limit("7d", 0.4), limit("7d", 0.6), limit("1h", 0.9)],
+        },
+        { provider: "openai-codex", fetchedAt, limits: [limit("5h", 0)] },
+      ],
+    },
+  });
+  const { baseUrl } = await start();
+
+  const first = await snapshotWhen(
+    baseUrl,
+    (snapshot) => snapshot.provider_limits !== "unknown" && snapshot.sources.providerLimits.ok,
+  );
+  const iso = (milliseconds: number) => new Date(milliseconds).toISOString();
+  expect(first.provider_limits).toEqual([
+    {
+      provider: "anthropic",
+      window: "5h",
+      used_fraction: 0.25,
+      resets_at: iso(resetsAt),
+      fetched_at: iso(fetchedAt),
+    },
+    {
+      provider: "anthropic",
+      window: "7d",
+      used_fraction: 0.6,
+      resets_at: iso(resetsAt + 86_400_000),
+      fetched_at: iso(fetchedAt),
+    },
+    {
+      provider: "openai-codex",
+      window: "5h",
+      used_fraction: 0,
+      resets_at: iso(resetsAt),
+      fetched_at: iso(fetchedAt),
+    },
+  ]);
+
+  // The second read happens 60 s after the first, and the fake exits 1 then.
+  const countFile = join(state, "omp.count");
+  const deadline = Date.now() + 90_000;
+  while (Number(existsSync(countFile) ? readFileSync(countFile, "utf8") : 0) < 2) {
+    expect(Date.now(), "omp usage was not read a second time").toBeLessThan(deadline);
+    await Bun.sleep(500);
+  }
+  const failed = await snapshotWhen(baseUrl, (snapshot) => !snapshot.sources.providerLimits.ok);
+  expect(failed.provider_limits).toEqual(first.provider_limits);
+  expect(failed.sources.providerLimits.read_at).toBe(first.sources.providerLimits.read_at);
+}, 150_000);
+
+test("ARK-285-AC3 each agent is waiting on a prompt, idle N min, working or unknown from orca worktree ps, and a failed read gives unknown and then keeps the last value", async () => {
+  isolatedEnvironment();
+  const run = `${today()}-ARK-815-1`;
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-815", title: "Stuck agents" },
+    phase: "building",
+  });
+  const stepTasks = {
+    prompt: "prompt (implementer, .)", // agentWait present
+    blocked: "blocked (validator, .)", // state waiting
+    quiet: "quiet (implementer, .)", // working, no update for 10 min
+    waiter: "waiter (implementer, .)", // working in `wait`, no update for 20 min
+    ghost: "ghost (validator, .)", // in the worker list, not in worktree ps
+  };
+  const minutesAgo = (minutes: number, extraSeconds = 0) =>
+    Date.now() - minutes * 60_000 - extraSeconds * 1000;
+  const orca = {
+    terminals: [
+      { handle: "term-lead", connected: true, agentIdentity: "omp" },
+      ...Object.keys(stepTasks).map((name) => ({
+        handle: `term-${name}`,
+        connected: true,
+        agentIdentity: "omp",
+      })),
+    ],
+    runs: [{ id: `orca-${run}`, objective: `Ark run ${run}`, coordinator_handle: "term-lead" }],
+    workers: Object.keys(stepTasks).map((name) => ({
+      taskId: `task-${name}`,
+      state: "running",
+      agentTerminalHandle: `term-${name}`,
+    })),
+    tasks: Object.entries(stepTasks).map(([name, title]) => ({ id: `task-${name}`, title })),
+    worktrees: [
+      {
+        path: join(directory, "workspace"),
+        agents: [
+          {
+            taskTitle: "ARK-815 run lead",
+            state: "working",
+            toolName: "bash",
+            updatedAt: Date.now(),
+          },
+          {
+            taskTitle: stepTasks.prompt,
+            state: "working",
+            toolName: "bash",
+            updatedAt: Date.now(),
+            agentWait: { reason: "approval", source: "hook" },
+            lastAssistantMessage: "Run it?\n\nbun test test/hub.test.ts\n",
+          },
+          {
+            taskTitle: stepTasks.blocked,
+            state: "blocked",
+            toolName: "bash",
+            updatedAt: Date.now(),
+          },
+          {
+            taskTitle: stepTasks.quiet,
+            state: "working",
+            toolName: "bash",
+            updatedAt: minutesAgo(10, 5),
+            lastOutputAt: null,
+          },
+          {
+            taskTitle: stepTasks.waiter,
+            state: "working",
+            toolName: "wait",
+            updatedAt: minutesAgo(20),
+            lastOutputAt: minutesAgo(20),
+          },
+          // An agent that only `ps` lists: added as running, with its own activity.
+          { taskTitle: "extra (implementer, .)", state: "working", updatedAt: Date.now() },
+        ],
+      },
+      // A worktree outside runs/<run>/workspace is not a run's.
+      {
+        path: join(directory, "elsewhere"),
+        agents: [{ taskTitle: "stray (implementer, .)", state: "waiting" }],
+      },
+    ],
+  };
+  const state = installFakeTools({ orca, orcaPsFails: true });
+  const { baseUrl } = await start();
+  const textOf = (snapshot: Snapshot) => {
+    const agents = openRunOf(snapshot, run).agents;
+    if (agents === "unknown") throw new Error("agents are unknown");
+    return Object.fromEntries(
+      agents.map((agent) => [agent.step ?? agent.role, agent.activity.text]),
+    );
+  };
+
+  // `ps` has never answered: nothing is guessed.
+  const unknown = await snapshotWhen(
+    baseUrl,
+    (snapshot) => snapshot.sources.orca.ok && snapshot.runs !== "unknown",
+  );
+  expect(unknown.sources.agentWait).toEqual({ ok: false, read_at: null });
+  expect(Object.values(textOf(unknown)).every((text) => text === "unknown")).toBe(true);
+
+  writeFakeToolState(state, { orca, orcaPsFails: false });
+  const answered = await snapshotWhen(baseUrl, (snapshot) => snapshot.sources.agentWait.ok);
+  expect(textOf(answered)).toEqual({
+    "run lead": "working",
+    prompt: "waiting on a prompt",
+    blocked: "waiting on a prompt",
+    quiet: "idle 10 min",
+    waiter: "working",
+    ghost: "unknown",
+    extra: "working",
+  });
+  const agents = openRunOf(answered, run).agents;
+  if (agents === "unknown") throw new Error("agents are unknown");
+  const extra = agents.find((agent) => agent.step === "extra");
+  expect(extra).toMatchObject({ live: false, running: true, terminal: null });
+  expect(agents.find((agent) => agent.step === "prompt")?.activity.last_line).toBe(
+    "bun test test/hub.test.ts",
+  );
+
+  // A later failed read keeps the last answer and its age.
+  writeFakeToolState(state, { orca, orcaPsFails: true });
+  const stale = await snapshotWhen(baseUrl, (snapshot) => !snapshot.sources.agentWait.ok);
+  expect(textOf(stale)).toEqual(textOf(answered));
+  expect(stale.sources.agentWait.read_at).not.toBeNull();
+}, 60_000);
+
+test("ARK-285-AC4 an open MR gets its AC status and only its own testcases with file, line and result, and a run not in merge_requests_open gets none", async () => {
+  isolatedEnvironment();
+  const mergeRequest = "https://github.com/example/repo/pull/81";
+  const runOf = (ticket: string) => `${today()}-${ticket}-1`;
+  const steps = [
+    { id: "impl", role: "implementer", harness: "omp", model: "m", needs: [] as string[] },
+    { id: "review", role: "reviewer", harness: "omp", model: "m", needs: ["impl"] },
+  ];
+  const open = runOf("ARK-816");
+  const openDirectory = writeRun({
+    project: "p",
+    run: open,
+    ticket: { id: "ARK-816", title: "Open MR" },
+    phase: "merge_requests_open",
+    criteria: ["ARK-816-AC1", "ARK-816-AC2", "ARK-816-AC3"],
+    steps,
+    mergeRequests: [{ repo: ".", url: mergeRequest, number: 81 }],
+  });
+  const seq = readFileSync(join(openDirectory, "events.ndjson"), "utf8").trim().split("\n").length;
+  appendRawEvent(
+    openDirectory,
+    "test.completed",
+    {
+      passed: false,
+      heads: {},
+      criteria: { "ARK-816-AC1": "passing", "ARK-816-AC2": "failing", "ARK-816-AC3": "missing" },
+    },
+    seq + 1,
+  );
+  // The report holds 2 tickets. AC1 has two cases; AC10 must not count for AC1; the name carries `'`.
+  const report = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test">
+  <testsuite name="test/a.test.ts" file="test/a.test.ts">
+    <testcase name="ARK-816-AC1 lists the runs" classname="" file="test/a.test.ts" line="10" />
+    <testcase name="ARK-816-AC1 doesn&apos;t list a closed run" classname="" file="test/a.test.ts" line="22" />
+    <testcase name="ARK-816-AC2 refuses a bad token" classname="" file="test/a.test.ts" line="31">
+      <failure type="AssertionError">expected 200 to be 401 &gt; here</failure>
+    </testcase>
+    <testcase name="ARK-816-AC10 another AC" classname="" file="test/a.test.ts" line="40" />
+    <testcase name="ARK-999-AC1 other ticket passes" classname="" file="test/b.test.ts" line="5" />
+    <testcase name="ARK-999-AC2 other ticket fails" classname="" file="test/b.test.ts" line="9">
+      <failure type="AssertionError">no</failure>
+    </testcase>
+    <testcase name="a helper without an AC id" classname="" file="test/b.test.ts" line="14" />
+  </testsuite>
+</testsuites>
+`;
+  mkdirSync(join(openDirectory, "results"), { recursive: true });
+  writeFileSync(join(openDirectory, "results", "cli.report"), report);
+  mkdirSync(join(openDirectory, "findings"), { recursive: true });
+  // The reviewer's file counts; a newer file of another step does not.
+  writeFileSync(
+    join(openDirectory, "findings", "review.md"),
+    "### P1: a\n\n### P2: b\n\n### P2 (accepted): c\n\n### P3: d\n\nA line with ### P1 inside.\n",
+  );
+  writeFileSync(join(openDirectory, "findings", "round-1.md"), "### P1: x\n### P1: y\n");
+
+  // Same report in a run that is building: no evidence.
+  const building = runOf("ARK-817");
+  const buildingDirectory = writeRun({
+    project: "p",
+    run: building,
+    ticket: { id: "ARK-817", title: "Building" },
+    phase: "building",
+    criteria: ["ARK-816-AC1"],
+  });
+  mkdirSync(join(buildingDirectory, "results"), { recursive: true });
+  writeFileSync(join(buildingDirectory, "results", "cli.report"), report);
+
+  installFakeTools({});
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) => current.sources.evidence.ok && current.runs !== "unknown",
+  );
+
+  const evidence = openRunOf(snapshot, open).evidence;
+  expect(evidence?.criteria.map(({ id, status }) => ({ id, status }))).toEqual([
+    { id: "ARK-816-AC1", status: "passing" },
+    { id: "ARK-816-AC2", status: "failing" },
+    { id: "ARK-816-AC3", status: "missing" },
+  ]);
+  const proof = (id: string) => evidence?.criteria.find((criterion) => criterion.id === id)?.proof;
+  expect(proof("ARK-816-AC1")).toEqual([
+    { name: "ARK-816-AC1 lists the runs", file: "test/a.test.ts", line: 10, result: "pass" },
+    {
+      name: "ARK-816-AC1 doesn't list a closed run",
+      file: "test/a.test.ts",
+      line: 22,
+      result: "pass",
+    },
+  ]);
+  expect(proof("ARK-816-AC2")).toEqual([
+    { name: "ARK-816-AC2 refuses a bad token", file: "test/a.test.ts", line: 31, result: "fail" },
+  ]);
+  expect(proof("ARK-816-AC3")).toEqual([]);
+  // Testcases of the other ticket are shown nowhere.
+  expect(JSON.stringify(snapshot)).not.toContain("ARK-999");
+
+  expect(evidence?.findings).toEqual({
+    path: "findings/review.md",
+    link: `/api/run/${encodeURIComponent(open)}/file?path=${encodeURIComponent("findings/review.md")}`,
+    p1: 1,
+    p2: 2,
+    p3: 1,
+  });
+  const file = await fetch(`${baseUrl}${evidence!.findings!.link}`);
+  expect(file.status).toBe(200);
+  expect(await file.text()).toContain("### P1: a");
+
+  expect(openRunOf(snapshot, building).evidence).toBeNull();
+}, 60_000);
+
+test("ARK-285-AC4 one gh pr view call gives the checks, diff size and creation time, and a failing gh gives unknown, not a guess", async () => {
+  isolatedEnvironment();
+  const passing = "https://github.com/example/repo/pull/82";
+  const failingChecks = "https://github.com/example/repo/pull/83";
+  const mute = "https://github.com/example/repo/pull/84";
+  const createdAt = new Date(Date.now() - 7_200_000).toISOString();
+  const ticketOf = (ticket: string, url: string, number: number) =>
+    writeRun({
+      project: "p",
+      run: `${today()}-${ticket}-1`,
+      ticket: { id: ticket, title: `MR ${number}` },
+      phase: "merge_requests_open",
+      mergeRequests: [{ repo: ".", url, number }],
+    });
+  ticketOf("ARK-818", passing, 82);
+  ticketOf("ARK-819", failingChecks, 83);
+  ticketOf("ARK-820", mute, 84);
+  const state = installFakeTools({
+    failingMergeRequestViews: [mute],
+    mergeRequestViews: {
+      [passing]: {
+        state: "OPEN",
+        statusCheckRollup: [
+          {
+            __typename: "CheckRun",
+            name: "lint",
+            status: "COMPLETED",
+            conclusion: "SUCCESS",
+            detailsUrl: "https://ci.example/lint",
+          },
+          // A StatusContext, and a link that is not http(s): the link is dropped.
+          {
+            __typename: "StatusContext",
+            context: "legacy",
+            state: "SUCCESS",
+            targetUrl: "javascript:alert(1)",
+          },
+        ],
+        additions: 120,
+        deletions: 30,
+        changedFiles: 7,
+        createdAt,
+      },
+      [failingChecks]: {
+        state: "OPEN",
+        statusCheckRollup: [
+          {
+            __typename: "CheckRun",
+            name: "lint",
+            status: "COMPLETED",
+            conclusion: "SUCCESS",
+            detailsUrl: "https://ci.example/lint",
+          },
+          {
+            __typename: "CheckRun",
+            name: "tests",
+            status: "IN_PROGRESS",
+            conclusion: "",
+            detailsUrl: "https://ci.example/tests",
+          },
+          {
+            __typename: "CheckRun",
+            name: "e2e",
+            status: "COMPLETED",
+            conclusion: "TIMED_OUT",
+            detailsUrl: "https://ci.example/e2e",
+          },
+        ],
+        additions: 1,
+        deletions: 2,
+        changedFiles: 3,
+        createdAt,
+      },
+    },
+  });
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) =>
+      current.runs !== "unknown" &&
+      current.runs
+        .flatMap((run) => run.merge_requests)
+        .every((request) => request.url === mute || request.state !== "unknown") &&
+      current.runs.length === 3,
+  );
+  const requestOf = (url: string) =>
+    (snapshot.runs as RunView[])
+      .flatMap((run) => run.merge_requests)
+      .find((request) => request.url === url)!;
+
+  expect(requestOf(passing)).toMatchObject({
+    state: "open",
+    ci: "passing",
+    additions: 120,
+    deletions: 30,
+    changed_files: 7,
+    created_at: createdAt,
+    checks: [
+      { name: "lint", url: "https://ci.example/lint", result: "pass" },
+      { name: "legacy", url: null, result: "pass" },
+    ],
+  });
+  expect(requestOf(failingChecks)).toMatchObject({
+    ci: "failing",
+    checks: [
+      { name: "lint", result: "pass" },
+      { name: "tests", result: "pending" },
+      { name: "e2e", url: "https://ci.example/e2e", result: "fail" },
+    ],
+  });
+  // The failing gh: nothing is made up.
+  expect(requestOf(mute)).toMatchObject({
+    state: "unknown",
+    ci: "unknown",
+    checks: [],
+    additions: null,
+    deletions: null,
+    changed_files: null,
+    created_at: null,
+  });
+  expect(snapshot.sources.github.ok).toBe(false);
+
+  // One `gh pr view --json` call for each MR and read, and no `pr checks`.
+  const calls = readFileSync(join(state, "gh.log"), "utf8").trim().split("\n");
+  for (const call of calls) {
+    expect(call).toStartWith("pr view ");
+    expect(call).toEndWith(
+      "--json state,statusCheckRollup,additions,deletions,changedFiles,createdAt",
+    );
+  }
+}, 60_000);
+
+test("ARK-285-AC6 the median and p90 of step time by role come from the finished steps of closed runs, next to the time in the current step", async () => {
+  isolatedEnvironment();
+  const closedRun = (ticket: string, implementer: number, reviewer: number) =>
+    writeRun({
+      project: "p",
+      run: `${today()}-${ticket}-1`,
+      ticket: { id: ticket, title: `Closed ${ticket}` },
+      phase: "closed",
+      steps: [
+        {
+          id: "build",
+          role: "implementer",
+          harness: "omp",
+          model: "m",
+          needs: [],
+          startedAfter: 40,
+          finishedAfter: 40 + implementer,
+        },
+        {
+          id: "check",
+          role: "reviewer",
+          harness: "omp",
+          model: "m",
+          needs: ["build"],
+          startedAfter: 1000,
+          finishedAfter: 1000 + reviewer,
+        },
+        // A step that never started has no time.
+        { id: "later", role: "reviewer", harness: "omp", model: "m", needs: ["check"] },
+      ],
+    });
+  // Implementer: 100, 200, 600 s: median 200, p90 600 (nearest rank). Reviewer: 60, 60, 120.
+  closedRun("ARK-821", 100, 60);
+  closedRun("ARK-822", 200, 60);
+  closedRun("ARK-823", 600, 120);
+
+  // An open run: one step done, one running for 6 min, one pending; round 1 of 3.
+  const open = `${today()}-ARK-824-1`;
+  const startedAt = new Date(Date.now() - 3_600_000);
+  writeRun({
+    project: "p",
+    run: open,
+    ticket: { id: "ARK-824", title: "Open" },
+    phase: "building",
+    startedAt,
+    steps: [
+      {
+        id: "plan-tests",
+        role: "validator",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 40,
+        finishedAfter: 100,
+      },
+      {
+        id: "build",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 3600 - 361,
+      },
+      { id: "check", role: "reviewer", harness: "omp", model: "m", needs: ["build"] },
+    ],
+  });
+  installFakeTools({});
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(baseUrl, (current) => current.runs !== "unknown");
+
+  expect(snapshot.role_times).toEqual({
+    implementer: { median: 200, p90: 600, count: 3 },
+    reviewer: { median: 60, p90: 120, count: 3 },
+  });
+  const { progress } = openRunOf(snapshot, open);
+  expect(progress).toMatchObject({ steps_done: 1, steps_total: 3, round: 1, round_budget: 3 });
+  expect(progress?.current).toMatchObject({
+    step: "build",
+    role: "implementer",
+    typical_seconds: 200,
+    slow_above_seconds: 600,
+  });
+  const elapsed = (Date.now() - Date.parse(progress!.current!.started_at)) / 1000;
+  expect(stepTimeText("implementer", elapsed, snapshot.role_times.implementer)).toBe(
+    "implementer 6 min · typical 3 · slow above 10",
+  );
+  // No role with a closed run behind it: the time stands alone, and no ETA is ever sent.
+  expect(stepTimeText("validator", 90, snapshot.role_times.validator)).toBe("validator 2 min");
+  expect(JSON.stringify(snapshot)).not.toMatch(/\beta\b/i);
+}, 60_000);
+
+test("ARK-285-AC2 an omp that never answers leaves usage unknown, not a guess, and the hub keeps serving", async () => {
+  isolatedEnvironment();
+  installFakeTools({ ompMode: "down" });
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) => current.sources.orca.ok && current.sources.github.ok,
+  );
+  expect(snapshot.provider_limits).toBe("unknown");
+  expect(snapshot.sources.providerLimits.ok).toBe(false);
+  expect(snapshot.sources.providerLimits.read_at).toBeNull();
+  expect((await fetch(`${baseUrl}/`)).status).toBe(200);
+}, 60_000);
+
+test("ARK-285-AC1 docs/design/hub-v2 holds hybrid-1.html and data.js, ADR 0009 names Home, Runs and Backlog and says Runs replaces Map, and Map.tsx is gone", () => {
+  for (const file of ["hybrid-1.html", "data.js"])
+    expect(readFileSync(join(root, "docs/design/hub-v2", file), "utf8").length).toBeGreaterThan(0);
+  const line = readDoc("docs/adr/0009-hub-is-a-read-only-live-view.md")
+    .split("\n")
+    .find((candidate) => candidate.includes("The hub shows"));
+  expect(line).toContain("The hub shows Home, Runs and Backlog");
+  expect(line).toContain("Runs replaces Map");
+  expect(line).not.toContain("Run, Backlog and Map");
+  expect(existsSync(join(root, "hub/page/Map.tsx"))).toBe(false);
+});
+
+test("ARK-285-AC11 with every new reader running and an open MR with a 17000-case report, / and /nope answer with a p95 below 200 ms", async () => {
+  isolatedEnvironment();
+  const mergeRequest = "https://github.com/example/repo/pull/85";
+  const run = `${today()}-ARK-830-1`;
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-830", title: "Big report" },
+    phase: "merge_requests_open",
+    criteria: ["ARK-830-AC1"],
+    mergeRequests: [{ repo: ".", url: mergeRequest, number: 85 }],
+  });
+  const cases = Array.from(
+    { length: 17_000 },
+    (_, index) =>
+      `<testcase name="${index % 50 === 0 ? "ARK-830-AC1 " : "other "}${index}" file="test/a.test.ts" line="${index}" />`,
+  );
+  mkdirSync(join(directory, "results"), { recursive: true });
+  writeFileSync(
+    join(directory, "results", "cli.report"),
+    `<?xml version="1.0"?>\n<testsuites><testsuite name="a">\n${cases.join("\n")}\n</testsuite></testsuites>\n`,
+  );
+  installFakeTools({
+    orca: orcaAnswersFor(run),
+    ompUsage: {
+      reports: [
+        {
+          provider: "anthropic",
+          fetchedAt: Date.now(),
+          limits: [
+            {
+              window: { id: "5h", resetsAt: Date.now() + 3_600_000 },
+              amount: { usedFraction: 0.8 },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const { baseUrl } = await start();
+  const sample = async () => {
+    const latencies: Record<string, number[]> = { "/": [], "/nope": [] };
+    for (let round = 0; round < 100; round++)
+      for (const route of ["/", "/nope"]) {
+        const requestedAt = performance.now();
+        await (await fetch(`${baseUrl}${route}`)).arrayBuffer();
+        latencies[route].push(performance.now() - requestedAt);
+      }
+    for (const [route, durations] of Object.entries(latencies))
+      expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
+  };
+  await sample(); // while the readers make their first pass
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) =>
+      current.sources.evidence.ok &&
+      current.sources.providerLimits.ok &&
+      current.sources.agentWait.ok &&
+      current.sources.github.ok,
+  );
+  expect(openRunOf(snapshot, run).evidence?.criteria[0].proof.length).toBe(340);
+  await sample(); // with every reader answered and cached
+}, 120_000);
+
+test("ARK-285-AC11 typecheck, lint and format:check exit 0 (bun test is this run)", () => {
+  for (const script of ["typecheck", "lint", "format:check"]) {
+    const result = spawnSync("bun", ["run", script], { cwd: root, encoding: "utf8" });
+    expect(result.status, `bun run ${script}\n${result.stdout}${result.stderr}`).toBe(0);
+  }
+}, 300_000);
+
+test("ARK-285-AC12 the human check on the real ARK_HOME is recorded in docs/evidence/ARK-285-ac12.md with human: ok", () => {
+  const evidence = readDoc("docs/evidence/ARK-285-ac12.md");
+  for (const part of ["Home", "Runs", "run page", "ticket page", "light", "dark", "usage"])
+    expect(evidence, part).toContain(part);
+  expect(evidence).toMatch(/usage[^\n]*(match|equal)/i);
+  expect(evidence.split("\n")).toContain("human: ok");
+});
+
+test("ARK-285-AC3 after one good Orca read, a failing read keeps a stale waiting agent and still reports a quiet run as idle 60 min", () => {
+  const minutes = 60;
+  const run = {
+    run: "r",
+    updated_at: "then",
+    waiting: [],
+    plan: [{ id: "build", status: "running" }],
+    agents: [{ step: "build", activity: { kind: "working", text: "working", last_line: null } }],
+  };
+  const snapshotOf = (ok: boolean, agents: unknown[]): Snapshot =>
+    ({
+      runs: [{ ...run, agents }],
+      sources: { agentWait: { ok, read_at: "earlier" } },
+    }) as unknown as Snapshot;
+  const age = () => minutes * 60_000;
+  const stuck = (snapshot: Snapshot) => stuckAgents(snapshot, age).map((item) => item.text);
+
+  expect(stuck(snapshotOf(false, run.agents))).toEqual(["idle 60\u00a0min"]);
+  expect(stuck(snapshotOf(true, run.agents))).toEqual([]);
+  const waiting = [{ step: "build", activity: { kind: "waiting", text: "waiting on a prompt" } }];
+  expect(stuck(snapshotOf(false, waiting))).toEqual(["waiting on a prompt"]);
+});
+
+test("ARK-285-AC11 ticket text arrives in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside", async () => {
+  isolatedEnvironment();
+  const home = process.env.ARK_HOME as string;
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-840",
+    title: "Readable",
+    status: "ready",
+    problem: "Why it hurts",
+    change: "What changes",
+    criteria: [{ id: "ARK-840-AC1", text: "It works" }],
+  });
+  writeFileSync(join(home, "outside.md"), "## Problem\n\nOUTSIDE TICKET DIRECTORY\n");
+  writeFileSync(
+    join(home, "projects", "p", "tickets", "ARK-841.md"),
+    '---\nid: ../../../outside\ntitle: "Planted"\n---\n## Problem\n\nOwn text\n',
+  );
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) => current.tickets !== "unknown" && current.tickets.length === 2,
+  );
+  if (snapshot.tickets === "unknown") throw new Error("tickets are unknown");
+  const documents = Object.fromEntries(snapshot.tickets.map((t) => [t.title, t.document]));
+  expect(documents.Readable).toEqual({
+    problem: "Why it hurts",
+    change: "What changes",
+    criteria: [{ id: "ARK-840-AC1", text: "It works" }],
+  });
+  expect(documents.Planted?.problem).toBe("Own text");
+  expect(JSON.stringify(snapshot)).not.toContain("OUTSIDE TICKET DIRECTORY");
+  for (const id of ["ARK-840", "..%2F..%2F..%2Foutside"])
+    expect((await fetch(`${baseUrl}/api/ticket/p/${id}`)).status).toBe(404);
 });
