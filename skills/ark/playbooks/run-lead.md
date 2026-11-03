@@ -299,7 +299,7 @@ Never record `approve` unless the human said so, in Plannotator (exit 0) or thro
 ark worktree create <run>
 ```
 
-This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the plan uses is a worktree on the branch `ark/<ticket id>-<slug>`. Every other path is a link to the workspace. A repo named `.` is the workspace folder itself. A worker's working folder is `<run folder>/workspace/<repo>`. Ark also writes `.omp/config.yml` with `tools.approvalMode: yolo` in each repo worktree it makes (`ark worktree anchor` too), so workers run with no permission prompt. The file is hidden from `git status` and `git add` by a `.omp/.gitignore`, and nothing outside the run worktree changes.
+This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the plan uses is a worktree on the branch `ark/<ticket id>-<slug>`, or `ark/<ticket id>-<slug>-<n>` (lowest free `n` from 2) when that name exists locally or on origin. If a repo has uncommitted changes the command prints them and exits 1 without making any worktree: send an escalation, and never pass `--allow-dirty` unless the human says so. Every other path is a link to the workspace. A repo named `.` is the workspace folder itself. A worker's working folder is `<run folder>/workspace/<repo>`. Ark also writes `.omp/config.yml` with `tools.approvalMode: yolo` in each repo worktree it makes (`ark worktree anchor` too), so workers run with no permission prompt. The file is hidden from `git status` and `git add` by a `.omp/.gitignore`, and nothing outside the run worktree changes.
 
 ## 7. Run the steps
 
