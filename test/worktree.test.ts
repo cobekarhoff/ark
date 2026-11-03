@@ -19,6 +19,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeFakeCommand,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -58,7 +59,15 @@ function startRun(
   writeProject("demo", {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    suites: [
+      {
+        name: "unit",
+        level: "unit",
+        repo: ".",
+        command: "true",
+        parser: "bun",
+      },
+    ],
     roles,
   });
   const ticket = writeTicket(
@@ -76,8 +85,16 @@ function startRun(
 
 function addRemote(workspace: string): void {
   const remote = mkdtempSync(join(tmpdir(), "ark-remote-"));
-  const initialized = Bun.spawnSync(["git", "init", "--bare", "-b", "main", remote]);
-  if (initialized.exitCode !== 0) throw new Error(initialized.stderr.toString());
+  const initialized = Bun.spawnSync([
+    "git",
+    "init",
+    "--bare",
+    "-b",
+    "main",
+    remote,
+  ]);
+  if (initialized.exitCode !== 0)
+    throw new Error(initialized.stderr.toString());
   for (const args of [
     ["remote", "add", "origin", remote],
     ["push", "-u", "origin", "main"],
@@ -88,7 +105,10 @@ function addRemote(workspace: string): void {
   }
 }
 
-function approveAndOpenMergeRequest(runDirectory: string, openMergeRequest = true): void {
+function approveAndOpenMergeRequest(
+  runDirectory: string,
+  openMergeRequest = true,
+): void {
   writeFileSync(join(runDirectory, "plan.yml"), "steps: []\n");
   recordEvaluation(runDirectory);
   appendEvent(runDirectory, "plan.checked", {
@@ -97,7 +117,10 @@ function approveAndOpenMergeRequest(runDirectory: string, openMergeRequest = tru
     plan_hash: planHash(runDirectory),
     steps: [],
   });
-  appendEvent(runDirectory, "gate.answered", { gate: "plan", answer: "approve" });
+  appendEvent(runDirectory, "gate.answered", {
+    gate: "plan",
+    answer: "approve",
+  });
   if (!openMergeRequest) return;
   appendEvent(runDirectory, "merge_request.opened", {
     repo: ".",
@@ -111,7 +134,8 @@ function closeRun(
   runDirectory: string,
   outcome: string,
 ): { out: string; code: number } {
-  if (outcome === "abandoned" || outcome === "merged") approveAndOpenMergeRequest(runDirectory);
+  if (outcome === "abandoned" || outcome === "merged")
+    approveAndOpenMergeRequest(runDirectory);
   const result = ark("run", "close", runId, outcome);
   return { out: result.out, code: result.code };
 }
@@ -139,10 +163,16 @@ describe("workspace mirror", () => {
       "ark/FAKE-1-ticket-fake-1",
     );
 
-    expect(readlinkSync(join(mirror, "repos/b/c"))).toBe(join(workspace, "repos/b/c"));
+    expect(readlinkSync(join(mirror, "repos/b/c"))).toBe(
+      join(workspace, "repos/b/c"),
+    );
     expect(lstatSync(join(mirror, "repos/b")).isSymbolicLink()).toBe(false);
-    expect(readlinkSync(join(mirror, "AGENTS.md"))).toBe(join(workspace, "AGENTS.md"));
-    expect(readlinkSync(join(mirror, "compose.yml"))).toBe(join(workspace, "compose.yml"));
+    expect(readlinkSync(join(mirror, "AGENTS.md"))).toBe(
+      join(workspace, "AGENTS.md"),
+    );
+    expect(readlinkSync(join(mirror, "compose.yml"))).toBe(
+      join(workspace, "compose.yml"),
+    );
     expect(lstatSync(join(mirror, "repos")).isSymbolicLink()).toBe(false);
     expect(existsSync(join(mirror, ".DS_Store"))).toBe(false);
 
@@ -169,7 +199,10 @@ describe("workspace mirror", () => {
   });
 
   test("ARK-154-AC1 a single-repo workspace gets one worktree and no symlinks", () => {
-    const workspace = tempGitRepo({ "AGENTS.md": "rules\n", "src/main.txt": "x" });
+    const workspace = tempGitRepo({
+      "AGENTS.md": "rules\n",
+      "src/main.txt": "x",
+    });
     const { runId, runDirectory } = startRun(workspace);
     expect(ark("worktree", "create", runId, ".").code).toBe(0);
 
@@ -177,7 +210,9 @@ describe("workspace mirror", () => {
     expect(lstatSync(join(mirror, ".git")).isFile()).toBe(true);
     expect(lstatSync(join(mirror, "AGENTS.md")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(mirror, "src/main.txt"), "utf8")).toBe("x");
-    expect(gitOutput(mirror, "rev-parse", "--abbrev-ref", "HEAD")).toBe("ark/FAKE-1-ticket-fake-1");
+    expect(gitOutput(mirror, "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      "ark/FAKE-1-ticket-fake-1",
+    );
   });
 
   test("ARK-154-AC1 with no repos named, the repos of the last valid plan are used", () => {
@@ -186,7 +221,11 @@ describe("workspace mirror", () => {
     expect(ark("worktree", "create", runId).code).toBe(1);
 
     const plan = {
-      design: { interfaces: [{ name: "fixture plan", callers: ["ark worktree create"] }] },
+      design: {
+        interfaces: [
+          { name: "fixture plan", callers: ["ark worktree create"] },
+        ],
+      },
       summary: {
         why: "Select repositories for the worktree.",
         changes: [
@@ -226,8 +265,12 @@ describe("workspace mirror", () => {
     expect(ark("plan", "check", runId).code).toBe(0);
     expect(ark("worktree", "create", runId).code).toBe(0);
 
-    expect(lstatSync(join(runDirectory, "workspace/repos/b/c/.git")).isFile()).toBe(true);
-    expect(lstatSync(join(runDirectory, "workspace/repos/a")).isSymbolicLink()).toBe(true);
+    expect(
+      lstatSync(join(runDirectory, "workspace/repos/b/c/.git")).isFile(),
+    ).toBe(true);
+    expect(
+      lstatSync(join(runDirectory, "workspace/repos/a")).isSymbolicLink(),
+    ).toBe(true);
   });
 
   test("ARK-154-AC2 running again keeps existing worktrees, creates missing ones and refuses unknown repos", () => {
@@ -239,12 +282,13 @@ describe("workspace mirror", () => {
 
     const again = ark("worktree", "create", runId, "repos/a", "repos/b/c");
     expect(again.code).toBe(0);
-    expect(readFileSync(join(mirror, "repos/a/scratch.txt"), "utf8")).toBe("work in progress");
+    expect(readFileSync(join(mirror, "repos/a/scratch.txt"), "utf8")).toBe(
+      "work in progress",
+    );
     expect(lstatSync(join(mirror, "repos/b/c/.git")).isFile()).toBe(true);
-    expect(createdEvents(runDirectory).map((event) => event.data.repo)).toEqual([
-      "repos/a",
-      "repos/b/c",
-    ]);
+    expect(createdEvents(runDirectory).map((event) => event.data.repo)).toEqual(
+      ["repos/a", "repos/b/c"],
+    );
 
     const unknown = ark("worktree", "create", runId, "repos/nope");
     expect(unknown.code).toBe(1);
@@ -266,12 +310,15 @@ describe("workspace mirror", () => {
     expect(ark("worktree", "create", runId, "repos/b/c").code).toBe(0);
 
     let directory = join(runDirectory, "workspace/repos/b/c");
-    while (!existsSync(join(directory, "AGENTS.md"))) directory = dirname(directory);
+    while (!existsSync(join(directory, "AGENTS.md")))
+      directory = dirname(directory);
 
     const found = join(directory, "AGENTS.md");
     expect(directory).toBe(join(runDirectory, "workspace"));
     expect(lstatSync(found).isSymbolicLink()).toBe(true);
-    expect(realpathSync(found)).toBe(realpathSync(join(workspace, "AGENTS.md")));
+    expect(realpathSync(found)).toBe(
+      realpathSync(join(workspace, "AGENTS.md")),
+    );
     expect(readFileSync(found, "utf8")).toBe("workspace rules\n");
   });
 });
@@ -285,7 +332,11 @@ describe("ARK-167 worktree lifecycle", () => {
     );
 
     expect(ark("worktree", "create", runId, ".").code).toBe(0);
-    const branch = gitOutput(join(runDirectory, "workspace"), "branch", "--show-current");
+    const branch = gitOutput(
+      join(runDirectory, "workspace"),
+      "branch",
+      "--show-current",
+    );
     expect(branch).toBe("ark/FAKE-1-a-very-long-mixed-case-ticket-title-with");
     expect(branch).not.toContain("2026-");
     expect(branch.slice("ark/FAKE-1-".length)).toHaveLength(40);
@@ -316,12 +367,20 @@ describe("ARK-167 worktree lifecycle", () => {
     expect(dirtyClose.out).toContain("kept     .");
     expect(dirtyClose.out).toContain("uncommitted changes");
     expect(existsSync(path)).toBe(true);
-    expect(gitOutput(workspace, "rev-parse", "--verify", `refs/heads/${branch}`)).not.toBe("");
+    expect(
+      gitOutput(workspace, "rev-parse", "--verify", `refs/heads/${branch}`),
+    ).not.toBe("");
 
     const anotherTicket = writeTicket("demo", "FAKE-1", [
       { id: "FAKE-1-AC1", text: "criterion FAKE-1-AC1" },
     ]);
-    const anotherStarted = ark("run", "start", anotherTicket, "--project", "demo");
+    const anotherStarted = ark(
+      "run",
+      "start",
+      anotherTicket,
+      "--project",
+      "demo",
+    );
     const anotherRunId = anotherStarted.out.trim();
     const anotherRunDirectory = join(
       process.env.ARK_HOME as string,
@@ -333,7 +392,13 @@ describe("ARK-167 worktree lifecycle", () => {
     expect(ark("worktree", "create", anotherRunId, ".").code).toBe(0);
     const unmergedPath = join(anotherRunDirectory, "workspace");
     writeFileSync(join(unmergedPath, "committed.txt"), "branch-only change\n");
-    const staged = Bun.spawnSync(["git", "-C", unmergedPath, "add", "committed.txt"]);
+    const staged = Bun.spawnSync([
+      "git",
+      "-C",
+      unmergedPath,
+      "add",
+      "committed.txt",
+    ]);
     expect(staged.exitCode).toBe(0);
     const committed = Bun.spawnSync([
       "git",
@@ -349,9 +414,14 @@ describe("ARK-167 worktree lifecycle", () => {
     expect(unmergedClose.out).toContain("kept     .");
     expect(unmergedClose.out).toContain("branch is not in main");
     expect(existsSync(unmergedPath)).toBe(true);
-    expect(gitOutput(workspace, "rev-parse", "--verify", `refs/heads/${unmergedBranch}`)).not.toBe(
-      "",
-    );
+    expect(
+      gitOutput(
+        workspace,
+        "rev-parse",
+        "--verify",
+        `refs/heads/${unmergedBranch}`,
+      ),
+    ).not.toBe("");
   });
 });
 
@@ -377,12 +447,25 @@ function startFreshRun(): { runId: string; runDirectory: string } {
   writeProject("demo", {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    suites: [
+      {
+        name: "unit",
+        level: "unit",
+        repo: ".",
+        command: "true",
+        parser: "bun",
+      },
+    ],
     roles,
   });
-  const ticket = writeTicket("demo", "FAKE-1", [{ id: "FAKE-1-AC1", text: "criterion" }]);
+  const ticket = writeTicket("demo", "FAKE-1", [
+    { id: "FAKE-1-AC1", text: "criterion" },
+  ]);
   const runId = ark("run", "start", ticket, "--project", "demo").out.trim();
-  return { runId, runDirectory: join(arkHome, "projects", "demo", "runs", runId) };
+  return {
+    runId,
+    runDirectory: join(arkHome, "projects", "demo", "runs", runId),
+  };
 }
 
 describe("ARK-276 anchor worktree", () => {
@@ -395,9 +478,15 @@ describe("ARK-276 anchor worktree", () => {
     expect(first.code).toBe(0);
     expect(first.out).toBe(`path:${mirror}\n`);
     expect(lstatSync(join(mirror, ".git")).isFile()).toBe(true);
-    expect(gitOutput(mirror, "rev-parse", "--abbrev-ref", "HEAD")).toBe("ark/FAKE-1-ticket-fake-1");
-    const state = JSON.parse(readFileSync(join(runDirectory, "state.json"), "utf8"));
-    expect(state.worktrees.map((worktree: { repo: string }) => worktree.repo)).toEqual(["."]);
+    expect(gitOutput(mirror, "rev-parse", "--abbrev-ref", "HEAD")).toBe(
+      "ark/FAKE-1-ticket-fake-1",
+    );
+    const state = JSON.parse(
+      readFileSync(join(runDirectory, "state.json"), "utf8"),
+    );
+    expect(
+      state.worktrees.map((worktree: { repo: string }) => worktree.repo),
+    ).toEqual(["."]);
 
     const second = ark("worktree", "anchor", runId);
     expect(second.code).toBe(0);
@@ -420,7 +509,9 @@ describe("ARK-276 anchor worktree", () => {
     expect(create.out).toMatch(/exists\s+a\n/);
     expect(create.out).toMatch(/created\s+b /);
     expect(lstatSync(join(mirror, "b/.git")).isFile()).toBe(true);
-    expect(createdEvents(runDirectory).map((event) => event.data.repo)).toEqual(["a", "b"]);
+    expect(createdEvents(runDirectory).map((event) => event.data.repo)).toEqual(
+      ["a", "b"],
+    );
   });
 
   test("ARK-276-AC3 with a root repo and a nested repo the anchor is the mirror root, and create keeps it and makes the nested repo", () => {
@@ -436,14 +527,18 @@ describe("ARK-276 anchor worktree", () => {
     expect(create.out).toMatch(/exists\s+\.\n/);
     expect(create.out).toMatch(/created\s+repos\/x /);
     expect(lstatSync(join(mirror, "repos/x/.git")).isFile()).toBe(true);
-    expect(createdEvents(runDirectory).map((event) => event.data.repo)).toEqual([".", "repos/x"]);
+    expect(createdEvents(runDirectory).map((event) => event.data.repo)).toEqual(
+      [".", "repos/x"],
+    );
   });
 
   test("ARK-276-AC4 anchor works in awaiting_criteria, awaiting_strategy, planning and building, and is refused in closed like create", () => {
     const phaseOf = (runId: string) => ark("status", runId).out;
 
     const criteria = startFreshRun();
-    recordEvaluation(criteria.runDirectory, ["a blocker the human must accept"]);
+    recordEvaluation(criteria.runDirectory, [
+      "a blocker the human must accept",
+    ]);
     expect(phaseOf(criteria.runId)).toContain("awaiting_criteria");
     expect(ark("worktree", "anchor", criteria.runId).code).toBe(0);
 
@@ -481,7 +576,9 @@ describe("ARK-276 anchor worktree", () => {
     const create = ark("worktree", "create", closed.runId, ".");
     expect(refused.code).toBe(1);
     expect(create.code).toBe(1);
-    expect(refused.err).toContain("worktree.created refused: run is closed (aborted)");
+    expect(refused.err).toContain(
+      "worktree.created refused: run is closed (aborted)",
+    );
     expect(refused.err).toBe(create.err);
   });
 
@@ -508,7 +605,9 @@ describe("ARK-276 anchor worktree", () => {
     const anchorBranch = gitOutput(anchorPath, "branch", "--show-current");
     expect(closeRun(first.runId, first.runDirectory, "aborted").code).toBe(0);
     expect(existsSync(anchorPath)).toBe(false);
-    expect(gitOutput(join(two, "a"), "branch", "--list", anchorBranch)).toBe("");
+    expect(gitOutput(join(two, "a"), "branch", "--list", anchorBranch)).toBe(
+      "",
+    );
 
     const nested = tempRootWithNestedWorkspace();
     const second = startRun(nested);
@@ -579,7 +678,13 @@ describe("ARK-278 close removes workspace/", () => {
     const { runId, runDirectory } = startRun(tempMetaWorkspace());
     expect(ark("worktree", "create", runId, "repos/a").code).toBe(0);
     mkdirSync(join(runDirectory, "results"));
-    for (const name of ["ticket.md", "plan.md", "retro.md", "metrics.json", "results/r.json"])
+    for (const name of [
+      "ticket.md",
+      "plan.md",
+      "retro.md",
+      "metrics.json",
+      "results/r.json",
+    ])
       writeFileSync(join(runDirectory, name), "x\n");
     expect(existsSync(join(runDirectory, "workspace"))).toBe(true);
 
@@ -595,5 +700,150 @@ describe("ARK-278 close removes workspace/", () => {
       "results/r.json",
     ])
       expect(existsSync(join(runDirectory, name))).toBe(true);
+  });
+});
+
+/** Runs `body` with a fake `gh` first on PATH, then restores PATH. */
+function withFakeGh<T>(script: string, body: () => T): T {
+  const saved = process.env.PATH;
+  try {
+    writeFakeCommand("gh", script);
+    return body();
+  } finally {
+    process.env.PATH = saved;
+  }
+}
+
+/** Records a GitHub MR for the root repo so `ark run close` can ask the host about it. */
+function openGithubMergeRequest(runDirectory: string): void {
+  approveAndOpenMergeRequest(runDirectory, false);
+  appendEvent(runDirectory, "merge_request.opened", {
+    repo: ".",
+    url: "https://github.com/org/repo/pull/1",
+    number: 1,
+  });
+}
+
+function commitIn(path: string, file: string): void {
+  writeFileSync(join(path, file), "branch-only change\n");
+  for (const args of [
+    ["add", file],
+    ["commit", "-m", file],
+  ]) {
+    const result = Bun.spawnSync(["git", "-C", path, ...args]);
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+  }
+}
+
+describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
+  test("ARK-188-AC1 a branch that exists locally makes the new branch get suffix -2, recorded in worktree.created", () => {
+    const workspace = tempGitRepo();
+    gitOutput(workspace, "branch", "ark/FAKE-1-ticket-fake-1");
+    const { runId, runDirectory } = startRun(workspace);
+
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    expect(
+      createdEvents(runDirectory).map((event) => event.data.branch),
+    ).toEqual(["ark/FAKE-1-ticket-fake-1-2"]);
+    expect(
+      gitOutput(workspace, "branch", "--list", "ark/FAKE-1-ticket-fake-1-2"),
+    ).not.toBe("");
+  });
+
+  test("ARK-188-AC1 branches that exist only on origin are skipped: the lowest free suffix is used", () => {
+    const workspace = tempGitRepo();
+    addRemote(workspace);
+    for (const name of [
+      "ark/FAKE-1-ticket-fake-1",
+      "ark/FAKE-1-ticket-fake-1-2",
+    ])
+      Bun.spawnSync([
+        "git",
+        "-C",
+        workspace,
+        "push",
+        "origin",
+        `HEAD:refs/heads/${name}`,
+      ]);
+    const { runId, runDirectory } = startRun(workspace);
+    expect(gitOutput(workspace, "branch", "--list", "ark/FAKE-1-*")).toBe("");
+
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    expect(
+      createdEvents(runDirectory).map((event) => event.data.branch),
+    ).toEqual(["ark/FAKE-1-ticket-fake-1-3"]);
+  });
+
+  test("ARK-188-AC2 a merged MR deletes the branch although a squash merge left it out of the target", () => {
+    const workspace = tempGitRepo();
+    addRemote(workspace);
+    const { runId, runDirectory } = startRun(workspace);
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const path = join(runDirectory, "workspace");
+    const branch = gitOutput(path, "branch", "--show-current");
+    commitIn(path, "squashed.txt");
+    openGithubMergeRequest(runDirectory);
+
+    const closed = withFakeGh(
+      `echo '{"state":"MERGED","statusCheckRollup":[]}'`,
+      () => ark("run", "close", runId, "merged"),
+    );
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(`removed  .  ${branch}`);
+    expect(gitOutput(workspace, "branch", "--list", branch)).toBe("");
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test("ARK-188-AC3 a failed fetch with an unknown MR state keeps the branch and names the repo and the reason", () => {
+    const workspace = tempGitRepo();
+    addRemote(workspace);
+    const { runId, runDirectory } = startRun(workspace);
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const path = join(runDirectory, "workspace");
+    const branch = gitOutput(path, "branch", "--show-current");
+    commitIn(path, "unmerged.txt");
+    gitOutput(
+      workspace,
+      "remote",
+      "set-url",
+      "origin",
+      join(tmpdir(), "ark-no-such-remote"),
+    );
+    openGithubMergeRequest(runDirectory);
+
+    const closed = withFakeGh("exit 1", () =>
+      ark("run", "close", runId, "merged"),
+    );
+    expect(closed.out).toContain(
+      `kept     .  ${branch}: could not fetch origin`,
+    );
+    expect(closed.out).toContain("ark-no-such-remote");
+    expect(gitOutput(workspace, "branch", "--list", branch)).not.toBe("");
+    expect(existsSync(path)).toBe(true);
+  });
+
+  test("ARK-188-AC4 a dirty source repo without --allow-dirty exits 1, lists the path and creates no worktree", () => {
+    const workspace = tempGitRepo();
+    writeFileSync(join(workspace, "README.md"), "changed\n");
+    const { runId, runDirectory } = startRun(workspace);
+
+    const result = ark("worktree", "create", runId, ".");
+    expect(result.code).toBe(1);
+    expect(result.out + result.err).toContain("README.md");
+    expect(existsSync(join(runDirectory, "workspace"))).toBe(false);
+    expect(createdEvents(runDirectory)).toEqual([]);
+  });
+
+  test("ARK-188-AC5 with --allow-dirty the worktree is created and the changed path is printed as a warning", () => {
+    const workspace = tempGitRepo();
+    writeFileSync(join(workspace, "README.md"), "changed\n");
+    const { runId, runDirectory } = startRun(workspace);
+
+    const result = ark("worktree", "create", runId, ".", "--allow-dirty");
+    expect(result.code).toBe(0);
+    expect(result.out + result.err).toContain("warning");
+    expect(result.out + result.err).toContain("README.md");
+    expect(createdEvents(runDirectory)).toHaveLength(1);
+    expect(existsSync(join(runDirectory, "workspace"))).toBe(true);
   });
 });
