@@ -449,6 +449,39 @@ test("ARK-279-AC6 worker.md has the read-apply-report, Designer and Reviewer ski
   expect(worker).toContain("`- **Rule:** <name of the rule or guideline>`");
 });
 
+const defect =
+  /A worker that still stops at a permission prompt is a defect: tell (?:Master Chief|the run lead), and never approve it in the worker/;
+
+test("ARK-280-AC2 every worker-start line of chief.md and run-lead.md runs in an Ark-made worktree, where the setting is written", () => {
+  const lines = [...workerStartLines(chiefPlaybook), ...workerStartLines(runLeadPlaybook)];
+  expect(lines).toHaveLength(4);
+  for (const line of lines) expect(line).toMatch(/--worktree path:<[^>]+>/);
+  expect(section(chiefPlaybook, "## 6. Start a run lead for each ready ticket")).toContain(
+    "It writes `.omp/config.yml` with `tools.approvalMode: yolo` in the new worktree",
+  );
+  expect(section(runLeadPlaybook, "## 6. Create the worktrees")).toContain(
+    "`.omp/config.yml` with `tools.approvalMode: yolo` in each repo worktree it makes (`ark worktree anchor` too)",
+  );
+  const bootstrapPlaybook = readFileSync(join(playbookDirectory, "bootstrap.md"), "utf8");
+  const depthCheck = section(bootstrapPlaybook, "## 6. Confirm Orca's nesting depth is at least 2");
+  expect(depthCheck).toContain("--worktree path:<workspace>");
+  expect(depthCheck).toContain(
+    "the depth check follows the global `tools.approvalMode`. A worker that stops at a permission prompt here is not a depth failure: tell the human.",
+  );
+});
+
+test("ARK-280-AC4 the playbooks call a worker that stops at a permission prompt a defect to report, not to approve", () => {
+  const evaluate = section(runLeadPlaybook, "## 2. Evaluate the ticket and open the criteria gate");
+  const steps = section(runLeadPlaybook, "## 7. Run the steps");
+  // evaluator and designer starts in section 2, step workers in section 7
+  expect(evaluate.match(new RegExp(defect.source, "g"))).toHaveLength(2);
+  expect(steps.match(new RegExp(defect.source, "g"))).toHaveLength(1);
+  expect(section(chiefPlaybook, "## 6. Start a run lead for each ready ticket")).toMatch(
+    /a worker that still stops at one is a defect to fix, never to click through/,
+  );
+  expect(readFileSync(join(playbookDirectory, "worker.md"), "utf8")).toMatch(defect);
+});
+
 test("ARK-282-AC5 run-lead section 7 sends a worker-start that never ran to finish --failed --not-started and the roles check", () => {
   const rule = runLeadPlaybook
     .split("\n")

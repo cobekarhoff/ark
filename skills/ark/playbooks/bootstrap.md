@@ -187,6 +187,7 @@ The chain is Master Chief, run lead, worker. That is depth 2. Orca's default all
    orca orchestration worker-start --agent omp --worktree path:<workspace> --task-title "Ark depth check" --spec "Run this command and nothing else: orca orchestration worker-start --agent omp --worktree path:<workspace> --spec 'Reply done and stop.' --json. Then report the full JSON the command printed. Do not retry." --json
    ```
    Note the dispatch id from the JSON result.
+   These workers run in the main workspace, where Ark writes no `.omp/config.yml`, so the depth check follows the global `tools.approvalMode`. A worker that stops at a permission prompt here is not a depth failure: tell the human.
 3. Wait for the report, then read it:
    ```sh
    orca orchestration check --wait --timeout-ms 180000 --json
