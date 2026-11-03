@@ -355,3 +355,235 @@ button:not(:disabled):active {
     transition: none !important;
   }
 }
+
+/* ---- run page: Open in Orca, decisions, transcripts, run files ---- */
+/* ---- additions for S1 (mockup only) ---- */
+.btn-orca {
+  background: #222936;
+  border: 1px solid #333b48;
+  color: #d8dce3;
+  padding: 3px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.btn-orca:not(:disabled):hover {
+  background: #2a3242;
+}
+.ended {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.agentrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 2px 0;
+}
+.tl {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #2a303b;
+  border-radius: 6px;
+  background: #12151b;
+}
+.tl li {
+  display: grid;
+  grid-template-columns: 74px 160px 1fr;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #1f242d;
+}
+.tl li:last-child {
+  border-bottom: 0;
+}
+.tl .kind {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: #aab2bf;
+}
+.tl time {
+  font-variant-numeric: tabular-nums;
+  color: #8b93a1;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+.tl .why {
+  overflow-wrap: anywhere;
+}
+.cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+@media (max-width: 900px) {
+  .cols {
+    grid-template-columns: 1fr;
+  }
+  .tl li {
+    grid-template-columns: 60px 1fr;
+  }
+  .tl .kind {
+    grid-column: 2;
+  }
+  .tl .why {
+    grid-column: 1 / -1;
+  }
+}
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.files li {
+  padding: 5px 0;
+  border-bottom: 1px solid #1f242d;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+.crumb {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+.meta b {
+  font-weight: 500;
+  color: #8b93a1;
+  margin-right: 4px;
+}
+.msgs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 920px;
+}
+.msg {
+  border: 1px solid #2a303b;
+  border-radius: 6px;
+  background: #161a21;
+  padding: 8px 12px;
+}
+.msg.user {
+  background: #1a2233;
+  border-color: #2b3a57;
+}
+.msg > header {
+  display: flex;
+  gap: 10px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: #8b93a1;
+  margin-bottom: 4px;
+}
+.msg > header .role {
+  color: #d8dce3;
+  font-weight: 600;
+}
+.msg p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tool {
+  border: 1px solid #2a303b;
+  border-radius: 6px;
+  background: #12151b;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.tool .head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.tool .name {
+  font-family: ui-monospace, Menlo, monospace;
+  font-weight: 600;
+}
+.tool .args {
+  font-family: ui-monospace, Menlo, monospace;
+  color: #aab2bf;
+  overflow-wrap: anywhere;
+}
+.tool .res {
+  font-family: ui-monospace, Menlo, monospace;
+  color: #8b93a1;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.tool.err {
+  border-color: #7a3430;
+}
+details.think {
+  border: 1px dashed #333b48;
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #8b93a1;
+}
+details.think summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+details.think summary:focus-visible {
+  outline: 2px solid #7cb7ff;
+  outline-offset: 2px;
+}
+details.think p {
+  margin: 6px 0 0;
+  font-style: normal;
+  white-space: pre-wrap;
+}
+.more {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+pre.file {
+  background: #12151b;
+  border: 1px solid #2a303b;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow: auto;
+  font:
+    13px/1.5 ui-monospace,
+    Menlo,
+    monospace;
+  margin: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.note {
+  font-size: 12px;
+  color: #8b93a1;
+  margin: 6px 0 0;
+  max-width: 72ch;
+}
+.closed-banner {
+  border: 1px solid #2a303b;
+  background: #161a21;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.bad-text {
+  color: #ff7b72;
+  font-size: 12px;
+}
+.graph a:focus-visible .box {
+  stroke: #7cb7ff;
+  stroke-width: 3;
+}

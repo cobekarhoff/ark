@@ -52,7 +52,7 @@ omp plugin link .   # install this repo as an OMP plugin
 bun test            # run the tests
 ```
 
-The hub is read-only. When Orca or Plannotator does not answer, its views keep
+The hub is a view with one action: "Open in Orca" focuses a live agent's terminal (`orca terminal switch`; a running agent session that Orca lists no terminal for shows "running in Orca, open it from its chat tab" instead); it sends no text and changes no run state. When Orca or Plannotator does not answer, its views keep
 the last good value and show how old it is; `GET /api/snapshot` returns the
 same snapshot the page gets.
 

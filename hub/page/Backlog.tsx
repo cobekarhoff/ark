@@ -1,7 +1,8 @@
 // test ids: ticket-row (data-ticket), ticket-select, filter-text, filter-status, copy-button,
-// copy-preview, copy-status. No control here changes a ticket.
+// copy-preview, copy-status, ticket-run (data-run). No control here changes a ticket.
 import { useEffect, useMemo, useState } from "react";
-import { Unknown, known } from "./format.tsx";
+import { Phase, Unknown, known } from "./format.tsx";
+import { runHref } from "./RunDetail.tsx";
 import { useLive } from "./store.tsx";
 import type { TicketView } from "../types.ts";
 
@@ -50,6 +51,13 @@ export function Backlog({ focus }: { focus: string | null }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [copied, setCopied] = useState("");
   const tickets = snapshot && known(snapshot.tickets) ? snapshot.tickets : null;
+  // Every run of a ticket, newest first (the order of `all`).
+  const runsOf = new Map(
+    (snapshot && known(snapshot.ticket_runs) ? snapshot.ticket_runs : []).map((entry) => [
+      `${entry.project}/${entry.ticket}`,
+      entry.all,
+    ]),
+  );
   const loaded = tickets !== null;
   useEffect(() => {
     if (focus && loaded)
@@ -151,6 +159,7 @@ export function Backlog({ focus }: { focus: string | null }) {
             <th>ID</th>
             <th>Title</th>
             <th>Status</th>
+            <th>Runs</th>
             <th>Milestone</th>
             <th>depends_on</th>
           </tr>
@@ -176,6 +185,26 @@ export function Backlog({ focus }: { focus: string | null }) {
               <td className="wrap">{ticket.title}</td>
               <td className="nw">
                 <span className="pill">{ticket.status}</span>
+              </td>
+              <td className="nw">
+                {(runsOf.get(`${ticket.project}/${ticket.id}`) ?? []).map((entry) => (
+                  <div key={entry.run}>
+                    <a
+                      className="mono"
+                      href={runHref(entry.run)}
+                      data-testid="ticket-run"
+                      data-run={entry.run}
+                    >
+                      {entry.run}
+                    </a>{" "}
+                    <span className="pill">
+                      <Phase phase={entry.phase} />
+                    </span>
+                  </div>
+                ))}
+                {!runsOf.has(`${ticket.project}/${ticket.id}`) && (
+                  <span className="mut">no runs</span>
+                )}
               </td>
               <td className="nw">{ticket.milestone ?? "—"}</td>
               <td className="mono">
