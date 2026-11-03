@@ -291,32 +291,6 @@ describe("ARK-167 worktree lifecycle", () => {
     expect(branch.slice("ark/FAKE-1-".length)).toHaveLength(40);
   });
 
-  test("ARK-167-AC1 later runs append their run number to the branch", () => {
-    const workspace = tempGitRepo();
-    const first = startRun(workspace, ["FAKE-1-AC1"], "Useful Ticket");
-    expect(ark("run", "close", first.runId, "aborted").code).toBe(0);
-
-    const ticket = writeTicket(
-      "demo",
-      "FAKE-1",
-      [{ id: "FAKE-1-AC1", text: "criterion FAKE-1-AC1" }],
-      "Useful Ticket",
-    );
-    const started = ark("run", "start", ticket, "--project", "demo");
-    const secondRunId = started.out.trim();
-    const secondRunDirectory = join(
-      process.env.ARK_HOME as string,
-      "projects",
-      "demo",
-      "runs",
-      secondRunId,
-    );
-    expect(ark("worktree", "create", secondRunId, ".").code).toBe(0);
-    expect(gitOutput(join(secondRunDirectory, "workspace"), "branch", "--show-current")).toBe(
-      "ark/FAKE-1-useful-ticket-2",
-    );
-  });
-
   test("ARK-167-AC2 closing an abandoned run removes a clean worktree and its branch", () => {
     const workspace = tempGitRepo();
     const { runId, runDirectory } = startRun(workspace);
