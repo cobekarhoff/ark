@@ -229,7 +229,8 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "step.finished": {
         stepStatus.set(data.step, data.outcome);
-        if (data.not_started) {
+        // A merge start never moved the round, so its not_started finish has no round to restore.
+        if (data.not_started && !data.merge) {
           const last = startedRounds.findLastIndex((started) => started.step === data.step);
           if (last !== -1) startedRounds.splice(last, 1);
           round = Math.max(1, ...startedRounds.map((started) => started.round));

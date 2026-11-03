@@ -115,6 +115,13 @@ export function runStep(
 
   if (action === "finish") {
     const outcome = failed ? "failed" : "succeeded";
+    const last = events.findLast(
+      (event) =>
+        (event.type === "step.started" || event.type === "step.finished") &&
+        event.data.step === stepId,
+    );
+    if (notStarted && last?.type !== "step.started")
+      throw new ArkError(`--not-started needs a running start of step ${stepId}`);
     const started = events.findLast(
       (event) => event.type === "step.started" && event.data.step === stepId,
     );

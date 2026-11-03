@@ -886,6 +886,41 @@ test("ARK-282-AC2 --not-started is a usage error without --failed, with start an
   expect(eventLines(directory)).toEqual(before);
 });
 
+test("ARK-282-AC2 --not-started is refused unless the step has a running start", () => {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  const attempt = () => ark("run", "step", runId, "build", "finish", "--failed", "--not-started");
+  expect(attempt().code).toBe(1);
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  ark("run", "step", runId, "build", "finish", "--failed");
+  const before = eventLines(directory);
+  const result = attempt();
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("--not-started");
+  expect(eventLines(directory)).toEqual(before);
+});
+
+test("ARK-282-AC2 finish --failed --not-started after a merge start keeps the real round", () => {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  for (const round of [1, 2]) {
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(lastRound(directory)).toBe(round);
+    ark("run", "step", runId, "build", "finish", "--failed");
+  }
+  const before = statusOf(runId);
+  appendEvent(directory, "worktree.synced", { repo: ".", conflict: true });
+  appendEvent(directory, "step.started", {
+    step: "build",
+    role: "implementer",
+    repo: ".",
+    round: 2,
+    merge: true,
+  });
+  expect(ark("run", "step", runId, "build", "finish", "--failed", "--not-started").code).toBe(0);
+  expect(statusOf(runId)).toEqual(before);
+});
+
 test("ARK-282-AC3 a failed start at the last round keeps phase building and opens no escalation gate", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
