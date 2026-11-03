@@ -38,8 +38,18 @@ function executable(name: string, body: string) {
   chmodSync(join(bin, name), 0o755);
 }
 
+interface ScriptResult {
+  code: number;
+  out: string;
+  err: string;
+}
+
 /** Runs a script with the fakes first on PATH. A scratch TMPDIR keeps the real one out of reach. */
-function runScript(script: string, args: string[], environment: Record<string, string> = {}) {
+function runScript(
+  script: string,
+  args: string[],
+  environment: Record<string, string> = {},
+): ScriptResult {
   const result = Bun.spawnSync(["bash", join(repositoryRoot, "scripts", script), ...args], {
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...environment },
     timeout: 30_000,
@@ -68,7 +78,8 @@ esac
   executable("ark", `exec bun "${join(repositoryRoot, "cli", "ark.ts")}" "$@"\n`);
 });
 
-test("ARK-244-AC3 auto-merger merges the CLEAN PR only, reports the conflict and exits", () => {
+/** Two repos (PR 11 CLEAN, PR 12 DIRTY) with retro.md, ticket.md id ARK-900 and a ready ticket file; one auto-merger pass. */
+function runCleanPullRequestScenario() {
   const workspace = tempGitRepo();
   const projectDirectory = writeProject("demo", {
     workspace,
@@ -116,11 +127,12 @@ test("ARK-244-AC3 auto-merger merges the CLEAN PR only, reports the conflict and
     "---\nid: ARK-900\nstatus: ready\n---\n",
   );
 
-  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  return runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+}
 
+function expectCleanPullRequestOnlyMerged(result: ScriptResult) {
   expect(result.code).toBe(0);
   const calls = readFileSync(ghLog, "utf8").split("\n");
-  expect(calls).toContain("pr merge https://github.com/org/app/pull/11 --merge");
   expect(calls.filter((call) => call.startsWith("pr merge"))).toEqual([
     "pr merge https://github.com/org/app/pull/11 --merge",
   ]);
@@ -128,6 +140,16 @@ test("ARK-244-AC3 auto-merger merges the CLEAN PR only, reports the conflict and
   expect(change).toBeDefined();
   expect(change).toContain(`${run} #11 merged`);
   expect(change).toContain(`${run} #12 conflicting`);
+}
+
+test("ARK-244-AC3 auto-merger merges the CLEAN PR only, reports the conflict and exits", () => {
+  expectCleanPullRequestOnlyMerged(runCleanPullRequestScenario());
+});
+
+test("ARK-281-AC6 auto-merger with retro.md and a ready ticket file merges the CLEAN PR only, reports the conflict and holds nothing", () => {
+  const result = runCleanPullRequestScenario();
+  expectCleanPullRequestOnlyMerged(result);
+  expect(result.err).not.toContain("HELD:");
 });
 
 test("ARK-244-AC3 temp-cleaner removes only old ark-* directories", () => {
