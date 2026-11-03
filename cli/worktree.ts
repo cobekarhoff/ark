@@ -311,13 +311,13 @@ function dirtyLines(path: string, worktreePaths: string[]): string[] {
   return dirty;
 }
 
-/** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, and for a merged run an unmerged branch, and prints the repo and the reason. */
+/** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, for a merged run an unmerged branch, and for a handed_off run a branch with commits beyond its base; prints the repo and the reason. */
 export function worktreeCleanup(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   const workspace = loadConfig(project).workspace;
   let kept = false;
-  for (const { repo, path, branch } of [...state.worktrees].reverse()) {
+  for (const { repo, path, branch, base } of [...state.worktrees].reverse()) {
     // newest first: the anchor of a root repo holds the nested worktrees
     const source = join(workspace, repo);
     const keep = (reason: string) => {
@@ -364,7 +364,25 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
           }
         }
       }
+      // count in the source repo, before the worktree goes; an unknown count keeps the branch
+      let handedOff: string | undefined;
+      if (state.outcome === "handed_off") {
+        const counted = base
+          ? Bun.spawnSync(["git", "-C", source, "rev-list", "--count", `${base}..${branch}`])
+          : undefined;
+        const ahead =
+          counted?.exitCode === 0 ? Number(counted.stdout.toString().trim()) : undefined;
+        if (ahead === undefined)
+          handedOff = "handed off, could not count the commits ahead of its base";
+        else if (ahead > 0)
+          handedOff = `handed off, ${ahead} ${ahead === 1 ? "commit" : "commits"} ahead of ${base?.slice(0, 8)}`;
+      }
       git(source, "worktree", "remove", "--force", path); // clean but for Ark's own symlinks
+      if (handedOff !== undefined) {
+        // the worktree is gone, so the mirror folder may go too: no kept = true
+        console.log(`kept     ${repo}  ${branch}: ${handedOff}`);
+        continue;
+      }
     }
     Bun.spawnSync(["git", "-C", source, "branch", "-D", branch]);
     console.log(`removed  ${repo}  ${branch}`);
