@@ -75,11 +75,11 @@ async function start() {
 
 const readDoc = (path: string) => readFileSync(join(root, path), "utf8");
 const statusOf = (path: string) => readDoc(path).match(/^status: (.*)$/m)?.[1] ?? "";
-const viewNames = ["Home", "Run", "Backlog", "Map"];
+const viewNames = ["Home", "Runs", "Backlog"];
 const namesViews = (text: string) =>
   viewNames.every((name) => new RegExp(`\\b${name}\\b`).test(text));
 
-test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 0007, R13 and M4 name the four views", () => {
+test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 0007, R13 and M4 name the views", () => {
   expect(statusOf("docs/adr/0009-hub-is-a-read-only-live-view.md")).toBe("accepted");
   const superseded = statusOf("docs/adr/0008-hub-steers-through-master-chief.md");
   expect(superseded).toStartWith("superseded");
@@ -505,9 +505,9 @@ test("ARK-277-AC12 ark ui serves the hub in hub/", async () => {
 
 // ---------------------------------------------------------------- AC13
 
-test("ARK-277-AC13 the human check on the real ARK_HOME shows 4 view times below 1 s and human: ok", () => {
+test("ARK-277-AC13 the human check on the real ARK_HOME shows 3 view times below 1 s and human: ok", () => {
   const lines = readDoc("docs/evidence/ARK-277-ac13.md").split("\n");
-  for (const view of ["home", "run", "backlog", "map"]) {
+  for (const view of ["home", "run", "backlog"]) {
     const line = lines.find((candidate) => candidate.startsWith(`${view}: `));
     const milliseconds = Number(line?.slice(view.length + 2));
     expect(Number.isFinite(milliseconds), `${view}: ${line}`).toBe(true);

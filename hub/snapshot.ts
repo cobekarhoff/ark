@@ -1,6 +1,7 @@
-import { watch, type FSWatcher } from "node:fs";
+import { readFileSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../cli/config.ts";
+import { projectDirectory } from "../cli/paths.ts";
 import { waitingGate } from "../cli/run.ts";
 import {
   createArkReader,
@@ -34,11 +35,13 @@ import type {
   Snapshot,
   SourceName,
   StepStatus,
-  TranscriptPage,
+  TicketDocument,
   TicketRunView,
+  TranscriptPage,
 } from "./types.ts";
 import { roleTimesOf } from "./progress.ts";
 import { listRunFiles, timelineOf } from "./run-detail.ts";
+import { parseTicketDocument } from "./ticket-document.ts";
 import { UsageIndex, type RunCost } from "./usage.ts";
 
 export const intervalMilliseconds: Record<SourceName, number> = {
@@ -516,6 +519,20 @@ export function createSnapshotReader() {
       return () => listeners.delete(listener);
     },
     usage,
+    /** Text of a ticket the hub lists, read on request: the URL names a project and an id, never a path. */
+    ticketDocument(project: string, id: string): TicketDocument | null {
+      const listed = slots.ark.value?.tickets.some(
+        (ticket) => ticket.project === project && ticket.id === id,
+      );
+      if (!listed) return null;
+      try {
+        return parseTicketDocument(
+          readFileSync(join(projectDirectory(project), "tickets", `${id}.md`), "utf8"),
+        );
+      } catch {
+        return null;
+      }
+    },
     /** Run folder of a run the hub knows (open or closed), or null. The URL names a run, never a path. */
     runDirectory(run: string): string | null {
       return (

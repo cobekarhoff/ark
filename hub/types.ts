@@ -202,6 +202,13 @@ export type RunView = {
   cost_usd: number | null;
 };
 
+/** What `GET /api/ticket/<project>/<id>` answers: the text sections of one backlog ticket, as plain strings. */
+export type TicketDocument = {
+  problem: string;
+  change: string;
+  criteria: { id: string; text: string }[];
+};
+
 export type TicketView = {
   project: string;
   id: string;

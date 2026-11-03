@@ -1,52 +1,140 @@
-import { Component, type ReactNode } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import { Backlog } from "./Backlog.tsx";
+import { costByDay, dayOf, highestUsage, nearLimit, percent } from "./derive.ts";
 import { Home } from "./Home.tsx";
-import { MapView } from "./Map.tsx";
+import { known } from "./format.tsx";
 import { Run } from "./Run.tsx";
-import { LiveProvider, Stale, parseRoute, sourceNames, useHash, useLive } from "./store.tsx";
+import { Runs } from "./Runs.tsx";
+import {
+  LiveProvider,
+  Stale,
+  applyTheme,
+  isRetiredRoute,
+  parseRoute,
+  savedTheme,
+  sourceNames,
+  useHash,
+  useLive,
+  type ThemeChoice,
+} from "./store.tsx";
+import { TicketPage } from "./Ticket.tsx";
 
 const views = [
   ["home", "#/", "Home"],
-  ["run", "#/run", "Run"],
+  ["runs", "#/runs", "Runs"],
   ["backlog", "#/backlog", "Backlog"],
-  ["map", "#/map", "Map"],
 ] as const;
 
+const themes: [ThemeChoice, string][] = [
+  ["auto", "Auto"],
+  ["light", "Light"],
+  ["dark", "Dark"],
+];
+
+/** Auto follows `prefers-color-scheme`; Light and Dark pin it. The choice stays in this browser. */
+function ThemeSwitch() {
+  const [choice, setChoice] = useState(savedTheme);
+  return (
+    <div className="seg" role="group" aria-label="Theme">
+      {themes.map(([value, label]) => (
+        <button
+          key={value}
+          type="button"
+          aria-pressed={choice === value}
+          onClick={() => {
+            setChoice(value);
+            applyTheme(value);
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Shell() {
-  const route = parseRoute(useHash());
+  const hash = useHash();
+  const route = parseRoute(hash);
   const { snapshot, connected } = useLive();
-  const projects = Array.isArray(snapshot?.tickets)
-    ? [...new Set(snapshot.tickets.map((ticket) => ticket.project))].sort()
-    : [];
+  // The Map is gone: its old links land on Runs and the address says so.
+  useEffect(() => {
+    if (isRetiredRoute(location.hash)) location.replace("#/runs");
+  }, [hash]);
+  const projects =
+    snapshot && known(snapshot.tickets)
+      ? [...new Set(snapshot.tickets.map((ticket) => ticket.project))].sort()
+      : [];
+  const needs =
+    snapshot && known(snapshot.gates)
+      ? snapshot.gates.length +
+        (known(snapshot.runs) ? snapshot.runs.reduce((sum, run) => sum + run.waiting.length, 0) : 0)
+      : 0;
+  const top = snapshot ? highestUsage(snapshot.provider_limits) : null;
+  const today = snapshot ? (costByDay(snapshot).get(dayOf(new Date())) ?? 0) : null;
+  const current = route.view === "run" ? "runs" : route.view === "ticket" ? "backlog" : route.view;
   return (
     <>
       <a className="skip" href="#main" onClick={(event) => skipTo(event)}>
         Skip to main content
       </a>
-      <header>
-        <b>ark hub</b>
+      <header className="top">
+        <b className="brand">ark hub</b>
         <nav aria-label="Views">
           {views.map(([view, href, label]) => (
-            <a key={view} href={href} aria-current={route.view === view ? "page" : undefined}>
+            <a
+              key={view}
+              className="tab"
+              href={href}
+              aria-current={current === view ? "page" : undefined}
+            >
               {label}
+              {view === "home" && needs > 0 ? (
+                <span className="badge" aria-label={`${needs} need you`}>
+                  {needs}
+                </span>
+              ) : null}
             </a>
           ))}
         </nav>
-        <span className="mut">
-          {projects.length > 0 ? `project ${projects.join(", ")} · ` : ""}
-          {connected ? "live" : "connecting…"} · view only · focuses Orca
-        </span>
-        <span className="asof-list">
-          {sourceNames.map((name) => (
-            <Stale key={name} name={name} />
+        <div className="nav-right">
+          {projects.map((project) => (
+            <span key={project} className="chip mono" title="project">
+              {project}
+            </span>
           ))}
-        </span>
+          <span
+            className="chip"
+            data-testid="master-chief"
+            title={connected ? "live" : "connecting…"}
+          >
+            <i className={connected ? "live dot" : "dot"} />
+            Master Chief · {snapshot && known(snapshot.runs) ? snapshot.runs.length : "?"} runs
+          </span>
+          {top && top.used_fraction !== null ? (
+            <span className={nearLimit(top) ? "chip alarm" : "chip"} data-testid="nav-usage">
+              {top.provider} {top.window} <b>{percent(top.used_fraction)}%</b>
+            </span>
+          ) : null}
+          {today === null ? null : (
+            <span className="mono" data-testid="nav-cost">
+              ${today.toFixed(2)} today
+            </span>
+          )}
+          <ThemeSwitch />
+          <span className="asof-list">
+            {sourceNames.map((name) => (
+              <Stale key={name} name={name} />
+            ))}
+          </span>
+        </div>
       </header>
       <main id="main" tabIndex={-1}>
-        {route.view === "home" && <Home />}
-        {route.view === "run" && <Run run={route.run} sub={route.sub} />}
-        {route.view === "backlog" && <Backlog focus={route.arg} />}
-        {route.view === "map" && <MapView />}
+        {route.view === "home" ? <Home /> : null}
+        {route.view === "runs" ? <Runs /> : null}
+        {route.view === "run" ? <Run run={route.run!} sub={route.sub} /> : null}
+        {route.view === "backlog" ? <Backlog /> : null}
+        {route.view === "ticket" ? <TicketPage id={route.arg!} /> : null}
       </main>
     </>
   );

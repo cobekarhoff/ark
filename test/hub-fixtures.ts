@@ -145,6 +145,10 @@ export type FixtureTicket = {
   status: string;
   milestone?: string;
   dependsOn?: string[];
+  /** Text under `## Problem` and `## Change`. */
+  problem?: string;
+  change?: string;
+  criteria?: { id: string; text: string }[];
 };
 
 /** Writes `$ARK_HOME/projects/<project>/tickets/<id>.md` with the front matter the backlog reads. */
@@ -164,8 +168,19 @@ export function writeBacklogTicket(ticket: FixtureTicket): void {
     `status: ${ticket.status}`,
     ...(ticket.milestone ? [`milestone: ${ticket.milestone}`] : []),
     ...(ticket.dependsOn?.length ? [`depends_on: [${ticket.dependsOn.join(", ")}]`] : []),
+    ...(ticket.criteria?.length
+      ? [
+          "acceptance_criteria:",
+          ...ticket.criteria.flatMap((criterion) => [
+            `  - id: ${criterion.id}`,
+            `    text: ${JSON.stringify(criterion.text)}`,
+          ]),
+        ]
+      : []),
     "---",
     "",
+    ...(ticket.problem ? ["## Problem", "", ticket.problem, ""] : []),
+    ...(ticket.change ? ["## Change", "", ticket.change, ""] : []),
   ];
   writeFileSync(file, lines.join("\n"));
 }

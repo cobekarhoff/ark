@@ -1,4 +1,6 @@
-import type { PlanStepView, RunView, Snapshot } from "../types.ts";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import { stepTimeText } from "../progress.ts";
+import type { PlanStepView, RunProgress, RunView, Snapshot } from "../types.ts";
 
 const dollars = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -136,3 +138,55 @@ export function Phase({ phase }: { phase: string }) {
 export type Loaded<T> = Exclude<T, "unknown">;
 export const known = <T,>(value: T | "unknown"): value is T => value !== "unknown";
 export type Tickets = Exclude<Snapshot["tickets"], "unknown">;
+
+/** Only an http or https URL becomes a link: a `javascript:` URL from run text stays text. */
+export function ExternalLink({
+  url,
+  children,
+  ...rest
+}: { url: string; children: ReactNode } & Omit<ComponentProps<"a">, "href">) {
+  let safe = false;
+  try {
+    safe = ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    // not a URL: shown as text
+  }
+  return safe ? (
+    <a href={url} target="_blank" rel="noreferrer" {...rest}>
+      {children}
+    </a>
+  ) : (
+    <span>{children}</span>
+  );
+}
+
+/** The rule of `hub/progress.ts`, fed with the figures of the snapshot: no ETA. */
+export const currentStepText = (current: NonNullable<RunProgress["current"]>, elapsedMs: number) =>
+  stepTimeText(
+    current.role,
+    elapsedMs / 1000,
+    current.typical_seconds === null || current.slow_above_seconds === null
+      ? undefined
+      : { median: current.typical_seconds, p90: current.slow_above_seconds, count: 0 },
+  );
+
+/** True when the step runs longer than the p90 of its role. */
+export const isSlow = (current: NonNullable<RunProgress["current"]>, elapsedMs: number) =>
+  current.slow_above_seconds !== null && elapsedMs / 1000 > current.slow_above_seconds;
+
+/** A ring of steps done: the conic fill is the fraction, the label sits inside. */
+export function Ring({ done, total, label }: { done: number; total: number; label?: string }) {
+  return (
+    <span
+      className="ring"
+      role="img"
+      aria-label={`${done} of ${total} steps done`}
+      data-testid="ring"
+      data-steps-done={done}
+      data-steps-total={total}
+      style={{ "--p": total === 0 ? 0 : done / total } as CSSProperties}
+    >
+      <span>{label ?? `${done}/${total}`}</span>
+    </span>
+  );
+}

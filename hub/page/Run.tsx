@@ -1,19 +1,25 @@
 // test ids: step-node (data-step, data-status), step-cost, step-edge (data-from, data-to),
-// step-row, run-select, run-waiting, run-age, closed-banner, session-link (data-step)
+// step-row, run-waiting, run-age, closed-banner, session-link (data-step), agents, evidence,
+// evidence-criterion (data-id, data-status), step-time, ticket-link
 import { useEffect, useRef } from "react";
+import { Agents } from "./Agents.tsx";
 import {
   ArrowMarker,
   Cost,
+  ExternalLink,
   Phase,
+  Ring,
   Unknown,
   attentionOf,
   duration,
+  isSlow,
   known,
   stepStatus,
+  currentStepText,
 } from "./format.tsx";
 import type { Attention } from "./format.tsx";
-import { Agents } from "./Home.tsx";
-import { detourPath, edgePath, layout } from "./layout.ts";
+import { MergeRequest } from "./Home.tsx";
+import { layout } from "./layout.ts";
 import {
   RunFiles,
   SessionLists,
@@ -26,10 +32,10 @@ import { useAge, useLive, type Route } from "./store.tsx";
 import { FileView, Transcript } from "./Transcript.tsx";
 import type { PlanStepView, RunDetail, RunView } from "../types.ts";
 
-const nodeWidth = 240;
+const nodeWidth = 250;
 const nodeHeight = 92;
-const gapX = 70;
-const gapY = 24;
+const gapX = 24;
+const gapY = 36;
 const pad = 10;
 
 const statusLabel: Record<PlanStepView["status"], string> = {
@@ -40,6 +46,10 @@ const statusLabel: Record<PlanStepView["status"], string> = {
   stopped: "stopped",
 };
 
+/**
+ * The plan from top to bottom: a step is a row of the layout, steps that can run together sit side
+ * by side. An edge that skips a row runs down a lane left of the boxes, so it never passes behind one.
+ */
 function Dag({
   run,
   plan,
@@ -52,33 +62,29 @@ function Dag({
   const age = useAge();
   const box = useRef<HTMLDivElement>(null);
   const { placed, edges } = layout(plan.map((step) => ({ id: step.id, needs: step.needs })));
-  const column = new Map(placed.map(({ id, col }) => [id, col]));
-  const skips = edges.filter(({ from, to }) => column.get(to)! - column.get(from)! > 1);
-  // Room above the boxes for one lane per skipping edge.
-  const top = pad + (skips.length > 0 ? 8 * skips.length + 8 : 0);
+  const level = new Map(placed.map(({ id, col }) => [id, col]));
+  const skips = edges.filter(({ from, to }) => level.get(to)! - level.get(from)! > 1);
+  // Room left of the boxes for one lane per skipping edge.
+  const left = pad + (skips.length > 0 ? 10 * skips.length + 8 : 0);
   const at = new Map(
     placed.map(({ id, col, row }) => [
       id,
-      { x: pad + col * (nodeWidth + gapX), y: top + row * (nodeHeight + gapY) },
+      { x: left + row * (nodeWidth + gapX), y: pad + col * (nodeHeight + gapY) },
     ]),
   );
-  const width = Math.max(...placed.map((p) => p.col), 0) * (nodeWidth + gapX) + nodeWidth + 2 * pad;
+  const width =
+    left + Math.max(...placed.map((p) => p.row), 0) * (nodeWidth + gapX) + nodeWidth + pad;
   const height =
-    top + Math.max(...placed.map((p) => p.row), 0) * (nodeHeight + gapY) + nodeHeight + pad;
-  // The page opens on the work in progress: the running steps centered, or the first one when they do not fit.
-  const running = plan
-    .filter((step) => step.status === "running")
-    .map((step) => at.get(step.id)!.x);
-  const runningStart = Math.min(...running);
-  const runningEnd = Math.max(...running) + nodeWidth;
+    pad + Math.max(...placed.map((p) => p.col), 0) * (nodeHeight + gapY) + nodeHeight + pad;
+  // The page opens on the work in progress: the running step scrolled into the middle of the panel.
+  const running = plan.find((step) => step.status === "running");
+  const runningY = running ? at.get(running.id)!.y : null;
   useEffect(() => {
     const view = box.current;
-    if (!view || running.length === 0) return;
-    const fits = runningEnd - runningStart <= view.clientWidth;
-    const middle = fits ? (runningStart + runningEnd) / 2 : runningStart + nodeWidth / 2;
-    view.scrollLeft = Math.max(0, middle - view.clientWidth / 2);
-    // Re-run only when the running steps move, never on each snapshot: the reader may have scrolled.
-  }, [runningStart, runningEnd, running.length]);
+    if (!view || runningY === null) return;
+    view.scrollTop = Math.max(0, runningY + nodeHeight / 2 - view.clientHeight / 2);
+    // Re-run only when the running step moves, never on each snapshot: the reader may have scrolled.
+  }, [runningY]);
   return (
     <div ref={box} className="graph" tabIndex={0} role="region" aria-label="Plan DAG, scrollable">
       <svg role="group" aria-label="Plan dependency graph" width={width} height={height}>
@@ -88,11 +94,13 @@ function Dag({
           const end = at.get(to)!;
           const lane = skips.findIndex((edge) => edge.from === from && edge.to === to);
           const [x1, y1, x2, y2] = [
-            start.x + nodeWidth,
-            start.y + nodeHeight / 2,
-            end.x,
-            end.y + nodeHeight / 2,
+            start.x + nodeWidth / 2,
+            start.y + nodeHeight,
+            end.x + nodeWidth / 2,
+            end.y,
           ];
+          const middle = (y1 + y2) / 2;
+          const laneX = pad + 10 * lane;
           return (
             <path
               key={`${from}>${to}`}
@@ -101,7 +109,11 @@ function Dag({
               data-from={from}
               data-to={to}
               markerEnd="url(#arrow-dag)"
-              d={lane < 0 ? edgePath(x1, y1, x2, y2) : detourPath(x1, y1, x2, y2, pad + 8 * lane)}
+              d={
+                lane < 0
+                  ? `M${x1},${y1} C${x1},${middle} ${x2},${middle} ${x2},${y2}`
+                  : `M${x1},${y1} C${x1},${y1 + 30} ${laneX},${y1 + 30} ${laneX},${y1 + 60} L${laneX},${y2 - 60} C${laneX},${y2 - 30} ${x2},${y2 - 30} ${x2},${y2}`
+              }
             />
           );
         })}
@@ -135,12 +147,11 @@ function Dag({
                   ● {state.label}
                 </text>
                 <text
-                  className="cost"
+                  className={step.cost_usd === null ? "cost unk" : "cost"}
                   data-testid="step-cost"
                   x={x + nodeWidth - 12}
                   y={y + 82}
                   textAnchor="end"
-                  style={step.cost_usd === null ? { fill: "#8b93a1" } : { fill: "#d8dce3" }}
                 >
                   {step.cost_usd === null ? "unknown" : `$${step.cost_usd.toFixed(2)}`}
                 </text>
@@ -160,6 +171,139 @@ function stepSessions(detail: RunDetail | null, step: string) {
   );
 }
 
+/** The steps done, the round, the time in the step against its role, the cost and the start. */
+function Strip({ run }: { run: RunView }) {
+  const age = useAge();
+  const progress = run.progress;
+  const done =
+    progress?.steps_done ?? run.plan?.filter((step) => step.status === "succeeded").length ?? 0;
+  const total = progress?.steps_total ?? run.plan?.length ?? 0;
+  const current = progress?.current ?? null;
+  const elapsed = current ? age(current.started_at) : 0;
+  const scale = current?.slow_above_seconds ? current.slow_above_seconds * 1000 : null;
+  return (
+    <section className="strip" aria-label="Progress">
+      <div>
+        <span className="label">Steps</span>
+        <span className="strip-value">
+          <Ring done={done} total={total} />
+          <b className="mono" data-testid="steps-done">
+            {done} of {total}
+          </b>
+        </span>
+      </div>
+      <div>
+        <span className="label">Round</span>
+        <b className="mono strip-value" data-testid="round">
+          {progress ? `round ${progress.round} of ${progress.round_budget}` : `round ${run.round}`}
+        </b>
+      </div>
+      <div className="wide">
+        <span className="label">Time in step vs typical</span>
+        {current ? (
+          <>
+            <span className="meter" aria-hidden="true">
+              <i
+                className={isSlow(current, elapsed) ? "slow" : ""}
+                style={{ width: `${scale ? Math.min(100, (elapsed / scale) * 100) : 0}%` }}
+              />
+            </span>
+            <b className="mono" data-testid="step-time">
+              {currentStepText(current, elapsed)}
+            </b>
+          </>
+        ) : (
+          <span className="mut">no step runs</span>
+        )}
+      </div>
+      <div>
+        <span className="label">Cost so far</span>
+        <b className="strip-value">
+          <Cost usd={run.cost_usd} />
+        </b>
+      </div>
+      <div>
+        <span className="label">Started</span>
+        <b className="strip-value" data-testid="run-age">
+          {duration(age(run.started_at))} ago
+        </b>
+      </div>
+    </section>
+  );
+}
+
+function Evidence({ run }: { run: RunView }) {
+  const evidence = run.evidence;
+  return (
+    <section className="panel" data-testid="evidence">
+      <header>
+        <h2>Merge request</h2>
+      </header>
+      <div className="body">
+        {run.merge_requests.length === 0 ? (
+          <p className="mut">No merge request yet. It opens after the review step passes.</p>
+        ) : null}
+        {run.merge_requests.map((request) => (
+          <div key={request.url} className="evidence-mr">
+            <MergeRequest request={request} />
+            {request.additions !== null ? (
+              <span className="mut small">
+                +{request.additions} −{request.deletions ?? 0} · {request.changed_files ?? 0} files
+              </span>
+            ) : null}
+            <div className="checks">
+              {request.checks.map((check) => (
+                <span key={check.name} className="pill">
+                  {check.url ? (
+                    <ExternalLink url={check.url}>{check.name}</ExternalLink>
+                  ) : (
+                    check.name
+                  )}{" "}
+                  <span className="mut">{check.result}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+        {evidence ? (
+          <>
+            <ul className="links">
+              {evidence.criteria.map((criterion) => (
+                <li
+                  key={criterion.id}
+                  data-testid="evidence-criterion"
+                  data-id={criterion.id}
+                  data-status={criterion.status}
+                >
+                  <span className="mono">{criterion.id}</span>{" "}
+                  <span
+                    className={`pill ${criterion.status === "passing" ? "ok" : criterion.status === "failing" ? "bad" : "unk"}`}
+                  >
+                    {criterion.status}
+                  </span>{" "}
+                  <span className="mut">
+                    {criterion.proof.length} {criterion.proof.length === 1 ? "test" : "tests"}
+                    {criterion.proof.some((proof) => proof.result === "fail")
+                      ? ", some failing"
+                      : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {evidence.findings ? (
+              <p>
+                Findings P1 {evidence.findings.p1} · P2 {evidence.findings.p2} · P3{" "}
+                {evidence.findings.p3}{" "}
+                <a href={runHref(run.run, "file", evidence.findings.path)}>open</a>
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function Body({
   run,
   detail,
@@ -173,99 +317,131 @@ function Body({
 }) {
   const age = useAge();
   const closed = run.phase === "closed";
-  const edges = run.plan?.reduce((sum, step) => sum + step.needs.length, 0) ?? 0;
   const attention = closed ? [] : attentionOf(run, age);
   return (
     <>
-      {closed && (
+      {closed ? (
         <div className="closed-banner" data-testid="closed-banner">
           <span className="pill">closed</span> {run.run}
           {detail?.outcome ? ` · ${detail.outcome}` : ""}{" "}
           <span className="mut ended">no agents in Orca</span>
         </div>
-      )}
-      {attention.length > 0 && (
-        <section className="needs" aria-label="This run waits">
-          {attention.map((item) => (
-            <p key={`${item.step}/${item.kind}`} data-testid="run-waiting" data-kind={item.kind}>
-              <span className="pill warn">{item.label}</span>{" "}
-              {item.step ? <span className="mono">{item.step}: </span> : null}
-              {item.reason}
-            </p>
-          ))}
-        </section>
-      )}
-      {open && (
-        <>
-          <h2>Agents</h2>
-          <Agents agents={run.agents} />
-        </>
-      )}
-      {run.plan === null ? (
-        <>
-          <h2>Plan DAG</h2>
-          <Unknown /> <span className="mut">No plan yet.</span>
-        </>
-      ) : (
-        <>
-          <h2>
-            Plan DAG · {run.plan.length} steps · {edges} edges
-          </h2>
-          <Dag run={run.run} plan={run.plan} attention={attention} />
-          <h2>Steps</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Step</th>
-                <th>Role</th>
-                <th>Harness</th>
-                <th>Model</th>
-                <th>Status</th>
-                <th>Cost</th>
-                <th>Transcript</th>
-              </tr>
-            </thead>
-            <tbody>
-              {run.plan.map((step) => {
-                const sessions = stepSessions(detail, step.id);
-                return (
-                  <tr key={step.id} data-testid="step-row" data-step={step.id}>
-                    <td className="id nw">{step.id}</td>
-                    <td className="nw">{step.role}</td>
-                    <td className="nw">{step.harness}</td>
-                    <td className="mono wrap">{step.model}</td>
-                    <td
-                      className={
-                        stepStatus(step, attention, age, statusLabel).tone === "waiting"
-                          ? "nw amber"
-                          : "nw"
-                      }
-                    >
-                      {stepStatus(step, attention, age, statusLabel).label}
-                    </td>
-                    <td className="nw">
-                      <Cost usd={step.cost_usd} testId="step-row-cost" />
-                    </td>
-                    <td className="nw">
-                      {sessions && sessions.length > 0 ? (
-                        <a
-                          href={runHref(run.run, "step", step.id)}
-                          data-testid="session-link"
-                          data-step={step.id}
-                        >
-                          Open
-                        </a>
-                      ) : (
-                        <span className="mut">{loading ? "…" : "no session file"}</span>
-                      )}
-                    </td>
+      ) : null}
+      <Strip run={run} />
+      <div className="runcols">
+        <section className="panel plan-panel">
+          <header>
+            <h2>Plan</h2>
+            <span className="count">{run.plan?.length ?? 0} steps</span>
+            <span className="hint">click a step for its transcript</span>
+          </header>
+          {run.plan === null ? (
+            <div className="body">
+              <Unknown /> <span className="mut">No plan yet.</span>
+            </div>
+          ) : (
+            <>
+              <Dag run={run.run} plan={run.plan} attention={attention} />
+              <table>
+                <thead>
+                  <tr>
+                    <th>Step</th>
+                    <th>Role</th>
+                    <th>Harness</th>
+                    <th>Model</th>
+                    <th>Status</th>
+                    <th>Cost</th>
+                    <th>Transcript</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </>
-      )}
+                </thead>
+                <tbody>
+                  {run.plan.map((step) => {
+                    const sessions = stepSessions(detail, step.id);
+                    const state = stepStatus(step, attention, age, statusLabel);
+                    return (
+                      <tr key={step.id} data-testid="step-row" data-step={step.id}>
+                        <td className="id nw">{step.id}</td>
+                        <td className="nw">{step.role}</td>
+                        <td className="nw">{step.harness}</td>
+                        <td className="mono wrap">{step.model}</td>
+                        <td className={state.tone === "waiting" ? "nw amber" : "nw"}>
+                          {state.label}
+                        </td>
+                        <td className="nw">
+                          <Cost usd={step.cost_usd} testId="step-row-cost" />
+                        </td>
+                        <td className="nw">
+                          {sessions && sessions.length > 0 ? (
+                            <a
+                              href={runHref(run.run, "step", step.id)}
+                              data-testid="session-link"
+                              data-step={step.id}
+                            >
+                              Open
+                            </a>
+                          ) : (
+                            <span className="mut">{loading ? "…" : "no session file"}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
+          )}
+        </section>
+        <div className="stack">
+          {attention.length > 0 ? (
+            <section className="panel warn-panel" aria-label="This run waits">
+              <header>
+                <h2>This run waits</h2>
+              </header>
+              <div className="body">
+                {attention.map((item) => (
+                  <p
+                    key={`${item.step}/${item.kind}`}
+                    data-testid="run-waiting"
+                    data-kind={item.kind}
+                  >
+                    <span className="pill warn">{item.label}</span>{" "}
+                    {item.step ? <span className="mono">{item.step}: </span> : null}
+                    {item.reason}
+                  </p>
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {open ? (
+            <section className="panel">
+              <header>
+                <h2>Agents</h2>
+                <span className="hint">run lead and workers</span>
+              </header>
+              <div className="body" data-testid="agents">
+                <Agents agents={run.agents} />
+              </div>
+            </section>
+          ) : null}
+          <Evidence run={run} />
+          <section className="panel">
+            <header>
+              <h2>Ticket</h2>
+              <span className="mono mut">{run.ticket.id}</span>
+            </header>
+            <div className="body">
+              <p className="strong">{run.ticket.title}</p>
+              <a
+                className="btn"
+                href={`#/ticket/${encodeURIComponent(run.ticket.id)}`}
+                data-testid="ticket-link"
+              >
+                Read ticket and dependency graph
+              </a>
+            </div>
+          </section>
+        </div>
+      </div>
       <div className="cols">
         <div>
           <h2>Decisions · {detail ? detail.timeline.length : "…"} events</h2>
@@ -278,47 +454,33 @@ function Body({
           ) : (
             <p className="mut">Reading…</p>
           )}
-          {detail && (
+          {detail ? (
             <SessionLists run={run.run} sessions={detail.sessions} ready={detail.sessions_ready} />
-          )}
+          ) : null}
         </div>
       </div>
     </>
   );
 }
 
-export function Run({ run: wanted, sub }: { run: string | null; sub: Route["sub"] }) {
+export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
   const { snapshot } = useLive();
-  const age = useAge();
   const openRuns = snapshot && known(snapshot.runs) ? snapshot.runs : null;
-  const open = openRuns
-    ? (openRuns.find((candidate) => candidate.run === wanted) ??
-      (wanted ? null : (openRuns.find((candidate) => candidate.plan !== null) ?? openRuns[0])))
-    : null;
-  const target = wanted ?? open?.run ?? null;
+  const open = openRuns?.find((candidate) => candidate.run === wanted) ?? null;
   const usageReady = snapshot?.sources.usage.read_at != null;
-  const state = useRunDetail(target, `${open?.updated_at ?? ""}|${usageReady}`);
+  const state = useRunDetail(wanted, `${open?.updated_at ?? ""}|${usageReady}`);
   const detail = state.status === "ok" ? state.detail : null;
   const run = open ?? detail?.view ?? null;
   if (!run)
     return (
       <>
         <h1>Run</h1>
-        {target === null ? (
-          openRuns ? (
-            <p className="mut">
-              No open runs. <a href="#/map">Back to the Map</a>
-            </p>
-          ) : (
-            <Unknown />
-          )
-        ) : state.status === "missing" ? (
+        {state.status === "missing" ? (
           <p className="mut">
-            No open run {target}, and no closed run by that name.{" "}
-            <a href="#/map">Back to the Map</a>
+            No open run {wanted}, and no closed run by that name. <a href="#/runs">Back to Runs</a>
           </p>
         ) : state.status === "failed" ? (
-          <p className="bad-text">The hub could not read run {target}.</p>
+          <p className="bad-text">The hub could not read run {wanted}.</p>
         ) : (
           <p className="mut">Reading the run…</p>
         )}
@@ -368,41 +530,18 @@ export function Run({ run: wanted, sub }: { run: string | null; sub: Route["sub"
     );
   }
 
-  const options = openRuns?.some((candidate) => candidate.run === run.run)
-    ? (openRuns ?? [])
-    : [run, ...(openRuns ?? [])];
   return (
     <>
-      <h1>
-        {run.ticket.id} · {run.ticket.title}{" "}
+      <p className="crumb">
+        <a href="#/runs">← Runs</a>
+      </p>
+      <h1 className="run-title">
         <span className="pill">
           <Phase phase={run.phase} />
-        </span>
+        </span>{" "}
+        <span className="mono">{run.ticket.id}</span> {run.ticket.title}
       </h1>
-      <div className="toolbar">
-        {options.length > 1 && (
-          <select
-            aria-label="Run"
-            name="run"
-            data-testid="run-select"
-            value={run.run}
-            onChange={(event) => (location.hash = runHref(event.target.value))}
-          >
-            {options.map((candidate) => (
-              <option key={candidate.run} value={candidate.run}>
-                {candidate.ticket.id} · {candidate.run}
-              </option>
-            ))}
-          </select>
-        )}
-        <span className="mut">
-          Run cost <Cost usd={run.cost_usd} />
-        </span>
-        <span className="mut" data-testid="run-age">
-          started {duration(age(run.started_at))} ago · last event {duration(age(run.updated_at))}{" "}
-          ago
-        </span>
-      </div>
+      <p className="mut mono small">{run.run}</p>
       <Body run={run} detail={detail} loading={state.status === "loading"} open={open !== null} />
     </>
   );
