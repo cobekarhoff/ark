@@ -1417,3 +1417,11 @@ test("ARK-285-AC11 typecheck, lint and format:check exit 0 (bun test is this run
     expect(result.status, `bun run ${script}\n${result.stdout}${result.stderr}`).toBe(0);
   }
 }, 300_000);
+
+test("ARK-285-AC12 the human check on the real ARK_HOME is recorded in docs/evidence/ARK-285-ac12.md with human: ok", () => {
+  const evidence = readDoc("docs/evidence/ARK-285-ac12.md");
+  for (const part of ["Home", "Runs", "run page", "ticket page", "light", "dark", "usage"])
+    expect(evidence, part).toContain(part);
+  expect(evidence).toMatch(/usage[^\n]*(match|equal)/i);
+  expect(evidence.split("\n")).toContain("human: ok");
+});
