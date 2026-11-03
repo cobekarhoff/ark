@@ -117,6 +117,7 @@ function SessionPages({ run, session }: { run: string; session: SessionFile }) {
       <div className="more">
         <button
           type="button"
+          className="btn"
           data-testid="load-more"
           disabled={pages.next === null || pages.status === "more"}
           onClick={() => pages.next !== null && void load(pages.next, pages.entries)}
@@ -166,7 +167,7 @@ export function Transcript({
                 <button
                   key={candidate.file}
                   type="button"
-                  className="toggle"
+                  className="btn"
                   aria-pressed={candidate === session}
                   data-testid="transcript-file"
                   data-file={candidate.file}

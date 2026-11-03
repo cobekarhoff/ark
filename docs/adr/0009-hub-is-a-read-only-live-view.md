@@ -10,7 +10,7 @@ ARK-284 amends this ADR with one exception, a focus action. The human wants to s
 
 ## Decision
 
-- **The hub shows Home, Run, Backlog and Map.** No Timeline, Metrics, Search or Projects view. Run shows any run, open or closed: its decisions timeline, its files, and the transcript of each agent.
+- **The hub shows Home, Runs and Backlog.** Runs replaces Map: it shows every run on one board with a cross-run dependency graph, and a run opens as its own page. No Timeline, Metrics, Search or Projects view. The run page shows any run, open or closed: its decisions timeline, its files, and the transcript of each agent.
 - **The hub is read-only, with one exception: a focus action.** No steering, no text sent into a terminal, no notifications. It never changes `state.json`, `events.ndjson` or a gate.
 - **The one action is `POST /api/open-in-orca`** with `{ "terminal": <handle> }`. It runs `orca terminal switch --terminal <handle>` (an argument array, never a shell string) and nothing else. It sends no text into a terminal and changes no run state. It is the hub's only route that accepts a POST; every other route answers a write method with 404 or 405, and this route answers every other method with 405.
 - **Only the hub's own page may use it.** The route answers 403 unless the request's Origin and its Host are both `127.0.0.1:<port>` of the hub. A browser always sends Origin on a POST, so a request with no Origin is refused too (curl and scripts do not pass), and `localhost` is refused although the read routes accept it. It answers 400 when the body is not that JSON or the handle is not listed as live in the current snapshot, and 502 when `orca` fails or times out.

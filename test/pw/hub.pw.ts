@@ -111,9 +111,9 @@ test("ARK-277-AC3 handlers read only memory: p95 under 200 ms on 25 runs and 300
 
   // One page on each view.
   const context = await browser.newContext();
-  const pages = await Promise.all(["", "run", "backlog", "map"].map(() => context.newPage()));
+  const pages = await Promise.all(["", "runs", "backlog"].map(() => context.newPage()));
   await Promise.all(
-    ["", "run", "backlog", "map"].map((hash, index) => open(pages[index], baseUrl, hash)),
+    ["", "runs", "backlog"].map((hash, index) => open(pages[index], baseUrl, hash)),
   );
   await expect(pages[0].getByTestId("run")).toHaveCount(25);
   // Orca is being called and is slow: its calls outlast the reader's timeout.
@@ -187,7 +187,7 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
   page.on("request", (request) => requests.push(request));
   await open(page, baseUrl, "");
   await expect(page.getByTestId("run")).toHaveCount(1);
-  await expect(page.getByTestId("agent").first()).toBeVisible(); // Orca answered: the first load is complete
+  await expect(page.getByTestId("stale-label")).toHaveCount(0); // every source answered: the first load is complete
   const firstLoad = requests.length;
 
   const firstLoadPaths = requests.map((request) => new URL(request.url()).pathname);
@@ -196,10 +196,9 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
     expect(path === "/" || path === "/events" || path.startsWith("/assets/"), path).toBe(true);
 
   const views = [
-    ["Home", "Open runs"],
-    ["Run", "Plan DAG"],
+    ["Home", "Needs me"],
+    ["Runs", "Runs"],
     ["Backlog", "Backlog"],
-    ["Map", "Map"],
   ] as const;
   for (const [name, heading] of views) {
     const viewStartedAt = Date.now();
@@ -221,15 +220,14 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
     await page.waitForTimeout(Math.max(0, 30_000 - (Date.now() - viewStartedAt)));
   }
 
-  // The one request after it is the Run view's read of its run (`GET /api/run/<run>`, ARK-284).
-  const later = requests.slice(firstLoad).map((request) => new URL(request.url()).pathname);
-  expect(later.length).toBeGreaterThan(0);
-  for (const path of later) expect(path).toBe(`/api/run/${run}`);
+  // No view reads anything after the first load: Runs and Backlog draw from the snapshot, and the
+  // run page (`GET /api/run/<run>`, ARK-284) is not opened here.
+  expect(requests.slice(firstLoad).map((request) => new URL(request.url()).pathname)).toEqual([]);
 });
 
 // ---------------------------------------------------------------- AC7
 
-test("ARK-277-AC7 Home shows Needs me first, then each open run with its agents, MR, CI state and cost", async ({
+test("ARK-277-AC7 Home shows the tiles first, then the gate, each open run with its MR, CI state and cost, and the run page its agents", async ({
   page,
 }) => {
   const { sessions } = isolate();
@@ -266,23 +264,17 @@ test("ARK-277-AC7 Home shows Needs me first, then each open run with its agents,
   await expect(gate).toHaveCount(1);
   await expect(gate).toContainText("ARK-702");
   await expect(gate.getByTestId("gate-link")).toHaveAttribute("href", reviewUrl);
-  const needsMe = await page.getByText("Needs me").first().boundingBox();
-  expect(needsMe!.y).toBeLessThan((await runA.boundingBox())!.y);
-  expect((await gate.boundingBox())!.y).toBeLessThan((await runA.boundingBox())!.y);
+  const tiles = await page.getByTestId("tile").first().boundingBox();
+  expect(tiles!.y).toBeLessThan((await gate.boundingBox())!.y);
 
-  // Run A: ticket, title, phase, agents with role, harness and model, MR with state and CI, cost.
+  // Run A: ticket, title, phase, cost, and its MR with state and CI in the review queue.
   await expect(runA).toContainText("ARK-701");
   await expect(runA).toContainText("Run with a failing MR");
   await expect(runA.locator("[data-phase]")).toHaveAttribute("data-phase", "merge_requests_open");
-  const lead = runA.locator('[data-testid="agent"][data-role="run lead"]');
-  await expect(lead).toContainText("omp");
-  await expect(lead).toContainText("anthropic/claude-lead-model");
-  const worker = runA.locator('[data-testid="agent"][data-role="implementer"]');
-  await expect(worker).toContainText("codex");
-  await expect(worker).toContainText("openai/gpt-worker-model");
-  await expect(runA.getByTestId("mr")).toHaveAttribute("data-state", "open");
-  await expect(runA.getByTestId("mr")).toContainText("!71");
-  await expect(runA.getByTestId("ci")).toHaveAttribute("data-ci", "failing");
+  const review = page.locator(`[data-testid="review"][data-run="${runId("ARK-701")}"]`);
+  await expect(review.getByTestId("mr")).toHaveAttribute("data-state", "open");
+  await expect(review.getByTestId("mr")).toContainText("!71");
+  await expect(review.getByTestId("ci")).toHaveAttribute("data-ci", "failing");
   await expect(runA.getByTestId("cost")).toHaveText("$1.25");
 
   // Run B has no session: its cost is unknown, never $0.
@@ -294,6 +286,15 @@ test("ARK-277-AC7 Home shows Needs me first, then each open run with its agents,
   await expect(gate.getByTestId("gate-link")).toHaveCount(0, { timeout: 20_000 });
   await expect(gate).toContainText("Run at a gate");
   await expect(gate).toContainText(/acceptance criteria/i);
+
+  // The run page lists the agents with role, harness and model.
+  await open(page, baseUrl, `run/${runId("ARK-701")}`);
+  const lead = page.locator('[data-testid="agent"][data-role="run lead"]');
+  await expect(lead).toContainText("omp");
+  await expect(lead).toContainText("anthropic/claude-lead-model");
+  const worker = page.locator('[data-testid="agent"][data-role="implementer"]');
+  await expect(worker).toContainText("codex");
+  await expect(worker).toContainText("openai/gpt-worker-model");
 });
 
 // ---------------------------------------------------------------- AC8
@@ -421,7 +422,7 @@ test("ARK-277-AC9 Backlog lists and filters the tickets, changes none, and copie
   await open(page, baseUrl, "backlog");
 
   const rows = page.getByTestId("ticket-row");
-  await expect(rows).toHaveCount(5);
+  await expect(rows).toHaveCount(4); // the done ticket ARK-921 is hidden behind Show done
   // Each ticket: ID, title, status, milestone and depends_on.
   const ledger = page.locator('[data-testid="ticket-row"][data-ticket="ARK-912"]');
   await expect(ledger).toContainText("ARK-912");
@@ -436,7 +437,10 @@ test("ARK-277-AC9 Backlog lists and filters the tickets, changes none, and copie
   await expect(rows).toHaveCount(2); // ready and about the ledger: ARK-912 and ARK-919
   await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-921"]')).toHaveCount(0);
   await page.getByTestId("filter-status").selectOption("");
-  await expect(rows).toHaveCount(3); // the text filter alone: ARK-921 joins
+  await expect(rows).toHaveCount(2); // the text filter alone: ARK-921 is done, so still hidden
+  await page.getByTestId("show-done").check();
+  await expect(rows).toHaveCount(3); // Show done: ARK-921 joins
+  await page.getByTestId("show-done").uncheck();
 
   // Nothing here changes a ticket: the only button is the copy button, and the page only reads.
   await expect(page.locator("main button")).toHaveText(["Copy prompt for Master Chief"]);
@@ -459,7 +463,7 @@ test("ARK-277-AC9 Backlog lists and filters the tickets, changes none, and copie
 
 // ---------------------------------------------------------------- AC10
 
-test("ARK-277-AC10 the Map draws one node for each ticket and one edge for each depends_on, colored by the newest run's phase", async ({
+test("ARK-277-AC10 Runs draws one node for each ticket and one edge for each depends_on, colored by the newest run's phase", async ({
   page,
 }) => {
   isolate();
@@ -505,43 +509,40 @@ test("ARK-277-AC10 the Map draws one node for each ticket and one edge for each 
   });
   installFakeTools({});
   const baseUrl = await launch();
-  await open(page, baseUrl, "map");
+  await open(page, baseUrl, "runs");
 
-  // Default: tickets whose newest run is not closed (901, 903) and their direct neighbours (902,
-  // 904), live work first. 905 has no run and no neighbour in a run: hidden until Show all tickets.
-  const nodes = page.getByTestId("map-node");
+  // Active: tickets with an open run (901, 903) and their direct neighbours that are not done (902,
+  // 904). 905 has no run and no neighbour in a run: it shows under Queued.
+  const nodes = page.getByTestId("graph-node");
   await expect(nodes).toHaveCount(4);
-  await expect(page.locator('[data-testid="map-node"][data-ticket="ARK-905"]')).toHaveCount(0);
-  expect(
-    await nodes.evaluateAll((all) =>
-      all.slice(0, 2).map((node) => node.getAttribute("data-ticket")),
-    ),
-  ).toEqual(["ARK-901", "ARK-903"]);
-  // A node is a link: to the newest run, or to the Backlog row when there is none.
+  await expect(page.locator('[data-testid="graph-node"][data-ticket="ARK-905"]')).toHaveCount(0);
+  // A node is a link: to the newest run, or to the ticket page when there is none.
   const hrefOf = (ticket: string) =>
-    page.locator(`[data-testid="map-node"][data-ticket="${ticket}"] a`).getAttribute("href");
+    page.locator(`[data-testid="graph-node"][data-ticket="${ticket}"]`).getAttribute("href");
   expect(await hrefOf("ARK-901")).toBe(`#/run/${encodeURIComponent(runId("ARK-901", 2))}`);
-  expect(await hrefOf("ARK-902")).toBe("#/backlog/ARK-902");
-  await page.getByRole("button", { name: "Show all tickets" }).click();
+  expect(await hrefOf("ARK-902")).toBe("#/ticket/ARK-902");
+  await page.locator('[data-testid="graph-filter"][data-filter="Queued"]').click();
   await expect(nodes).toHaveCount(5);
-  const expectedPhase: Record<string, string> = {
+  const expectedState: Record<string, string> = {
     "ARK-901": "building",
-    "ARK-902": "no run",
-    "ARK-903": "planning",
-    "ARK-904": "no run",
-    "ARK-905": "no run",
+    "ARK-902": "blocked",
+    "ARK-903": "needs me", // a planning run waits at its plan gate
+    "ARK-904": "blocked",
+    "ARK-905": "queued",
   };
-  const fills = new Map<string, string>();
-  for (const [ticket, phase] of Object.entries(expectedPhase)) {
-    const node = page.locator(`[data-testid="map-node"][data-ticket="${ticket}"]`);
-    await expect(node).toHaveAttribute("data-phase", phase);
-    fills.set(ticket, await node.locator("rect").evaluate((box) => getComputedStyle(box).fill));
+  const colors = new Map<string, string>();
+  for (const [ticket, state] of Object.entries(expectedState)) {
+    const node = page.locator(`[data-testid="graph-node"][data-ticket="${ticket}"]`);
+    await expect(node).toHaveAttribute("data-state", state);
+    colors.set(ticket, await node.evaluate((box) => getComputedStyle(box).borderTopColor));
   }
   // The color is the phase: ARK-902, ARK-904 and ARK-905 share one, building and planning differ from it and each other.
-  expect(new Set(["ARK-902", "ARK-904", "ARK-905"].map((id) => fills.get(id))).size).toBe(1);
-  expect(new Set([fills.get("ARK-901"), fills.get("ARK-903"), fills.get("ARK-902")]).size).toBe(3);
+  expect(new Set(["ARK-902", "ARK-904", "ARK-905"].map((id) => colors.get(id))).size).toBe(1);
+  expect(new Set([colors.get("ARK-901"), colors.get("ARK-903"), colors.get("ARK-902")]).size).toBe(
+    3,
+  );
 
-  const edges = page.getByTestId("map-edge");
+  const edges = page.getByTestId("graph-edge");
   await expect(edges).toHaveCount(4);
   const drawn = await edges.evaluateAll((paths) =>
     paths.map((path) => `${path.getAttribute("data-from")}>${path.getAttribute("data-to")}`),
@@ -550,7 +551,7 @@ test("ARK-277-AC10 the Map draws one node for each ticket and one edge for each 
     ["ARK-901>ARK-902", "ARK-901>ARK-903", "ARK-902>ARK-904", "ARK-903>ARK-904"].sort(),
   );
 
-  // No step nodes: the plan of the building run does not reach the Map.
+  // No step nodes: the plan of the building run does not reach Runs.
   await expect(page.getByTestId("step-node")).toHaveCount(0);
   await expect(page.locator("main")).not.toContainText("secret-step");
 });
@@ -586,7 +587,10 @@ test("ARK-277-AC11 a source that stops answering keeps its last good value and s
   const baseUrl = await launch();
   await open(page, baseUrl, "");
 
-  const agents = page.locator(`[data-testid="run"][data-run="${run}"] td`).nth(3);
+  // The agents are on the run page: a second page in the same browser shows them.
+  const runPage = await page.context().newPage();
+  await open(runPage, baseUrl, `run/${run}`);
+  const agents = runPage.getByTestId("agents");
   const label = (source: string) =>
     page.locator(`[data-testid="stale-label"][data-source="${source}"]`);
 
@@ -644,7 +648,7 @@ test("ARK-277-AC7 an agent that Orca reports without harness and model shows the
     },
   });
   const baseUrl = await launch();
-  await open(page, baseUrl, "");
+  await open(page, baseUrl, `run/${run}`);
 
   const agent = page.locator('[data-testid="agent"][data-role="validator"]');
   await expect(agent).toContainText("omp (planned)");
@@ -669,8 +673,8 @@ test("ARK-277-AC7 an MR whose gh pr view fails shows unknown, never open", async
   await expect(request).toContainText("!72");
   await expect(request).toHaveAttribute("data-state", "unknown");
   await expect(request.getByTestId("mr-state")).toHaveText("unknown");
-  // pr checks still answers: its fact is shown, the state is not made up.
-  await expect(request.getByTestId("ci")).toHaveAttribute("data-ci", "passing");
+  // The checks come from the same `gh pr view`: with no answer there is no CI fact either.
+  await expect(request.getByTestId("ci")).toHaveAttribute("data-ci", "unknown");
 });
 
 test("ARK-277-AC7 an unread question and an escalation of live workers wait on Home, a finished worker's do not", async ({
@@ -764,7 +768,7 @@ test("ARK-277-AC7 a run lead without harness and model shows roles.chief of ark.
     },
   });
   const baseUrl = await launch();
-  await open(page, baseUrl, "");
+  await open(page, baseUrl, `run/${run}`);
 
   const lead = page.locator('[data-testid="agent"][data-role="run lead"]');
   await expect(lead).toContainText("claude (configured)");
@@ -840,7 +844,7 @@ function orcaWithReleasedWorker(run: string) {
   };
 }
 
-test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, Master Chief included, ended for a released one and a no-button label for one running but not listed", async ({
+test("ARK-284-AC2 the run page shows Open in Orca for each live agent, Master Chief included, ended for a released one and a no-button label for one running but not listed", async ({
   page,
 }) => {
   isolate();
@@ -849,11 +853,11 @@ test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, M
   const answers = orcaWithReleasedWorker(run);
   const state = installFakeTools({ orca: answers });
   const baseUrl = await launch();
-  const home = page.locator(`[data-testid="run"][data-run="${run}"]`);
+  const home = page.getByTestId("agents");
   const button = (handle: string) =>
     page.locator(`[data-testid="open-in-orca"][data-terminal="${handle}"]`);
 
-  await open(page, baseUrl, "");
+  await open(page, baseUrl, `run/${run}`);
   await expect(home).toBeVisible();
   // Each agent of the snapshot has its handle and live flag.
   await expect
@@ -878,7 +882,7 @@ test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, M
       ]),
     );
 
-  // Home: a button for the live agents, Master Chief too; the released one says why it has none.
+  // The run page: a button for the live agents, Master Chief too; the released one says why it has none.
   for (const handle of ["term-chief", "term-lead", "term-worker"])
     await expect(home.locator(`[data-terminal="${handle}"]`)).toHaveText("Open in Orca");
   await expect(home.locator('[data-testid="agent"][data-role="Master Chief"]')).toHaveCount(1);
@@ -902,9 +906,6 @@ test("ARK-284-AC2 Home and the run page show Open in Orca for each live agent, M
   await expect.poll(() => switchCalls(state)).toEqual(["terminal switch --terminal term-worker"]);
   expect(readFileSync(join(state, "orca.log"), "utf8")).not.toContain("terminal send");
 
-  // The run page shows the same.
-  await open(page, baseUrl, `run/${run}`);
-  await expect(page.getByTestId("open-in-orca")).toHaveCount(3);
   await expect(page.getByTestId("orca-ended")).toHaveText("ended, not in Orca");
   await expect(page.getByTestId("orca-running")).toHaveText(
     "running in Orca, open it from its chat tab",
@@ -946,7 +947,7 @@ test("ARK-284-AC2 a failing Orca leaves the button usable and says why, and a cl
   await expect(page.getByTestId("open-in-orca")).toHaveCount(0);
 });
 
-test("ARK-284-AC3 a closed run opens from its Backlog row and from its Map node, and both lead to the newest run", async ({
+test("ARK-284-AC3 a closed run opens from its Backlog row and from its Runs card, and both lead to the newest run", async ({
   page,
 }) => {
   isolate();
@@ -991,16 +992,14 @@ test("ARK-284-AC3 a closed run opens from its Backlog row and from its Map node,
   await expect(page.getByTestId("closed-banner")).toContainText(older);
   await expect(page.getByTestId("timeline-entry").first()).toBeVisible();
 
-  // Map: the node of a ticket with a run links to its newest run; a closed one opens too.
-  await open(page, baseUrl, "map");
-  await expect(page.locator('[data-testid="map-node"][data-ticket="ARK-841"] a')).toHaveAttribute(
-    "href",
-    `#/run/${newer}`,
-  );
-  await page.getByTestId("map-finished").click();
-  const node = page.locator('[data-testid="map-node"][data-ticket="ARK-842"] a');
-  await expect(node).toHaveAttribute("href", `#/run/${only}`);
-  await node.click();
+  // Runs: the card of a ticket with an open run links to its newest run; a closed run's card opens too.
+  await open(page, baseUrl, "runs");
+  await expect(
+    page.locator('[data-testid="run-card"][data-lane="Building"][data-ticket="ARK-841"]'),
+  ).toHaveAttribute("href", `#/run/${newer}`);
+  const card = page.locator(`[data-testid="run-card"][data-lane="Closed"][data-run="${only}"]`);
+  await expect(card).toHaveAttribute("href", `#/run/${only}`);
+  await card.click();
   await expect(page.locator("main h1")).toContainText("ARK-842");
   await expect(page.getByTestId("closed-banner")).toContainText(only);
   // The open run still opens, with no closed banner.
@@ -1339,4 +1338,985 @@ test("ARK-284-AC8 the run page links the run files that exist and shows them as 
     expect(answer.status, path).toBe(404);
     expect(answer.body, path).not.toContain("TOPSECRET");
   }
+});
+
+// ---------------------------------------------------------------- ARK-285
+
+/** One JUnit report with two passing cases for each passing criterion and one failing case for a failing one. */
+function junitReport(criteria: [string, "passing" | "failing"][]): string {
+  const cases = criteria.flatMap(([id, status], index) =>
+    status === "passing"
+      ? [`${id} first`, `${id} second`].map(
+          (name, line) =>
+            `<testcase name="${name}" file="test/a.test.ts" line="${index * 10 + line + 1}" />`,
+        )
+      : [
+          `<testcase name="${id} fails" file="test/a.test.ts" line="${index * 10 + 1}"><failure type="AssertionError">no</failure></testcase>`,
+        ],
+  );
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites>\n<testsuite name="a">\n${cases.join("\n")}\n</testsuite>\n</testsuites>\n`;
+}
+
+/**
+ * An open run in `merge_requests_open`: its MR (the fake `gh` answers for the URL), the test
+ * result of each criterion, a JUnit report and a findings file with 1 P1, 2 P2 and 1 P3.
+ */
+function reviewRun(options: {
+  ticket: string;
+  title: string;
+  number: number;
+  criteria: [string, "passing" | "failing"][];
+  createdAgo: number;
+  conclusion: "SUCCESS" | "FAILURE";
+  size: { additions: number; deletions: number; changedFiles: number };
+  findings: string;
+}) {
+  const run = runId(options.ticket);
+  const url = `https://github.com/example/repo/pull/${options.number}`;
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: options.ticket, title: options.title },
+    phase: "merge_requests_open",
+    criteria: options.criteria.map(([id]) => id),
+    steps: [{ id: "review", role: "reviewer", harness: "omp", model: "m", needs: [] }],
+    mergeRequests: [{ repo: ".", url, number: options.number }],
+    startedAt: ago(14_400),
+  });
+  const events = readFileSync(join(directory, "events.ndjson"), "utf8").trim().split("\n").length;
+  appendRawEvent(
+    directory,
+    "test.completed",
+    { passed: true, heads: {}, criteria: Object.fromEntries(options.criteria) },
+    events + 1,
+  );
+  mkdirSync(join(directory, "results"), { recursive: true });
+  writeFileSync(join(directory, "results", "cli.report"), junitReport(options.criteria));
+  mkdirSync(join(directory, "findings"), { recursive: true });
+  writeFileSync(join(directory, "findings", "review.md"), options.findings);
+  const view = {
+    state: "OPEN",
+    statusCheckRollup: [
+      {
+        __typename: "CheckRun",
+        name: "lint",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        detailsUrl: "https://ci.example/lint",
+      },
+      {
+        __typename: "CheckRun",
+        name: "unit",
+        status: "COMPLETED",
+        conclusion: options.conclusion,
+        detailsUrl: "https://ci.example/unit",
+      },
+    ],
+    ...options.size,
+    createdAt: ago(options.createdAgo).toISOString(),
+  };
+  return { run, url, directory, view };
+}
+
+const usageAt = (fraction: number) => ({
+  reports: [
+    {
+      provider: "anthropic",
+      fetchedAt: Date.now(),
+      limits: [
+        {
+          window: { id: "5h", resetsAt: Date.now() + 4_440_000 },
+          amount: { usedFraction: fraction },
+        },
+      ],
+    },
+  ],
+});
+
+/** Home with 1 gate, 1 stuck agent (a prompt), 2 MRs in review and the 5h window of anthropic at 82%. */
+async function homeWithBlockers() {
+  isolate();
+  const gate = writeRun({
+    project: "p",
+    run: runId("ARK-501"),
+    ticket: { id: "ARK-501", title: "Run at a gate" },
+    phase: "awaiting_criteria",
+  });
+  const stuckRun = runId("ARK-502");
+  const stuckDirectory = writeRun({
+    project: "p",
+    run: stuckRun,
+    ticket: { id: "ARK-502", title: "Run with a stuck agent" },
+    phase: "building",
+    steps: [
+      {
+        id: "hub-server",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 120,
+      },
+    ],
+  });
+  const older = reviewRun({
+    ticket: "ARK-503",
+    title: "Ready to merge",
+    number: 91,
+    criteria: [
+      ["ARK-503-AC1", "passing"],
+      ["ARK-503-AC2", "passing"],
+      ["ARK-503-AC3", "passing"],
+    ],
+    createdAgo: 10_800,
+    conclusion: "SUCCESS",
+    size: { additions: 312, deletions: 41, changedFiles: 6 },
+    findings: "### P1: a\n\n### P2: b\n\n### P2: c\n\n### P3: d\n",
+  });
+  const newer = reviewRun({
+    ticket: "ARK-504",
+    title: "Blocked by a failing test",
+    number: 92,
+    criteria: [
+      ["ARK-504-AC1", "passing"],
+      ["ARK-504-AC2", "failing"],
+    ],
+    createdAgo: 1200,
+    conclusion: "FAILURE",
+    size: { additions: 158, deletions: 22, changedFiles: 4 },
+    findings: "### P1: x\n\n### P1: y\n",
+  });
+  const orca = {
+    ...orcaAnswersFor(stuckRun),
+    worktrees: [
+      {
+        path: join(stuckDirectory, "workspace"),
+        agents: [
+          {
+            taskTitle: "hub-server (implementer, .)",
+            state: "working",
+            toolName: "bash",
+            updatedAt: Date.now(),
+            agentWait: { reason: "approval", source: "hook" },
+            lastAssistantMessage: "Allow bash?\n\nbun test test/hub.test.ts\n",
+          },
+        ],
+      },
+    ],
+  };
+  installFakeTools({
+    orca,
+    mergeRequestViews: { [older.url]: older.view, [newer.url]: newer.view },
+    ompUsage: usageAt(0.82),
+    plannotatorSessions: [
+      { index: 1, target: join(gate, "ticket.md"), url: "http://localhost:20000/review/gate" },
+    ],
+  });
+  return { baseUrl: await launch(), older, newer, stuckRun };
+}
+
+test("ARK-285-AC5 Home shows the tile strip first, then the blockers, the review queue in merge order and the progress and usage, with Master Chief once", async ({
+  page,
+}) => {
+  const { baseUrl, older, newer, stuckRun } = await homeWithBlockers();
+  await open(page, baseUrl, "");
+
+  // The tile strip comes first, in this order, then three columns.
+  const tiles = page.getByTestId("tile");
+  await expect(tiles).toHaveCount(6);
+  await expect(tiles.locator(".tile-label")).toHaveText([
+    "Needs me",
+    "Reviews waiting",
+    "Stuck agents",
+    "anthropic 5h limit",
+    "Cost today",
+    "Open runs",
+  ]);
+  const value = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"] .big`);
+  await expect(value("needs-me")).toHaveText("1");
+  await expect(value("reviews")).toHaveText("2");
+  await expect(value("runs")).toHaveText("4");
+  await expect(value("stuck")).toHaveText("1", { timeout: 20_000 });
+  await expect(value("usage")).toHaveText("82%", { timeout: 20_000 });
+  const strip = (await page.locator(".tiles").boundingBox())!;
+  const columns = page.locator(".cols3 > *");
+  await expect(columns).toHaveCount(3);
+  const boxes = await columns.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const { x, y } = node.getBoundingClientRect();
+      return { x, y };
+    }),
+  );
+  expect(boxes[0].y).toBeGreaterThan(strip.y + strip.height - 1);
+  expect(boxes[0].x).toBeLessThan(boxes[1].x);
+  expect(boxes[1].x).toBeLessThan(boxes[2].x);
+
+  // Column 1: the gate, then the stuck agent with its last line and Open in Orca.
+  await expect(columns.nth(0).getByTestId("gate")).toContainText("ARK-501");
+  const stuck = columns.nth(0).getByTestId("stuck");
+  await expect(stuck).toHaveCount(1, { timeout: 20_000 });
+  await expect(stuck).toHaveAttribute("data-run", stuckRun);
+  await expect(stuck).toContainText("waiting on a prompt");
+  await expect(stuck).toContainText("bun test test/hub.test.ts");
+  await expect(stuck.getByRole("button", { name: "Open in Orca" })).toBeVisible();
+
+  // Column 2: the review queue in merge order; the older MR is first.
+  const reviews = columns.nth(1).getByTestId("review");
+  await expect(reviews).toHaveCount(2);
+  await expect(reviews.nth(0)).toHaveAttribute("data-run", older.run);
+  await expect(reviews.nth(1)).toHaveAttribute("data-run", newer.run);
+  const first = reviews.nth(0);
+  const second = reviews.nth(1);
+  await expect(first.getByTestId("ci")).toHaveAttribute("data-ci", "passing");
+  await expect(second.getByTestId("ci")).toHaveAttribute("data-ci", "failing");
+  await expect(first.getByTestId("tests")).toHaveText("6 pass · 0 fail", { timeout: 30_000 });
+  await expect(second.getByTestId("tests")).toHaveText("2 pass · 1 fail");
+  await expect(first.getByTestId("findings")).toContainText("P1 1 · P2 2 · P3 1");
+  await expect(second.getByTestId("findings")).toContainText("P1 2 · P2 0 · P3 0");
+  await expect(first.getByTestId("findings-link")).toHaveAttribute(
+    "href",
+    `#/run/${encodeURIComponent(older.run)}/file/${encodeURIComponent("findings/review.md")}`,
+  );
+  await expect(first.getByTestId("diff")).toHaveText("+312 −41 · 6 files");
+  await expect(second.getByTestId("diff")).toHaveText("+158 −22 · 4 files");
+  await expect(first.getByTestId("waited")).toHaveText(/^3\s*h/);
+  await expect(second.getByTestId("waited")).toHaveText(/^(19|20|21)\s*min/);
+  // One square for each AC, red for the failing one.
+  await expect(first.getByTestId("ac-square")).toHaveCount(3);
+  await expect(second.getByTestId("ac-square")).toHaveCount(2);
+  await expect(second.getByTestId("ac-square").nth(1)).toHaveAttribute("data-status", "failing");
+
+  // Column 3: the progress of each open run, and the usage window in red with its reset time.
+  await expect(columns.nth(2).getByTestId("run")).toHaveCount(4);
+  const window = columns.nth(2).getByTestId("usage-window");
+  await expect(window).toHaveAttribute("data-near", "true");
+  await expect(window).toContainText("82%");
+  await expect(window.getByTestId("usage-reset")).toContainText(/resets \d\d:\d\d/);
+  await expect(page.locator('[data-testid="tile"][data-tile="usage"]')).toHaveClass(/alarm/);
+
+  // Master Chief shows once, in the nav, and no row shows (configured).
+  await expect(page.getByText("Master Chief")).toHaveCount(1);
+  await expect(page.locator("header.top").getByText("Master Chief")).toHaveCount(1);
+  await expect(page.getByText("(configured)")).toHaveCount(0);
+});
+
+test("ARK-285-AC5 a javascript: URL in a gate or an MR shows as text, never a link", async ({
+  page,
+}) => {
+  isolate();
+  const run = runId("ARK-505");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-505", title: "Hostile link" },
+    phase: "merge_requests_open",
+    mergeRequests: [{ repo: ".", url: "javascript:alert(1)", number: 5 }],
+  });
+  writeEventLog(
+    directory,
+    ago(7200),
+    [
+      {
+        after: 0,
+        type: "run.started",
+        data: { run, project: "p", ticket: { id: "ARK-505", title: "Hostile link" }, criteria: [] },
+      },
+      {
+        after: 900,
+        type: "merge_request.opened",
+        data: { repo: ".", url: "javascript:alert(1)", number: 5 },
+      },
+    ],
+    [],
+  );
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("mr")).toContainText("!5");
+  await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
+  await open(page, baseUrl, `run/${run}`);
+  await expect(page.getByTestId("timeline-entry").first()).toBeVisible();
+  await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
+});
+
+test("ARK-285-AC7 Runs shows every run on one board and graph with filters, rings of steps done, dashed edges to open tickets and what each run unblocks", async ({
+  page,
+}) => {
+  isolate();
+  const step = (id: string, role: string, needs: string[], done: boolean) => ({
+    id,
+    role,
+    harness: "omp",
+    model: "m",
+    needs,
+    startedAfter: done ? 20 : 400,
+    ...(done ? { finishedAfter: 300 } : {}),
+  });
+  const ticket = (id: string, extra: Partial<Parameters<typeof writeBacklogTicket>[0]> = {}) =>
+    writeBacklogTicket({ project: "p", id, title: `Title of ${id}`, status: "ready", ...extra });
+  const longTitle =
+    "A very long title that goes on and on so it needs more than two lines of a card in a lane of the board to show";
+  // 2 building: ARK-601 with 1 of 3 steps done, ARK-602 with a long title.
+  ticket("ARK-601");
+  ticket("ARK-602", { title: longTitle });
+  writeRun({
+    project: "p",
+    run: runId("ARK-601"),
+    ticket: { id: "ARK-601", title: "Title of ARK-601" },
+    phase: "building",
+    steps: [
+      step("a", "implementer", [], true),
+      step("b", "validator", ["a"], false),
+      { id: "c", role: "reviewer", harness: "omp", model: "m", needs: ["b"] },
+    ],
+  });
+  writeRun({
+    project: "p",
+    run: runId("ARK-602"),
+    ticket: { id: "ARK-602", title: longTitle },
+    phase: "building",
+    steps: [step("only", "implementer", [], false)],
+  });
+  // 1 queued ticket that waits on a building one; 1 in review that depends on a closed one.
+  ticket("ARK-603", { dependsOn: ["ARK-601"] });
+  ticket("ARK-604", { dependsOn: ["ARK-611"] });
+  reviewRun({
+    ticket: "ARK-604",
+    title: "Title of ARK-604",
+    number: 61,
+    criteria: [["ARK-604-AC1", "passing"]],
+    createdAgo: 600,
+    conclusion: "SUCCESS",
+    size: { additions: 1, deletions: 1, changedFiles: 1 },
+    findings: "### P3: z\n",
+  });
+  // 6 closed runs, oldest first: ARK-612 depends on ARK-611.
+  for (let number = 1; number <= 6; number++) {
+    const id = `ARK-61${number}`;
+    ticket(id, { status: "done", ...(number === 2 ? { dependsOn: ["ARK-611"] } : {}) });
+    writeRun({
+      project: "p",
+      run: runId(id),
+      ticket: { id, title: `Title of ${id}` },
+      phase: "closed",
+      startedAt: ago(86_400 - number * 600),
+    });
+  }
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "runs");
+  await expect(page.getByTestId("run-card").first()).toBeVisible();
+
+  // No picker; the five lanes in order.
+  await expect(page.getByTestId("run-select")).toHaveCount(0);
+  await expect(page.locator("select")).toHaveCount(0);
+  await expect(page.getByTestId("lane")).toHaveCount(5);
+  expect(
+    await page
+      .getByTestId("lane")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-lane"))),
+  ).toEqual(["Queued", "Building", "Needs me", "Awaiting merge", "Closed"]);
+  const lane = (name: string) => page.locator(`[data-testid="lane"][data-lane="${name}"]`);
+  await expect(lane("Queued").getByTestId("run-card")).toHaveCount(1);
+  await expect(lane("Building").getByTestId("run-card")).toHaveCount(2);
+  await expect(lane("Needs me").getByTestId("run-card")).toHaveCount(0);
+  await expect(lane("Awaiting merge").getByTestId("run-card")).toHaveCount(1);
+  // Closed: the last 5, and a count of the older run.
+  await expect(lane("Closed").getByTestId("run-card")).toHaveCount(5);
+  await expect(lane("Closed").getByTestId("older-runs")).toHaveText("1 older run in graph");
+
+  // A ring of steps done, from plan.yml: 1 of 3 for ARK-601. A title wraps to 2 lines.
+  const ring = lane("Building").locator('[data-ticket="ARK-601"] [data-testid="ring"]');
+  await expect(ring).toHaveAttribute("data-steps-done", "1");
+  await expect(ring).toHaveAttribute("data-steps-total", "3");
+  const wrapped = lane("Building").locator('[data-ticket="ARK-602"] .title2');
+  expect(
+    await wrapped.evaluate((node) => ({
+      clamp: getComputedStyle(node).getPropertyValue("-webkit-line-clamp"),
+      cut: node.scrollHeight > node.clientHeight,
+    })),
+  ).toEqual({ clamp: "2", cut: true });
+
+  // Filters: Active (open runs and the tickets that wait on them), Queued, Old.
+  const filter = (name: string) =>
+    page.locator(`[data-testid="graph-filter"][data-filter="${name}"]`);
+  await expect(filter("Active")).toHaveText(/Active\s*3/);
+  await expect(filter("Queued")).toHaveText(/Queued\s*1/);
+  await expect(filter("Old")).toHaveText(/Old\s*6/);
+  await expect(filter("Active")).toHaveAttribute("aria-pressed", "true");
+  const nodes = page.getByTestId("graph-node");
+  const ids = async () =>
+    (
+      await nodes.evaluateAll((all) => all.map((node) => node.getAttribute("data-ticket")))
+    ).toSorted((left, right) => (left ?? "").localeCompare(right ?? ""));
+  await expect(nodes).toHaveCount(4);
+  expect(await ids()).toEqual(["ARK-601", "ARK-602", "ARK-603", "ARK-604"]);
+  // An edge from a ticket that is not done is dashed.
+  const blocking = page.locator('[data-testid="graph-edge"][data-blocking="true"]');
+  await expect(blocking).toHaveCount(1);
+  await expect(blocking).toHaveAttribute("data-from", "ARK-601");
+  await expect(blocking).toHaveAttribute("data-to", "ARK-603");
+  expect(await blocking.evaluate((path) => getComputedStyle(path).strokeDasharray)).not.toBe(
+    "none",
+  );
+  // What finishing a run unblocks.
+  await expect(page.locator('[data-testid="unblocks"][data-ticket="ARK-601"]')).toContainText(
+    "ARK-603",
+  );
+  await expect(page.locator('[data-testid="unblocks"][data-ticket="ARK-602"]')).toContainText(
+    "unblocks nothing",
+  );
+
+  await filter("Queued").click();
+  await expect(filter("Queued")).toHaveAttribute("aria-pressed", "true");
+  await expect(nodes).toHaveCount(2);
+  expect(await ids()).toEqual(["ARK-601", "ARK-603"]);
+
+  await filter("Old").click();
+  await expect(nodes).toHaveCount(6);
+  expect(await ids()).toEqual([1, 2, 3, 4, 5, 6].map((number) => `ARK-61${number}`));
+  // The edge between two closed tickets is satisfied: solid.
+  await expect(page.getByTestId("graph-edge")).toHaveCount(1);
+  await expect(page.getByTestId("graph-edge")).toHaveAttribute("data-blocking", "false");
+  expect(
+    await page.getByTestId("graph-edge").evaluate((path) => getComputedStyle(path).strokeDasharray),
+  ).toBe("none");
+  // The older-runs button opens the Old filter too.
+  await filter("Active").click();
+  await lane("Closed").getByTestId("older-runs").click();
+  await expect(filter("Old")).toHaveAttribute("aria-pressed", "true");
+
+  // A click on a run opens its run page.
+  await lane("Building").locator('[data-ticket="ARK-601"]').click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${runId("ARK-601")}$`));
+  await expect(page.locator("main h1")).toContainText("ARK-601");
+});
+
+test("ARK-285-AC8 Backlog groups the tickets, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
+  page,
+}) => {
+  isolate();
+  const ticket = (
+    id: string,
+    status: string,
+    extra: Partial<Parameters<typeof writeBacklogTicket>[0]> = {},
+  ) =>
+    writeBacklogTicket({
+      project: "p",
+      id,
+      title: `Title of ${id}`,
+      status,
+      milestone: "M4",
+      ...extra,
+    });
+  ticket("ARK-701", "ready");
+  writeRun({
+    project: "p",
+    run: runId("ARK-701"),
+    ticket: { id: "ARK-701", title: "Title of ARK-701" },
+    phase: "building",
+  });
+  ticket("ARK-702", "in_progress");
+  ticket("ARK-703", "ready", {
+    dependsOn: ["ARK-701"],
+    title: "The ticket page",
+    problem:
+      "The first line.\n\nSecond paragraph with <b>raw markup</b> in it.\n\n- one bullet\n- another bullet",
+    change: "Change the page <script>window.__ran = 1</script>.",
+    criteria: [
+      { id: "ARK-703-AC1", text: "The page shows the title" },
+      { id: "ARK-703-AC2", text: "Esc returns to the list" },
+    ],
+  });
+  ticket("ARK-704", "ready", { dependsOn: ["ARK-703"] });
+  ticket("ARK-705", "superseded");
+  ticket("ARK-706", "done");
+  // Enough proposed tickets that the page scrolls.
+  for (let number = 0; number < 40; number++)
+    ticket(`ARK-8${String(number).padStart(2, "0")}`, "proposed");
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "backlog");
+  const rows = page.getByTestId("ticket-row");
+  await expect(rows.first()).toBeVisible();
+
+  // Rows are grouped; done and superseded tickets wait behind Show done.
+  expect(
+    await page
+      .getByTestId("group")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-group"))),
+  ).toEqual(["In a run", "In progress", "Ready", "Proposed"]);
+  await expect(rows).toHaveCount(44);
+  await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-706"]')).toHaveCount(0);
+  await page.getByTestId("show-done").check();
+  await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-706"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-705"]')).toHaveCount(1);
+  await page.getByTestId("show-done").uncheck();
+
+  // j and k move the selection; / focuses the search.
+  const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
+  await expect(selected).toHaveAttribute("data-ticket", "ARK-701");
+  await page.keyboard.press("j");
+  await expect(selected).toHaveAttribute("data-ticket", "ARK-702");
+  await page.keyboard.press("j");
+  await expect(selected).toHaveAttribute("data-ticket", "ARK-703");
+  await page.keyboard.press("k");
+  await expect(selected).toHaveAttribute("data-ticket", "ARK-702");
+  await page.keyboard.press("/");
+  await expect(page.getByTestId("filter-text")).toBeFocused();
+  await page.keyboard.type("ticket page");
+  await expect(rows).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("filter-text")).not.toBeFocused();
+  await page.getByTestId("filter-text").fill("");
+  await expect(rows).toHaveCount(44);
+  await page.keyboard.press("Escape"); // out of the search box: j and k are keys again
+
+  // Enter in the native status select belongs to the select, even with a row selected.
+  await page.keyboard.press("j");
+  await expect(selected).toHaveCount(1);
+  await page.getByTestId("filter-status").focus();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  await expect(page).toHaveURL(/#\/backlog$/);
+  await page.locator("body").click({ position: { x: 1, y: 1 } });
+
+  // Move far down the list, so the page has scrolled, then Enter opens the ticket.
+  for (let press = 0; press < 30; press++) await page.keyboard.press("j");
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(100);
+  const target = (await selected.getAttribute("data-ticket"))!;
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`#/ticket/${target}$`));
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+
+  // Esc returns to the list: same row, same scroll position.
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/backlog$/);
+  await expect(selected).toHaveAttribute("data-ticket", target);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+
+  // The full page of ARK-703: title, problem, change, numbered criteria, graph and lists.
+  await page.locator('[data-testid="ticket-link"]', { hasText: "ARK-703" }).click();
+  await expect(page.locator("main h1")).toHaveText("The ticket page");
+  await expect(page.getByTestId("ticket-problem")).toContainText("The first line.");
+  await expect(page.getByTestId("ticket-problem").locator("li")).toHaveText([
+    "one bullet",
+    "another bullet",
+  ]);
+  // The text is escaped: the markup shows as written and nothing runs.
+  await expect(page.getByTestId("ticket-problem")).toContainText("<b>raw markup</b>");
+  await expect(page.locator(".prose b")).toHaveCount(0);
+  await expect(page.getByTestId("ticket-change")).toContainText(
+    "<script>window.__ran = 1</script>",
+  );
+  expect(
+    await page.evaluate(() => (window as unknown as { __ran?: number }).__ran),
+  ).toBeUndefined();
+  const criteria = page.getByTestId("ticket-criterion");
+  await expect(criteria).toHaveCount(2);
+  await expect(criteria.nth(1)).toContainText("Esc returns to the list");
+  expect(
+    await page.locator("ol.criteria").evaluate((list) => getComputedStyle(list).listStyleType),
+  ).toBe("decimal");
+  // Its own dependency graph: the ticket, what it depends on and what it unblocks.
+  const graph = page.getByTestId("ticket-graph");
+  expect(
+    (
+      await graph
+        .getByTestId("graph-node")
+        .evaluateAll((all) => all.map((node) => node.getAttribute("data-ticket")))
+    ).toSorted((left, right) => (left ?? "").localeCompare(right ?? "")),
+  ).toEqual(["ARK-701", "ARK-703", "ARK-704"]);
+  await expect(graph.getByTestId("graph-edge")).toHaveCount(2);
+  await expect(page.getByTestId("depends-on").getByTestId("dep-link")).toHaveText(["ARK-701"]);
+  await expect(page.getByTestId("unblocks-list").getByTestId("unblock-link")).toHaveText([
+    "ARK-704",
+  ]);
+  await page.getByTestId("unblocks-list").getByTestId("unblock-link").click();
+  await expect(page).toHaveURL(/#\/ticket\/ARK-704$/);
+  await expect(page.locator("main h1")).toHaveText("Title of ARK-704");
+});
+
+test("ARK-285-AC9 the run page puts a progress strip, the vertical step plan, then agents, MR evidence and a link to the ticket in the hybrid-1 layout, and keeps the decisions, run files and Open in Orca", async ({
+  page,
+}) => {
+  isolate();
+  // One closed run gives the typical time of an implementer and of a validator step: 10 min.
+  writeRun({
+    project: "p",
+    run: runId("ARK-900"),
+    ticket: { id: "ARK-900", title: "History" },
+    phase: "closed",
+    startedAt: ago(172_800),
+    steps: [
+      {
+        id: "old",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 60,
+        finishedAfter: 660,
+      },
+      {
+        id: "older",
+        role: "validator",
+        harness: "omp",
+        model: "m",
+        needs: ["old"],
+        startedAfter: 700,
+        finishedAfter: 1300,
+      },
+    ],
+  });
+  const run = runId("ARK-901");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-901", title: "A run in the new layout" },
+    phase: "building",
+    startedAt: ago(1800),
+    steps: [
+      {
+        id: "first",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 60,
+        finishedAfter: 600,
+      },
+      {
+        id: "second",
+        role: "validator",
+        harness: "omp",
+        model: "m",
+        needs: ["first"],
+        startedAfter: 660,
+      },
+      { id: "third", role: "reviewer", harness: "omp", model: "m", needs: ["second"] },
+    ],
+  });
+  writeFileSync(join(directory, "plan.md"), "# Plan\n");
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-901",
+    title: "A run in the new layout",
+    status: "ready",
+  });
+  const review = reviewRun({
+    ticket: "ARK-902",
+    title: "A run with an MR",
+    number: 93,
+    criteria: [
+      ["ARK-902-AC1", "passing"],
+      ["ARK-902-AC2", "failing"],
+    ],
+    createdAgo: 900,
+    conclusion: "SUCCESS",
+    size: { additions: 5, deletions: 2, changedFiles: 1 },
+    findings: "### P2: q\n",
+  });
+  installFakeTools({
+    orca: orcaAnswersFor(run),
+    mergeRequestViews: { [review.url]: review.view },
+  });
+  const baseUrl = await launch();
+  await open(page, baseUrl, `run/${run}`);
+
+  // Progress strip: steps done, round, the time in the step against its role, cost, start. No ETA.
+  const strip = page.locator(".strip");
+  await expect(strip.getByTestId("steps-done")).toHaveText("1 of 3");
+  await expect(strip.getByTestId("round")).toHaveText("round 1 of 3");
+  await expect(strip.getByTestId("step-time")).toHaveText(
+    /^validator \d+ min · typical \d+ · slow above \d+$/,
+    { timeout: 20_000 },
+  );
+  await expect(page.locator("main")).not.toContainText(/\bETA\b/);
+
+  // The vertical plan: one step below the other, the strip above the plan, the plan left of the side column.
+  const box = async (selector: string) => (await page.locator(selector).boundingBox())!;
+  const first = await box('[data-testid="step-node"][data-step="first"]');
+  const second = await box('[data-testid="step-node"][data-step="second"]');
+  const third = await box('[data-testid="step-node"][data-step="third"]');
+  expect(second.y).toBeGreaterThan(first.y + first.height);
+  expect(third.y).toBeGreaterThan(second.y + second.height);
+  expect(Math.abs(first.x - third.x)).toBeLessThan(2);
+  const stripBox = (await strip.boundingBox())!;
+  expect(first.y).toBeGreaterThan(stripBox.y + stripBox.height);
+  const agents = await box('[data-testid="agents"]');
+  expect(agents.x).toBeGreaterThan(first.x + first.width);
+
+  // The side column: agents with Open in Orca, the merge request, a link to the ticket page.
+  await expect(page.getByTestId("agents").getByTestId("open-in-orca")).toHaveCount(2);
+  await expect(page.getByTestId("evidence")).toContainText("No merge request yet");
+  await page.getByTestId("ticket-link").click();
+  await expect(page).toHaveURL(/#\/ticket\/ARK-901$/);
+  await expect(page.locator("main h1")).toHaveText("A run in the new layout");
+
+  // Still there: the decisions timeline, the run files and the transcript links.
+  await open(page, baseUrl, `run/${run}`);
+  await expect(page.getByTestId("timeline")).toBeVisible();
+  await expect(page.getByTestId("run-file-link").first()).toBeVisible();
+  await expect(page.getByTestId("session-link")).toHaveCount(0); // no session file in this fixture
+  await expect(page.getByTestId("step-row")).toHaveCount(3);
+
+  // An MR in review shows its evidence: CI, diff size, each AC with its status, the findings.
+  await open(page, baseUrl, `run/${review.run}`);
+  const evidence = page.getByTestId("evidence");
+  await expect(evidence.getByTestId("ci")).toHaveAttribute("data-ci", "passing");
+  await expect(evidence).toContainText("+5 −2 · 1 files");
+  const criterion = (id: string) =>
+    evidence.locator(`[data-testid="evidence-criterion"][data-id="${id}"]`);
+  await expect(criterion("ARK-902-AC1")).toHaveAttribute("data-status", "passing", {
+    timeout: 30_000,
+  });
+  await expect(criterion("ARK-902-AC2")).toContainText("some failing");
+  await expect(evidence).toContainText("P2 1");
+});
+
+type Contrast = { text: string; ratio: number; need: number };
+
+/** Text of the page that is below 4.5:1 (3:1 when large), by the colors the browser computed. */
+async function weakContrast(page: Page): Promise<{ checked: number; weak: Contrast[] }> {
+  return page.evaluate(() => {
+    type Color = { r: number; g: number; b: number; a: number };
+    const parse = (css: string): Color => {
+      const channels = css.match(/-?[\d.]+%?/g)?.map(Number) ?? [0, 0, 0, 0];
+      const srgb = css.startsWith("color(");
+      const scale = srgb ? 255 : 1;
+      return {
+        r: channels[0] * scale,
+        g: channels[1] * scale,
+        b: channels[2] * scale,
+        a: channels[3] ?? 1,
+      };
+    };
+    const over = (top: Color, bottom: Color): Color => {
+      const a = top.a + bottom.a * (1 - top.a);
+      const mix = (front: number, back: number) =>
+        a === 0 ? 0 : (front * top.a + back * bottom.a * (1 - top.a)) / a;
+      return { r: mix(top.r, bottom.r), g: mix(top.g, bottom.g), b: mix(top.b, bottom.b), a };
+    };
+    const light = (color: Color) => {
+      const [r, g, b] = [color.r, color.g, color.b].map((channel) => {
+        const value = channel / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const background = (element: Element): Color => {
+      let color: Color = { r: 0, g: 0, b: 0, a: 0 };
+      for (let node: Element | null = element; node; node = node.parentElement) {
+        color = over(color, parse(getComputedStyle(node).backgroundColor));
+        if (color.a >= 1) break;
+      }
+      return over(color, parse(getComputedStyle(document.documentElement).backgroundColor));
+    };
+    const weak: Contrast[] = [];
+    let checked = 0;
+    for (const element of document.querySelectorAll("header.top *, main *")) {
+      const own = [...element.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent?.trim() ?? "")
+        .join(" ")
+        .trim();
+      const style = getComputedStyle(element);
+      if (own === "" || element.getClientRects().length === 0 || style.visibility === "hidden")
+        continue;
+      if (element.closest("button:disabled, svg")) continue;
+      checked += 1;
+      const back = background(element);
+      const text = over(
+        { ...parse(style.color), a: parse(style.color).a * Number(style.opacity) },
+        back,
+      );
+      const [bright, dark] = [light(text), light(back)].sort((left, right) => right - left);
+      const ratio = (bright + 0.05) / (dark + 0.05);
+      const size = parseFloat(style.fontSize);
+      const large = size >= 24 || (size >= 18.66 && Number(style.fontWeight) >= 700);
+      const need = large ? 3 : 4.5;
+      if (ratio < need)
+        weak.push({ text: own.slice(0, 40), ratio: Math.round(ratio * 100) / 100, need });
+    }
+    return { checked, weak };
+  });
+}
+
+test("ARK-285-AC10 the theme follows the system, the nav switch sets Auto, Light or Dark and keeps it after a reload, and text keeps its contrast on Home, Runs and a ticket page in both themes", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const { baseUrl } = await homeWithBlockers();
+  for (const [id, status] of [
+    ["ARK-511", "ready"],
+    ["ARK-512", "ready"],
+  ])
+    writeBacklogTicket({
+      project: "p",
+      id,
+      title: `Title of ${id}`,
+      status,
+      dependsOn: id === "ARK-512" ? ["ARK-511"] : [],
+      problem: "A problem in words.\n\n- a bullet",
+      change: "A change in words.",
+      criteria: [{ id: `${id}-AC1`, text: "It works" }],
+    });
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  await page.emulateMedia({ colorScheme: "light" });
+  await open(page, baseUrl, "");
+  // Wait for every panel the contrast check must see.
+  await expect(page.getByTestId("stuck")).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.getByTestId("review").first().getByTestId("tests")).toHaveText(
+    "6 pass · 0 fail",
+    {
+      timeout: 30_000,
+    },
+  );
+
+  const theme = (name: string) =>
+    page.getByRole("group", { name: "Theme" }).getByRole("button", { name });
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  // Auto follows the system scheme.
+  await expect(theme("Auto")).toHaveAttribute("aria-pressed", "true");
+  const systemLight = await background();
+  await page.emulateMedia({ colorScheme: "dark" });
+  const systemDark = await background();
+  expect(systemDark).not.toBe(systemLight);
+
+  const views = [
+    ["Home", ""],
+    ["Runs", "runs"],
+    ["a ticket page", "ticket/ARK-512"],
+  ] as const;
+  const before = requests.length;
+  for (const [choice, expected] of [
+    ["Light", systemLight],
+    ["Dark", systemDark],
+  ] as const) {
+    await theme(choice).click();
+    await expect(theme(choice)).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(background).toBe(expected);
+    for (const [name, hash] of views) {
+      await page.evaluate((target) => (location.hash = `#/${target}`), hash);
+      await expect(page.locator("main h1")).toBeVisible();
+      if (hash === "") await expect(page.getByTestId("tile")).toHaveCount(6);
+      if (hash === "runs") await expect(page.getByTestId("lane")).toHaveCount(5);
+      if (hash.startsWith("ticket")) await expect(page.getByTestId("ticket-problem")).toBeVisible();
+      // A color that still fades from the other theme is not the color the page rests on.
+      await page.evaluate(() =>
+        Promise.all(document.getAnimations().map((fade) => fade.finished.catch(() => undefined))),
+      );
+      const { checked, weak } = await weakContrast(page);
+      expect(checked, `text checked on ${name} in ${choice}`).toBeGreaterThan(20);
+      expect(weak, `${name} in ${choice}`).toEqual([]);
+    }
+  }
+  // Switching the theme and the views sent no request at all.
+  expect(requests.slice(before)).toEqual([]);
+
+  // In Dark, a primary button and Open in Orca keep 4.5:1 for their white 13px text while hovered.
+  await theme("Dark").click();
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("stuck")).toHaveCount(1);
+  const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
+  expect(await actions.count()).toBeGreaterThan(0);
+  for (let index = 0; index < (await actions.count()); index++) {
+    const action = actions.nth(index);
+    await action.hover();
+    await page.waitForTimeout(400); // the color transition has ended
+    const ratio = await action.evaluate((element) => {
+      const channels = (css: string) =>
+        css
+          .match(/[\d.]+/g)!
+          .slice(0, 3)
+          .map(Number);
+      const light = (css: string) => {
+        const [r, g, b] = channels(css).map((channel) => {
+          const value = channel / 255;
+          return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const style = getComputedStyle(element);
+      const [one, two] = [light(style.color), light(style.backgroundColor)].sort((a, b) => b - a);
+      return (one + 0.05) / (two + 0.05);
+    });
+    expect(ratio, `hovered action ${index} in Dark`).toBeGreaterThanOrEqual(4.5);
+  }
+
+  // The choice stays after a reload, and Auto goes back to the system.
+  await page.evaluate(() => (location.hash = "#/"));
+  await theme("Light").click();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.reload();
+  await expect(page.locator("main h1")).toBeVisible();
+  await expect(theme("Light")).toHaveAttribute("aria-pressed", "true");
+  expect(await background()).toBe(systemLight);
+  await theme("Auto").click();
+  await expect.poll(background).toBe(systemDark);
+});
+
+test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ page }) => {
+  isolate();
+  installFakeTools({});
+  const baseUrl = await launch();
+  await page.goto(`${baseUrl}/#/map`);
+  await expect(page.getByTestId("lane")).toHaveCount(5);
+  await expect(page).toHaveURL(/#\/runs$/);
+  const links = page.getByRole("navigation", { name: "Views" }).getByRole("link");
+  await expect(links).toHaveText(["Home", "Runs", "Backlog"]);
+});
+
+test("ARK-285-AC11 Home, Runs and Backlog send no request after the first load, and a ticket page and a run page read only their own text", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const { baseUrl, older, stuckRun } = await homeWithBlockers();
+  writeBacklogTicket({ project: "p", id: "ARK-521", title: "Ticket", status: "ready" });
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  await open(page, baseUrl, "");
+  // Every reader has answered: the first load is complete.
+  await expect(page.getByTestId("stuck")).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.getByTestId("review").first().getByTestId("tests")).toHaveText(
+    "6 pass · 0 fail",
+    { timeout: 30_000 },
+  );
+  await expect(page.getByTestId("stale-label")).toHaveCount(0);
+  const firstLoad = requests.splice(0);
+  expect(firstLoad.filter((path) => path === "/events")).toHaveLength(1);
+  for (const path of firstLoad)
+    expect(path === "/" || path === "/events" || path.startsWith("/assets/"), path).toBe(true);
+
+  const nav = page.getByRole("navigation", { name: "Views" });
+  for (const [name, heading] of [
+    ["Runs", "Runs"],
+    ["Backlog", "Backlog"],
+    ["Home", "Needs me"],
+  ] as const) {
+    await nav.getByRole("link", { name }).click();
+    await expect(page.getByRole("heading", { name: new RegExp(heading) }).first()).toBeVisible();
+  }
+  await page.waitForTimeout(2000);
+  expect(requests.splice(0)).toEqual([]);
+
+  // The ticket page reads from the snapshot: no request but the first load and the event stream.
+  await open(page, baseUrl, "ticket/ARK-521");
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(requests.filter((path) => path.startsWith("/api/ticket"))).toEqual([]);
+  // The run page does read (`/api/run`, from ARK-284): the one place the page goes past AC11.
+  await open(page, baseUrl, `run/${stuckRun}`);
+  await expect(page.getByTestId("timeline")).toBeVisible();
+  await open(page, baseUrl, `run/${older.run}`);
+  await expect(page.getByTestId("evidence")).toBeVisible();
+  await page.waitForTimeout(2000);
+  const extra = requests.filter(
+    (path) => path !== "/" && path !== "/events" && !path.startsWith("/assets/"),
+  );
+  expect(extra.length).toBeGreaterThan(0);
+  for (const path of extra) expect(path.startsWith("/api/run/"), path).toBe(true);
 });

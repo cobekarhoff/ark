@@ -1,0 +1,320 @@
+// test ids: lane (data-lane), run-card (data-lane, data-run, data-ticket), older-runs, graph-filter
+// (data-filter, aria-pressed), graph-node, graph-edge (data-blocking), unblocks (data-ticket),
+// ring (data-steps-done, data-steps-total)
+import { useState } from "react";
+import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
+import { closedRuns, ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
+import { Ring, Unknown, known } from "./format.tsx";
+import { runHref } from "./RunDetail.tsx";
+import { useLive } from "./store.tsx";
+import type { RunView, Snapshot } from "../types.ts";
+
+const lanes = [
+  ["Queued", "waiting for a slot", "p-none"],
+  ["Building", "agents working", "p-build"],
+  ["Needs me", "gate or escalation", "p-gate"],
+  ["Awaiting merge", "MR in the review queue", "p-review"],
+  ["Closed", "last 5", "p-done"],
+] as const;
+
+const closedShown = 5;
+const filters = ["Active", "Queued", "Old"] as const;
+type Filter = (typeof filters)[number];
+
+const ringOf = (entry: TicketEntry): GraphTicket["ring"] =>
+  entry.open?.progress
+    ? { done: entry.open.progress.steps_done, total: entry.open.progress.steps_total }
+    : entry.open
+      ? { done: 0, total: 1, label: "–" }
+      : entry.lane === "Closed"
+        ? { done: 1, total: 1, label: "✓" }
+        : { done: 0, total: 1, label: "–" };
+
+const hrefOf = (entry: TicketEntry) =>
+  entry.open
+    ? runHref(entry.open.run)
+    : entry.newest
+      ? runHref(entry.newest.run)
+      : `#/ticket/${encodeURIComponent(entry.ticket.id)}`;
+
+/** The ticket-level state of a ticket in its card: `waits on ARK-282 (building)` for a blocked one. */
+function waitsOn(entry: TicketEntry, entries: Map<string, TicketEntry>): string {
+  const blockers = entry.ticket.depends_on
+    .map((id) => entries.get(ticketKey(entry.ticket.project, id)))
+    .filter((blocker): blocker is TicketEntry => blocker !== undefined && !blocker.satisfied);
+  return blockers.length === 0
+    ? "ready"
+    : `waits on ${blockers.map((blocker) => `${blocker.ticket.id} (${blocker.state})`).join(", ")}`;
+}
+
+function Card({
+  lane,
+  run,
+  ticket,
+  title,
+  ring,
+  tone,
+  href,
+  note,
+}: {
+  lane: string;
+  run: string | null;
+  ticket: string;
+  title: string;
+  ring: GraphTicket["ring"];
+  tone: string;
+  href: string;
+  note: string;
+}) {
+  return (
+    <a
+      className={`gnode card ${tone}`}
+      href={href}
+      data-testid="run-card"
+      data-lane={lane}
+      data-run={run ?? undefined}
+      data-ticket={ticket}
+    >
+      <Ring {...ring} />
+      <span className="gtext">
+        <span className="ghead">
+          <b className="mono">{ticket}</b>
+          {run ? <span className="mut small">{run.slice(0, 10)}</span> : null}
+        </span>
+        <span className="title2">{title}</span>
+        <span className="mut small">{note}</span>
+      </span>
+    </a>
+  );
+}
+
+function noteOf(run: RunView): string {
+  const progress = run.progress;
+  const parts = [progress ? `round ${progress.round} of ${progress.round_budget}` : "no plan yet"];
+  if (run.waiting[0]) parts.push("waiting for you");
+  else if (run.merge_requests[0])
+    parts.push(`MR #${run.merge_requests[0].number} · CI ${run.merge_requests[0].ci}`);
+  return parts.join(" · ");
+}
+
+function Board({
+  snapshot,
+  entries,
+  showOld,
+}: {
+  snapshot: Snapshot;
+  entries: Map<string, TicketEntry>;
+  showOld: () => void;
+}) {
+  const closed = known(snapshot.ticket_runs) ? closedRuns(snapshot.ticket_runs) : [];
+  const byTicket = new Map([...entries.values()].map((entry) => [entry.ticket.id, entry]));
+  const titleOf = (id: string) => byTicket.get(id)?.ticket.title ?? id;
+  return (
+    <div className="board">
+      {lanes.map(([lane, hint, tone]) => {
+        const cards = [...entries.values()].filter(
+          (entry) => entry.lane === lane && lane !== "Closed",
+        );
+        const closedCards = lane === "Closed" ? closed.slice(0, closedShown) : [];
+        const count = lane === "Closed" ? closed.length : cards.length;
+        return (
+          <section
+            key={lane}
+            className="lane"
+            data-testid="lane"
+            data-lane={lane}
+            aria-label={lane}
+          >
+            <header>
+              <h2>
+                <i className={`dot ${tone}`} />
+                {lane}
+              </h2>
+              <span className="count">{count}</span>
+              <span className="hint">{hint}</span>
+            </header>
+            <div className="lane-body">
+              {cards.map((entry) => (
+                <Card
+                  key={entry.key}
+                  lane={lane}
+                  run={entry.open?.run ?? null}
+                  ticket={entry.ticket.id}
+                  title={entry.open?.ticket.title ?? entry.ticket.title ?? entry.ticket.id}
+                  ring={ringOf(entry)}
+                  tone={tone}
+                  href={hrefOf(entry)}
+                  note={entry.open ? noteOf(entry.open) : waitsOn(entry, entries)}
+                />
+              ))}
+              {closedCards.map((run) => (
+                <Card
+                  key={run.run}
+                  lane={lane}
+                  run={run.run}
+                  ticket={run.ticket}
+                  title={titleOf(run.ticket)}
+                  ring={{ done: 1, total: 1, label: "✓" }}
+                  tone={tone}
+                  href={runHref(run.run)}
+                  note="closed"
+                />
+              ))}
+              {count === 0 ? <p className="mut empty">None.</p> : null}
+              {lane === "Closed" && closed.length > closedShown ? (
+                <button type="button" className="btn" data-testid="older-runs" onClick={showOld}>
+                  {closed.length - closedShown} older{" "}
+                  {closed.length - closedShown === 1 ? "run" : "runs"} in graph
+                </button>
+              ) : null}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The graph set of a filter: the tickets of its lanes, and for Active and Queued their open neighbours. */
+function graphKeys(filter: Filter, entries: Map<string, TicketEntry>): Set<string> {
+  const all = [...entries.values()];
+  const primary = new Set(
+    all
+      .filter((entry) =>
+        filter === "Active"
+          ? entry.open !== null
+          : filter === "Queued"
+            ? entry.lane === "Queued"
+            : entry.lane === "Closed",
+      )
+      .map((entry) => entry.key),
+  );
+  if (filter === "Old") return primary;
+  const shown = new Set(primary);
+  // A neighbour that is not done is still part of the picture: it blocks or waits.
+  for (const entry of all)
+    for (const id of entry.ticket.depends_on) {
+      const need = ticketKey(entry.ticket.project, id);
+      if (primary.has(entry.key) && entries.get(need) && !entries.get(need)!.satisfied)
+        shown.add(need);
+      if (primary.has(need) && !entry.satisfied) shown.add(entry.key);
+    }
+  return shown;
+}
+
+export function Runs() {
+  const { snapshot } = useLive();
+  const [filter, setFilter] = useState<Filter>("Active");
+  if (!snapshot || !known(snapshot.tickets) || !known(snapshot.runs))
+    return (
+      <>
+        <h1>Runs</h1>
+        <Unknown />
+      </>
+    );
+  const entries = ticketEntries(snapshot);
+  const counts: Record<Filter, number> = {
+    Active: [...entries.values()].filter((entry) => entry.open !== null).length,
+    Queued: [...entries.values()].filter((entry) => entry.lane === "Queued").length,
+    Old: [...entries.values()].filter((entry) => entry.lane === "Closed").length,
+  };
+  const keys = graphKeys(filter, entries);
+  const shown = [...entries.values()].filter((entry) => keys.has(entry.key));
+  const graph: GraphTicket[] = shown.map((entry) => ({
+    key: entry.key,
+    id: entry.ticket.id,
+    title: entry.open?.ticket.title ?? entry.ticket.title ?? entry.ticket.id,
+    state: entry.state,
+    tone: entry.tone,
+    href: hrefOf(entry),
+    ring: ringOf(entry),
+    needs: entry.ticket.depends_on.map((id) => ticketKey(entry.ticket.project, id)),
+    satisfied: entry.satisfied,
+  }));
+  const unblocks = [...entries.values()]
+    .filter((entry) => entry.open !== null)
+    .map((entry) => ({
+      entry,
+      next: [...entries.values()].filter(
+        (other) =>
+          !other.satisfied &&
+          other.ticket.depends_on.includes(entry.ticket.id) &&
+          other.ticket.project === entry.ticket.project,
+      ),
+    }));
+  const open = snapshot.runs.length;
+  return (
+    <>
+      <h1>
+        Runs{" "}
+        <span className="mut sub">
+          {open} open · {counts.Queued} queued · {counts.Old} closed. Click a run for its plan.
+        </span>
+      </h1>
+      <Board snapshot={snapshot} entries={entries} showOld={() => setFilter("Old")} />
+      <section className="panel graph-panel">
+        <header>
+          <h2>Cross-run dependency graph</h2>
+          <div className="seg" role="group" aria-label="Graph filter">
+            {filters.map((name) => (
+              <button
+                key={name}
+                type="button"
+                aria-pressed={filter === name}
+                data-testid="graph-filter"
+                data-filter={name}
+                onClick={() => setFilter(name)}
+              >
+                {name} <span className="count">{counts[name]}</span>
+              </button>
+            ))}
+          </div>
+          <span className="hint legend">
+            <span className="dash" /> still blocking <span className="solid" /> satisfied
+          </span>
+        </header>
+        <div className="graph-split">
+          <div
+            className="graph-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label="Ticket graph, scrollable"
+          >
+            {graph.length === 0 ? (
+              <p className="mut empty">No ticket in this filter.</p>
+            ) : (
+              <DepGraph tickets={graph} label={`Dependency graph, ${filter}`} />
+            )}
+          </div>
+          <aside className="unblocks-list" aria-label="What finishing unblocks">
+            <h3>What finishing unblocks</h3>
+            {unblocks.length === 0 ? <p className="mut">No open run.</p> : null}
+            {unblocks.map(({ entry, next }) => (
+              <div key={entry.key} data-testid="unblocks" data-ticket={entry.ticket.id}>
+                <a className="mono strong" href={hrefOf(entry)}>
+                  {entry.ticket.id}
+                </a>{" "}
+                <span className="mut">{entry.state}</span>
+                <div className="chips">
+                  {next.length === 0 ? (
+                    <span className="mut">unblocks nothing</span>
+                  ) : (
+                    next.map((other) => (
+                      <a
+                        key={other.key}
+                        className="chip mono"
+                        href={`#/ticket/${encodeURIComponent(other.ticket.id)}`}
+                      >
+                        {other.ticket.id}
+                      </a>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+          </aside>
+        </div>
+      </section>
+    </>
+  );
+}

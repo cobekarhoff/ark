@@ -65,7 +65,7 @@ const switchTimeoutMilliseconds = 5000;
 /**
  * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /events`
  * (Server-Sent Events), and on request `GET /api/run/<run>` (any run, open or closed),
- * `GET /api/run/<run>/transcript?file=&cursor=` and `GET /api/run/<run>/file?path=`. The one POST
+ * `GET /api/run/<run>/transcript?file=&cursor=`, and `GET /api/run/<run>/file?path=`. The one POST
  * route is `POST /api/open-in-orca` (ADR 0009): it focuses a live terminal in Orca and does nothing
  * else. Any other method gets 405, any other path 404.
  *
