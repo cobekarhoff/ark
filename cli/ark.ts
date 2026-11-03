@@ -39,10 +39,11 @@ const commands: Command[] = [
     run: ([ticketFile], flags) => runStart(ticketFile, flags["--project"] as string | undefined),
   },
   {
-    usage: "run step <run> <step> start|finish [--failed] [--merge] [--project <name>]",
+    usage:
+      "run step <run> <step> start|finish [--failed] [--not-started] [--merge] [--project <name>]",
     description:
-      "Records that a plan step started or finished. Use --failed with finish when the step failed. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo.",
-    flags: { "--failed": false, "--merge": false, "--project": true },
+      "Records that a plan step started or finished. Use --failed with finish when the step failed. Use --not-started with finish --failed when the worker never ran (worker-start exited non-zero and no worker is running): it records not_started: true on step.finished, takes back the round of that start, and the retro does not count the step. It is a usage error without --failed, and with start or --merge. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo.",
+    flags: { "--failed": false, "--not-started": false, "--merge": false, "--project": true },
     minimum: 3,
     maximum: 3,
     run: ([runId, stepId, action], flags) =>
@@ -52,6 +53,7 @@ const commands: Command[] = [
         action,
         flags["--failed"] === true,
         flags["--merge"] === true,
+        flags["--not-started"] === true,
         flags["--project"] as string | undefined,
       ),
   },
@@ -115,7 +117,7 @@ const commands: Command[] = [
   {
     usage: "plan check <run> [--project <name>]",
     description:
-      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions.",
+      "Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. A step whose harness and model are not the pair of any entry in roles in ark.yml is invalid: the problem names the step, its pair and the allowed pairs. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,

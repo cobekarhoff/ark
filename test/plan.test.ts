@@ -125,6 +125,25 @@ describe("plan check", () => {
     ]);
   });
 
+  test("ARK-282-AC1 refuses a step whose harness/model pair is in no role and names the allowed pairs", () => {
+    const plan = validPlan();
+    plan.steps = [
+      step("own", { role: "implementer" }),
+      step("other-role", { role: "implementer", harness: "codex", model: "gpt-codex" }),
+      step("bad-model", { harness: "claude", model: "pi/task" }),
+      step("bad-harness", { harness: "pi", model: "claude-sonnet" }),
+    ];
+    writePlan(plan);
+    const result = ark("plan", "check", runId);
+    expect(result.code).toBe(1);
+    const allowed = "claude/claude-sonnet, codex/gpt-codex";
+    const problems = events().findLast((event) => event.type === "plan.checked").data.problems;
+    expect(problems.filter((problem: string) => problem.includes("ark.yml roles"))).toEqual([
+      `step bad-model uses claude/pi/task, which is not in ark.yml roles: ${allowed}`,
+      `step bad-harness uses pi/claude-sonnet, which is not in ark.yml roles: ${allowed}`,
+    ]);
+  });
+
   test("ARK-153-AC1 refuses a missing or unparsable plan.yml and appends nothing", () => {
     const before = events().length;
     expect(ark("plan", "check", runId).code).toBe(1);

@@ -99,18 +99,29 @@ export function runStep(
   action: string,
   failed = false,
   merge = false,
+  notStarted = false,
   inProject?: string,
 ): void {
   if (action !== "start" && action !== "finish")
     throw new ArkError(`unknown step action "${action}": use start or finish`);
   if (failed && action === "start") throw new ArkError("--failed only applies to finish");
   if (merge && action === "finish") throw new ArkError("--merge only applies to start");
+  if (notStarted && action === "start") throw new ArkError("--not-started only applies to finish");
+  if (notStarted && !failed) throw new ArkError("--not-started needs --failed");
+  if (notStarted && merge) throw new ArkError("--not-started cannot be used with --merge");
   const { directory } = findRun(runId, inProject);
   const events = readEvents(directory);
   const state = deriveState(events);
 
   if (action === "finish") {
     const outcome = failed ? "failed" : "succeeded";
+    const last = events.findLast(
+      (event) =>
+        (event.type === "step.started" || event.type === "step.finished") &&
+        event.data.step === stepId,
+    );
+    if (notStarted && last?.type !== "step.started")
+      throw new ArkError(`--not-started needs a running start of step ${stepId}`);
     const started = events.findLast(
       (event) => event.type === "step.started" && event.data.step === stepId,
     );
@@ -118,8 +129,9 @@ export function runStep(
       step: stepId,
       outcome,
       ...(started?.data.merge ? { merge: true } : {}),
+      ...(notStarted ? { not_started: true } : {}),
     });
-    console.log(`${runId} ${stepId} ${outcome}`);
+    console.log(`${runId} ${stepId} ${outcome}${notStarted ? " (not started)" : ""}`);
     return;
   }
 
@@ -131,7 +143,11 @@ export function runStep(
       `unknown step ${stepId}: the checked plan has ${state.steps.map((step) => step.id).join(", ") || "no steps"}`,
     );
   const finishes = events.filter(
-    (event) => event.type === "step.finished" && event.data.step === stepId && !event.data.merge,
+    (event) =>
+      event.type === "step.finished" &&
+      event.data.step === stepId &&
+      !event.data.merge &&
+      !event.data.not_started,
   ).length;
   const round = planned.role === "implementer" && !merge ? finishes + 1 : state.round;
   appendEvent(directory, "step.started", {

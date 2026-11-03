@@ -833,3 +833,119 @@ test("ARK-278-AC7 a released worker that stays listed is never released again an
   // both rows are still listed after the sweeps
   expect(orcaCalls("worker-list").length).toBeGreaterThanOrEqual(2);
 });
+
+const statusOf = (runId: string) => {
+  const out = ark("status", runId).out;
+  return { round: out.match(/^round:.*$/m)?.[0], phase: out.match(/^phase:.*$/m)?.[0] };
+};
+const lastRound = (directory: string) =>
+  JSON.parse(eventLines(directory).at(-1) as string).data.round;
+
+for (const startedRounds of [0, 1]) {
+  test(`ARK-282-AC2 finish --failed --not-started restores the round after ${startedRounds} failed rounds of 2`, () => {
+    const { runId, directory } = startRun();
+    approvePlan(directory);
+    for (let round = 1; round <= startedRounds; round++) {
+      expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+      ark("run", "step", runId, "build", "finish", "--failed");
+    }
+    const before = statusOf(runId);
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    const failedStartRound = lastRound(directory);
+    expect(failedStartRound).toBe(startedRounds + 1);
+
+    const finished = ark("run", "step", runId, "build", "finish", "--failed", "--not-started");
+    expect(finished.code).toBe(0);
+    expect(JSON.parse(eventLines(directory).at(-1) as string).data).toEqual({
+      step: "build",
+      outcome: "failed",
+      not_started: true,
+    });
+    expect(statusOf(runId)).toEqual(before);
+
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(lastRound(directory)).toBe(failedStartRound);
+  });
+}
+
+test("ARK-282-AC2 --not-started is a usage error without --failed, with start and with --merge", () => {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  const before = eventLines(directory);
+  const attempts = [
+    ["build", "finish", "--not-started"],
+    ["build", "start", "--not-started"],
+    ["build", "finish", "--failed", "--not-started", "--merge"],
+  ];
+  for (const args of attempts) {
+    const result = ark("run", "step", runId, ...args);
+    expect(result.code).toBe(1);
+    if (!args.includes("--merge")) expect(result.err).toContain("--not-started");
+  }
+  expect(eventLines(directory)).toEqual(before);
+});
+
+test("ARK-282-AC2 --not-started is refused unless the step has a running start", () => {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  const attempt = () => ark("run", "step", runId, "build", "finish", "--failed", "--not-started");
+  expect(attempt().code).toBe(1);
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  ark("run", "step", runId, "build", "finish", "--failed");
+  const before = eventLines(directory);
+  const result = attempt();
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("--not-started");
+  expect(eventLines(directory)).toEqual(before);
+});
+
+test("ARK-282-AC2 finish --failed --not-started after a merge start keeps the real round", () => {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  for (const round of [1, 2]) {
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(lastRound(directory)).toBe(round);
+    ark("run", "step", runId, "build", "finish", "--failed");
+  }
+  const before = statusOf(runId);
+  appendEvent(directory, "worktree.synced", { repo: ".", conflict: true });
+  appendEvent(directory, "step.started", {
+    step: "build",
+    role: "implementer",
+    repo: ".",
+    round: 2,
+    merge: true,
+  });
+  expect(ark("run", "step", runId, "build", "finish", "--failed", "--not-started").code).toBe(0);
+  expect(statusOf(runId)).toEqual(before);
+});
+
+test("ARK-282-AC3 a failed start at the last round keeps phase building and opens no escalation gate", () => {
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  for (const round of [1, 2]) {
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(lastRound(directory)).toBe(round);
+    ark("run", "step", runId, "build", "finish", "--failed");
+  }
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": "failing" },
+  });
+  appendEvent(directory, "gate.answered", { gate: "escalation", answer: "one_more_round" });
+
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  expect(lastRound(directory)).toBe(3);
+  expect(ark("run", "step", runId, "build", "finish", "--failed", "--not-started").code).toBe(0);
+
+  const status = ark("status", runId).out;
+  expect(status).toContain("phase: building");
+  expect(status).toContain("waiting gate: none");
+  const gatesBefore = eventLines(directory).filter((line) => line.includes('"gate.'));
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+  expect(lastRound(directory)).toBe(3);
+  expect(eventLines(directory).filter((line) => line.includes('"gate.'))).toEqual(gatesBefore);
+});

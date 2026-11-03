@@ -481,6 +481,19 @@ test("ARK-280-AC4 the playbooks call a worker that stops at a permission prompt 
   expect(readFileSync(join(playbookDirectory, "worker.md"), "utf8")).toMatch(defect);
 });
 
+test("ARK-282-AC5 run-lead section 7 sends a worker-start that never ran to finish --failed --not-started and the roles check", () => {
+  const rule = runLeadPlaybook
+    .split("\n")
+    .find((line) => line.includes("If `worker-start` exits non-zero"));
+  expect(rule).toBeDefined();
+  expect(rule).toContain("no running terminal");
+  expect(rule).toContain("ark run step <run> <step> finish --failed --not-started");
+  expect(rule).toContain("and not `finish --failed`");
+  expect(rule).toContain("read `roles` in `ark.yml` again");
+  expect(rule).toContain("ark plan check <run>");
+  expect(rule).toMatch(/model, harness or ACP model/);
+});
+
 test("ARK-281-AC5 chief.md states the 3 auto-merger rules in section 12 and the HELD superseded action", () => {
   const line = chiefPlaybook
     .split("\n")

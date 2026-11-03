@@ -473,6 +473,53 @@ describe("ark retro", () => {
     ]);
   });
 
+  test("ARK-282-AC4 a step finished with not_started adds no round and no cost step; a plain failed one still does", () => {
+    const withGhost = (notStarted: boolean): EventRow[] => [
+      ...scenario.slice(0, -1),
+      [
+        "14:58:00.000",
+        "step.started",
+        { step: "ghost", role: "implementer", repo: "repos/platform", round: 3 },
+      ],
+      [
+        "14:58:30.000",
+        "step.finished",
+        { step: "ghost", outcome: "failed", ...(notStarted ? { not_started: true } : {}) },
+      ],
+      scenario.at(-1) as EventRow,
+    ];
+    writeEvents(runDirectory, withGhost(true));
+    retro(runId);
+    let metrics = readMetrics();
+    expect(metrics.rework).toMatchObject({ rounds: 2, escalations: 1 });
+    expect(Object.keys(metrics.cost.by_step)).toEqual(["build", "review"]);
+
+    writeEvents(runDirectory, withGhost(false));
+    retro(runId);
+    metrics = readMetrics();
+    expect(metrics.rework).toMatchObject({ rounds: 3, escalations: 1 });
+    expect(Object.keys(metrics.cost.by_step)).toContain("ghost");
+  });
+
+  test("ARK-282-AC4 a merge start finished with not_started leaves the real round and drops only the merge step", () => {
+    writeEvents(runDirectory, [
+      ...scenario.slice(0, -1),
+      [
+        "14:58:00.000",
+        "step.started",
+        { step: "build", role: "implementer", repo: "repos/platform", round: 2, merge: true },
+      ],
+      [
+        "14:58:30.000",
+        "step.finished",
+        { step: "build", outcome: "failed", merge: true, not_started: true },
+      ],
+      scenario.at(-1) as EventRow,
+    ]);
+    retro(runId);
+    expect(readMetrics().rework).toMatchObject({ rounds: 2, merge_steps: 0 });
+  });
+
   describe("merge request activity", () => {
     const originalPath = process.env.PATH;
     const withMergeRequest: EventRow[] = [
