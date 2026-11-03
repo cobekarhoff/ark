@@ -202,7 +202,7 @@ export type RunView = {
   cost_usd: number | null;
 };
 
-/** What `GET /api/ticket/<project>/<id>` answers: the text sections of one backlog ticket, as plain strings. */
+/** The text sections of one backlog ticket, as plain strings, read in the background and sent in the snapshot. */
 export type TicketDocument = {
   problem: string;
   change: string;
@@ -216,6 +216,8 @@ export type TicketView = {
   status: string;
   milestone: string | null;
   depends_on: string[];
+  /** Null for an unreadable ticket. */
+  document: TicketDocument | null;
 };
 
 /** The newest run of a ticket, open or closed, for the Map. A ticket with no entry has no run. */

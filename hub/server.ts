@@ -65,8 +65,7 @@ const switchTimeoutMilliseconds = 5000;
 /**
  * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /events`
  * (Server-Sent Events), and on request `GET /api/run/<run>` (any run, open or closed),
- * `GET /api/run/<run>/transcript?file=&cursor=`, `GET /api/run/<run>/file?path=` and
- * `GET /api/ticket/<project>/<id>` (the text sections of a listed ticket). The one POST
+ * `GET /api/run/<run>/transcript?file=&cursor=`, and `GET /api/run/<run>/file?path=`. The one POST
  * route is `POST /api/open-in-orca` (ADR 0009): it focuses a live terminal in Orca and does nothing
  * else. Any other method gets 405, any other path 404.
  *
@@ -134,12 +133,6 @@ export async function serve(reader: SnapshotReader, port: number) {
     return text("not found", 404);
   }
 
-  /** `GET /api/ticket/<project>/<id>`: the text sections of a ticket the hub lists, as JSON strings. */
-  function ticketRoute(project: string, id: string): Response {
-    const document = reader.ticketDocument(project, id);
-    return document ? json(document) : text("no such ticket", 404);
-  }
-
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
@@ -159,15 +152,6 @@ export async function serve(reader: SnapshotReader, port: number) {
       if (run) {
         try {
           return await runRoute(url, decodeURIComponent(run[1]), run[2] ?? "");
-        } catch {
-          return text("bad request", 400);
-        }
-      }
-
-      const ticket = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)$/);
-      if (ticket) {
-        try {
-          return ticketRoute(decodeURIComponent(ticket[1]), decodeURIComponent(ticket[2]));
         } catch {
           return text("bad request", 400);
         }

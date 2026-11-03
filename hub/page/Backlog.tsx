@@ -172,11 +172,14 @@ export function Backlog() {
           ?.scrollIntoView({ block: "nearest" });
         return;
       }
-      // Enter on a link or button keeps its own action; anywhere else it opens the selected ticket.
+      // Enter on a link, button, select or textarea keeps its own action; anywhere else (the search
+      // field included) it opens the selected ticket.
       const control =
         event.target instanceof HTMLElement ? event.target.closest("a, button") : null;
       const checkbox = event.target instanceof HTMLInputElement && event.target.type === "checkbox";
-      if (event.key === "Enter" && current !== null && !control && !checkbox) {
+      const native =
+        event.target instanceof HTMLSelectElement || event.target instanceof HTMLTextAreaElement;
+      if (event.key === "Enter" && current !== null && !control && !checkbox && !native) {
         event.preventDefault();
         remember();
         location.hash = `#/ticket/${encodeURIComponent(current)}`;

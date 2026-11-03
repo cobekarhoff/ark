@@ -1872,6 +1872,15 @@ test("ARK-285-AC8 Backlog groups the tickets, keys move and open them, a ticket 
   await expect(rows).toHaveCount(44);
   await page.keyboard.press("Escape"); // out of the search box: j and k are keys again
 
+  // Enter in the native status select belongs to the select, even with a row selected.
+  await page.keyboard.press("j");
+  await expect(selected).toHaveCount(1);
+  await page.getByTestId("filter-status").focus();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(300);
+  await expect(page).toHaveURL(/#\/backlog$/);
+  await page.locator("body").click({ position: { x: 1, y: 1 } });
+
   // Move far down the list, so the page has scrolled, then Enter opens the ticket.
   for (let press = 0; press < 30; press++) await page.keyboard.press("j");
   const before = await page.evaluate(() => window.scrollY);
@@ -2205,8 +2214,38 @@ test("ARK-285-AC10 the theme follows the system, the nav switch sets Auto, Light
       expect(weak, `${name} in ${choice}`).toEqual([]);
     }
   }
-  // Switching the theme and the views sent no request but the ticket text.
-  expect(requests.slice(before).filter((path) => !path.startsWith("/api/ticket/"))).toEqual([]);
+  // Switching the theme and the views sent no request at all.
+  expect(requests.slice(before)).toEqual([]);
+
+  // In Dark, a primary button and Open in Orca keep 4.5:1 for their white 13px text while hovered.
+  await theme("Dark").click();
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("stuck")).toHaveCount(1);
+  const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
+  expect(await actions.count()).toBeGreaterThan(0);
+  for (let index = 0; index < (await actions.count()); index++) {
+    const action = actions.nth(index);
+    await action.hover();
+    await page.waitForTimeout(400); // the color transition has ended
+    const ratio = await action.evaluate((element) => {
+      const channels = (css: string) =>
+        css
+          .match(/[\d.]+/g)!
+          .slice(0, 3)
+          .map(Number);
+      const light = (css: string) => {
+        const [r, g, b] = channels(css).map((channel) => {
+          const value = channel / 255;
+          return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const style = getComputedStyle(element);
+      const [one, two] = [light(style.color), light(style.backgroundColor)].sort((a, b) => b - a);
+      return (one + 0.05) / (two + 0.05);
+    });
+    expect(ratio, `hovered action ${index} in Dark`).toBeGreaterThanOrEqual(4.5);
+  }
 
   // The choice stays after a reload, and Auto goes back to the system.
   await page.evaluate(() => (location.hash = "#/"));
@@ -2264,10 +2303,12 @@ test("ARK-285-AC11 Home, Runs and Backlog send no request after the first load, 
   await page.waitForTimeout(2000);
   expect(requests.splice(0)).toEqual([]);
 
-  // The ticket page and the run page do read: AC11 says "no request other than its first load
-  // and the event stream", so these two reads are the places where the page goes past it.
+  // The ticket page reads from the snapshot: no request but the first load and the event stream.
   await open(page, baseUrl, "ticket/ARK-521");
   await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(requests.filter((path) => path.startsWith("/api/ticket"))).toEqual([]);
+  // The run page does read (`/api/run`, from ARK-284): the one place the page goes past AC11.
   await open(page, baseUrl, `run/${stuckRun}`);
   await expect(page.getByTestId("timeline")).toBeVisible();
   await open(page, baseUrl, `run/${older.run}`);
@@ -2277,6 +2318,5 @@ test("ARK-285-AC11 Home, Runs and Backlog send no request after the first load, 
     (path) => path !== "/" && path !== "/events" && !path.startsWith("/assets/"),
   );
   expect(extra.length).toBeGreaterThan(0);
-  for (const path of extra)
-    expect(path.startsWith("/api/ticket/") || path.startsWith("/api/run/"), path).toBe(true);
+  for (const path of extra) expect(path.startsWith("/api/run/"), path).toBe(true);
 });

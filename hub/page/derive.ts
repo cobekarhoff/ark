@@ -26,10 +26,12 @@ export type Stuck = {
  */
 export function stuckAgents(snapshot: Snapshot, age: (time: string) => number): Stuck[] {
   if (!known(snapshot.runs)) return [];
-  const answered = snapshot.sources.agentWait.read_at !== null;
+  const { ok, read_at } = snapshot.sources.agentWait;
   return snapshot.runs.flatMap((run): Stuck[] => {
-    if (answered && known(run.agents))
-      return run.agents.flatMap((agent) =>
+    if (read_at !== null && known(run.agents)) {
+      // Agent facts kept from the last good read stay (their activity shows its age). While the
+      // source fails, a run they do not flag falls back to the run-level check below.
+      const flagged = run.agents.flatMap((agent) =>
         agent.activity.kind === "waiting" || agent.activity.kind === "idle"
           ? [
               {
@@ -43,6 +45,8 @@ export function stuckAgents(snapshot: Snapshot, age: (time: string) => number): 
             ]
           : [],
       );
+      if (ok || flagged.length > 0) return flagged;
+    }
     return attentionOf(run, age)
       .filter((item) => item.kind === "idle")
       .map((item) => ({

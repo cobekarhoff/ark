@@ -31,7 +31,7 @@
   --link: light-dark(#2553c7, #9cc3ff);
   --on-red: light-dark(#ffffff, #1a0907);
   --primary: light-dark(#1d1c1a, #2d6cdf);
-  --primary-hover: light-dark(#34322e, #3a7af0);
+  --primary-hover: light-dark(#34322e, #3470e4);
   --on-primary: #ffffff;
   --term-bg: light-dark(#17191e, #07090c);
   --term-fg: #d6dbe4;

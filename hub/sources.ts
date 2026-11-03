@@ -8,6 +8,7 @@ import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
 import { loadPlan, type PlanStep } from "../cli/plan.ts";
 import { stepWindows, type StepWindow } from "../cli/retro.ts";
 import { readEventsLeniently } from "./run-detail.ts";
+import { parseTicketDocument } from "./ticket-document.ts";
 import type {
   Agent,
   AgentActivity,
@@ -95,10 +96,12 @@ export function createArkReader() {
       status: "unreadable",
       milestone: null,
       depends_on: [],
+      document: null,
     };
     let ticket = unreadable;
     try {
-      const match = readFileSync(file, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      const source = readFileSync(file, "utf8");
+      const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
       const fields = match ? (Bun.YAML.parse(match[1]) as Record<string, unknown> | null) : null;
       if (fields && typeof fields.id === "string" && typeof fields.title === "string") {
         ticket = {
@@ -108,6 +111,8 @@ export function createArkReader() {
           status: typeof fields.status === "string" ? fields.status : "unknown",
           milestone: typeof fields.milestone === "string" ? fields.milestone : null,
           depends_on: Array.isArray(fields.depends_on) ? fields.depends_on.map(String) : [],
+          // From the file this reader opened, never from a path built out of the front-matter id.
+          document: parseTicketDocument(source),
         };
       }
     } catch {

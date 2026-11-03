@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { RunDetail, RunView, Snapshot, TranscriptPage } from "../hub/types.ts";
+import { stuckAgents } from "../hub/page/derive.ts";
 import { stepTimeText } from "../hub/progress.ts";
 import { readTranscriptPage } from "../hub/transcript.ts";
 import { UsageIndex } from "../hub/usage.ts";
@@ -1424,4 +1425,62 @@ test("ARK-285-AC12 the human check on the real ARK_HOME is recorded in docs/evid
     expect(evidence, part).toContain(part);
   expect(evidence).toMatch(/usage[^\n]*(match|equal)/i);
   expect(evidence.split("\n")).toContain("human: ok");
+});
+
+test("ARK-285-AC3 after one good Orca read, a failing read keeps a stale waiting agent and still reports a quiet run as idle 60 min", () => {
+  const minutes = 60;
+  const run = {
+    run: "r",
+    updated_at: "then",
+    waiting: [],
+    plan: [{ id: "build", status: "running" }],
+    agents: [{ step: "build", activity: { kind: "working", text: "working", last_line: null } }],
+  };
+  const snapshotOf = (ok: boolean, agents: unknown[]): Snapshot =>
+    ({
+      runs: [{ ...run, agents }],
+      sources: { agentWait: { ok, read_at: "earlier" } },
+    }) as unknown as Snapshot;
+  const age = () => minutes * 60_000;
+  const stuck = (snapshot: Snapshot) => stuckAgents(snapshot, age).map((item) => item.text);
+
+  expect(stuck(snapshotOf(false, run.agents))).toEqual(["idle 60\u00a0min"]);
+  expect(stuck(snapshotOf(true, run.agents))).toEqual([]);
+  const waiting = [{ step: "build", activity: { kind: "waiting", text: "waiting on a prompt" } }];
+  expect(stuck(snapshotOf(false, waiting))).toEqual(["waiting on a prompt"]);
+});
+
+test("ARK-285-AC11 ticket text arrives in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside", async () => {
+  isolatedEnvironment();
+  const home = process.env.ARK_HOME as string;
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-840",
+    title: "Readable",
+    status: "ready",
+    problem: "Why it hurts",
+    change: "What changes",
+    criteria: [{ id: "ARK-840-AC1", text: "It works" }],
+  });
+  writeFileSync(join(home, "outside.md"), "## Problem\n\nOUTSIDE TICKET DIRECTORY\n");
+  writeFileSync(
+    join(home, "projects", "p", "tickets", "ARK-841.md"),
+    '---\nid: ../../../outside\ntitle: "Planted"\n---\n## Problem\n\nOwn text\n',
+  );
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) => current.tickets !== "unknown" && current.tickets.length === 2,
+  );
+  if (snapshot.tickets === "unknown") throw new Error("tickets are unknown");
+  const documents = Object.fromEntries(snapshot.tickets.map((t) => [t.title, t.document]));
+  expect(documents.Readable).toEqual({
+    problem: "Why it hurts",
+    change: "What changes",
+    criteria: [{ id: "ARK-840-AC1", text: "It works" }],
+  });
+  expect(documents.Planted?.problem).toBe("Own text");
+  expect(JSON.stringify(snapshot)).not.toContain("OUTSIDE TICKET DIRECTORY");
+  for (const id of ["ARK-840", "..%2F..%2F..%2Foutside"])
+    expect((await fetch(`${baseUrl}/api/ticket/p/${id}`)).status).toBe(404);
 });

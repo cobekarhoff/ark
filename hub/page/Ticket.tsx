@@ -1,40 +1,12 @@
 // test ids: ticket-page, ticket-problem, ticket-change, ticket-criterion (data-id), ticket-graph,
 // depends-on (links: dep-link), unblocks-list (links: unblock-link)
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
 import { Unknown, known } from "./format.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { useLive } from "./store.tsx";
-import type { TicketDocument } from "../types.ts";
-
-type Document = { status: "loading" | "failed" } | { status: "ok"; document: TicketDocument };
-
-/** One read of the ticket text when its page opens. The text is shown as text, never as HTML. */
-function useTicketDocument(project: string | null, id: string): Document {
-  const [state, setState] = useState<{ key: string; value: Document }>({
-    key: "",
-    value: { status: "loading" },
-  });
-  const key = `${project}/${id}`;
-  useEffect(() => {
-    if (project === null) return;
-    const controller = new AbortController();
-    void fetch(`/api/ticket/${encodeURIComponent(project)}/${encodeURIComponent(id)}`, {
-      signal: controller.signal,
-    })
-      .then(async (response): Promise<Document> =>
-        response.ok ? { status: "ok", document: await response.json() } : { status: "failed" },
-      )
-      .catch((): Document => ({ status: "failed" }))
-      .then((value) => {
-        if (!controller.signal.aborted) setState({ key, value });
-      });
-    return () => controller.abort();
-  }, [project, id, key]);
-  return state.key === key ? state.value : { status: "loading" };
-}
 
 /** Paragraphs and bullet lists of plain text: Markdown marks stay as written, nothing becomes HTML. */
 function Prose({ text, testId }: { text: string; testId: string }) {
@@ -81,7 +53,6 @@ export function TicketPage({ id }: { id: string }) {
   const entry = entries
     ? ([...entries.values()].find((candidate) => candidate.ticket.id === id) ?? null)
     : null;
-  const document = useTicketDocument(entry?.ticket.project ?? null, id);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -152,19 +123,18 @@ export function TicketPage({ id }: { id: string }) {
             ) : null}
             {lead ? <OpenInOrca agent={lead} /> : null}
           </div>
-          {document.status === "loading" ? <p className="mut">Reading the ticket…</p> : null}
-          {document.status === "failed" ? (
+          {ticket.document === null ? (
             <p className="bad-text">The hub could not read the text of this ticket.</p>
           ) : null}
-          {document.status === "ok" ? (
+          {ticket.document ? (
             <>
               <h2>Problem</h2>
-              <Prose text={document.document.problem} testId="ticket-problem" />
+              <Prose text={ticket.document.problem} testId="ticket-problem" />
               <h2>Change</h2>
-              <Prose text={document.document.change} testId="ticket-change" />
-              <h2>Acceptance criteria · {document.document.criteria.length}</h2>
+              <Prose text={ticket.document.change} testId="ticket-change" />
+              <h2>Acceptance criteria · {ticket.document.criteria.length}</h2>
               <ol className="criteria">
-                {document.document.criteria.map((criterion) => (
+                {ticket.document.criteria.map((criterion) => (
                   <li key={criterion.id} data-testid="ticket-criterion" data-id={criterion.id}>
                     <span className="mono mut">{criterion.id}</span> {criterion.text}
                   </li>
