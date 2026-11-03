@@ -2219,3 +2219,64 @@ test("ARK-285-AC10 the theme follows the system, the nav switch sets Auto, Light
   await theme("Auto").click();
   await expect.poll(background).toBe(systemDark);
 });
+
+test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ page }) => {
+  isolate();
+  installFakeTools({});
+  const baseUrl = await launch();
+  await page.goto(`${baseUrl}/#/map`);
+  await expect(page.getByTestId("lane")).toHaveCount(5);
+  await expect(page).toHaveURL(/#\/runs$/);
+  const links = page.getByRole("navigation", { name: "Views" }).getByRole("link");
+  await expect(links).toHaveText(["Home", "Runs", "Backlog"]);
+});
+
+test("ARK-285-AC11 Home, Runs and Backlog send no request after the first load, and a ticket page and a run page read only their own text", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const { baseUrl, older, stuckRun } = await homeWithBlockers();
+  writeBacklogTicket({ project: "p", id: "ARK-521", title: "Ticket", status: "ready" });
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  await open(page, baseUrl, "");
+  // Every reader has answered: the first load is complete.
+  await expect(page.getByTestId("stuck")).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.getByTestId("review").first().getByTestId("tests")).toHaveText(
+    "6 pass · 0 fail",
+    { timeout: 30_000 },
+  );
+  await expect(page.getByTestId("stale-label")).toHaveCount(0);
+  const firstLoad = requests.splice(0);
+  expect(firstLoad.filter((path) => path === "/events")).toHaveLength(1);
+  for (const path of firstLoad)
+    expect(path === "/" || path === "/events" || path.startsWith("/assets/"), path).toBe(true);
+
+  const nav = page.getByRole("navigation", { name: "Views" });
+  for (const [name, heading] of [
+    ["Runs", "Runs"],
+    ["Backlog", "Backlog"],
+    ["Home", "Needs me"],
+  ] as const) {
+    await nav.getByRole("link", { name }).click();
+    await expect(page.getByRole("heading", { name: new RegExp(heading) }).first()).toBeVisible();
+  }
+  await page.waitForTimeout(2000);
+  expect(requests.splice(0)).toEqual([]);
+
+  // The ticket page and the run page do read: AC11 says "no request other than its first load
+  // and the event stream", so these two reads are the places where the page goes past it.
+  await open(page, baseUrl, "ticket/ARK-521");
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await open(page, baseUrl, `run/${stuckRun}`);
+  await expect(page.getByTestId("timeline")).toBeVisible();
+  await open(page, baseUrl, `run/${older.run}`);
+  await expect(page.getByTestId("evidence")).toBeVisible();
+  await page.waitForTimeout(2000);
+  const extra = requests.filter(
+    (path) => path !== "/" && path !== "/events" && !path.startsWith("/assets/"),
+  );
+  expect(extra.length).toBeGreaterThan(0);
+  for (const path of extra)
+    expect(path.startsWith("/api/ticket/") || path.startsWith("/api/run/"), path).toBe(true);
+});

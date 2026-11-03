@@ -1320,3 +1320,100 @@ test("ARK-285-AC6 the median and p90 of step time by role come from the finished
   expect(stepTimeText("validator", 90, snapshot.role_times.validator)).toBe("validator 2 min");
   expect(JSON.stringify(snapshot)).not.toMatch(/\beta\b/i);
 }, 60_000);
+
+test("ARK-285-AC2 an omp that never answers leaves usage unknown, not a guess, and the hub keeps serving", async () => {
+  isolatedEnvironment();
+  installFakeTools({ ompMode: "down" });
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) => current.sources.orca.ok && current.sources.github.ok,
+  );
+  expect(snapshot.provider_limits).toBe("unknown");
+  expect(snapshot.sources.providerLimits.ok).toBe(false);
+  expect(snapshot.sources.providerLimits.read_at).toBeNull();
+  expect((await fetch(`${baseUrl}/`)).status).toBe(200);
+}, 60_000);
+
+test("ARK-285-AC1 docs/design/hub-v2 holds hybrid-1.html and data.js, ADR 0009 names Home, Runs and Backlog and says Runs replaces Map, and Map.tsx is gone", () => {
+  for (const file of ["hybrid-1.html", "data.js"])
+    expect(readFileSync(join(root, "docs/design/hub-v2", file), "utf8").length).toBeGreaterThan(0);
+  const line = readDoc("docs/adr/0009-hub-is-a-read-only-live-view.md")
+    .split("\n")
+    .find((candidate) => candidate.includes("The hub shows"));
+  expect(line).toContain("The hub shows Home, Runs and Backlog");
+  expect(line).toContain("Runs replaces Map");
+  expect(line).not.toContain("Run, Backlog and Map");
+  expect(existsSync(join(root, "hub/page/Map.tsx"))).toBe(false);
+});
+
+test("ARK-285-AC11 with every new reader running and an open MR with a 17000-case report, / and /nope answer with a p95 below 200 ms", async () => {
+  isolatedEnvironment();
+  const mergeRequest = "https://github.com/example/repo/pull/85";
+  const run = `${today()}-ARK-830-1`;
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-830", title: "Big report" },
+    phase: "merge_requests_open",
+    criteria: ["ARK-830-AC1"],
+    mergeRequests: [{ repo: ".", url: mergeRequest, number: 85 }],
+  });
+  const cases = Array.from(
+    { length: 17_000 },
+    (_, index) =>
+      `<testcase name="${index % 50 === 0 ? "ARK-830-AC1 " : "other "}${index}" file="test/a.test.ts" line="${index}" />`,
+  );
+  mkdirSync(join(directory, "results"), { recursive: true });
+  writeFileSync(
+    join(directory, "results", "cli.report"),
+    `<?xml version="1.0"?>\n<testsuites><testsuite name="a">\n${cases.join("\n")}\n</testsuite></testsuites>\n`,
+  );
+  installFakeTools({
+    orca: orcaAnswersFor(run),
+    ompUsage: {
+      reports: [
+        {
+          provider: "anthropic",
+          fetchedAt: Date.now(),
+          limits: [
+            {
+              window: { id: "5h", resetsAt: Date.now() + 3_600_000 },
+              amount: { usedFraction: 0.8 },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const { baseUrl } = await start();
+  const sample = async () => {
+    const latencies: Record<string, number[]> = { "/": [], "/nope": [] };
+    for (let round = 0; round < 100; round++)
+      for (const route of ["/", "/nope"]) {
+        const requestedAt = performance.now();
+        await (await fetch(`${baseUrl}${route}`)).arrayBuffer();
+        latencies[route].push(performance.now() - requestedAt);
+      }
+    for (const [route, durations] of Object.entries(latencies))
+      expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
+  };
+  await sample(); // while the readers make their first pass
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) =>
+      current.sources.evidence.ok &&
+      current.sources.providerLimits.ok &&
+      current.sources.agentWait.ok &&
+      current.sources.github.ok,
+  );
+  expect(openRunOf(snapshot, run).evidence?.criteria[0].proof.length).toBe(340);
+  await sample(); // with every reader answered and cached
+}, 120_000);
+
+test("ARK-285-AC11 typecheck, lint and format:check exit 0 (bun test is this run)", () => {
+  for (const script of ["typecheck", "lint", "format:check"]) {
+    const result = spawnSync("bun", ["run", script], { cwd: root, encoding: "utf8" });
+    expect(result.status, `bun run ${script}\n${result.stdout}${result.stderr}`).toBe(0);
+  }
+}, 300_000);
