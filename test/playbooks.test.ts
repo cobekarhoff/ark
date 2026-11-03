@@ -665,3 +665,21 @@ test("ARK-289-AC6 the live check records the human approval and that the live ha
   expect(lines).toContain("live handoff: not run");
   expect(lines).toContain("human: ok");
 });
+
+test("ARK-287-AC5 run-lead.md tells the lead to re-test a stale head before asking, to re-test after a refused open, and the validator to commit evidence first", () => {
+  const escalate = flat(section(runLeadPlaybook, "## 9. Escalate when the round budget is spent"));
+  expect(escalate).toContain("test head:");
+  expect(escalate).toContain("stale");
+  const retest = escalate.indexOf("`ark test <run>`", escalate.indexOf("test head:"));
+  expect(retest).toBeGreaterThan(-1);
+  expect(retest).toBeLessThan(escalate.indexOf("orca orchestration ask"));
+
+  const open = flat(section(runLeadPlaybook, "## 10. Open the MRs"));
+  expect(open).toContain("changed since the last test");
+  expect(open).toMatch(/Run `ark test <run>` and open again\. This needs no gate/);
+
+  const rework = flat(section(runLeadPlaybook, "## 8. Test, review and rework"));
+  expect(rework).toMatch(
+    /validator commits its evidence files (?:\(.*?\) )?before the last `ark test <run>`, so that no commit follows that test/,
+  );
+});

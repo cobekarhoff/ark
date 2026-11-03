@@ -121,7 +121,7 @@ Opens the escalation gate when the round budget is spent, also when the last ark
 ```text
 ark merge-request open <run> [--project <name>]
 
-Pushes each repo's branch and opens one MR for each repo, in dependency order. No command merges.
+Pushes each repo's branch and opens one MR for each repo, in dependency order. It refuses, with exit 1 and before any push, when a repo head changed since the last test, and ends the error with `run ark test <run> again`. No command merges.
 ```
 
 ### merge-request status
@@ -153,7 +153,7 @@ Fetches and fast-forwards the target branch of the workspace checkout of each re
 ```text
 ark status [<run>] [--project <name>]
 
-Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, MRs and cost. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT, and with a run it looks for the run in that project only.
+Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, test head, MRs and cost. The test head line is `test head: current` when every worktree is at the head of the last test, and one `test head: stale (<repo> tested <8 characters>, now <8 characters>)` line for each repo that changed. There is no test head line before the first test. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT, and with a run it looks for the run in that project only.
 ```
 
 ### retro
