@@ -222,6 +222,8 @@ export type FakeToolOptions = {
   };
   /** Seconds each Orca call sleeps before it answers. */
   orcaSleepSeconds?: number;
+  /** `orca terminal switch` exits 1. Every call is logged in `orca.log` either way. */
+  orcaSwitchFails?: boolean;
   /** `up` answers, `down` fails every call, `twice` answers each command twice and then fails. */
   orcaMode?: "up" | "down" | "twice";
   plannotatorMode?: "up" | "down" | "twice";
@@ -244,6 +246,7 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   put("orca.tasks", wrap(options.orca?.tasks, "tasks"));
   put("orca.inbox", wrap(options.orca?.messages, "messages"));
   put("orca.sleep", String(options.orcaSleepSeconds ?? 0));
+  put("orca.switchfails", options.orcaSwitchFails ? "1" : "0");
   put("orca.mode", options.orcaMode ?? "up");
   put("plannotator.mode", options.plannotatorMode ?? "up");
   put("plannotator.sessions", JSON.stringify(options.plannotatorSessions ?? []));
@@ -275,6 +278,7 @@ cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
 ${modeGate(state, "orca", "$cmd")}
 case "$1 $2" in
   "terminal list") cat '${state}/orca.terminals' ;;
+  "terminal switch") [ "$(cat '${state}/orca.switchfails')" = 1 ] && exit 1; echo '{"result":{}}' ;;
   "orchestration run-list") cat '${state}/orca.runs' ;;
   "orchestration worker-list") cat '${state}/orca.workers' ;;
   "orchestration task-list") cat '${state}/orca.tasks' ;;
@@ -320,4 +324,182 @@ export function orcaAnswersFor(run: string): NonNullable<FakeToolOptions["orca"]
     ],
     tasks: [{ id: "task-1", title: "hub-server (implementer, .)" }],
   };
+}
+
+// ---------------------------------------------------------------- ARK-284
+
+export type SessionHarness = "omp" | "claude" | "codex";
+
+/** Texts a transcript fixture holds, from its `tag`: a test looks for them in the page. */
+export const transcriptTexts = (tag: string) => ({
+  user: `hello ${tag}`,
+  thinking: `pondering ${tag}`,
+  assistant: `answer ${tag}`,
+  command: `ls -la /tmp/${tag}`,
+  okFirstLine: `listing ok ${tag}`,
+  failFirstLine: `boom ${tag}`,
+  /** On the second line of a result: it must never reach the page. */
+  tail: `FULL-RESULT-TAIL ${tag}`,
+});
+
+const iso = (start: Date, second: number) =>
+  new Date(start.getTime() + second * 1000).toISOString();
+
+/**
+ * One session file of the given harness, in the shape the real files have: a user message, a
+ * thinking block, an assistant text, one tool call that succeeds and one that fails. Record `n`
+ * is stamped `start + n` seconds; the first stamp is `start`, the cwd is in the head.
+ */
+export function transcriptText(
+  harness: SessionHarness,
+  options: { cwd: string; start: Date; tag?: string },
+): string {
+  const { cwd, start } = options;
+  const text = transcriptTexts(options.tag ?? harness);
+  const at = (second: number) => iso(start, second);
+  const okResult = `${text.okFirstLine}\nsecond line\n${text.tail}`;
+  const failResult = `${text.failFirstLine}\n${text.tail}`;
+  const records: unknown[] = [];
+  if (harness === "omp") {
+    const message = (second: number, body: Record<string, unknown>) => ({
+      type: "message",
+      id: `m${second}`,
+      timestamp: at(second),
+      message: body,
+    });
+    records.push(
+      { type: "session", version: 3, id: "fixture", timestamp: at(0), cwd },
+      message(1, { role: "user", content: [{ type: "text", text: text.user }] }),
+      message(2, {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: text.thinking },
+          { type: "text", text: text.assistant },
+          { type: "toolCall", id: "c1", name: "bash", arguments: { command: text.command } },
+          { type: "toolCall", id: "c2", name: "bash", arguments: { command: "false" } },
+        ],
+      }),
+      message(3, {
+        role: "toolResult",
+        toolCallId: "c1",
+        isError: false,
+        content: [{ type: "text", text: okResult }],
+      }),
+      message(4, {
+        role: "toolResult",
+        toolCallId: "c2",
+        isError: true,
+        content: [{ type: "text", text: failResult }],
+      }),
+    );
+  } else if (harness === "claude") {
+    const record = (second: number, type: "user" | "assistant", content: unknown) => ({
+      type,
+      uuid: `u${second}`,
+      timestamp: at(second),
+      cwd,
+      message: { role: type, content },
+    });
+    records.push(
+      record(0, "user", text.user),
+      record(1, "assistant", [
+        { type: "thinking", thinking: text.thinking },
+        { type: "text", text: text.assistant },
+        { type: "tool_use", id: "c1", name: "Bash", input: { command: text.command } },
+        { type: "tool_use", id: "c2", name: "Bash", input: { command: "false" } },
+      ]),
+      record(2, "user", [
+        { type: "tool_result", tool_use_id: "c1", content: okResult },
+        { type: "tool_result", tool_use_id: "c2", content: failResult, is_error: true },
+      ]),
+    );
+  } else {
+    const item = (second: number, payload: Record<string, unknown>) => ({
+      timestamp: at(second),
+      type: "response_item",
+      payload,
+    });
+    const output = (result: string, exit: number) =>
+      JSON.stringify({ output: result, metadata: { exit_code: exit } });
+    records.push(
+      { timestamp: at(0), type: "session_meta", payload: { id: "fixture", cwd } },
+      item(1, {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: text.user }],
+      }),
+      item(2, { type: "reasoning", summary: [{ type: "summary_text", text: text.thinking }] }),
+      item(3, {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: text.assistant }],
+      }),
+      item(4, {
+        type: "function_call",
+        name: "shell",
+        call_id: "c1",
+        arguments: JSON.stringify({ command: ["bash", "-lc", text.command] }),
+      }),
+      item(5, { type: "function_call_output", call_id: "c1", output: output(okResult, 0) }),
+      item(6, {
+        type: "function_call",
+        name: "shell",
+        call_id: "c2",
+        arguments: JSON.stringify({ command: ["false"] }),
+      }),
+      item(7, { type: "function_call_output", call_id: "c2", output: output(failResult, 1) }),
+    );
+  }
+  return `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
+}
+
+/** An omp session file of `count` user messages `m0`, `m1`, ...: it pages at 200 entries. */
+export function ompMessagesText(cwd: string, start: Date, count: number): string {
+  const lines = [
+    JSON.stringify({ type: "session", version: 3, id: "fixture", timestamp: iso(start, 0), cwd }),
+  ];
+  for (let number = 0; number < count; number++)
+    lines.push(
+      JSON.stringify({
+        type: "message",
+        id: `m${number}`,
+        timestamp: iso(start, number + 1),
+        message: { role: "user", content: [{ type: "text", text: `m${number}` }] },
+      }),
+    );
+  return `${lines.join("\n")}\n`;
+}
+
+/** Writes `text` to `<root>/<relative>` and returns the path. */
+export function writeSessionFile(root: string, relative: string, text: string): string {
+  const file = join(root, relative);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text);
+  return file;
+}
+
+/**
+ * Replaces a run's `events.ndjson` with the given events, one per line, `seconds` after `started`,
+ * plus any raw lines (a damaged one) at the position given. Use it for a run that needs event
+ * types `writeRun` does not write.
+ */
+export function writeEventLog(
+  directory: string,
+  started: Date,
+  events: { after: number; type: string; data: Record<string, unknown> }[],
+  rawLines: { before: number; text: string }[] = [],
+): void {
+  const lines: string[] = [];
+  events.forEach((event, index) => {
+    for (const raw of rawLines) if (raw.before === index) lines.push(raw.text);
+    lines.push(
+      JSON.stringify({
+        seq: index + 1,
+        time: iso(started, event.after),
+        type: event.type,
+        data: event.data,
+      }),
+    );
+  });
+  writeFileSync(join(directory, "events.ndjson"), `${lines.join("\n")}\n`);
 }

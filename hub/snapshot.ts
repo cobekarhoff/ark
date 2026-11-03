@@ -17,12 +17,15 @@ import {
 import type {
   Gate,
   GateKind,
+  RunDetail,
   RunView,
   Snapshot,
   SourceName,
   StepStatus,
+  TranscriptPage,
   TicketRunView,
 } from "./types.ts";
+import { listRunFiles, timelineOf } from "./run-detail.ts";
 import { UsageIndex, type RunCost } from "./usage.ts";
 
 export const intervalMilliseconds: Record<SourceName, number> = {
@@ -101,6 +104,63 @@ export function createSnapshotReader() {
     return cost;
   }
 
+  /** One run as the page draws it. A closed run has no Orca agents and nothing it waits for. */
+  function viewOf(run: ArkRun, closed: boolean): RunView {
+    const { state, events } = run;
+    const cost = costOf(run, closed);
+    const statusOf = (id: string): StepStatus =>
+      state.steps.find((step) => step.id === id)?.status ?? "pending";
+    const startOf = (id: string): string | null => {
+      const start = run.windows.findLast((window) => window.id === id)?.start;
+      return start === undefined ? null : new Date(start).toISOString();
+    };
+    const waiting = closed ? [] : (slots.orca.value?.waits.get(state.run) ?? []);
+    return {
+      run: state.run,
+      project: state.project,
+      ticket: state.ticket,
+      phase: state.phase,
+      round: state.round,
+      started_at: events[0].time,
+      updated_at: events.at(-1)!.time,
+      plan:
+        run.plan?.map((step) => ({
+          id: step.id,
+          role: step.role,
+          harness: step.harness,
+          model: step.model,
+          needs: step.needs,
+          status: statusOf(step.id),
+          cost_usd: cost.steps[step.id] ?? null,
+          started_at: startOf(step.id),
+          waiting: waiting.find((wait) => wait.step === step.id) ?? null,
+        })) ?? null,
+      merge_requests: state.merge_requests.map((request) => {
+        const facts = githubFacts.get(request.url);
+        return { ...request, state: facts?.state ?? "unknown", ci: facts?.ci ?? "unknown" };
+      }),
+      agents: closed
+        ? []
+        : slots.orca.value
+          ? (slots.orca.value.agents.get(state.run) ?? []).map((agent) => {
+              const step = run.plan?.find((candidate) => candidate.id === agent.step);
+              if (step)
+                return {
+                  ...agent,
+                  planned: { harness: step.harness, model: step.model, source: "plan" as const },
+                };
+              // A run lead starts with the harness and model of `roles.chief` (chief playbook).
+              const chief = agent.step === null ? chiefRole(state.project) : null;
+              return chief
+                ? { ...agent, planned: { ...chief, source: "configured" as const } }
+                : agent;
+            })
+          : "unknown",
+      waiting,
+      cost_usd: cost.total,
+    };
+  }
+
   function compose(): Omit<Snapshot, "generated_at"> {
     const sources = Object.fromEntries(
       Object.entries(slots).map(([name, slot]) => [name, { ok: slot.ok, read_at: slot.readAt }]),
@@ -120,14 +180,6 @@ export function createSnapshotReader() {
     const gates: Gate[] = [];
     const runs = openRuns.map((run): RunView => {
       const { state, events, directory } = run;
-      const cost = costOf(run, false);
-      const statusOf = (id: string): StepStatus =>
-        state.steps.find((step) => step.id === id)?.status ?? "pending";
-      const startOf = (id: string): string | null => {
-        const start = run.windows.findLast((window) => window.id === id)?.start;
-        return start === undefined ? null : new Date(start).toISOString();
-      };
-      const waiting = slots.orca.value?.waits.get(state.run) ?? [];
       const kind = waitingGate(state);
       if (kind !== "none") {
         const gateKind = kind as GateKind;
@@ -147,48 +199,7 @@ export function createSnapshotReader() {
             .time,
         });
       }
-      return {
-        run: state.run,
-        project: state.project,
-        ticket: state.ticket,
-        phase: state.phase,
-        round: state.round,
-        started_at: events[0].time,
-        updated_at: events.at(-1)!.time,
-        plan:
-          run.plan?.map((step) => ({
-            id: step.id,
-            role: step.role,
-            harness: step.harness,
-            model: step.model,
-            needs: step.needs,
-            status: statusOf(step.id),
-            cost_usd: cost.steps[step.id] ?? null,
-            started_at: startOf(step.id),
-            waiting: waiting.find((wait) => wait.step === step.id) ?? null,
-          })) ?? null,
-        merge_requests: state.merge_requests.map((request) => {
-          const facts = githubFacts.get(request.url);
-          return { ...request, state: facts?.state ?? "unknown", ci: facts?.ci ?? "unknown" };
-        }),
-        agents: slots.orca.value
-          ? (slots.orca.value.agents.get(state.run) ?? []).map((agent) => {
-              const step = run.plan?.find((candidate) => candidate.id === agent.step);
-              if (step)
-                return {
-                  ...agent,
-                  planned: { harness: step.harness, model: step.model, source: "plan" as const },
-                };
-              // A run lead starts with the harness and model of `roles.chief` (chief playbook).
-              const chief = agent.step === null ? chiefRole(state.project) : null;
-              return chief
-                ? { ...agent, planned: { ...chief, source: "configured" as const } }
-                : agent;
-            })
-          : "unknown",
-        waiting,
-        cost_usd: cost.total,
-      };
+      return viewOf(run, false);
     });
     gates.sort((left, right) => left.since.localeCompare(right.since));
 
@@ -196,8 +207,12 @@ export function createSnapshotReader() {
     const newest = new Map<string, TicketRunView>();
     for (const run of ark.runs) {
       const key = `${run.state.project}/${run.state.ticket.id}`;
-      if (newest.has(key)) continue;
       const closed = run.state.phase === "closed";
+      const known = newest.get(key);
+      if (known) {
+        known.all.push({ run: run.state.run, phase: run.state.phase });
+        continue;
+      }
       newest.set(key, {
         project: run.state.project,
         ticket: run.state.ticket.id,
@@ -205,6 +220,7 @@ export function createSnapshotReader() {
         phase: run.state.phase,
         waiting: !closed && (slots.orca.value?.waits.get(run.state.run)?.length ?? 0) > 0,
         cost_usd: costOf(run, closed).total,
+        all: [{ run: run.state.run, phase: run.state.phase }],
       });
     }
     return {
@@ -356,5 +372,53 @@ export function createSnapshotReader() {
       return () => listeners.delete(listener);
     },
     usage,
+    /** Run folder of a run the hub knows (open or closed), or null. The URL names a run, never a path. */
+    runDirectory(run: string): string | null {
+      return (
+        slots.ark.value?.runs.find((candidate) => candidate.state.run === run)?.directory ?? null
+      );
+    },
+    /**
+     * Any run, open or closed, read on request: timeline from the events held in memory, the run files
+     * that exist, and the session files mapped whole to owners. Null for a run the hub does not know.
+     */
+    runDetail(run: string): RunDetail | null {
+      const found = slots.ark.value?.runs.find((candidate) => candidate.state.run === run);
+      if (!found) return null;
+      const closed = found.state.phase === "closed";
+      const { events } = found;
+      return {
+        view: viewOf(found, closed),
+        closed,
+        outcome: found.state.outcome,
+        closed_at: closed
+          ? (events.findLast((event) => event.type === "run.closed")?.time ?? null)
+          : null,
+        timeline: timelineOf(events),
+        files: listRunFiles(found.directory),
+        sessions: usage.sessionsOf(found.directory, found.windows, Date.parse(events[0].time)),
+        sessions_ready: slots.usage.readAt !== null,
+      };
+    },
+    /** Terminal handles the current snapshot lists as live: the only handles `open-in-orca` accepts. */
+    liveTerminals(): Set<string> {
+      const current = JSON.parse(this.json()) as Snapshot;
+      const handles = new Set<string>();
+      if (current.runs !== "unknown")
+        for (const run of current.runs)
+          if (run.agents !== "unknown")
+            for (const agent of run.agents)
+              if (agent.live && agent.terminal) handles.add(agent.terminal);
+      return handles;
+    },
+    /**
+     * One page of a session file of the run, read in the usage worker thread. Null when the hub does
+     * not know the run or the file is not one of the run's session files (the URL never names a path
+     * that the index did not list). Rejects when the worker fails.
+     */
+    async transcript(run: string, file: string, cursor: number): Promise<TranscriptPage | null> {
+      const session = this.runDetail(run)?.sessions.find((candidate) => candidate.file === file);
+      return session ? usage.transcript(file, session.harness, cursor) : null;
+    },
   };
 }

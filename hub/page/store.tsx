@@ -90,6 +90,11 @@ export const sourceNames: SourceName[] = ["ark", "orca", "plannotator", "github"
 export type Route = {
   view: "home" | "run" | "backlog" | "map";
   run: string | null;
+  /**
+   * `#/run/<run>/step/<id>`, `/lead`, `/session/<file>` open a transcript; `/file/<path>` shows a run
+   * file. Each argument is one URL-encoded segment.
+   */
+  sub: { kind: "step" | "lead" | "session" | "file"; arg: string | null } | null;
   /** `#/backlog/<ticket>` marks a row; `#/map/finished` shows finished tickets. */
   arg: string | null;
 };
@@ -104,11 +109,16 @@ const decode = (part: string): string => {
 };
 
 export function parseRoute(hash: string): Route {
-  const [, view, part] = hash.split("/");
+  const [, view, part, kind, subArg] = hash.split("/");
   const arg = part ? decode(part) : null;
-  if (view === "run") return { view, run: arg, arg: null };
-  if (view === "backlog" || view === "map") return { view, run: null, arg };
-  return { view: "home", run: null, arg: null };
+  if (view === "run") {
+    const subKinds = ["step", "lead", "session", "file"] as const;
+    const subKind = subKinds.find((candidate) => candidate === kind);
+    const sub = subKind ? { kind: subKind, arg: subArg ? decode(subArg) : null } : null;
+    return { view, run: arg, sub, arg: null };
+  }
+  if (view === "backlog" || view === "map") return { view, run: null, sub: null, arg };
+  return { view: "home", run: null, sub: null, arg: null };
 }
 
 const subscribeHash = (notify: () => void) => {
