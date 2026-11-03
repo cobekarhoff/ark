@@ -574,3 +574,8 @@ test("ARK-286-AC5 chief leaves a close of an aborted run to the run lead unless 
   expect(rule).toContain("no run lead is alive");
   expect(runLeadPlaybook).toContain("ark run close <run> aborted");
 });
+
+test("ARK-286-AC6 package.json defines the typecheck, lint and format:check scripts", () => {
+  const { scripts } = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8"));
+  for (const name of ["typecheck", "lint", "format:check"]) expect(scripts[name]).toBeTruthy();
+});
