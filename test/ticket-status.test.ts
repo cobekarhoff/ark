@@ -189,7 +189,7 @@ test("ARK-191-AC2 run close leaves the ticket file alone when ticket_source is n
 /** Starts a run whose newest event is `minutesOld` hours before the frozen status time. */
 function openRunAged(ticketId: string, minutesOld: number, statusTime: number): string {
   process.env.ARK_NOW = new Date(statusTime - minutesOld * 60_000).toISOString();
-  const { runId } = startRun(writeTicket("demo", ticketId, [{ id: `${ticketId}-AC1`, text: "x" }]));
+  const { runId } = startRun(ticketWithStatus(ticketId, "ready"));
   return runId;
 }
 
