@@ -37,7 +37,7 @@ The run's tests passed and its branches were given to a human without Ark openin
 _Avoid_: Delivered
 
 **Hub**:
-The browser page `ark ui` serves. It lists what waits for the human across all projects, with live runs, Master Chief state and agents. It steers agents by sending text to the Master Chief terminal (or a run lead terminal) with `orca terminal send`; it never changes run state itself (ADR 0008).
+The read-only browser page `ark ui` serves, from `hub/`. Home shows what needs the human, then each open run with its agents, models, MRs and cost; Run draws the plan DAG; Backlog lists tickets; Map graphs ticket dependencies. It steers nothing and changes no state (ADR 0009).
 _Avoid_: Control center, dashboard
 
 **Merge request (MR)**:

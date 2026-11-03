@@ -52,9 +52,9 @@ omp plugin link .   # install this repo as an OMP plugin
 bun test            # run the tests
 ```
 
-The hub's Needs me section reports when the Plannotator Inbox is not running or
-when its reader fails. `/api/state` exposes the reader status and error in
-`readers.plannotator` and `readers.plannotator_error`.
+The hub is read-only. When Orca or Plannotator does not answer, its views keep
+the last good value and show how old it is; `GET /api/snapshot` returns the
+same snapshot the page gets.
 
 To undo the setup, run `bun unlink` and `omp plugin uninstall ark`.
 

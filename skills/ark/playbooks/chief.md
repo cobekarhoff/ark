@@ -26,7 +26,7 @@ Use the project name as `<project>` below.
 Do this before anything else in the session. Each project has one Master Chief.
 
 1. List the Runs: `orca orchestration run-list --json`.
-2. Find a Run whose objective is exactly "Master Chief: <project> tickets". If none exists, create it now. `run-create` binds this terminal to the new Run, and the hub finds and steers Master Chief through that Run:
+2. Find a Run whose objective is exactly "Master Chief: <project> tickets". If none exists, create it now. `run-create` binds this terminal to the new Run, and `ark chief handover` finds Master Chief through that Run:
 
    ```sh
    orca orchestration run-create --objective "Master Chief: <project> tickets" --json

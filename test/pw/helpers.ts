@@ -116,9 +116,9 @@ export function writeFakeOrca(script: string): string {
   return directory;
 }
 
-/** Starts `ark ui --port 0` and resolves once it prints its address. `useCleanup` kills it. */
+/** Starts `bun hub/main.ts --port 0` and resolves once it prints its address. `useCleanup` kills it. */
 export async function startHub(): Promise<{ process: ChildProcess; baseUrl: string }> {
-  const hub = spawn("bun", [join(repositoryRoot, "cli", "ark.ts"), "ui", "--port", "0"], {
+  const hub = spawn("bun", [join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -129,7 +129,7 @@ export async function startHub(): Promise<{ process: ChildProcess; baseUrl: stri
     const port = output.match(/127\.0\.0\.1:(\d+)/)?.[1];
     if (port) return { process: hub, baseUrl: `http://127.0.0.1:${port}` };
   }
-  throw new Error(`ark ui exited before serving: ${output}`);
+  throw new Error(`the hub exited before serving: ${output}`);
 }
 
 /** Stops one hub started by `startHub`. */
