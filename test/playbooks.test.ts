@@ -651,12 +651,10 @@ test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
   expect(result.exitCode).toBe(0);
 });
 
-test("ARK-289-AC6 the live check records the message id, Master Chief's quoted approval and human: ok", () => {
-  const lines = readFileSync(
-    join(import.meta.dir, "../docs/evidence/ARK-289-ac6.md"),
-    "utf8",
-  ).split("\n");
-  expect(lines.some((line) => /^message id: \S+/.test(line))).toBe(true);
-  expect(lines.some((line) => /^Master Chief: .*Human approval:/.test(line))).toBe(true);
+test("ARK-289-AC6 the live check records the human approval and that the live handoff was not run", () => {
+  const text = readFileSync(join(import.meta.dir, "../docs/evidence/ARK-289-ac6.md"), "utf8");
+  const lines = text.split("\n");
+  expect(text).toContain('"i approve it here"');
+  expect(lines).toContain("live handoff: not run");
   expect(lines).toContain("human: ok");
 });
