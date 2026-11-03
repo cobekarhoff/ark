@@ -525,3 +525,52 @@ test("ARK-187-AC4 run-lead lets the human abort in any phase before an MR opens 
   expect(runLeadPlaybook).toContain("The human can abort in any phase before an MR opens");
   expect(runLeadPlaybook).toContain("ark run close <run> aborted");
 });
+
+const retroPlaybook = readFileSync(join(playbookDirectory, "retro.md"), "utf8");
+const chiefSection = (n: number) =>
+  chiefPlaybook.split(new RegExp(`^## ${n}\\.`, "m"))[1]?.split(/^## \d+\./m)[0] ?? "";
+
+test("ARK-286-AC1 chief section 7 has the busy-agent rule and every send carries a retry id", () => {
+  const supervise = chiefSection(7);
+  for (const text of ["already processing", "30 seconds", "5 times"])
+    expect(supervise).toContain(text);
+
+  const sends = chiefPlaybook.split("\n").filter((l) => l.includes("orca orchestration send"));
+  expect(sends.length).toBeGreaterThan(0);
+  for (const line of sends) expect(line).toContain("--retry-request");
+});
+
+test("ARK-286-AC2 chief reports an undelivered message and sends it again on the next wait", () => {
+  const rule = chiefSection(7).split("### A busy agent")[1]?.split(/^### /m)[0] ?? "";
+  expect(rule).toMatch(
+    /tell the human the target, the subject and that the message is not delivered/,
+  );
+  expect(rule).toMatch(/Send the message again on your next wait/);
+  expect(rule).toMatch(/Never treat the message as delivered/);
+});
+
+test("ARK-286-AC3 run-lead has the busy-agent rule with a shared retry id and a fallback", () => {
+  for (const text of ["already processing", "--retry-request", "30 seconds", "5 sends"])
+    expect(runLeadPlaybook).toContain(text);
+  expect(runLeadPlaybook).toContain("orca orchestration check --wait");
+  expect(runLeadPlaybook).toContain("final report");
+});
+
+test("ARK-286-AC4 retro handoff send carries a retry id and names the chief rule", () => {
+  const part1 = retroPlaybook.split("## Part 2")[0]!;
+  const send = part1.split("\n").find((l) => l.includes("orca orchestration send"));
+  expect(send).toContain("--retry-request <id>");
+  expect(part1).toContain("already processing");
+  expect(part1).toMatch(/"A busy agent" in `playbooks\/chief\.md` section 7/);
+});
+
+test("ARK-286-AC5 chief leaves a close of an aborted run to the run lead unless none is alive", () => {
+  const close = chiefSection(8);
+  const row = close.split("\n").find((l) => l.startsWith("| The human stops the run"));
+  expect(row).toContain("`ark run close <run> aborted`");
+  const rule = close.split("\n").find((l) => l.startsWith("Abort row:"));
+  expect(rule).toContain("the run lead runs `ark run close <run> aborted` itself");
+  expect(rule).toContain("ark status <run>");
+  expect(rule).toContain("no run lead is alive");
+  expect(runLeadPlaybook).toContain("ark run close <run> aborted");
+});
