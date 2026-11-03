@@ -53,7 +53,8 @@ const roles = ["implementer", "validator", "reviewer"];
 const levels = ["integration", "e2e"];
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
-const textList = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
+const textList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.map((item) => (item == null ? "" : String(item))) : [];
 const objectList = (value: unknown): Record<string, unknown>[] =>
   Array.isArray(value)
     ? value.map((item) =>
