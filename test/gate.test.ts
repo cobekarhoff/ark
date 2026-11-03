@@ -218,3 +218,59 @@ describe("gate record", () => {
     expect(stateOf(directory).outcome).toBe("aborted");
   });
 });
+
+describe("plan approval survives only an unchanged valid recheck", () => {
+  // Approves a valid plan, rechecks it, and returns the run.
+  function approvedRun() {
+    const { runId, directory } = startRun(criteria);
+    writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
+    expect(ark("plan", "check", runId).code).toBe(0);
+    expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
+    return { runId, directory };
+  }
+
+  test("ARK-187-AC1 a recheck of an unchanged plan keeps approval and the step starts", () => {
+    const { runId, directory } = approvedRun();
+    expect(ark("plan", "check", runId).code).toBe(0);
+    const started = ark("run", "step", runId, "build", "start");
+    expect(started.code).toBe(0);
+    expect(stateOf(directory).current_step).toBe("build");
+  });
+
+  test("ARK-187-AC2 a recheck of an edited plan clears approval and step start names the plan gate", () => {
+    const { runId, directory } = approvedRun();
+    writeFileSync(
+      join(directory, "plan.yml"),
+      JSON.stringify({ ...plan, steps: [{ ...plan.steps[0], model: "other" }] }),
+    );
+    // The edit is checked against the project roles; the result may be invalid, the hash differs either way.
+    ark("plan", "check", runId);
+    const before = eventsOf(directory).length;
+    const refused = ark("run", "step", runId, "build", "start");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("gate.answered plan approve");
+    expect(eventsOf(directory).length).toBe(before);
+  });
+
+  test("ARK-187-AC2 an invalid recheck with the same plan hash clears approval", () => {
+    const { runId, directory } = approvedRun();
+    // Same plan.yml bytes, but the role's model no longer exists in the project config.
+    writeProject("demo", {
+      workspace: tempGitRepo(),
+      ticket_source: "local",
+      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+      roles: {
+        implementer: { harness: "other", model: "other" },
+        validator: { harness: "codex", model: "gpt-codex" },
+        reviewer: { harness: "codex", model: "gpt-codex" },
+      },
+    });
+    const checked = ark("plan", "check", runId);
+    expect(checked.code).toBe(1);
+    const before = eventsOf(directory).length;
+    const refused = ark("run", "step", runId, "build", "start");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("gate.answered plan approve");
+    expect(eventsOf(directory).length).toBe(before);
+  });
+});
