@@ -44,7 +44,7 @@ ark status <run>
 
 `ark status` lists every open run. `ark status <run>` shows the phase, the round, the current step, the gate that waits for you, the MR links and the cost so far.
 
-Workers run without a permission prompt. `ark worktree anchor` and `ark worktree create` write `.omp/config.yml` in each repo worktree of the run, with `tools.approvalMode: yolo`, the least permissive setting that stops the prompt. It applies only to the worktrees Ark makes for the run: nothing in your `~/.omp` and nothing in the main workspace changes. A `.omp/.gitignore` keeps the file out of `git status` and the MR. To turn it off for a worktree, delete its `.omp/config.yml`; there is no Ark switch. A worker that still stops at a permission prompt is a defect: tell Master Chief, and do not click the prompt through.
+omp workers run without a permission prompt, measured in structured mode. `ark worktree anchor` and `ark worktree create` write `.omp/config.yml` in each repo worktree of the run, with `tools.approvalMode: yolo`, the lowest value that did not stop a worker in the measured runs. Terminal mode and other harnesses (claude, codex) were not measured and ignore `.omp/config.yml`. It applies only to the worktrees Ark makes for the run: nothing in your `~/.omp` and nothing in the main workspace changes. A `.omp/.gitignore` keeps the file out of `git status` and the MR. To turn it off for a worktree, delete its `.omp/config.yml` before the worker starts; the delete is per worktree, and every new run writes the file again. There is no Ark switch. A worker that still stops at a permission prompt is a defect: tell Master Chief, and do not click the prompt through.
 
 ## 4. Answer the gates
 

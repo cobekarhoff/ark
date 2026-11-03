@@ -461,6 +461,12 @@ test("ARK-280-AC2 every worker-start line of chief.md and run-lead.md runs in an
   expect(section(runLeadPlaybook, "## 6. Create the worktrees")).toContain(
     "`.omp/config.yml` with `tools.approvalMode: yolo` in each repo worktree it makes (`ark worktree anchor` too)",
   );
+  const bootstrapPlaybook = readFileSync(join(playbookDirectory, "bootstrap.md"), "utf8");
+  const depthCheck = section(bootstrapPlaybook, "## 6. Confirm Orca's nesting depth is at least 2");
+  expect(depthCheck).toContain("--worktree path:<workspace>");
+  expect(depthCheck).toContain(
+    "the depth check follows the global `tools.approvalMode`. A worker that stops at a permission prompt here is not a depth failure: tell the human.",
+  );
 });
 
 test("ARK-280-AC4 the playbooks call a worker that stops at a permission prompt a defect to report, not to approve", () => {
