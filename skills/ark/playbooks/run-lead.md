@@ -333,7 +333,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 
    When the step has a `skills` list in `plan.yml`, add a line `UI skills: <the skills of the step>` to the worker spec.
 
-   Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`, then run `ark run step <run> <step> finish --failed` and decide what to do.
+   Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`. When no worker ran (the output has `failedStage` and no running terminal), run `ark run step <run> <step> finish --failed --not-started`, and not `finish --failed`: `--not-started` gives back the round that `start` took. Never use `--not-started` for a worker that ran. When the error names a model, harness or ACP model, read `roles` in `ark.yml` again, fix `harness` and `model` in `plan.yml` to a pair that `roles` has, and run `ark plan check <run>`. Then decide what to do.
 
 3. Keep the terminal handle from the `worker-start --json` output: the `id` of the entry in `result.effects[]` with `"kind": "terminal"` (`term_...`). About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds, then read its terminal, without waiting for the long wait below:
 
