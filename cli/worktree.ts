@@ -14,6 +14,7 @@ import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 import { discoverRepos, git, mirrorRoot, targetBranch } from "./workspace.ts";
+import { mergeRequestState } from "./merge-request.ts";
 
 const skippedRootEntries = new Set([".git", ".DS_Store", "repos"]);
 
@@ -34,16 +35,40 @@ function reposOfLastValidPlan(runDirectory: string): string[] {
   return [...new Set(steps.map((step) => step.repo))];
 }
 
-/** `ark/<ticket id>-<slug>`, plus `-<run number>` from the second run on. The slug is the title, lowercase, hyphenated, at most 40 characters. */
-function branchName(runId: string, ticket: { id: string; title: string }): string {
+/** `ark/<ticket id>-<slug>`. The slug is the title, lowercase, hyphenated, at most 40 characters. */
+function baseBranchName(ticket: { id: string; title: string }): string {
   const slug = ticket.title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+/, "")
     .slice(0, 40)
     .replace(/-+$/, "");
-  const number = Number(runId.match(/-(\d+)$/)?.[1] ?? 1);
-  return `ark/${ticket.id}${slug ? `-${slug}` : ""}${number > 1 ? `-${number}` : ""}`;
+  return `ark/${ticket.id}${slug ? `-${slug}` : ""}`;
+}
+
+/** Where the branch `name` exists in `source`: `locally`, `on origin`, or undefined when free. A repo without an origin remote, or with an unreachable one, falls back to the local refs. */
+function branchTakenAt(source: string, name: string): string | undefined {
+  const has = (ref: string) =>
+    Bun.spawnSync(["git", "-C", source, "show-ref", "--verify", "--quiet", ref]).exitCode === 0;
+  if (has(`refs/heads/${name}`)) return "locally";
+  if (has(`refs/remotes/origin/${name}`)) return "on origin";
+  const listed = Bun.spawnSync(["git", "-C", source, "ls-remote", "--heads", "origin", name]);
+  const onOrigin = listed.stdout
+    .toString()
+    .split("\n")
+    .some((line) => line.endsWith(`\trefs/heads/${name}`));
+  return onOrigin ? "on origin" : undefined;
+}
+
+/** The base name, or the lowest `-<n>` from 2 that is free locally and on origin. `taken` says why the base name was not used. */
+function freeBranchName(source: string, base: string): { branch: string; taken?: string } {
+  const where = branchTakenAt(source, base);
+  if (where === undefined) return { branch: base };
+  for (let suffix = 2; ; suffix++) {
+    const branch = `${base}-${suffix}`;
+    if (branchTakenAt(source, branch) === undefined)
+      return { branch, taken: `${base} exists ${where}` };
+  }
 }
 
 /** Removes the worktree and its branch, then returns one "left behind" line for each that is still there. */
@@ -64,7 +89,6 @@ function removeWorktree(source: string, path: string, branch: string, forces: nu
 
 /** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. */
 function addRepoWorktree(
-  runId: string,
   directory: string,
   workspace: string,
   setup: string | undefined,
@@ -77,14 +101,17 @@ function addRepoWorktree(
   const path = repo === "." ? mirror : join(mirror, repo);
   const isSymlink = pathExists(path) && lstatSync(path).isSymbolicLink();
   const source = join(workspace, repo);
-  const branch = branchName(runId, state.ticket);
   if (!isSymlink && existsSync(join(path, ".git"))) {
     if (state.worktrees.some((worktree) => worktree.repo === repo)) {
       log(`exists   ${repo}`);
       return;
     }
-    // no worktree.created event: an earlier create failed and its cleanup failed too
-    const left = removeWorktree(source, path, branch, 2);
+    // no worktree.created event: an earlier create failed and its cleanup failed too.
+    // Its branch is the one checked out there; a new name search would not find it.
+    const oldBranch = Bun.spawnSync(["git", "-C", path, "symbolic-ref", "--short", "HEAD"])
+      .stdout.toString()
+      .trim();
+    const left = removeWorktree(source, path, oldBranch, 2);
     if (left.length > 0)
       throw new ArkError(
         `could not remove the stale leftover in repo "${repo}"\n${left.join("\n")}`,
@@ -93,9 +120,11 @@ function addRepoWorktree(
   }
   if (isSymlink) unlinkSync(path); // an earlier call left this repo untouched
   mkdirSync(dirname(path), { recursive: true });
+  const { branch, taken } = freeBranchName(source, baseBranchName(state.ticket));
   const base = git(source, "rev-parse", "HEAD");
   git(source, "worktree", "add", "-b", branch, path, base);
   log(`created  ${repo} -> ${path}`);
+  if (taken) log(`branch   ${repo}  ${branch} (${taken})`);
   if (setup) {
     const result = Bun.spawnSync(["sh", "-c", setup], { cwd: path });
     if (result.exitCode !== 0) {
@@ -125,12 +154,58 @@ export function worktreeAnchor(runId: string, inProject?: string): void {
   if (repo === undefined) throw new ArkError(`workspace ${config.workspace} has no git repo`);
   const state = deriveState(readEvents(directory));
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
-  addRepoWorktree(runId, directory, config.workspace, config.setup, state, repo, () => {});
+  addRepoWorktree(directory, config.workspace, config.setup, state, repo, () => {});
   const mirror = mirrorRoot(directory);
   console.log(`path:${repo === "." ? mirror : join(mirror, repo)}`);
 }
 
-export function worktreeCreate(runId: string, repos: string[], inProject?: string): void {
+/** Checks every repo that still needs a worktree for uncommitted changes before any worktree is added. Throws and names the changed paths, or with `allowDirty` prints a warning per repo. */
+function checkClean(
+  workspace: string,
+  knownRepos: string[],
+  repos: string[],
+  state: RunState,
+  allowDirty: boolean,
+): void {
+  const nested = knownRepos.map((repo) => join(workspace, repo));
+  const dirty = repos
+    .filter((repo) => !state.worktrees.some((worktree) => worktree.repo === repo))
+    .map((repo) => ({ repo, source: join(workspace, repo), lines: [] as string[] }))
+    .map((entry) => ({ ...entry, lines: dirtyLines(entry.source, nested) }))
+    .filter(({ lines }) => lines.length > 0);
+  if (dirty.length === 0) return;
+  const shown = 10;
+  if (allowDirty) {
+    for (const { repo, source, lines } of dirty)
+      console.log(
+        [
+          `warning  ${repo.padEnd(8)} ${source} has ${lines.length} uncommitted ${lines.length === 1 ? "change" : "changes"}, not in the worktree`,
+          ...lines.slice(0, shown).map((line) => `             ${line}`),
+          ...(lines.length > shown ? [`             ... and ${lines.length - shown} more`] : []),
+        ].join("\n"),
+      );
+    return;
+  }
+  const report = dirty.flatMap(({ repo, source, lines }) => [
+    `  dirty    ${repo.padEnd(8)} ${source}  (${lines.length} changed ${lines.length === 1 ? "file" : "files"})`,
+    ...lines.slice(0, shown).map((line) => `             ${line}`),
+    ...(lines.length > shown ? [`             ... and ${lines.length - shown} more`] : []),
+  ]);
+  throw new ArkError(
+    [
+      `refusing to create worktrees, ${dirty.length} ${dirty.length === 1 ? "repo has" : "repos have"} uncommitted changes:`,
+      ...report,
+      "Commit or stash them, or pass --allow-dirty to branch from HEAD without those changes.",
+    ].join("\n"),
+  );
+}
+
+export function worktreeCreate(
+  runId: string,
+  repos: string[],
+  inProject?: string,
+  allowDirty = false,
+): void {
   const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
   const workspace = config.workspace;
@@ -150,9 +225,10 @@ export function worktreeCreate(runId: string, repos: string[], inProject?: strin
 
   const state = deriveState(readEvents(directory));
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
+  checkClean(workspace, knownRepos, touched, state, allowDirty);
 
   for (const repo of touched)
-    addRepoWorktree(runId, directory, workspace, config.setup, state, repo, console.log);
+    addRepoWorktree(directory, workspace, config.setup, state, repo, console.log);
 
   const mirror = mirrorRoot(directory);
   if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror
@@ -254,21 +330,31 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
         continue;
       }
       if (state.outcome === "merged") {
-        Bun.spawnSync(["git", "-C", source, "fetch", "origin"]); // best effort: a stale origin ref only keeps the branch
-        const target = targetBranch(source);
-        if (
-          Bun.spawnSync([
-            "git",
-            "-C",
-            source,
-            "merge-base",
-            "--is-ancestor",
-            branch,
-            `origin/${target}`,
-          ]).exitCode !== 0
-        ) {
-          keep(`branch is not in ${target}`);
-          continue;
+        // before the worktree is removed: the host call runs inside it
+        const mergeRequest = state.merge_requests.find((merge) => merge.repo === repo);
+        const mergeState = mergeRequest ? mergeRequestState(mergeRequest, path) : "none";
+        if (mergeState !== "merged") {
+          // a squash or rebase merge leaves the branch out of the target, so only a merged MR proves it
+          const fetched = Bun.spawnSync(["git", "-C", source, "fetch", "origin"]);
+          const target = targetBranch(source);
+          const inTarget =
+            Bun.spawnSync([
+              "git",
+              "-C",
+              source,
+              "merge-base",
+              "--is-ancestor",
+              branch,
+              `origin/${target}`,
+            ]).exitCode === 0;
+          if (!inTarget) {
+            const unknown = mergeState === "none" || mergeState === "unknown";
+            if (fetched.exitCode !== 0 && unknown) {
+              const reason = fetched.stderr.toString().trim().split("\n").join(" ");
+              keep(`could not fetch origin (${reason}), cannot tell if the MR merged`);
+            } else keep(`branch is not in ${target}`);
+            continue;
+          }
         }
       }
       git(source, "worktree", "remove", "--force", path); // clean but for Ark's own symlinks
