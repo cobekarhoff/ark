@@ -53,7 +53,8 @@ const roles = ["implementer", "validator", "reviewer"];
 const levels = ["integration", "e2e"];
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
-const textList = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
+const textList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.map((item) => (item == null ? "" : String(item))) : [];
 const objectList = (value: unknown): Record<string, unknown>[] =>
   Array.isArray(value)
     ? value.map((item) =>
@@ -98,7 +99,7 @@ export function loadPlan(runDirectory: string): Plan {
       approach: text(designBlock.approach),
       interfaces: objectList(designBlock.interfaces).map((entry) => ({
         name: text(entry.name),
-        callers: textList(entry.callers),
+        callers: textList(entry.callers).map((caller) => caller.trim()),
       })),
       example: text(designBlock.example),
     },
@@ -280,6 +281,8 @@ export function findProblems(
     if (!entry.name) problems.push(`design interface #${i + 1} has no name`);
     if (entry.callers.length === 0) {
       problems.push(`design interface ${entry.name || `#${i + 1}`} has no callers`);
+    } else if (entry.callers.includes("")) {
+      problems.push(`design interface ${entry.name || `#${i + 1}`} has a blank caller`);
     }
   });
   const decisionIds = new Set<string>();
@@ -377,8 +380,14 @@ export function renderPlanMarkdown(
     lines.push(`| ${tableCell(entry.name)} | ${entry.callers.map(tableCell).join("<br>")} |`);
   }
   lines.push("");
-  if (plan.design.example.trim()) lines.push("```text", plan.design.example.trimEnd(), "```");
-  else lines.push("No example given.");
+  if (plan.design.example.trim()) {
+    const longestRun = Math.max(
+      0,
+      ...(plan.design.example.match(/`+/g) ?? []).map((run) => run.length),
+    );
+    const fence = "`".repeat(Math.max(3, longestRun + 1));
+    lines.push(`${fence}text`, plan.design.example.trimEnd(), fence);
+  } else lines.push("No example given.");
   if (plan.decisions.length > 0) {
     lines.push("", "## Decisions", "");
     for (const decision of plan.decisions) {
