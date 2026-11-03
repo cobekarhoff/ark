@@ -227,7 +227,7 @@ test("ARK-165-AC1 ARK-165-AC2 Chief polls on every wait, closes merged runs and 
   const supervise = chief.split("## 7. Supervise")[1]?.split("\n## ")[0] ?? "";
   const close = chief.split("## 8. Close the run")[1]?.split("\n## ")[0] ?? "";
   expect(supervise).toContain(
-    "On every wait, including an empty one, run `ark merge-request status <run>`",
+    "On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>`",
   );
   expect(supervise).toContain("If every MR of a run is merged, go to section 8");
   expect(close).toContain("ark run close <run> merged");
