@@ -31,9 +31,9 @@ Records that a plan step started or finished. Use --failed with finish when the 
 ### run close
 
 ```text
-ark run close <run> <outcome> [--project <name>]
+ark run close [<run> <outcome>] [--sweep] [--project <name>]
 
-Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs.
+Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs. After the close it releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each; it prints `<dispatch id> still active, not released` for an active one, and one `orca: workers not released: <reason>` line when Orca fails, and the close still exits 0. `ark run close --sweep [--project <name>]` does the same release for every closed run of the project (ARK_PROJECT when --project is not given), records no event, and prints nothing for a run with nothing to report. --sweep takes no run argument.
 ```
 
 ### evaluation record
