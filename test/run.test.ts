@@ -722,17 +722,10 @@ test("ARK-278-AC3 an Orca failure prints one orca line and the close still recor
   expect(closedEvent(missing.directory)).toBe(true);
 
   // orca hangs past the timeout
-  const hung = startRun("demo", "ARK-901");
-  useFakeOrca({ runs: [], workers: {}, hang: true });
-  process.env.ARK_ORCA_TIMEOUT_MS = "300";
-  try {
-    const hang = ark("run", "close", hung.runId, "aborted");
-    expect(hang.code).toBe(0);
-    expect(hang.out).toMatch(/orca: workers not released: .*timed out$/m);
-    expect(hang.out.match(/orca:/g)).toHaveLength(1);
-  } finally {
-    delete process.env.ARK_ORCA_TIMEOUT_MS;
-  }
+  const hung = runHangingClose();
+  expect(hung.output.code).toBe(0);
+  expect(hung.output.out).toMatch(/orca: workers not released: .*timed out$/m);
+  expect(hung.output.out.match(/orca:/g)).toHaveLength(1);
   expect(closedEvent(hung.directory)).toBe(true);
 
   // one failing dispatch: later dispatches of the run are still released, one orca line
@@ -764,15 +757,7 @@ test("ARK-278-AC3 an Orca failure prints one orca line and the close still recor
 });
 
 test("ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later close against a slow orca", () => {
-  const hung = startRun("demo", "ARK-901");
-  useFakeOrca({ runs: [], workers: {}, hang: true });
-  process.env.ARK_ORCA_TIMEOUT_MS = "300";
-  try {
-    const hang = ark("run", "close", hung.runId, "aborted");
-    expect(hang.out).toMatch(/orca: workers not released: .*timed out$/m);
-  } finally {
-    delete process.env.ARK_ORCA_TIMEOUT_MS;
-  }
+  runHangingClose();
 
   // real wall-clock delay: the fake orca subprocess must outlast the leaked 300 ms to prove the override is gone
   const slow = startRun("demo", "ARK-904");
@@ -785,6 +770,18 @@ test("ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later clos
   expect(closed.out).toContain("ctx_slow released (succeeded)");
   expect(closed.out).not.toContain("orca:");
 });
+
+// Shared by ARK-278-AC3 and ARK-292-AC1: the hang case sets a short timeout and must clean it up itself.
+function runHangingClose() {
+  const hung = startRun("demo", "ARK-901");
+  useFakeOrca({ runs: [], workers: {}, hang: true });
+  process.env.ARK_ORCA_TIMEOUT_MS = "300";
+  try {
+    return { directory: hung.directory, output: ark("run", "close", hung.runId, "aborted") };
+  } finally {
+    delete process.env.ARK_ORCA_TIMEOUT_MS;
+  }
+}
 
 function symlinkBun(directory: string): void {
   Bun.spawnSync(["ln", "-s", process.execPath, join(directory, "bun")]);
