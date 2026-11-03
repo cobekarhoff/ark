@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   copyFileSync,
   existsSync,
@@ -19,6 +19,9 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const fixtures = resolve(import.meta.dir, "fixtures/merge-request");
 const run = "2026-10-29-ARK-900-1";

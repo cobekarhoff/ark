@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -20,6 +20,9 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const workspaceSteps = [
   { id: "build", role: "implementer", repo: ".", needs: [], criteria: ["ARK-900-AC1"] },

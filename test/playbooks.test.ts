@@ -1,8 +1,11 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { outcomes } from "../cli/transitions.ts";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const playbookDirectory = join(import.meta.dir, "../skills/ark/playbooks");
 const chiefPlaybook = readFileSync(join(playbookDirectory, "chief.md"), "utf8");

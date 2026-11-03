@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
@@ -36,6 +36,9 @@ import {
   writeSessionFile,
 } from "./hub-fixtures.ts";
 import { installFakeTools, startHub, stopHub, tempArkHome, type StartedHub } from "./helpers.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const root = resolve(import.meta.dir, "..");
 const hubs: StartedHub["process"][] = [];
