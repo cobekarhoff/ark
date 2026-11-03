@@ -447,3 +447,22 @@ test("ARK-279-AC6 worker.md has the read-apply-report, Designer and Reviewer ski
   expect(worker).toContain("`- **Skill:** <skill>`");
   expect(worker).toContain("`- **Rule:** <name of the rule or guideline>`");
 });
+
+test("ARK-281-AC5 chief.md states the 3 auto-merger rules in section 12 and the HELD superseded action", () => {
+  const line = chiefPlaybook
+    .split("\n")
+    .find((l) => l.includes("scripts/auto-merger.sh <workspace>"));
+  expect(line).toBeDefined();
+  expect(line).toContain("`retro.md`");
+  expect(line).toMatch(/`superseded` or `done`/);
+  expect(line).toMatch(/`HELD: <run> #<number> <reason>` lines to stderr/);
+  const loops = chiefPlaybook.split(/^## 12\./m)[1];
+  expect(loops).toContain(line!);
+  const held = chiefPlaybook
+    .split("\n")
+    .find((l) => l.startsWith("A `HELD: <run> #<number> ticket superseded`"));
+  expect(held).toBeDefined();
+  expect(held).toMatch(/close the run `aborted` or `abandoned`/);
+  expect(held).toContain("`gh pr close <url>`");
+  expect(chiefPlaybook.split(/^## 8\./m)[1]?.split(/^## 9\./m)[0]).toContain(held!);
+});
