@@ -57,7 +57,15 @@ Writes the text in <file> as the new text of one criterion in the run's ticket.m
 ```text
 ark strategy record <run> [--project <name>]
 
-Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or a project whose ark.yml has no roles.designer. A mockup and roles.designer are not needed when the surface is only none, or when there is one card and the surface is only document. Two or more cards open the strategy gate; one card opens no gate.
+Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link or no Skills line, a Skills line that names a skill `ark ui-skills <run>` does not list, or a project whose ark.yml has no roles.designer. A mockup, a Skills line and roles.designer are not needed when the surface is only none, or when there is one card and the surface is only document. Two or more cards open the strategy gate; one card opens no gate.
+```
+
+### ui-skills
+
+```text
+ark ui-skills <run> [--project <name>]
+
+Prints the UI skills of the run, one line for each. When the Surfaces list in the recorded evaluation is not none, it prints the required skills, then one more line for the React skill, which is only for a change that touches React code. When Surfaces is none, it prints none. It exits 1 for a run with no recorded evaluation. The Designer, the implementer, the validator and the reviewer read these skills; strategy record and plan check refuse a Skills line or a skills list that names any other skill.
 ```
 
 ### plan check
@@ -65,7 +73,7 @@ Reads strategies.md in the run folder and records its strategy cards: the count,
 ```text
 ark plan check <run> [--project <name>]
 
-Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. It records the number of open decisions.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a decision with fewer than 2 or more than 4 options. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions.
 ```
 
 ### worktree anchor
@@ -244,7 +252,7 @@ The evaluator writes `evaluation.md` in the run folder. `ark evaluation record` 
 
 ## `strategies.md` format
 
-The run lead writes `strategies.md` in the run folder, and the Designer adds mockup links. Each card is a level-2 heading `## <id> <title>`, followed by lines `Approach:`, `Interfaces:`, `Tradeoffs:`, `Steps:`, `Mockup:` (links to files in the run folder; leave the line out when no mockup is needed, `Mockup: none` is refused), `Recommended: yes` and, for a single card, `Reason:`. `ark strategy record` reads them. With 2 or more cards exactly one is recommended, and the phase is `awaiting_strategy` until `gate.answered strategy <card id>`. With one card, `plan.md` has a Strategy section with "Only one strategy considered, because <reason>".
+The run lead writes `strategies.md` in the run folder, and the Designer adds mockup links. Each card is a level-2 heading `## <id> <title>`, followed by lines `Approach:`, `Interfaces:`, `Tradeoffs:`, `Steps:`, `Mockup:` (links to files in the run folder; leave the line out when no mockup is needed, `Mockup: none` is refused), `Skills:` (UI skills the Designer applied, from `ark ui-skills <run>`; needed on each card in the same case as `Mockup:`, and refused when empty or when it names a skill that command does not list), `Recommended: yes` and, for a single card, `Reason:`. `ark strategy record` reads them. With 2 or more cards exactly one is recommended, and the phase is `awaiting_strategy` until `gate.answered strategy <card id>`. With one card, `plan.md` has a Strategy section with "Only one strategy considered, because <reason>".
 
 ## `plan.yml` fields
 
@@ -264,15 +272,16 @@ Top level:
 
 Each entry in `steps`:
 
-| Field      | Type             | Meaning                                                                       |
-| ---------- | ---------------- | ----------------------------------------------------------------------------- |
-| `id`       | string           | Name of the step. Other steps refer to it in `needs`.                         |
-| `role`     | string           | `implementer`, `validator`, or `reviewer`.                                    |
-| `repo`     | string           | The repo the step works in, as a path relative to the workspace.              |
-| `harness`  | string           | The agent harness, for example `claude`, `codex`, `omp`, or `pi`.             |
-| `model`    | string           | The model the harness uses.                                                   |
-| `needs`    | list of step ids | Steps that must finish first. An empty list means the step can start at once. |
-| `criteria` | list of strings  | The AC the step serves.                                                       |
+| Field      | Type             | Meaning                                                                                                                                                                                                                                                                                                    |
+| ---------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`       | string           | Name of the step. Other steps refer to it in `needs`.                                                                                                                                                                                                                                                      |
+| `role`     | string           | `implementer`, `validator`, or `reviewer`.                                                                                                                                                                                                                                                                 |
+| `repo`     | string           | The repo the step works in, as a path relative to the workspace.                                                                                                                                                                                                                                           |
+| `harness`  | string           | The agent harness, for example `claude`, `codex`, `omp`, or `pi`.                                                                                                                                                                                                                                          |
+| `model`    | string           | The model the harness uses.                                                                                                                                                                                                                                                                                |
+| `needs`    | list of step ids | Steps that must finish first. An empty list means the step can start at once.                                                                                                                                                                                                                              |
+| `criteria` | list of strings  | The AC the step serves.                                                                                                                                                                                                                                                                                    |
+| `skills`   | list of strings  | Optional. UI skills the step applies, from `ark ui-skills <run>`. When the evaluation lists a surface other than `none`, `ark plan check` needs it on at least one step, accepts only skills that command lists, and needs every required skill in a non-empty list. `plan.md` then has a `Skills` column. |
 
 Each entry in `test_cases`:
 
