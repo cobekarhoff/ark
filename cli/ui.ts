@@ -4,9 +4,15 @@ import { join } from "node:path";
 import { arkHome } from "./paths.ts";
 
 /** Serves the hub in `hub/` as a child process and ends with it. Port 0 picks a free port. */
-export async function ui(port: number): Promise<void> {
+export async function ui(port: number, name?: string): Promise<void> {
   const child = Bun.spawn(
-    [process.execPath, join(import.meta.dir, "..", "hub", "main.ts"), "--port", `${port}`],
+    [
+      process.execPath,
+      join(import.meta.dir, "..", "hub", "main.ts"),
+      "--port",
+      `${port}`,
+      ...(name === undefined ? [] : ["--name", name]),
+    ],
     {
       stdin: "ignore",
       stdout: "inherit",
