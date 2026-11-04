@@ -18,6 +18,7 @@ import {
   deriveState,
   readEvents,
   writeState,
+  type ArkEvent,
   type EventData,
   type RunState,
 } from "./events.ts";
@@ -134,6 +135,61 @@ export function runStart(ticketFile: string, project?: string): void {
   console.log(run);
 }
 
+/** The most extra rounds `gates.escalation: auto` grants in one run. */
+const autoEscalationCap = 2;
+
+function refused(action: () => void): boolean {
+  try {
+    action();
+    return false;
+  } catch (err) {
+    if (!(err instanceof ArkError)) throw err;
+    return true;
+  }
+}
+
+/**
+ * Records escalation one_more_round by auto when `start` is refused only for an escalation reason:
+ * the answer is dry-run first, so a start refused for any other reason leaves no answer.
+ * Returns the count line, or null when nothing was recorded.
+ */
+function answerEscalationByAuto(
+  directory: string,
+  events: ArkEvent[],
+  state: RunState,
+  start: EventData,
+): string | null {
+  if (state.escalation_requested || state.implementer === "human") return null;
+  if (!refused(() => assertAllowed(state, "step.started", start))) return null;
+  const used = events.filter(
+    (event) =>
+      event.type === "gate.answered" &&
+      event.data.gate === "escalation" &&
+      event.data.by === "auto" &&
+      !event.data.merge,
+  ).length;
+  if (!start.merge && used >= autoEscalationCap) return null;
+  const answer = {
+    gate: "escalation",
+    answer: "one_more_round",
+    by: "auto",
+    ...(start.merge ? { merge: true } : {}),
+  };
+  if (refused(() => assertAllowed(state, "gate.answered", answer))) return null;
+  const answered = deriveState([
+    ...events,
+    {
+      seq: events.length + 1,
+      time: new Date(hubNow()).toISOString(),
+      type: "gate.answered",
+      data: answer,
+    },
+  ]);
+  if (refused(() => assertAllowed(answered, "step.started", start))) return null;
+  appendEvent(directory, "gate.answered", answer);
+  return `escalation one_more_round by auto (${start.merge ? "merge, not counted" : `${used + 1} of ${autoEscalationCap}`})`;
+}
+
 export function runStep(
   runId: string,
   stepId: string,
@@ -150,7 +206,7 @@ export function runStep(
   if (notStarted && action === "start") throw new ArkError("--not-started only applies to finish");
   if (notStarted && !failed) throw new ArkError("--not-started needs --failed");
   if (notStarted && merge) throw new ArkError("--not-started cannot be used with --merge");
-  const { directory } = findRun(runId, inProject);
+  const { project, directory } = findRun(runId, inProject);
   const events = readEvents(directory);
   const state = deriveState(events);
 
@@ -191,15 +247,20 @@ export function runStep(
       !event.data.not_started,
   ).length;
   const round = planned.role === "implementer" && !merge ? finishes + 1 : state.round;
-  appendEvent(directory, "step.started", {
+  const start: EventData = {
     step: stepId,
     role: planned.role,
     repo: planned.repo,
     round,
     ...(merge ? { merge: true } : {}),
-  });
+  };
+  if (planned.role === "implementer" && loadConfig(project).gates.escalation === "auto") {
+    const line = answerEscalationByAuto(directory, events, state, start);
+    if (line) console.log(line);
+  }
+  appendEvent(directory, "step.started", start);
   console.log(
-    `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${state.round_budget})`,
+    `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${deriveState(readEvents(directory)).round_budget})`,
   );
 }
 
