@@ -452,7 +452,7 @@ orca orchestration send --retry-request <id> --type status --subject "Escalation
 
 For a `--merge` start the printed line is `escalation one_more_round by auto (merge, not counted)`: write `(merge, not counted)` in the subject and `not counted toward 2` in the body. Ark never answers an escalation after `ark escalate` (a requested escalation), and never a third spent budget: the `ask` flow below stays for those cases. `criteria` is not covered by this: it still goes to the human.
 
-If the last `ark test <run>` passed but a review P0 or P1 is unresolved at the spent budget, the phase is still `building`. Open the gate with `ark escalate <run> --reason "<the unresolved finding>"`. Never add a failing test only to open the gate.
+With `gates.escalation: auto` and a passing last `ark test <run>`, the phase is still `building` at the spent budget, and `start` answers by auto as above: just start the step, then send the status. Use `ark escalate <run> --reason "<the unresolved finding>"` only when the human must decide (for example an unresolved review P0 or P1): Ark never answers it by auto. Never add a failing test only to open the gate.
 
 After `ark escalate`, continue with steps 1 to 3 below, as for any spent budget.
 
