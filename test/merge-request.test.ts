@@ -873,6 +873,31 @@ test(
   { timeout: 30_000 },
 );
 
+test("ARK-307-AC1 refuses a required string that is only a slash", () => {
+  const { runDirectory } = scenario({ core: "github", app: "github" });
+  setCriterionText(runDirectory, "ARK-900-AC1", "Reads `/`");
+  const refused = ark("merge-request", "open", run);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("AC string in no tracked file at head:");
+  expect(refused.err).toContain("`/`");
+});
+
+test("ARK-307-AC3 the descriptions, CLI reference and how-to say a path string passes when the path exists", () => {
+  const root = resolve(import.meta.dir, "..");
+  const section = (file: string, start: string, end: string) => {
+    const text = readFileSync(join(root, file), "utf8");
+    const from = text.indexOf(start);
+    expect(from).toBeGreaterThanOrEqual(0);
+    return text.slice(from + start.length, text.indexOf(end, from + start.length));
+  };
+  const phrase = "names a tracked file or folder at HEAD";
+  for (const command of ["merge-request open", "run close"]) {
+    expect(section("cli/ark.ts", `usage: "${command}`, 'usage: "')).toContain(phrase);
+    expect(section("docs/reference/cli.md", `### ${command}`, "\n### ")).toContain(phrase);
+  }
+  expect(readFileSync(join(root, "docs/how-to/project-checks.md"), "utf8")).toContain(phrase);
+});
+
 test(
   "ARK-305-AC1 skips placeholder, glob, dots, file:line, own id and every string of a manual AC, refuses only the real missing string",
   () => {
