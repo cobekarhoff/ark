@@ -2532,12 +2532,12 @@ test("ARK-291-AC4 the rail shows each active and later milestone with its outcom
   await expect(page.locator('[data-testid="milestone-pick"][data-state="done"]')).toHaveCount(2);
 
   // A click on a milestone filters the lists.
-  expect(await ticketsOf(page)).toEqual(["ARK-401", "ARK-402", "ARK-404"]);
+  await expect.poll(() => ticketsOf(page)).toEqual(["ARK-401", "ARK-402", "ARK-404"]);
   const m3 = page.locator('[data-testid="milestone-pick"][data-milestone="M3"]');
   await m3.click();
   await expect(m3).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("milestone-filter")).toContainText("M3");
-  expect(await ticketsOf(page)).toEqual(["ARK-401", "ARK-402"]);
+  await expect.poll(() => ticketsOf(page)).toEqual(["ARK-401", "ARK-402"]);
 
   // And the graph: one lane, the tickets of the milestone only.
   await page.getByTestId("view-graph").click();
@@ -2558,12 +2558,12 @@ test("ARK-291-AC4 the rail shows each active and later milestone with its outcom
     .click();
   await expect(page.getByTestId("graph-lane")).toHaveCount(2);
   await page.getByTestId("view-list").click();
-  expect(await ticketsOf(page)).toEqual(["ARK-401", "ARK-402", "ARK-404"]);
+  await expect.poll(() => ticketsOf(page)).toEqual(["ARK-401", "ARK-402", "ARK-404"]);
   await page.locator('[data-testid="milestone-pick"][data-milestone="M1"]').click();
   await expect(page.getByTestId("ticket-row")).toHaveCount(0);
   await expect(page.getByTestId("milestone-filter")).toContainText("M1");
   await page.getByTestId("milestone-all").click();
-  expect(await ticketsOf(page)).toEqual(["ARK-401", "ARK-402", "ARK-404"]);
+  await expect.poll(() => ticketsOf(page)).toEqual(["ARK-401", "ARK-402", "ARK-404"]);
 });
 
 test("ARK-291-AC5 Needs your review lists every proposed ticket in 2 lines, says Master Chief evaluates and the human approves, and copies Evaluate with the IDs in dependency order", async ({
@@ -2646,7 +2646,7 @@ test("ARK-291-AC6 the Shipped bar shows the done sum and the done count of each 
   await open(page, baseUrl, "roadmap");
 
   // Shipped tickets are in no list; the bar is shut and shows the counts.
-  expect(await ticketsOf(page)).toEqual(["ARK-607"]);
+  await expect.poll(() => ticketsOf(page)).toEqual(["ARK-607"]);
   const bar = page.getByTestId("shipped-bar");
   await expect(bar.getByTestId("shipped-total")).toHaveText("3 done");
   await expect(bar.getByTestId("shipped-count")).toHaveText(["M1 2", "M2 1"]);
