@@ -144,7 +144,7 @@ Your decision at a gate. A decision made by an agent is never an answer.
 _Avoid_: Approval, sign-off, vote
 
 **Round**:
-One return to implementation after the first build, caused by a failing test case, a finding the run lead sends back, or an extra round granted at an escalation.
+One return to implementation after the first build, caused by a failing test case, a finding the run lead sends back, or an extra round granted at an escalation, by you or by auto (up to 2).
 _Avoid_: Retry, iteration, attempt
 
 **Round budget**:
@@ -152,7 +152,7 @@ How many rounds a run may use before you must decide. The default is two.
 _Avoid_: Retry limit, max attempts
 
 **Escalation**:
-The gate a run reaches when its round budget is spent. You grant one more round, take over, or abort.
+The gate a run reaches when its round budget is spent. You grant one more round, take over, or abort. With `gates.escalation: auto`, Ark grants the first 2 extra rounds itself (`by: auto`) and asks you after that. It never answers an escalation that `ark escalate` requested.
 _Avoid_: Failure, stuck run
 
 ## Projects
