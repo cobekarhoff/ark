@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
+import { manualCriteria } from "./criteria.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 
@@ -10,6 +11,7 @@ const gateAnswers: Record<string, string[]> = {
   strategy: [],
   plan: ["approve", "change", "abort"],
   escalation: ["one_more_round", "take_over", "abort"],
+  manual: ["ok", "problem"],
 };
 
 // Reads the ticket file named in run.started, so edits made at the criteria gate are picked up.
@@ -39,10 +41,19 @@ function acceptCriteria(runDirectory: string): void {
 export function gateRecord(
   runId: string,
   gate: string,
-  answer: string,
+  args: string[],
   note?: string,
   inProject?: string,
 ): void {
+  // The manual gate is answered for one criterion: `<criterion id> <answer>`; the others take `<answer>`.
+  const [criterion, answer] = gate === "manual" ? args : [undefined, args[0]];
+  if (answer === undefined) {
+    throw new ArkError(
+      gate === "manual"
+        ? "the manual gate needs a criterion id and an answer: ark gate record <run> manual <criterion id> ok|problem"
+        : `gate ${gate} needs an answer`,
+    );
+  }
   if (!Object.hasOwn(gateAnswers, gate)) {
     throw new ArkError(`unknown gate "${gate}": use ${Object.keys(gateAnswers).join(", ")}`);
   }
@@ -52,15 +63,23 @@ export function gateRecord(
     );
   }
   const { directory } = findRun(runId, inProject);
+  if (criterion !== undefined) {
+    if (!deriveState(readEvents(directory)).criteria.some((c) => c.id === criterion))
+      throw new ArkError(`criterion ${criterion} is not in the ticket`);
+    if (!manualCriteria(directory).includes(criterion))
+      throw new ArkError(`criterion ${criterion} is not manual: set \`manual: true\` in ticket.md`);
+  }
   const accepting = gate === "criteria" && answer === "accept";
   // Only the awaiting_criteria phase refreshes criteria; in any other phase the transition table refuses the answer.
   if (accepting && deriveState(readEvents(directory)).phase === "awaiting_criteria")
     acceptCriteria(directory);
-  appendEvent(
-    directory,
-    "gate.answered",
-    note === undefined ? { gate, answer, by: "human" } : { gate, answer, by: "human", note },
-  );
+  appendEvent(directory, "gate.answered", {
+    gate,
+    ...(criterion === undefined ? {} : { criterion }),
+    answer,
+    by: "human",
+    ...(note === undefined ? {} : { note }),
+  });
   console.log(`recorded ${gate} ${answer}`);
 }
 
