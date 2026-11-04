@@ -41,4 +41,6 @@ Proved by the `ark test` checks: `bun test`, `bun run typecheck`, `bun run lint`
 
 ## ARK-303-AC9: Master Chief catch-up reply
 
-pending
+> **Catch-up** (ark chief state + Orca inbox). Merged: nothing since ARK-304 (PR #112). Failed or aborted: none. Waiting on you: 1. SQC-1 handoff close refused by the ARK-304 AC-literal check (ACs quote removed strings); options (a) ticket the check fix, close after (recommended), (b) close aborted now, (c) leave open. 2. ARK-290 AC8 ROADMAP.md; options ok (recommended) or problem. 3. ARK-303 AC9 (this reply) and AC7 (verify.md); options ok or problem. Unknown: ark chief state shows run leads and queued tasks unavailable (no Orca Run 'Master Chief: ark tickets' found).
+
+Human check: AC9 ok. AC7 ok.
