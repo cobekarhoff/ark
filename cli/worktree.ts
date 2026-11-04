@@ -9,12 +9,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadConfig, mergeRequestsMode } from "./config.ts";
+import { loadConfig, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
-import { discoverRepos, git, mirrorRoot, targetBranch } from "./workspace.ts";
+import { discoverRepos, git, mirrorRoot, repoBase, targetBranch } from "./workspace.ts";
 import { mergeRequestState } from "./merge-request.ts";
 
 const skippedRootEntries = new Set([".git", ".DS_Store", "repos"]);
@@ -91,12 +91,12 @@ function removeWorktree(source: string, path: string, branch: string, forces: nu
 /** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. */
 function addRepoWorktree(
   directory: string,
-  workspace: string,
-  setup: string | undefined,
+  config: ProjectConfig,
   state: RunState,
   repo: string,
   log: (line: string) => void,
 ): void {
+  const { workspace, setup } = config;
   const mirror = mirrorRoot(directory);
   mkdirSync(mirror, { recursive: true });
   const path = repo === "." ? mirror : join(mirror, repo);
@@ -122,7 +122,19 @@ function addRepoWorktree(
   if (isSymlink) unlinkSync(path); // an earlier call left this repo untouched
   mkdirSync(dirname(path), { recursive: true });
   const { branch, taken } = freeBranchName(source, baseBranchName(state.ticket));
-  const base = git(source, "rev-parse", "HEAD");
+  const configured = repoBase(config, repo);
+  let base: string;
+  if (configured === undefined) base = git(source, "rev-parse", "HEAD");
+  else {
+    // before `git worktree add` and the worktree.created event: a failed fetch leaves nothing behind
+    try {
+      git(source, "fetch", "origin", configured);
+      base = git(source, "rev-parse", `origin/${configured}`);
+    } catch (err) {
+      if (err instanceof ArkError) throw new ArkError(`repo ${repo}: ${err.message}`);
+      throw err;
+    }
+  }
   git(source, "worktree", "add", "-b", branch, path, base);
   log(`created  ${repo} -> ${path}`);
   // yolo: lower tools.approvalMode values stopped a worker at its first shell call (findings/permission-modes.md).
@@ -161,7 +173,7 @@ export function worktreeAnchor(runId: string, inProject?: string): void {
   if (repo === undefined) throw new ArkError(`workspace ${config.workspace} has no git repo`);
   const state = deriveState(readEvents(directory));
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
-  addRepoWorktree(directory, config.workspace, config.setup, state, repo, () => {});
+  addRepoWorktree(directory, config, state, repo, () => {});
   const mirror = mirrorRoot(directory);
   console.log(`path:${repo === "." ? mirror : join(mirror, repo)}`);
 }
@@ -234,8 +246,7 @@ export function worktreeCreate(
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
   checkClean(workspace, knownRepos, touched, state, allowDirty);
 
-  for (const repo of touched)
-    addRepoWorktree(directory, workspace, config.setup, state, repo, console.log);
+  for (const repo of touched) addRepoWorktree(directory, config, state, repo, console.log);
 
   const mirror = mirrorRoot(directory);
   if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror
@@ -258,12 +269,13 @@ export function worktreeSync(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
-  const mayPush = mergeRequestsMode(project) !== "none";
+  const config = loadConfig(project);
+  const mayPush = config.merge_requests !== "none";
   assertAllowed(state, "worktree.synced", { repo: state.worktrees[0].repo, conflict: false });
   const conflicts: string[] = [];
   for (const worktree of state.worktrees) {
     git(worktree.path, "fetch", "origin");
-    const target = targetBranch(worktree.path);
+    const target = targetBranch(worktree.path, repoBase(config, worktree.repo));
     const merged = Bun.spawnSync([
       "git",
       "-C",
@@ -331,7 +343,8 @@ function handedOffReason(source: string, branch: string, base?: string): string 
 export function worktreeCleanup(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
-  const workspace = loadConfig(project).workspace;
+  const config = loadConfig(project);
+  const workspace = config.workspace;
   let kept = false;
   for (const { repo, path, branch, base } of [...state.worktrees].reverse()) {
     // newest first: the anchor of a root repo holds the nested worktrees
@@ -365,7 +378,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
         if (mergeState !== "merged") {
           // a squash or rebase merge leaves the branch out of the target, so only a merged MR proves it
           const fetched = Bun.spawnSync(["git", "-C", source, "fetch", "origin"]);
-          const target = targetBranch(source);
+          const target = targetBranch(source, repoBase(config, repo));
           const inTarget =
             Bun.spawnSync([
               "git",
