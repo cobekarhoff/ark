@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig } from "./config.ts";
+import { loadConfig, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
@@ -37,8 +37,14 @@ export function git(directory: string, ...args: string[]): string {
   return result.stdout.toString().trim();
 }
 
-/** The branch origin's HEAD points at, for example `main`. */
-export function targetBranch(repoPath: string): string {
+/** The base and target branch the project configures for `repo` (`repos.<repo>.base`), or undefined. The key is the repo path exactly, with no normalising. */
+export function repoBase(config: ProjectConfig, repo: string): string | undefined {
+  return config.repos?.[repo]?.base;
+}
+
+/** `base` when the repo has one, else the branch origin's HEAD points at, for example `main`. */
+export function targetBranch(repoPath: string, base?: string): string {
+  if (base !== undefined) return base;
   return git(repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(
     /^origin\//,
     "",
@@ -48,12 +54,13 @@ export function targetBranch(repoPath: string): string {
 /** Fast-forwards the workspace checkout's target branch of each repo the run touched to origin. */
 export function workspaceSync(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
-  const workspace = loadConfig(project).workspace;
+  const config = loadConfig(project);
+  const workspace = config.workspace;
   for (const { repo } of deriveState(readEvents(directory)).worktrees) {
     const path = join(workspace, repo);
     try {
       git(path, "fetch", "origin");
-      const target = targetBranch(path);
+      const target = targetBranch(path, repoBase(config, repo));
       if (git(path, "branch", "--show-current") === target)
         git(path, "merge", "--ff-only", `origin/${target}`);
       else git(path, "fetch", "origin", `${target}:${target}`); // not checked out: git moves the ref only if it fast-forwards

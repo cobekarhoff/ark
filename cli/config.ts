@@ -30,6 +30,8 @@ export type ProjectConfig = {
     designer?: RoleConfig;
     chief?: RoleConfig;
   };
+  /** Base and target branch per repo, keyed by repo path exactly as `ark worktree create` names it (`.` or `repos/a`). */
+  repos?: Record<string, { base: string }>;
   concurrency: number;
   round_budget: number;
   /** Each gate is answered by the human or by Ark. A missing key is human. */
@@ -150,6 +152,16 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     gates[name] = value as "human" | "auto";
   }
 
+  let repos: ProjectConfig["repos"];
+  if (fields.repos !== undefined) {
+    const reposField = asObject(fields.repos, "repos");
+    repos = {};
+    for (const key of Object.keys(reposField))
+      repos[key] = {
+        base: text(asObject(reposField[key], `repos.${key}`), "base", `repos.${key}.base`),
+      };
+  }
+
   const config: ProjectConfig = {
     workspace,
     ticket_source: ticketSource,
@@ -160,6 +172,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     round_budget: integer(fields, "round_budget", 0, 2),
     gates,
   };
+  if (repos !== undefined) config.repos = repos;
   if (fields.compose !== undefined) config.compose = fields.compose as string;
   if (fields.setup !== undefined) config.setup = fields.setup as string;
   return config;
