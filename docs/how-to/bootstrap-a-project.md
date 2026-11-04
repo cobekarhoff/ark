@@ -73,7 +73,9 @@ You need:
 
    Commit and merge the files it made. Run worktrees start from the base branch, so an uncommitted file is not in a run's worktree. On the next web UI run after the merge, the Designer reads the files through `impeccable context`. If a file is missing, the Designer says so in `strategies.md`.
 
-8. Read the summary Master Chief prints. It lists what it detected, what you answered, what it registered in Orca, and anything left for you.
+8. Master Chief writes `~/.ark/projects/<project>/verify.md`, the guide that the validator uses for a live check of the real app. It has three parts: how to start the app, how to reach it, and a feature map with one row for each feature, the command or page that exercises it, and what a working result shows. Master Chief detects what it can from the README, the scripts and the docs, and asks you only for the rest. For Ark, it writes `~/.ark/projects/ark/verify.md` for the hub (`ark ui`) and the CLI. If the file exists, it asks whether to keep, replace or edit it. When a later validator finds the file wrong, the run lead proposes a fix with the scope `project` in the retro.
+
+9. Read the summary Master Chief prints. It lists what it detected, what you answered, what it registered in Orca, the `verify.md` it wrote, and anything left for you.
 
 ## Bootstrap a meta-repo that holds several repos
 
@@ -136,7 +138,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
 
 ## Change a project later
 
-Edit `~/.ark/projects/<project>/ark.yml` by hand, or run `/skill:ark bootstrap` again and answer "edit" when it finds the file. Add lessons for run leads to `~/.ark/projects/<project>/learnings.md`. The [retro playbook](../../skills/ark/playbooks/retro.md) proposes such changes for your approval.
+Edit `~/.ark/projects/<project>/ark.yml` by hand, or run `/skill:ark bootstrap` again and answer "edit" when it finds the file. Add lessons for run leads to `~/.ark/projects/<project>/learnings.md`, and fix `~/.ark/projects/<project>/verify.md` when the app starts or behaves differently. The [retro playbook](../../skills/ark/playbooks/retro.md) proposes such changes for your approval.
 
 ## Related
 
