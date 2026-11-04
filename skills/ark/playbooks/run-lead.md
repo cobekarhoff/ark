@@ -139,7 +139,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    plannotator annotate "<run folder>/strategies.md" "<run folder>/mockups/<file>" --gate --json --result-file "<run folder>/gates/strategy-<n>.json"
    ```
 
-   `<n>` is 1 for the first review and goes up by 1 for each design round. Tell Master Chief that a review is open before you run it, as in section 5. For a question about interaction, the human can instead open a running prototype on `localhost`. If Plannotator is not installed or the review fails, ask Master Chief:
+   `<n>` is 1 for the first review and goes up by 1 for each design round. Tell Master Chief that a review is open before you run it, as in section 5. For a question about interaction, start the prototype yourself as `portless <topic>.proto --app-port <port> <command>`, name `http://<topic>.proto.localhost`, and open it with `orca tab create --worktree path:<run worktree> --url http://<topic>.proto.localhost` (see Live human check). If Plannotator is not installed or the review fails, ask Master Chief:
 
    ```sh
    orca orchestration ask --question "Run <run>: strategies ready in <run folder>/strategies.md (mockups in <run folder>/mockups/). Cards: <one line per card: id and approach>. Which card? Say a card id, or abort. To mix cards or change one, write the note." --options "<card ids>,abort" --timeout-ms 600000
@@ -156,6 +156,32 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    ```
 
    The command refuses a card ID that is not in the latest `strategy.recorded`. After a card ID, the phase is `planning`: go to section 3, and write the plan for that card only. On `abort`, run `ark run close <run> aborted` and go to section 11 with outcome `aborted`.
+
+### Live human check
+
+Use this when the human must try a running thing: a prototype for the strategy gate, or the hub of a run (the UI the run changed) before a gate or merge. Name every server by URL, never by a port.
+
+1. Slug, stated once: the run's ticket id and counter in lowercase, without the date. Run `2026-11-03-ARK-284-1` gives `ark-284-1`.
+2. Pick a free `<port>` first: the proxy needs it before the server starts.
+3. In the run worktree, start the hub in a background terminal (a background process, not a worker, so "never start an agent except through `worker-start`" does not bar it):
+
+   ```sh
+   portless hub.<slug> --app-port <port> ark ui --port <port> --name hub.<slug>.localhost
+   ```
+
+4. Preflight:
+
+   ```sh
+   curl -sf http://hub.<slug>.localhost/api/snapshot
+   ```
+
+   If it fails, use the printed `http://127.0.0.1:<port>` and say so in the report.
+
+5. Open the page: `orca tab create --worktree path:<run worktree> --url http://hub.<slug>.localhost`. Put the same URL in the `orca orchestration ask` text.
+6. In the evidence file, name the URL, not a port.
+7. Stop the hub when the check is done.
+
+For a project app, start `portless <project> --app-port <port> <command>` and state `http://<project>.localhost`. For a prototype, `portless <topic>.proto --app-port <port> <command>` at `http://<topic>.proto.localhost` (topic lowercase, no underscore). The proxy is set up once by ARK-300; you do not start or stop it.
 
 ## 3. Read the workspace and the learnings
 
