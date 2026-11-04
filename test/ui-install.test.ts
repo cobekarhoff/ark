@@ -229,7 +229,8 @@ test("ARK-300-AC1 install with portless writes the proxy agent and the wrapped h
   expect(hubPlist).toContain("<string>--name</string>\n    <string>ark.localhost</string>");
   const again = runArkWithEnvironment(environment, "ui", "install", "--port", "4317");
   expect(again.stdout.toString()).toContain("Nothing changed");
-  runArkWithEnvironment(environment, "ui", "uninstall");
+  const removal = runArkWithEnvironment(environment, "ui", "uninstall");
+  expect(removal.stdout.toString()).toContain("keeps running until you run: portless proxy stop");
   expect(existsSync(hub) || existsSync(proxy)).toBe(false);
 });
 

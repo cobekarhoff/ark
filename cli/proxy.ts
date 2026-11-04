@@ -19,7 +19,7 @@ export const portlessProgram = (): string | null =>
  * `portless proxy start` daemonizes the proxy and exits 0 at once, also when a proxy runs already.
  * So the agent has RunAtLoad true and KeepAlive false: with KeepAlive true, launchd would see the
  * exit as a crash and respawn it every 10 s. Cost: a proxy that dies later is not restarted
- * (run `ark ui install` again). `--foreground` would allow KeepAlive, but the form is fixed by ARK-300.
+ * (run `portless proxy start --unprivileged`). `--foreground` would allow KeepAlive, but the form is fixed by ARK-300.
  */
 export const proxyStartArguments = (portless: string): string[] => [
   portless,

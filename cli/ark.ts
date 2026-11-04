@@ -284,7 +284,7 @@ const commands: Command[] = [
   {
     usage: "ui uninstall",
     description:
-      "Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy. It does nothing, and exits 0, when neither agent is installed.",
+      "Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy, so the hub stops and neither starts at login. It does not stop the shared portless proxy: that keeps running until you run `portless proxy stop`. It does nothing, and exits 0, when neither agent is installed.",
     flags: {},
     minimum: 0,
     maximum: 0,

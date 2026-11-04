@@ -229,6 +229,6 @@ export function uiUninstall(): void {
   console.log(
     removed.length === 0
       ? `LaunchAgents ${hubLabel} and ${proxyLabel} are not installed. Nothing changed.`
-      : `${removed.join("\n")}\nThe hub and the proxy are stopped and will not start at login.`,
+      : `${removed.join("\n")}\nThe hub is stopped and neither agent starts at login. The shared portless proxy keeps running until you run: portless proxy stop`,
   );
 }

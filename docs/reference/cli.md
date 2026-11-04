@@ -201,7 +201,7 @@ Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents 
 ```text
 ark ui uninstall
 
-Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy. It does nothing, and exits 0, when neither agent is installed.
+Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy, so the hub stops and neither starts at login. It does not stop the shared portless proxy: that keeps running until you run `portless proxy stop`. It does nothing, and exits 0, when neither agent is installed.
 ```
 
 <!-- generated:commands:end -->

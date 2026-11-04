@@ -74,7 +74,7 @@ This prints `404`.
 ark ui uninstall
 ```
 
-This unloads and deletes both LaunchAgents. The hub and the proxy stop and do not start at login.
+This unloads and deletes both LaunchAgents. The hub stops and neither agent starts at login. The shared portless proxy keeps running, because it is a detached background process that launchd does not own. Stop it with `portless proxy stop`.
 
 ## Who can reach the proxy
 
@@ -95,6 +95,6 @@ Safari, Firefox, HTTPS, a reboot.
 ## If it does not work
 
 - **`portless not found`:** install it with `npm i -g portless`, then run `ark ui install` again. To use another binary, set `ARK_PORTLESS` to its path.
-- **The proxy is not running after login:** its LaunchAgent has `KeepAlive` off, because `portless proxy start` starts a background proxy and exits at once. A proxy that dies is not restarted. Run `ark ui install` again, or `portless proxy start --unprivileged`.
+- **The proxy is not running after login:** its LaunchAgent has `KeepAlive` off, because `portless proxy start` starts a background proxy and exits at once. A proxy that dies is not restarted. Run `portless proxy start --unprivileged`. Running `ark ui install` again changes nothing.
 - **The route is missing, or `portless` fails with a Node error:** run `portless doctor`. Install from a shell where Node 24+ resolves, so the LaunchAgent `PATH` holds it.
 - Portless is pre-1.0 (0.15.13), so its flags may change. `portless doctor` is the check.
