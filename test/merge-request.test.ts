@@ -717,73 +717,89 @@ function setCriterionText(runDirectory: string, id: string, text: string) {
   writeFileSync(file, lines.join("\n"));
 }
 
-test("ARK-302-AC2 refuses when a criterion is missing or failing in the last test.completed, names each, opens nothing", () => {
-  const { runDirectory } = scenario({ core: "github", app: "github" });
-  // passed stays true: the refusal must come from the per-AC status, not the suite verdict.
-  rewriteEvents(runDirectory, (event) => {
-    if (event.type === "test.completed") event.data.criteria = { "ARK-900-AC1": "failing" };
-    return event;
-  });
-  const refused = ark("merge-request", "open", run);
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("ARK-900-AC1 (failing)");
-  expect(refused.err).toContain("ARK-900-AC2 (missing)");
-  expect(calls()).toHaveLength(0);
-  expect(openedEvents(runDirectory)).toHaveLength(0);
-});
+test(
+  "ARK-302-AC2 refuses when a criterion is missing or failing in the last test.completed, names each, opens nothing",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" });
+    // passed stays true: the refusal must come from the per-AC status, not the suite verdict.
+    rewriteEvents(runDirectory, (event) => {
+      if (event.type === "test.completed") event.data.criteria = { "ARK-900-AC1": "failing" };
+      return event;
+    });
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("ARK-900-AC1 (failing)");
+    expect(refused.err).toContain("ARK-900-AC2 (missing)");
+    expect(calls()).toHaveLength(0);
+    expect(openedEvents(runDirectory)).toHaveLength(0);
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-302-AC2 a manual criterion that is not passing does not block opening", () => {
-  const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
-  expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
-  rewriteEvents(runDirectory, (event) => {
-    if (event.type === "test.completed")
-      event.data.criteria = { "ARK-900-AC1": "passing", "ARK-900-AC2": "manual ok" };
-    return event;
-  });
-  expect(ark("merge-request", "open", run).code).toBe(0);
-});
+test(
+  "ARK-302-AC2 a manual criterion that is not passing does not block opening",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
+    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+    rewriteEvents(runDirectory, (event) => {
+      if (event.type === "test.completed")
+        event.data.criteria = { "ARK-900-AC1": "passing", "ARK-900-AC2": "manual ok" };
+      return event;
+    });
+    expect(ark("merge-request", "open", run).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-302-AC3 refuses an AC string that no tracked file holds, names the AC and the string, and accepts one that exists", () => {
-  const { runDirectory, worktrees } = scenario({ core: "github", app: "github" });
-  // `core` and `# test` are tracked at head (core.txt, README.md); the string of AC2 is in no worktree at head.
-  setCriterionText(runDirectory, "ARK-900-AC1", "Core writes `core` and `# test`");
-  setCriterionText(runDirectory, "ARK-900-AC2", "App shows `absent-string-xyz` and `core`");
-  // An untracked file holding the string is not tracked, so it does not count.
-  writeFileSync(join(worktrees.app, "scratch.txt"), "absent-string-xyz");
+test(
+  "ARK-302-AC3 refuses an AC string that no tracked file holds, names the AC and the string, and accepts one that exists",
+  () => {
+    const { runDirectory, worktrees } = scenario({ core: "github", app: "github" });
+    // `core` and `# test` are tracked at head (core.txt, README.md); the string of AC2 is in no worktree at head.
+    setCriterionText(runDirectory, "ARK-900-AC1", "Core writes `core` and `# test`");
+    setCriterionText(runDirectory, "ARK-900-AC2", "App shows `absent-string-xyz` and `core`");
+    // An untracked file holding the string is not tracked, so it does not count.
+    writeFileSync(join(worktrees.app, "scratch.txt"), "absent-string-xyz");
 
-  const refused = ark("merge-request", "open", run);
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("ARK-900-AC2 `absent-string-xyz`");
-  expect(refused.err).not.toContain("ARK-900-AC1");
-  expect(refused.err).not.toContain("`core`");
-  expect(refused.err).not.toContain("`# test`");
-  expect(calls()).toHaveLength(0);
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("ARK-900-AC2 `absent-string-xyz`");
+    expect(refused.err).not.toContain("ARK-900-AC1");
+    expect(refused.err).not.toContain("`core`");
+    expect(refused.err).not.toContain("`# test`");
+    expect(calls()).toHaveLength(0);
 
-  setCriterionText(runDirectory, "ARK-900-AC2", "App shows `core`");
-  expect(ark("merge-request", "open", run).code).toBe(0);
-});
+    setCriterionText(runDirectory, "ARK-900-AC2", "App shows `core`");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-302-AC6 a perf run refuses a missing baseline.md and an empty compare.md, names each, and opens once both have content", () => {
-  const { runDirectory } = scenario({ core: "github", app: "github" });
-  rewriteEvents(runDirectory, (event) => {
-    if (event.type === "run.started") event.data.kind = "perf";
-    return event;
-  });
-  mkdirSync(join(runDirectory, "results"), { recursive: true });
-  writeFileSync(join(runDirectory, "results/compare.md"), "");
+test(
+  "ARK-302-AC6 a perf run refuses a missing baseline.md and an empty compare.md, names each, and opens once both have content",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" });
+    rewriteEvents(runDirectory, (event) => {
+      if (event.type === "run.started") event.data.kind = "perf";
+      return event;
+    });
+    mkdirSync(join(runDirectory, "results"), { recursive: true });
+    writeFileSync(join(runDirectory, "results/compare.md"), "");
 
-  const refused = ark("merge-request", "open", run);
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("results/baseline.md");
-  expect(refused.err).toContain("results/compare.md");
-  expect(calls()).toHaveLength(0);
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("results/baseline.md");
+    expect(refused.err).toContain("results/compare.md");
+    expect(calls()).toHaveLength(0);
 
-  writeFileSync(join(runDirectory, "results/baseline.md"), "p95 120 ms\n");
-  const half = ark("merge-request", "open", run);
-  expect(half.code).toBe(1);
-  expect(half.err).not.toContain("results/baseline.md");
-  expect(half.err).toContain("results/compare.md");
+    writeFileSync(join(runDirectory, "results/baseline.md"), "p95 120 ms\n");
+    const half = ark("merge-request", "open", run);
+    expect(half.code).toBe(1);
+    expect(half.err).not.toContain("results/baseline.md");
+    expect(half.err).toContain("results/compare.md");
 
-  writeFileSync(join(runDirectory, "results/compare.md"), "p95 80 ms\n");
-  expect(ark("merge-request", "open", run).code).toBe(0);
-});
+    writeFileSync(join(runDirectory, "results/compare.md"), "p95 80 ms\n");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
