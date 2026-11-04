@@ -114,3 +114,19 @@ The ACs of ARK-302 and ARK-304 name these strings. `ark merge-request open` find
 - `the last test must have passed`
 - `ARK-304-AC6`
 - `bun test test/playbooks.test.ts -t ARK-304-AC6`
+- `--limit <n>`
+- `--cursor <cursor>`
+- `test/chief.test.ts`
+- `ARK-306-AC1`
+- `bun test test/chief.test.ts -t ARK-306-AC1`
+- `cli/orca-release.ts`
+- `ARK-306-AC2`
+- `bun test test/chief.test.ts -t ARK-306-AC2`
+- `unavailable: orca orchestration run-list failed: <reason>`
+- `timed out after <n> s`
+- `unavailable: no Orca Run "Master Chief: <project> tickets"`
+- `ARK-306-AC3`
+- `orca: runtime is not running`
+- `bun test test/chief.test.ts -t ARK-306-AC3`
+- `ARK-306-AC4`
+- `bun test test/playbooks.test.ts -t ARK-306-AC4`

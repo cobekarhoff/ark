@@ -171,7 +171,7 @@ test("ARK-177-AC7 chief playbook refuses a second live Master Chief and takes ov
     ?.split("\n## ")[0];
 
   expect(oneChief).toBeDefined();
-  expect(oneChief).toMatch(/List the Runs: `orca orchestration run-list --json`/);
+  expect(oneChief).toMatch(/List the Runs: `orca orchestration run-list --json --limit 100`/);
   expect(oneChief).toMatch(/objective is exactly "Master Chief: <project> tickets"/);
   expect(oneChief).toMatch(/If none exists, create it now/);
   expect(oneChief).toMatch(/If the handle is live and is not your own.*stop/i);

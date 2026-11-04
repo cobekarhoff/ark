@@ -47,3 +47,45 @@ export async function execJson<T>(
     return null;
   }
 }
+
+export type ExecResult = { stdout: string; stderr: string; code: number | null; timedOut: boolean };
+
+/**
+ * Runs a command and returns what `exec` hides: exit code, stderr and whether the timeout fired.
+ * Never throws: a command that cannot start gives a null code and the error text as stderr.
+ */
+export async function execResult(
+  command: string[],
+  timeoutMilliseconds = readerTimeoutMilliseconds,
+): Promise<ExecResult> {
+  try {
+    const child = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const killer = setTimeout(() => child.kill(), timeoutMilliseconds);
+    // The backstop also covers a killed shell whose grandchild still holds a pipe open.
+    let backstop: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]).then(
+        async ([stdout, stderr]) => ({ stdout, stderr, code: await child.exited, timedOut: false }),
+      ),
+      new Promise<ExecResult>((done) => {
+        backstop = setTimeout(
+          () => done({ stdout: "", stderr: "", code: null, timedOut: true }),
+          timeoutMilliseconds + 100,
+        );
+      }),
+    ]);
+    clearTimeout(backstop);
+    clearTimeout(killer);
+    // A killed child exits by signal; the killer fired when the exit came after the deadline.
+    return { ...result, timedOut: result.timedOut || child.signalCode !== null };
+  } catch (err) {
+    return { stdout: "", stderr: String(err), code: null, timedOut: false };
+  }
+}
+
+/** The reason a command failed: first non-empty stderr line, else `exit <code>`, or the timeout. */
+export function failureReason(result: ExecResult, timeoutMilliseconds: number): string {
+  if (result.timedOut) return `timed out after ${Math.ceil(timeoutMilliseconds / 1000)} s`;
+  const line = result.stderr.split("\n").find((text) => text.trim() !== "");
+  return line?.trim() ?? `exit ${result.code}`;
+}

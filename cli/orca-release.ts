@@ -1,11 +1,11 @@
 import { execJson } from "./exec.ts";
+import { orcaPages, orcaTimeout } from "./orca.ts";
 
 type Worker = { dispatchId: string; state: string; terminalState: string };
 
 /** Timeouts in ms: lists stay short, a release may stop a terminal. ARK_ORCA_TIMEOUT_MS overrides both (tests). */
 export function orcaTimeouts(): { list: number; release: number } {
-  const forced = Number(process.env.ARK_ORCA_TIMEOUT_MS);
-  return forced > 0 ? { list: forced, release: forced } : { list: 5000, release: 15000 };
+  return { list: orcaTimeout(5000), release: orcaTimeout(15000) };
 }
 
 class OrcaFailure extends Error {}
@@ -19,21 +19,20 @@ async function call<T>(args: string[], timeout: number): Promise<T> {
   return reply.result;
 }
 
+/** The shared paged reader, with release's own failure messages. */
 async function pages<Row>(
   verb: string,
   scope: string[],
   key: string,
   timeout: number,
 ): Promise<Row[]> {
-  const rows: Row[] = [];
-  let cursor: string | undefined;
-  do {
-    const args = [verb, ...scope, "--limit", "100", ...(cursor ? ["--cursor", cursor] : [])];
-    const page = await call<Record<string, unknown>>(args, timeout);
-    rows.push(...((page[key] as Row[] | undefined) ?? []));
-    cursor = (page.nextCursor as string | null | undefined) ?? undefined;
-  } while (cursor);
-  return rows;
+  const answer = await orcaPages<Row>(verb, key, scope, timeout);
+  if (answer.ok) return answer.value;
+  throw new OrcaFailure(
+    answer.reason === "orca not found on PATH"
+      ? answer.reason
+      : `orca orchestration ${verb} failed or timed out`,
+  );
 }
 
 /**

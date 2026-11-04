@@ -25,7 +25,7 @@ Use the project name as `<project>` below.
 
 Do this before anything else in the session. Each project has one Master Chief.
 
-1. List the Runs: `orca orchestration run-list --json`.
+1. List the Runs: `orca orchestration run-list --json --limit 100`. The default list holds 10 rows, so read every page: if the answer has a `nextCursor` that is not null, repeat with `--cursor <nextCursor>` until `nextCursor` is null.
 2. Find a Run whose objective is exactly "Master Chief: <project> tickets". If none exists, create it now. `run-create` binds this terminal to the new Run, and `ark chief handover` finds Master Chief through that Run:
 
    ```sh
