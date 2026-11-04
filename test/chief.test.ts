@@ -4,11 +4,12 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { appendEvent } from "../cli/events";
 import { ark, tempArkHome, tempGitRepo, writeProject } from "./helpers";
 
@@ -21,14 +22,38 @@ const closedRun = "2026-11-01-ARK-899-1";
 
 // Fake `orca`: logs every call's argv ($FAKE_ORCA_LOG, arguments joined by \x1f, calls ended by \x1e)
 // and answers from $FAKE_ORCA_DIR/scenario.json written by setScenario. Like the real orca,
-// `worker-list` shows only the Run named by --run. A shell script: a bun script starts too slowly.
+// `worker-list` shows only the Run named by --run, and `run-list` pages: 10 rows when --limit is
+// absent, at most 100 with it, and a `nextCursor` (`c<offset>`) that --cursor continues.
+// A shell script: a bun script starts too slowly.
 const fakeOrca = `#!/bin/sh
-printf '%s\\037' "$@" >> "$FAKE_ORCA_LOG"
-printf '\\036' >> "$FAKE_ORCA_LOG"
+# One append per call, so concurrent calls cannot interleave their records.
+record=$(printf '%s\\037' "$@"; printf '\\036')
+printf '%s' "$record" >> "$FAKE_ORCA_LOG"
 d=$FAKE_ORCA_DIR
-[ -f "$d/fail" ] && exit 1
+if [ -f "$d/fail" ]; then
+  read -r only code < "$d/fail"
+  if [ "$only" = all ] || [ "$only" = "$2" ]; then
+    [ -f "$d/hang" ] && exec sleep 30
+    [ -f "$d/stderr" ] && cat "$d/stderr" >&2
+    exit "$code"
+  fi
+fi
 case "$1 $2" in
-  "orchestration run-list") cat "$d/run-list" ;;
+  "orchestration run-list")
+    limit=10; offset=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --limit) limit=$2 ;;
+        --cursor) offset=\${2#c} ;;
+      esac
+      shift
+    done
+    [ "$limit" -gt 100 ] && limit=100
+    total=$(wc -l < "$d/runs.ndjson")
+    rows=$(sed -n "$((offset + 1)),$((offset + limit))p" "$d/runs.ndjson" | paste -sd, -)
+    next=$((offset + limit))
+    if [ "$next" -lt "$total" ]; then next="\\"c$next\\""; else next=null; fi
+    printf '{"result":{"runs":[%s],"nextCursor":%s}}\\n' "$rows" "$next" ;;
   "orchestration worker-list")
     while [ $# -gt 0 ]; do [ "$1" = --run ] && run=$2; shift; done
     cat "$d/workers-$run" 2>/dev/null || echo '{"result":{"workers":[]}}' ;;
@@ -46,7 +71,8 @@ let workspace = "";
 const originalPath = process.env.PATH;
 
 type Scenario = {
-  fail?: boolean;
+  /** Makes `verb` (default every verb) exit `code` (default 1) after writing `stderr`; `hang` sleeps instead. */
+  fail?: { verb?: string; code?: number; stderr?: string; hang?: boolean } | true;
   runs?: unknown[];
   /** Workers by Orca Run id. */
   workers?: Record<string, unknown[]>;
@@ -59,8 +85,16 @@ type Scenario = {
 function setScenario(scenario: Scenario) {
   const reply = (name: string, result: unknown) =>
     writeFileSync(join(fakeDirectory, name), JSON.stringify({ result }));
-  if (scenario.fail) writeFileSync(join(fakeDirectory, "fail"), "");
-  reply("run-list", { runs: scenario.runs ?? [] });
+  if (scenario.fail) {
+    const fail = scenario.fail === true ? {} : scenario.fail;
+    writeFileSync(join(fakeDirectory, "fail"), `${fail.verb ?? "all"} ${fail.code ?? 1}\n`);
+    if (fail.stderr) writeFileSync(join(fakeDirectory, "stderr"), fail.stderr);
+    if (fail.hang) writeFileSync(join(fakeDirectory, "hang"), "");
+  }
+  writeFileSync(
+    join(fakeDirectory, "runs.ndjson"),
+    (scenario.runs ?? []).map((row) => `${JSON.stringify(row)}\n`).join(""),
+  );
   for (const [run, workers] of Object.entries(scenario.workers ?? {}))
     reply(`workers-${run}`, { workers });
   reply("ready", { tasks: scenario.ready ?? [] });
@@ -135,6 +169,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env.PATH = originalPath;
+  delete process.env.ARK_ORCA_TIMEOUT_MS;
 });
 
 const chiefOrcaRun = {
@@ -274,4 +309,169 @@ test("ARK-244-AC2 chief handover refuses and starts nothing when no Master Chief
   expect(result.code).not.toBe(0);
   expect(result.err).toMatch(/no live Master Chief/i);
   expect(callsTo("agent", "launch")).toHaveLength(0);
+});
+
+const rowsPerPage = 100;
+
+/** `count` Runs with the Master Chief Run at row `chiefRow` and the open Ark run just before it (1-based). */
+function manyRuns(count: number, chiefRow: number | null) {
+  return Array.from({ length: count }, (_, index) => {
+    const row = index + 1;
+    if (row === chiefRow) return chiefOrcaRun;
+    if (row === (chiefRow ?? -1) - 1)
+      return { id: "run_ark", objective: `Ark run ${openRun}`, coordinator_handle: "term_lead" };
+    return { id: `run_filler_${row}`, objective: `Filler ${row}`, coordinator_handle: "term_x" };
+  });
+}
+
+const leadScenario = (count: number, chiefRow: number | null): Scenario => ({
+  runs: manyRuns(count, chiefRow),
+  workers: {
+    run_chief: [{ dispatchId: "ctx_lead", runId: "run_chief", agentTerminalHandle: "term_lead" }],
+  },
+  ready: [{ id: "task_ready", task_title: "Ready ticket ARK-1", status: "ready" }],
+  pending: [{ id: "task_pending", task_title: "Pending ticket ARK-2", status: "pending" }],
+});
+
+const runListPages = () => callsTo("orchestration", "run-list").length;
+
+test("ARK-306-AC1 chief state finds the Master Chief Run at row 12 of 12 and row 205 of 230", () => {
+  for (const [count, chiefRow, pages] of [
+    [12, 12, 1],
+    [230, 205, 3],
+  ] as const) {
+    setScenario(leadScenario(count, chiefRow));
+    const before = runListPages();
+
+    const result = ark("chief", "state", "--project", project);
+    expect(result.err).toBe("");
+    expect(result.code).toBe(0);
+
+    const leadRow = section(result.out, "Run leads")
+      .split("\n")
+      .find((line) => line.includes("ctx_lead"));
+    expect(leadRow).toContain(openRun);
+    const queue = section(result.out, "Queued Orca Tasks");
+    expect(queue).toContain("Ready ticket ARK-1");
+    expect(queue).toContain("Pending ticket ARK-2");
+    expect(runListPages() - before).toBe(pages);
+  }
+});
+
+test("ARK-306-AC2 chief handover and readTerminals find the live Master Chief at row 12 of 12 and 205 of 230", () => {
+  for (const [count, chiefRow] of [
+    [12, 12],
+    [230, 205],
+  ] as const) {
+    setScenario({
+      runs: manyRuns(count, chiefRow),
+      terminals: [{ handle: "term_chief", worktreePath: workspace, connected: true }],
+      launch: { kind: "terminal", handle: "term_new" },
+    });
+
+    const result = ark("chief", "handover", "--project", project);
+    expect(result.err).toBe("");
+    expect(result.out.trim()).toBe("term_new");
+
+    // In a child process: Bun resolves `orca` with the PATH it started with, not the test's.
+    const read = Bun.spawnSync(
+      [
+        "bun",
+        "-e",
+        `import { readTerminals } from "${join(import.meta.dir, "..", "cli", "orca.ts")}";
+        const read = await readTerminals();
+        console.log(JSON.stringify({ count: read?.runs.length, chief: read?.runs.some((run) => run.id === "run_chief") }));`,
+      ],
+      { env: process.env },
+    );
+    expect(JSON.parse(read.stdout.toString())).toEqual({ count, chief: true });
+  }
+});
+
+test("ARK-306-AC2 the text --cursor is in exactly one file of cli/ and hub/", () => {
+  const root = join(import.meta.dir, "..");
+  const holders: string[] = [];
+  for (const directory of ["cli", "hub"])
+    for (const file of readdirSync(join(root, directory), { recursive: true, encoding: "utf8" })) {
+      const path = join(root, directory, file);
+      if (
+        /\.(ts|tsx|js|jsx|css|html)$/.test(file) &&
+        readFileSync(path, "utf8").includes("--cursor")
+      )
+        holders.push(join(directory, file));
+    }
+  expect(holders).toEqual([join("cli", "orca.ts")]);
+});
+
+const noRunListFailure = (out: string, reason: string) => {
+  for (const heading of ["Run leads", "Queued Orca Tasks"]) {
+    const text = section(out, heading);
+    expect(text).toContain(`unavailable: orca orchestration run-list failed: ${reason}`);
+    expect(text).not.toMatch(/\bnone\b/);
+  }
+};
+
+test("ARK-306-AC3 a failing run-list names the first non-empty stderr line", () => {
+  setScenario({ fail: { stderr: "\n  \nconnection refused\nsecond line\n", code: 4 } });
+  const result = ark("chief", "state", "--project", project);
+  expect(result.code).toBe(0);
+  noRunListFailure(result.out, "connection refused");
+  expect(result.out).not.toContain("second line");
+  expect(section(result.out, "Open runs")).toContain(openRun);
+});
+
+test("ARK-306-AC3 a failing run-list with empty stderr names the exit code", () => {
+  setScenario({ fail: { code: 3 } });
+  noRunListFailure(ark("chief", "state", "--project", project).out, "exit 3");
+});
+
+test("ARK-306-AC3 a run-list that does not answer in time names the timeout", () => {
+  process.env.ARK_ORCA_TIMEOUT_MS = "1000";
+  setScenario({ fail: { hang: true } });
+  noRunListFailure(ark("chief", "state", "--project", project).out, "timed out after 1 s");
+});
+
+test("ARK-306-AC3 a missing orca names orca not found on PATH", () => {
+  setScenario({});
+  process.env.PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
+  noRunListFailure(ark("chief", "state", "--project", project).out, "orca not found on PATH");
+});
+
+test("ARK-306-AC3 a failing worker-list names itself and the other sections still print", () => {
+  setScenario({ ...leadScenario(12, 12), fail: { verb: "worker-list", stderr: "no workers\n" } });
+  const { out } = ark("chief", "state", "--project", project);
+  const leads = section(out, "Run leads");
+  expect(leads).toContain("unavailable: orca orchestration worker-list failed: no workers");
+  expect(leads).not.toMatch(/\bnone\b/);
+  expect(section(out, "Queued Orca Tasks")).toContain("Ready ticket ARK-1");
+  expect(section(out, "Open runs")).toContain(openRun);
+});
+
+test("ARK-306-AC3 a failing task-list names itself and the other sections still print", () => {
+  setScenario({ ...leadScenario(12, 12), fail: { verb: "task-list", code: 7 } });
+  const { out } = ark("chief", "state", "--project", project);
+  const queue = section(out, "Queued Orca Tasks");
+  expect(queue).toContain("unavailable: orca orchestration task-list failed: exit 7");
+  expect(queue).not.toMatch(/\bnone\b/);
+  expect(section(out, "Run leads")).toContain("ctx_lead");
+  expect(section(out, "Open runs")).toContain(openRun);
+});
+
+test("ARK-306-AC3 230 Runs without a Master Chief Run print the no Orca Run text, not none", () => {
+  setScenario(leadScenario(230, null));
+  const { out } = ark("chief", "state", "--project", project);
+  expect(runListPages()).toBe(Math.ceil(230 / rowsPerPage));
+  for (const heading of ["Run leads", "Queued Orca Tasks"]) {
+    const text = section(out, heading);
+    expect(text).toContain(`unavailable: no Orca Run "Master Chief: ${project} tickets"`);
+    expect(text).not.toMatch(/\bnone\b/);
+  }
+});
+
+test("ARK-306-AC5 the ARK-244 chief tests and the releaseSettledWorkers tests are present", () => {
+  const chief = readFileSync(join(import.meta.dir, "chief.test.ts"), "utf8");
+  const run = readFileSync(join(import.meta.dir, "run.test.ts"), "utf8");
+  expect(chief).toMatch(/^test\("ARK-244-AC1 /m);
+  expect(chief).toMatch(/^test\("ARK-244-AC2 /m);
+  expect(run).toMatch(/^test\("ARK-278-AC1 run close releases/m);
 });
