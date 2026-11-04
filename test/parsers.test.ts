@@ -1,8 +1,11 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseBehave } from "../cli/parsers/behave";
 import { parsePytest } from "../cli/parsers/pytest";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 // Real output: `pytest -o junit_family=xunit1 --junitxml=...` and `behave --format json -o ...`
 // run on throwaway projects (pytest 8, behave 1.3.3).

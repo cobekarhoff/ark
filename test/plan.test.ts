@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
@@ -11,6 +11,9 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const criteria = [
   { id: "ARK-900-AC1", text: "first" },

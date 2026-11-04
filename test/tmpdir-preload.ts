@@ -1,7 +1,10 @@
-import { afterAll } from "bun:test";
+import { afterAll, setDefaultTimeout } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// ARK-292: default for the first file only; bun resets it per file, so each test file also calls setDefaultTimeout(30_000).
+setDefaultTimeout(30_000);
 
 // One root per bun test process. os.tmpdir() and child processes use it.
 // afterAll, not process "exit": exit hooks do not fire in a bun test preload.
