@@ -1418,14 +1418,14 @@ function reviewRun(options: {
   return { run, url, directory, view };
 }
 
-const usageAt = (fraction: number) => ({
+const usageAt = (fraction: number, baseInstant = Date.now()) => ({
   reports: [
     {
       provider: "anthropic",
       fetchedAt: Date.now(),
       limits: [
         {
-          window: { id: "5h", resetsAt: Date.now() + 4_440_000 },
+          window: { id: "5h", resetsAt: baseInstant + 4_440_000 },
           amount: { usedFraction: fraction },
         },
       ],
@@ -1433,8 +1433,8 @@ const usageAt = (fraction: number) => ({
   ],
 });
 
-/** Home with 1 gate, 1 stuck agent (a prompt), 2 MRs in review and the 5h window of anthropic at 82%. */
-async function homeWithBlockers() {
+/** Home with 1 gate, 1 stuck agent (a prompt), 2 MRs in review and the 5h window of anthropic at 82%. The usage reset is `baseInstant` + 74 min: the page compares it with its own clock, every age with the server's. */
+async function homeWithBlockers(baseInstant = Date.now()) {
   isolate();
   const gate = writeRun({
     project: "p",
@@ -1507,7 +1507,7 @@ async function homeWithBlockers() {
   installFakeTools({
     orca,
     mergeRequestViews: { [older.url]: older.view, [newer.url]: newer.view },
-    ompUsage: usageAt(0.82),
+    ompUsage: usageAt(0.82, baseInstant),
     plannotatorSessions: [
       { index: 1, target: join(gate, "ticket.md"), url: "http://localhost:20000/review/gate" },
     ],
@@ -1515,10 +1515,32 @@ async function homeWithBlockers() {
   return { baseUrl: await launch(), older, newer, stuckRun };
 }
 
-test("ARK-285-AC5 Home shows the tile strip first, then the blockers, the review queue in merge order and the progress and usage, with Master Chief once", async ({
-  page,
-}) => {
-  const { baseUrl, older, newer, stuckRun } = await homeWithBlockers();
+/** The fixture and the page clock share one instant in UTC, so the reset form (HH:MM or date and time) never depends on when the suite runs. */
+test.describe("the usage reset on a frozen clock", () => {
+  test.use({ timezoneId: "UTC" });
+  const day = new Date().toISOString().slice(0, 10);
+  const at = (time: string) => Date.parse(`${day}T${time}:00Z`);
+
+  test("ARK-285-AC5 Home shows the tile strip first, then the blockers, the review queue in merge order and the progress and usage, with Master Chief once", async ({
+    page,
+  }) => {
+    await checkHomeWithBlockers(page, at("12:00"), /resets \d\d:\d\d/);
+  });
+  test("ARK-301-AC1 page clock at 23:30 UTC: the reset falls on the next day and shows its date", async ({
+    page,
+  }) => {
+    await checkHomeWithBlockers(page, at("23:30"), /resets \d\d \w{3} 00:\d\d/);
+  });
+  test("ARK-301-AC1 page clock at 12:00 UTC: the reset falls on the same day and shows HH:MM only", async ({
+    page,
+  }) => {
+    await checkHomeWithBlockers(page, at("12:00"), /resets 13:\d\d/);
+  });
+});
+
+async function checkHomeWithBlockers(page: Page, baseInstant: number, reset: RegExp) {
+  await page.clock.setFixedTime(baseInstant);
+  const { baseUrl, older, newer, stuckRun } = await homeWithBlockers(baseInstant);
   await open(page, baseUrl, "");
 
   // The tile strip comes first, in this order, then three columns.
@@ -1591,14 +1613,14 @@ test("ARK-285-AC5 Home shows the tile strip first, then the blockers, the review
   const window = columns.nth(2).getByTestId("usage-window");
   await expect(window).toHaveAttribute("data-near", "true");
   await expect(window).toContainText("82%");
-  await expect(window.getByTestId("usage-reset")).toContainText(/resets \d\d:\d\d/);
+  await expect(window.getByTestId("usage-reset")).toContainText(reset);
   await expect(page.locator('[data-testid="tile"][data-tile="usage"]')).toHaveClass(/alarm/);
 
   // Master Chief shows once, in the nav, and no row shows (configured).
   await expect(page.getByText("Master Chief")).toHaveCount(1);
   await expect(page.locator("header.top").getByText("Master Chief")).toHaveCount(1);
   await expect(page.getByText("(configured)")).toHaveCount(0);
-});
+}
 
 test("ARK-285-AC5 a javascript: URL in a gate or an MR shows as text, never a link", async ({
   page,

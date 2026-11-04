@@ -167,7 +167,7 @@ describe("playwright migration", () => {
   );
 
   test(
-    "ARK-243-AC6 the Playwright suite leaves nothing in the temporary folder",
+    "ARK-243-AC6 ARK-301-AC2 the Playwright suite leaves nothing in the temporary folder",
     () => {
       const dir = scratch();
       try {
