@@ -194,9 +194,10 @@ When the human amends a criterion of a run before its plan gate, do not put the 
 
 1. Check that it is from the run lead you started for that run.
 2. Run `ark status <run>`. A run lead that finished its work leaves the run in `merge_requests_open`, or in `closed` if it was aborted.
-3. If the outcome is `failed`, or the run is not in `merge_requests_open`, tell the human what the run lead reported and decide with them.
-4. Otherwise give the human the MR links from `ark status <run>`, in the order they must merge, and tell them: review each MR, merge them in that order, then tell you.
-5. Release the run lead: `orca orchestration worker-release --dispatch <dispatch id> --json`.
+3. If the run is in phase `building`, the outcome is not `failed`, and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask whether they took the branches. On their answer run `ark run close <run> handed_off`, then go to section 8 after-close steps. Skip steps 4 and 5, then release the run lead as in step 6.
+4. If the outcome is `failed`, or the run is not in `merge_requests_open`, tell the human what the run lead reported and decide with them.
+5. Otherwise give the human the MR links from `ark status <run>`, in the order they must merge, and tell them: review each MR, merge them in that order, then tell you.
+6. Release the run lead: `orca orchestration worker-release --dispatch <dispatch id> --json`.
 
 ## 8. Close the run
 
@@ -280,7 +281,7 @@ At 70% or more context use, as your status line shows, do these steps in order. 
 
 Two loops run in the Ark repo's `scripts/` folder. Start each one in its own background job in a terminal, with the workspace and the interval in seconds as arguments:
 
-- `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN and 3 rules hold: it merges only after `retro.md` exists in the run folder (the run lead sent its final report), it skips a run whose ticket is `superseded` or `done`, and it re-reads `ark status <run>` right before `gh pr merge`. It prints `HELD: <run> #<number> <reason>` lines to stderr, once for each held PR. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again.
+- `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN and 3 rules hold: it merges only after `retro.md` exists in the run folder (the run lead sent its final report), it skips a run whose ticket is `superseded` or `done`, and it re-reads `ark status <run>` right before `gh pr merge`. It prints `HELD: <run> #<number> <reason>` lines to stderr, once for each held PR. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again. Do not start `scripts/auto-merger.sh` for a project whose `ark.yml` says `merge_requests: none`: its runs never reach `merge_requests_open`.
 - `scripts/temp-cleaner.sh <workspace> 300` removes Ark test temp directories older than 12 minutes from `$TMPDIR`. It prints `LOW DISK` and exits when `/` has less than 15 GB free.
 
 ## Rules

@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadConfig } from "../cli/config.ts";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
 import {
@@ -179,6 +180,34 @@ for (const [name, mutate, expected] of invalidConfigs) {
     expect(existsSync(join(process.env.ARK_HOME as string, "projects", "broken", "runs"))).toBe(
       false,
     );
+  });
+}
+
+test("ARK-295-AC1 loadConfig returns merge_requests open, none, and open when the key is absent", () => {
+  writeProject("opened", validConfig({ merge_requests: "open" }));
+  writeProject("local", validConfig({ merge_requests: "none" }));
+  writeProject("plain", validConfig());
+  expect(loadConfig("opened").merge_requests).toBe("open");
+  expect(loadConfig("local").merge_requests).toBe("none");
+  expect(loadConfig("plain").merge_requests).toBe("open");
+});
+
+test("ARK-295-AC1 any other merge_requests value is refused and the run start names the rule", () => {
+  writeProject("broken", validConfig({ merge_requests: "maybe" }));
+  expect(() => loadConfig("broken")).toThrow("merge_requests must be one of open, none");
+  const ticketFile = writeTicket("broken", "ARK-902", [{ id: "ARK-902-AC1", text: "It works" }]);
+  const result = ark("run", "start", ticketFile, "--project", "broken");
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("merge_requests must be one of open, none");
+});
+
+for (const [name, value] of [
+  ["null", null],
+  ["blank", ""],
+] as const) {
+  test(`ARK-295-AC1 a ${name} merge_requests value is refused, not read as open`, () => {
+    writeProject("broken", validConfig({ merge_requests: value }));
+    expect(() => loadConfig("broken")).toThrow("merge_requests must be one of open, none");
   });
 }
 
@@ -982,7 +1011,11 @@ test("ARK-282-AC3 a failed start at the last round keeps phase building and open
 });
 
 /** A building run in a real git worktree. Its one suite is a real `bun test` file that proves ARK-900-AC1. */
-function worktreeRun(): { runId: string; directory: string; worktree: string } {
+function worktreeRun(config: Record<string, unknown> = {}): {
+  runId: string;
+  directory: string;
+  worktree: string;
+} {
   const workspace = tempGitRepo({
     "ac.test.ts": `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
   });
@@ -999,6 +1032,7 @@ function worktreeRun(): { runId: string; directory: string; worktree: string } {
           parser: "bun",
         },
       ],
+      ...config,
     }),
   );
   const { runId, directory } = startRun();
@@ -1132,4 +1166,69 @@ test("ARK-287-AC3 a spent budget with a failed last test is escalation, and a pa
   expect(opened.err).not.toContain("escalation");
   expect(eventLines(directory).some((line) => line.includes('"gate":"escalation"'))).toBe(false);
   expect(eventLines(directory).slice(0, eventsBefore.length)).toEqual(eventsBefore);
+});
+
+const localBranchLines = (runId: string) =>
+  ark("status", runId)
+    .out.split("\n")
+    .filter((line) => line.startsWith("branch"));
+
+test("ARK-295-AC5 a none project lists each branch with commits beyond its base, before and after handed_off", () => {
+  const { runId, directory, worktree } = worktreeRun({ merge_requests: "none" });
+  const created = JSON.parse(
+    eventLines(directory).find((line) => line.includes('"worktree.created"')) as string,
+  ).data as { branch: string; base: string };
+
+  // No commit yet: the local-only line replaces `merge requests: none`, and no branch line.
+  const before = ark("status", runId);
+  expect(before.code).toBe(0);
+  expect(before.out).toContain("merge requests: none (local only)\n");
+  expect(before.out).not.toMatch(/^merge requests: none$/m);
+  expect(localBranchLines(runId)).toEqual([]);
+
+  commitIn(worktree, "one");
+  commitIn(worktree, "two");
+  const line = `branch   .  ${created.branch}  2 commit(s) ahead of ${created.base.slice(0, 8)}`;
+  expect(created.base).toHaveLength(40);
+  expect(localBranchLines(runId)).toEqual([line]);
+  expect(ark("status", runId).out).toContain(`merge requests: none (local only)\n${line}\n`);
+
+  // After the close the worktree is gone and the kept branch is counted in the source repo.
+  expect(ark("test", runId).code).toBe(0);
+  const closed = ark("run", "close", runId, "handed_off");
+  expect(closed.code).toBe(0);
+  expect(existsSync(worktree)).toBe(false);
+  const after = ark("status", runId);
+  expect(after.code).toBe(0);
+  expect(after.out).toContain(`merge requests: none (local only)\n${line}\n`);
+});
+
+test("ARK-295-AC5 an open project and a project with no ark.yml print the unchanged merge requests line", () => {
+  const { runId, directory, worktree } = worktreeRun({ merge_requests: "open" });
+  commitIn(worktree, "one");
+  const open = ark("status", runId);
+  expect(open.code).toBe(0);
+  expect(open.out).toMatch(/^merge requests: none$/m);
+  expect(open.out).not.toContain("(local only)");
+  expect(localBranchLines(runId)).toEqual([]);
+
+  rmSync(join(directory, "../../ark.yml"));
+  const missing = ark("status", runId);
+  expect(missing.code).toBe(0);
+  expect(missing.out).toMatch(/^merge requests: none$/m);
+  expect(missing.out).not.toContain("(local only)");
+  expect(localBranchLines(runId)).toEqual([]);
+});
+
+test("ARK-295-AC5 ark status counts a none project with an invalid unrelated field as open instead of failing", () => {
+  const { runId, directory } = worktreeRun({ merge_requests: "none" });
+  const configFile = join(directory, "../../ark.yml");
+  writeFileSync(
+    configFile,
+    JSON.stringify({ ...JSON.parse(readFileSync(configFile, "utf8")), concurrency: 0 }),
+  );
+  const result = ark("status", runId);
+  expect(result.code).toBe(0);
+  expect(result.out).toMatch(/^merge requests: none$/m);
+  expect(result.out).not.toContain("(local only)");
 });

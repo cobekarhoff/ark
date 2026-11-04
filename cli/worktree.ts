@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadConfig } from "./config.ts";
+import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
 import { findRun } from "./paths.ts";
@@ -255,9 +255,10 @@ export function worktreeCreate(
 
 /** Merges origin/<target> into every worktree and pushes the branch of each repo with an open MR. A conflicting repo is recorded and skipped; after the last repo one error names every conflicting repo. */
 export function worktreeSync(runId: string, inProject?: string): void {
-  const { directory } = findRun(runId, inProject);
+  const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
+  const mayPush = mergeRequestsMode(project) !== "none";
   assertAllowed(state, "worktree.synced", { repo: state.worktrees[0].repo, conflict: false });
   const conflicts: string[] = [];
   for (const worktree of state.worktrees) {
@@ -282,7 +283,7 @@ export function worktreeSync(runId: string, inProject?: string): void {
       );
       continue;
     }
-    const pushed = state.merge_requests.some((merge) => merge.repo === worktree.repo);
+    const pushed = mayPush && state.merge_requests.some((merge) => merge.repo === worktree.repo);
     if (pushed) git(worktree.path, "push", "origin", worktree.branch);
     console.log(
       `${worktree.repo}  ${target}  ${git(worktree.path, "rev-parse", "HEAD")}${pushed ? "  pushed" : ""}`,
@@ -311,12 +312,16 @@ function dirtyLines(path: string, worktreePaths: string[]): string[] {
   return dirty;
 }
 
+/** Commits of `branch` beyond `base`, counted in the source repo; undefined when the count fails. */
+export function commitsAhead(source: string, branch: string, base?: string): number | undefined {
+  if (!base) return undefined;
+  const counted = Bun.spawnSync(["git", "-C", source, "rev-list", "--count", `${base}..${branch}`]);
+  return counted.exitCode === 0 ? Number(counted.stdout.toString().trim()) : undefined;
+}
+
 /** Why a handed_off branch must stay: commits beyond its base, or a count that failed. Counted in the source repo, so it works with the worktree gone. */
 function handedOffReason(source: string, branch: string, base?: string): string | undefined {
-  const counted = base
-    ? Bun.spawnSync(["git", "-C", source, "rev-list", "--count", `${base}..${branch}`])
-    : undefined;
-  const ahead = counted?.exitCode === 0 ? Number(counted.stdout.toString().trim()) : undefined;
+  const ahead = commitsAhead(source, branch, base);
   if (ahead === undefined) return "handed off, could not count the commits ahead of its base";
   if (ahead > 0)
     return `handed off, ${ahead} ${ahead === 1 ? "commit" : "commits"} ahead of ${base?.slice(0, 8)}`;

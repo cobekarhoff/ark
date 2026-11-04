@@ -65,7 +65,12 @@ const created = () => calls().filter((call) => call.argv.includes("create"));
 const optionValue = (call: LoggedCall, option: string) => call.argv[call.argv.indexOf(option) + 1];
 
 // Three repos. The plan lists app first, but app needs core. docs gets no commits.
-function scenario(hosts: Record<"core" | "app", Host>, testPassed = true, manual: string[] = []) {
+function scenario(
+  hosts: Record<"core" | "app", Host>,
+  testPassed = true,
+  manual: string[] = [],
+  config: Record<string, unknown> = {},
+) {
   tempArkHome();
   const projectDirectory = writeProject("demo", {
     workspace: tmpdir(),
@@ -76,6 +81,7 @@ function scenario(hosts: Record<"core" | "app", Host>, testPassed = true, manual
       validator: { harness: "codex", model: "gpt-codex" },
       reviewer: { harness: "codex", model: "gpt-codex" },
     },
+    ...config,
   });
   const ticketFile = writeTicket(
     "demo",
@@ -597,3 +603,94 @@ test(
   },
   { timeout: 30_000 },
 );
+
+/** Fake git, gh and glab that append their arguments to one file; git then runs the real git. */
+function fakeHostTools(): string {
+  const realGit = Bun.which("git") as string;
+  const directory = mkdtempSync(join(tmpdir(), "ark-fake-tools-"));
+  const calls = join(directory, "calls.log");
+  writeFileSync(calls, "");
+  for (const tool of ["git", "gh", "glab"])
+    writeFileSync(
+      join(directory, tool),
+      `#!/bin/sh\necho "${tool} $*" >> "${calls}"\n${tool === "git" ? `exec "${realGit}" "$@"` : "exit 1"}\n`,
+      { mode: 0o755 },
+    );
+  process.env.PATH = `${directory}:${process.env.PATH}`;
+  return calls;
+}
+
+const none = { merge_requests: "none" };
+
+test(
+  "ARK-295-AC2 merge-request open exits 1 for a none project before any git, gh or glab runs",
+  () => {
+    const { runDirectory, bares } = scenario({ core: "github", app: "github" }, true, [], none);
+    const toolCalls = fakeHostTools();
+    const result = ark("merge-request", "open", run);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain(
+      `project demo has merge_requests: none: close the run with ark run close ${run} handed_off`,
+    );
+    expect(readFileSync(toolCalls, "utf8")).toBe("");
+    expect(calls()).toEqual([]);
+    expect(openedEvents(runDirectory)).toEqual([]);
+    expect(
+      Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.core })
+        .exitCode,
+    ).not.toBe(0);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-295-AC2 merge-request open still pushes and opens for a project with merge_requests open",
+  () => {
+    const { runDirectory, bares } = scenario({ core: "github", app: "github" }, true, [], {
+      merge_requests: "open",
+    });
+    const result = ark("merge-request", "open", run);
+    expect(result.code).toBe(0);
+    expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
+    expect(openedEvents(runDirectory)).toHaveLength(2);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-295-AC3 merge-request status prints merge requests: none for a none project and calls no gh or glab",
+  () => {
+    scenario({ core: "github", app: "github" }, true, [], none);
+    const toolCalls = fakeHostTools();
+    const result = ark("merge-request", "status", run);
+    expect(result.code).toBe(0);
+    expect(result.out.trim()).toBe("merge requests: none");
+    expect(readFileSync(toolCalls, "utf8")).toBe("");
+    expect(calls()).toEqual([]);
+  },
+  { timeout: 30_000 },
+);
+
+for (const subcommand of ["open", "status"]) {
+  test(
+    `ARK-295-AC2 ARK-295-AC3 merge-request ${subcommand} refuses a none project with an invalid unrelated field before any git, gh or glab runs`,
+    () => {
+      const { bares } = scenario({ core: "github", app: "github" }, true, [], {
+        ...none,
+        concurrency: 0,
+      });
+      const toolCalls = fakeHostTools();
+      const result = ark("merge-request", subcommand, run);
+      expect(result.code).toBe(1);
+      expect(result.err).toContain("concurrency must be an integer >= 1");
+      expect(readFileSync(toolCalls, "utf8")).toBe("");
+      expect(calls()).toEqual([]);
+      expect(
+        Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], {
+          cwd: bares.core,
+        }).exitCode,
+      ).not.toBe(0);
+    },
+    { timeout: 30_000 },
+  );
+}
