@@ -42,3 +42,14 @@ test("ARK-302-AC10 docs/reference/cli.md equals the output of bun scripts/cli-re
   expect(generated.exitCode).toBe(0);
   expect(readFileSync(path, "utf8")).toBe(committed);
 });
+
+test("ARK-305-AC4 the two command descriptions and project-checks name the not: prefix", () => {
+  const read = (path: string) => readFileSync(join(repositoryRoot, path), "utf8");
+  const source = read("cli/ark.ts");
+  for (const command of ["merge-request open", "run close"]) {
+    const start = source.indexOf(`usage: "${command} `);
+    expect(start).toBeGreaterThan(-1);
+    expect(source.slice(start, start + 2500)).toContain("not:");
+  }
+  expect(read("docs/how-to/project-checks.md")).toContain("not:");
+});
