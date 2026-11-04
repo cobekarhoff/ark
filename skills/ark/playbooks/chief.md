@@ -236,15 +236,16 @@ A `HELD: <run> #<number> ticket superseded` line from the auto-merger (section 1
 
 After `ark run close`:
 
-1. Mark the Task: `orca orchestration task-update --id <task id> --status completed --result "<outcome>" --json`. Tasks that depend on it become ready. Use `--status failed` for `abandoned` and `aborted`.2. If the outcome is `merged`, sync and notify before you start any ticket:
+1. Mark the Task: `orca orchestration task-update --id <task id> --status completed --result "<outcome>" --json`. Tasks that depend on it become ready. Use `--status failed` for `abandoned` and `aborted`.
+2. If the outcome is `merged`, sync and notify before you start any ticket:
    1. Run `ark workspace sync <run>`. It fast-forwards the workspace checkout's target branch and prints `<repo>  <branch>  <head>`. If it exits 1, tell the human which repo it names and wait: new runs must not start from a stale base.
    2. For every other open run, send its lead a `status` message with the target branch and the head that `ark workspace sync` printed:
 
       ```sh
       orca orchestration send --retry-request <id> --to dispatch:<run lead dispatch id> --type status --subject "<repo>: <branch> moved" --body "Run <closed run> merged. <repo> <branch> is now at <head>. Run \`ark worktree sync <run>\` before your next step." --json
       ```
-2. Run the close check with the human: read `playbooks/retro.md` and follow "Part 1: Close check", steps 3 and 4, which are the Master Chief steps. Steps 1 and 2 are done: `ark run close` ran, and `retro.md` exists.
-3. Start the next ready ticket, if `concurrency` allows.
+3. Run the close check with the human: read `playbooks/retro.md` and follow "Part 1: Close check", steps 3 and 4, which are the Master Chief steps. Steps 1 and 2 are done: `ark run close` ran, and `retro.md` exists.
+4. Start the next ready ticket, if `concurrency` allows.
 
 ## 9. Link an escaped defect
 
