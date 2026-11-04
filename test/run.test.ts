@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -1407,4 +1408,228 @@ test("ARK-302-AC5 a bug run with several ACs needs one test.completed with every
     "ARK-900-AC3": "manual pending",
   });
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+});
+
+type CloseCriterion = { id: string; text: string; manual?: boolean };
+
+/** A building worktree run whose ticket holds `criteria` and whose last test passed at the current head with `statuses`. */
+function closableRun(
+  criteria: CloseCriterion[],
+  statuses: Record<string, string>,
+  kind?: string,
+): { runId: string; directory: string; worktree: string } {
+  const run = worktreeRun();
+  const ticket = [
+    "---",
+    "id: ARK-900",
+    'title: "Demo ticket"',
+    "status: ready",
+    ...(kind === undefined ? [] : [`kind: ${kind}`]),
+    "acceptance_criteria:",
+    ...criteria.flatMap((criterion) => [
+      `  - id: ${criterion.id}`,
+      `    text: ${JSON.stringify(criterion.text)}`,
+      ...(criterion.manual ? ["    manual: true"] : []),
+    ]),
+    "---",
+    "## Why",
+    "",
+    "Test ticket.",
+    "",
+  ].join("\n");
+  writeFileSync(join(run.directory, "ticket.md"), ticket);
+  // criteria.updated is refused while building, so the run.started event carries the criteria and the kind.
+  const file = join(run.directory, "events.ndjson");
+  writeFileSync(
+    file,
+    readFileSync(file, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const event = JSON.parse(line);
+        if (event.type === "run.started") {
+          event.data.criteria = criteria.map((item) => item.id);
+          if (kind !== undefined) event.data.kind = kind;
+        }
+        return JSON.stringify(event);
+      })
+      .join("\n") + "\n",
+  );
+  const head = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: run.worktree })
+    .stdout.toString()
+    .trim();
+  appendEvent(run.directory, "test.completed", {
+    passed: true,
+    heads: { ".": head },
+    suites: [],
+    criteria: statuses,
+  });
+  return run;
+}
+
+const closedEvents = (directory: string) =>
+  eventLines(directory).filter((line) => line.includes('"run.closed"'));
+
+test("ARK-304-AC1 close handed_off refuses a missing and a failing AC, appends no run.closed and keeps the worktree", () => {
+  const { runId, directory, worktree } = closableRun(
+    [
+      { id: "ARK-900-AC1", text: "One" },
+      { id: "ARK-900-AC2", text: "Two" },
+      { id: "ARK-900-AC3", text: "Three" },
+    ],
+    { "ARK-900-AC1": "passing", "ARK-900-AC3": "failing" },
+  );
+  const eventsBefore = eventLines(directory);
+  const refused = ark("run", "close", runId, "handed_off");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain(
+    "criteria not passing in the last test run: ARK-900-AC2 (missing), ARK-900-AC3 (failing)",
+  );
+  expect(refused.err).not.toContain("ARK-900-AC1");
+  expect(eventLines(directory)).toEqual(eventsBefore);
+  expect(closedEvents(directory)).toEqual([]);
+  expect(existsSync(worktree)).toBe(true);
+});
+
+test("ARK-304-AC2 close handed_off refuses a pending manual AC, then an absent AC string, and names only the absent one", () => {
+  const { runId, directory, worktree } = closableRun(
+    [
+      { id: "ARK-900-AC1", text: "Holds `ARK-900-AC1 works` and `absent-string-xyz`" },
+      { id: "ARK-900-AC2", text: "A person checks it", manual: true },
+    ],
+    { "ARK-900-AC1": "passing", "ARK-900-AC2": "manual" },
+  );
+  const eventsBefore = eventLines(directory);
+
+  const manual = ark("run", "close", runId, "handed_off");
+  expect(manual.code).toBe(1);
+  expect(manual.err).toContain("manual criterion without ok: ARK-900-AC2");
+  expect(manual.err).not.toContain("manual criteria without ok:");
+
+  expect(ark("gate", "record", runId, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+  const eventsAfterGate = eventLines(directory);
+  const absent = ark("run", "close", runId, "handed_off");
+  expect(absent.code).toBe(1);
+  expect(absent.err).toContain("AC string in no tracked file at head:");
+  expect(absent.err).toContain("ARK-900-AC1 `absent-string-xyz`");
+  expect(absent.err).not.toContain("`ARK-900-AC1 works`");
+  expect(eventLines(directory)).toEqual(eventsAfterGate);
+  expect(eventsAfterGate.length).toBeGreaterThan(eventsBefore.length);
+  expect(closedEvents(directory)).toEqual([]);
+  expect(existsSync(worktree)).toBe(true);
+});
+
+test("ARK-304-AC2 close handed_off says criteria for several pending manual ACs", () => {
+  const { runId } = closableRun(
+    [
+      { id: "ARK-900-AC1", text: "One", manual: true },
+      { id: "ARK-900-AC2", text: "Two", manual: true },
+    ],
+    {},
+  );
+  const refused = ark("run", "close", runId, "handed_off");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("manual criteria without ok: ARK-900-AC1, ARK-900-AC2");
+});
+
+test("ARK-304-AC3 close handed_off refuses a commit after the test, then closes after ark test at the new head", () => {
+  const { runId, directory, worktree } = worktreeRun();
+  expect(ark("test", runId).code).toBe(0);
+  commitIn(worktree, "late");
+  const eventsBefore = eventLines(directory);
+
+  const refused = ark("run", "close", runId, "handed_off");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("changed since the last test run");
+  expect(refused.err).toContain("repo .");
+  expect(refused.err.trim().endsWith(`run ark test ${runId} again`)).toBe(true);
+  expect(eventLines(directory)).toEqual(eventsBefore);
+  expect(existsSync(worktree)).toBe(true);
+
+  expect(ark("test", runId).code).toBe(0);
+  const closed = ark("run", "close", runId, "handed_off");
+  expect(closed.code, closed.err).toBe(0);
+  expect(closedEvents(directory)).toHaveLength(1);
+});
+
+test("ARK-304-AC4 a perf run with no results/compare.md is refused by close handed_off", () => {
+  const { runId, directory } = closableRun(
+    [{ id: "ARK-900-AC1", text: "It works" }],
+    { "ARK-900-AC1": "passing" },
+    "perf",
+  );
+  const refused = ark("run", "close", runId, "handed_off");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("perf run: missing or empty result file:");
+  expect(refused.err).toContain("results/compare.md");
+  expect(closedEvents(directory)).toEqual([]);
+});
+
+test("ARK-304-AC4 each of the five shared refusal messages is in exactly one file of cli/", () => {
+  const directory = join(import.meta.dir, "../cli");
+  const sources = readdirSync(directory)
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => readFileSync(join(directory, name), "utf8"));
+  for (const message of [
+    "criteria not passing in the last test run:",
+    "manual criterion without ok:",
+    "manual criteria without ok:",
+    "AC string in no tracked file at head:",
+    "changed since the last test run",
+  ])
+    expect(
+      sources.filter((source) => source.includes(message)),
+      message,
+    ).toHaveLength(1);
+});
+
+test("ARK-304-AC5 close handed_off succeeds for a run that meets every rule and prints the closed line", () => {
+  const { runId, directory, worktree } = closableRun(
+    [
+      { id: "ARK-900-AC1", text: "Holds `ARK-900-AC1 works`" },
+      { id: "ARK-900-AC2", text: "A person checks it", manual: true },
+    ],
+    { "ARK-900-AC1": "passing", "ARK-900-AC2": "manual" },
+  );
+  expect(ark("gate", "record", runId, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+  const closed = ark("run", "close", runId, "handed_off");
+  expect(closed.code, closed.err).toBe(0);
+  expect(closed.out).toContain(`${runId} closed: handed_off`);
+  expect(closedEvents(directory)).toHaveLength(1);
+  expect(existsSync(worktree)).toBe(false);
+});
+
+test("ARK-304-AC5 the first two refusals keep their text and come before the AC refusals", () => {
+  const { runId, directory } = closableRun([{ id: "ARK-900-AC1", text: "It works" }], {
+    "ARK-900-AC1": "failing",
+  });
+  // Failing AC and no merge request: the AC refusal is not reached while the test did not pass.
+  appendEvent(directory, "test.completed", { passed: false, heads: {}, suites: [], criteria: {} });
+  const notPassed = ark("run", "close", runId, "handed_off");
+  expect(notPassed.code).toBe(1);
+  expect(notPassed.err).toContain(
+    "run.closed handed_off refused: missing test.completed with passed true",
+  );
+
+  appendEvent(directory, "merge_request.opened", {
+    repo: ".",
+    url: "https://example.com/mr/1",
+    number: 1,
+  });
+  const opened = ark("run", "close", runId, "handed_off");
+  expect(opened.code).toBe(1);
+  expect(opened.err).toContain("run.closed handed_off refused: the run has merge requests");
+  expect(closedEvents(directory)).toEqual([]);
+});
+
+test("ARK-304-AC7 run close keeps its branch-retention sentence in help and docs, and docs/reference/cli.md equals the generator output", () => {
+  const root = join(import.meta.dir, "..");
+  const sentence = "For handed_off it keeps each branch with commits beyond its base";
+  expect(ark("run", "close", "--help").out).toContain(sentence);
+  const referencePath = join(root, "docs/reference/cli.md");
+  const committed = readFileSync(referencePath, "utf8");
+  expect(committed).toContain(sentence);
+  const generated = Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root });
+  expect(generated.exitCode).toBe(0);
+  expect(readFileSync(referencePath, "utf8")).toBe(committed);
 });

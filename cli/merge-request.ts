@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors";
 import { manualCriteria } from "./criteria.ts";
-import { appendEvent, deriveState, readEvents, type ArkEvent } from "./events";
+import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events";
 import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
@@ -275,28 +275,32 @@ export function staleHeads(events: ArkEvent[]): StaleHead[] {
   return stale;
 }
 
-export function mergeRequestOpen(runId: string, inProject?: string): void {
-  const { project, directory } = findRun(runId, inProject);
-  if (mergeRequestsMode(project) === "none")
-    throw new ArkError(
-      `project ${project} has merge_requests: none: close the run with ark run close ${runId} handed_off`,
-    );
-  const projectConfig = loadConfig(project);
-  const events = readEvents(directory);
-  const state = deriveState(events);
-  if (!["building", "escalation", "merge_requests_open"].includes(state.phase)) {
-    throw new ArkError(`cannot open merge requests while the run is in phase ${state.phase}`);
-  }
-
+function worktreeMap(events: ArkEvent[]): Map<string, Worktree> {
   const worktrees = new Map<string, Worktree>();
   for (const event of events)
     if (event.type === "worktree.created") worktrees.set(event.data.repo, event.data as Worktree);
+  return worktrees;
+}
+
+/**
+ * The refusals shared by `ark merge-request open` and `ark run close <run> handed_off`: the test result, the
+ * manual and non-manual ACs, the head of every repo, the AC strings, and the `perf` and `refactor` rules.
+ */
+export function assertShippable(
+  runId: string,
+  project: string,
+  directory: string,
+  events: ArkEvent[],
+  state: RunState,
+): void {
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
   const unproven = manualCriteria(directory).filter((id) => state.gates[`manual:${id}`] !== "ok");
   if (unproven.length > 0)
     throw new ArkError(
-      `manual ${unproven.length === 1 ? "criterion" : "criteria"} without ok: ${unproven.join(", ")}`,
+      unproven.length === 1
+        ? `manual criterion without ok: ${unproven.join(", ")}`
+        : `manual criteria without ok: ${unproven.join(", ")}`,
     );
   const manual = new Set(manualCriteria(directory));
   const notPassing = state.criteria.filter(
@@ -315,8 +319,9 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
     );
   }
 
-  const repoPaths = discoverRepos(projectConfig.workspace).map(
-    (repo) => worktrees.get(repo)?.path ?? join(projectConfig.workspace, repo),
+  const worktrees = worktreeMap(events);
+  const repoPaths = discoverRepos(loadConfig(project).workspace).map(
+    (repo) => worktrees.get(repo)?.path ?? join(loadConfig(project).workspace, repo),
   );
   const absent = absentLiterals(criterionTexts(directory), repoPaths);
   if (absent.length > 0)
@@ -332,7 +337,24 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
     throw new ArkError(
       `refactor run: the suites ${state.base_passed === false ? "fail" : "were not run"} at the base commit: run ark test ${runId}`,
     );
+}
 
+export function mergeRequestOpen(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
+  if (mergeRequestsMode(project) === "none")
+    throw new ArkError(
+      `project ${project} has merge_requests: none: close the run with ark run close ${runId} handed_off`,
+    );
+  const projectConfig = loadConfig(project);
+  const events = readEvents(directory);
+  const state = deriveState(events);
+  if (!["building", "escalation", "merge_requests_open"].includes(state.phase)) {
+    throw new ArkError(`cannot open merge requests while the run is in phase ${state.phase}`);
+  }
+
+  assertShippable(runId, project, directory, events, state);
+
+  const worktrees = worktreeMap(events);
   const plan = loadPlan(directory);
   const upstream = upstreamRepos(plan);
   const order = mergeOrder(plan);
