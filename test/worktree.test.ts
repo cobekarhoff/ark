@@ -9,6 +9,7 @@ import {
   readlinkSync,
   realpathSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -914,5 +915,120 @@ describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
     expect(result.out + result.err).toContain("README.md");
     expect(createdEvents(runDirectory)).toHaveLength(1);
     expect(existsSync(join(runDirectory, "workspace"))).toBe(true);
+  });
+});
+
+/** Starts a run in a two-repo workspace with a worktree in `a` and `b`, and a passed test, so it may close `handed_off`. */
+function handedOffRun() {
+  const workspace = tempTwoRepoWorkspace();
+  const { runId, runDirectory } = startRun(workspace);
+  for (const repo of ["a", "b"]) expect(ark("worktree", "create", runId, repo).code).toBe(0);
+  approveAndOpenMergeRequest(runDirectory, false);
+  appendEvent(runDirectory, "test.completed", {
+    passed: true,
+    heads: {},
+    suites: [{ name: "unit", level: "unit", passed: true }],
+    criteria: { "FAKE-1-AC1": "passing" },
+  });
+  const [a, b] = ["a", "b"].map((repo) => join(runDirectory, "workspace", repo));
+  const branch = gitOutput(a, "branch", "--show-current");
+  const base = createdEvents(runDirectory).find((event) => event.data.repo === "a").data
+    .base as string;
+  return { workspace, runId, runDirectory, a, b, branch, base };
+}
+
+describe("ARK-294 handed_off close keeps branches with commits", () => {
+  test("ARK-294-AC1 closing handed_off keeps a committed branch, removes the worktree and workspace, and prints a kept line", () => {
+    const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
+    commitIn(a, "work.txt");
+    const commit = gitOutput(a, "rev-parse", "HEAD");
+
+    const closed = closeRun(runId, runDirectory, "handed_off");
+    expect(closed.code).toBe(0);
+    expect(gitOutput(join(workspace, "a"), "rev-parse", "--verify", branch)).toBe(commit);
+    expect(existsSync(a)).toBe(false);
+    expect(existsSync(join(runDirectory, "workspace"))).toBe(false);
+    expect(closed.out).toContain(
+      `kept     a  ${branch}: handed off, 1 commit ahead of ${base.slice(0, 8)}\n`,
+    );
+  });
+
+  test("ARK-294-AC2 closing handed_off removes an empty branch and counts several commits", () => {
+    const { workspace, runId, runDirectory, a, b, branch } = handedOffRun();
+    for (const file of ["one.txt", "two.txt", "three.txt"]) commitIn(a, file);
+
+    const closed = closeRun(runId, runDirectory, "handed_off");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(`removed  b  ${branch}\n`);
+    expect(closed.out).toMatch(
+      new RegExp(`kept     a  ${branch}: handed off, 3 commits ahead of `),
+    );
+    expect(existsSync(b)).toBe(false);
+    expect(gitOutput(join(workspace, "b"), "branch", "--list", branch)).toBe("");
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
+  });
+
+  test("ARK-294-AC3 a dirty handed_off worktree and its branch stay", () => {
+    const { workspace, runId, runDirectory, a, branch } = handedOffRun();
+    commitIn(a, "work.txt");
+    writeFileSync(join(a, "untracked.txt"), "dirty\n");
+
+    const closed = closeRun(runId, runDirectory, "handed_off");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(`kept     a  ${branch}: uncommitted changes`);
+    expect(existsSync(a)).toBe(true);
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
+  });
+
+  test("ARK-294-AC3 an aborted run still deletes a branch that has a commit", () => {
+    const { workspace, runId, runDirectory, a, branch } = handedOffRun();
+    commitIn(a, "work.txt");
+
+    const closed = closeRun(runId, runDirectory, "aborted");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(`removed  a  ${branch}\n`);
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).toBe("");
+  });
+
+  test("ARK-294-AC3 a handed_off branch whose base is unknown is kept", () => {
+    const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
+    commitIn(a, "work.txt");
+    const events = join(runDirectory, "events.ndjson");
+    writeFileSync(events, readFileSync(events, "utf8").replaceAll(base, "0".repeat(base.length)));
+
+    const closed = closeRun(runId, runDirectory, "handed_off");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(`kept     a  ${branch}: handed off`);
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
+  });
+
+  test("ARK-294-AC3 a handed_off branch with commits stays when its worktree directory is already gone", () => {
+    const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
+    commitIn(a, "work.txt");
+    rmSync(a, { recursive: true, force: true });
+
+    const closed = closeRun(runId, runDirectory, "handed_off");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(
+      `kept     a  ${branch}: handed off, 1 commit ahead of ${base.slice(0, 8)}\n`,
+    );
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
+  });
+
+  test("ARK-294-AC4 the close description, reference, CONTEXT, chief playbook and how-to say the branches stay", () => {
+    const root = join(import.meta.dir, "..");
+    const text = (path: string) => readFileSync(join(root, path), "utf8");
+    const log = "git -C <repo> log <base>..<branch>";
+
+    for (const path of ["cli/ark.ts", "docs/reference/cli.md"])
+      expect(text(path)).toContain(
+        "For handed_off it keeps each branch with commits beyond its base",
+      );
+    expect(text("CONTEXT.md")).toMatch(
+      /Each branch with commits beyond its base stays in its clone/,
+    );
+    expect(text("skills/ark/playbooks/chief.md")).toContain(log);
+    expect(text("docs/how-to/run-a-ticket.md")).toContain(log);
+    expect(text("docs/how-to/run-a-ticket.md")).toMatch(/stays in its clone/);
   });
 });

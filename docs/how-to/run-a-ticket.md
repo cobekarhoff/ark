@@ -97,6 +97,8 @@ Master Chief checks the state of each PR with `gh` or `glab`, and then closes th
 | You took the branches and want no PRs     | `handed_off` |
 | You stopped the run before any PR existed | `aborted`    |
 
+With `handed_off`, each branch that has commits beyond its base stays in its clone, and `ark run close` prints a `kept` line for it. The worktrees are removed. `git -C <repo> log <base>..<branch>` lists the commits; the `kept` line names the branch and the first 8 characters of the base.
+
 ## 8. Answer the retro questions
 
 The run lead writes `retro.md` for the run, on top of the numbers from `ark retro`. After the run closes, Master Chief asks you three questions: what caused the most pain, what to change now, and what surprised you. It records your answers in `retro.md`.
