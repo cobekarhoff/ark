@@ -222,28 +222,14 @@ The chain is Master Chief, run lead, worker. That is depth 2. Orca's default all
 
 Workers run in `<run>/workspace/<repo>` worktrees, and run leads in `<run>/workspace`. Clara's own skills (`.claude/skills`, the `factory-*` skills) sit at the workspace root. The ARK-150 spike found that OMP does not load them from the mirror.
 
-The method that works: add the workspace's skills directory to OMP's `skills.customDirectories` setting. OMP scans each listed directory for `<directory>/<skill-name>/SKILL.md`, one level deep, and requires each `SKILL.md` to have a `description`. A custom directory outranks a default skill with the same name. Because the setting lives in OMP's user configuration, every OMP agent that Orca launches (run leads, workers and subagents) gets the skills, whatever its working directory.
+Ark makes them reachable. `ark worktree anchor` and `ark worktree create` write `skills.customDirectories` into the `.omp/config.yml` of each nested worktree: the mirror path `<run>/workspace/<directory>` for each of `.claude/skills`, `.agents/skills` and `.omp/skills` that the workspace root has. The root worktree needs no entry, because OMP reads `<cwd>/.claude/skills` itself. The human's global OMP config is not changed. OMP scans each listed directory for `<directory>/<skill-name>/SKILL.md`, one level deep, and requires each `SKILL.md` to have a `description`.
 
-1. Find the directories. Check the workspace root and each repo for `.claude/skills`, `.agents/skills` and `.omp/skills`:
-   ```sh
-   ls -d <workspace>/.claude/skills <workspace>/.agents/skills <workspace>/.omp/skills <workspace>/repos/*/.claude/skills 2>/dev/null
-   ```
-   If none exists, skip this step.
-2. Read the current value. The command replaces the whole list, so keep what is there:
-   ```sh
-   omp config get skills.customDirectories
-   ```
-3. Set the merged list (a JSON array of absolute paths). The directory itself, not a single skill, goes in the list:
-   ```sh
-   omp config set skills.customDirectories '["<workspace>/.claude/skills"]'
-   ```
-   Tell the human what you changed and that it applies to all of their OMP sessions. If the list already holds the path, change nothing.
-4. Verify: `omp config get skills.customDirectories` prints the path, and each `<path>/<skill-name>/SKILL.md` has a `description` in its frontmatter. Report any skill that lacks one: OMP skips it.
+Nothing to run here. Check that the workspace skills can load: list `<workspace>/.claude/skills`, `<workspace>/.agents/skills` and `<workspace>/.omp/skills`, and report any `<skill-name>/SKILL.md` that has no `description` in its frontmatter: OMP skips it. If none of the three directories exists, skip this step.
 
 Claude Code workers and Codex workers do not read OMP's setting. For those harnesses, tell the run lead to list the skills a step needs by absolute path in the worker's prompt (`<workspace>/.claude/skills/<name>/SKILL.md`). Write this under "Skills" in the final summary, and add the line to the project's `learnings.md` so run leads read it at plan time:
 
 ```markdown
-- Workspace skills live in `<workspace>/.claude/skills`. OMP workers load them through `skills.customDirectories`. For Claude Code and Codex workers, pass the `SKILL.md` paths in the step prompt.
+- Workspace skills live in `<workspace>/.claude/skills`. Ark writes them into each worktree's `skills.customDirectories`, so OMP workers load them. For Claude Code and Codex workers, pass the `SKILL.md` paths in the step prompt.
 ```
 
 ## 8. Write `ark.yml`
