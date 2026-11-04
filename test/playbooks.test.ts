@@ -11,7 +11,6 @@ const playbookDirectory = join(import.meta.dir, "../skills/ark/playbooks");
 const chiefPlaybook = readFileSync(join(playbookDirectory, "chief.md"), "utf8");
 const bootstrapPlaybook = readFileSync(join(playbookDirectory, "bootstrap.md"), "utf8");
 const runLeadPlaybook = readFileSync(join(playbookDirectory, "run-lead.md"), "utf8");
-
 test("ARK-169-AC1 bootstrap creates the depth-check Run before starting a worker", () => {
   const depthCheck = bootstrapPlaybook
     .split("## 6. Confirm Orca's nesting depth is at least 2")[1]
@@ -723,4 +722,72 @@ test("ARK-283-AC5 cli.md and run-lead.md name the manual gate, cli.md equals the
 
   Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root });
   expect(readFileSync(path, "utf8")).toBe(reference);
+});
+
+test("ARK-295-AC6 run-lead step 3 skips gh pr list and glab mr list for a none project", () => {
+  const step = section(runLeadPlaybook, "3. Read the workspace and the learnings")
+    .split("\n3. ")[1]
+    ?.split("\n\n")[0];
+  expect(step).toContain("`gh pr list --state all --limit 10`");
+  expect(step).toContain(
+    "When `ark.yml` says `merge_requests: none`, skip `gh pr list` and `glab mr list`",
+  );
+});
+
+test("ARK-295-AC6 run-lead section 10 has a local-only paragraph that syncs and never opens an MR", () => {
+  const paragraph = section(runLeadPlaybook, "10. Open the MRs")
+    .split("\n\n")
+    .find((text) => text.includes("`merge_requests: none`"));
+  expect(paragraph).toBeDefined();
+  expect(paragraph).toContain("never run `ark merge-request open <run>`");
+  expect(paragraph).toContain("`ark worktree sync <run>`");
+  expect(paragraph).toContain("go to section 11");
+  expect(paragraph).not.toMatch(/then run, as a separate command/i);
+});
+
+test("ARK-295-AC6 run-lead section 11 step 3 lists the branches from ark status in place of MR links", () => {
+  const step = section(runLeadPlaybook, "11. Retro and final report")
+    .split("\n3. ")[1]
+    ?.split("\n4. ")[0];
+  expect(step).toContain("For a `none` project, list the branches from `ark status <run>`");
+  expect(step).toContain("in place of MR links");
+});
+
+test("ARK-295-AC6 chief tells the human the branches on a none worker_done, closes handed_off on the answer and skips the auto-merger", () => {
+  const workerDone = chiefPlaybook
+    .split("\n3. If the run is in phase `building`")[1]
+    ?.split("\n4. ")[0];
+  expect(workerDone).toBeDefined();
+  expect(workerDone).toContain("`merge_requests: none`");
+  expect(workerDone).toContain("`git -C <repo> log --oneline <base>..<branch>`");
+  expect(workerDone).toContain("`worktree.created` event");
+  expect(workerDone).toContain("On their answer run `ark run close <run> handed_off`");
+
+  const loops = section(chiefPlaybook, "12. Background loops");
+  expect(loops).toContain(
+    "Do not start `scripts/auto-merger.sh` for a project whose `ark.yml` says `merge_requests: none`",
+  );
+});
+
+test("ARK-295-AC6 retro needs no host check for handed_off and bootstrap writes merge_requests: none only when the human says so", () => {
+  expect(retroPlaybook).toContain("`handed_off` needs no host check: the run has no MR.");
+  expect(bootstrapPlaybook).toContain(
+    "Write `merge_requests: none` only when the human says the project must not push",
+  );
+  expect(bootstrapPlaybook).toContain("Never detect it.");
+  expect(bootstrapPlaybook).toMatch(/^merge_requests: none # only when the human says/m);
+});
+
+test("ARK-295-AC7 the generated CLI reference equals the file and its ark.yml key table lists merge_requests", () => {
+  const root = join(import.meta.dir, "..");
+  const path = join(root, "docs/reference/cli.md");
+  const before = readFileSync(path, "utf8");
+  expect(
+    Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
+  ).toBe(0);
+  const after = readFileSync(path, "utf8");
+  expect(after).toBe(before);
+  expect(after).toMatch(
+    /^\| `merge_requests` +\| no +\| string +\| `open` \(the default\) or `none`\./m,
+  );
 });

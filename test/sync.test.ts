@@ -70,7 +70,7 @@ function configureOrigin(repoPath: string): void {
   git(repoPath, "remote", "set-head", "origin", "main");
 }
 
-function startRun(repoNames = ["."], withValidator = false) {
+function startRun(repoNames = ["."], withValidator = false, config: Record<string, unknown> = {}) {
   const workspace = makeWorkspace(repoNames);
   tempArkHome();
   const projectDirectory = writeProject("demo", {
@@ -86,6 +86,7 @@ function startRun(repoNames = ["."], withValidator = false) {
       },
     ],
     roles,
+    ...config,
   });
   const ticketFile = writeTicket(
     "demo",
@@ -613,6 +614,66 @@ test(
     expect(
       JSON.parse(readFileSync(join(scenario.runDirectory, "state.json"), "utf8")).sync_conflicts,
     ).toEqual(["repos/b"]);
+  },
+  { timeout: 30_000 },
+);
+
+/** Makes every push from the repo fail: git cannot push to the URL `DISABLED`. */
+function disablePush(workspace: string, repoNames: string[]): void {
+  for (const repoName of repoNames)
+    git(
+      repoName === "." ? workspace : join(workspace, repoName),
+      "config",
+      "remote.origin.pushurl",
+      "DISABLED",
+    );
+}
+
+for (const stray of [false, true]) {
+  test(
+    `ARK-295-AC4 worktree sync never pushes for a none project${stray ? ", also with a stray merge_request.opened event" : ""}`,
+    () => {
+      const scenario = startRun(["repos/a", "repos/b"], false, { merge_requests: "none" });
+      disablePush(scenario.workspace, ["repos/a", "repos/b"]);
+      if (stray)
+        appendEvent(scenario.runDirectory, "merge_request.opened", {
+          repo: "repos/a",
+          url: "https://github.com/acme/a/pull/1",
+          number: 1,
+        });
+      const targetHead = advanceOrigin(scenario.workspace, "repos/a", "target.txt", "target\n");
+
+      const synced = ark("worktree", "sync", scenario.runId);
+      expect(synced.code).toBe(0);
+      expect(synced.out).toContain("repos/a  main");
+      expect(synced.out).toContain("repos/b  main");
+      expect(synced.out).not.toContain("pushed");
+      expect(
+        git(scenario.worktreePath("repos/a"), "merge-base", "--is-ancestor", targetHead, "HEAD"),
+      ).toBe("");
+    },
+    { timeout: 30_000 },
+  );
+}
+
+test(
+  "ARK-295-AC4 an open project with an MR event still pushes on sync, so the disabled pushurl is what stops a none project",
+  () => {
+    const scenario = startRun(["."], false, { merge_requests: "open" });
+    appendEvent(scenario.runDirectory, "merge_request.opened", {
+      repo: ".",
+      url: "https://github.com/acme/main/pull/1",
+      number: 1,
+    });
+    const origin = git(scenario.workspace, "remote", "get-url", "origin");
+    disablePush(scenario.workspace, ["."]);
+    const failed = ark("worktree", "sync", scenario.runId);
+    expect(failed.code).not.toBe(0);
+
+    git(scenario.workspace, "config", "remote.origin.pushurl", origin);
+    const synced = ark("worktree", "sync", scenario.runId);
+    expect(synced.code).toBe(0);
+    expect(synced.out).toContain("pushed");
   },
   { timeout: 30_000 },
 );
