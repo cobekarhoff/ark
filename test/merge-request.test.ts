@@ -869,41 +869,87 @@ test(
 );
 
 // Fixture: test/fixtures/merge-request/sqc-1-criteria.md
-test("ARK-305-AC3 the SQC-1 fixture lists only real strings as required and the six stale docs/ paths as removed", () => {
-  const text = readFileSync(join(fixtures, "sqc-1-criteria.md"), "utf8");
-  const frontmatter = Bun.YAML.parse(text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "") as {
-    acceptance_criteria: { id: string; text: string; manual?: boolean }[];
-  };
-  const literals = new Map(
-    frontmatter.acceptance_criteria.map(({ id, text, manual }) => [
-      id,
-      requiredLiterals({ id, text, manual: manual === true }),
-    ]),
-  );
-  const required = [...literals.values()].flatMap((entry) => entry.required);
-  expect(literals.get("SQC-1-AC7")).toEqual({ required: [], removed: [] });
-  for (const literal of [
-    "## Finding the knowledge base",
-    "uv run check-knowledge-docs",
-    "Paths are relative to the workspace root",
-  ])
-    expect(required).toContain(literal);
-  for (const literal of required) {
-    expect(literal).not.toMatch(/[<*]|\.\.\.|:\d+$|^not:/);
-    expect(literal).not.toMatch(/SQC[-_]1[-_]AC/);
-  }
-  expect(literals.get("SQC-1-AC6")?.removed).toEqual([
-    "docs/00-master-reference.md",
-    "docs/architecture/",
-    "docs/references/",
-    "docs/workflows/",
-    "docs/operations/",
-    "docs/templates/",
-  ]);
-  expect(frontmatter.acceptance_criteria.find(({ id }) => id === "SQC-1-AC6")?.text).toContain(
-    "(N docs)",
-  );
-});
+test(
+  "ARK-305-AC3 a run with the SQC-1 ACs opens when every listed string is tracked and refuses naming only a deleted one",
+  () => {
+    const text = readFileSync(join(fixtures, "sqc-1-criteria.md"), "utf8");
+    const frontmatter = Bun.YAML.parse(text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "") as {
+      acceptance_criteria: { id: string; text: string; manual?: boolean }[];
+    };
+    const literals = new Map(
+      frontmatter.acceptance_criteria.map(({ id, text, manual }) => [
+        id,
+        requiredLiterals({ id, text, manual: manual === true }),
+      ]),
+    );
+    const required = [...literals.values()].flatMap((entry) => entry.required);
+    const removed = [...literals.values()].flatMap((entry) => entry.removed);
+    expect(literals.get("SQC-1-AC7")).toEqual({ required: [], removed: [] });
+    for (const literal of [
+      "## Finding the knowledge base",
+      "uv run check-knowledge-docs",
+      "Paths are relative to the workspace root",
+    ])
+      expect(required).toContain(literal);
+    for (const literal of required) {
+      expect(literal).not.toMatch(/[<*]|\.\.\.|:\d+$|^not:/);
+      expect(literal).not.toMatch(/SQC[-_]1[-_]AC/);
+    }
+    expect(literals.get("SQC-1-AC6")?.removed).toEqual([
+      "docs/00-master-reference.md",
+      "docs/architecture/",
+      "docs/references/",
+      "docs/workflows/",
+      "docs/operations/",
+      "docs/templates/",
+    ]);
+    expect(frontmatter.acceptance_criteria.find(({ id }) => id === "SQC-1-AC6")?.text).toContain(
+      "(N docs)",
+    );
+
+    // The command boundary: a run whose ticket holds these ACs.
+    const { runDirectory, worktrees } = scenario({ core: "github", app: "github" }, true, [
+      "SQC-1-AC7",
+    ]);
+    const ids = frontmatter.acceptance_criteria.map(({ id }) => id);
+    writeFileSync(join(runDirectory, "ticket.md"), text);
+    rewriteEvents(runDirectory, (event) => {
+      if (event.type === "run.started") event.data.criteria = ids;
+      return event;
+    });
+    expect(ark("gate", "record", run, "manual", "SQC-1-AC7", "ok").code).toBe(0);
+    const commitLiterals = (kept: string[]) => {
+      writeFileSync(join(worktrees.core, "literals.txt"), kept.join("\n") + "\n");
+      git(worktrees.core, "add", "-A");
+      git(worktrees.core, "commit", "-m", "literals");
+      rewriteEvents(runDirectory, (event) => {
+        if (event.type === "test.completed") {
+          event.data.heads["repos/core"] = git(worktrees.core, "rev-parse", "HEAD");
+          event.data.criteria = Object.fromEntries(
+            ids.map((id) => [id, id === "SQC-1-AC7" ? "manual ok" : "passing"]),
+          );
+        }
+        return event;
+      });
+    };
+    expect(removed.length).toBeGreaterThan(0);
+
+    commitLiterals(required);
+    const opened = ark("merge-request", "open", run);
+    expect(opened.err).not.toContain("AC string");
+    expect(opened.code).toBe(0);
+
+    const deleted = "uv run check-knowledge-docs";
+    commitLiterals(required.filter((literal) => literal !== deleted));
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain(`\`${deleted}\``);
+    expect(refused.err.match(/AC string in no tracked file at head: /g)).toHaveLength(1);
+    for (const literal of required.filter((literal) => literal !== deleted))
+      expect(refused.err).not.toContain(`\`${literal}\``);
+  },
+  { timeout: 60_000 },
+);
 
 test(
   "ARK-302-AC6 a perf run refuses a missing baseline.md and an empty compare.md, names each, and opens once both have content",

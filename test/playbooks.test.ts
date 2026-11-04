@@ -1105,3 +1105,21 @@ test("ARK-304-AC6 chief section 8 row and worker_done step 3 say close applies t
   expect(step).toContain(sentence);
   expect(chiefPlaybook).not.toContain("the last test must have passed");
 });
+
+test("ARK-305-AC4 brainstorm and chief AC-authoring advice puts removed strings in not: and stale strings outside backticks", () => {
+  for (const [file, heading] of [
+    ["brainstorm.md", "## Ticket format"],
+    ["chief.md", "## 3. Evaluate the ticket"],
+  ]) {
+    const section = readFileSync(join(playbookDirectory, file), "utf8")
+      .split(heading)[1]
+      ?.split("\n## ")[0];
+    expect(section).toBeDefined();
+    expect(section).toContain(
+      "in `not:` (`` `not:docs/old/` ``): it must then be in no tracked file",
+    );
+    expect(section).toMatch(
+      /string that the run rewrites, or that only describes the old state, outside backticks/,
+    );
+  }
+});
