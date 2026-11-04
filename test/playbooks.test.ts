@@ -968,3 +968,49 @@ test("ARK-300-AC5 the live check evidence records a proof line", () => {
     expect.stringMatching(/^proof: (passed|partial)$/),
   );
 });
+
+test("ARK-288-AC6 run-lead sends a status with the run, the round and <n> of 2 after an automatic escalation answer, and does not ask", () => {
+  const escalate = flat(section(runLeadPlaybook, "## 9. Escalate when the round budget is spent"));
+  expect(escalate).toContain("`gates.escalation: auto`");
+  expect(escalate).toContain("`gate: escalation`, `answer: one_more_round`, `by: auto`");
+  expect(escalate).toContain(
+    "Do not record the answer and do not `ask`. Send Master Chief a `status`",
+  );
+  expect(escalate).toContain("--type status");
+  expect(escalate).toContain(
+    '--subject "Escalation answered by auto: <ticket id> round <round> (<n> of 2)"',
+  );
+  expect(escalate).toContain("Run <run>");
+  expect(escalate).toContain("`ark escalate` (a requested escalation)");
+  const repair = flat(section(runLeadPlaybook, "## 10. Open the MRs"));
+  expect(repair).toContain(
+    "With `gates.escalation: auto`, `ark run step ... start` records it by auto",
+  );
+  const lead = flat(runLeadPlaybook);
+  expect(lead).toContain("`escalation` set to `auto` is answered by Ark too, up to 2 times");
+  expect(lead).toContain("you report it with a `status`, not an `ask`");
+});
+
+test("ARK-288-AC6 chief section 7 passes the auto escalation status to the human and relays no question", () => {
+  const supervise = flat(section(chiefPlaybook, "## 7. Supervise"));
+  expect(supervise).toContain("`Escalation answered by auto:`");
+  expect(supervise).toContain("pass it on as one line");
+  expect(supervise).toContain(
+    "`<ticket>: auto granted extra round <round> (<n> of 2). No action needed.`",
+  );
+  expect(supervise).toContain("and ask nothing");
+  expect(supervise).toContain("never relay as a question");
+  expect(supervise).toContain(
+    "The third spent budget, and any escalation that `ark escalate` requested, still arrive as an `ask`",
+  );
+});
+
+test("ARK-288-AC6 neither playbook still says the escalation gate stays with the human when set to auto", () => {
+  for (const playbook of [runLeadPlaybook, chiefPlaybook]) {
+    const text = flat(playbook);
+    expect(text).not.toContain("`criteria` and `escalation` gates stay with the human");
+    expect(text).not.toContain("`criteria` and `escalation` gates still go to the human");
+    expect(text).not.toContain("nothing answers them yet");
+    expect(text).not.toContain("`criteria` and `escalation` always go to the human");
+  }
+});
