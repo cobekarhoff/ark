@@ -1,13 +1,14 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
+import { manualCriteria } from "./criteria.ts";
 import { ArkError } from "./errors.ts";
-import { appendEvent, deriveState, readEvents } from "./events.ts";
+import { appendEvent, deriveState, readEvents, type CriterionStatus } from "./events.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { findRun } from "./paths.ts";
 import { discoverRepos, mirrorRoot } from "./workspace.ts";
 
-type Status = "passing" | "failing" | "missing";
+type Status = CriterionStatus;
 
 function run(command: string[], cwd: string) {
   const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -34,6 +35,10 @@ function criterionStatus(criterion: string, provingResults: TestResult[]): Statu
   return tagged.some((result) => result.status === "passed") ? "passing" : "missing";
 }
 
+function manualStatus(answer: string | undefined): Status {
+  return answer === "ok" ? "manual ok" : answer === "problem" ? "manual problem" : "manual pending";
+}
+
 export function testRun(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
@@ -42,7 +47,9 @@ export function testRun(runId: string, inProject?: string): void {
     throw new ArkError(`${runId} has no workspace mirror: run ark worktree create first`);
   const resultsDirectory = join(directory, "results");
   mkdirSync(resultsDirectory, { recursive: true });
-  const criteria = deriveState(readEvents(directory)).criteria.map((criterion) => criterion.id);
+  const state = deriveState(readEvents(directory));
+  const criteria = state.criteria.map((criterion) => criterion.id);
+  const manual = new Set(manualCriteria(directory));
 
   const composeBase = config.compose
     ? [
@@ -83,14 +90,22 @@ export function testRun(runId: string, inProject?: string): void {
   }
 
   const criterionStatuses = Object.fromEntries(
-    criteria.map((criterion) => [criterion, criterionStatus(criterion, provingResults)]),
+    criteria.map((criterion) => [
+      criterion,
+      // A manual criterion is decided by the manual gate alone, also when a test is tagged with it.
+      manual.has(criterion)
+        ? manualStatus(state.gates[`manual:${criterion}`])
+        : criterionStatus(criterion, provingResults),
+    ]),
   );
   const heads = Object.fromEntries(
     discoverRepos(config.workspace).map((repo) => [repo, headOf(repo, config.workspace, mirror)]),
   );
   const passed =
     suites.every((suite) => suite.passed) &&
-    Object.values(criterionStatuses).every((status) => status === "passing");
+    Object.entries(criterionStatuses).every(
+      ([criterion, status]) => manual.has(criterion) || status === "passing",
+    );
   appendEvent(directory, "test.completed", { passed, heads, suites, criteria: criterionStatuses });
 
   for (const suite of suites)
@@ -101,7 +116,7 @@ export function testRun(runId: string, inProject?: string): void {
   const problems = [
     ...suites.filter((suite) => !suite.passed).map((suite) => `suite ${suite.name} failed`),
     ...Object.entries(criterionStatuses)
-      .filter(([, status]) => status !== "passing")
+      .filter(([criterion, status]) => status !== (manual.has(criterion) ? "manual ok" : "passing"))
       .map(([criterion, status]) => `${criterion} is ${status}`),
   ];
   if (problems.length > 0)

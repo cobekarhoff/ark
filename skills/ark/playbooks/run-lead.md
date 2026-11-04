@@ -98,7 +98,7 @@ The gate opens when the phase is `awaiting_criteria`. That means the ticket has 
    Add your recommendation to the question. If the ask times out, resume it with `--resume <message id>`. Never send a second question.
 
 3. On `edit`, the human's reply holds the changes. Revise the draft, and ask again.
-4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`. Put them in its frontmatter as `acceptance_criteria: [{id, text}]`. Then record the answer:
+4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`. Put them in its frontmatter as `acceptance_criteria: [{id, text}]`. Keep `manual: true` on every criterion that has it. Then record the answer:
 
    ```sh
    ark gate record <run> criteria accept
@@ -222,7 +222,7 @@ Rules for the plan:
 - Use one implementer step for each repo the ticket changes. A step that needs another repo's change lists that step in `needs`.
 - Add a validator step that writes the integration and E2E tests. Put it in the repo that owns the suite (see `suites[].repo` in `ark.yml`). It needs the implementer steps whose code it tests.
 - Add a reviewer step for each repo the ticket changes. It needs the implementer and validator steps for that repo.
-- `test_cases` has: `id`, `criterion`, `level` (`integration` or `e2e`), `given` (context), `when` (actions), `then` (observable results) and `expected`. All three groups are lists of strings. `given` can be empty; `when` and `then` must not be empty. The old test-case `steps` field is rejected. Every AC needs at least one test case. Unit tests never prove an AC, so do not list them.
+- `test_cases` has: `id`, `criterion`, `level` (`integration` or `e2e`), `given` (context), `when` (actions), `then` (observable results) and `expected`. All three groups are lists of strings. `given` can be empty; `when` and `then` must not be empty. The old test-case `steps` field is rejected. Every AC without `manual: true` needs at least one test case; a manual criterion needs none, because the gate `manual` answer `ok` proves it. Unit tests never prove an AC, so do not list them.
 - `design` is required. `ark plan check` rejects a plan with no `design.interfaces`, or with an interface that has no `callers`. `interfaces` lists each interface the change touches: a command, a playbook section, an event, a file format or an exported function. Find the callers of each one before you write it: search the repo, and read the playbooks and docs that name it. A removed or changed interface with a caller you did not list is how earlier runs broke. `approach` (the method, in a few sentences) and `example` (a sample of new or changed output) are optional, but give both. Plan.md shows "No approach given." or "No example given." for a missing part, and the human can ask for it with `change` at the plan gate.
 - `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
@@ -390,10 +390,11 @@ After the validator and implementer steps succeed:
 ark test <run>
 ```
 
-The command runs the integration and E2E suites on the composed workspace. Exit 0 means every AC has a passing tagged test. Exit 1 lists the failing or missing AC.
+The command runs the integration and E2E suites on the composed workspace. Exit 0 means every AC without `manual: true` has a passing tagged test, and every criterion with `manual: true` is `manual ok`. Exit 1 lists the failing or missing AC and each manual criterion that is not `manual ok`.
 
 - **A tagged test fails.** Read `<run folder>/results/`. Decide whether the product code or the test is wrong. If the code is wrong, send the implementer step back: write the failing test names and output into `<run folder>/findings/round-<round>.md`, then start the implementer step again (section 7). That is a new round. If the test is wrong, start the validator step again. A validator restart is not a round.
 - **An AC is `missing`.** No tagged test passed for it. Start the validator step again.
+- **A criterion is `manual pending`.** A person proves it, so a validator step has no test to write: never restart the validator for it. Ask the human through Master Chief to check each criterion with `manual: true`, one question for each criterion id, and wait for the answer. Record it as the human's answer, never your own: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]`. Then run `ark test <run>` again. `manual ok` counts as proved. `manual problem` is a defect: write the human's note into `<run folder>/findings/round-<round>.md` and send the implementer step back (section 7). The wait for the human counts as gate wait in `ark retro`. A `manual pending` never opens the escalation gate and `ark merge-request open` refuses until each manual criterion is `manual ok`. In the validator spec, say that a manual criterion gets no test. Tell the implementer the literal strings `manual: true`, `manual pending`, `manual ok` and `manual problem`.
 - After any rework, run `ark test <run>` again. Tests must pass at the latest commit.
 - A validator commits its evidence files (for example a file written after a human check) before the last `ark test <run>`, so that no commit follows that test. A commit after the last test makes `ark status <run>` show `test head: stale`, and `ark merge-request open <run>` refuses the changed head.
 
