@@ -150,24 +150,24 @@ const commands: Command[] = [
   {
     usage: "test <run> [--project <name>]",
     description:
-      "Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. It exits 1 unless every AC passes.",
+      "Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. A criterion with `manual: true` in ticket.md has no test: it shows `manual pending`, `manual ok` or `manual problem` from the manual gate, even when a test is tagged with it. It exits 1 unless every AC is passing or manual ok. `passed` in test.completed counts the automated criteria only, so a manual pending never opens the escalation gate.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,
     run: ([runId], flags) => testRun(runId, flags["--project"] as string | undefined),
   },
   {
-    usage: "gate record <run> <gate> <answer> [--note <text>] [--project <name>]",
+    usage: "gate record <run> <gate> [<criterion id>] <answer> [--note <text>] [--project <name>]",
     description:
-      "Records your answer to a gate. The gates are criteria, strategy, plan and escalation. The strategy gate takes the ID of a card in the latest strategy record, or abort. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.",
+      "Records your answer to a gate. The gates are criteria, strategy, plan, escalation and manual. The strategy gate takes the ID of a card in the latest strategy record, or abort. The manual gate proves one criterion that has `manual: true` in ticket.md: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]` records gate.answered with the field `criterion`; it refuses an ID that is not in the ticket or not manual, and the answer is never automatic. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.",
     flags: { "--note": true, "--project": true },
     minimum: 3,
-    maximum: 3,
-    run: ([runId, gate, answer], flags) =>
+    maximum: 4,
+    run: ([runId, gate, ...args], flags) =>
       gateRecord(
         runId,
         gate,
-        answer,
+        args,
         flags["--note"] as string | undefined,
         flags["--project"] as string | undefined,
       ),
@@ -189,7 +189,7 @@ const commands: Command[] = [
   {
     usage: "merge-request open <run> [--project <name>]",
     description:
-      "Pushes each repo's branch and opens one MR for each repo, in dependency order. It refuses, with exit 1 and before any push, when a repo head changed since the last test, and ends the error with `run ark test <run> again`. No command merges.",
+      "Pushes each repo's branch and opens one MR for each repo, in dependency order. It refuses, with exit 1 and before any push, when a repo head changed since the last test, and ends the error with `run ark test <run> again`. It also refuses, before any push, when a criterion with `manual: true` has no manual ok, and names each one. No command merges.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,

@@ -53,9 +53,11 @@ const describers: Record<string, Describe> = {
   "test.completed": (data) => {
     const statuses = Object.values<string>(data.criteria ?? {});
     const counts = {
-      pass: statuses.filter((status) => status === "passing").length,
-      fail: statuses.filter((status) => status === "failing").length,
-      missing: statuses.filter((status) => status === "missing").length,
+      // A manual criterion counts as proved at `manual ok`, as failing at `manual problem`, else as missing.
+      pass: statuses.filter((status) => status === "passing" || status === "manual ok").length,
+      fail: statuses.filter((status) => status === "failing" || status === "manual problem").length,
+      missing: statuses.filter((status) => status === "missing" || status === "manual pending")
+        .length,
     };
     return { why: data.passed ? "passed" : "failed", counts, url: null };
   },

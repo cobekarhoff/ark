@@ -1,6 +1,7 @@
 import { beforeEach, expect, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { manualCriteria } from "../cli/criteria.ts";
 import { ark, recordEvaluation, tempArkHome, tempGitRepo, writeProject } from "./helpers.ts";
 
 const AC1 = "ARK-207-AC1";
@@ -176,4 +177,15 @@ test(`ARK-207-AC3 plan.md lists the amendment after the next plan check, and app
   expect(plan).toContain("- **New:** brand new text");
   expect(plan).not.toContain(`### ${AC2}\n\n- **Old:**`);
   expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
+});
+
+test("ARK-283-AC1 criteria amend keeps manual: true on the amended criterion (block-style ticket)", () => {
+  writeFileSync(
+    join(runDirectory, "ticket.md"),
+    read("ticket.md").replace('text: "original one"', 'text: "original one"\n    manual: true'),
+  );
+  expect(manualCriteria(runDirectory)).toEqual([AC1]);
+  expect(ark("criteria", "amend", runId, AC1, textFile("m", "reworded one")).code).toBe(0);
+  expect(read("ticket.md")).toContain("manual: true");
+  expect(manualCriteria(runDirectory)).toEqual([AC1]);
 });

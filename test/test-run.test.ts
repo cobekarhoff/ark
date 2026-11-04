@@ -29,6 +29,8 @@ function buildingRun(options: {
   e2e?: string[];
   unit?: string[];
   compose?: string;
+  manual?: string[];
+  roundBudget?: number;
 }): { runId: string; runDirectory: string; workspace: string; arkHome: string } {
   const arkHome = tempArkHome();
   const workspace = tempGitRepo({
@@ -39,6 +41,7 @@ function buildingRun(options: {
     workspace,
     ticket_source: "local",
     compose: options.compose,
+    ...(options.roundBudget === undefined ? {} : { round_budget: options.roundBudget }),
     suites: [
       { name: "unit", level: "unit", repo: ".", command: junit("unit.test.ts"), parser: "bun" },
       { name: "e2e", level: "e2e", repo: ".", command: junit("e2e.test.ts"), parser: "bun" },
@@ -48,7 +51,11 @@ function buildingRun(options: {
   const ticket = writeTicket(
     "demo",
     "FAKE-1",
-    options.criteria.map((id) => ({ id, text: `criterion ${id}` })),
+    options.criteria.map((id) => ({
+      id,
+      text: `criterion ${id}`,
+      ...(options.manual?.includes(id) ? { manual: true } : {}),
+    })),
   );
   const runId = ark("run", "start", ticket, "--project", "demo").out.match(
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
@@ -77,16 +84,19 @@ function buildingRun(options: {
         criteria: options.criteria,
       },
     ],
-    test_cases: options.criteria.map((criterion) => ({
-      id: `proves-${criterion}`,
-      criterion,
-      level: "e2e",
-      given: [],
-      when: ["run it"],
-      // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
-      then: ["it works"],
-      expected: "it works",
-    })),
+    // A manual criterion needs no test case: `ark plan check` below must accept the plan without one.
+    test_cases: options.criteria
+      .filter((criterion) => !options.manual?.includes(criterion))
+      .map((criterion) => ({
+        id: `proves-${criterion}`,
+        criterion,
+        level: "e2e",
+        given: [],
+        when: ["run it"],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+        then: ["it works"],
+        expected: "it works",
+      })),
   };
   writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify(plan));
   for (const args of [
@@ -234,5 +244,97 @@ describe("ark test", () => {
       `--project-directory ${mirror} -p ${runId.toLowerCase()} up -d --wait`,
       `--project-directory ${mirror} -p ${runId.toLowerCase()} down`,
     ]);
+  });
+});
+
+describe("ark test with manual criteria", () => {
+  const manualRun = (extra: { roundBudget?: number; e2e?: string[] } = {}) =>
+    buildingRun({
+      criteria: ["FAKE-1-AC1", "FAKE-1-AC2", "FAKE-1-AC3"],
+      manual: ["FAKE-1-AC3"],
+      e2e: [passing("FAKE-1-AC1 works"), passing("FAKE-1-AC2 works"), ...(extra.e2e ?? [])],
+      roundBudget: extra.roundBudget,
+    });
+  const answer = (runId: string, value: string) =>
+    ark("gate", "record", runId, "manual", "FAKE-1-AC3", value);
+  const phaseOf = (runDirectory: string) =>
+    JSON.parse(readFileSync(join(runDirectory, "state.json"), "utf8")).phase;
+
+  test("ARK-283-AC1 a criterion with manual: true shows manual pending, manual ok or manual problem and only manual ok exits 0", () => {
+    const { runId, runDirectory } = manualRun();
+
+    const pending = ark("test", runId);
+    expect(pending.code).toBe(1);
+    expect(pending.out).toContain("FAKE-1-AC1  passing");
+    expect(pending.out).toContain("FAKE-1-AC3  manual pending");
+    expect(pending.err).toContain("FAKE-1-AC3 is manual pending");
+
+    expect(answer(runId, "ok").code).toBe(0);
+    const ok = ark("test", runId);
+    expect(ok.code).toBe(0);
+    expect(ok.out).toContain("FAKE-1-AC3  manual ok");
+
+    expect(answer(runId, "problem").code).toBe(0);
+    const problem = ark("test", runId);
+    expect(problem.code).toBe(1);
+    expect(problem.out).toContain("FAKE-1-AC3  manual problem");
+    expect(problem.err).toContain("FAKE-1-AC3 is manual problem");
+
+    expect(testCompleted(runDirectory).map((event) => event.criteria["FAKE-1-AC3"])).toEqual([
+      "manual pending",
+      "manual ok",
+      "manual problem",
+    ]);
+  });
+
+  test("ARK-283-AC1 a problem answer followed by ok reads manual ok", () => {
+    const { runId } = manualRun();
+    expect(answer(runId, "problem").code).toBe(0);
+    expect(ark("test", runId).out).toContain("FAKE-1-AC3  manual problem");
+    expect(answer(runId, "ok").code).toBe(0);
+    const result = ark("test", runId);
+    expect(result.out).toContain("FAKE-1-AC3  manual ok");
+    expect(result.code).toBe(0);
+  });
+
+  test("ARK-283-AC1 manual pending on the last round keeps passed true and does not open the escalation gate", () => {
+    const { runId, runDirectory } = manualRun({ roundBudget: 1 });
+    const result = ark("test", runId);
+    expect(result.code).toBe(1);
+    expect(testCompleted(runDirectory)[0].passed).toBe(true);
+    expect(phaseOf(runDirectory)).not.toBe("escalation");
+    // The human can still answer the manual gate.
+    expect(answer(runId, "ok").code).toBe(0);
+  });
+
+  test("ARK-283-AC1 a failing automated criterion still makes passed false next to a manual ok", () => {
+    const { runId, runDirectory } = buildingRun({
+      criteria: ["FAKE-1-AC1", "FAKE-1-AC2"],
+      manual: ["FAKE-1-AC2"],
+      e2e: [failing("FAKE-1-AC1 breaks")],
+    });
+    expect(ark("gate", "record", runId, "manual", "FAKE-1-AC2", "ok").code).toBe(0);
+    expect(ark("test", runId).code).toBe(1);
+    expect(testCompleted(runDirectory)[0].passed).toBe(false);
+  });
+
+  test("ARK-283-AC1 a manual criterion with a passing tagged test is still decided by the manual gate", () => {
+    const { runId, runDirectory } = manualRun({ e2e: [passing("FAKE-1-AC3 tagged test passes")] });
+    const result = ark("test", runId);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("FAKE-1-AC3  manual pending");
+    expect(testCompleted(runDirectory)[0].criteria["FAKE-1-AC3"]).toBe("manual pending");
+  });
+
+  test("ARK-283-AC1 plan check accepted a plan with no test case for the manual criterion", () => {
+    const { runDirectory } = manualRun();
+    const plan = JSON.parse(readFileSync(join(runDirectory, "plan.yml"), "utf8"));
+    expect(plan.test_cases.map((testCase: { criterion: string }) => testCase.criterion)).toEqual([
+      "FAKE-1-AC1",
+      "FAKE-1-AC2",
+    ]);
+    const events = readFileSync(join(runDirectory, "events.ndjson"), "utf8");
+    expect(events).toContain('"type":"plan.checked"');
+    expect(events).toContain('"valid":true');
   });
 });

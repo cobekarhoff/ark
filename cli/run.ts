@@ -4,6 +4,7 @@ import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
+import { manualCriteria } from "./criteria.ts";
 import { appendEvent, deriveState, readEvents, writeState, type RunState } from "./events.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
@@ -261,6 +262,9 @@ function printRun(runId: string, inProject?: string): void {
         `  ${event.data.gate} ${event.data.answer} by ${event.data.by === "auto" ? "auto" : "human"}`,
     );
   const current = state.steps.find((step) => step.id === state.current_step);
+  const manualPending = manualCriteria(directory).filter(
+    (id) => state.gates[`manual:${id}`] !== "ok",
+  );
   const lines = [
     `run: ${basename(directory)}`,
     `ticket: ${state.ticket.id} ${state.ticket.title}`,
@@ -268,6 +272,7 @@ function printRun(runId: string, inProject?: string): void {
     `round: ${state.round}/${state.round_budget}`,
     `current step: ${current ? `${current.id} (${current.status})` : "none"}`,
     `waiting gate: ${waitingGate(state)}`,
+    ...(manualPending.length > 0 ? [`manual pending: ${manualPending.join(", ")}`] : []),
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
     ...testHeadLines(directory),

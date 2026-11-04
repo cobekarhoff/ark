@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors";
+import { manualCriteria } from "./criteria.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent } from "./events";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
@@ -247,6 +248,11 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
     if (event.type === "worktree.created") worktrees.set(event.data.repo, event.data as Worktree);
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
+  const unproven = manualCriteria(directory).filter((id) => state.gates[`manual:${id}`] !== "ok");
+  if (unproven.length > 0)
+    throw new ArkError(
+      `manual ${unproven.length === 1 ? "criterion" : "criteria"} without ok: ${unproven.join(", ")}`,
+    );
   if (!lastTest.data.passed)
     throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
   const [first] = staleHeads(events);

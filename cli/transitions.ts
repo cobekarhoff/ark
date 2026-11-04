@@ -7,6 +7,7 @@ const gateAnswers: Record<string, string[]> = {
   criteria: ["accept", "edit", "abort"],
   plan: ["approve", "change", "abort"],
   escalation: ["one_more_round", "take_over", "abort"],
+  manual: ["ok", "problem"],
 };
 
 const buildPhases = ["building", "escalation", "merge_requests_open"];
@@ -170,7 +171,8 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
   }
 }
 
-export const gateNames = ["criteria", "strategy", "plan", "escalation"];
+// Not in config.ts gateNames on purpose: the manual gate is always the human's.
+export const gateNames = ["criteria", "strategy", "plan", "escalation", "manual"];
 
 function assertGateAllowed(state: RunState, data: EventData): void {
   if (!gateNames.includes(data.gate))
@@ -183,15 +185,21 @@ function assertGateAllowed(state: RunState, data: EventData): void {
       `unknown answer "${data.answer}" for gate ${data.gate}: use ${answers.join(", ")}`,
     );
   }
+  if (data.gate === "manual" && !state.criteria.some((c) => c.id === data.criterion))
+    throw new ArkError(
+      `gate.answered manual refused: criterion ${data.criterion} is not in the ticket`,
+    );
   const phaseOfGate = {
     criteria: "awaiting_criteria",
     strategy: "awaiting_strategy",
     plan: "planning",
     escalation: "escalation",
-  }[data.gate as "criteria" | "strategy" | "plan" | "escalation"];
+    manual: "building",
+  }[data.gate as "criteria" | "strategy" | "plan" | "escalation" | "manual"];
   if (
     state.phase !== phaseOfGate &&
-    !(data.gate === "escalation" && state.phase === "merge_requests_open")
+    !(data.gate === "escalation" && state.phase === "merge_requests_open") &&
+    !(data.gate === "manual" && state.phase === "escalation")
   ) {
     throw new ArkError(
       `gate.answered ${data.gate} ${data.answer} refused: run is in phase ${state.phase}, the ${data.gate} gate opens in phase ${phaseOfGate}`,

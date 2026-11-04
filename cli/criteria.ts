@@ -5,8 +5,22 @@ import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 
-/**
- * Replaces the `text:` line of one criterion in the frontmatter and its `| ID | ... |` table row.
+/** Ids of the criteria with `manual: true` in the run folder's ticket.md. A person proves them with the `manual` gate. */
+export function manualCriteria(runDirectory: string): string[] {
+  const file = join(runDirectory, "ticket.md");
+  const match = existsSync(file)
+    ? readFileSync(file, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/)
+    : null;
+  const criteria = match
+    ? (Bun.YAML.parse(match[1]) as { acceptance_criteria?: { id?: unknown; manual?: unknown }[] })
+        ?.acceptance_criteria
+    : undefined;
+  return (criteria ?? [])
+    .filter((criterion) => criterion?.manual === true)
+    .map((criterion) => String(criterion.id));
+}
+
+/** Replaces the `text:` line of one criterion in the frontmatter and its `| ID | ... |` table row.
  * YAML has no round trip in Bun, so only that one line and that one row change; a ticket with no
  * table row keeps only the frontmatter change. Returns the new ticket and the old frontmatter text.
  */
