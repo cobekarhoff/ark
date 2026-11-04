@@ -3,9 +3,10 @@ import { join } from "node:path";
 import { ArkError } from "./errors";
 import { manualCriteria } from "./criteria.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent } from "./events";
-import { mergeRequestsMode } from "./config.ts";
+import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
+import { repoBase } from "./workspace.ts";
 import { uiSkillsFor } from "./ui-skills";
 
 type PlanStep = { id: string; repo: string; needs: string[]; criteria: string[] };
@@ -120,7 +121,9 @@ function emptyResultFiles(directory: string): string[] {
   });
 }
 
-function defaultBranch(worktree: Worktree): string {
+/** The configured `repos.<repo>.base`, else the branch origin's HEAD names, else the worktree's base commit. */
+function defaultBranch(worktree: Worktree, base: string | undefined): string {
+  if (base !== undefined) return base;
   const result = spawn(
     ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
     worktree.path,
@@ -278,6 +281,7 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
     throw new ArkError(
       `project ${project} has merge_requests: none: close the run with ark run close ${runId} handed_off`,
     );
+  const projectConfig = loadConfig(project);
   const events = readEvents(directory);
   const state = deriveState(events);
   if (!["building", "escalation", "merge_requests_open"].includes(state.phase)) {
@@ -374,7 +378,7 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
     const created = createMergeRequest(
       host,
       worktree,
-      defaultBranch(worktree),
+      defaultBranch(worktree, repoBase(projectConfig, repo)),
       `${ticket.id}: ${ticket.title}`,
       description(ticket, criteriaIds, texts, dependencyLines, ui),
     );

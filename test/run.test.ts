@@ -211,6 +211,35 @@ for (const [name, value] of [
   });
 }
 
+test("ARK-296-AC1 loadConfig returns repos keyed by the exact repo path, and none when the key is absent", () => {
+  const repos = {
+    "repos/confluent/consumers-v2": { base: "release/9.1.0" },
+    ".": { base: "main" },
+  };
+  writeProject("based", validConfig({ repos }));
+  writeProject("plain", validConfig());
+  expect(loadConfig("based").repos).toEqual(repos);
+  expect(Object.hasOwn(loadConfig("plain"), "repos")).toBe(false);
+});
+
+for (const [name, entry] of [
+  ["no base", {}],
+  ["an empty base", { base: "" }],
+  ["a non-string base", { base: 9 }],
+] as const) {
+  test(`ARK-296-AC1 a repos entry with ${name} is refused and names the key`, () => {
+    writeProject(
+      "broken",
+      validConfig({ repos: { "repos/a": { base: "main" }, "repos/b": entry } }),
+    );
+    expect(() => loadConfig("broken")).toThrow("repos.repos/b");
+    const ticketFile = writeTicket("broken", "ARK-902", [{ id: "ARK-902-AC1", text: "It works" }]);
+    const result = ark("run", "start", ticketFile, "--project", "broken");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("repos.repos/b");
+  });
+}
+
 test("ARK-152-AC2 run start refuses a project with no ark.yml", () => {
   const ticketFile = writeTicket("ghost", "ARK-903", []);
   const result = ark("run", "start", ticketFile, "--project", "ghost");
