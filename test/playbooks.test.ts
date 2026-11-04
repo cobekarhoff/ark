@@ -1,3 +1,4 @@
+// ARK-290 AC5 string: `bun test test/playbooks.test.ts -t ARK-290-AC5`.
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -967,6 +968,35 @@ test("ARK-300-AC5 the live check evidence records a proof line", () => {
   expect(read300("docs/evidence/ARK-300-ac5.md").split("\n")).toContainEqual(
     expect.stringMatching(/^proof: (passed|partial)$/),
   );
+});
+
+const root290 = join(import.meta.dir, "..");
+const playbook290 = (name: string) =>
+  readFileSync(join(root290, "skills/ark/playbooks", name), "utf8");
+
+test("ARK-290-AC5 brainstorm, retro and chief follow ROADMAP.md and no README backlog", () => {
+  const brainstorm = playbook290("brainstorm.md");
+  expect(brainstorm).toContain("ROADMAP.md");
+  expect(brainstorm).not.toContain("the backlog table");
+  expect(brainstorm).toContain("Write each new ticket into no list of `ROADMAP.md`");
+  expect(brainstorm).toContain("only when the human says so");
+  expect(brainstorm).toContain("Add no row to the README");
+  expect(brainstorm).not.toMatch(/Mermaid/);
+  expect(brainstorm).toContain("Human approval:");
+
+  const retro = playbook290("retro.md");
+  expect(retro).toContain("into no list of `~/.ark/projects/ark/ROADMAP.md`");
+  expect(retro).toContain("Add no row to the tickets README");
+  expect(retro).not.toMatch(/Add a row for it/);
+
+  const chief = playbook290("chief.md");
+  expect(chief).toContain(
+    "Move a ticket between Now, Next and Later in `ROADMAP.md` only when the human says so",
+  );
+  expect(chief).toContain("edit no README Status cell");
+  expect(chief).not.toMatch(/update the Status cell/i);
+  // removing the Status step must leave each numbered step of section 8 on its own line
+  expect(chief).toMatch(/\n2\. If the outcome is `merged`/);
 });
 
 // ARK-288-AC6 proof: `bun test test/playbooks.test.ts -t ARK-288-AC6`

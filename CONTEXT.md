@@ -44,6 +44,18 @@ _Avoid_: Control center, dashboard
 The request Ark opens for a human to review and merge one repo's changes. On GitHub it's a pull request.
 _Avoid_: Change request
 
+**Roadmap**:
+The file `$ARK_HOME/projects/<project>/ROADMAP.md`: the vision, the milestones and the human's rank of the open tickets. Only the human changes a rank. Format: `docs/reference/roadmap.md`.
+_Avoid_: Backlog table, plan
+
+**Milestone**:
+A named outcome in the roadmap, such as M9 "See the work". It is `done`, `active` or `later`. A ticket joins one by its `milestone:` field.
+_Avoid_: Release, epic
+
+**Horizon**:
+Now, Next or Later: one of the three ranked lists of the roadmap. An open ticket in no horizon is Unranked.
+_Avoid_: Priority, sprint
+
 ## Roles
 
 **Master Chief**:
