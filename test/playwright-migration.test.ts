@@ -177,4 +177,23 @@ describe("playwright migration", () => {
     },
     wholeSuite,
   );
+
+  test(
+    "ARK-301-AC2 the usage-reset specs run at two frozen page clocks, not the wall clock",
+    () => {
+      const titles = listed().map((entry) => entry.title);
+      expect(titles.filter((title) => title.startsWith("ARK-301-AC1 page clock at ")).length).toBe(
+        2,
+      );
+
+      const spec = readFileSync(join(root, "test/pw/hub.pw.ts"), "utf8");
+      const block = spec.slice(spec.indexOf('test.describe("the usage reset on a frozen clock"'));
+      expect(block).toContain('timezoneId: "UTC"');
+      expect(spec).toContain("await page.clock.setFixedTime(baseInstant);");
+      expect(spec).toContain(
+        "const { baseUrl, older, newer, stuckRun } = await homeWithBlockers(baseInstant);",
+      );
+    },
+    long,
+  );
 });
