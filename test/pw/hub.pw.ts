@@ -1911,7 +1911,7 @@ test("ARK-285-AC8 Roadmap lists the tickets by horizon, keys move and open them,
 
   // Esc returns to the list: same row, same scroll position.
   await page.keyboard.press("Escape");
-  await expect(page).toHaveURL(/#\/roadmap\?project=p$/);
+  await expect(page).toHaveURL(/#\/roadmap$/);
   await expect(selected).toHaveAttribute("data-ticket", target);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 
@@ -2494,7 +2494,7 @@ test("ARK-291-AC3 the project is picked at the top of Roadmap or by a header chi
   await open(page, baseUrl, "roadmap");
 
   const pick = (name: string) =>
-    page.getByRole("group", { name: "Project" }).getByRole("button", { name });
+    page.getByRole("group", { name: "Project" }).getByRole("button", { name, exact: true });
   const expectOnly = async (vision: string, ranked: string, review: string) => {
     await expect(page.getByTestId("roadmap-vision")).toHaveText(vision);
     await expect.poll(() => ticketsOf(page)).toEqual([ranked]);
@@ -2502,6 +2502,8 @@ test("ARK-291-AC3 the project is picked at the top of Roadmap or by a header chi
     await expect(page.getByTestId("review-item")).toHaveCount(1);
   };
 
+  await expect(pick("All projects")).toHaveAttribute("aria-pressed", "true");
+  await pick("alpha").click();
   await expect(pick("alpha")).toHaveAttribute("aria-pressed", "true");
   await expectOnly("Alpha vision.", "ARK-111", "ARK-112");
 
@@ -2518,8 +2520,8 @@ test("ARK-291-AC3 the project is picked at the top of Roadmap or by a header chi
   await expect(page).toHaveURL(/#\/roadmap\?project=beta$/);
   await expectOnly("Beta vision.", "QC-211", "QC-212");
 
-  // A header chip drives the same project.
-  await page.locator("header .chip", { hasText: "alpha" }).click();
+  // The header control drives the same project.
+  await pick("alpha").click();
   await expect(page).toHaveURL(/#\/roadmap\?project=alpha$/);
   await expect(pick("alpha")).toHaveAttribute("aria-pressed", "true");
   await expectOnly("Alpha vision.", "ARK-111", "ARK-112");
@@ -2922,9 +2924,10 @@ test("ARK-291-AC8 a warning shows in a notice with its ticket IDs, an error repl
     requests.push({ method: request.method(), path: new URL(request.url()).pathname }),
   );
   await open(page, baseUrl, "roadmap");
-  await expect(page.getByTestId("roadmap-vision")).toBeVisible();
   const projectButton = (name: string) =>
     page.getByRole("group", { name: "Project" }).getByRole("button", { name });
+  await projectButton("a-warn").click();
+  await expect(page.getByTestId("roadmap-vision")).toBeVisible();
 
   // Four warnings, one of each kind, each with its ticket IDs, in a notice that is not an alert.
   const warnings = page.getByTestId("roadmap-warning");
@@ -2987,11 +2990,9 @@ test("ARK-291-AC8 a warning shows in a notice with its ticket IDs, an error repl
   await expect(page.getByTestId("milestone-rail")).toHaveCount(0);
   await expect(page.getByTestId("shipped-bar")).toHaveCount(0);
   await expect(page.getByTestId("copy-command")).toBeVisible();
-  // The switcher stays on every state, and lists the projects of the header.
+  // The control stays on every state: All projects and one button per project.
   await expect(projectButton("b-bad")).toBeVisible();
-  await expect(page.getByRole("group", { name: "Project" }).getByRole("button")).toHaveCount(
-    await page.locator(".nav-right a.chip").count(),
-  );
+  await expect(page.getByRole("group", { name: "Project" }).getByRole("button")).toHaveCount(4);
 
   // Only GETs, and nothing after the first load but the event stream it opened.
   await page.waitForTimeout(1000);
@@ -3067,7 +3068,7 @@ test("ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same s
   await expect(page).toHaveURL(new RegExp(`#/ticket/${target}$`));
   await expect(page.getByTestId("ticket-page")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page).toHaveURL(/#\/roadmap\?project=p$/);
+  await expect(page).toHaveURL(/#\/roadmap$/);
   await expect(selected).toHaveAttribute("data-ticket", target);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 

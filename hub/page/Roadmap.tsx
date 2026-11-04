@@ -1,9 +1,7 @@
 // test ids: see RoadmapParts.tsx and RoadmapGraph.tsx; here: roadmap-page, roadmap-vision, view-list,
 // view-graph, filter-text, milestone-filter, notes-link, roadmap-error (the message and line),
 // roadmap-none (the line). No control here changes a ticket or a rank.
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { ticketEntries, ticketKey } from "./derive.ts";
-import { Unknown, known } from "./format.tsx";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RoadmapGraph } from "./RoadmapGraph.tsx";
 import {
   BrainstormCommand,
@@ -19,7 +17,9 @@ import {
   type ShippedFolds,
   type RoadmapData,
 } from "./RoadmapParts.tsx";
-import { parseRoute, roadmapHash, useHash, useLive } from "./store.tsx";
+import { isUnknownProject, scoped, ticketEntries, ticketKey } from "./derive.ts";
+import { Unknown, UnknownProject, known } from "./format.tsx";
+import { ticketHref, useLive, useProject, withProject } from "./store.tsx";
 import type { Roadmap as RoadmapModel, RoadmapItem } from "../roadmap.ts";
 import type { Snapshot, TicketView } from "../types.ts";
 
@@ -69,6 +69,8 @@ const isFinished = (status: string) => status === "done" || status === "supersed
 
 /** What the page keeps while a ticket page is open, so Esc lands on the same row and scroll position. */
 type Remembered = {
+  /** `<filter>|<project>`: only the section of that filter and project takes it back. */
+  key: string;
   scroll: number;
   cursor: string | null;
   text: string;
@@ -77,6 +79,7 @@ type Remembered = {
   shipped: ShippedFolds | undefined;
 };
 let remembered: Remembered | null = null;
+const rememberedFor = (key: string) => (remembered?.key === key ? remembered : null);
 
 /** A form field has the focus: its keys are text, not shortcuts. */
 const isTyping = (target: EventTarget | null) =>
@@ -145,23 +148,39 @@ function build(snapshot: Snapshot, project: string, needle: string, milestone: s
   return { data, roadmap, sections, review, graphTickets, tickets, ok };
 }
 
-export function Roadmap() {
-  const { snapshot } = useLive();
-  const [text, setText] = useState(() => remembered?.text ?? "");
-  const [milestone, setMilestone] = useState<string | null>(() => remembered?.milestone ?? null);
-  const [view, setView] = useState<"list" | "graph">(() => remembered?.view ?? "list");
-  const [cursor, setCursor] = useState<string | null>(() => remembered?.cursor ?? null);
-  // The project is in the URL only: the header chips and the picker both set it.
-  const chosen = parseRoute(useHash()).project;
-  // The projects the header lists: those with tickets.
-  const names =
-    snapshot && known(snapshot.tickets)
-      ? [...new Set(snapshot.tickets.map((ticket) => ticket.project))].sort()
-      : [];
-  const project = chosen !== null && names.includes(chosen) ? chosen : (names[0] ?? null);
+/**
+ * One project's roadmap with its own state: search text, milestone, view, cursor, shipped folds and
+ * the scroll kept for Esc. Under All projects each project has one, so no control reaches another.
+ * Keys act on the active section only: the one last hovered, clicked or focused (the first at start).
+ */
+function ProjectRoadmap({
+  snapshot,
+  project,
+  scope,
+  heading,
+  isActive,
+  onActivate,
+}: {
+  snapshot: Snapshot;
+  project: string;
+  /** The filter of the URL: with `project` it keys what `remembered` holds. */
+  scope: string | null;
+  /** Under All projects each section is named by its project. */
+  heading: boolean;
+  isActive: boolean;
+  onActivate: () => void;
+}) {
+  const key = `${scope ?? ""}|${project}`;
+  const root = useRef<HTMLElement>(null);
+  const [text, setText] = useState(() => rememberedFor(key)?.text ?? "");
+  const [milestone, setMilestone] = useState<string | null>(
+    () => rememberedFor(key)?.milestone ?? null,
+  );
+  const [view, setView] = useState<"list" | "graph">(() => rememberedFor(key)?.view ?? "list");
+  const [cursor, setCursor] = useState<string | null>(() => rememberedFor(key)?.cursor ?? null);
   const needle = text.trim().toLowerCase();
   const model = useMemo(
-    () => (snapshot && project !== null ? build(snapshot, project, needle, milestone) : null),
+    () => build(snapshot, project, needle, milestone),
     [snapshot, project, needle, milestone],
   );
 
@@ -176,10 +195,13 @@ export function Roadmap() {
     return model.graphTickets.toSorted((a, b) => laneAt(a) - laneAt(b)).map((ticket) => ticket.id);
   }, [model, view]);
   const current = cursor !== null && order.includes(cursor) ? cursor : (order[0] ?? null);
+  // Only the active section shows a cursor: it is the one the keys move.
+  const marked = isActive ? current : null;
 
-  const [folds] = useState(() => ({ at: remembered?.shipped as ShippedFolds | undefined }));
+  const [folds] = useState(() => ({ at: rememberedFor(key)?.shipped as ShippedFolds | undefined }));
   const remember = (id: string | null = current) => {
     remembered = {
+      key,
       scroll: window.scrollY,
       cursor: id,
       text,
@@ -189,15 +211,17 @@ export function Roadmap() {
     };
   };
 
-  // Back from a ticket page: the same scroll position, once the rows exist.
+  // Back from a ticket page: the same scroll position, once the rows exist, and only for the
+  // filter and project that left.
   const loaded = model !== null;
   useLayoutEffect(() => {
-    if (!loaded || !remembered) return;
+    if (!loaded || remembered?.key !== key) return;
     window.scrollTo(0, remembered.scroll);
     remembered = null;
-  }, [loaded]);
+  }, [loaded, key]);
 
   useEffect(() => {
+    if (!isActive) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const typing = isTyping(event.target);
@@ -207,7 +231,7 @@ export function Roadmap() {
       }
       if (event.key === "/" && !typing) {
         event.preventDefault();
-        document.querySelector<HTMLInputElement>('[data-testid="filter-text"]')?.focus();
+        root.current?.querySelector<HTMLInputElement>('[data-testid="filter-text"]')?.focus();
         return;
       }
       if ((event.key === "j" || event.key === "k") && !typing) {
@@ -217,8 +241,8 @@ export function Roadmap() {
           order[Math.min(order.length - 1, Math.max(0, at + (event.key === "j" ? 1 : -1)))];
         if (next === undefined) return;
         setCursor(next);
-        document
-          .querySelector(
+        root.current
+          ?.querySelector(
             `:is([data-testid="ticket-row"],[data-testid="graph-node"])[data-ticket="${CSS.escape(next)}"]`,
           )
           ?.scrollIntoView({ block: "nearest" });
@@ -233,27 +257,14 @@ export function Roadmap() {
       if (event.key === "Enter" && current !== null && !control && !native) {
         event.preventDefault();
         remember();
-        location.hash = `#/ticket/${encodeURIComponent(current)}`;
+        location.hash = ticketHref(current);
       }
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
   });
 
-  if (!snapshot || !known(snapshot.tickets) || !known(snapshot.roadmap))
-    return (
-      <>
-        <h1>Roadmap</h1>
-        <Unknown />
-      </>
-    );
-  if (!model || project === null)
-    return (
-      <>
-        <h1>Roadmap</h1>
-        <p className="mut">No project has tickets yet.</p>
-      </>
-    );
+  if (!model) return null;
 
   const { data, roadmap, sections, review, graphTickets, ok } = model;
   const prompt = `Evaluate ${dependencyOrder(
@@ -335,164 +346,218 @@ export function Roadmap() {
     </div>
   );
 
-  const switcher = (
-    <div className="seg big rm-projects" role="group" aria-label="Project">
-      {names.map((name) => (
-        <button
-          key={name}
-          type="button"
-          aria-pressed={name === project}
-          onClick={() => {
-            location.hash = roadmapHash(name);
-          }}
-        >
-          {name}
-        </button>
-      ))}
-    </div>
-  );
+  const hover = (id: string) => {
+    setCursor(id);
+    onActivate();
+  };
 
-  if (roadmap && "none" in roadmap)
-    return (
+  const page =
+    roadmap && "none" in roadmap ? (
       <div className="rm-page solo" data-testid="roadmap-page">
-        <h1 className="sr">Roadmap</h1>
-        {switcher}
         <p className="rm-solo" data-testid="roadmap-none">
           {"This project's roadmap lives in "}
           {roadmap.none}.
         </p>
         <BrainstormCommand />
       </div>
-    );
-
-  return (
-    <div
-      className={`rm-page${ok ? "" : " solo"}`}
-      data-testid="roadmap-page"
-      onClickCapture={(event) => {
-        // Every link out to a ticket (Review, relations, Shipped, titles) keeps the way back.
-        const href = (event.target as Element).closest("a")?.getAttribute("href");
-        if (href?.startsWith("#/ticket/")) remember(decodeURIComponent(href.slice(9)));
-      }}
-    >
-      <h1 className="sr">Roadmap</h1>
-      {switcher}
-      {ok ? (
-        <Rail
-          milestones={ok.milestones}
-          selected={milestone}
-          onSelect={setMilestone}
-          openCount={data.open.length}
-          shipped={doneTotal(ok.shipped)}
-        />
-      ) : null}
-      <div className="rm-main">
+    ) : (
+      <div
+        className={`rm-page${ok ? "" : " solo"}`}
+        data-testid="roadmap-page"
+        onClickCapture={(event) => {
+          // Every link out to a ticket (Review, relations, Shipped, titles) keeps the way back.
+          const href = (event.target as Element).closest("a")?.getAttribute("href");
+          if (href?.startsWith("#/ticket/"))
+            remember(decodeURIComponent(href.slice(9).split("?")[0]));
+        }}
+      >
         {ok ? (
-          <p className="rm-vision" data-testid="roadmap-vision">
-            {ok.vision}
-          </p>
+          <Rail
+            milestones={ok.milestones}
+            selected={milestone}
+            onSelect={setMilestone}
+            openCount={data.open.length}
+            shipped={doneTotal(ok.shipped)}
+          />
         ) : null}
-        {toolbar}
-        {ok && view === "graph" ? (
-          <>
-            <ReviewPanel items={review} prompt={prompt} bar />
-            <div className="rm-legend">
-              <span>
-                <svg viewBox="0 0 28 8" aria-hidden="true">
-                  <path d="M0 4h28" className="rm-edge finished" />
-                </svg>
-                Dependency finished
-              </span>
-              <span>
-                <svg viewBox="0 0 28 8" aria-hidden="true">
-                  <path d="M0 4h28" className="rm-edge open" />
-                </svg>
-                Dependency still open, blocks the ticket
-              </span>
-              <span>
-                <i className="rm-swatch" />
-                Proposed
-              </span>
-              <span className="rm-legend-end">
-                {graphTickets.length} open tickets · arrows run from a ticket to what it unblocks
-              </span>
-            </div>
-            {graphTickets.length === 0 ? (
-              <p className="rm-empty">No open ticket matches.</p>
-            ) : (
-              <RoadmapGraph
-                tickets={graphTickets}
-                milestones={ok?.milestones ?? []}
-                data={data}
-                cursor={current}
-                onOpen={(id) => onOpen(id)()}
-              />
-            )}
-          </>
-        ) : (
-          <div className="rm-layout">
-            <div className="rm-lists">
-              {ok ? (
-                <>
-                  {sections.map((section) => (
-                    <Section
-                      key={section.name}
-                      name={section.name}
-                      hint={section.hint}
-                      count={section.picks.length}
-                    >
-                      {section.picks.length === 0 ? (
-                        <p className="rm-empty">Nothing here.</p>
-                      ) : section.name === "Now" ? (
-                        <div className="rm-grid-now">
-                          {section.picks.map((pick) => (
-                            <Card
-                              key={pick.item.id}
-                              pick={pick}
-                              data={data}
-                              current={pick.item.id === current}
-                              onOpen={onOpen(pick.item.id)}
-                              onHover={() => setCursor(pick.item.id)}
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <ul className="rm-rows">
-                          {section.picks.map((pick) => (
-                            <Row
-                              key={pick.item.id}
-                              pick={pick}
-                              data={data}
-                              current={pick.item.id === current}
-                              onOpen={onOpen(pick.item.id)}
-                              onHover={() => setCursor(pick.item.id)}
-                            />
-                          ))}
-                        </ul>
-                      )}
-                    </Section>
-                  ))}
-                  {shown === 0 ? <p className="rm-empty">No ticket matches.</p> : null}
-                </>
+        <div className="rm-main">
+          {ok ? (
+            <p className="rm-vision" data-testid="roadmap-vision">
+              {ok.vision}
+            </p>
+          ) : null}
+          {toolbar}
+          {ok && view === "graph" ? (
+            <>
+              <ReviewPanel items={review} prompt={prompt} bar />
+              <div className="rm-legend">
+                <span>
+                  <svg viewBox="0 0 28 8" aria-hidden="true">
+                    <path d="M0 4h28" className="rm-edge finished" />
+                  </svg>
+                  Dependency finished
+                </span>
+                <span>
+                  <svg viewBox="0 0 28 8" aria-hidden="true">
+                    <path d="M0 4h28" className="rm-edge open" />
+                  </svg>
+                  Dependency still open, blocks the ticket
+                </span>
+                <span>
+                  <i className="rm-swatch" />
+                  Proposed
+                </span>
+                <span className="rm-legend-end">
+                  {graphTickets.length} open tickets · arrows run from a ticket to what it unblocks
+                </span>
+              </div>
+              {graphTickets.length === 0 ? (
+                <p className="rm-empty">No open ticket matches.</p>
               ) : (
-                <p className="rm-error" role="alert" data-testid="roadmap-error">
-                  ROADMAP.md does not read. {(roadmap as { error: string }).error}
-                </p>
+                <RoadmapGraph
+                  tickets={graphTickets}
+                  milestones={ok?.milestones ?? []}
+                  data={data}
+                  cursor={marked}
+                  onOpen={(id) => onOpen(id)()}
+                />
               )}
+            </>
+          ) : (
+            <div className="rm-layout">
+              <div className="rm-lists">
+                {ok ? (
+                  <>
+                    {sections.map((section) => (
+                      <Section
+                        key={section.name}
+                        name={section.name}
+                        hint={section.hint}
+                        count={section.picks.length}
+                      >
+                        {section.picks.length === 0 ? (
+                          <p className="rm-empty">Nothing here.</p>
+                        ) : section.name === "Now" ? (
+                          <div className="rm-grid-now">
+                            {section.picks.map((pick) => (
+                              <Card
+                                key={pick.item.id}
+                                pick={pick}
+                                data={data}
+                                current={pick.item.id === marked}
+                                onOpen={onOpen(pick.item.id)}
+                                onHover={() => hover(pick.item.id)}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <ul className="rm-rows">
+                            {section.picks.map((pick) => (
+                              <Row
+                                key={pick.item.id}
+                                pick={pick}
+                                data={data}
+                                current={pick.item.id === marked}
+                                onOpen={onOpen(pick.item.id)}
+                                onHover={() => hover(pick.item.id)}
+                              />
+                            ))}
+                          </ul>
+                        )}
+                      </Section>
+                    ))}
+                    {shown === 0 ? <p className="rm-empty">No ticket matches.</p> : null}
+                  </>
+                ) : (
+                  <p className="rm-error" role="alert" data-testid="roadmap-error">
+                    ROADMAP.md does not read. {(roadmap as { error: string }).error}
+                  </p>
+                )}
+              </div>
+              <ReviewPanel items={review} prompt={prompt} bar={false} />
             </div>
-            <ReviewPanel items={review} prompt={prompt} bar={false} />
-          </div>
-        )}
-        {ok ? <Notices warnings={ok.warnings} /> : null}
+          )}
+          {ok ? <Notices warnings={ok.warnings} /> : null}
+        </div>
+        {ok ? (
+          <ShippedBar
+            shipped={ok.shipped}
+            milestones={ok.milestones}
+            initial={folds.at}
+            onFolds={(next) => void (folds.at = next)}
+          />
+        ) : null}
       </div>
-      {ok ? (
-        <ShippedBar
-          shipped={ok.shipped}
-          milestones={ok.milestones}
-          initial={folds.at}
-          onFolds={(next) => void (folds.at = next)}
-        />
-      ) : null}
-    </div>
+    );
+  return (
+    <section
+      ref={root}
+      aria-label={heading ? project : undefined}
+      data-project={project}
+      onClickCapture={onActivate}
+      onFocusCapture={onActivate}
+    >
+      {heading ? <h2 className="rm-project">{project}</h2> : null}
+      {page}
+    </section>
+  );
+}
+
+export function Roadmap() {
+  const { snapshot: whole } = useLive();
+  const project = useProject();
+  const [active, setActive] = useState<string | null>(null);
+  if (!whole || !known(whole.tickets) || !known(whole.roadmap))
+    return (
+      <>
+        <h1>Roadmap</h1>
+        <Unknown />
+      </>
+    );
+  if (isUnknownProject(whole, project))
+    return (
+      <>
+        <h1>Roadmap</h1>
+        <UnknownProject project={project!} />
+      </>
+    );
+  // The filter of the URL cuts the snapshot once. The sections are the projects with tickets, in name order.
+  const snapshot = scoped(whole, project);
+  const names = known(snapshot.tickets)
+    ? [...new Set(snapshot.tickets.map((ticket) => ticket.project))].toSorted()
+    : [];
+  if (names.length === 0)
+    return (
+      <>
+        <h1>Roadmap · {project ?? "All projects"}</h1>
+        <p className="mut">
+          {project === null ? "No project has tickets yet." : `No tickets in ${project}.`}
+          {project === null ? null : (
+            <>
+              {" "}
+              <a href={withProject(location.hash, null)}>All projects</a>
+            </>
+          )}
+        </p>
+      </>
+    );
+  const activeName = active !== null && names.includes(active) ? active : names[0];
+  return (
+    <>
+      <h1 className="sr">Roadmap · {project ?? "All projects"}</h1>
+      <div className={project === null && names.length > 1 ? "rm-stack multi" : "rm-stack"}>
+        {names.map((name) => (
+          <ProjectRoadmap
+            key={name}
+            snapshot={snapshot}
+            project={name}
+            scope={project}
+            heading={project === null}
+            isActive={name === activeName}
+            onActivate={() => setActive(name)}
+          />
+        ))}
+      </div>
+    </>
   );
 }

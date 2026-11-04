@@ -3,10 +3,10 @@
 import { useEffect } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
-import { Unknown, known } from "./format.tsx";
+import { OutsideNote, ProjectValue, Unknown, known } from "./format.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import { runHref } from "./RunDetail.tsx";
-import { roadmapHash, useLive } from "./store.tsx";
+import { hashOf, ticketHref, useLive } from "./store.tsx";
 
 /** Paragraphs and bullet lists of plain text: Markdown marks stay as written, nothing becomes HTML. */
 function Prose({ text, testId }: { text: string; testId: string }) {
@@ -35,7 +35,7 @@ const node = (entry: TicketEntry, base: TicketEntry["ticket"]): GraphTicket => (
   title: entry.ticket.title ?? entry.ticket.id,
   state: entry.state,
   tone: entry.tone,
-  href: `#/ticket/${encodeURIComponent(entry.ticket.id)}`,
+  href: ticketHref(entry.ticket.id),
   ring: entry.open?.progress
     ? { done: entry.open.progress.steps_done, total: entry.open.progress.steps_total }
     : entry.satisfied || entry.lane === "Closed"
@@ -57,14 +57,14 @@ export function TicketPage({ id }: { id: string }) {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [id]);
-  const project = entry?.ticket.project ?? null;
   useEffect(() => {
+    // Esc goes back with the filter of the URL, not the ticket's project.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") location.hash = roadmapHash(project);
+      if (event.key === "Escape") location.hash = hashOf("#/roadmap");
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [project]);
+  }, []);
 
   if (!snapshot || !entries || !known(snapshot.tickets))
     return (
@@ -77,7 +77,7 @@ export function TicketPage({ id }: { id: string }) {
     return (
       <>
         <p className="crumb">
-          <a href="#/roadmap">← Roadmap</a>
+          <a href={hashOf("#/roadmap")}>← Roadmap</a>
         </p>
         <h1>{id}</h1>
         <p className="mut">No ticket {id} in the roadmap.</p>
@@ -103,7 +103,7 @@ export function TicketPage({ id }: { id: string }) {
   return (
     <div className="ticket-page" data-testid="ticket-page">
       <p className="crumb">
-        <a href={roadmapHash(project)}>← Roadmap</a>{" "}
+        <a href={hashOf("#/roadmap")}>← Roadmap</a>{" "}
         <span className="mut">Esc returns to the list</span>
       </p>
       <div className="ticket-cols">
@@ -115,7 +115,9 @@ export function TicketPage({ id }: { id: string }) {
             {ticket.status.replaceAll("_", " ") === entry.state ? null : (
               <span className="pill">{ticket.status}</span>
             )}
+            <ProjectValue project={ticket.project} />
           </div>
+          <OutsideNote project={ticket.project} />
           <h1 className="ticket-title">{ticket.title ?? ticket.id}</h1>
           <div className="actions">
             {run ? (
@@ -169,11 +171,7 @@ export function TicketPage({ id }: { id: string }) {
               ) : null}
               {dependsOn.map((need) => (
                 <li key={need.id}>
-                  <a
-                    className="mono"
-                    href={`#/ticket/${encodeURIComponent(need.id)}`}
-                    data-testid="dep-link"
-                  >
+                  <a className="mono" href={ticketHref(need.id)} data-testid="dep-link">
                     {need.id}
                   </a>{" "}
                   {need.entry?.ticket.title ?? ""}{" "}
@@ -190,11 +188,7 @@ export function TicketPage({ id }: { id: string }) {
               {unblocks.length === 0 ? <li className="mut">No ticket waits for it.</li> : null}
               {unblocks.map((other) => (
                 <li key={other.key}>
-                  <a
-                    className="mono"
-                    href={`#/ticket/${encodeURIComponent(other.ticket.id)}`}
-                    data-testid="unblock-link"
-                  >
+                  <a className="mono" href={ticketHref(other.ticket.id)} data-testid="unblock-link">
                     {other.ticket.id}
                   </a>{" "}
                   {other.ticket.title} <span className="pill">{other.state}</span>

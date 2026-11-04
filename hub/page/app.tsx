@@ -1,6 +1,14 @@
 import { Component, useEffect, useState, type ReactNode } from "react";
 import { Roadmap } from "./Roadmap.tsx";
-import { costByDay, dayOf, highestUsage, nearLimit, percent } from "./derive.ts";
+import {
+  costByDay,
+  dayOf,
+  highestUsage,
+  nearLimit,
+  percent,
+  projectsOf,
+  scoped,
+} from "./derive.ts";
 import { Home } from "./Home.tsx";
 import { known } from "./format.tsx";
 import { Run } from "./Run.tsx";
@@ -9,9 +17,10 @@ import {
   LiveProvider,
   Stale,
   applyTheme,
-  isRetiredRoute,
+  hashOf,
   parseRoute,
-  roadmapHash,
+  retiredTarget,
+  withProject,
   savedTheme,
   sourceNames,
   useHash,
@@ -54,26 +63,49 @@ function ThemeSwitch() {
   );
 }
 
+/** The one project filter of the site: All projects, or one project. The URL holds it; a click sets the URL. */
+function ProjectFilter({ projects, project }: { projects: string[]; project: string | null }) {
+  const pick = (name: string | null) => () => {
+    location.hash = withProject(location.hash, name);
+  };
+  return (
+    <div className="seg" role="group" aria-label="Project">
+      <button type="button" aria-pressed={project === null} onClick={pick(null)}>
+        All projects
+      </button>
+      {projects.map((name) => (
+        <button
+          key={name}
+          type="button"
+          className="mono"
+          aria-pressed={project === name}
+          onClick={pick(name)}
+        >
+          {name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Shell() {
   const hash = useHash();
   const route = parseRoute(hash);
-  const { snapshot, connected } = useLive();
-  // The Map is gone: its old links land on Runs. Backlog is now Roadmap, and `#/backlog/<ticket>` keeps its tail.
+  const { snapshot: whole, connected } = useLive();
+  // The Map is gone: its old links land on Runs. Backlog is now Roadmap. Both keep the query and the tail.
   useEffect(() => {
-    if (isRetiredRoute(location.hash)) location.replace("#/runs");
-    else if (/^#\/backlog(\/|$)/.test(location.hash))
-      location.replace(location.hash.replace("#/backlog", "#/roadmap"));
+    const target = retiredTarget(location.hash);
+    if (target) location.replace(target);
   }, [hash]);
-  const projects =
-    snapshot && known(snapshot.tickets)
-      ? [...new Set(snapshot.tickets.map((ticket) => ticket.project))].sort()
-      : [];
+  // The header counts follow the filter; the limit is per account and does not.
+  const snapshot = whole ? scoped(whole, route.project) : null;
+  const projects = whole ? projectsOf(whole) : [];
   const needs =
     snapshot && known(snapshot.gates)
       ? snapshot.gates.length +
         (known(snapshot.runs) ? snapshot.runs.reduce((sum, run) => sum + run.waiting.length, 0) : 0)
       : 0;
-  const top = snapshot ? highestUsage(snapshot.provider_limits) : null;
+  const top = whole ? highestUsage(whole.provider_limits) : null;
   const today = snapshot ? (costByDay(snapshot).get(dayOf(new Date())) ?? 0) : null;
   const current = route.view === "run" ? "runs" : route.view === "ticket" ? "roadmap" : route.view;
   return (
@@ -88,7 +120,7 @@ function Shell() {
             <a
               key={view}
               className="tab"
-              href={href}
+              href={hashOf(href)}
               aria-current={current === view ? "page" : undefined}
             >
               {label}
@@ -101,21 +133,7 @@ function Shell() {
           ))}
         </nav>
         <div className="nav-right">
-          {projects.map((project) => (
-            <a
-              key={project}
-              className="chip mono"
-              href={roadmapHash(project)}
-              title="Show this project's roadmap"
-              aria-current={
-                route.view === "roadmap" && (route.project ?? projects[0]) === project
-                  ? "true"
-                  : undefined
-              }
-            >
-              {project}
-            </a>
-          ))}
+          <ProjectFilter projects={projects} project={route.project} />
           <span
             className="chip"
             data-testid="master-chief"
@@ -126,7 +144,7 @@ function Shell() {
           </span>
           {top && top.used_fraction !== null ? (
             <span className={nearLimit(top) ? "chip alarm" : "chip"} data-testid="nav-usage">
-              {top.provider} {top.window} <b>{percent(top.used_fraction)}%</b>
+              {top.provider} {top.window} <b>{percent(top.used_fraction)}%</b> · all projects
             </span>
           ) : null}
           {today === null ? null : (
@@ -146,7 +164,7 @@ function Shell() {
         {route.view === "home" ? <Home /> : null}
         {route.view === "runs" ? <Runs /> : null}
         {route.view === "run" ? <Run run={route.run!} sub={route.sub} /> : null}
-        {route.view === "roadmap" ? <Roadmap key={route.project} /> : null}
+        {route.view === "roadmap" ? <Roadmap /> : null}
         {route.view === "ticket" ? <TicketPage id={route.arg!} /> : null}
       </main>
     </>
@@ -180,7 +198,7 @@ class Boundary extends Component<
         <h1>This page failed</h1>
         <p className="mut">
           {this.state.error.message}. <button onClick={() => location.reload()}>Reload</button>{" "}
-          <a href="#/">Home</a>
+          <a href={hashOf("#/")}>Home</a>
         </p>
       </main>
     );

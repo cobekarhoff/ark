@@ -13,6 +13,8 @@ import {
   percent,
   reviewQueue,
   stuckAgents,
+  isUnknownProject,
+  scoped,
   type Stuck,
 } from "./derive.ts";
 import {
@@ -20,6 +22,7 @@ import {
   ExternalLink,
   Phase,
   Unknown,
+  UnknownProject,
   attentionOf,
   duration,
   isSlow,
@@ -28,7 +31,7 @@ import {
   type Attention,
 } from "./format.tsx";
 import { Clock, runHref } from "./RunDetail.tsx";
-import { useAge, useLive, useNow } from "./store.tsx";
+import { useAge, useLive, useNow, useProject } from "./store.tsx";
 import type {
   CriterionEvidence,
   Gate,
@@ -442,7 +445,7 @@ function UsageWindow({ limit }: { limit: ProviderWindow }) {
       data-near={near}
     >
       <div className="usage-head">
-        <b>{limit.provider}</b> <span className="mut">{limit.window} window</span>
+        <b>{limit.provider}</b> <span className="mut">{limit.window} window · all projects</span>
         <b className="end big-pct">{fraction === null ? "unknown" : `${percent(fraction)}%`}</b>
       </div>
       <div className="meter" aria-hidden="true">
@@ -493,9 +496,10 @@ function Usage({ snapshot }: { snapshot: Snapshot }) {
 }
 
 export function Home() {
-  const { snapshot } = useLive();
+  const { snapshot: whole } = useLive();
   const age = useAge();
-  if (!snapshot)
+  const project = useProject();
+  if (!whole)
     return (
       <>
         <h1 className="sr">Home</h1>
@@ -504,6 +508,14 @@ export function Home() {
         </p>
       </>
     );
+  if (isUnknownProject(whole, project))
+    return (
+      <>
+        <h1>Home</h1>
+        <UnknownProject project={project!} />
+      </>
+    );
+  const snapshot = scoped(whole, project);
   const { runs, gates } = snapshot;
   const waiting = known(runs)
     ? runs.flatMap((run) =>
@@ -528,7 +540,7 @@ export function Home() {
   const escalated = known(runs) ? runs.filter((run) => needsHuman(snapshot, run)).length : 0;
   return (
     <>
-      <h1 className="sr">Home</h1>
+      <h1 className="sr">Home · {project ?? "All projects"}</h1>
       <section className="tiles" aria-label="What needs you first">
         <Tile
           tile="needs-me"
@@ -555,7 +567,15 @@ export function Home() {
           label={top ? `${top.provider} ${top.window} limit` : "Usage limit"}
           value={top?.used_fraction == null ? "?" : `${percent(top.used_fraction)}%`}
           tone={top && nearLimit(top) ? "alarm" : undefined}
-          note={top ? <Resets limit={top} /> : "unknown"}
+          note={
+            top ? (
+              <>
+                <Resets limit={top} /> · all projects
+              </>
+            ) : (
+              "unknown · all projects"
+            )
+          }
         />
         <Tile
           tile="cost"

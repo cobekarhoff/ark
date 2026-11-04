@@ -1,7 +1,8 @@
 // test ids: roadmap-graph, graph-lane (data-milestone), graph-strip, graph-dot (data-ticket),
 // graph-node (data-ticket, data-state, aria-current), graph-edge (data-from, data-to, data-blocking)
 import { layoutGraph, roundedPath, type GraphInput } from "./roadmap-graph.ts";
-import { StatusChip, ticketHref, type RoadmapData, entryOf } from "./RoadmapParts.tsx";
+import { StatusChip, type RoadmapData, entryOf } from "./RoadmapParts.tsx";
+import { ticketHref } from "./store.tsx";
 import type { RoadmapMilestone } from "../roadmap.ts";
 
 const marker = (name: string, className: string) => (

@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { TicketEntry } from "./derive.ts";
 import { phaseLabel } from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
+import { ticketHref } from "./store.tsx";
 import type { RoadmapItem, RoadmapMilestone, RoadmapWarning } from "../roadmap.ts";
 import type { TicketRunView, TicketView } from "../types.ts";
 
@@ -22,7 +23,6 @@ export type RoadmapData = {
 const finished = (ticket: TicketView | undefined) =>
   ticket !== undefined && (ticket.status === "done" || ticket.status === "superseded");
 
-export const ticketHref = (id: string) => `#/ticket/${encodeURIComponent(id)}`;
 export const entryOf = (data: RoadmapData, id: string) =>
   data.entries.get(`${data.project}/${id}`) as TicketEntry;
 
