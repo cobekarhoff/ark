@@ -210,11 +210,3 @@ test("ARK-191-AC3 ark status shows each open run's age and marks only runs older
   expect(lines).toContain(`${exactly24}  planning  -  24h`);
   expect(lines).toContain(`${hours25}  planning  -  25h  stale`);
 });
-
-test("ARK-191-AC4 chief.md tells Master Chief to update the README Status cell at start and at close", () => {
-  const chief = readFileSync(join(import.meta.dir, "../skills/ark/playbooks/chief.md"), "utf8");
-  const start = chief.split("## 6. Start a run lead for each ready ticket")[1]?.split("\n## ")[0];
-  const close = chief.split("## 8. Close the run")[1]?.split("\n## ")[0];
-  expect(start).toMatch(/Status cell[^\n]*tickets\/README\.md[^\n]*`in_progress`/);
-  expect(close).toMatch(/Status cell[^\n]*tickets\/README\.md[^\n]*`done`[^\n]*`ready`/);
-});

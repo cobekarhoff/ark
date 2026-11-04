@@ -114,8 +114,6 @@ Do these steps in order for one ready ticket.
 
    The command prints the run name. Use it as `<run>` below.
 
-   Then update the Status cell of the row of this ticket in `$ARK_HOME/projects/<project>/tickets/README.md` to `in_progress`. `ark run start` already set the ticket file; the README is yours.
-
 3. **Start the run lead.** First make the run worktree, so the run lead does not start in the main workspace. You stay in the main workspace.
 
    ```sh
@@ -237,17 +235,15 @@ A `HELD: <run> #<number> ticket superseded` line from the auto-merger (section 1
 
 After `ark run close`:
 
-1. Mark the Task: `orca orchestration task-update --id <task id> --status completed --result "<outcome>" --json`. Tasks that depend on it become ready. Use `--status failed` for `abandoned` and `aborted`.
-   Then update the Status cell of the row of this ticket in `$ARK_HOME/projects/<project>/tickets/README.md`: `done` for `merged`, `ready` for `aborted` and `abandoned`, and leave it for `handed_off`. `ark run close` already set the ticket file; the README is yours.
-2. If the outcome is `merged`, sync and notify before you start any ticket:
+1. Mark the Task: `orca orchestration task-update --id <task id> --status completed --result "<outcome>" --json`. Tasks that depend on it become ready. Use `--status failed` for `abandoned` and `aborted`.2. If the outcome is `merged`, sync and notify before you start any ticket:
    1. Run `ark workspace sync <run>`. It fast-forwards the workspace checkout's target branch and prints `<repo>  <branch>  <head>`. If it exits 1, tell the human which repo it names and wait: new runs must not start from a stale base.
    2. For every other open run, send its lead a `status` message with the target branch and the head that `ark workspace sync` printed:
 
       ```sh
       orca orchestration send --retry-request <id> --to dispatch:<run lead dispatch id> --type status --subject "<repo>: <branch> moved" --body "Run <closed run> merged. <repo> <branch> is now at <head>. Run \`ark worktree sync <run>\` before your next step." --json
       ```
-3. Run the close check with the human: read `playbooks/retro.md` and follow "Part 1: Close check", steps 3 and 4, which are the Master Chief steps. Steps 1 and 2 are done: `ark run close` ran, and `retro.md` exists.
-4. Start the next ready ticket, if `concurrency` allows.
+2. Run the close check with the human: read `playbooks/retro.md` and follow "Part 1: Close check", steps 3 and 4, which are the Master Chief steps. Steps 1 and 2 are done: `ark run close` ran, and `retro.md` exists.
+3. Start the next ready ticket, if `concurrency` allows.
 
 ## 9. Link an escaped defect
 
@@ -293,5 +289,6 @@ Two loops run in the Ark repo's `scripts/` folder. Start each one in its own bac
 - Never answer a gate yourself, and never relay a `plan` or `strategy` gate that `ark.yml` set to `auto`. Every other `ask` goes to the human, and the human's words go back with `reply`.
 - Never run `ark gate record`. The run lead records the human's answer.
 - Never queue a ticket the human did not approve.
+- Move a ticket between Now, Next and Later in `ROADMAP.md` only when the human says so. The `status:` field of the ticket file is the only status: edit no README Status cell.
 - Never start more open runs than `concurrency`.
 - Use the executable you ran `orca` with for the whole session.
