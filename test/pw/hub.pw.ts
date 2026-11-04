@@ -3040,6 +3040,7 @@ test("ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same s
   await open(page, baseUrl, "roadmap");
   const rows = page.getByTestId("ticket-row");
   await expect(rows).toHaveCount(44);
+  await expect(page.getByTestId("stale-label")).toHaveCount(0); // the nav stops growing once every source has answered
   const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
 
   // j and k move the selection, / goes to the search box, Esc leaves it.
