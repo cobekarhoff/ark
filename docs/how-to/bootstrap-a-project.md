@@ -91,14 +91,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
 
 3. Master Chief registers the workspace and every nested repo in Orca, each with non-Orca worktrees shown. Orca needs this to launch agents into the run's worktrees of each repo.
 
-4. Master Chief makes the workspace's own skills reachable. Clara keeps skills in `.claude/skills`, and OMP does not find them from a run's worktrees. Master Chief adds the directory to OMP's `skills.customDirectories` setting:
-
-   ```sh
-   omp config get skills.customDirectories
-   omp config set skills.customDirectories '["/Users/you/Dev/abbott/clara-agentic-environment/.claude/skills"]'
-   ```
-
-   This applies to all your OMP sessions. It keeps any entries already in the list. For Claude Code and Codex workers, the run lead passes the skill paths in each worker's prompt.
+4. Ark makes the workspace's own skills reachable. Clara keeps skills in `.claude/skills`, and OMP does not find them from a run's nested worktrees. `ark worktree anchor` and `ark worktree create` write `skills.customDirectories` into each nested worktree's `.omp/config.yml`, with the mirror path of each of `.claude/skills`, `.agents/skills` and `.omp/skills` that the workspace root has. Your global OMP config does not change. Master Chief only checks that each `SKILL.md` has a `description`. For Claude Code and Codex workers, the run lead passes the skill paths in each worker's prompt.
 
 5. Check the written `ark.yml`. For a meta-repo, it has one suite for each integration or E2E suite, and each suite names its repo. This example shows the shape. Your detected values differ:
 
