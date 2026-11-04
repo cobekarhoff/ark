@@ -28,11 +28,12 @@ checks:
 
 - `ark merge-request open <run>` refuses when a non-manual AC is not `passing` in the last `test.completed`.
 - It refuses when a string in backticks in the text of an AC is in no tracked file at HEAD of any repo of the workspace, run worktree or not. A backtick span must sit on one line and be non-blank. Each is searched with `git grep -F`. Fix a wrong literal with `ark criteria amend`.
+- `ark run close <run> handed_off` applies the same refusals, and those of the `kind` rules below, before it appends `run.closed` or removes a worktree. On a refusal run `ark test <run>` again or `ark criteria amend`.
 - A ticket may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`). `bug`: `ark run step <run> <implementer step> start` refuses until a failing `ark test` of every AC exists. `perf`: `results/baseline.md` and `results/compare.md` must exist and not be empty. `refactor`: `ark test` runs the suites at the base commit once and records `base_passed`.
 
 ## Literals
 
-The ACs of ARK-302 name these strings. `ark merge-request open` finds each one in this file, as the rule above requires:
+The ACs of ARK-302 and ARK-304 name these strings. `ark merge-request open` finds each one in this file, as the rule above requires:
 
 - `ark.yml`
 - `checks:`
@@ -100,3 +101,16 @@ The ACs of ARK-302 name these strings. `ark merge-request open` finds each one i
 - `bun run lint`
 - `bun run format:check`
 - `Enforced by: <check or refusal>`
+- `ARK-304-AC1`
+- `bun test test/run.test.ts -t ARK-304-AC1`
+- `ARK-304-AC2`
+- `bun test test/run.test.ts -t ARK-304-AC2`
+- `ARK-304-AC3`
+- `bun test test/run.test.ts -t ARK-304-AC3`
+- `ARK-304-AC4`
+- `bun test test/run.test.ts -t ARK-304-AC4`
+- `ARK-304-AC5`
+- `bun test test/run.test.ts -t ARK-304-AC5`
+- `the last test must have passed`
+- `ARK-304-AC6`
+- `bun test test/playbooks.test.ts -t ARK-304-AC6`

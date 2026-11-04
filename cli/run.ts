@@ -25,7 +25,7 @@ import {
 } from "./events.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
-import { staleHeads } from "./merge-request.ts";
+import { assertShippable, staleHeads } from "./merge-request.ts";
 import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, worktreeCleanup } from "./worktree.ts";
 
@@ -247,8 +247,14 @@ function syncClosedTicket(started: EventData | undefined, outcome: string): void
 }
 
 export async function runClose(runId: string, outcome: string, inProject?: string): Promise<void> {
-  const { directory } = findRun(runId, inProject);
-  const started = readEvents(directory).find((event) => event.type === "run.started");
+  const { project, directory } = findRun(runId, inProject);
+  const events = readEvents(directory);
+  if (outcome === "handed_off") {
+    const state = deriveState(events);
+    assertAllowed(state, "run.closed", { outcome });
+    assertShippable(runId, project, directory, events, state);
+  }
+  const started = events.find((event) => event.type === "run.started");
   appendEvent(directory, "run.closed", { outcome });
   console.log(`${runId} closed: ${outcome}`);
   syncClosedTicket(started?.data, outcome);
