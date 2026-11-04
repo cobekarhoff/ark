@@ -1014,3 +1014,25 @@ test("ARK-288-AC6 neither playbook still says the escalation gate stays with the
     expect(text).not.toContain("`criteria` and `escalation` always go to the human");
   }
 });
+
+test("ARK-297-AC4 bootstrap step 7 does not set the global omp config and says Ark writes each worktree config.yml", () => {
+  const step = bootstrapPlaybook
+    .split("## 7. Make the workspace's skills reachable for workers")[1]
+    ?.split("\n## ")[0];
+  expect(step).toBeDefined();
+  expect(bootstrapPlaybook).not.toContain("omp config set");
+  expect(step).toContain(
+    "`skills.customDirectories` into the `.omp/config.yml` of each nested worktree",
+  );
+  expect(step).toMatch(/global OMP config is not changed/);
+  expect(step).toContain("Claude Code workers and Codex workers");
+  expect(step).toContain("`SKILL.md` paths in the step prompt");
+});
+
+test("ARK-297-AC5 the spikes note says skills reach a nested worktree through skills.customDirectories in its .omp/config.yml", () => {
+  const spikes = readFileSync(join(import.meta.dir, "../docs/explanation/orca-spikes.md"), "utf8");
+  const item = spikes.split("- **Workspace skills don't load.**")[1]?.split("\n- ")[0];
+  expect(item).toBeDefined();
+  expect(item).toContain("`skills.customDirectories`");
+  expect(item).toContain("`.omp/config.yml` of each nested worktree");
+});
