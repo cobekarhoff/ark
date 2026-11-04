@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,6 +7,9 @@ import { parseClaudeSession } from "../cli/usage/claude.ts";
 import { readUsage } from "../cli/usage/index.ts";
 import { parseOmpSession } from "../cli/usage/omp.ts";
 import { tempArkHome } from "./helpers.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const fixtures = join(import.meta.dir, "fixtures", "retro");
 const runId = "2026-10-29-ARK-901-1";

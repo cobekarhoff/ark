@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   existsSync,
   lstatSync,
@@ -24,6 +24,9 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const roles = {
   implementer: { harness: "claude", model: "claude-sonnet" },

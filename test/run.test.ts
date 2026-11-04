@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -20,6 +20,9 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const workspaceSteps = [
   { id: "build", role: "implementer", repo: ".", needs: [], criteria: ["ARK-900-AC1"] },
@@ -593,6 +596,7 @@ const dir = process.env.FAKE_ORCA_DIR;
 const args = process.argv.slice(2);
 appendFileSync(dir + "/calls.log", args.join(" ") + "\\n");
 const state = JSON.parse(readFileSync(dir + "/state.json", "utf8"));
+if (state.delayMs) await Bun.sleep(state.delayMs);
 if (state.hang) await Bun.sleep(30000);
 const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const page = (rows, key) => {
@@ -617,6 +621,7 @@ type FakeState = {
   workers: Record<string, FakeWorker[]>;
   pageSize?: number;
   hang?: boolean;
+  delayMs?: number;
   failRelease?: string[];
 };
 
@@ -717,13 +722,10 @@ test("ARK-278-AC3 an Orca failure prints one orca line and the close still recor
   expect(closedEvent(missing.directory)).toBe(true);
 
   // orca hangs past the timeout
-  const hung = startRun("demo", "ARK-901");
-  useFakeOrca({ runs: [], workers: {}, hang: true });
-  process.env.ARK_ORCA_TIMEOUT_MS = "300";
-  const hang = ark("run", "close", hung.runId, "aborted");
-  expect(hang.code).toBe(0);
-  expect(hang.out).toMatch(/orca: workers not released: .*timed out$/m);
-  expect(hang.out.match(/orca:/g)).toHaveLength(1);
+  const hung = runHangingClose();
+  expect(hung.output.code).toBe(0);
+  expect(hung.output.out).toMatch(/orca: workers not released: .*timed out$/m);
+  expect(hung.output.out.match(/orca:/g)).toHaveLength(1);
   expect(closedEvent(hung.directory)).toBe(true);
 
   // one failing dispatch: later dispatches of the run are still released, one orca line
@@ -753,6 +755,33 @@ test("ARK-278-AC3 an Orca failure prints one orca line and the close still recor
   expect(nothing.code).toBe(0);
   expect(nothing.out).toBe(`${none.runId} closed: aborted\n`);
 });
+
+test("ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later close against a slow orca", () => {
+  runHangingClose();
+
+  // real wall-clock delay: the fake orca subprocess must outlast the leaked 300 ms to prove the override is gone
+  const slow = startRun("demo", "ARK-904");
+  useFakeOrca({
+    delayMs: 700,
+    runs: [{ id: "orca_slow", objective: `Ark run ${slow.runId}` }],
+    workers: { orca_slow: [worker("ctx_slow", "succeeded", "reclaimable")] },
+  });
+  const closed = ark("run", "close", slow.runId, "aborted");
+  expect(closed.out).toContain("ctx_slow released (succeeded)");
+  expect(closed.out).not.toContain("orca:");
+});
+
+// Shared by ARK-278-AC3 and ARK-292-AC1: the hang case sets a short timeout and must clean it up itself.
+function runHangingClose() {
+  const hung = startRun("demo", "ARK-901");
+  useFakeOrca({ runs: [], workers: {}, hang: true });
+  process.env.ARK_ORCA_TIMEOUT_MS = "300";
+  try {
+    return { directory: hung.directory, output: ark("run", "close", hung.runId, "aborted") };
+  } finally {
+    delete process.env.ARK_ORCA_TIMEOUT_MS;
+  }
+}
 
 function symlinkBun(directory: string): void {
   Bun.spawnSync(["ln", "-s", process.execPath, join(directory, "bun")]);
