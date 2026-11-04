@@ -375,6 +375,7 @@ export function renderPlanMarkdown(
         "",
         `- **Old:** ${amendment.old.replaceAll("\n", " ")}`,
         `- **New:** ${amendment.new.replaceAll("\n", " ")}`,
+        ...(amendment.reason ? [`- **Reason:** ${amendment.reason}`] : []),
       );
     }
   }

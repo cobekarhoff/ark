@@ -430,6 +430,43 @@ function localOnlyLines(project: string, state: RunState): string[] {
   return ["merge requests: none (local only)", ...branches];
 }
 
+/** The words of `from` and `to` that differ, with "..." on each cut side. */
+function changedWords(from: string, to: string): [string, string] {
+  const a = from.split(/\s+/);
+  const b = to.split(/\s+/);
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  )
+    tail++;
+  const cut = (words: string[]) =>
+    [
+      head > 0 ? "..." : "",
+      words.slice(head, words.length - tail).join(" "),
+      tail > 0 ? "..." : "",
+    ].join("");
+  return [cut(a), cut(b)];
+}
+
+function amendedLines(state: RunState): string[] {
+  if (state.amended_criteria.length === 0) return [];
+  return [
+    "amended criteria:",
+    ...state.amended_criteria.flatMap((amended) => {
+      const [before, after] = changedWords(amended.old, amended.new);
+      return [
+        `  ${amended.id} by ${amended.by}: ${amended.reason.replace(/\s+/g, " ")}`,
+        `    old: ${before}`,
+        `    new: ${after}`,
+      ];
+    }),
+  ];
+}
+
 function printRun(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = writeState(directory);
@@ -454,6 +491,7 @@ function printRun(runId: string, inProject?: string): void {
     `waiting gate: ${waitingGate(state)}`,
     ...(manualPending.length > 0 ? [`manual pending: ${manualPending.join(", ")}`] : []),
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
+    ...amendedLines(state),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
     ...testHeadLines(directory),
     ...(statusMergeRequestsMode(project) === "none"

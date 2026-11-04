@@ -113,5 +113,6 @@ Any change that follows from a retro takes effect only after you approve it.
 
 - **Master Chief refuses to start.** The session is not in an Orca terminal. Open it from one.
 - **A run lead cannot start a worker.** Orca's nested worker depth is below 2. Set it to 2 in Orca's settings.
-- **You want to stop a run.** Tell Master Chief to abort it. An abort at any gate closes the run with the outcome `aborted`.
+- **An AC wording is wrong after planning.** Tell Master Chief the new text and your reason. The run lead runs `ark criteria amend <run> <criterion id> <file> --reason <text>`, which works in every phase before `merge_requests_open`, instead of aborting the run. Before plan approval it runs `ark plan check` again; after approval it does not, and the run keeps its phase. `ark status` lists each amendment with its reason.
+- **You want to stop a run.** Tell Master Chief to abort it. An abort at any gate closes the run with the outcome `aborted`. An aborted run keeps a branch that has commits beyond its base, as with `handed_off`, and `ark run close` prints a `kept` line for it.
 - **A bug turns up after you merge.** Give Master Chief the bug ticket and say which run caused it. It links the two as an escaped defect.

@@ -40,7 +40,7 @@ export type RunState = {
   round_budget: number;
   criteria: { id: string; status: CriterionStatus }[];
   /** Each amended criterion: the text before its first amendment and the latest text. */
-  amended_criteria: { id: string; old: string; new: string }[];
+  amended_criteria: { id: string; old: string; new: string; by: string; reason: string }[];
   /** The manual gate is answered once for each criterion: key `manual:<criterion>`. */
   gates: {
     criteria?: string;
@@ -145,7 +145,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   let criteriaStatus: Record<string, CriterionStatus> = {};
   const gates: Record<string, string> = {};
   let plan: RunState["plan"] = null;
-  const amendments = new Map<string, { id: string; old: string; new: string }>();
+  const amendments = new Map<string, RunState["amended_criteria"][number]>();
   let planApproved = false;
   let approvedPlanHash: string | null = null;
   let planSteps: { id: string; role: string; repo: string }[] = [];
@@ -184,12 +184,13 @@ export function deriveState(events: ArkEvent[]): RunState {
           id: data.criterion,
           old: first?.old ?? data.old,
           new: data.new,
+          by: data.by ?? "human",
+          reason: data.reason ?? "",
         });
         // New text needs a new human decision: an earlier manual answer no longer stands.
         delete gates[`manual:${data.criterion}`];
         // The amendment changes what plan.md must show, so the plan needs a new check.
-        plan = null;
-        planApproved = false;
+        if (!planApproved) plan = null;
         break;
       }
       case "evaluation.recorded":

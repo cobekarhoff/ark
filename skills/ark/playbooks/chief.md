@@ -190,7 +190,7 @@ A run lead is blocked. Read the message, tell the human, and decide the next ste
 
 ### An amendment of a criterion
 
-When the human amends a criterion of a run before its plan gate, do not put the new text in free text. Send the run lead the criterion ID and the new text, and ask it to run `ark criteria amend <run> <criterion id> <file>`, so that `ticket.md`, the log and `plan.md` carry it.
+When the human approves a new wording for a criterion of a run, do not put the new text in free text. Use `ark criteria amend <run> <criterion id> <file> --reason <text>` when an AC wording is wrong after planning, instead of aborting the run, and only with the human's approval. Send the run lead the criterion ID, the new text and the human's reason, and ask it to run the command, so that `ticket.md`, the log and `plan.md` carry it. The run lead runs it, never amends on its own. It works in every phase before `merge_requests_open`.
 
 ### A `worker_done` from a run lead
 
