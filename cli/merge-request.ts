@@ -133,8 +133,16 @@ function absentLiterals(
   absent: { criterion: string; literal: string }[];
   present: { criterion: string; literal: string }[];
 } {
-  const found = (literal: string) =>
-    repoPaths.some((path) => spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], path).ok);
+  // A path string is present when it names a tracked file or folder at HEAD. A lone `/` strips to "" (the root
+  // tree), so an empty path never counts.
+  const found = (literal: string) => {
+    const treePath = literal.replace(/\/$/, "");
+    return repoPaths.some(
+      (repoPath) =>
+        spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], repoPath).ok ||
+        (treePath !== "" && spawn(["git", "cat-file", "-e", `HEAD:${treePath}`], repoPath).ok),
+    );
+  };
   const absent: { criterion: string; literal: string }[] = [];
   const present: { criterion: string; literal: string }[] = [];
   for (const [criterion, value] of criteria) {
