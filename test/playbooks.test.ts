@@ -1061,3 +1061,104 @@ test("ARK-297-AC5 the spikes note says skills reach a nested worktree through sk
   expect(item).toContain("`skills.customDirectories`");
   expect(item).toContain("`.omp/config.yml` of each nested worktree");
 });
+
+// ARK-303: playbook text checks. Sections are cut by heading text, never by number.
+const skillDirectory = join(import.meta.dir, "../skills/ark");
+const readSkillFile = (path: string) => readFileSync(join(skillDirectory, path), "utf8");
+const sectionText = (text: string, heading: string, level = "##") => {
+  const body = text.split(`\n${level} ${heading}`)[1];
+  expect(body).toBeDefined();
+  return body!.split(new RegExp(`\\n#{1,${level.length}} `))[0]!.replace(/\s+/g, " ");
+};
+const reviewerRubric = readSkillFile("rubrics/reviewer.md");
+
+test("ARK-303-AC1 the reviewer rubric and worker Reviewer section require a Repro line on P0 and P1, else P2", () => {
+  const texts = [
+    reviewerRubric.replace(/\s+/g, " "),
+    sectionText(workerPlaybook, "Reviewer", "###"),
+  ];
+  for (const text of texts) {
+    expect(text).toContain("- **Repro:** <command>");
+    expect(text).toMatch(/A P0 or P1 without it is written as P2/);
+    expect(text).toMatch(/Evidence quotes the output that shows the problem/);
+  }
+});
+
+test("ARK-303-AC2 run-lead section 8 runs the Repro before sending a P0 or P1 back", () => {
+  const text = sectionText(runLeadPlaybook, "8.");
+  expect(text).toContain(
+    "Before you send a P0 or P1 back to the implementer, run its Repro yourself",
+  );
+  expect(text).toMatch(
+    /output does not show the problem, treat the finding as P2 and write why under `## Run lead decision`/,
+  );
+});
+
+test("ARK-303-AC3 run-lead section 1 opens a todo list with one item for each numbered section", () => {
+  const text = sectionText(runLeadPlaybook, "1.");
+  expect(text).toContain(
+    "Open your harness's todo list with one item for each numbered section of this playbook, in order, and mark each item done when you finish its section",
+  );
+  expect(text).not.toMatch(/\b(11|eleven) (items|sections)\b/);
+});
+
+test("ARK-303-AC4 bootstrap writes verify.md, the validator uses it, retro handles a wrong one as scope project", () => {
+  const step = sectionText(bootstrapPlaybook, "12. Write `verify.md`");
+  expect(step).toContain("`$ARK_HOME/projects/<project>/verify.md`");
+  expect(step).toMatch(/\*\*Start:\*\*.*\*\*Reach:\*\*.*\*\*Feature map:\*\*/);
+  expect(step).toMatch(/for each feature|one row for each feature/);
+  expect(step).toMatch(/what a working result shows/);
+  expect(step).toMatch(/Ask only what you could not detect/);
+
+  const validator = sectionText(workerPlaybook, "Validator", "###");
+  expect(validator).toMatch(/When `verify.md` exists.*use it for a live check/);
+
+  expect(retroPlaybook.replace(/\s+/g, " ")).toMatch(
+    /When the validator finds `verify.md` wrong, the run lead writes a proposal with scope `project`/,
+  );
+});
+
+test("ARK-303-AC5 every link in principles.md points to a file and heading that exist, and workers and the rubric cite it", () => {
+  const slug = (heading: string) =>
+    heading
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N} _-]/gu, "")
+      .replace(/ /g, "-");
+  const links = [...readSkillFile("principles.md").matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]!);
+  expect(links.length).toBeGreaterThan(0);
+  for (const link of links) {
+    const [path, anchor] = link.split("#");
+    const file = join(skillDirectory, path!);
+    expect(existsSync(file), `${link}: file missing`).toBe(true);
+    if (anchor) {
+      const slugs = readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => /^#{1,6} /.test(line))
+        .map((line) => slug(line.replace(/^#+ /, "").trim()));
+      expect(slugs, `${link}: heading missing`).toContain(anchor);
+    }
+  }
+
+  for (const heading of ["Implementer", "Validator", "Reviewer"]) {
+    expect(sectionText(workerPlaybook, heading, "###"), heading).toContain(
+      "skills/ark/principles.md",
+    );
+  }
+  expect(reviewerRubric).toMatch(/Name the principle from \[`principles.md`\]/);
+});
+
+test("ARK-303-AC6 chief has a Catch the human up section that replies once and does not wait", () => {
+  const text = sectionText(chiefPlaybook, "13. Catch the human up");
+  expect(text).toContain("`ark chief state");
+  expect(text).toMatch(/inbox/);
+  expect(text).toMatch(
+    /\*\*Merged:\*\*.*\*\*Failed or aborted:\*\*.*\*\*Waiting on the human:\*\*/,
+  );
+  expect(text).toMatch(/options/);
+  expect(text).toMatch(/decide from the reply alone/);
+  expect(text).toMatch(/do not wait for an answer in that turn/);
+});
+
+test("ARK-303-AC7 bootstrap spells the path of the ark project's verify.md", () => {
+  expect(bootstrapPlaybook).toContain("~/.ark/projects/ark/verify.md");
+});
