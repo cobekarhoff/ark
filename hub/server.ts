@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { exec } from "../cli/exec.ts";
+import { proxyPort } from "../cli/proxy.ts";
 import { resolveRunFile } from "./run-detail.ts";
 import type { SnapshotReader } from "./snapshot.ts";
 
@@ -11,13 +12,12 @@ const pageEntry = join(import.meta.dir, "page", "index.html");
  * A browser page on another origin, or a DNS-rebinding host name, must not read run files through
  * the hub. Requests with no Origin (curl, tests) pass.
  */
-export function isLocalRequest(request: Request, port: number): boolean {
-  const local = [`127.0.0.1:${port}`, `localhost:${port}`];
+export function isLocalRequest(request: Request, authorities: string[]): boolean {
   const origin = request.headers.get("origin");
   const host = request.headers.get("host");
   return (
-    (origin === null || local.some((authority) => origin === `http://${authority}`)) &&
-    (host === null || local.includes(host))
+    (origin === null || authorities.some((authority) => origin === `http://${authority}`)) &&
+    (host === null || authorities.includes(host))
   );
 }
 
@@ -75,19 +75,30 @@ const switchTimeoutMilliseconds = 5000;
  * The hub renders no Markdown or run text on the server: run and ticket text leaves only as JSON
  * strings or `text/plain`, and the page puts it in the document as text.
  */
-export async function serve(reader: SnapshotReader, port: number) {
+export async function serve(reader: SnapshotReader, port: number, name?: string) {
   const page = await buildPage();
   const encoder = new TextEncoder();
 
   /**
    * `POST /api/open-in-orca {"terminal": <handle>}`. 403 unless the request came from the hub's own
-   * page: a browser always sends Origin on a POST, so Origin and Host must both be the hub's
-   * `127.0.0.1:<port>` (a missing Origin is refused, unlike on GET). 400 for a body that is not that
+   * page: a browser always sends Origin on a POST, so Origin and Host must be the same authority:
+   * the hub's `127.0.0.1:<port>`, or its `--name` with or without the proxy port (a missing Origin is refused, unlike on GET). 400 for a body that is not that
    * JSON or a handle the current snapshot does not list as live. 502 when `orca` fails.
    */
+  const postAuthorities = () => [
+    `127.0.0.1:${server.port}`,
+    ...(name ? [name, `${name}:${proxyPort}`] : []),
+  ];
+  const getAuthorities = () => [`localhost:${server.port}`, ...postAuthorities()];
+
   async function openInOrca(request: Request): Promise<Response> {
-    const own = `127.0.0.1:${server.port}`;
-    if (request.headers.get("origin") !== `http://${own}` || request.headers.get("host") !== own)
+    // One authority for both headers: a mixed pair is foreign. localhost is not allowed here.
+    const host = request.headers.get("host");
+    if (
+      host === null ||
+      !postAuthorities().includes(host) ||
+      request.headers.get("origin") !== `http://${host}`
+    )
       return text("foreign origin", 403);
     let handle: unknown;
     try {
@@ -146,7 +157,7 @@ export async function serve(reader: SnapshotReader, port: number) {
           ? openInOrca(request)
           : text("method not allowed", 405, { allow: "POST" });
       if (request.method !== "GET") return text("method not allowed", 405, { allow: "GET" });
-      if (!isLocalRequest(request, server.port!)) return text("foreign origin", 403);
+      if (!isLocalRequest(request, getAuthorities())) return text("foreign origin", 403);
 
       const run = pathname.match(/^\/api\/run\/([^/]+)(\/transcript|\/file)?$/);
       if (run) {
