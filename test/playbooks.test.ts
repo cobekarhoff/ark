@@ -806,11 +806,15 @@ test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead
   expect(commandProblems(workerPlaybookText)).toEqual([]);
   // the check sees the commands: not vacuously empty
   const commands = [...quotedCommands(runLeadPlaybook), ...quotedCommands(workerPlaybookText)];
-  expect(commands.filter((c) => /^portless \S+ --app-port/.test(c)).length).toBeGreaterThanOrEqual(
-    4,
-  );
-  expect(commands.filter((c) => c.startsWith("orca tab create")).length).toBeGreaterThanOrEqual(2);
-  expect(commands.filter((c) => c.includes("ark ui --port")).length).toBeGreaterThanOrEqual(1);
+  expect(
+    commands.filter((command) => /^portless \S+ --app-port/.test(command)).length,
+  ).toBeGreaterThanOrEqual(4);
+  expect(
+    commands.filter((command) => command.startsWith("orca tab create")).length,
+  ).toBeGreaterThanOrEqual(2);
+  expect(
+    commands.filter((command) => command.includes("ark ui --port")).length,
+  ).toBeGreaterThanOrEqual(1);
 });
 
 test("ARK-299-AC4 the evidence file holds curl -sf, orca tab create and portless list with their output", () => {
@@ -819,7 +823,8 @@ test("ARK-299-AC4 the evidence file holds curl -sf, orca tab create and portless
   expect(text).toMatch(
     /\$ orca tab create --worktree path:\S+ --url http:\/\/hub\.ark-299-check\.localhost\n\S/,
   );
-  expect(text).toMatch(
-    /\$ portless list\n[^$]*hub\.ark-299-check\.localhost[^$]*\$ portless list\nNo active routes/,
-  );
+  const lists = text.split("$ portless list\n");
+  expect(lists).toHaveLength(3);
+  expect(lists[1]).toContain("http://hub.ark-299-check.localhost  ->");
+  expect(lists[2]).toMatch(/^No active routes\./);
 });
