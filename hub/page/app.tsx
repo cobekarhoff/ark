@@ -1,5 +1,5 @@
 import { Component, useEffect, useState, type ReactNode } from "react";
-import { Backlog } from "./Backlog.tsx";
+import { Roadmap } from "./Roadmap.tsx";
 import { costByDay, dayOf, highestUsage, nearLimit, percent } from "./derive.ts";
 import { Home } from "./Home.tsx";
 import { known } from "./format.tsx";
@@ -22,7 +22,7 @@ import { TicketPage } from "./Ticket.tsx";
 const views = [
   ["home", "#/", "Home"],
   ["runs", "#/runs", "Runs"],
-  ["backlog", "#/backlog", "Backlog"],
+  ["roadmap", "#/roadmap", "Roadmap"],
 ] as const;
 
 const themes: [ThemeChoice, string][] = [
@@ -57,9 +57,11 @@ function Shell() {
   const hash = useHash();
   const route = parseRoute(hash);
   const { snapshot, connected } = useLive();
-  // The Map is gone: its old links land on Runs and the address says so.
+  // The Map is gone: its old links land on Runs. Backlog is now Roadmap, and `#/backlog/<ticket>` keeps its tail.
   useEffect(() => {
     if (isRetiredRoute(location.hash)) location.replace("#/runs");
+    else if (/^#\/backlog(\/|$)/.test(location.hash))
+      location.replace(location.hash.replace("#/backlog", "#/roadmap"));
   }, [hash]);
   const projects =
     snapshot && known(snapshot.tickets)
@@ -72,7 +74,7 @@ function Shell() {
       : 0;
   const top = snapshot ? highestUsage(snapshot.provider_limits) : null;
   const today = snapshot ? (costByDay(snapshot).get(dayOf(new Date())) ?? 0) : null;
-  const current = route.view === "run" ? "runs" : route.view === "ticket" ? "backlog" : route.view;
+  const current = route.view === "run" ? "runs" : route.view === "ticket" ? "roadmap" : route.view;
   return (
     <>
       <a className="skip" href="#main" onClick={(event) => skipTo(event)}>
@@ -133,7 +135,7 @@ function Shell() {
         {route.view === "home" ? <Home /> : null}
         {route.view === "runs" ? <Runs /> : null}
         {route.view === "run" ? <Run run={route.run!} sub={route.sub} /> : null}
-        {route.view === "backlog" ? <Backlog /> : null}
+        {route.view === "roadmap" ? <Roadmap /> : null}
         {route.view === "ticket" ? <TicketPage id={route.arg!} /> : null}
       </main>
     </>

@@ -12,6 +12,13 @@ function sectionOf(body: string, heading: string): string {
     .trim();
 }
 
+/** The first sentence of the `## Problem` section, else of `## Why`; null when neither has text. */
+export function whyOf(source: string): string | null {
+  const body = source.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/)?.[1] ?? source;
+  const text = sectionOf(body, "problem") || sectionOf(body, "why");
+  return text.replace(/\s+/g, " ").match(/^.*?(?:[.!?](?=\s)|[.!?]$|$)/)?.[0] || null;
+}
+
 /**
  * The Problem and Change sections and the numbered acceptance criteria of a ticket file. Leaves as
  * plain strings: the page puts them in the document as text, never as Markdown HTML.

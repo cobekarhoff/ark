@@ -12,6 +12,8 @@
  * or the usage index has not finished its first build). Times are ISO strings.
  */
 
+import type { Roadmap } from "./roadmap.ts";
+
 export type SourceName =
   | "ark"
   | "orca"
@@ -216,9 +218,18 @@ export type TicketView = {
   status: string;
   milestone: string | null;
   depends_on: string[];
+  /** First sentence of the `## Problem` or `## Why` section; null when there is none. */
+  why: string | null;
   /** Null for an unreadable ticket. */
   document: TicketDocument | null;
 };
+
+/**
+ * The roadmap of one project, from `$ARK_HOME/projects/<project>/ROADMAP.md`: the `readRoadmap`
+ * roadmap, `{ error }` (message and line) when the file does not read, or `{ none }` with the
+ * project's `ticket_source` (local, github or jira) when it has no `ROADMAP.md`.
+ */
+export type ProjectRoadmap = Roadmap | { error: string } | { none: string };
 
 /** The newest run of a ticket, open or closed, for the Map. A ticket with no entry has no run. */
 export type TicketRunView = {
@@ -241,6 +252,8 @@ export type Snapshot = {
   runs: RunView[] | "unknown";
   gates: Gate[] | "unknown";
   tickets: TicketView[] | "unknown";
+  /** By project. */
+  roadmap: Record<string, ProjectRoadmap> | "unknown";
   ticket_runs: TicketRunView[] | "unknown";
   /** Per provider and window of `omp usage --json`. */
   provider_limits: ProviderWindow[] | "unknown";

@@ -1,5 +1,5 @@
 ---
-status: superseded in part by ADR 0008 and ADR 0009; the hub shows Home, Runs and Backlog
+status: superseded in part by ADR 0008 and ADR 0009; the hub shows Home, Runs and Roadmap
 ---
 
 # A read-only control center gives the high-level view

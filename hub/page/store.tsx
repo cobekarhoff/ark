@@ -100,7 +100,7 @@ export const sourceNames: SourceName[] = [
 
 /** Hash routes: client-side, so a view change never reaches the server. */
 export type Route = {
-  view: "home" | "runs" | "run" | "backlog" | "ticket";
+  view: "home" | "runs" | "run" | "roadmap" | "ticket";
   run: string | null;
   /**
    * `#/run/<run>/step/<id>`, `/lead`, `/session/<file>` open a transcript; `/file/<path>` shows a run
@@ -134,7 +134,7 @@ export function parseRoute(hash: string): Route {
   }
   if (view === "runs" || view === "run" || view === "map")
     return { view: "runs", run: null, sub: null, arg: null };
-  if (view === "backlog") return { view, run: null, sub: null, arg: null };
+  if (view === "roadmap") return { view, run: null, sub: null, arg: null };
   if (view === "ticket" && arg !== null) return { view, run: null, sub: null, arg };
   return { view: "home", run: null, sub: null, arg: null };
 }

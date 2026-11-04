@@ -8,13 +8,15 @@ import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
 import { loadPlan, type PlanStep } from "../cli/plan.ts";
 import { stepWindows, type StepWindow } from "../cli/retro.ts";
 import { readEventsLeniently } from "./run-detail.ts";
-import { parseTicketDocument } from "./ticket-document.ts";
+import { readRoadmap, type RoadmapTicket } from "./roadmap.ts";
+import { parseTicketDocument, whyOf } from "./ticket-document.ts";
 import type {
   Agent,
   AgentActivity,
   CheckView,
   FindingsView,
   ProofCase,
+  ProjectRoadmap,
   ProviderWindow,
   TicketView,
   Wait,
@@ -35,7 +37,13 @@ export type ArkRun = {
   plan: PlanStep[] | null;
   windows: StepWindow[];
 };
-export type ArkValue = { runs: ArkRun[]; tickets: TicketView[] };
+export type ArkValue = {
+  runs: ArkRun[];
+  tickets: TicketView[];
+  roadmap: Record<string, ProjectRoadmap>;
+};
+
+const ticketSources = ["local", "github", "jira"];
 
 export const signatureOf = (file: string): string | null => {
   try {
@@ -53,6 +61,53 @@ export const signatureOf = (file: string): string | null => {
 export function createArkReader() {
   const runCache = new Map<string, { signature: string; run: ArkRun }>();
   const ticketCache = new Map<string, { signature: string; ticket: TicketView | null }>();
+  const fileCache = new Map<string, { signature: string; text: string | null }>();
+
+  /** A text file read again only when its size or mtime changed; null when it is missing or unreadable. */
+  function readText(file: string): string | null {
+    const signature = signatureOf(file);
+    if (signature === null) return null;
+    const known = fileCache.get(file);
+    if (known?.signature === signature) return known.text;
+    let text: string | null = null;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      // Unreadable: the caller treats it as a file with no text.
+    }
+    fileCache.set(file, { signature, text });
+    return text;
+  }
+
+  /** `ticket_source` of `ark.yml`; `local` (the default) for a project with no ark.yml or a value that is not one of the three. */
+  function ticketSourceOf(project: string): string {
+    try {
+      const fields = Bun.YAML.parse(readText(join(projectDirectory(project), "ark.yml")) ?? "") as {
+        ticket_source?: unknown;
+      } | null;
+      const value = fields?.ticket_source;
+      return typeof value === "string" && ticketSources.includes(value) ? value : "local";
+    } catch {
+      return "local";
+    }
+  }
+
+  function roadmapOf(project: string, tickets: TicketView[]): ProjectRoadmap {
+    const markdown = readText(join(projectDirectory(project), "ROADMAP.md"));
+    if (markdown === null) return { none: ticketSourceOf(project) };
+    // A ticket whose front matter did not read has no real status: it waits in Review.
+    const known: RoadmapTicket[] = tickets.map((ticket) => ({
+      id: ticket.id,
+      title: ticket.title,
+      status: ["unreadable", "unknown"].includes(ticket.status) ? "proposed" : ticket.status,
+      milestone: ticket.milestone,
+      depends_on: ticket.depends_on,
+    }));
+    const result = readRoadmap(markdown, known);
+    return result.ok
+      ? result.roadmap
+      : { error: result.errors.map((error) => `line ${error.line}: ${error.message}`).join(" ") };
+  }
 
   function readRun(directory: string): ArkRun | null {
     const log = join(directory, "events.ndjson");
@@ -96,6 +151,7 @@ export function createArkReader() {
       status: "unreadable",
       milestone: null,
       depends_on: [],
+      why: null,
       document: null,
     };
     let ticket = unreadable;
@@ -111,6 +167,7 @@ export function createArkReader() {
           status: typeof fields.status === "string" ? fields.status : "unknown",
           milestone: typeof fields.milestone === "string" ? fields.milestone : null,
           depends_on: Array.isArray(fields.depends_on) ? fields.depends_on.map(String) : [],
+          why: whyOf(source),
           // From the file this reader opened, never from a path built out of the front-matter id.
           document: parseTicketDocument(source),
         };
@@ -127,6 +184,7 @@ export function createArkReader() {
     read(): ArkValue {
       const runs: ArkRun[] = [];
       const tickets: TicketView[] = [];
+      const roadmap: Record<string, ProjectRoadmap> = {};
       for (const project of listProjects()) {
         const runsRoot = runsDirectory(project);
         if (existsSync(runsRoot)) {
@@ -136,26 +194,30 @@ export function createArkReader() {
           }
         }
         const ticketsRoot = join(projectDirectory(project), "tickets");
+        const projectTickets: TicketView[] = [];
         if (existsSync(ticketsRoot)) {
           for (const name of readdirSync(ticketsRoot).sort()) {
             if (!ticketFile.test(name)) continue;
             const ticket = readTicket(project, join(ticketsRoot, name), name);
-            if (ticket) tickets.push(ticket);
+            if (ticket) projectTickets.push(ticket);
           }
         }
+        tickets.push(...projectTickets);
+        roadmap[project] = roadmapOf(project, projectTickets);
       }
       runs.sort((left, right) =>
         right.state.run.localeCompare(left.state.run, undefined, { numeric: true }),
       );
-      return { runs, tickets };
+      return { runs, tickets, roadmap };
     },
-    /** Folders to watch: each run folder (events.ndjson, plan.yml), the runs roots and the tickets folders. */
+    /** Folders to watch: each run folder (events.ndjson, plan.yml), the runs roots, the tickets folders and each project folder (ROADMAP.md, ark.yml). */
     watchPaths(): string[] {
       const paths: string[] = [];
       for (const project of listProjects()) {
         const runsRoot = runsDirectory(project);
         const ticketsRoot = join(projectDirectory(project), "tickets");
-        for (const root of [runsRoot, ticketsRoot]) if (existsSync(root)) paths.push(root);
+        for (const root of [projectDirectory(project), runsRoot, ticketsRoot])
+          if (existsSync(root)) paths.push(root);
         if (existsSync(runsRoot))
           for (const name of readdirSync(runsRoot)) paths.push(join(runsRoot, name));
       }

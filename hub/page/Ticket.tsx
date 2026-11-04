@@ -59,7 +59,7 @@ export function TicketPage({ id }: { id: string }) {
   }, [id]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") location.hash = "#/backlog";
+      if (event.key === "Escape") location.hash = "#/roadmap";
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
@@ -76,10 +76,10 @@ export function TicketPage({ id }: { id: string }) {
     return (
       <>
         <p className="crumb">
-          <a href="#/backlog">← Backlog</a>
+          <a href="#/roadmap">← Roadmap</a>
         </p>
         <h1>{id}</h1>
-        <p className="mut">No ticket {id} in the backlog.</p>
+        <p className="mut">No ticket {id} in the roadmap.</p>
       </>
     );
   const { ticket } = entry;
@@ -102,7 +102,7 @@ export function TicketPage({ id }: { id: string }) {
   return (
     <div className="ticket-page" data-testid="ticket-page">
       <p className="crumb">
-        <a href="#/backlog">← Backlog</a> <span className="mut">Esc returns to the list</span>
+        <a href="#/roadmap">← Roadmap</a> <span className="mut">Esc returns to the list</span>
       </p>
       <div className="ticket-cols">
         <article>

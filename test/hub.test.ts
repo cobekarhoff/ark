@@ -83,7 +83,7 @@ async function start() {
 
 const readDoc = (path: string) => readFileSync(join(root, path), "utf8");
 const statusOf = (path: string) => readDoc(path).match(/^status: (.*)$/m)?.[1] ?? "";
-const viewNames = ["Home", "Runs", "Backlog"];
+const viewNames = ["Home", "Runs", "Roadmap"];
 const namesViews = (text: string) =>
   viewNames.every((name) => new RegExp(`\\b${name}\\b`).test(text));
 
@@ -1341,13 +1341,13 @@ test("ARK-285-AC2 an omp that never answers leaves usage unknown, not a guess, a
   expect((await fetch(`${baseUrl}/`)).status).toBe(200);
 }, 60_000);
 
-test("ARK-285-AC1 docs/design/hub-v2 holds hybrid-1.html and data.js, ADR 0009 names Home, Runs and Backlog and says Runs replaces Map, and Map.tsx is gone", () => {
+test("ARK-285-AC1 docs/design/hub-v2 holds hybrid-1.html and data.js, ADR 0009 names Home, Runs and Roadmap and says Runs replaces Map, and Map.tsx is gone", () => {
   for (const file of ["hybrid-1.html", "data.js"])
     expect(readFileSync(join(root, "docs/design/hub-v2", file), "utf8").length).toBeGreaterThan(0);
   const line = readDoc("docs/adr/0009-hub-is-a-read-only-live-view.md")
     .split("\n")
     .find((candidate) => candidate.includes("The hub shows"));
-  expect(line).toContain("The hub shows Home, Runs and Backlog");
+  expect(line).toContain("The hub shows Home, Runs and Roadmap");
   expect(line).toContain("Runs replaces Map");
   expect(line).not.toContain("Run, Backlog and Map");
   expect(existsSync(join(root, "hub/page/Map.tsx"))).toBe(false);

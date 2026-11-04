@@ -111,9 +111,9 @@ test("ARK-277-AC3 handlers read only memory: p95 under 200 ms on 25 runs and 300
 
   // One page on each view.
   const context = await browser.newContext();
-  const pages = await Promise.all(["", "runs", "backlog"].map(() => context.newPage()));
+  const pages = await Promise.all(["", "runs", "roadmap"].map(() => context.newPage()));
   await Promise.all(
-    ["", "runs", "backlog"].map((hash, index) => open(pages[index], baseUrl, hash)),
+    ["", "runs", "roadmap"].map((hash, index) => open(pages[index], baseUrl, hash)),
   );
   await expect(pages[0].getByTestId("run")).toHaveCount(25);
   // Orca is being called and is slow: its calls outlast the reader's timeout.
@@ -198,7 +198,7 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
   const views = [
     ["Home", "Needs me"],
     ["Runs", "Runs"],
-    ["Backlog", "Backlog"],
+    ["Roadmap", "Roadmap"],
   ] as const;
   for (const [name, heading] of views) {
     const viewStartedAt = Date.now();
@@ -220,7 +220,7 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
     await page.waitForTimeout(Math.max(0, 30_000 - (Date.now() - viewStartedAt)));
   }
 
-  // No view reads anything after the first load: Runs and Backlog draw from the snapshot, and the
+  // No view reads anything after the first load: Runs and Roadmap draw from the snapshot, and the
   // run page (`GET /api/run/<run>`, ARK-284) is not opened here.
   expect(requests.slice(firstLoad).map((request) => new URL(request.url()).pathname)).toEqual([]);
 });
@@ -394,7 +394,7 @@ test("ARK-277-AC8 the run page draws one node for each plan step and one edge fo
 
 // ---------------------------------------------------------------- AC9
 
-test("ARK-277-AC9 Backlog lists and filters the tickets, changes none, and copies the selected IDs in dependency order", async ({
+test("ARK-277-AC9 Roadmap lists and filters the tickets, changes none, and copies the selected IDs in dependency order", async ({
   context,
   page,
 }) => {
@@ -419,7 +419,7 @@ test("ARK-277-AC9 Backlog lists and filters the tickets, changes none, and copie
   const baseUrl = await launch();
   const methods: string[] = [];
   page.on("request", (request) => methods.push(request.method()));
-  await open(page, baseUrl, "backlog");
+  await open(page, baseUrl, "roadmap");
 
   const rows = page.getByTestId("ticket-row");
   await expect(rows).toHaveCount(4); // the done ticket ARK-921 is hidden behind Show done
@@ -786,7 +786,7 @@ test("ARK-277-AC9 a file in the tickets folder that is not named like a ticket i
   );
   installFakeTools({});
   const baseUrl = await launch();
-  await open(page, baseUrl, "backlog");
+  await open(page, baseUrl, "roadmap");
 
   await expect(page.getByTestId("ticket-row")).toHaveCount(1);
   await expect(page.getByTestId("ticket-row")).toHaveAttribute("data-ticket", "ARK-930");
@@ -802,8 +802,8 @@ test("ARK-277-AC11 a hash that does not decode shows the page and a later hash s
 
   await expect(page.getByRole("link", { name: "Home" })).toBeVisible();
   await expect(page.locator("main")).toContainText("No open run");
-  await page.getByRole("link", { name: "Backlog" }).click();
-  await expect(page.getByRole("heading", { name: "Backlog" })).toBeVisible();
+  await page.getByRole("link", { name: "Roadmap" }).click();
+  await expect(page.getByRole("heading", { name: "Roadmap" })).toBeVisible();
 });
 
 // ---------------------------------------------------------------- ARK-284
@@ -947,7 +947,7 @@ test("ARK-284-AC2 a failing Orca leaves the button usable and says why, and a cl
   await expect(page.getByTestId("open-in-orca")).toHaveCount(0);
 });
 
-test("ARK-284-AC3 a closed run opens from its Backlog row and from its Runs card, and both lead to the newest run", async ({
+test("ARK-284-AC3 a closed run opens from its Roadmap row and from its Runs card, and both lead to the newest run", async ({
   page,
 }) => {
   isolate();
@@ -982,8 +982,8 @@ test("ARK-284-AC3 a closed run opens from its Backlog row and from its Runs card
   installFakeTools({});
   const baseUrl = await launch();
 
-  // Backlog: the runs of a ticket, newest first; a link opens the closed one.
-  await open(page, baseUrl, "backlog");
+  // Roadmap: the runs of a ticket, newest first; a link opens the closed one.
+  await open(page, baseUrl, "roadmap");
   const row = page.locator('[data-testid="ticket-row"][data-ticket="ARK-841"]');
   await expect(row.getByTestId("ticket-run")).toHaveCount(2);
   await expect(row.getByTestId("ticket-run")).toHaveText([newer, older]);
@@ -1814,7 +1814,7 @@ test("ARK-285-AC7 Runs shows every run on one board and graph with filters, ring
   await expect(page.locator("main h1")).toContainText("ARK-601");
 });
 
-test("ARK-285-AC8 Backlog groups the tickets, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
+test("ARK-285-AC8 Roadmap groups the tickets, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
   page,
 }) => {
   isolate();
@@ -1858,7 +1858,7 @@ test("ARK-285-AC8 Backlog groups the tickets, keys move and open them, a ticket 
     ticket(`ARK-8${String(number).padStart(2, "0")}`, "proposed");
   installFakeTools({});
   const baseUrl = await launch();
-  await open(page, baseUrl, "backlog");
+  await open(page, baseUrl, "roadmap");
   const rows = page.getByTestId("ticket-row");
   await expect(rows.first()).toBeVisible();
 
@@ -1900,7 +1900,7 @@ test("ARK-285-AC8 Backlog groups the tickets, keys move and open them, a ticket 
   await page.getByTestId("filter-status").focus();
   await page.keyboard.press("Enter");
   await page.waitForTimeout(300);
-  await expect(page).toHaveURL(/#\/backlog$/);
+  await expect(page).toHaveURL(/#\/roadmap$/);
   await page.locator("body").click({ position: { x: 1, y: 1 } });
 
   // Move far down the list, so the page has scrolled, then Enter opens the ticket.
@@ -1914,7 +1914,7 @@ test("ARK-285-AC8 Backlog groups the tickets, keys move and open them, a ticket 
 
   // Esc returns to the list: same row, same scroll position.
   await page.keyboard.press("Escape");
-  await expect(page).toHaveURL(/#\/backlog$/);
+  await expect(page).toHaveURL(/#\/roadmap$/);
   await expect(selected).toHaveAttribute("data-ticket", target);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 
@@ -2289,10 +2289,10 @@ test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ pa
   await expect(page.getByTestId("lane")).toHaveCount(5);
   await expect(page).toHaveURL(/#\/runs$/);
   const links = page.getByRole("navigation", { name: "Views" }).getByRole("link");
-  await expect(links).toHaveText(["Home", "Runs", "Backlog"]);
+  await expect(links).toHaveText(["Home", "Runs", "Roadmap"]);
 });
 
-test("ARK-285-AC11 Home, Runs and Backlog send no request after the first load, and a ticket page and a run page read only their own text", async ({
+test("ARK-285-AC11 Home, Runs and Roadmap send no request after the first load, and a ticket page and a run page read only their own text", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -2316,7 +2316,7 @@ test("ARK-285-AC11 Home, Runs and Backlog send no request after the first load, 
   const nav = page.getByRole("navigation", { name: "Views" });
   for (const [name, heading] of [
     ["Runs", "Runs"],
-    ["Backlog", "Backlog"],
+    ["Roadmap", "Roadmap"],
     ["Home", "Needs me"],
   ] as const) {
     await nav.getByRole("link", { name }).click();

@@ -80,7 +80,7 @@ const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLTextAreaElement ||
   target instanceof HTMLSelectElement;
 
-export function Backlog() {
+export function Roadmap() {
   const { snapshot } = useLive();
   const [text, setText] = useState(() => remembered?.text ?? "");
   const [status, setStatus] = useState(() => remembered?.status ?? "");
@@ -192,7 +192,7 @@ export function Backlog() {
   if (!tickets)
     return (
       <>
-        <h1>Backlog</h1>
+        <h1>Roadmap</h1>
         <Unknown />
       </>
     );
@@ -216,7 +216,7 @@ export function Backlog() {
   return (
     <>
       <h1>
-        Backlog{" "}
+        Roadmap{" "}
         <span className="mut sub">
           Done tickets are hidden. j / k to move, Enter to read, / to search.
         </span>
