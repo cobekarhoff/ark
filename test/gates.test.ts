@@ -298,6 +298,27 @@ test("ARK-288-AC1 a spent budget with gates.escalation auto records the answer b
   expect(deriveState(eventsOf(directory)).steps[0].status).toBe("running");
 });
 
+test("ARK-288-AC1 a spent budget in phase building with no test or a passing test is answered by auto", () => {
+  for (const passing of [false, true]) {
+    const { runId, directory } = buildingRun({ escalation: "auto" });
+    spendRounds(runId, directory, false);
+    if (passing) {
+      appendEvent(directory, "test.completed", {
+        passed: true,
+        heads: {},
+        suites: [],
+        criteria: {},
+      });
+    }
+    expect(deriveState(eventsOf(directory)).phase).toBe("building");
+    const result = start(runId);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("escalation one_more_round by auto (1 of 2)");
+    expect(autoAnswers(directory)).toHaveLength(1);
+    expect(deriveState(eventsOf(directory)).steps[0].status).toBe("running");
+  }
+});
+
 test("ARK-288-AC1 a start refused for a running step or a --merge with no failed sync leaves no gate.answered", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   spendRounds(runId, directory);

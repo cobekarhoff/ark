@@ -1304,3 +1304,14 @@ test("ARK-288-AC7 the retro counts the automatic escalation answer as auto and t
   const entry = timelineOf(events).find((item) => item.why.startsWith("escalation gate"));
   expect(entry?.why).toBe("escalation gate: one_more_round by auto");
 });
+
+test("ARK-288-AC7 the retro text prints one by auto line for the automatic escalation answer and one by human line for a human one", () => {
+  const { runId } = autoEscalatedRun();
+  expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
+  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+  const retro = ark("retro", runId);
+  expect(retro.code).toBe(0);
+  expect(retro.out.match(/^escalation one_more_round by auto$/gm)).toHaveLength(1);
+  expect(retro.out.match(/^escalation one_more_round by human$/gm)).toHaveLength(1);
+});
