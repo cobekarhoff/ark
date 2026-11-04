@@ -1,5 +1,7 @@
 # ARK-290-AC8 evidence
 
+Evidence file: `docs/evidence/ARK-290-ac8.md`.
+
 Manual criterion. The human reviewed `~/.ark/projects/ark/ROADMAP.md` and the slimmed `~/.ark/projects/ark/tickets/README.md`.
 
 human: ok

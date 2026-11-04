@@ -1,3 +1,5 @@
+// ARK-290 AC strings: `test/roadmap.test.ts`; `bun test test/roadmap.test.ts -t ARK-290-AC2`;
+// `bun test test/roadmap.test.ts -t ARK-290-AC3`.
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
