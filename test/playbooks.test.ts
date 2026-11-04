@@ -1,6 +1,7 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isHubName } from "../cli/proxy.ts";
 import { outcomes } from "../cli/transitions.ts";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
 
@@ -722,6 +723,140 @@ test("ARK-283-AC5 cli.md and run-lead.md name the manual gate, cli.md equals the
 
   Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root });
   expect(readFileSync(path, "utf8")).toBe(reference);
+});
+
+const workerPlaybookText = readFileSync(join(playbookDirectory, "worker.md"), "utf8");
+
+test("ARK-299-AC1 run-lead.md Live human check has the seven items in order, with the slug rule once", () => {
+  const live = flat(section(runLeadPlaybook, "### Live human check"));
+  const steps = [
+    "1. Slug, stated once:",
+    "2. Pick a free `<port>` first",
+    "3. In the run worktree, start the hub in a background terminal",
+    "portless hub.<slug> --app-port <port> ark ui --port <port> --name hub.<slug>.localhost",
+    "4. Preflight:",
+    "curl -sf http://hub.<slug>.localhost/api/snapshot",
+    "use the printed `http://127.0.0.1:<port>` and say so in the report",
+    "5. Open the page:",
+    "orca tab create --worktree path:<run worktree> --url http://hub.<slug>.localhost",
+    "`orca orchestration ask` text",
+    "6. In the evidence file, name the URL, not a port.",
+    "7. Stop the hub when the check is done.",
+  ];
+  let at = -1;
+  for (const step of steps) {
+    const found = live.indexOf(step);
+    expect(found, step).toBeGreaterThan(at);
+    at = found;
+  }
+  expect(flat(runLeadPlaybook).split("Run `2026-11-03-ARK-284-1` gives `ark-284-1`")).toHaveLength(
+    2,
+  );
+});
+
+test("ARK-299-AC2 worker.md and run-lead.md start a prototype as portless <topic>.proto, name the URL not a port, and stop it", () => {
+  const worker = flat(workerPlaybookText);
+  const lead = flat(runLeadPlaybook);
+  for (const text of [worker, lead]) {
+    expect(text).toContain("portless <topic>.proto --app-port <port> <command>");
+    expect(text).toContain("http://<topic>.proto.localhost");
+    expect(text).not.toMatch(/on `localhost`/);
+  }
+  expect(worker).toContain("Report the URL, not a port.");
+  expect(worker).toContain("Stop the server after the check.");
+  expect(worker).toContain("portless <project> --app-port <port> <command>");
+  const gate = lead.slice(lead.indexOf("plannotator annotate"));
+  expect(gate).toContain(
+    "orca tab create --worktree path:<run worktree> --url http://<topic>.proto.localhost",
+  );
+});
+
+/** Every code-block line and inline `command` of a Markdown text. */
+const quotedCommands = (text: string): string[] => {
+  const blocks = [...text.matchAll(/^[ \t]*```\w*\n([\s\S]*?)^[ \t]*```/gm)];
+  const rest = text.replaceAll(/^[ \t]*```\w*\n[\s\S]*?^[ \t]*```/gm, "");
+  return [
+    ...blocks.flatMap(([, body]) => body.split("\n").map((line) => line.trim())),
+    ...[...rest.matchAll(/`([^`\n]+)`/g)].map(([, span]) => span),
+  ].filter(Boolean);
+};
+
+/** What the CLI would refuse in the portless, orca tab create and ark ui commands of a playbook. */
+const commandProblems = (text: string): string[] => {
+  const problems: string[] = [];
+  if (/\bark route\b/.test(text)) problems.push("quotes ark route");
+  for (const command of quotedCommands(text)) {
+    if (command.startsWith("portless ")) {
+      const appPort = command.match(/^portless [^\s-]\S* --app-port (\S+) [^\s-]/)?.[1];
+      const validPort =
+        appPort === "<port>" ||
+        (/^\d+$/.test(appPort ?? "") && Number(appPort) >= 1 && Number(appPort) <= 65535);
+      if (!validPort) problems.push(`portless form: ${command}`);
+    }
+    if (/^orca tab create(\s|$)/.test(command)) {
+      const args = command.slice("orca tab create".length).match(/(?:<[^>]*>|\S)+/g) ?? [];
+      const pairs = new Map<string, string>();
+      for (let i = 0; i < args.length; i += 2) {
+        if (!/^--(url|worktree)$/.test(args[i]) || !args[i + 1] || args[i + 1].startsWith("-"))
+          pairs.set("bad", args[i]);
+        else pairs.set(args[i], args[i + 1]);
+      }
+      if (pairs.size !== 2 || !pairs.has("--url") || !pairs.has("--worktree"))
+        problems.push(`orca tab create flags: ${command}`);
+    }
+    const ui = command.match(/\bark ui(?=\s|$).*/)?.[0];
+    if (ui) {
+      const name = ui.match(/--name (\S+)/)?.[1];
+      if (!name || !isHubName(name.replaceAll("<slug>", "ark-1")))
+        problems.push(`ark ui --name: ${command}`);
+    }
+  }
+  return problems;
+};
+
+test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead.md and worker.md has a form the CLI accepts", () => {
+  expect(commandProblems(runLeadPlaybook)).toEqual([]);
+  expect(commandProblems(workerPlaybookText)).toEqual([]);
+  // rejected forms, through the same checker
+  for (const bad of [
+    "orca tab create --url --worktree",
+    "orca tab create -x --url http://a.localhost --worktree current",
+    "orca tab create --url http://a.localhost",
+    "orca tab create --url http://a.localhost --worktree current --bogus x",
+    "portless hub.ark-1 --app-port --bogus bun app.ts",
+    "portless hub.ark-1 --app-port 0 bun app.ts",
+    "portless hub.ark-1 --app-port 99999 bun app.ts",
+    "portless hub.ark-1 --app-port 3000",
+  ])
+    expect(commandProblems(`\`${bad}\``), bad).toHaveLength(1);
+  expect(commandProblems("`orca tab create --worktree path:x --url http://a.localhost`")).toEqual(
+    [],
+  );
+  for (const good of ["1", "65535", "<port>"])
+    expect(commandProblems(`\`portless a.proto --app-port ${good} bun app.ts\``), good).toEqual([]);
+  // the check sees the commands: not vacuously empty
+  const commands = [...quotedCommands(runLeadPlaybook), ...quotedCommands(workerPlaybookText)];
+  expect(
+    commands.filter((command) => /^portless \S+ --app-port/.test(command)).length,
+  ).toBeGreaterThanOrEqual(4);
+  expect(
+    commands.filter((command) => command.startsWith("orca tab create")).length,
+  ).toBeGreaterThanOrEqual(2);
+  expect(
+    commands.filter((command) => command.includes("ark ui --port")).length,
+  ).toBeGreaterThanOrEqual(1);
+});
+
+test("ARK-299-AC4 the evidence file holds curl -sf, orca tab create and portless list with their output", () => {
+  const text = readFileSync(join(import.meta.dir, "../docs/evidence/ARK-299-ac4.md"), "utf8");
+  expect(text).toContain("$ curl -sf http://hub.ark-299-check.localhost/api/snapshot");
+  expect(text).toMatch(
+    /\$ orca tab create --worktree path:\S+ --url http:\/\/hub\.ark-299-check\.localhost\n\S/,
+  );
+  const lists = text.split("$ portless list\n");
+  expect(lists).toHaveLength(3);
+  expect(lists[1]).toContain("http://hub.ark-299-check.localhost  ->");
+  expect(lists[2]).toMatch(/^No active routes\./);
 });
 
 test("ARK-295-AC6 run-lead step 3 skips gh pr list and glab mr list for a none project", () => {
