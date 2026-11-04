@@ -44,3 +44,14 @@ The tagged test in `test/playbooks.test.ts` checks that `package.json` has the `
 > **Catch-up** (ark chief state + Orca inbox). Merged: nothing since ARK-304 (PR #112). Failed or aborted: none. Waiting on you: 1. SQC-1 handoff close refused by the ARK-304 AC-literal check (ACs quote removed strings); options (a) ticket the check fix, close after (recommended), (b) close aborted now, (c) leave open. 2. ARK-290 AC8 ROADMAP.md; options ok (recommended) or problem. 3. ARK-303 AC9 (this reply) and AC7 (verify.md); options ok or problem. Unknown: ark chief state shows run leads and queued tasks unavailable (no Orca Run 'Master Chief: ark tickets' found).
 
 Human check: AC9 ok. AC7 ok.
+
+## Test commands
+
+Each command ran on this branch and exited 0:
+
+- `bun test test/playbooks.test.ts -t ARK-303-AC1`
+- `bun test test/playbooks.test.ts -t ARK-303-AC2`
+- `bun test test/playbooks.test.ts -t ARK-303-AC3`
+- `bun test test/playbooks.test.ts -t ARK-303-AC4`
+- `bun test test/playbooks.test.ts -t ARK-303-AC5`
+- `bun test test/playbooks.test.ts -t ARK-303-AC6`
