@@ -787,11 +787,13 @@ const commandProblems = (text: string): string[] => {
   const problems: string[] = [];
   if (/\bark route\b/.test(text)) problems.push("quotes ark route");
   for (const command of quotedCommands(text)) {
-    if (
-      command.startsWith("portless ") &&
-      !/^portless [^\s-]\S* --app-port (\d+|<port>) [^\s-]/.test(command)
-    )
-      problems.push(`portless form: ${command}`);
+    if (command.startsWith("portless ")) {
+      const appPort = command.match(/^portless [^\s-]\S* --app-port (\S+) [^\s-]/)?.[1];
+      const validPort =
+        appPort === "<port>" ||
+        (/^\d+$/.test(appPort ?? "") && Number(appPort) >= 1 && Number(appPort) <= 65535);
+      if (!validPort) problems.push(`portless form: ${command}`);
+    }
     if (/^orca tab create(\s|$)/.test(command)) {
       const args = command.slice("orca tab create".length).match(/(?:<[^>]*>|\S)+/g) ?? [];
       const pairs = new Map<string, string>();
@@ -823,13 +825,16 @@ test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead
     "orca tab create --url http://a.localhost",
     "orca tab create --url http://a.localhost --worktree current --bogus x",
     "portless hub.ark-1 --app-port --bogus bun app.ts",
+    "portless hub.ark-1 --app-port 0 bun app.ts",
+    "portless hub.ark-1 --app-port 99999 bun app.ts",
     "portless hub.ark-1 --app-port 3000",
   ])
     expect(commandProblems(`\`${bad}\``), bad).toHaveLength(1);
   expect(commandProblems("`orca tab create --worktree path:x --url http://a.localhost`")).toEqual(
     [],
   );
-  expect(commandProblems("`portless a.proto --app-port 3000 bun app.ts`")).toEqual([]);
+  for (const good of ["1", "65535", "<port>"])
+    expect(commandProblems(`\`portless a.proto --app-port ${good} bun app.ts\``), good).toEqual([]);
   // the check sees the commands: not vacuously empty
   const commands = [...quotedCommands(runLeadPlaybook), ...quotedCommands(workerPlaybookText)];
   expect(
