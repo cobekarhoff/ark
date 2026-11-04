@@ -2379,7 +2379,8 @@ test("ARK-291-AC1 the nav shows Roadmap and not Backlog, and #/backlog and #/bac
   await expect(page.getByTestId("roadmap-page")).toBeVisible();
   await page.goto(`${baseUrl}/#/backlog/ARK-701`);
   await expect(page).toHaveURL(/#\/roadmap\/ARK-701$/);
-  await expect(page.getByTestId("roadmap-page")).toBeVisible();
+  await expect(page.getByTestId("ticket-page")).toContainText("ARK-701");
+  await expect(page.getByTestId("roadmap-page")).toHaveCount(0);
 
   const links = page.getByRole("navigation", { name: "Views" }).getByRole("link");
   await expect(links).toHaveText(["Home", "Runs", "Roadmap"]);
@@ -2634,6 +2635,8 @@ test("ARK-291-AC6 the Shipped bar shows the done sum and the done count of each 
   roadmapTicket("ARK-605", "superseded", { milestone: "M2" });
   roadmapTicket("ARK-606", "superseded", { milestone: "M2" });
   roadmapTicket("ARK-607", "ready", { milestone: "M2" });
+  roadmapTicket("ARK-608", "done"); // finished, milestone M4 is not declared
+  roadmapTicket("ARK-609", "done", { milestone: undefined }); // finished, no milestone
   writeRoadmap("p", {
     milestones: [
       ["M1", "First", "Outcome one.", "done"],
@@ -2648,8 +2651,8 @@ test("ARK-291-AC6 the Shipped bar shows the done sum and the done count of each 
   // Shipped tickets are in no list; the bar is shut and shows the counts.
   await expect.poll(() => ticketsOf(page)).toEqual(["ARK-607"]);
   const bar = page.getByTestId("shipped-bar");
-  await expect(bar.getByTestId("shipped-total")).toHaveText("3 done");
-  await expect(bar.getByTestId("shipped-count")).toHaveText(["M1 2", "M2 1"]);
+  await expect(bar.getByTestId("shipped-total")).toHaveText("5 done");
+  await expect(bar.getByTestId("shipped-count")).toHaveText(["M1 2", "M2 1", "M4 1", "– 1"]);
   await expect(page.getByTestId("shipped-panel")).toHaveCount(0);
   await bar.getByTestId("shipped-toggle").click();
   const panel = page.getByTestId("shipped-panel");
@@ -2657,7 +2660,7 @@ test("ARK-291-AC6 the Shipped bar shows the done sum and the done count of each 
 
   // One fold for each milestone, shut until clicked.
   const folds = panel.getByTestId("shipped-fold");
-  await expect(folds).toHaveCount(2);
+  await expect(folds).toHaveCount(4);
   await expect(panel.getByTestId("shipped-ticket")).toHaveCount(0);
   const first = panel.locator('[data-testid="shipped-fold"][data-milestone="M1"]');
   await first.getByRole("button").first().click();
@@ -3021,6 +3024,27 @@ test("ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same s
   await expect(page).toHaveURL(/#\/roadmap$/);
   await expect(selected).toHaveAttribute("data-ticket", target);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+
+  // A link that is not a title (Review column, Shipped) keeps the way back too, folds included.
+  await page.getByTestId("shipped-toggle").click();
+  await page.locator('[data-testid="shipped-fold"] button').first().click();
+  const reviewLink = page.locator('[data-testid="review-item"][data-ticket="ARK-639"]');
+  await reviewLink.evaluate((node) => node.scrollIntoView({ block: "center" }));
+  const viaReview = await page.evaluate(() => window.scrollY);
+  expect(viaReview).toBeGreaterThan(100);
+  await reviewLink.click();
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("roadmap-page")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(viaReview);
+  await expect(page.getByTestId("shipped-panel")).toBeVisible();
+  await expect(page.getByTestId("shipped-ticket").first()).toBeVisible();
+  await page.getByTestId("shipped-ticket").first().click();
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("roadmap-page")).toBeVisible();
+  await expect(page.getByTestId("shipped-ticket").first()).toBeVisible();
+  await page.getByTestId("shipped-toggle").click();
 
   // Contrast of the list, the graph, the folds and the notices, in both themes.
   await page.evaluate(() => window.scrollTo(0, 0));

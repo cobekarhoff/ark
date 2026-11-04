@@ -3,7 +3,7 @@
 // copy-button, copy-command, shipped-bar, shipped-toggle, shipped-panel, shipped-fold (data-milestone),
 // superseded-fold, shipped-ticket, milestone-rail, milestone-pick (data-milestone, aria-pressed),
 // milestone-bar, done-fold, roadmap-warning (data-kind). Nothing here changes a ticket or a rank.
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { TicketEntry } from "./derive.ts";
 import { phaseLabel } from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
@@ -425,16 +425,17 @@ export function Rail({
   selected,
   onSelect,
   openCount,
+  shipped,
 }: {
   milestones: RoadmapMilestone[];
   selected: string | null;
   onSelect: (id: string | null) => void;
   openCount: number;
+  shipped: number;
 }) {
   const [folded, setFolded] = useState(false);
   const done = milestones.filter((milestone) => milestone.state === "done");
   const doneTickets = done.reduce((sum, milestone) => sum + milestone.done, 0);
-  const shipped = milestones.reduce((sum, milestone) => sum + milestone.done, 0);
   const pick = (id: string) => onSelect(selected === id ? null : id);
   return (
     <nav className="rm-rail" aria-label="Milestones" data-testid="milestone-rail">
@@ -573,22 +574,43 @@ export function Notices({ warnings }: { warnings: RoadmapWarning[] }) {
 
 type Shipped = { milestone: string; tickets: RoadmapItem[] };
 
+/** Every shipped ticket with status done, declared milestone or not. */
+export const doneTotal = (shipped: Shipped[]) =>
+  shipped.reduce(
+    (sum, entry) => sum + entry.tickets.filter((ticket) => ticket.status === "done").length,
+    0,
+  );
+
+/** The Shipped bar's open folds: kept across a visit to a ticket page. */
+export type ShippedFolds = {
+  open: boolean;
+  unfolded: ReadonlySet<string>;
+  supersededOpen: ReadonlySet<string>;
+};
+
 export function ShippedBar({
   shipped,
   milestones,
+  initial,
+  onFolds,
 }: {
   shipped: Shipped[];
   milestones: RoadmapMilestone[];
+  initial?: ShippedFolds;
+  onFolds: (folds: ShippedFolds) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(new Set());
-  const [supersededOpen, setSupersededOpen] = useState<ReadonlySet<string>>(new Set());
+  const [open, setOpen] = useState(initial?.open ?? false);
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(initial?.unfolded ?? new Set());
+  const [supersededOpen, setSupersededOpen] = useState<ReadonlySet<string>>(
+    initial?.supersededOpen ?? new Set(),
+  );
+  useEffect(() => onFolds({ open, unfolded, supersededOpen }), [open, unfolded, supersededOpen]);
   const flip = (set: ReadonlySet<string>, id: string) => {
     const next = new Set(set);
     if (!next.delete(id)) next.add(id);
     return next;
   };
-  const total = milestones.reduce((sum, milestone) => sum + milestone.done, 0);
+  const total = doneTotal(shipped);
   const countsOf = (entry: Shipped) => {
     const milestone = milestones.find((candidate) => candidate.id === entry.milestone);
     const done = entry.tickets.filter((ticket) => ticket.status === "done");

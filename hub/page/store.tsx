@@ -134,8 +134,9 @@ export function parseRoute(hash: string): Route {
   }
   if (view === "runs" || view === "run" || view === "map")
     return { view: "runs", run: null, sub: null, arg: null };
-  if (view === "roadmap") return { view, run: null, sub: null, arg: null };
-  if (view === "ticket" && arg !== null) return { view, run: null, sub: null, arg };
+  if (view === "roadmap" && arg === null) return { view, run: null, sub: null, arg: null };
+  if ((view === "ticket" || view === "roadmap") && arg !== null)
+    return { view: "ticket", run: null, sub: null, arg };
   return { view: "home", run: null, sub: null, arg: null };
 }
 

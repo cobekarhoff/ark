@@ -15,6 +15,8 @@ import {
   Row,
   Section,
   ShippedBar,
+  doneTotal,
+  type ShippedFolds,
   type RoadmapData,
 } from "./RoadmapParts.tsx";
 import { useLive } from "./store.tsx";
@@ -73,6 +75,7 @@ type Remembered = {
   milestone: string | null;
   view: "list" | "graph";
   project: string | null;
+  shipped: ShippedFolds | undefined;
 };
 let remembered: Remembered | null = null;
 
@@ -174,8 +177,17 @@ export function Roadmap() {
   }, [model, view]);
   const current = cursor !== null && order.includes(cursor) ? cursor : (order[0] ?? null);
 
+  const [folds] = useState(() => ({ at: remembered?.shipped as ShippedFolds | undefined }));
   const remember = (id: string | null = current) => {
-    remembered = { scroll: window.scrollY, cursor: id, text, milestone, view, project };
+    remembered = {
+      scroll: window.scrollY,
+      cursor: id,
+      text,
+      milestone,
+      view,
+      project,
+      shipped: folds.at,
+    };
   };
 
   // Back from a ticket page: the same scroll position, once the rows exist.
@@ -357,7 +369,15 @@ export function Roadmap() {
     );
 
   return (
-    <div className={`rm-page${ok ? "" : " solo"}`} data-testid="roadmap-page">
+    <div
+      className={`rm-page${ok ? "" : " solo"}`}
+      data-testid="roadmap-page"
+      onClickCapture={(event) => {
+        // Every link out to a ticket (Review, relations, Shipped, titles) keeps the way back.
+        const href = (event.target as Element).closest("a")?.getAttribute("href");
+        if (href?.startsWith("#/ticket/")) remember(decodeURIComponent(href.slice(9)));
+      }}
+    >
       <h1 className="sr">Roadmap</h1>
       {switcher}
       {ok ? (
@@ -366,6 +386,7 @@ export function Roadmap() {
           selected={milestone}
           onSelect={setMilestone}
           openCount={data.open.length}
+          shipped={doneTotal(ok.shipped)}
         />
       ) : null}
       <div className="rm-main">
@@ -467,7 +488,14 @@ export function Roadmap() {
         )}
         {ok ? <Notices warnings={ok.warnings} /> : null}
       </div>
-      {ok ? <ShippedBar shipped={ok.shipped} milestones={ok.milestones} /> : null}
+      {ok ? (
+        <ShippedBar
+          shipped={ok.shipped}
+          milestones={ok.milestones}
+          initial={folds.at}
+          onFolds={(next) => void (folds.at = next)}
+        />
+      ) : null}
     </div>
   );
 }
