@@ -40,6 +40,7 @@ Throughout this playbook:
    ```
 
 7. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered.
+8. Open your harness's todo list with one item for each numbered section of this playbook, in order, and mark each item done when you finish its section. When you replace a stopped run lead, mark done the sections that `ark status <run>` shows as finished.
 
 ## 2. Evaluate the ticket and open the criteria gate
 
@@ -435,9 +436,9 @@ Run the reviewer steps after the tests pass. Each reviewer writes its findings t
 
 - A UI finding (it has `**Skill:**` and `**Rule:**` lines) is a finding like any other: treat it by its rank, as below.
 - P0 sends work back. Tell the implementer to fix it.
-- P1 sends work back unless you can show it is wrong or out of scope. Reproduce a P0 or P1 with a test or a command before you send work back; do not send it on the reviewer's evidence alone.
+- P1 sends work back unless you can show it is wrong or out of scope. Before you send a P0 or P1 back to the implementer, run its Repro yourself. When the output does not show the problem, treat the finding as P2 and write why under `## Run lead decision`. A P0 or P1 with no Repro line is a P2 already: never send it on the reviewer's evidence alone.
 - P2 and P3 do not send work back unless several of them point at one real problem. Record them in the retro. A P2 that names a CI risk on another platform sends work back, because you cannot test it locally.
-- Write each decision and its reason in `<run folder>/findings/<step>.md`, in a section named `Run lead decision`. For each finding, write: send back or leave, and why.
+- Write each decision and its reason in `<run folder>/findings/<step>.md`, under the heading `## Run lead decision`. For each finding, write: send back or leave, and why.
 
 To send work back, write the findings you accept into `<run folder>/findings/round-<round>.md`, start the implementer step again, run `ark test <run>` when it finishes, and then start the reviewer step again to check the fixes. Stop when a review sends nothing back and the tests pass.
 
