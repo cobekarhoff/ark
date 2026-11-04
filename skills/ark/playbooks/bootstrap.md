@@ -35,6 +35,15 @@ find <workspace> -maxdepth 5 -name .git -not -path '*/node_modules/*'
 
 Strip `/.git` and the workspace prefix to get each repo path, such as `repos/platform` or `repos/shared/packages`. One repo, which is the workspace root, means a single-repo project. Several repos mean a meta-repo.
 
+Then find each repo's target branch and its current branch, and keep every repo where they differ. Leave out a repo with no `origin/HEAD` or a detached HEAD, and say so in the final summary:
+
+```sh
+git -C <workspace>/<repo> symbolic-ref --short refs/remotes/origin/HEAD   # for example origin/main
+git -C <workspace>/<repo> branch --show-current                          # for example release/9.1.0
+```
+
+These repos are the `repos` candidates. Ask for each one in step 3.
+
 ### Stack
 
 Read these files in each repo root. The first match names the stack.
@@ -127,13 +136,15 @@ Default: no key, which means `open`. Write `merge_requests: none` only when the 
 
 ## 3. Ask only what you could not detect
 
-Make a list of the unknowns: ticket source, whether the project must not push (`merge_requests: none`; ask it once, recommended answer: no), roles, an ambiguous suite level, or a missing suite command. For each unknown, one at a time:
+Make a list of the unknowns: the base of each `repos` candidate from step 2, ticket source, whether the project must not push (`merge_requests: none`; ask it once, recommended answer: no), roles, an ambiguous suite level, or a missing suite command. For each unknown, one at a time:
 
 1. Ask the question with a recommended answer.
 2. Wait for the human.
 3. Record the answer and move to the next.
 
 Example: "I found Jira in `.mcp.json` and a GitLab remote. Which ticket source should Ark use? Recommended: `jira`, because the agents' Jira tools are configured and the GitLab remote only hosts code."
+
+For each `repos` candidate, ask: "`<repo>` is on `<current branch>` but origin/HEAD names `<target branch>`. Which branch should runs start from, sync with and open MRs against? Recommended: `<current branch>`, because the clone's checked-out branch is where the team works, unless it is a feature branch. Then recommend `<target branch>`." An answer is the `base` for that repo. A repo not asked about gets no `repos` entry, and its base stays the clone's HEAD with the origin/HEAD target.
 
 If nothing is unknown, ask nothing and go on.
 
@@ -242,6 +253,8 @@ Write `~/.ark/projects/<project>/ark.yml` in the contract schema. Create the dir
 ```yaml
 workspace: <absolute workspace path>
 ticket_source: <local | github | jira>
+repos: # only for repos where step 3 got a base; key is the repo path, exactly
+  repos/app: { base: release/9.1.0 }
 merge_requests: none # only when the human says the project must not push; omit otherwise
 compose: <compose command> # omit when the project has no compose file
 suites:
