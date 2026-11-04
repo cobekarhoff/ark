@@ -65,11 +65,15 @@ export function criteriaAmend(
   runId: string,
   criterionId: string,
   file: string,
+  reason: string | undefined,
   inProject?: string,
 ): void {
   const { directory } = findRun(runId, inProject);
   // Refuse a wrong phase or an unknown criterion before reading the file.
-  assertAllowed(deriveState(readEvents(directory)), "criteria.amended", { criterion: criterionId });
+  assertAllowed(deriveState(readEvents(directory)), "criteria.amended", {
+    criterion: criterionId,
+    reason,
+  });
   if (!existsSync(file)) throw new ArkError(`criteria.amended refused: ${file} not found`);
   const newText = readFileSync(file, "utf8")
     .trim()
@@ -85,6 +89,8 @@ export function criteriaAmend(
     criterion: criterionId,
     old: oldText,
     new: newText,
+    by: "human",
+    reason: reason?.trim(),
   });
   writeFileSync(ticketFile, ticket);
   console.log(
@@ -92,8 +98,13 @@ export function criteriaAmend(
   );
   console.log(`  old: ${oldText}`);
   console.log(`  new: ${newText}`);
-  if (existsSync(join(directory, "plan.md")))
+  if (deriveState(readEvents(directory)).phase === "planning") {
+    if (existsSync(join(directory, "plan.md")))
+      console.log(
+        `plan.md may be stale: run \`ark plan check ${runId}\` again to list this amendment`,
+      );
+  } else
     console.log(
-      `plan.md may be stale: run \`ark plan check ${runId}\` again to list this amendment`,
+      "the plan is approved: do not run ark plan check again, it can change the plan hash and reset the approval",
     );
 }

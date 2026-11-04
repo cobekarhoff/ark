@@ -2,6 +2,7 @@ import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { manualCriteria } from "../cli/criteria.ts";
+import { appendEvent } from "../cli/events.ts";
 import { ark, recordEvaluation, tempArkHome, tempGitRepo, writeProject } from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
@@ -104,7 +105,15 @@ beforeEach(() => {
 
 test(`${AC1} writes the new text into ticket.md frontmatter and table and records the event`, () => {
   const before = read("ticket.md");
-  const result = ark("criteria", "amend", runId, AC1, textFile("new", "new | one\n"));
+  const result = ark(
+    "criteria",
+    "amend",
+    runId,
+    AC1,
+    textFile("new", "new | one\n"),
+    "--reason",
+    "why",
+  );
   expect(result.code).toBe(0);
   expect(read("ticket.md")).toBe(
     before
@@ -113,18 +122,22 @@ test(`${AC1} writes the new text into ticket.md frontmatter and table and record
   );
   expect(amendments()).toEqual([
     expect.objectContaining({
-      data: { criterion: AC1, old: "original one", new: "new | one" },
+      data: { criterion: AC1, old: "original one", new: "new | one", by: "human", reason: "why" },
     }),
   ]);
   expect(readFileSync(backlogFile, "utf8")).toBe(ticketText);
 });
 
 test(`${AC1} a second amendment records the first amended text as old`, () => {
-  expect(ark("criteria", "amend", runId, AC1, textFile("a", "first")).code).toBe(0);
-  expect(ark("criteria", "amend", runId, AC1, textFile("b", "second")).code).toBe(0);
+  expect(ark("criteria", "amend", runId, AC1, textFile("a", "first"), "--reason", "why").code).toBe(
+    0,
+  );
+  expect(
+    ark("criteria", "amend", runId, AC1, textFile("b", "second"), "--reason", "why").code,
+  ).toBe(0);
   expect(amendments().map((event) => event.data)).toEqual([
-    { criterion: AC1, old: "original one", new: "first" },
-    { criterion: AC1, old: "first", new: "second" },
+    { criterion: AC1, old: "original one", new: "first", by: "human", reason: "why" },
+    { criterion: AC1, old: "first", new: "second", by: "human", reason: "why" },
   ]);
   expect(read("ticket.md")).toContain(`| ${AC1} | second |`);
 });
@@ -132,23 +145,31 @@ test(`${AC1} a second amendment records the first amended text as old`, () => {
 test(`${AC2} refuses an unknown criterion, names it, and changes nothing`, () => {
   const ticket = read("ticket.md");
   const log = read("events.ndjson");
-  const result = ark("criteria", "amend", runId, "ARK-207-AC9", textFile("new", "x"));
+  const result = ark(
+    "criteria",
+    "amend",
+    runId,
+    "ARK-207-AC9",
+    textFile("new", "x"),
+    "--reason",
+    "why",
+  );
   expect(result.code).toBe(1);
   expect(result.err).toContain("ARK-207-AC9");
   expect(read("ticket.md")).toBe(ticket);
   expect(read("events.ndjson")).toBe(log);
 });
 
-test(`${AC2} refuses a run past the plan gate, names the phase, and changes nothing`, () => {
+test(`${AC2} refuses a run in merge_requests_open, names the phase, and changes nothing`, () => {
   writeValidPlan();
   expect(ark("plan", "check", runId).code).toBe(0);
   expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
+  appendEvent(runDirectory, "merge_request.opened", { repo: ".", url: "u" });
   const ticket = read("ticket.md");
   const log = read("events.ndjson");
-  const result = ark("criteria", "amend", runId, AC1, textFile("new", "x"));
+  const result = ark("criteria", "amend", runId, AC1, textFile("new", "x"), "--reason", "why");
   expect(result.code).toBe(1);
-  expect(result.err).toContain("building");
-  expect(result.err).toContain("planning");
+  expect(result.err).toContain("merge_requests_open");
   expect(read("ticket.md")).toBe(ticket);
   expect(read("events.ndjson")).toBe(log);
 });
@@ -156,7 +177,7 @@ test(`${AC2} refuses a run past the plan gate, names the phase, and changes noth
 test(`${AC2} refuses an empty file and changes nothing`, () => {
   const ticket = read("ticket.md");
   const log = read("events.ndjson");
-  const result = ark("criteria", "amend", runId, AC1, textFile("empty", ""));
+  const result = ark("criteria", "amend", runId, AC1, textFile("empty", ""), "--reason", "why");
   expect(result.code).toBe(1);
   expect(read("ticket.md")).toBe(ticket);
   expect(read("events.ndjson")).toBe(log);
@@ -166,7 +187,9 @@ test(`ARK-207-AC3 plan.md lists the amendment after the next plan check, and app
   writeValidPlan();
   expect(ark("plan", "check", runId).code).toBe(0);
   expect(read("plan.md")).not.toContain("Amended criteria");
-  expect(ark("criteria", "amend", runId, AC1, textFile("new", "brand new text")).code).toBe(0);
+  expect(
+    ark("criteria", "amend", runId, AC1, textFile("new", "brand new text"), "--reason", "why").code,
+  ).toBe(0);
 
   const refused = ark("gate", "record", runId, "plan", "approve");
   expect(refused.code).toBe(1);
@@ -188,7 +211,9 @@ test("ARK-283-AC1 criteria amend keeps manual: true on the amended criterion (bl
     read("ticket.md").replace('text: "original one"', 'text: "original one"\n    manual: true'),
   );
   expect(manualCriteria(runDirectory)).toEqual([AC1]);
-  expect(ark("criteria", "amend", runId, AC1, textFile("m", "reworded one")).code).toBe(0);
+  expect(
+    ark("criteria", "amend", runId, AC1, textFile("m", "reworded one"), "--reason", "why").code,
+  ).toBe(0);
   expect(read("ticket.md")).toContain("manual: true");
   expect(manualCriteria(runDirectory)).toEqual([AC1]);
 });

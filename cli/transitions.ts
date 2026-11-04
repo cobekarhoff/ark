@@ -51,12 +51,15 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
         throw new ArkError("criteria.updated refused: the ticket has no criteria");
       return;
     case "criteria.amended": {
-      const allowed = ["awaiting_strategy", "planning"];
       // In awaiting_criteria the backlog file is the source: name the gate that moves the run on.
-      if (state.phase === "awaiting_criteria") requirePhase(state, type, allowed);
-      if (!allowed.includes(state.phase))
+      if (state.phase === "awaiting_criteria") requirePhase(state, type, []);
+      if (state.phase === "merge_requests_open")
         throw new ArkError(
-          `${type} refused: run is in phase ${state.phase}; allowed only in ${allowed.join(" or ")}`,
+          `${type} refused: run is in phase ${state.phase}; allowed before merge_requests_open`,
+        );
+      if (typeof data.reason !== "string" || data.reason.trim() === "")
+        throw new ArkError(
+          `${type} refused: --reason is required (the human's reason for the new text)`,
         );
       if (!state.criteria.some((criterion) => criterion.id === data.criterion))
         throw new ArkError(

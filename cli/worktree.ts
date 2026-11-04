@@ -363,15 +363,22 @@ export function commitsAhead(source: string, branch: string, base?: string): num
   return counted.exitCode === 0 ? Number(counted.stdout.toString().trim()) : undefined;
 }
 
-/** Why a handed_off branch must stay: commits beyond its base, or a count that failed. Counted in the source repo, so it works with the worktree gone. */
-function handedOffReason(source: string, branch: string, base?: string): string | undefined {
+/** Why the branch of a handed_off or aborted run must stay: commits beyond its base, or a count that failed. Counted in the source repo, so it works with the worktree gone. */
+function keepBranchReason(
+  outcome: string | null,
+  source: string,
+  branch: string,
+  base?: string,
+): string | undefined {
+  if (outcome !== "handed_off" && outcome !== "aborted") return undefined;
+  const label = outcome === "aborted" ? "aborted" : "handed off";
   const ahead = commitsAhead(source, branch, base);
-  if (ahead === undefined) return "handed off, could not count the commits ahead of its base";
+  if (ahead === undefined) return `${label}, could not count the commits ahead of its base`;
   if (ahead > 0)
-    return `handed off, ${ahead} ${ahead === 1 ? "commit" : "commits"} ahead of ${base?.slice(0, 8)}`;
+    return `${label}, ${ahead} ${ahead === 1 ? "commit" : "commits"} ahead of ${base?.slice(0, 8)}`;
 }
 
-/** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, for a merged run an unmerged branch, and for a handed_off run a branch with commits beyond its base; prints the repo and the reason. */
+/** Removes each worktree of a closed run and its local branch. Keeps a dirty worktree, for a merged run an unmerged branch, and for a handed_off or aborted run a branch with commits beyond its base; prints the repo and the reason. */
 export function worktreeCleanup(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
@@ -387,8 +394,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
     };
     if (!existsSync(path)) {
       Bun.spawnSync(["git", "-C", source, "worktree", "prune"]);
-      const handedOff =
-        state.outcome === "handed_off" ? handedOffReason(source, branch, base) : undefined;
+      const handedOff = keepBranchReason(state.outcome, source, branch, base);
       if (handedOff !== undefined) {
         console.log(`kept     ${repo}  ${branch}: ${handedOff}`);
         continue;
@@ -432,8 +438,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
         }
       }
       // count in the source repo, before the worktree goes; an unknown count keeps the branch
-      const handedOff =
-        state.outcome === "handed_off" ? handedOffReason(source, branch, base) : undefined;
+      const handedOff = keepBranchReason(state.outcome, source, branch, base);
       git(source, "worktree", "remove", "--force", path); // clean but for Ark's own symlinks
       if (handedOff !== undefined) {
         // the worktree is gone, so the mirror folder may go too: no kept = true

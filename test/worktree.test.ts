@@ -1095,14 +1095,14 @@ describe("ARK-294 handed_off close keeps branches with commits", () => {
     expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
   });
 
-  test("ARK-294-AC3 an aborted run still deletes a branch that has a commit", () => {
+  test("ARK-294-AC3 an aborted run keeps a branch that has a commit", () => {
     const { workspace, runId, runDirectory, a, branch } = handedOffRun();
     commitIn(a, "work.txt");
 
     const closed = closeRun(runId, runDirectory, "aborted");
     expect(closed.code).toBe(0);
-    expect(closed.out).toContain(`removed  a  ${branch}\n`);
-    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).toBe("");
+    expect(closed.out).toContain(`kept     a  ${branch}: aborted, 1 commit ahead of`);
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
   });
 
   test("ARK-294-AC3 a handed_off branch whose base is unknown is kept", () => {
