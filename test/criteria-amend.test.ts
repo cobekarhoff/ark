@@ -217,3 +217,133 @@ test("ARK-283-AC1 criteria amend keeps manual: true on the amended criterion (bl
   expect(read("ticket.md")).toContain("manual: true");
   expect(manualCriteria(runDirectory)).toEqual([AC1]);
 });
+
+/** Plan checked, approved and a worktree made: the run is in building. */
+function buildingRun(): void {
+  writeValidPlan();
+  for (const args of [
+    ["plan", "check", runId],
+    ["gate", "record", runId, "plan", "approve"],
+    ["worktree", "create", runId, "."],
+  ])
+    expect(ark(...args).code).toBe(0);
+  expect(ark("status", runId).out).toContain("phase: building");
+}
+
+const amend = (id: string, text: string, ...reason: string[]) =>
+  ark("criteria", "amend", runId, id, textFile("amend", text), ...reason);
+
+test("ARK-308-AC1 amend with --reason succeeds in building, escalation and testing", () => {
+  buildingRun();
+  expect(amend(AC1, "in building", "--reason", "r1").code).toBe(0);
+
+  // testing: a test run has been recorded and the run is still building
+  appendEvent(runDirectory, "test.completed", {
+    passed: true,
+    heads: {},
+    suites: [{ name: "cli", level: "integration", passed: true }],
+    criteria: {},
+  });
+  expect(amend(AC1, "in testing", "--reason", "r2").code).toBe(0);
+
+  // escalation: the round budget is spent and the last test failed
+  appendEvent(runDirectory, "step.started", {
+    step: "build",
+    role: "implementer",
+    repo: ".",
+    round: 2,
+  });
+  appendEvent(runDirectory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [{ name: "cli", level: "integration", passed: false }],
+    criteria: {},
+  });
+  expect(ark("status", runId).out).toContain("phase: escalation");
+  expect(amend(AC1, "in escalation", "--reason", "r3").code).toBe(0);
+  expect(ark("status", runId).out).toContain("phase: escalation");
+  expect(amendments().map((event) => event.data.reason)).toEqual(["r1", "r2", "r3"]);
+  expect(read("ticket.md")).toContain(`| ${AC1} | in escalation |`);
+});
+
+test("ARK-308-AC1 amend is refused in merge_requests_open and in a closed run, naming the phase", () => {
+  buildingRun();
+  appendEvent(runDirectory, "merge_request.opened", { repo: ".", url: "u" });
+  const ticket = read("ticket.md");
+  const log = read("events.ndjson");
+  const open = amend(AC1, "x", "--reason", "why");
+  expect(open.code).toBe(1);
+  expect(open.err).toContain("merge_requests_open");
+  expect(read("ticket.md")).toBe(ticket);
+  expect(read("events.ndjson")).toBe(log);
+
+  appendEvent(runDirectory, "run.closed", { outcome: "abandoned" });
+  const closed = amend(AC1, "x", "--reason", "why");
+  expect(closed.code).toBe(1);
+  expect(closed.err).toContain("closed");
+  expect(read("ticket.md")).toBe(ticket);
+});
+
+test("ARK-308-AC1 amend without --reason, or with an empty or blank one, is refused and changes nothing", () => {
+  const ticket = read("ticket.md");
+  const log = read("events.ndjson");
+  for (const reason of [[], ["--reason", ""], ["--reason", "   "]]) {
+    const result = amend(AC1, "x", ...reason);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("--reason");
+  }
+  expect(read("ticket.md")).toBe(ticket);
+  expect(read("events.ndjson")).toBe(log);
+});
+
+test("ARK-308-AC2 the event holds by human and the reason, and ark status shows the amendment and its reason", () => {
+  const result = amend(AC1, "brand new text", "--reason", "the old wording named a deleted path");
+  expect(result.code).toBe(0);
+  expect(amendments()[0].data).toEqual({
+    criterion: AC1,
+    old: "original one",
+    new: "brand new text",
+    by: "human",
+    reason: "the old wording named a deleted path",
+  });
+  const status = ark("status", runId).out;
+  expect(status).toContain("amended criteria:");
+  expect(status).toContain(`${AC1} by human: the old wording named a deleted path`);
+  expect(status).toContain("new: ");
+});
+
+test("ARK-308-AC3 an amendment in planning clears the plan check, so ark plan check is needed again", () => {
+  writeValidPlan();
+  expect(ark("plan", "check", runId).code).toBe(0);
+  expect(amend(AC1, "reworded", "--reason", "why").code).toBe(0);
+  const refused = ark("gate", "record", runId, "plan", "approve");
+  expect(refused.code).toBe(1);
+  expect(ark("status", runId).out).toContain("phase: planning");
+  expect(ark("plan", "check", runId).code).toBe(0);
+  expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
+});
+
+test("ARK-308-AC3 an amendment in building keeps the phase and the approval, clears that criterion's manual answer, and ark test judges the new text", () => {
+  writeFileSync(
+    join(runDirectory, "ticket.md"),
+    read("ticket.md").replace('text: "original one"', 'text: "original one"\n    manual: true'),
+  );
+  buildingRun();
+  expect(ark("gate", "record", runId, "manual", AC1, "ok").code).toBe(0);
+  const before = ark("test", runId);
+  expect(before.out).toContain(`criterion  ${AC1}  manual ok`);
+
+  const result = amend(AC1, "reworded after the plan gate", "--reason", "why");
+  expect(result.code).toBe(0);
+  expect(result.out).toContain("do not run ark plan check again");
+  const status = ark("status", runId).out;
+  expect(status).toContain("phase: building");
+  expect(status).not.toContain("phase: planning");
+
+  const after = ark("test", runId);
+  expect(after.out).toContain(`criterion  ${AC1}  manual pending`);
+  expect(read("ticket.md")).toContain("reworded after the plan gate");
+  expect(read("ticket.md")).toContain("manual: true");
+  expect(ark("gate", "record", runId, "manual", AC1, "ok").code).toBe(0);
+  expect(ark("test", runId).out).toContain(`criterion  ${AC1}  manual ok`);
+});

@@ -1352,3 +1352,67 @@ test("ARK-296-AC5 bootstrap step 2 asks for the base of each repo off origin/HEA
   ).toBe(0);
   expect(readFileSync(path, "utf8")).toBe(before);
 });
+
+describe("ARK-308 aborted run keeps branches with commits", () => {
+  test("ARK-308-AC4 aborted keeps a branch with a commit and prints the kept line, and removes a branch with none", () => {
+    const { workspace, runId, runDirectory, a, b, branch, base } = handedOffRun();
+    commitIn(a, "work.txt");
+    const commit = gitOutput(a, "rev-parse", "HEAD");
+
+    const closed = closeRun(runId, runDirectory, "aborted");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(
+      `kept     a  ${branch}: aborted, 1 commit ahead of ${base.slice(0, 8)}\n`,
+    );
+    expect(closed.out).toContain(`removed  b  ${branch}\n`);
+    expect(gitOutput(join(workspace, "a"), "rev-parse", "--verify", branch)).toBe(commit);
+    expect(gitOutput(join(workspace, "b"), "branch", "--list", branch)).toBe("");
+    expect(existsSync(a)).toBe(false);
+    expect(existsSync(b)).toBe(false);
+  });
+
+  test("ARK-308-AC4 an aborted run whose base is not recorded keeps its branch", () => {
+    const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
+    commitIn(a, "work.txt");
+    const events = join(runDirectory, "events.ndjson");
+    writeFileSync(events, readFileSync(events, "utf8").replaceAll(base, "0".repeat(base.length)));
+
+    const closed = closeRun(runId, runDirectory, "aborted");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(`kept     a  ${branch}: aborted, could not count`);
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
+  });
+
+  test("ARK-308-AC4 a dirty aborted worktree and its branch stay", () => {
+    const { workspace, runId, runDirectory, a, branch } = handedOffRun();
+    commitIn(a, "work.txt");
+    writeFileSync(join(a, "untracked.txt"), "dirty\n");
+
+    const closed = closeRun(runId, runDirectory, "aborted");
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(`kept     a  ${branch}: uncommitted changes`);
+    expect(existsSync(a)).toBe(true);
+    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
+  });
+
+  test("ARK-308-AC5 cli.md matches the generator, and the descriptions, how-to and playbooks name --reason and the kept branch", () => {
+    const root = join(import.meta.dir, "..");
+    const text = (path: string) => readFileSync(join(root, path), "utf8");
+    const reference = text("docs/reference/cli.md");
+    expect(
+      Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
+    ).toBe(0);
+    expect(text("docs/reference/cli.md")).toBe(reference);
+
+    for (const path of ["cli/ark.ts", "docs/reference/cli.md"]) {
+      expect(text(path)).toContain("--reason");
+      expect(text(path)).toContain("keeps a branch with commits");
+    }
+    for (const path of [
+      "docs/how-to/run-a-ticket.md",
+      "skills/ark/playbooks/run-lead.md",
+      "skills/ark/playbooks/chief.md",
+    ])
+      expect(text(path)).toContain("--reason");
+  });
+});
