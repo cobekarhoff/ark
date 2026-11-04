@@ -997,3 +997,96 @@ test("ARK-290-AC5 brainstorm, retro and chief follow ROADMAP.md and no README ba
   // removing the Status step must leave each numbered step of section 8 on its own line
   expect(chief).toMatch(/\n2\. If the outcome is `merged`/);
 });
+
+// ARK-288-AC6 proof: `bun test test/playbooks.test.ts -t ARK-288-AC6`
+test("ARK-288-AC6 run-lead sends a status with the run, the round and <n> of 2 after an automatic escalation answer, and does not ask", () => {
+  const escalate = flat(section(runLeadPlaybook, "## 9. Escalate when the round budget is spent"));
+  expect(escalate).toContain("`gates.escalation: auto`");
+  expect(escalate).toContain("`gate: escalation`, `answer: one_more_round`, `by: auto`");
+  expect(escalate).toContain(
+    "Do not record the answer and do not `ask`. Send Master Chief a `status`",
+  );
+  expect(escalate).toContain("--type status");
+  expect(escalate).toContain(
+    '--subject "Escalation answered by auto: <ticket id> round <round> (<n> of 2)"',
+  );
+  expect(escalate).toContain("Run <run>");
+  expect(escalate).toContain("`ark escalate` (a requested escalation)");
+  const repair = flat(section(runLeadPlaybook, "## 10. Open the MRs"));
+  expect(repair).toContain(
+    "With `gates.escalation: auto`, `ark run step ... start` records it by auto",
+  );
+  const lead = flat(runLeadPlaybook);
+  expect(lead).toContain("`escalation` set to `auto` is answered by Ark too, up to 2 times");
+  expect(lead).toContain("you report it with a `status`, not an `ask`");
+});
+
+test("ARK-288-AC6 chief section 7 passes the auto escalation status to the human and relays no question", () => {
+  const supervise = flat(section(chiefPlaybook, "## 7. Supervise"));
+  expect(supervise).toContain("`Escalation answered by auto:`");
+  expect(supervise).toContain("pass it on as one line");
+  expect(supervise).toContain(
+    "`<ticket>: auto granted extra round <round> (<n> of 2). No action needed.`",
+  );
+  expect(supervise).toContain("and ask nothing");
+  expect(supervise).toContain("never relay as a question");
+  expect(supervise).toContain(
+    "The third spent budget, and any escalation that `ark escalate` requested, still arrive as an `ask`",
+  );
+});
+
+test("ARK-288-AC6 neither playbook still says the escalation gate stays with the human when set to auto", () => {
+  for (const playbook of [runLeadPlaybook, chiefPlaybook]) {
+    const text = flat(playbook);
+    expect(text).not.toContain("`criteria` and `escalation` gates stay with the human");
+    expect(text).not.toContain("`criteria` and `escalation` gates still go to the human");
+    expect(text).not.toContain("nothing answers them yet");
+    expect(text).not.toContain("`criteria` and `escalation` always go to the human");
+  }
+});
+
+test("ARK-302-AC8 run-lead section 4 tells the run lead to read kind and write the first and last steps for bug, perf and refactor", () => {
+  const plan = section(runLeadPlaybook, "## 4. Write the plan\n");
+  expect(plan).not.toBe("");
+  expect(plan).toMatch(/Read `kind`/);
+  expect(plan).toMatch(/`bug`:[^\n]*first step is a validator step that serves every AC/);
+  expect(plan).toMatch(
+    /`perf`:[^\n]*first step `goal` names `results\/baseline\.md`[^\n]*last step `goal` names `results\/compare\.md`/,
+  );
+  expect(plan).toMatch(/`refactor`:[^\n]*`base_passed`/);
+});
+
+test("ARK-302-AC8 brainstorm and chief section 6 say to set kind in a new ticket", () => {
+  const brainstorm = readFileSync(join(playbookDirectory, "brainstorm.md"), "utf8");
+  expect(brainstorm).toMatch(
+    /`kind` \(`bug`, `perf`, `refactor` or `feature`; set it in every new ticket/,
+  );
+
+  const start = section(chiefPlaybook, "## 6. Start a run lead for each ready ticket\n");
+  expect(start).not.toBe("");
+  expect(start).toMatch(
+    /^ *kind: feature # bug, perf, refactor or feature:.*set it in every new ticket/m,
+  );
+});
+
+test("ARK-297-AC4 bootstrap step 7 does not set the global omp config and says Ark writes each worktree config.yml", () => {
+  const step = bootstrapPlaybook
+    .split("## 7. Make the workspace's skills reachable for workers")[1]
+    ?.split("\n## ")[0];
+  expect(step).toBeDefined();
+  expect(bootstrapPlaybook).not.toContain("omp config set");
+  expect(step).toContain(
+    "`skills.customDirectories` into the `.omp/config.yml` of each nested worktree",
+  );
+  expect(step).toMatch(/global OMP config is not changed/);
+  expect(step).toContain("Claude Code workers and Codex workers");
+  expect(step).toContain("`SKILL.md` paths in the step prompt");
+});
+
+test("ARK-297-AC5 the spikes note says skills reach a nested worktree through skills.customDirectories in its .omp/config.yml", () => {
+  const spikes = readFileSync(join(import.meta.dir, "../docs/explanation/orca-spikes.md"), "utf8");
+  const item = spikes.split("- **Workspace skills don't load.**")[1]?.split("\n- ")[0];
+  expect(item).toBeDefined();
+  expect(item).toContain("`skills.customDirectories`");
+  expect(item).toContain("`.omp/config.yml` of each nested worktree");
+});

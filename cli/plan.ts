@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type ProjectConfig, loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { manualCriteria } from "./criteria.ts";
-import { type RunState, appendEvent, deriveState, readEvents } from "./events.ts";
+import { type RunState, type TicketKind, appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 import { allowedUiSkills, uiSkillsFor } from "./ui-skills.ts";
@@ -18,6 +18,8 @@ export type PlanStep = {
   needs: string[];
   criteria: string[];
   skills: string[];
+  /** Optional text of what the step does. A perf plan names `results/baseline.md` and `results/compare.md` here. */
+  goal: string;
 };
 
 export type PlanTestCase = {
@@ -127,6 +129,7 @@ export function loadPlan(runDirectory: string): Plan {
       needs: textList(step.needs),
       criteria: textList(step.criteria),
       skills: textList(step.skills),
+      goal: text(step.goal),
     })),
     test_cases: objectList(test_cases).map((testCase) => {
       const name = text(testCase.id) || "(no id)";
@@ -200,6 +203,7 @@ export function findProblems(
   surfaces: string[],
   configuredRoles: ProjectConfig["roles"],
   manual: string[] = [],
+  kind: TicketKind = "feature",
 ): string[] {
   const allowedPairs = [
     ...new Set(Object.values(configuredRoles).map((role) => `${role.harness}/${role.model}`)),
@@ -307,6 +311,18 @@ export function findProblems(
       problems.push(`decision ${name} chosen "${decision.chosen}" is not an option`);
     }
   });
+  const first = plan.steps[0];
+  const last = plan.steps.at(-1);
+  if (kind === "bug") {
+    if (first?.role !== "validator" || !ticketCriteria.every((id) => first.criteria.includes(id)))
+      problems.push("bug run: the first step must be a validator step that serves every criterion");
+  }
+  if (kind === "perf") {
+    if (!first?.goal.includes("results/baseline.md"))
+      problems.push("perf run: the first step goal must name results/baseline.md");
+    if (!last?.goal.includes("results/compare.md"))
+      problems.push("perf run: the last step goal must name results/compare.md");
+  }
   const required = uiSkillsFor(surfaces);
   if (required.length > 0) {
     if (plan.steps.every((step) => step.skills.length === 0))
@@ -451,6 +467,7 @@ export function planCheck(runId: string, inProject?: string): void {
     surfaces,
     loadConfig(project).roles,
     manualCriteria(directory),
+    state.kind,
   );
   const valid = problems.length === 0;
   const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;

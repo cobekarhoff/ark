@@ -18,8 +18,11 @@ import {
   deriveState,
   readEvents,
   writeState,
+  type ArkEvent,
   type EventData,
+  ticketKinds,
   type RunState,
+  type TicketKind,
 } from "./events.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
@@ -29,7 +32,12 @@ import { commitsAhead, worktreeCleanup } from "./worktree.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
 
-function readTicket(ticketFile: string): { id: string; title: string; criteria: string[] } {
+function readTicket(ticketFile: string): {
+  id: string;
+  title: string;
+  kind: TicketKind;
+  criteria: string[];
+} {
   const frontmatter = readFileSync(ticketFile, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!frontmatter)
     throw new ArkError(
@@ -40,6 +48,11 @@ function readTicket(ticketFile: string): { id: string; title: string; criteria: 
     if (typeof fields[key] !== "string" || fields[key] === "")
       throw new ArkError(`${ticketFile}: ticket field ${key} is required`);
   }
+  const kind = fields.kind ?? "feature";
+  if (!(ticketKinds as readonly unknown[]).includes(kind))
+    throw new ArkError(
+      `${ticketFile}: kind must be one of ${ticketKinds.join(", ")}, not ${JSON.stringify(kind)}`,
+    );
   const criteria = fields.acceptance_criteria ?? [];
   if (!Array.isArray(criteria))
     throw new ArkError(`${ticketFile}: acceptance_criteria must be a list`);
@@ -49,7 +62,12 @@ function readTicket(ticketFile: string): { id: string; title: string; criteria: 
     }
     return criterion.id as string;
   });
-  return { id: fields.id as string, title: fields.title as string, criteria: ids };
+  return {
+    id: fields.id as string,
+    title: fields.title as string,
+    kind: kind as TicketKind,
+    criteria: ids,
+  };
 }
 
 function resolveProject(absoluteTicketFile: string, project?: string): string {
@@ -122,6 +140,7 @@ export function runStart(ticketFile: string, project?: string): void {
       run,
       project: projectName,
       ticket: { id: ticket.id, title: ticket.title },
+      kind: ticket.kind,
       criteria: ticket.criteria,
       ticket_file: absoluteTicketFile,
       round_budget: config.round_budget,
@@ -132,6 +151,61 @@ export function runStart(ticketFile: string, project?: string): void {
   }
   warnSetTicketStatus(absoluteTicketFile, projectName, "in_progress");
   console.log(run);
+}
+
+/** The most extra rounds `gates.escalation: auto` grants in one run. */
+const autoEscalationCap = 2;
+
+function refused(action: () => void): boolean {
+  try {
+    action();
+    return false;
+  } catch (err) {
+    if (!(err instanceof ArkError)) throw err;
+    return true;
+  }
+}
+
+/**
+ * Records escalation one_more_round by auto when `start` is refused only for an escalation reason:
+ * the answer is dry-run first, so a start refused for any other reason leaves no answer.
+ * Returns the count line, or null when nothing was recorded.
+ */
+function answerEscalationByAuto(
+  directory: string,
+  events: ArkEvent[],
+  state: RunState,
+  start: EventData,
+): string | null {
+  if (state.escalation_requested || state.implementer === "human") return null;
+  if (!refused(() => assertAllowed(state, "step.started", start))) return null;
+  const used = events.filter(
+    (event) =>
+      event.type === "gate.answered" &&
+      event.data.gate === "escalation" &&
+      event.data.by === "auto" &&
+      !event.data.merge,
+  ).length;
+  if (!start.merge && used >= autoEscalationCap) return null;
+  const answer = {
+    gate: "escalation",
+    answer: "one_more_round",
+    by: "auto",
+    ...(start.merge ? { merge: true } : {}),
+  };
+  if (refused(() => assertAllowed(state, "gate.answered", answer))) return null;
+  const answered = deriveState([
+    ...events,
+    {
+      seq: events.length + 1,
+      time: new Date(hubNow()).toISOString(),
+      type: "gate.answered",
+      data: answer,
+    },
+  ]);
+  if (refused(() => assertAllowed(answered, "step.started", start))) return null;
+  appendEvent(directory, "gate.answered", answer);
+  return `escalation one_more_round by auto (${start.merge ? "merge, not counted" : `${used + 1} of ${autoEscalationCap}`})`;
 }
 
 export function runStep(
@@ -150,7 +224,7 @@ export function runStep(
   if (notStarted && action === "start") throw new ArkError("--not-started only applies to finish");
   if (notStarted && !failed) throw new ArkError("--not-started needs --failed");
   if (notStarted && merge) throw new ArkError("--not-started cannot be used with --merge");
-  const { directory } = findRun(runId, inProject);
+  const { project, directory } = findRun(runId, inProject);
   const events = readEvents(directory);
   const state = deriveState(events);
 
@@ -191,15 +265,20 @@ export function runStep(
       !event.data.not_started,
   ).length;
   const round = planned.role === "implementer" && !merge ? finishes + 1 : state.round;
-  appendEvent(directory, "step.started", {
+  const start: EventData = {
     step: stepId,
     role: planned.role,
     repo: planned.repo,
     round,
     ...(merge ? { merge: true } : {}),
-  });
+  };
+  if (planned.role === "implementer" && loadConfig(project).gates.escalation === "auto") {
+    const line = answerEscalationByAuto(directory, events, state, start);
+    if (line) console.log(line);
+  }
+  appendEvent(directory, "step.started", start);
   console.log(
-    `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${state.round_budget})`,
+    `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${deriveState(readEvents(directory)).round_budget})`,
   );
 }
 
@@ -362,6 +441,7 @@ function printRun(runId: string, inProject?: string): void {
   const lines = [
     `run: ${basename(directory)}`,
     `ticket: ${state.ticket.id} ${state.ticket.title}`,
+    `kind: ${state.kind}`,
     `phase: ${state.phase}${state.outcome ? ` (${state.outcome})` : ""}`,
     `round: ${state.round}/${state.round_budget}`,
     `current step: ${current ? `${current.id} (${current.status})` : "none"}`,

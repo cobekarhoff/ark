@@ -9,12 +9,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadConfig, mergeRequestsMode } from "./config.ts";
+import { loadConfig, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
-import { discoverRepos, git, mirrorRoot, targetBranch } from "./workspace.ts";
+import { discoverRepos, git, mirrorRoot, repoBase, targetBranch } from "./workspace.ts";
 import { mergeRequestState } from "./merge-request.ts";
 
 const skippedRootEntries = new Set([".git", ".DS_Store", "repos"]);
@@ -88,15 +88,42 @@ function removeWorktree(source: string, path: string, branch: string, forces: nu
   return left;
 }
 
-/** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. */
+/** The commit a new worktree of `repo` starts from: origin/<base> after a fetch when the project sets a base, else the clone HEAD. */
+function resolveBase(config: ProjectConfig, repo: string): string {
+  const source = join(config.workspace, repo);
+  const configured = repoBase(config, repo);
+  if (configured === undefined) return git(source, "rev-parse", "HEAD");
+  try {
+    git(source, "fetch", "origin", configured);
+    return git(source, "rev-parse", `origin/${configured}`);
+  } catch (err) {
+    if (err instanceof ArkError) throw new ArkError(`repo ${repo}: ${err.message}`);
+    throw err;
+  }
+}
+
+const SKILL_DIRECTORIES = [".claude/skills", ".agents/skills", ".omp/skills"];
+
+/** The `--allow-dirty` warning text: one header and up to 10 changed paths. */
+function dirtyWarning(repo: string, source: string, lines: string[]): string {
+  const shown = 10;
+  return [
+    `warning  ${repo.padEnd(8)} ${source} has ${lines.length} uncommitted ${lines.length === 1 ? "change" : "changes"}, not in the worktree`,
+    ...lines.slice(0, shown).map((line) => `             ${line}`),
+    ...(lines.length > shown ? [`             ... and ${lines.length - shown} more`] : []),
+  ].join("\n");
+}
+
+/** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. A new root worktree warns on stderr about root changes the mirror lacks; `checkClean` never refuses the root. */
 function addRepoWorktree(
   directory: string,
-  workspace: string,
-  setup: string | undefined,
+  config: ProjectConfig,
   state: RunState,
   repo: string,
   log: (line: string) => void,
+  resolvedBase?: string,
 ): void {
+  const { workspace, setup } = config;
   const mirror = mirrorRoot(directory);
   mkdirSync(mirror, { recursive: true });
   const path = repo === "." ? mirror : join(mirror, repo);
@@ -122,13 +149,22 @@ function addRepoWorktree(
   if (isSymlink) unlinkSync(path); // an earlier call left this repo untouched
   mkdirSync(dirname(path), { recursive: true });
   const { branch, taken } = freeBranchName(source, baseBranchName(state.ticket));
-  const base = git(source, "rev-parse", "HEAD");
+  const base = resolvedBase ?? resolveBase(config, repo);
   git(source, "worktree", "add", "-b", branch, path, base);
   log(`created  ${repo} -> ${path}`);
   // yolo: lower tools.approvalMode values stopped a worker at its first shell call (findings/permission-modes.md).
   // `.omp/.gitignore` ("*") hides the folder, itself included, from status and `git add`; it touches no shared git file.
   mkdirSync(join(path, ".omp"), { recursive: true });
-  writeFileSync(join(path, ".omp", "config.yml"), "tools:\n  approvalMode: yolo\n");
+  const skillDirectories =
+    repo === "." ? [] : SKILL_DIRECTORIES.filter((name) => existsSync(join(workspace, name)));
+  const settings = {
+    tools: { approvalMode: "yolo" },
+    // omp reads <cwd>/.claude/skills natively, so only a nested worktree needs the root's folders.
+    ...(skillDirectories.length > 0 && {
+      skills: { customDirectories: skillDirectories.map((name) => join(mirror, name)) },
+    }),
+  };
+  writeFileSync(join(path, ".omp", "config.yml"), `${Bun.YAML.stringify(settings, null, 2)}\n`);
   writeFileSync(join(path, ".omp", ".gitignore"), "*\n");
   log(`setting  ${repo}: .omp/config.yml`);
   if (taken) log(`branch   ${repo}  ${branch} (${taken})`);
@@ -151,6 +187,11 @@ function addRepoWorktree(
     log(`setup    ${repo}: ${setup}`);
   }
   appendEvent(directory, "worktree.created", { repo, path, branch, base });
+  if (repo === ".") {
+    const nested = discoverRepos(workspace).map((name) => join(workspace, name));
+    const lines = dirtyLines(workspace, nested);
+    if (lines.length > 0) console.error(dirtyWarning(repo, workspace, lines));
+  }
 }
 
 /** Early worktree of the first repo of the workspace, so the run lead and its first workers have their own folder. Prints `path:<absolute path>`; a second call prints the same line and records nothing. */
@@ -161,12 +202,12 @@ export function worktreeAnchor(runId: string, inProject?: string): void {
   if (repo === undefined) throw new ArkError(`workspace ${config.workspace} has no git repo`);
   const state = deriveState(readEvents(directory));
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
-  addRepoWorktree(directory, config.workspace, config.setup, state, repo, () => {});
+  addRepoWorktree(directory, config, state, repo, () => {});
   const mirror = mirrorRoot(directory);
   console.log(`path:${repo === "." ? mirror : join(mirror, repo)}`);
 }
 
-/** Checks every repo that still needs a worktree for uncommitted changes before any worktree is added. Throws and names the changed paths, or with `allowDirty` prints a warning per repo. */
+/** Checks every nested repo that still needs a worktree for uncommitted changes before any worktree is added. The root `.` is skipped: its worktree warns on stderr instead. Throws and names the changed paths, or with `allowDirty` prints a warning per repo. */
 function checkClean(
   workspace: string,
   knownRepos: string[],
@@ -176,21 +217,14 @@ function checkClean(
 ): void {
   const nested = knownRepos.map((repo) => join(workspace, repo));
   const dirty = repos
-    .filter((repo) => !state.worktrees.some((worktree) => worktree.repo === repo))
+    .filter((repo) => repo !== "." && !state.worktrees.some((worktree) => worktree.repo === repo))
     .map((repo) => ({ repo, source: join(workspace, repo), lines: [] as string[] }))
     .map((entry) => ({ ...entry, lines: dirtyLines(entry.source, nested) }))
     .filter(({ lines }) => lines.length > 0);
   if (dirty.length === 0) return;
   const shown = 10;
   if (allowDirty) {
-    for (const { repo, source, lines } of dirty)
-      console.log(
-        [
-          `warning  ${repo.padEnd(8)} ${source} has ${lines.length} uncommitted ${lines.length === 1 ? "change" : "changes"}, not in the worktree`,
-          ...lines.slice(0, shown).map((line) => `             ${line}`),
-          ...(lines.length > shown ? [`             ... and ${lines.length - shown} more`] : []),
-        ].join("\n"),
-      );
+    for (const { repo, source, lines } of dirty) console.log(dirtyWarning(repo, source, lines));
     return;
   }
   const report = dirty.flatMap(({ repo, source, lines }) => [
@@ -234,12 +268,21 @@ export function worktreeCreate(
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
   checkClean(workspace, knownRepos, touched, state, allowDirty);
 
+  // every fetch happens before the first worktree add or event: one bad base leaves nothing behind
+  const bases = new Map(
+    touched
+      .filter((repo) => !state.worktrees.some((worktree) => worktree.repo === repo))
+      .map((repo) => [repo, resolveBase(config, repo)]),
+  );
   for (const repo of touched)
-    addRepoWorktree(directory, workspace, config.setup, state, repo, console.log);
+    addRepoWorktree(directory, config, state, repo, console.log, bases.get(repo));
 
-  const mirror = mirrorRoot(directory);
-  if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror
+  linkUntouched(workspace, mirrorRoot(directory), knownRepos);
+}
 
+/** Links every root entry and repo of the workspace that the mirror does not hold yet. A single-repo workspace needs none: the worktree is the mirror. */
+export function linkUntouched(workspace: string, mirror: string, knownRepos: string[]): void {
+  if (knownRepos.length === 1 && knownRepos[0] === ".") return;
   for (const entry of readdirSync(workspace)) {
     const link = join(mirror, entry);
     if (!skippedRootEntries.has(entry) && !pathExists(link))
@@ -258,12 +301,13 @@ export function worktreeSync(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
-  const mayPush = mergeRequestsMode(project) !== "none";
+  const config = loadConfig(project);
+  const mayPush = config.merge_requests !== "none";
   assertAllowed(state, "worktree.synced", { repo: state.worktrees[0].repo, conflict: false });
   const conflicts: string[] = [];
   for (const worktree of state.worktrees) {
     git(worktree.path, "fetch", "origin");
-    const target = targetBranch(worktree.path);
+    const target = targetBranch(worktree.path, repoBase(config, worktree.repo));
     const merged = Bun.spawnSync([
       "git",
       "-C",
@@ -331,7 +375,8 @@ function handedOffReason(source: string, branch: string, base?: string): string 
 export function worktreeCleanup(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
   const state = deriveState(readEvents(directory));
-  const workspace = loadConfig(project).workspace;
+  const config = loadConfig(project);
+  const workspace = config.workspace;
   let kept = false;
   for (const { repo, path, branch, base } of [...state.worktrees].reverse()) {
     // newest first: the anchor of a root repo holds the nested worktrees
@@ -365,7 +410,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
         if (mergeState !== "merged") {
           // a squash or rebase merge leaves the branch out of the target, so only a merged MR proves it
           const fetched = Bun.spawnSync(["git", "-C", source, "fetch", "origin"]);
-          const target = targetBranch(source);
+          const target = targetBranch(source, repoBase(config, repo));
           const inTarget =
             Bun.spawnSync([
               "git",

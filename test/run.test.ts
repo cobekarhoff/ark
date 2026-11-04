@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { loadConfig } from "../cli/config.ts";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
+import { timelineOf } from "../hub/run-detail.ts";
 import {
   ark,
   recordEvaluation,
@@ -208,6 +209,35 @@ for (const [name, value] of [
   test(`ARK-295-AC1 a ${name} merge_requests value is refused, not read as open`, () => {
     writeProject("broken", validConfig({ merge_requests: value }));
     expect(() => loadConfig("broken")).toThrow("merge_requests must be one of open, none");
+  });
+}
+
+test("ARK-296-AC1 loadConfig returns repos keyed by the exact repo path, and none when the key is absent", () => {
+  const repos = {
+    "repos/confluent/consumers-v2": { base: "release/9.1.0" },
+    ".": { base: "main" },
+  };
+  writeProject("based", validConfig({ repos }));
+  writeProject("plain", validConfig());
+  expect(loadConfig("based").repos).toEqual(repos);
+  expect(Object.hasOwn(loadConfig("plain"), "repos")).toBe(false);
+});
+
+for (const [name, entry] of [
+  ["no base", {}],
+  ["an empty base", { base: "" }],
+  ["a non-string base", { base: 9 }],
+] as const) {
+  test(`ARK-296-AC1 a repos entry with ${name} is refused and names the key`, () => {
+    writeProject(
+      "broken",
+      validConfig({ repos: { "repos/a": { base: "main" }, "repos/b": entry } }),
+    );
+    expect(() => loadConfig("broken")).toThrow("repos.repos/b");
+    const ticketFile = writeTicket("broken", "ARK-902", [{ id: "ARK-902-AC1", text: "It works" }]);
+    const result = ark("run", "start", ticketFile, "--project", "broken");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("repos.repos/b");
   });
 }
 
@@ -1231,4 +1261,150 @@ test("ARK-295-AC5 ark status counts a none project with an invalid unrelated fie
   expect(result.code).toBe(0);
   expect(result.out).toMatch(/^merge requests: none$/m);
   expect(result.out).not.toContain("(local only)");
+});
+
+/** A run with gates.escalation auto whose spent budget `ark run step ... start` answers by auto. */
+function autoEscalatedRun(): { runId: string; directory: string } {
+  writeProject("demo", validConfig({ gates: { escalation: "auto" } }));
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  for (let round = 1; round <= 2; round++) {
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  }
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": "failing" },
+  });
+  const started = ark("run", "step", runId, "build", "start");
+  expect(started.err).toBe("");
+  expect(started.out).toContain("escalation one_more_round by auto (1 of 2)");
+  return { runId, directory };
+}
+
+// ARK-288-AC7 proof: `bun test test/run.test.ts -t ARK-288-AC7`
+test("ARK-288-AC7 ark status prints escalation one_more_round by auto after an automatic answer", () => {
+  const { runId } = autoEscalatedRun();
+  const status = ark("status", runId);
+  expect(status.code).toBe(0);
+  expect(status.out).toContain("escalation one_more_round by auto");
+  expect(status.out).not.toContain("escalation one_more_round by human");
+});
+
+test("ARK-288-AC7 the retro counts the automatic escalation answer as auto and the run page timeline shows by auto", () => {
+  const { runId, directory } = autoEscalatedRun();
+  expect(ark("retro", runId).code).toBe(0);
+  const metrics = JSON.parse(readFileSync(join(directory, "metrics.json"), "utf8"));
+  expect(metrics.gates).toMatchObject({ auto_answers: 1 });
+  const events = readFileSync(join(directory, "events.ndjson"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const entry = timelineOf(events).find((item) => item.why.startsWith("escalation gate"));
+  expect(entry?.why).toBe("escalation gate: one_more_round by auto");
+});
+
+test("ARK-288-AC7 the retro text prints one by auto line for the automatic escalation answer and one by human line for a human one", () => {
+  const { runId } = autoEscalatedRun();
+  expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
+  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+  const retro = ark("retro", runId);
+  expect(retro.code).toBe(0);
+  expect(retro.out.match(/^escalation one_more_round by auto$/gm)).toHaveLength(1);
+  expect(retro.out.match(/^escalation one_more_round by human$/gm)).toHaveLength(1);
+});
+
+function startKindRun(kind: string | undefined, ticketId = "ARK-900", acCount = 1) {
+  const ticketFile = writeTicket(
+    "demo",
+    ticketId,
+    Array.from({ length: acCount }, (_, i) => ({ id: `${ticketId}-AC${i + 1}`, text: "It works" })),
+    "Demo ticket",
+    kind,
+  );
+  const started = ark("run", "start", ticketFile, "--project", "demo");
+  const runId = started.out.trim();
+  return {
+    started,
+    runId,
+    directory: join(process.env.ARK_HOME as string, "projects", "demo", "runs", runId),
+  };
+}
+
+test("ARK-302-AC4 each kind and a missing kind land in run.started and ark status, and a bad kind exits 1 naming the allowed values", () => {
+  const expected: [string | undefined, string][] = [
+    ["bug", "bug"],
+    ["perf", "perf"],
+    ["refactor", "refactor"],
+    ["feature", "feature"],
+    [undefined, "feature"],
+  ];
+  expected.forEach(([kind, shown], i) => {
+    const { started, runId, directory } = startKindRun(kind, `ARK-91${i}`);
+    expect(started.code).toBe(0);
+    expect(JSON.parse(eventLines(directory)[0]).data.kind).toBe(shown);
+    expect(ark("status", runId).out).toContain(`kind: ${shown}`);
+  });
+
+  const bad = startKindRun("chore", "ARK-919");
+  expect(bad.started.code).toBe(1);
+  for (const allowed of ["bug", "perf", "refactor", "feature"])
+    expect(bad.started.err).toContain(allowed);
+  expect(bad.started.err).toContain("chore");
+  expect(ark("status").out).not.toContain("ARK-919");
+});
+
+test("ARK-302-AC5 a bug run refuses an implementer step start until a test.completed has every non-manual AC failing", () => {
+  const { runId, directory } = startKindRun("bug");
+  approvePlan(directory);
+  const message = "bug run: record a failing ark test of the ACs before the fix";
+
+  const refused = ark("run", "step", runId, "build", "start");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain(message);
+  const before = eventLines(directory);
+
+  // A test where the AC is missing (no test tagged) is not a failing test.
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": "missing" },
+  });
+  expect(ark("run", "step", runId, "build", "start").err).toContain(message);
+  expect(eventLines(directory)).toHaveLength(before.length + 1);
+
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": "failing" },
+  });
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+});
+
+test("ARK-302-AC5 a bug run with several ACs needs one test.completed with every non-manual AC failing", () => {
+  const { runId, directory } = startKindRun("bug", "ARK-900", 3);
+  approvePlan(directory);
+  const message = "bug run: record a failing ark test of the ACs before the fix";
+  const completed = (criteria: Record<string, string>) =>
+    appendEvent(directory, "test.completed", { passed: false, heads: {}, suites: [], criteria });
+
+  // A run that lists only AC1 as failing leaves AC2 and AC3 unproven.
+  completed({ "ARK-900-AC1": "failing" });
+  // One AC still passing, and failing ACs spread over two runs: neither is a red proof.
+  completed({ "ARK-900-AC1": "failing", "ARK-900-AC2": "passing", "ARK-900-AC3": "failing" });
+  completed({ "ARK-900-AC1": "passing", "ARK-900-AC2": "failing", "ARK-900-AC3": "failing" });
+  expect(ark("run", "step", runId, "build", "start").err).toContain(message);
+
+  // A manual AC is skipped, so the other two failing is enough.
+  completed({
+    "ARK-900-AC1": "failing",
+    "ARK-900-AC2": "failing",
+    "ARK-900-AC3": "manual pending",
+  });
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
 });

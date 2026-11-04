@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,8 +73,9 @@ function scenario(
   config: Record<string, unknown> = {},
 ) {
   tempArkHome();
+  const workspace = mkdtempSync(join(tmpdir(), "ark-workspace-"));
   const projectDirectory = writeProject("demo", {
-    workspace: tmpdir(),
+    workspace,
     ticket_source: "local",
     suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
     roles: {
@@ -130,7 +132,9 @@ function scenario(
     { type: "gate.answered", data: { gate: "plan", answer: "approve" } },
   ];
   for (const name of ["core", "app", "docs"]) {
-    const source = tempGitRepo();
+    const source = join(workspace, "repos", name);
+    mkdirSync(join(workspace, "repos"), { recursive: true });
+    renameSync(tempGitRepo(), source);
     const base = git(source, "branch", "--show-current");
     const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
     git(bare, "init", "--bare");
@@ -174,7 +178,7 @@ function scenario(
       .map((event, i) => JSON.stringify({ seq: i + 1, time: "2026-10-29T00:00:00.000Z", ...event }))
       .join("\n") + "\n",
   );
-  return { runDirectory, worktrees, bares };
+  return { runDirectory, worktrees, bares, workspace };
 }
 
 /** Adds an evaluation of `surfaces`, skills on every plan step and a reviewer step with `findings`. */
@@ -694,3 +698,160 @@ for (const subcommand of ["open", "status"]) {
     { timeout: 30_000 },
   );
 }
+
+/** Rewrites the events of a scenario run in place; `change` gets each parsed event and returns it. */
+function rewriteEvents(
+  runDirectory: string,
+  change: (event: { type: string; data: Record<string, any> }) => unknown,
+) {
+  const file = join(runDirectory, "events.ndjson");
+  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  writeFileSync(
+    file,
+    lines.map((line) => JSON.stringify(change(JSON.parse(line)))).join("\n") + "\n",
+  );
+}
+
+/** Replaces the text of one AC in the run's ticket.md (the text is a JSON string there). */
+function setCriterionText(runDirectory: string, id: string, text: string) {
+  const file = join(runDirectory, "ticket.md");
+  const lines = readFileSync(file, "utf8").split("\n");
+  const at = lines.findIndex((line) => line === `  - id: ${id}`) + 1;
+  lines[at] = `    text: ${JSON.stringify(text)}`;
+  writeFileSync(file, lines.join("\n"));
+}
+
+test(
+  "ARK-302-AC2 refuses when a criterion is missing or failing in the last test.completed, names each, opens nothing",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" });
+    // passed stays true: the refusal must come from the per-AC status, not the suite verdict.
+    rewriteEvents(runDirectory, (event) => {
+      if (event.type === "test.completed") event.data.criteria = { "ARK-900-AC1": "failing" };
+      return event;
+    });
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("ARK-900-AC1 (failing)");
+    expect(refused.err).toContain("ARK-900-AC2 (missing)");
+    expect(calls()).toHaveLength(0);
+    expect(openedEvents(runDirectory)).toHaveLength(0);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-302-AC2 a manual criterion that is not passing does not block opening",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
+    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+    rewriteEvents(runDirectory, (event) => {
+      if (event.type === "test.completed")
+        event.data.criteria = { "ARK-900-AC1": "passing", "ARK-900-AC2": "manual ok" };
+      return event;
+    });
+    expect(ark("merge-request", "open", run).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-296-AC4 merge-request open passes repos.<repo>.base to gh --base and glab --target-branch",
+  () => {
+    scenario({ core: "github", app: "gitlab" }, true, [], {
+      repos: { "repos/core": { base: "release/9" }, "repos/app": { base: "release/9.1.0" } },
+    });
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    const [gh, glab] = created();
+    expect([gh.tool, optionValue(gh, "--base")]).toEqual(["gh", "release/9"]);
+    expect(gh.argv.slice(0, 2)).toEqual(["pr", "create"]);
+    expect([glab.tool, optionValue(glab, "--target-branch")]).toEqual(["glab", "release/9.1.0"]);
+    expect(glab.argv.slice(0, 2)).toEqual(["mr", "create"]);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-302-AC3 refuses an AC string that no tracked file holds, names the AC and the string, and accepts one that exists",
+  () => {
+    const { runDirectory, worktrees } = scenario({ core: "github", app: "github" });
+    // `core` and `# test` are tracked at head (core.txt, README.md); the string of AC2 is in no worktree at head.
+    setCriterionText(runDirectory, "ARK-900-AC1", "Core writes `core` and `# test`");
+    setCriterionText(runDirectory, "ARK-900-AC2", "App shows `absent-string-xyz` and `core`");
+    // An untracked file holding the string is not tracked, so it does not count.
+    writeFileSync(join(worktrees.app, "scratch.txt"), "absent-string-xyz");
+
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("ARK-900-AC2 `absent-string-xyz`");
+    expect(refused.err).not.toContain("ARK-900-AC1");
+    expect(refused.err).not.toContain("`core`");
+    expect(refused.err).not.toContain("`# test`");
+    expect(calls()).toHaveLength(0);
+
+    setCriterionText(runDirectory, "ARK-900-AC2", "App shows `core`");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-302-AC3 accepts an AC string that only an untouched repo of the workspace holds",
+  () => {
+    const { runDirectory, workspace } = scenario({ core: "github", app: "github" });
+    // `lib` has no run worktree: it is only linked into the mirror.
+    renameSync(tempGitRepo({ "lib.txt": "lib-only-literal" }), join(workspace, "repos/lib"));
+    setCriterionText(runDirectory, "ARK-900-AC1", "Core reads `lib-only-literal`");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+
+    setCriterionText(runDirectory, "ARK-900-AC1", "Core reads `absent-everywhere`");
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("ARK-900-AC1 `absent-everywhere`");
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-302-AC6 a perf run refuses a missing baseline.md and an empty compare.md, names each, and opens once both have content",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" });
+    rewriteEvents(runDirectory, (event) => {
+      if (event.type === "run.started") event.data.kind = "perf";
+      return event;
+    });
+    mkdirSync(join(runDirectory, "results"), { recursive: true });
+    writeFileSync(join(runDirectory, "results/compare.md"), "");
+
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("results/baseline.md");
+    expect(refused.err).toContain("results/compare.md");
+    expect(calls()).toHaveLength(0);
+
+    writeFileSync(join(runDirectory, "results/baseline.md"), "p95 120 ms\n");
+    const half = ark("merge-request", "open", run);
+    expect(half.code).toBe(1);
+    expect(half.err).not.toContain("results/baseline.md");
+    expect(half.err).toContain("results/compare.md");
+
+    writeFileSync(join(runDirectory, "results/compare.md"), "p95 80 ms\n");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-296-AC4 a repo with no base keeps the origin/HEAD target while a configured repo uses its base",
+  () => {
+    const { worktrees } = scenario({ core: "github", app: "gitlab" }, true, [], {
+      repos: { "repos/app": { base: "release/9" } },
+    });
+    git(worktrees.core, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    const [gh, glab] = created();
+    expect(optionValue(gh, "--base")).toBe("develop");
+    expect(optionValue(glab, "--target-branch")).toBe("release/9");
+  },
+  { timeout: 30_000 },
+);

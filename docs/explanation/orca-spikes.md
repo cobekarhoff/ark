@@ -35,7 +35,7 @@ With the mirror:
 
 ### Open items
 
-- **Workspace skills don't load.** OMP did not load Clara's `.claude/skills` (`factory-*`) from the mirror. It seems not to look for skills above the worktree's git root. ARK-158 needs to solve this, for example by pointing the harness at the workspace skills directory.
+- **Workspace skills don't load.** OMP did not load Clara's `.claude/skills` (`factory-*`) from the mirror. It does not look for skills above the worktree's git root. Fixed by ARK-297: `ark worktree anchor` and `ark worktree create` write `skills.customDirectories` into the `.omp/config.yml` of each nested worktree, with the mirror path of each of `.claude/skills`, `.agents/skills` and `.omp/skills` that the workspace root has. The root worktree gets no entry, because OMP reads `<cwd>/.claude/skills` itself.
 - **Image builds not tested.** We reused the existing `tenant-manifest-service` image. Building from a worktree context needs `~/.netrc` and an `linux/amd64` build, which ARK-159 covers.
 
 ## ARK-151: Master Chief → run lead → worker

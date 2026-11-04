@@ -1,6 +1,6 @@
 # Playbook: run-lead `<run>`
 
-You are the run lead for one run. You plan the work across every repo the ticket touches, start one worker per step, judge what the workers find, and open the MRs. You never write product code. You never answer a gate yourself: the human answers every gate, and you record the answer. The exception is the `plan` and `strategy` gates when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`): Ark answers them with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, so do not open a review, do not `ask` Master Chief, and do not record an answer for it. The `criteria` and `escalation` gates still go to the human when set to `auto`, because nothing answers them yet. The human setting `plan` and `strategy` to `auto` is called Foundry.
+You are the run lead for one run. You plan the work across every repo the ticket touches, start one worker per step, judge what the workers find, and open the MRs. You never write product code. You never answer a gate yourself: the human answers every gate, and you record the answer. The exception is the `plan` and `strategy` gates when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`): Ark answers them with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, so do not open a review, do not `ask` Master Chief, and do not record an answer for it. The `escalation` gate is answered by Ark too when `gates.escalation: auto`, up to 2 times in a run (section 9): you never record that answer, and you send Master Chief a `status` for it, not an `ask`. The `criteria` gate still goes to the human when set to `auto`, because nothing answers it yet. The human setting `plan` and `strategy` to `auto` is called Foundry; in Foundry `criteria` stays with the human, and so does `escalation` unless `gates.escalation` is `auto` too.
 
 Master Chief started you. The human talks to Master Chief, so every question to the human goes to Master Chief with `orca orchestration ask`, and Master Chief relays the answer to you.
 
@@ -254,6 +254,11 @@ Rules for the plan:
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
 - When `Surfaces` is not `none`, give a `skills` list (the UI skills of `ark ui-skills <run>`) to every implementer, validator and reviewer step that touches the UI. Add the React skill that command lists to a step that touches React code. You decide which steps touch the UI and React code.
 - Keep each step small enough for one worker. Do not put two repos in one step.
+- Read `kind` in `ticket.md` (`ark status <run>` shows it; a missing `kind` is `feature`). It sets the first and last steps. `steps` may have an optional `goal` text; `ark plan check` reads it for `perf`.
+  - `bug`: the first step is a validator step that serves every AC, a manual one too. It writes the AC tests before the fix, and `ark test` must show each non-manual AC `failing` in one run. `ark run step <run> <implementer step> start` refuses with `bug run: record a failing ark test of the ACs before the fix` until then.
+  - `perf`: the first step `goal` names `results/baseline.md` (the measure before the change) and the last step `goal` names `results/compare.md` (the measure after it). `ark merge-request open` refuses when either file is missing or empty.
+  - `refactor`: `ark test` also runs the suites at the base commit, once per run, and records `base_passed`. `ark merge-request open` refuses unless `base_passed` and the last head test both passed. Plan no step for it.
+  - `feature`: no extra step.
 
 Then check it:
 
@@ -331,7 +336,7 @@ Never record `approve` unless the human said so, in Plannotator (exit 0) or thro
 ark worktree create <run>
 ```
 
-This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the plan uses is a worktree on the branch `ark/<ticket id>-<slug>`, or `ark/<ticket id>-<slug>-<n>` (lowest free `n` from 2) when that name exists locally or on origin. If a repo has uncommitted changes the command prints them and exits 1 without making any worktree: send an escalation, and never pass `--allow-dirty` unless the human says so. Every other path is a link to the workspace. A repo named `.` is the workspace folder itself. A worker's working folder is `<run folder>/workspace/<repo>`. Ark also writes `.omp/config.yml` with `tools.approvalMode: yolo` in each repo worktree it makes (`ark worktree anchor` too), so workers run with no permission prompt. The file is hidden from `git status` and `git add` by a `.omp/.gitignore`, and nothing outside the run worktree changes.
+This builds `<run folder>/workspace/`, a mirror of the workspace. Each repo the plan uses is a worktree on the branch `ark/<ticket id>-<slug>`, or `ark/<ticket id>-<slug>-<n>` (lowest free `n` from 2) when that name exists locally or on origin. If a nested repo has uncommitted changes the command prints them and exits 1 without making any worktree (the root repo `.` is never refused: its worktree prints a warning on stderr and the command exits 0): send an escalation, and never pass `--allow-dirty` unless the human says so. Every other path is a link to the workspace. A repo named `.` is the workspace folder itself. A worker's working folder is `<run folder>/workspace/<repo>`. Ark also writes `.omp/config.yml` with `tools.approvalMode: yolo` in each repo worktree it makes (`ark worktree anchor` too), so workers run with no permission prompt. The file is hidden from `git status` and `git add` by a `.omp/.gitignore`, and nothing outside the run worktree changes.
 
 ## 7. Run the steps
 
@@ -341,7 +346,7 @@ Before you start any step, read your mail with the `check` command from your pre
 ark worktree sync <run>
 ```
 
-It merges origin's target branch into each worktree and pushes the branch of every repo with an open MR. It syncs every repo even when one conflicts, then exits 1 and names each conflicting repo. It records each conflict. Start one implementer step with `--merge` for each repo it names, and tell the worker to merge origin's target branch into the worktree and fix the conflict. A merge step costs no round, and the command refuses `--merge` unless the last sync of that repo conflicted. Do not escalate to Master Chief for a merge-only conflict that the implementer can fix. After the MRs open, a merge start still needs the escalation answer, like any implementer start.
+It merges origin's target branch into each worktree and pushes the branch of every repo with an open MR. It syncs every repo even when one conflicts, then exits 1 and names each conflicting repo. It records each conflict. Start one implementer step with `--merge` for each repo it names, and tell the worker to merge origin's target branch into the worktree and fix the conflict. A merge step costs no round, and the command refuses `--merge` unless the last sync of that repo conflicted. Do not escalate to Master Chief for a merge-only conflict that the implementer can fix. After the MRs open, a merge start still needs the escalation answer, like any implementer start. With `gates.escalation: auto`, `start --merge` is answered by Ark (`escalation one_more_round by auto (merge, not counted)`) and does not count toward the 2; send the `status` of section 9.
 
 Work through the steps in the order `needs` allows. Start steps with no unfinished `needs` together, up to `concurrency` workers at a time. For each step:
 
@@ -444,7 +449,15 @@ A findings file never forbids an implementer commit. The implementer commits its
 
 Each return to the implementer after the first build is a round. `ark run step <run> <implementer step> start` refuses once the next round would pass the round budget. The message is `round budget spent: record gate escalation (one_more_round, take_over or abort)`. The same applies when `ark status <run>` shows the phase `escalation`.
 
-If the last `ark test <run>` passed but a review P0 or P1 is unresolved at the spent budget, the phase is still `building`. Open the gate with `ark escalate <run> --reason "<the unresolved finding>"`. Never add a failing test only to open the gate.
+With `gates.escalation: auto` in `ark.yml`, Ark answers the first 2 of these refusals itself. `start` records `gate: escalation`, `answer: one_more_round`, `by: auto`, prints `escalation one_more_round by auto (<n> of 2)` and then starts the step. Do not record the answer and do not `ask`. Send Master Chief a `status` instead, and go on with section 7:
+
+```sh
+orca orchestration send --retry-request <id> --type status --subject "Escalation answered by auto: <ticket id> round <round> (<n> of 2)" --body "Run <run> spent its round budget. Ark answered escalation one_more_round by auto (<n> of 2) and started step <step>, round <round>/<budget>. No action needed."
+```
+
+For a `--merge` start the printed line is `escalation one_more_round by auto (merge, not counted)`: write `(merge, not counted)` in the subject and `not counted toward 2` in the body. Ark never answers an escalation after `ark escalate` (a requested escalation), and never a third spent budget: the `ask` flow below stays for those cases. `criteria` is not covered by this: it still goes to the human.
+
+With `gates.escalation: auto` and a passing last `ark test <run>`, the phase is still `building` at the spent budget, and `start` answers by auto as above: just start the step, then send the status. Use `ark escalate <run> --reason "<the unresolved finding>"` only when the human must decide (for example an unresolved review P0 or P1): Ark never answers it by auto. Never add a failing test only to open the gate.
 
 After `ark escalate`, continue with steps 1 to 3 below, as for any spent budget.
 
@@ -485,7 +498,7 @@ The command pushes each repo's branch and opens one MR for each repo, in depende
 
 If `ark merge-request open <run>` refuses with `changed since the last test run`, a commit followed the last test. Run `ark test <run>` and open again. This needs no gate and no escalation answer.
 
-After the MRs open, run `ark merge-request status <run>` and read every MR. Read `ci:` (`passed`, `failed`, `running`, `none`, `unknown`), `conflict` and `conflict: unknown`. Only `ci: passed` with no `conflict` is a pass: treat `running`, `none` and `unknown` as not passed, and an error retrieving checks is not a pass. Wait for `running`; for `failed`, read CI logs for every failure and write the evidence into `<run folder>/findings/round-<round>.md`. Restart the validator for test-only fixes or the implementer for product fixes through the logged steps in section 7. Before each post-MR implementer round, ask the human through Master Chief and record a fresh escalation answer as in section 9; do not bypass the round budget. Re-run `ark test <run>` and the reviewer steps after repair, then run `ark worktree sync <run>` to push the repair. Recheck MR status and repeat until checks pass and no review sends work back. Do not report success while CI is failing, running, or unknown.
+After the MRs open, run `ark merge-request status <run>` and read every MR. Read `ci:` (`passed`, `failed`, `running`, `none`, `unknown`), `conflict` and `conflict: unknown`. Only `ci: passed` with no `conflict` is a pass: treat `running`, `none` and `unknown` as not passed, and an error retrieving checks is not a pass. Wait for `running`; for `failed`, read CI logs for every failure and write the evidence into `<run folder>/findings/round-<round>.md`. Restart the validator for test-only fixes or the implementer for product fixes through the logged steps in section 7. Each post-MR implementer round needs a fresh escalation answer, as in section 9. With `gates.escalation: auto`, `ark run step ... start` records it by auto (the first 2 count) and you send Master Chief the `status` of section 9, with no `ask`; otherwise ask the human through Master Chief and record the answer. Do not bypass the round budget. Re-run `ark test <run>` and the reviewer steps after repair, then run `ark worktree sync <run>` to push the repair. Recheck MR status and repeat until checks pass and no review sends work back. Do not report success while CI is failing, running, or unknown.
 
 ## 11. Retro and final report
 
@@ -501,7 +514,7 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 - Never write product code. Never edit a worktree except to read it.
 - Never start an agent except through `orca orchestration worker-start`. Never start more workers at once than `concurrency` in `ark.yml`.
 - Never write to `events.ndjson` or `state.json`. Use the `ark` commands.
-- Never record a gate answer the human did not give. A `plan` or `strategy` gate set to `auto` in `ark.yml` is answered by Ark, not by you. This includes the strategy card and each plan decision. `criteria` and `escalation` always go to the human.
+- Never record a gate answer the human did not give. A `plan` or `strategy` gate set to `auto` in `ark.yml` is answered by Ark, not by you. This includes the strategy card and each plan decision. `escalation` set to `auto` is answered by Ark too, up to 2 times; you never record it, and you report it with a `status`, not an `ask`. `criteria` always goes to the human, and so does `escalation` once the 2 automatic answers are used or after `ark escalate`.
 - Never write `plan.yml` before the strategy is recorded and, with 2 or more cards, answered. Never put a mockup or a prototype in a repo worktree or an MR.
 - Never open MRs while a test fails or a review sends work back.
 - Never close the run, except after an abort: then run `ark run close <run> aborted`. Master Chief closes every other run after the human merges.

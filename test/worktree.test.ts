@@ -581,7 +581,7 @@ describe("ARK-276 anchor worktree", () => {
       passed: true,
       heads: { ".": gitOutput(mirror, "rev-parse", "HEAD") },
       suites: [],
-      criteria: {},
+      criteria: { "FAKE-1-AC1": "passing" },
     });
 
     const opened = ark("merge-request", "open", runId);
@@ -632,7 +632,7 @@ describe("ARK-278 close removes workspace/", () => {
 });
 
 describe("ARK-280 worker permission setting", () => {
-  const settingFile = "tools:\n  approvalMode: yolo\n";
+  const expectedSettings = { tools: { approvalMode: "yolo" } };
 
   /** Every file under `directory` as `relative path -> content or link target`, skipping `skip` prefixes. */
   function snapshot(directory: string, skip: string[] = []): Record<string, string> {
@@ -678,12 +678,16 @@ describe("ARK-280 worker permission setting", () => {
     const anchor = ark("worktree", "anchor", runId);
     expect(anchor.code).toBe(0);
     expect(anchor.out).toContain(`path:${mirror}`);
-    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     assertHiddenFromGit(mirror);
 
     // create after anchor keeps the file and the clean status
     expect(ark("worktree", "create", runId, ".").code).toBe(0);
-    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     assertHiddenFromGit(mirror);
   });
 
@@ -692,7 +696,9 @@ describe("ARK-280 worker permission setting", () => {
     const { runId, runDirectory } = startRun(workspace);
     expect(ark("worktree", "create", runId, ".").code).toBe(0);
     const mirror = join(runDirectory, "workspace");
-    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     assertHiddenFromGit(mirror);
   });
 
@@ -707,7 +713,9 @@ describe("ARK-280 worker permission setting", () => {
     expect(result.code).toBe(0);
 
     const mirror = join(runDirectory, "workspace");
-    expect(readFileSync(join(mirror, "repos/a/.omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, "repos/a/.omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     assertHiddenFromGit(join(mirror, "repos/a"));
 
     // repos/b/c is a link to the workspace: a write through it would land in the main workspace
@@ -722,7 +730,9 @@ describe("ARK-280 worker permission setting", () => {
 
     // a second repo gets its own file
     expect(ark("worktree", "create", runId, "repos/b/c").code).toBe(0);
-    expect(readFileSync(join(mirror, "repos/b/c/.omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, "repos/b/c/.omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     expect(existsSync(join(workspace, "repos/b/c/.omp"))).toBe(false);
   });
 
@@ -794,6 +804,99 @@ test("ARK-280-AC5 docs/reference/cli.md matches the generator", () => {
     Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
   ).toBe(0);
   expect(readFileSync(path, "utf8")).toBe(before);
+});
+
+/** A root repo with tracked skill folders and the nested repo `repos/x`. */
+function skillsWorkspace(directories: string[]): string {
+  const files = Object.fromEntries(directories.map((name) => [`${name}/analyze/SKILL.md`, "x\n"]));
+  const workspace = tempGitRepo({ "AGENTS.md": "rules\n", ...files });
+  mkdirSync(join(workspace, "repos"));
+  renameSync(tempGitRepo({ "readme.txt": "x" }), join(workspace, "repos/x"));
+  return workspace;
+}
+
+describe("ARK-297 workspace skills and dirty root", () => {
+  const parsedConfig = (runDirectory: string, folder: string) =>
+    Bun.YAML.parse(
+      readFileSync(join(runDirectory, "workspace", folder, ".omp/config.yml"), "utf8"),
+    );
+
+  test("ARK-297-AC1 a nested worktree lists the mirror path of each root skills folder, the root worktree and a workspace without skills list none", () => {
+    const withSkills = startRun(skillsWorkspace([".claude/skills", ".omp/skills"]));
+    expect(ark("worktree", "anchor", withSkills.runId).code).toBe(0);
+    expect(ark("worktree", "create", withSkills.runId, "repos/x").code).toBe(0);
+    const mirror = join(withSkills.runDirectory, "workspace");
+    expect(parsedConfig(withSkills.runDirectory, "repos/x")).toEqual({
+      tools: { approvalMode: "yolo" },
+      skills: {
+        customDirectories: [join(mirror, ".claude/skills"), join(mirror, ".omp/skills")],
+      },
+    });
+    expect(parsedConfig(withSkills.runDirectory, ".")).toEqual({ tools: { approvalMode: "yolo" } });
+
+    const without = startRun(skillsWorkspace([]));
+    expect(ark("worktree", "anchor", without.runId).code).toBe(0);
+    expect(ark("worktree", "create", without.runId, "repos/x").code).toBe(0);
+    expect(parsedConfig(without.runDirectory, "repos/x")).toEqual({
+      tools: { approvalMode: "yolo" },
+    });
+  });
+
+  const warningCount = (text: string) => text.split("uncommitted change").length - 1;
+  const dirtyRoot = () => {
+    const workspace = skillsWorkspace([]);
+    writeFileSync(join(workspace, "AGENTS.md"), "edited\n");
+    writeFileSync(join(workspace, "new-one.txt"), "u");
+    writeFileSync(join(workspace, "new-two.txt"), "u");
+    return workspace;
+  };
+
+  test("ARK-297-AC3 anchor on a dirty root warns once on stderr, keeps stdout to one path line, and a later create adds no second warning", () => {
+    const { runId, runDirectory } = startRun(dirtyRoot());
+    const anchored = ark("worktree", "anchor", runId);
+    expect(anchored.code).toBe(0);
+    expect(anchored.out).toBe(`path:${join(runDirectory, "workspace")}\n`);
+    expect(warningCount(anchored.err)).toBe(1);
+    expect(anchored.err).toContain("has 3 uncommitted changes, not in the worktree");
+    for (const path of ["AGENTS.md", "new-one.txt", "new-two.txt"])
+      expect(anchored.err).toContain(path);
+    expect(anchored.err).not.toContain("repos/x");
+
+    const created = ark("worktree", "create", runId, "repos/x");
+    expect(created.code).toBe(0);
+    expect(warningCount(created.out + created.err)).toBe(0);
+  });
+
+  test("ARK-297-AC3 create that names the dirty root exits 0 without --allow-dirty and warns once on stderr, never on stdout, with no earlier anchor", () => {
+    const { runId } = startRun(dirtyRoot());
+    const created = ark("worktree", "create", runId, ".");
+    expect(created.code).toBe(0);
+    expect(warningCount(created.err)).toBe(1);
+    expect(created.err).toContain("has 3 uncommitted changes, not in the worktree");
+    expect(warningCount(created.out)).toBe(0);
+  });
+
+  test("ARK-297-AC3 a clean root with a nested repo prints no warning and exits 0", () => {
+    const { runId } = startRun(skillsWorkspace([]));
+    const anchored = ark("worktree", "anchor", runId);
+    expect(anchored.code).toBe(0);
+    expect(anchored.err).toBe("");
+    expect(anchored.out.trim().split("\n")).toHaveLength(1);
+  });
+});
+
+test("ARK-297-AC2 the live omp check is kept in docs/evidence/ARK-297-ac2.md with proof: passed", () => {
+  const evidence = readFileSync(join(import.meta.dir, "../docs/evidence/ARK-297-ac2.md"), "utf8");
+  for (const part of [
+    "ark worktree anchor",
+    "ark worktree create",
+    "omp -p --no-session",
+    "analyze",
+    "skills.customDirectories",
+    "approvalMode: yolo",
+  ])
+    expect(evidence, part).toContain(part);
+  expect(evidence.split("\n")).toContain("proof: passed");
 });
 
 /** Runs `body` with a fake `gh` first on PATH, then restores PATH. */
@@ -892,29 +995,29 @@ describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
     expect(existsSync(path)).toBe(true);
   });
 
-  test("ARK-188-AC4 a dirty source repo without --allow-dirty exits 1, lists the path and creates no worktree", () => {
-    const workspace = tempGitRepo();
-    writeFileSync(join(workspace, "README.md"), "changed\n");
+  test("ARK-188-AC4 a dirty nested source repo without --allow-dirty exits 1, lists the path and creates no worktree", () => {
+    const workspace = tempTwoRepoWorkspace();
+    writeFileSync(join(workspace, "a", "readme.txt"), "changed\n");
     const { runId, runDirectory } = startRun(workspace);
 
-    const result = ark("worktree", "create", runId, ".");
+    const result = ark("worktree", "create", runId, "a");
     expect(result.code).toBe(1);
-    expect(result.out + result.err).toContain("README.md");
+    expect(result.out + result.err).toContain("readme.txt");
     expect(existsSync(join(runDirectory, "workspace"))).toBe(false);
     expect(createdEvents(runDirectory)).toEqual([]);
   });
 
-  test("ARK-188-AC5 with --allow-dirty the worktree is created and the changed path is printed as a warning", () => {
-    const workspace = tempGitRepo();
-    writeFileSync(join(workspace, "README.md"), "changed\n");
+  test("ARK-188-AC5 with --allow-dirty the nested worktree is created and the changed path is printed as a warning", () => {
+    const workspace = tempTwoRepoWorkspace();
+    writeFileSync(join(workspace, "a", "readme.txt"), "changed\n");
     const { runId, runDirectory } = startRun(workspace);
 
-    const result = ark("worktree", "create", runId, ".", "--allow-dirty");
+    const result = ark("worktree", "create", runId, "a", "--allow-dirty");
     expect(result.code).toBe(0);
-    expect(result.out + result.err).toContain("warning");
-    expect(result.out + result.err).toContain("README.md");
+    expect(result.out).toContain("warning");
+    expect(result.out).toContain("readme.txt");
     expect(createdEvents(runDirectory)).toHaveLength(1);
-    expect(existsSync(join(runDirectory, "workspace"))).toBe(true);
+    expect(existsSync(join(runDirectory, "workspace", "a"))).toBe(true);
   });
 });
 
@@ -1031,4 +1134,209 @@ describe("ARK-294 handed_off close keeps branches with commits", () => {
     expect(text("docs/how-to/run-a-ticket.md")).toContain(log);
     expect(text("docs/how-to/run-a-ticket.md")).toMatch(/stays in its clone/);
   });
+});
+
+/** Adds `repos` to the ark.yml that `startRun` wrote (JSON, which is YAML). */
+function setRepos(runDirectory: string, repos: Record<string, { base: string }>): void {
+  const file = join(runDirectory, "../../ark.yml");
+  writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), repos }));
+}
+
+/** Pushes one commit to `branch` of `workspace`'s origin from a second clone; returns its sha. */
+function pushToOrigin(workspace: string, branch: string, file: string): string {
+  const clone = mkdtempSync(join(tmpdir(), "ark-other-clone-"));
+  gitOutput(clone, "clone", gitOutput(workspace, "remote", "get-url", "origin"), ".");
+  gitOutput(clone, "config", "user.name", "Ark Test");
+  gitOutput(clone, "config", "user.email", "ark@example.com");
+  gitOutput(clone, "checkout", branch);
+  commitIn(clone, file);
+  gitOutput(clone, "push", "origin", branch);
+  return gitOutput(clone, "rev-parse", "HEAD");
+}
+
+/** A clone whose origin has main and release/9 at the same commit, checked out on `checkedOut`. */
+function releaseWorkspace(checkedOut: "main" | "release/9" = "main"): string {
+  const workspace = tempGitRepo();
+  addRemote(workspace);
+  gitOutput(workspace, "push", "origin", "main:release/9");
+  gitOutput(workspace, "checkout", "-b", "release/9", "origin/release/9");
+  gitOutput(workspace, "checkout", checkedOut);
+  return workspace;
+}
+
+describe("ARK-296 repos.<repo>.base starts the worktree from origin/<base>", () => {
+  test("ARK-296-AC2 worktree create fetches origin/<base> and starts from it, not from the clone HEAD", () => {
+    const workspace = releaseWorkspace("release/9");
+    commitIn(workspace, "local-only.txt"); // on the clone's release/9, not on origin
+    const cloneHead = gitOutput(workspace, "rev-parse", "HEAD");
+    const originHead = pushToOrigin(workspace, "release/9", "origin-only.txt"); // clone's origin/release/9 is stale
+    const { runId, runDirectory } = startRun(workspace);
+    setRepos(runDirectory, { ".": { base: "release/9" } });
+
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const worktree = join(runDirectory, "workspace");
+    expect(gitOutput(worktree, "rev-parse", "HEAD")).toBe(originHead);
+    expect(gitOutput(worktree, "rev-parse", "HEAD")).not.toBe(cloneHead);
+    expect(existsSync(join(worktree, "local-only.txt"))).toBe(false);
+    expect(createdEvents(runDirectory).map((event) => event.data.base)).toEqual([originHead]);
+  });
+
+  test("ARK-296-AC2 worktree anchor starts from origin/<base> and records it as worktree.created.base", () => {
+    const workspace = releaseWorkspace("release/9");
+    commitIn(workspace, "local-only.txt");
+    const originHead = pushToOrigin(workspace, "release/9", "origin-only.txt");
+    const { runId, runDirectory } = startRun(workspace);
+    setRepos(runDirectory, { ".": { base: "release/9" } });
+
+    const anchor = ark("worktree", "anchor", runId);
+    expect(anchor.code).toBe(0);
+    const path = anchor.out.trim().replace(/^path:/, "");
+    expect(gitOutput(path, "rev-parse", "HEAD")).toBe(originHead);
+    expect(createdEvents(runDirectory).map((event) => event.data.base)).toEqual([originHead]);
+  });
+
+  test("ARK-296-AC2 a repo with no base still starts from the clone HEAD", () => {
+    const workspace = releaseWorkspace("release/9");
+    commitIn(workspace, "local-only.txt");
+    const cloneHead = gitOutput(workspace, "rev-parse", "HEAD");
+    const { runId, runDirectory } = startRun(workspace);
+    setRepos(runDirectory, { "repos/other": { base: "release/9" } });
+
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    expect(gitOutput(join(runDirectory, "workspace"), "rev-parse", "HEAD")).toBe(cloneHead);
+  });
+
+  for (const command of ["create", "anchor"]) {
+    test(`ARK-296-AC2 worktree ${command} with a base origin lacks exits 1, names the repo and the fetch error, and makes nothing`, () => {
+      const workspace = releaseWorkspace();
+      const { runId, runDirectory } = startRun(workspace);
+      setRepos(runDirectory, { ".": { base: "release/none" } });
+
+      const result =
+        command === "create"
+          ? ark("worktree", "create", runId, ".")
+          : ark("worktree", "anchor", runId);
+      expect(result.code).toBe(1);
+      expect(result.err).toContain("repo .");
+      expect(result.err).toContain("git fetch origin release/none");
+      expect(result.err).toContain("couldn't find remote ref release/none");
+      const mirror = join(runDirectory, "workspace");
+      expect(existsSync(mirror) ? readdirSync(mirror) : []).toEqual([]); // anchor makes the empty mirror folder before the fetch
+      expect(
+        gitOutput(workspace, "worktree", "list", "--porcelain").match(/^worktree /gm),
+      ).toHaveLength(1);
+      expect(gitOutput(workspace, "branch", "--list", "ark/*")).toBe("");
+      expect(readFileSync(join(runDirectory, "events.ndjson"), "utf8")).not.toContain(
+        "worktree.created",
+      );
+    });
+  }
+
+  test("ARK-296-AC2 worktree create with a later repo whose base fetch fails makes no worktree, branch or event for the earlier repo", () => {
+    const workspace = tempTwoRepoWorkspace();
+    for (const repo of ["a", "b"]) addRemote(join(workspace, repo));
+    const { runId, runDirectory } = startRun(workspace);
+    setRepos(runDirectory, { a: { base: "main" }, b: { base: "release/none" } });
+
+    const result = ark("worktree", "create", runId, "a", "b");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("repo b");
+    expect(result.err).toContain("git fetch origin release/none");
+    for (const repo of ["a", "b"]) {
+      expect(existsSync(join(runDirectory, "workspace", repo, ".git"))).toBe(false);
+      expect(
+        gitOutput(join(workspace, repo), "worktree", "list", "--porcelain").match(/^worktree /gm),
+      ).toHaveLength(1);
+      expect(gitOutput(join(workspace, repo), "branch", "--list", "ark/*")).toBe("");
+    }
+    expect(createdEvents(runDirectory)).toEqual([]);
+  }, 30_000);
+});
+
+describe("ARK-296 repos.<repo>.base is the target of worktree cleanup and workspace sync", () => {
+  /** A run on a clone whose origin has main and release/9. The run branch is pushed to origin/release/9 only, so it is in release/9 and not in main. */
+  function pushedToRelease(repos: Record<string, { base: string }>) {
+    const workspace = releaseWorkspace();
+    const { runId, runDirectory } = startRun(workspace);
+    setRepos(runDirectory, repos);
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const worktree = join(runDirectory, "workspace");
+    const branch = gitOutput(worktree, "branch", "--show-current");
+    commitIn(worktree, "squashed.txt");
+    gitOutput(worktree, "push", "origin", "HEAD:release/9");
+    openGithubMergeRequest(runDirectory);
+    return { workspace, runId, runDirectory, worktree, branch };
+  }
+  const openMergeRequest = `echo '{"state":"OPEN","statusCheckRollup":[]}'`;
+
+  test("ARK-296-AC4 cleanup of a merged run treats a branch in origin/<base> as in the target", () => {
+    const { workspace, runId, worktree, branch } = pushedToRelease({ ".": { base: "release/9" } });
+    const closed = withFakeGh(openMergeRequest, () => ark("run", "close", runId, "merged"));
+    expect(closed.code).toBe(0);
+    expect(closed.out).toContain(`removed  .  ${branch}`);
+    expect(gitOutput(workspace, "branch", "--list", branch)).toBe("");
+    expect(existsSync(worktree)).toBe(false);
+  });
+
+  test("ARK-296-AC4 cleanup of a merged run with no base keeps the origin/HEAD target", () => {
+    const { workspace, runId, worktree, branch } = pushedToRelease({});
+    const closed = withFakeGh(openMergeRequest, () => ark("run", "close", runId, "merged"));
+    expect(closed.out).toContain(`kept     .  ${branch}: branch is not in main`);
+    expect(gitOutput(workspace, "branch", "--list", branch)).not.toBe("");
+    expect(existsSync(worktree)).toBe(true);
+  });
+
+  /** A run whose clone is on main and has a local release/9; origin/release/9 then moves ahead. */
+  function originMoved(repos: Record<string, { base: string }>) {
+    const workspace = releaseWorkspace();
+    const { runId, runDirectory } = startRun(workspace);
+    setRepos(runDirectory, repos);
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    return { workspace, runId, releaseHead: pushToOrigin(workspace, "release/9", "r.txt") };
+  }
+
+  test("ARK-296-AC4 workspace sync fast-forwards origin/<base> into the local <base> branch", () => {
+    const { workspace, runId, releaseHead } = originMoved({ ".": { base: "release/9" } });
+    const mainBefore = gitOutput(workspace, "rev-parse", "main");
+    const synced = ark("workspace", "sync", runId);
+    expect(synced.code).toBe(0);
+    expect(synced.out).toContain(`.  release/9  ${releaseHead}`);
+    expect(gitOutput(workspace, "rev-parse", "release/9")).toBe(releaseHead);
+    expect(gitOutput(workspace, "rev-parse", "main")).toBe(mainBefore);
+  });
+
+  test("ARK-296-AC4 workspace sync with no base keeps the origin/HEAD target", () => {
+    const { workspace, runId, releaseHead } = originMoved({});
+    const staleRelease = gitOutput(workspace, "rev-parse", "release/9");
+    const synced = ark("workspace", "sync", runId);
+    expect(synced.code).toBe(0);
+    expect(synced.out).toContain(`.  main  ${gitOutput(workspace, "rev-parse", "main")}`);
+    expect(gitOutput(workspace, "rev-parse", "release/9")).toBe(staleRelease);
+    expect(staleRelease).not.toBe(releaseHead);
+  });
+});
+
+test("ARK-296-AC5 bootstrap step 2 asks for the base of each repo off origin/HEAD, docs/reference documents repos, and cli.md matches the generator", () => {
+  const root = join(import.meta.dir, "..");
+  const bootstrap = readFileSync(join(root, "skills/ark/playbooks/bootstrap.md"), "utf8");
+  const step2 = bootstrap.split("\n## 2.")[1]?.split("\n## ")[0] ?? "";
+  expect(step2).toContain("`origin/HEAD`");
+  expect(step2).toContain("keep every repo where they differ");
+  expect(step2).toContain("These repos are the `repos` candidates. Ask for each one in step 3.");
+  const ask = bootstrap.match(/For each `repos` candidate, ask: .*$/m)?.[0] ?? "";
+  expect(ask).toContain("origin/HEAD");
+  expect(ask).toContain("Recommended:");
+  expect(bootstrap).toMatch(/^repos: .*key is the repo path, exactly$/m);
+
+  const reference = readdirSync(join(root, "docs/reference"))
+    .map((name) => readFileSync(join(root, "docs/reference", name), "utf8"))
+    .join("\n");
+  expect(reference).toMatch(/^\| `repos` +\| no +\| map +\|.*\{ base: <branch name> \}/m);
+
+  const path = join(root, "docs/reference/cli.md");
+  const before = readFileSync(path, "utf8");
+  expect(
+    Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
+  ).toBe(0);
+  expect(readFileSync(path, "utf8")).toBe(before);
 });

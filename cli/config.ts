@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { projectDirectory } from "./paths.ts";
+import { discoverRepos } from "./workspace.ts";
 
 const ticketSources = ["local", "github", "jira"];
 const levels = ["unit", "integration", "e2e"];
@@ -25,11 +26,15 @@ export type ProjectConfig = {
     command: string;
     parser: string;
   }[];
+  /** Commands `ark test` runs in the repo's worktree before the suites. They must not write files. */
+  checks: { name: string; repo: string; command: string }[];
   roles: Record<Role, RoleConfig> & {
     evaluator?: RoleConfig;
     designer?: RoleConfig;
     chief?: RoleConfig;
   };
+  /** Base and target branch per repo, keyed by repo path exactly as `ark worktree create` names it (`.` or `repos/a`). */
+  repos?: Record<string, { base: string }>;
   concurrency: number;
   round_budget: number;
   /** Each gate is answered by the human or by Ark. A missing key is human. */
@@ -123,6 +128,23 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     };
   });
 
+  if (fields.checks !== undefined && !Array.isArray(fields.checks))
+    fail("checks must be a list of { name, repo, command }");
+  const workspaceRepos = discoverRepos(workspace);
+  const checkNames = new Set<string>();
+  const checks = ((fields.checks as unknown[] | undefined) ?? []).map((entry, i) => {
+    const check = asObject(entry, `checks[${i}]`);
+    const name = text(check, "name", `checks[${i}].name`);
+    if (checkNames.has(name)) fail(`checks[${i}].name duplicates another check: ${name}`);
+    checkNames.add(name);
+    const repo = text(check, "repo", `checks[${i}].repo`);
+    if (!workspaceRepos.includes(repo))
+      fail(
+        `checks[${i}].repo is not a repo of the workspace: ${repo} (use ${workspaceRepos.join(", ")})`,
+      );
+    return { name, repo, command: text(check, "command", `checks[${i}].command`) };
+  });
+
   const rolesField = asObject(fields.roles ?? fail("roles is required"), "roles");
   const roles = {} as ProjectConfig["roles"];
   // The evaluator, designer and chief are optional: ark evaluation record, ark strategy record and the chief playbook name them when missing.
@@ -150,16 +172,28 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     gates[name] = value as "human" | "auto";
   }
 
+  let repos: ProjectConfig["repos"];
+  if (fields.repos !== undefined) {
+    const reposField = asObject(fields.repos, "repos");
+    repos = {};
+    for (const key of Object.keys(reposField))
+      repos[key] = {
+        base: text(asObject(reposField[key], `repos.${key}`), "base", `repos.${key}.base`),
+      };
+  }
+
   const config: ProjectConfig = {
     workspace,
     ticket_source: ticketSource,
     merge_requests: mergeRequestsMode,
     suites,
+    checks,
     roles,
     concurrency: integer(fields, "concurrency", 1, 2),
     round_budget: integer(fields, "round_budget", 0, 2),
     gates,
   };
+  if (repos !== undefined) config.repos = repos;
   if (fields.compose !== undefined) config.compose = fields.compose as string;
   if (fields.setup !== undefined) config.setup = fields.setup as string;
   return config;

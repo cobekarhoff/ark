@@ -90,7 +90,7 @@ When no Run has the objective 'Master Chief: <project> tickets', or the send exi
 
 Copy the newest ticket's structure:
 
-- Frontmatter: `id`, `title`, `status: proposed`, `milestone`, `traces` (PRD requirement IDs), `depends_on`, and `acceptance_criteria` with IDs `<ticket>-AC<k>`. A criterion that only a person can prove gets `manual: true`; leave the field out for every other criterion.
+- Frontmatter: `id`, `title`, `status: proposed`, `kind` (`bug`, `perf`, `refactor` or `feature`; set it in every new ticket, and a missing `kind` reads as `feature`), `milestone`, `traces` (PRD requirement IDs), `depends_on`, and `acceptance_criteria` with IDs `<ticket>-AC<k>`. A criterion that only a person can prove gets `manual: true`; leave the field out for every other criterion.
 - Sections: Problem, Change, Acceptance criteria (a table), Evidence.
 
 The next number is one above the highest `ARK-*.md` in the tickets folder.

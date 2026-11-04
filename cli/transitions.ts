@@ -110,6 +110,10 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
       requirePhase(state, type, buildPhases);
       if (state.steps.find((step) => step.id === data.step)?.status === "running")
         throw new ArkError(`step.started refused: step ${data.step} is already running`);
+      if (state.kind === "bug" && data.role === "implementer" && !state.red_test)
+        throw new ArkError(
+          "step.started refused: bug run: record a failing ark test of the ACs before the fix",
+        );
       if (
         state.phase === "merge_requests_open" &&
         data.role === "implementer" &&
@@ -199,6 +203,8 @@ function assertGateAllowed(state: RunState, data: EventData): void {
   if (
     state.phase !== phaseOfGate &&
     !(data.gate === "escalation" && state.phase === "merge_requests_open") &&
+    // A spent budget at step start in building: only the auto path answers there.
+    !(data.gate === "escalation" && state.phase === "building" && data.by === "auto") &&
     !(data.gate === "manual" && state.phase === "escalation")
   ) {
     throw new ArkError(
