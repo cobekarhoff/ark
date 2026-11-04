@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { ArkError } from "./errors";
 import { manualCriteria } from "./criteria.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent } from "./events";
+import { mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
 import { uiSkillsFor } from "./ui-skills";
@@ -236,7 +237,11 @@ export function staleHeads(events: ArkEvent[]): StaleHead[] {
 }
 
 export function mergeRequestOpen(runId: string, inProject?: string): void {
-  const { directory } = findRun(runId, inProject);
+  const { project, directory } = findRun(runId, inProject);
+  if (mergeRequestsMode(project) === "none")
+    throw new ArkError(
+      `project ${project} has merge_requests: none: close the run with ark run close ${runId} handed_off`,
+    );
   const events = readEvents(directory);
   const state = deriveState(events);
   if (!["building", "escalation", "merge_requests_open"].includes(state.phase)) {
@@ -635,7 +640,11 @@ export function mergeRequestStatus(
   const sinceTime = options.since === undefined ? undefined : Date.parse(options.since);
   if (sinceTime !== undefined && Number.isNaN(sinceTime))
     throw new ArkError(`--since ${options.since} is not an ISO 8601 time`);
-  const { directory } = findRun(runId, inProject);
+  const { project, directory } = findRun(runId, inProject);
+  if (mergeRequestsMode(project) === "none") {
+    console.log("merge requests: none");
+    return;
+  }
   const state = deriveState(readEvents(directory));
   if (state.merge_requests.length === 0) throw new ArkError(`${runId} has no merge requests`);
   const reports = state.merge_requests.map((merge) => {

@@ -2,7 +2,7 @@ import { now as hubNow } from "./clock.ts";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { manualCriteria } from "./criteria.ts";
 import { appendEvent, deriveState, readEvents, writeState, type RunState } from "./events.ts";
@@ -10,7 +10,7 @@ import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { staleHeads } from "./merge-request.ts";
 import { assertAllowed } from "./transitions.ts";
-import { worktreeCleanup } from "./worktree.ts";
+import { commitsAhead, worktreeCleanup } from "./worktree.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
 
@@ -251,8 +251,22 @@ function testHeadLines(directory: string): string[] {
   );
 }
 
+/** The `none` project's merge request line and one `branch` line for each worktree with commits beyond its base. */
+function localOnlyLines(project: string, state: RunState): string[] {
+  const workspace = loadConfig(project).workspace;
+  const branches: string[] = [];
+  for (const { repo, branch, base } of state.worktrees) {
+    const ahead = commitsAhead(join(workspace, repo), branch, base);
+    if (ahead)
+      branches.push(
+        `branch   ${repo}  ${branch}  ${ahead} commit(s) ahead of ${base?.slice(0, 8)}`,
+      );
+  }
+  return ["merge requests: none (local only)", ...branches];
+}
+
 function printRun(runId: string, inProject?: string): void {
-  const { directory } = findRun(runId, inProject);
+  const { project, directory } = findRun(runId, inProject);
   const state = writeState(directory);
   if (state.events === 0) throw new ArkError(`run ${runId} has no events`);
   const answered = readEvents(directory)
@@ -276,8 +290,12 @@ function printRun(runId: string, inProject?: string): void {
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
     ...testHeadLines(directory),
-    `merge requests: ${state.merge_requests.length === 0 ? "none" : ""}`,
-    ...state.merge_requests.map((request) => `  ${request.repo} ${request.url}`),
+    ...(mergeRequestsMode(project) === "none"
+      ? localOnlyLines(project, state)
+      : [
+          `merge requests: ${state.merge_requests.length === 0 ? "none" : ""}`,
+          ...state.merge_requests.map((request) => `  ${request.repo} ${request.url}`),
+        ]),
     costLine(directory),
   ];
   console.log(lines.join("\n"));

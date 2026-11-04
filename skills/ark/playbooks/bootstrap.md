@@ -121,9 +121,13 @@ Leave out `concurrency` and `round_budget`. Their defaults are 2 and 2.
 
 A repo has UI code when it has one of these signals: a web framework in `package.json` (`react`, `vue`, `svelte`, `next`, `@angular/core`), HTML templates, a Storybook config (`.storybook/`), or an `ios` or `android` project. Find each UI repo without a question. For each one, record whether `PRODUCT.md` and `DESIGN.md` already exist at its root. Bootstrap writes no `ark.yml` field for this: step 10 uses the result.
 
+### Merge requests
+
+Default: no key, which means `open`. Write `merge_requests: none` only when the human says the project must not push, for example no host token yet or every clone has `remote.origin.pushurl` set to `DISABLED`. Never detect it. A `none` run ends `handed_off`: Ark pushes nothing and `ark status` lists the local branches.
+
 ## 3. Ask only what you could not detect
 
-Make a list of the unknowns: ticket source, roles, an ambiguous suite level, or a missing suite command. For each unknown, one at a time:
+Make a list of the unknowns: ticket source, whether the project must not push (`merge_requests: none`; ask it once, recommended answer: no), roles, an ambiguous suite level, or a missing suite command. For each unknown, one at a time:
 
 1. Ask the question with a recommended answer.
 2. Wait for the human.
@@ -238,6 +242,7 @@ Write `~/.ark/projects/<project>/ark.yml` in the contract schema. Create the dir
 ```yaml
 workspace: <absolute workspace path>
 ticket_source: <local | github | jira>
+merge_requests: none # only when the human says the project must not push; omit otherwise
 compose: <compose command> # omit when the project has no compose file
 suites:
   - name: <unique name>

@@ -15,6 +15,7 @@ type RoleConfig = { harness: string; model: string };
 export type ProjectConfig = {
   workspace: string;
   ticket_source: "local" | "github" | "jira";
+  merge_requests: "open" | "none";
   compose?: string;
   setup?: string;
   suites: {
@@ -47,6 +48,15 @@ export function loadConfig(project: string): ProjectConfig {
     throw new ArkError(`${file}: not valid YAML: ${(err as Error).message}`);
   }
   return validateConfig(raw, file);
+}
+
+/** The project's merge_requests mode; a missing or invalid ark.yml counts as open. */
+export function mergeRequestsMode(project: string): ProjectConfig["merge_requests"] {
+  try {
+    return loadConfig(project).merge_requests;
+  } catch {
+    return "open";
+  }
 }
 
 export function validateConfig(raw: unknown, path: string): ProjectConfig {
@@ -87,6 +97,10 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     "ticket_source",
     ticketSources,
   ) as ProjectConfig["ticket_source"];
+  const mergeRequests = fields.merge_requests ?? "open";
+  if (mergeRequests !== "open" && mergeRequests !== "none")
+    fail("merge_requests must be one of open, none");
+  const mergeRequestsMode = mergeRequests as ProjectConfig["merge_requests"];
   if (fields.compose !== undefined) text(fields, "compose", "compose");
   if (fields.setup !== undefined) text(fields, "setup", "setup");
 
@@ -142,6 +156,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   const config: ProjectConfig = {
     workspace,
     ticket_source: ticketSource,
+    merge_requests: mergeRequestsMode,
     suites,
     roles,
     concurrency: integer(fields, "concurrency", 1, 2),
