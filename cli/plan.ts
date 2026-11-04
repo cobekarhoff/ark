@@ -314,11 +314,8 @@ export function findProblems(
   const first = plan.steps[0];
   const last = plan.steps.at(-1);
   if (kind === "bug") {
-    const automated = ticketCriteria.filter((id) => !manual.includes(id));
-    if (first?.role !== "validator" || !automated.every((id) => first.criteria.includes(id)))
-      problems.push(
-        "bug run: the first step must be a validator step that serves every non-manual criterion",
-      );
+    if (first?.role !== "validator" || !ticketCriteria.every((id) => first.criteria.includes(id)))
+      problems.push("bug run: the first step must be a validator step that serves every criterion");
   }
   if (kind === "perf") {
     if (!first?.goal.includes("results/baseline.md"))

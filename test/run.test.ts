@@ -1262,11 +1262,11 @@ test("ARK-295-AC5 ark status counts a none project with an invalid unrelated fie
   expect(result.out).not.toContain("(local only)");
 });
 
-function startKindRun(kind: string | undefined, ticketId = "ARK-900") {
+function startKindRun(kind: string | undefined, ticketId = "ARK-900", acCount = 1) {
   const ticketFile = writeTicket(
     "demo",
     ticketId,
-    [{ id: `${ticketId}-AC1`, text: "It works" }],
+    Array.from({ length: acCount }, (_, i) => ({ id: `${ticketId}-AC${i + 1}`, text: "It works" })),
     "Demo ticket",
     kind,
   );
@@ -1327,6 +1327,29 @@ test("ARK-302-AC5 a bug run refuses an implementer step start until a test.compl
     heads: {},
     suites: [],
     criteria: { "ARK-900-AC1": "failing" },
+  });
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+});
+
+test("ARK-302-AC5 a bug run with several ACs needs one test.completed with every non-manual AC failing", () => {
+  const { runId, directory } = startKindRun("bug", "ARK-900", 3);
+  approvePlan(directory);
+  const message = "bug run: record a failing ark test of the ACs before the fix";
+  const completed = (criteria: Record<string, string>) =>
+    appendEvent(directory, "test.completed", { passed: false, heads: {}, suites: [], criteria });
+
+  // A run that lists only AC1 as failing leaves AC2 and AC3 unproven.
+  completed({ "ARK-900-AC1": "failing" });
+  // One AC still passing, and failing ACs spread over two runs: neither is a red proof.
+  completed({ "ARK-900-AC1": "failing", "ARK-900-AC2": "passing", "ARK-900-AC3": "failing" });
+  completed({ "ARK-900-AC1": "passing", "ARK-900-AC2": "failing", "ARK-900-AC3": "failing" });
+  expect(ark("run", "step", runId, "build", "start").err).toContain(message);
+
+  // A manual AC is skipped, so the other two failing is enough.
+  completed({
+    "ARK-900-AC1": "failing",
+    "ARK-900-AC2": "failing",
+    "ARK-900-AC3": "manual pending",
   });
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
 });

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,8 +73,9 @@ function scenario(
   config: Record<string, unknown> = {},
 ) {
   tempArkHome();
+  const workspace = mkdtempSync(join(tmpdir(), "ark-workspace-"));
   const projectDirectory = writeProject("demo", {
-    workspace: tmpdir(),
+    workspace,
     ticket_source: "local",
     suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
     roles: {
@@ -130,7 +132,9 @@ function scenario(
     { type: "gate.answered", data: { gate: "plan", answer: "approve" } },
   ];
   for (const name of ["core", "app", "docs"]) {
-    const source = tempGitRepo();
+    const source = join(workspace, "repos", name);
+    mkdirSync(join(workspace, "repos"), { recursive: true });
+    renameSync(tempGitRepo(), source);
     const base = git(source, "branch", "--show-current");
     const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
     git(bare, "init", "--bare");
@@ -174,7 +178,7 @@ function scenario(
       .map((event, i) => JSON.stringify({ seq: i + 1, time: "2026-10-29T00:00:00.000Z", ...event }))
       .join("\n") + "\n",
   );
-  return { runDirectory, worktrees, bares };
+  return { runDirectory, worktrees, bares, workspace };
 }
 
 /** Adds an evaluation of `surfaces`, skills on every plan step and a reviewer step with `findings`. */
@@ -787,6 +791,23 @@ test(
 
     setCriterionText(runDirectory, "ARK-900-AC2", "App shows `core`");
     expect(ark("merge-request", "open", run).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-302-AC3 accepts an AC string that only an untouched repo of the workspace holds",
+  () => {
+    const { runDirectory, workspace } = scenario({ core: "github", app: "github" });
+    // `lib` has no run worktree: it is only linked into the mirror.
+    renameSync(tempGitRepo({ "lib.txt": "lib-only-literal" }), join(workspace, "repos/lib"));
+    setCriterionText(runDirectory, "ARK-900-AC1", "Core reads `lib-only-literal`");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+
+    setCriterionText(runDirectory, "ARK-900-AC1", "Core reads `absent-everywhere`");
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("ARK-900-AC1 `absent-everywhere`");
   },
   { timeout: 30_000 },
 );

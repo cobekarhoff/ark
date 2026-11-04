@@ -711,8 +711,8 @@ describe("plan check UI skills", () => {
 
 describe("plan check by ticket kind", () => {
   /** Starts a run of `kind` on a second ticket with the same ACs as `criteria`, and makes it the current run. */
-  function startKindRun(kind: string) {
-    const ticket = writeTicket("demo", "ARK-901", criteria, undefined, kind);
+  function startKindRun(kind: string, ticketCriteria: Record<string, unknown>[] = criteria) {
+    const ticket = writeTicket("demo", "ARK-901", ticketCriteria as never, undefined, kind);
     const started = ark("run", "start", ticket);
     expect(started.code).toBe(0);
     runId = started.out.trim();
@@ -743,6 +743,29 @@ describe("plan check by ticket kind", () => {
       expect(result.code).toBe(1);
       expect(result.out).toContain("bug run");
     }
+
+    writePlan({
+      ...validPlan(),
+      steps: [
+        step("tests", { role: "validator", criteria: both }),
+        step("build", { needs: ["tests"], criteria: both }),
+      ],
+    });
+    expect(ark("plan", "check", runId).code).toBe(0);
+  });
+
+  test("ARK-302-AC5 a bug run with a manual criterion still needs the first validator step to serve it", () => {
+    startKindRun("bug", [criteria[0], { ...criteria[1], manual: true }]);
+    writePlan({
+      ...validPlan(),
+      steps: [
+        step("tests", { role: "validator", criteria: ["ARK-900-AC1"] }),
+        step("build", { needs: ["tests"], criteria: both }),
+      ],
+    });
+    const refused = ark("plan", "check", runId);
+    expect(refused.code).toBe(1);
+    expect(refused.out).toContain("bug run");
 
     writePlan({
       ...validPlan(),

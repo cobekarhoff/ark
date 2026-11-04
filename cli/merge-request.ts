@@ -6,7 +6,7 @@ import { appendEvent, deriveState, readEvents, type ArkEvent } from "./events";
 import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
-import { repoBase } from "./workspace.ts";
+import { discoverRepos, repoBase } from "./workspace.ts";
 import { uiSkillsFor } from "./ui-skills";
 
 type PlanStep = { id: string; repo: string; needs: string[]; criteria: string[] };
@@ -94,19 +94,19 @@ export function backtickedLiterals(text: string): string[] {
 }
 
 /**
- * Backticked AC strings that no tracked file of any run worktree holds at HEAD.
- * ponytail: an untouched repo is a symlink to the live workspace checkout, not a run worktree, so it is not searched.
+ * Backticked AC strings that no tracked file at HEAD of any repo of the run holds. A touched repo is searched in
+ * its run worktree, an untouched one at its workspace checkout, which the mirror links to.
  */
 function absentLiterals(
   texts: Map<string, string>,
-  worktrees: Map<string, Worktree>,
+  repoPaths: string[],
 ): { criterion: string; literal: string }[] {
   const absent: { criterion: string; literal: string }[] = [];
   for (const [criterion, text] of texts)
     for (const literal of new Set(backtickedLiterals(text)))
       if (
-        ![...worktrees.values()].some(
-          ({ path }) => spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], path).ok,
+        !repoPaths.some(
+          (path) => spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], path).ok,
         )
       )
         absent.push({ criterion, literal });
@@ -315,7 +315,10 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
     );
   }
 
-  const absent = absentLiterals(criterionTexts(directory), worktrees);
+  const repoPaths = discoverRepos(projectConfig.workspace).map(
+    (repo) => worktrees.get(repo)?.path ?? join(projectConfig.workspace, repo),
+  );
+  const absent = absentLiterals(criterionTexts(directory), repoPaths);
   if (absent.length > 0)
     throw new ArkError(
       `AC string in no tracked file at head: ${absent.map(({ criterion, literal }) => `${criterion} \`${literal}\``).join("; ")}`,

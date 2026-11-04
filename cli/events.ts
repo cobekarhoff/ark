@@ -153,7 +153,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   const syncConflicts = new Set<string>();
   let lastTest: RunState["last_test"] = null;
   let kind: TicketKind = "feature";
-  let redTest = false;
+  const testRuns: Record<string, string>[] = [];
   let basePassed: boolean | undefined;
   let escalationAnswered = false;
   let escalationRequested = false;
@@ -276,13 +276,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         criteriaStatus = data.criteria;
         lastTest = { passed: data.passed, heads: data.heads };
         basePassed = data.base_passed ?? basePassed;
-        {
-          const automated = Object.values<string>(data.criteria ?? {}).filter(
-            (status) => !status.startsWith("manual"),
-          );
-          if (automated.length > 0 && automated.every((status) => status === "failing"))
-            redTest = true;
-        }
+        testRuns.push(data.criteria ?? {});
         if (mergeRequests.length === 0) escalationAnswered = false;
         break;
       case "escalation.requested":
@@ -328,6 +322,12 @@ export function deriveState(events: ArkEvent[]): RunState {
   )
     phase = "escalation";
   else phase = "building";
+
+  // Red proof: one test run where every current non-manual criterion failed.
+  const redTest = testRuns.some((statuses) => {
+    const required = criteriaIds.filter((id) => !statuses[id]?.startsWith("manual"));
+    return required.length > 0 && required.every((id) => statuses[id] === "failing");
+  });
 
   return {
     run,

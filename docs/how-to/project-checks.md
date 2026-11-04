@@ -27,7 +27,7 @@ checks:
 ## What else refuses
 
 - `ark merge-request open <run>` refuses when a non-manual AC is not `passing` in the last `test.completed`.
-- It refuses when a string in backticks in the text of an AC is in no tracked file of a run worktree at head. A backtick span must sit on one line and be non-blank. Each is searched with `git grep -F` at HEAD. A repo with no run worktree is not searched. Fix a wrong literal with `ark criteria amend`.
+- It refuses when a string in backticks in the text of an AC is in no tracked file at HEAD of any repo of the workspace, run worktree or not. A backtick span must sit on one line and be non-blank. Each is searched with `git grep -F`. Fix a wrong literal with `ark criteria amend`.
 - A ticket may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`). `bug`: `ark run step <run> <implementer step> start` refuses until a failing `ark test` of every AC exists. `perf`: `results/baseline.md` and `results/compare.md` must exist and not be empty. `refactor`: `ark test` runs the suites at the base commit once and records `base_passed`.
 
 ## Literals

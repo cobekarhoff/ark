@@ -22,6 +22,7 @@ import {
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { findRun } from "./paths.ts";
 import { discoverRepos, mirrorRoot } from "./workspace.ts";
+import { linkUntouched } from "./worktree.ts";
 
 type Status = CriterionStatus;
 
@@ -105,8 +106,11 @@ function baseSuitesPassed(
       if (created.code !== 0)
         throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
       added.push({ source, path });
+    }
+    linkUntouched(config.workspace, root, discoverRepos(config.workspace));
+    for (const { repo } of worktrees) {
       if (config.setup) {
-        const setup = run(["sh", "-c", config.setup], path);
+        const setup = run(["sh", "-c", config.setup], join(root, repo));
         if (setup.code !== 0)
           throw new ArkError(
             `setup failed at the base of ${repo}: ${(setup.stderr || setup.stdout).trim()}`,
@@ -119,11 +123,7 @@ function baseSuitesPassed(
         throw new ArkError(`compose up failed: ${(up.stderr || up.stdout).trim()}`);
     }
     return config.suites
-      .map((suite) => {
-        const at = join(root, suite.repo);
-        const cwd = existsSync(at) ? at : join(config.workspace, suite.repo);
-        return runSuite(suite, cwd, resultsDirectory, "base-").passed;
-      })
+      .map((suite) => runSuite(suite, join(root, suite.repo), resultsDirectory, "base-").passed)
       .every(Boolean);
   } finally {
     if (compose) run([...compose, "down"], root);

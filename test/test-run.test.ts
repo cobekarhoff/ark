@@ -1,5 +1,14 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ark,
@@ -447,5 +456,87 @@ describe("ark test on a refactor run", () => {
     expect(result.out).toContain("base      passed");
     expect(testCompleted(runDirectory)[0].base_passed).toBe(true);
     expect(ark("merge-request", "open", runId).err).not.toContain("base commit");
+  });
+
+  test("ARK-302-AC7 the base suites of a touched repo can read an untouched sibling repo", () => {
+    const arkHome = tempArkHome();
+    const workspace = mkdtempSync(join(tmpdir(), "ark-workspace-"));
+    mkdirSync(join(workspace, "repos"));
+    renameSync(
+      tempGitRepo({
+        "e2e.test.ts": suiteTests([
+          `test("FAKE-1-AC1 reads the sibling", () => { expect(require("node:fs").readFileSync("../b/data.txt", "utf8")).toBe("sibling"); });`,
+        ]),
+      }),
+      join(workspace, "repos/a"),
+    );
+    renameSync(tempGitRepo({ "data.txt": "sibling" }), join(workspace, "repos/b"));
+    writeProject("demo", {
+      workspace,
+      ticket_source: "local",
+      suites: [
+        {
+          name: "e2e",
+          level: "e2e",
+          repo: "repos/a",
+          command: junit("e2e.test.ts"),
+          parser: "bun",
+        },
+      ],
+      roles,
+    });
+    const runId = ark(
+      "run",
+      "start",
+      writeTicket("demo", "FAKE-1", [{ id: "FAKE-1-AC1", text: "reads" }], "Ticket", "refactor"),
+      "--project",
+      "demo",
+    ).out.match(/\d{4}-\d{2}-\d{2}-FAKE-1-\d+/)![0];
+    const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+    recordEvaluation(runDirectory);
+    writeFileSync(
+      join(runDirectory, "plan.yml"),
+      JSON.stringify({
+        design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
+        summary: {
+          why: "Test the base.",
+          changes: [{ criterion: "FAKE-1-AC1", where: "a", now: "x", fix: "y" }],
+        },
+        steps: [
+          {
+            id: "build",
+            role: "implementer",
+            repo: "repos/a",
+            harness: "claude",
+            model: "claude-sonnet",
+            needs: [],
+            criteria: ["FAKE-1-AC1"],
+          },
+        ],
+        test_cases: [
+          {
+            id: "proves",
+            criterion: "FAKE-1-AC1",
+            level: "e2e",
+            given: [],
+            when: ["run it"],
+            // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+            then: ["it works"],
+            expected: "it works",
+          },
+        ],
+      }),
+    );
+    for (const args of [
+      ["plan", "check", runId],
+      ["gate", "record", runId, "plan", "approve"],
+      ["worktree", "create", runId, "repos/a"],
+    ])
+      expect(ark(...args).code).toBe(0);
+
+    const result = ark("test", runId);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("base      passed");
+    expect(testCompleted(runDirectory)[0].base_passed).toBe(true);
   });
 });
