@@ -83,6 +83,7 @@ Do these steps in order for one ready ticket.
    ---
    id: ARK-156
    title: "Router skill and playbooks"
+   kind: feature # bug, perf, refactor or feature: copy it from the proposed ticket and set it in every new ticket
    acceptance_criteria:
      - id: ARK-156-AC1
        text: "The statement, copied word for word"

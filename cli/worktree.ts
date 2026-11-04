@@ -277,9 +277,12 @@ export function worktreeCreate(
   for (const repo of touched)
     addRepoWorktree(directory, config, state, repo, console.log, bases.get(repo));
 
-  const mirror = mirrorRoot(directory);
-  if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror
+  linkUntouched(workspace, mirrorRoot(directory), knownRepos);
+}
 
+/** Links every root entry and repo of the workspace that the mirror does not hold yet. A single-repo workspace needs none: the worktree is the mirror. */
+export function linkUntouched(workspace: string, mirror: string, knownRepos: string[]): void {
+  if (knownRepos.length === 1 && knownRepos[0] === ".") return;
   for (const entry of readdirSync(workspace)) {
     const link = join(mirror, entry);
     if (!skippedRootEntries.has(entry) && !pathExists(link))

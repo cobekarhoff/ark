@@ -969,6 +969,30 @@ test("ARK-300-AC5 the live check evidence records a proof line", () => {
   );
 });
 
+test("ARK-302-AC8 run-lead section 4 tells the run lead to read kind and write the first and last steps for bug, perf and refactor", () => {
+  const plan = section(runLeadPlaybook, "## 4. Write the plan\n");
+  expect(plan).not.toBe("");
+  expect(plan).toMatch(/Read `kind`/);
+  expect(plan).toMatch(/`bug`:[^\n]*first step is a validator step that serves every AC/);
+  expect(plan).toMatch(
+    /`perf`:[^\n]*first step `goal` names `results\/baseline\.md`[^\n]*last step `goal` names `results\/compare\.md`/,
+  );
+  expect(plan).toMatch(/`refactor`:[^\n]*`base_passed`/);
+});
+
+test("ARK-302-AC8 brainstorm and chief section 6 say to set kind in a new ticket", () => {
+  const brainstorm = readFileSync(join(playbookDirectory, "brainstorm.md"), "utf8");
+  expect(brainstorm).toMatch(
+    /`kind` \(`bug`, `perf`, `refactor` or `feature`; set it in every new ticket/,
+  );
+
+  const start = section(chiefPlaybook, "## 6. Start a run lead for each ready ticket\n");
+  expect(start).not.toBe("");
+  expect(start).toMatch(
+    /^ *kind: feature # bug, perf, refactor or feature:.*set it in every new ticket/m,
+  );
+});
+
 test("ARK-297-AC4 bootstrap step 7 does not set the global omp config and says Ark writes each worktree config.yml", () => {
   const step = bootstrapPlaybook
     .split("## 7. Make the workspace's skills reachable for workers")[1]

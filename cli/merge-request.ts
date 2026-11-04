@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors";
 import { manualCriteria } from "./criteria.ts";
@@ -6,7 +6,7 @@ import { appendEvent, deriveState, readEvents, type ArkEvent } from "./events";
 import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
-import { repoBase } from "./workspace.ts";
+import { discoverRepos, repoBase } from "./workspace.ts";
 import { uiSkillsFor } from "./ui-skills";
 
 type PlanStep = { id: string; repo: string; needs: string[]; criteria: string[] };
@@ -83,6 +83,42 @@ function criterionTexts(runDirectory: string): Map<string, string> {
     : {};
   const criteria = frontmatter.acceptance_criteria ?? [];
   return new Map(criteria.map((criterion) => [criterion.id, criterion.text]));
+}
+
+/**
+ * The strings in backticks of an AC text. One rule for all of them: a span must sit on one line and be
+ * non-blank, so a multi-line span and an empty `` never become a literal. Each is searched verbatim (`git grep -F`).
+ */
+export function backtickedLiterals(text: string): string[] {
+  return [...text.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]).filter((s) => s.trim() !== "");
+}
+
+/**
+ * Backticked AC strings that no tracked file at HEAD of any repo of the run holds. A touched repo is searched in
+ * its run worktree, an untouched one at its workspace checkout, which the mirror links to.
+ */
+function absentLiterals(
+  texts: Map<string, string>,
+  repoPaths: string[],
+): { criterion: string; literal: string }[] {
+  const absent: { criterion: string; literal: string }[] = [];
+  for (const [criterion, text] of texts)
+    for (const literal of new Set(backtickedLiterals(text)))
+      if (
+        !repoPaths.some(
+          (path) => spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], path).ok,
+        )
+      )
+        absent.push({ criterion, literal });
+  return absent;
+}
+
+/** Result files a perf run must leave: missing or empty ones. */
+function emptyResultFiles(directory: string): string[] {
+  return ["results/baseline.md", "results/compare.md"].filter((file) => {
+    const path = join(directory, file);
+    return !existsSync(path) || statSync(path).size === 0;
+  });
 }
 
 /** The configured `repos.<repo>.base`, else the branch origin's HEAD names, else the worktree's base commit. */
@@ -262,6 +298,14 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
     throw new ArkError(
       `manual ${unproven.length === 1 ? "criterion" : "criteria"} without ok: ${unproven.join(", ")}`,
     );
+  const manual = new Set(manualCriteria(directory));
+  const notPassing = state.criteria.filter(
+    ({ id }) => !manual.has(id) && lastTest.data.criteria?.[id] !== "passing",
+  );
+  if (notPassing.length > 0)
+    throw new ArkError(
+      `criteria not passing in the last test run: ${notPassing.map(({ id }) => `${id} (${lastTest.data.criteria?.[id] ?? "missing"})`).join(", ")}`,
+    );
   if (!lastTest.data.passed)
     throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
   const [first] = staleHeads(events);
@@ -270,6 +314,24 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
       `repo ${first.repo} changed since the last test run (tested ${first.tested?.slice(0, 8) ?? "nothing"}, now ${first.current.slice(0, 8)}): run ark test ${runId} again`,
     );
   }
+
+  const repoPaths = discoverRepos(projectConfig.workspace).map(
+    (repo) => worktrees.get(repo)?.path ?? join(projectConfig.workspace, repo),
+  );
+  const absent = absentLiterals(criterionTexts(directory), repoPaths);
+  if (absent.length > 0)
+    throw new ArkError(
+      `AC string in no tracked file at head: ${absent.map(({ criterion, literal }) => `${criterion} \`${literal}\``).join("; ")}`,
+    );
+  if (state.kind === "perf") {
+    const bad = emptyResultFiles(directory);
+    if (bad.length > 0)
+      throw new ArkError(`perf run: missing or empty result file: ${bad.join(", ")}`);
+  }
+  if (state.kind === "refactor" && state.base_passed !== true)
+    throw new ArkError(
+      `refactor run: the suites ${state.base_passed === false ? "fail" : "were not run"} at the base commit: run ark test ${runId}`,
+    );
 
   const plan = loadPlan(directory);
   const upstream = upstreamRepos(plan);
