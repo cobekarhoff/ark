@@ -131,3 +131,8 @@ The ACs of ARK-302, ARK-304 and ARK-305 name these strings. `ark merge-request o
 - `## Finding the knowledge base`
 - `uv run check-knowledge-docs`
 - `Paths are relative to the workspace root`
+- `ARK_305_AC1`
+- `bun test test/merge-request.test.ts -t ARK-305-AC1`
+- `bun test test/merge-request.test.ts -t ARK-305-AC2`
+- `bun test test/merge-request.test.ts -t ARK-305-AC3`
+- `bun test test/playbooks.test.ts -t ARK-305-AC4`
