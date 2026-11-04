@@ -1061,3 +1061,17 @@ test("ARK-297-AC5 the spikes note says skills reach a nested worktree through sk
   expect(item).toContain("`skills.customDirectories`");
   expect(item).toContain("`.omp/config.yml` of each nested worktree");
 });
+
+test("ARK-304-AC6 chief section 8 row and worker_done step 3 say close applies the refusals of merge-request open", () => {
+  const sentence =
+    "`ark run close` applies the refusals of `ark merge-request open`; on a refusal, run `ark test <run>` again or `ark criteria amend`, and tell the human which AC is open";
+  const row = section(chiefPlaybook, "## 8.")
+    .split("\n")
+    .find((line) => line.includes("`ark run close <run> handed_off`"));
+  expect(row).toContain(sentence);
+  const step = chiefPlaybook
+    .split("\n3. If the run is in phase `building`, the outcome is not `failed`,")[1]
+    ?.split("\n4. ")[0];
+  expect(step).toContain(sentence);
+  expect(chiefPlaybook).not.toContain("the last test must have passed");
+});

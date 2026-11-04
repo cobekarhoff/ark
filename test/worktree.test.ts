@@ -129,6 +129,18 @@ function closeRun(
   outcome: string,
 ): { out: string; code: number } {
   if (outcome === "abandoned" || outcome === "merged") approveAndOpenMergeRequest(runDirectory);
+  // handed_off applies the refusals of merge-request open: a passing test at the current heads.
+  if (outcome === "handed_off") {
+    const heads: Record<string, string> = {};
+    for (const { data } of createdEvents(runDirectory))
+      if (existsSync(data.path)) heads[data.repo] = gitOutput(data.path, "rev-parse", "HEAD");
+    appendEvent(runDirectory, "test.completed", {
+      passed: true,
+      heads,
+      suites: [{ name: "unit", level: "unit", passed: true }],
+      criteria: { "FAKE-1-AC1": "passing" },
+    });
+  }
   const result = ark("run", "close", runId, outcome);
   return { out: result.out, code: result.code };
 }
