@@ -87,13 +87,13 @@ Every improvement proposal in `retro.md` uses this shape:
 
 - **Scope:** project | Ark | skill
 - **Evidence:** <run id and event sequence number, metrics.json value, or finding; at least one>
-- **Change:** <the exact change: the lines for `ark.yml` or `learnings.md`, the ticket title and ACs, or the skill diff>
+- **Change:** <the exact change: the lines for `ark.yml`, `learnings.md` or `verify.md`, the ticket title and ACs, or the skill diff>
 - **Status:** proposed
 ```
 
 Scopes:
 
-- **project:** a change to `ark.yml` or `learnings.md` for this project only.
+- **project:** a change to `ark.yml`, `learnings.md` or `verify.md` for this project only. When the validator finds `verify.md` wrong, the run lead writes a proposal with scope `project`. Wrong means a start or reach command fails, or a feature gives another result than the map says; the validator's findings are the evidence.
 - **Ark:** a change to Ark's own process or commands. It becomes a ticket on the Ark backlog.
 - **skill:** a change to a skill, shown as a diff.
 
@@ -110,6 +110,7 @@ Apply a proposal only after the human answers "approve". Then change the status 
   ```markdown
   - <lesson in one sentence>. Evidence: <run id>, <what showed it>. Added <date>.
   ```
+- A fix to `verify.md` goes into `~/.ark/projects/<project>/verify.md`. Edit only the named lines of the start, reach or feature map part, run the changed command once to check that it now shows the result the map names, and keep the three-part form of bootstrap step 12.
 
 ### Scope: Ark
 

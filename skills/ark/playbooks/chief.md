@@ -289,6 +289,18 @@ Two loops run in the Ark repo's `scripts/` folder. Start each one in its own bac
 - `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN and 3 rules hold: it merges only after `retro.md` exists in the run folder (the run lead sent its final report), it skips a run whose ticket is `superseded` or `done`, and it re-reads `ark status <run>` right before `gh pr merge`. It prints `HELD: <run> #<number> <reason>` lines to stderr, once for each held PR. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again. Do not start `scripts/auto-merger.sh` for a project whose `ark.yml` says `merge_requests: none`: its runs never reach `merge_requests_open`.
 - `scripts/temp-cleaner.sh <workspace> 300` removes Ark test temp directories older than 12 minutes from `$TMPDIR`. It prints `LOW DISK` and exits when `/` has less than 15 GB free.
 
+## 13. Catch the human up
+
+When the human asks to be caught up ("catch me up", "what's waiting"), give one reply. Build it from two reads: `ark chief state --project <project>`, and your Orca inbox read without a wait (`orca orchestration check --json`; do not ack a message you did not handle). A state section that says `unavailable` is unknown: say so in the reply, never call it empty.
+
+The reply has three parts, in this order:
+
+1. **Merged:** each run that merged since the human last heard from you, with its ticket ID and title.
+2. **Failed or aborted:** each run that failed, aborted or was abandoned, with the reason in one line.
+3. **Waiting on the human:** each item that waits on the human, one block for each: the run or ticket, what is asked (a gate, a `manual` check, an escalation, a question, a retro close check), and the options with your recommended one. Write it so that the human can decide from the reply alone, with no need to open the run.
+
+Leave out a part that has no items and say "Nothing waiting" when all three are empty. End the reply after the last item. Do not ask "anything else", do not wait for an answer in that turn, and do not answer a gate yourself: the human's answer comes in the next message, and then you handle it as in section 7.
+
 ## Rules
 
 - Never write product code, edit a worktree, or run a project's tests yourself. Run leads and workers do that.

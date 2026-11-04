@@ -25,7 +25,7 @@ Read the ticket and the step's ACs first. If the repo has a web UI, also load th
 
 ## How to report
 
-Report each problem once, at the place where it matters most. Do not repeat a problem under a second area or a second finding. Do not report style the repo's formatter or linter already enforces. Do not report a finding without evidence.
+Report each problem once, at the place where it matters most. Do not repeat a problem under a second area or a second finding. Do not report style the repo's formatter or linter already enforces. Do not report a finding without evidence. Name the principle from [`principles.md`](../principles.md) that the finding breaks, when one applies.
 
 Use these priorities:
 
@@ -44,8 +44,11 @@ Write each finding in this form:
 - **File:** <path relative to the repo>
 - **Line:** <line number or range>
 - **Area:** correctness | proof | security | complexity | naming
+- **Repro:** <command>
 - **Evidence:** <what you read or ran, and what it shows: the code, the missing test, the command and its output>
 - **Fix:** <one sentence>
 ```
+
+A P0 or P1 finding has a line `- **Repro:** <command>`, and its Evidence quotes the output that shows the problem. For a design finding (an abstraction with one user), the command is a `grep`. A P0 or P1 without it is written as P2: keep the heading `### P2` and drop the Repro line. A P2 or P3 needs no Repro.
 
 If you find nothing, say "No findings" and name the areas you checked. End with a count by priority (for example `P0: 0, P1: 1, P2: 0, P3: 2`), then finish with `worker_done`. The run lead decides which findings send work back.
