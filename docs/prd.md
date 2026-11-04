@@ -99,30 +99,9 @@ An improvement proposal cites evidence and names a scope:
 
 Usage parsers read OMP and Claude Code session files first. A Codex parser follows when you use Codex.
 
-## Milestones
+## Roadmap
 
-| Milestone                    | Outcome                                                                                                                                            | Tickets                                                                |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| M1 Core loop on the Ark repo | Two spikes, the command line, the router skill and playbooks. One Ark ticket goes from Master Chief to a merged pull request.                      | ARK-150, ARK-151, ARK-152, ARK-153, ARK-154, ARK-155, ARK-156, ARK-157 |
-| M2 Multi-repo on Clara       | Bootstrap, pytest and behave parsers, side-by-side compose. One Clara ticket across at least two repos reaches merge requests in dependency order. | ARK-158, ARK-159                                                       |
-| M3 Self-improvement          | `ark retro`, the retro playbook, the close check, the deep interview, and learnings.                                                               | ARK-160, ARK-161                                                       |
-| M4 Hub                       | The hub (R13): Home, Runs and Backlog.                                                                                                             | ARK-175, ARK-176, ARK-177, ARK-178, ARK-179, ARK-180, ARK-181          |
-| Later                        | Onboarding for smart-qc. GitLab MRs assigned to you for review. Teams and Outlook as hub sources.                                                  | Not yet ticketed                                                       |
-
-| Ticket  | Title                                                                                                    | Depends on                         | Milestone |
-| ------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------- | --------- |
-| ARK-150 | Spike: side-by-side worktrees for a Clara run, driven by Orca                                            | None                               | M1        |
-| ARK-151 | Spike: Master Chief, run lead, and worker on Orca, with gate relay                                       | None                               | M1        |
-| ARK-152 | CLI core: `run start`, `status`, `run close`, event log, transition table, project config                | None                               | M1        |
-| ARK-153 | Plan file: `plan check`, `plan.mmd`, `gate record`                                                       | ARK-152                            | M1        |
-| ARK-154 | Worktrees and tests: `worktree create` builds the workspace mirror, `ark test` with the bun parser       | ARK-150, ARK-152                   | M1        |
-| ARK-155 | Merge requests in dependency order on GitHub and GitLab                                                  | ARK-152                            | M1        |
-| ARK-156 | Router skill and playbooks: chief, run-lead, worker, with Orca and Plannotator                           | ARK-151, ARK-153, ARK-154, ARK-155 | M1        |
-| ARK-157 | Cutover: delete the old design's code, tests, typed tools, and extension; generate the command reference | none                               | M1        |
-| ARK-158 | Bootstrap playbook, pytest and behave parsers, onboard Clara                                             | ARK-156                            | M2        |
-| ARK-159 | First Clara ticket across repos to merge requests in dependency order                                    | ARK-158                            | M2        |
-| ARK-160 | `ark retro`, `metrics.json`, and session usage parsers                                                   | ARK-152                            | M3        |
-| ARK-161 | Retro playbook, close check, deep interview, and learnings                                               | ARK-156, ARK-160                   | M3        |
+The vision, the milestones and the order of the open work are in `$ARK_HOME/projects/ark/ROADMAP.md`. The format is in [docs/reference/roadmap.md](reference/roadmap.md). Each ticket file holds its own status, milestone and dependencies.
 
 ARK-109 is superseded by this redesign.
 

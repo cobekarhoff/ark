@@ -17,8 +17,9 @@ The human opens you in a terminal. Take the project from the current directory, 
 
 Read these files:
 
-- `~/.ark/projects/<project>/tickets/README.md`: the backlog table, the status rules and the graph.
-- `docs/prd.md`: requirements, non-goals and milestones.
+- `~/.ark/projects/<project>/ROADMAP.md`: the vision, the milestones and the Now, Next and Later ranks. A project with no `ROADMAP.md` has none to read.
+- `~/.ark/projects/<project>/tickets/README.md`: the status rules.
+- `docs/prd.md`: requirements and non-goals.
 - The ADR titles in `docs/adr/`.
 - `CONTEXT.md`: the glossary. Use its terms.
 - The newest ticket with an AC table. It is the format reference.
@@ -51,10 +52,7 @@ One ticket is one run. Chain tickets that change the same files (`depends_on`), 
 
 Write tickets after the human confirms the shared understanding. See [Ticket format](#ticket-format).
 
-Then re-read `README.md`, because other sessions edit it. For each ticket, add:
-
-- A table row, with status `proposed`.
-- A Mermaid node, and the edges for its `depends_on`.
+Write each new ticket into no list of `ROADMAP.md`: it shows there as Review. Change the vision, a milestone or a rank only when the human says so, and then re-read `ROADMAP.md` first, because other sessions edit it. Add no row to the README.
 
 ## 8. Hand off
 

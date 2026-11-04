@@ -73,7 +73,7 @@ test("ARK-182-AC3 no tracked repo file points to the personal skill", () => {
   expect(search.exitCode).toBe(1);
 });
 
-test("ARK-182-AC4 the brainstorm playbook writes proposed tickets with a README row and graph node, and forbids ready, queueing and sending to Master Chief", () => {
+test("ARK-182-AC4 the brainstorm playbook writes proposed tickets into no list of ROADMAP.md, and forbids ready, queueing and sending to Master Chief", () => {
   const rules = section(brainstormPlaybook, "Rules");
   expect(rules).toContain("always `proposed`");
   expect(rules).toContain("Never write `ready`.");
@@ -83,8 +83,8 @@ test("ARK-182-AC4 the brainstorm playbook writes proposed tickets with a README 
   expect(rules).toContain("Never send anything to Master Chief's terminal.");
 
   const writeTickets = section(brainstormPlaybook, "7. Write tickets");
-  expect(writeTickets).toMatch(/table row, with status `proposed`/);
-  expect(writeTickets).toMatch(/Mermaid node, and the edges for its `depends_on`/);
+  expect(writeTickets).toContain("into no list of `ROADMAP.md`");
+  expect(writeTickets).toContain("only when the human says so");
 
   expect(section(brainstormPlaybook, "Ticket format")).toContain("`status: proposed`");
 });
