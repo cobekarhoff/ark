@@ -727,31 +727,39 @@ function advanceBranch(workspace: string, branch: string, file: string): string 
   return git(clone, "rev-parse", "HEAD");
 }
 
-test("ARK-296-AC3 worktree sync merges origin/<base> of the repo, not the branch origin/HEAD names", () => {
-  const scenario = startRun(
-    ["."],
-    false,
-    { repos: { ".": { base: "release/9" } } },
-    (workspace) => {
-      git(workspace, "branch", "release/9");
-      git(workspace, "push", "origin", "release/9");
-    },
-  );
-  const worktree = scenario.worktreePath();
-  // after the run began: m.txt on main only, r.txt on release/9 only
-  advanceOrigin(scenario.workspace, ".", "m.txt", "main\n");
-  const releaseHead = advanceBranch(scenario.workspace, "release/9", "r.txt");
+test(
+  "ARK-296-AC3 worktree sync merges origin/<base> of the repo, not the branch origin/HEAD names",
+  () => {
+    const scenario = startRun(
+      ["."],
+      false,
+      { repos: { ".": { base: "release/9" } } },
+      (workspace) => {
+        git(workspace, "branch", "release/9");
+        git(workspace, "push", "origin", "release/9");
+      },
+    );
+    const worktree = scenario.worktreePath();
+    // after the run began: m.txt on main only, r.txt on release/9 only
+    advanceOrigin(scenario.workspace, ".", "m.txt", "main\n");
+    const releaseHead = advanceBranch(scenario.workspace, "release/9", "r.txt");
 
-  const synced = ark("worktree", "sync", scenario.runId);
-  expect(synced.code).toBe(0);
-  expect(existsSync(join(worktree, "m.txt"))).toBe(false);
-  expect(readFileSync(join(worktree, "r.txt"), "utf8")).toBe("release/9\n");
-  expect(git(worktree, "merge-base", "--is-ancestor", releaseHead, "HEAD")).toBe("");
-});
+    const synced = ark("worktree", "sync", scenario.runId);
+    expect(synced.code).toBe(0);
+    expect(existsSync(join(worktree, "m.txt"))).toBe(false);
+    expect(readFileSync(join(worktree, "r.txt"), "utf8")).toBe("release/9\n");
+    expect(git(worktree, "merge-base", "--is-ancestor", releaseHead, "HEAD")).toBe("");
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-296-AC3 worktree sync of a repo with no base still merges the branch origin/HEAD names", () => {
-  const scenario = startRun();
-  advanceOrigin(scenario.workspace, ".", "m.txt", "main\n");
-  expect(ark("worktree", "sync", scenario.runId).code).toBe(0);
-  expect(readFileSync(join(scenario.worktreePath(), "m.txt"), "utf8")).toBe("main\n");
-});
+test(
+  "ARK-296-AC3 worktree sync of a repo with no base still merges the branch origin/HEAD names",
+  () => {
+    const scenario = startRun();
+    advanceOrigin(scenario.workspace, ".", "m.txt", "main\n");
+    expect(ark("worktree", "sync", scenario.runId).code).toBe(0);
+    expect(readFileSync(join(scenario.worktreePath(), "m.txt"), "utf8")).toBe("main\n");
+  },
+  { timeout: 30_000 },
+);

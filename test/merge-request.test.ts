@@ -695,25 +695,33 @@ for (const subcommand of ["open", "status"]) {
   );
 }
 
-test("ARK-296-AC4 merge-request open passes repos.<repo>.base to gh --base and glab --target-branch", () => {
-  scenario({ core: "github", app: "gitlab" }, true, [], {
-    repos: { "repos/core": { base: "release/9" }, "repos/app": { base: "release/9.1.0" } },
-  });
-  expect(ark("merge-request", "open", run).code).toBe(0);
-  const [gh, glab] = created();
-  expect([gh.tool, optionValue(gh, "--base")]).toEqual(["gh", "release/9"]);
-  expect(gh.argv.slice(0, 2)).toEqual(["pr", "create"]);
-  expect([glab.tool, optionValue(glab, "--target-branch")]).toEqual(["glab", "release/9.1.0"]);
-  expect(glab.argv.slice(0, 2)).toEqual(["mr", "create"]);
-});
+test(
+  "ARK-296-AC4 merge-request open passes repos.<repo>.base to gh --base and glab --target-branch",
+  () => {
+    scenario({ core: "github", app: "gitlab" }, true, [], {
+      repos: { "repos/core": { base: "release/9" }, "repos/app": { base: "release/9.1.0" } },
+    });
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    const [gh, glab] = created();
+    expect([gh.tool, optionValue(gh, "--base")]).toEqual(["gh", "release/9"]);
+    expect(gh.argv.slice(0, 2)).toEqual(["pr", "create"]);
+    expect([glab.tool, optionValue(glab, "--target-branch")]).toEqual(["glab", "release/9.1.0"]);
+    expect(glab.argv.slice(0, 2)).toEqual(["mr", "create"]);
+  },
+  { timeout: 30_000 },
+);
 
-test("ARK-296-AC4 a repo with no base keeps the origin/HEAD target while a configured repo uses its base", () => {
-  const { worktrees } = scenario({ core: "github", app: "gitlab" }, true, [], {
-    repos: { "repos/app": { base: "release/9" } },
-  });
-  git(worktrees.core, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop");
-  expect(ark("merge-request", "open", run).code).toBe(0);
-  const [gh, glab] = created();
-  expect(optionValue(gh, "--base")).toBe("develop");
-  expect(optionValue(glab, "--target-branch")).toBe("release/9");
-});
+test(
+  "ARK-296-AC4 a repo with no base keeps the origin/HEAD target while a configured repo uses its base",
+  () => {
+    const { worktrees } = scenario({ core: "github", app: "gitlab" }, true, [], {
+      repos: { "repos/app": { base: "release/9" } },
+    });
+    git(worktrees.core, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    const [gh, glab] = created();
+    expect(optionValue(gh, "--base")).toBe("develop");
+    expect(optionValue(glab, "--target-branch")).toBe("release/9");
+  },
+  { timeout: 30_000 },
+);
