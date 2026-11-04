@@ -677,3 +677,33 @@ test(
   },
   { timeout: 30_000 },
 );
+
+test(
+  "ARK-295-AC4 worktree sync refuses a none project with an invalid unrelated field before any git push or gh call",
+  () => {
+    const scenario = startRun(["."], false, { merge_requests: "none" });
+    const configFile = join(scenario.runDirectory, "../../ark.yml");
+    const config = JSON.parse(readFileSync(configFile, "utf8"));
+    writeFileSync(configFile, JSON.stringify({ ...config, concurrency: 0 }));
+    appendEvent(scenario.runDirectory, "merge_request.opened", {
+      repo: ".",
+      url: "https://github.com/acme/main/pull/1",
+      number: 1,
+    });
+    const realGit = Bun.which("git") as string;
+    const log = join(fakeGhDirectory, "calls.log");
+    writeFileSync(log, "");
+    for (const tool of ["git", "gh", "glab"])
+      writeFileSync(
+        join(fakeGhDirectory, tool),
+        `#!/bin/sh\necho "${tool} $*" >> "${log}"\n${tool === "git" ? `exec "${realGit}" "$@"` : "exit 1"}\n`,
+        { mode: 0o755 },
+      );
+
+    const synced = ark("worktree", "sync", scenario.runId);
+    expect(synced.code).toBe(1);
+    expect(synced.err).toContain("concurrency must be an integer >= 1");
+    expect(readFileSync(log, "utf8")).toBe("");
+  },
+  { timeout: 30_000 },
+);

@@ -755,10 +755,10 @@ test("ARK-295-AC6 run-lead section 11 step 3 lists the branches from ark status 
 
 test("ARK-295-AC6 chief tells the human the branches on a none worker_done, closes handed_off on the answer and skips the auto-merger", () => {
   const workerDone = chiefPlaybook
-    .split("\n3. If the run is in phase `building`")[1]
+    .split("\n3. If the run is in phase `building`, the outcome is not `failed`,")[1]
     ?.split("\n4. ")[0];
   expect(workerDone).toBeDefined();
-  expect(workerDone).toContain("`merge_requests: none`");
+  expect(workerDone).toContain("project's `ark.yml` says `merge_requests: none`");
   expect(workerDone).toContain("`git -C <repo> log --oneline <base>..<branch>`");
   expect(workerDone).toContain("`worktree.created` event");
   expect(workerDone).toContain("On their answer run `ark run close <run> handed_off`");
@@ -766,6 +766,18 @@ test("ARK-295-AC6 chief tells the human the branches on a none worker_done, clos
   const loops = section(chiefPlaybook, "12. Background loops");
   expect(loops).toContain(
     "Do not start `scripts/auto-merger.sh` for a project whose `ark.yml` says `merge_requests: none`",
+  );
+});
+
+test("ARK-295-AC6 chief keeps a failed run lead out of the local-only handoff", () => {
+  const afterStatus = chiefPlaybook.split("2. Run `ark status <run>`.")[1] as string;
+  const localOnly = afterStatus.indexOf("If the run is in phase `building`");
+  expect(localOnly).toBeGreaterThan(-1);
+  expect(afterStatus.slice(localOnly, afterStatus.indexOf("\n4. "))).toContain(
+    "the outcome is not `failed`",
+  );
+  expect(afterStatus).toContain(
+    "4. If the outcome is `failed`, or the run is not in `merge_requests_open`, tell the human",
   );
 });
 

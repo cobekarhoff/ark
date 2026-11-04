@@ -670,3 +670,27 @@ test(
   },
   { timeout: 30_000 },
 );
+
+for (const subcommand of ["open", "status"]) {
+  test(
+    `ARK-295-AC2 ARK-295-AC3 merge-request ${subcommand} refuses a none project with an invalid unrelated field before any git, gh or glab runs`,
+    () => {
+      const { bares } = scenario({ core: "github", app: "github" }, true, [], {
+        ...none,
+        concurrency: 0,
+      });
+      const toolCalls = fakeHostTools();
+      const result = ark("merge-request", subcommand, run);
+      expect(result.code).toBe(1);
+      expect(result.err).toContain("concurrency must be an integer >= 1");
+      expect(readFileSync(toolCalls, "utf8")).toBe("");
+      expect(calls()).toEqual([]);
+      expect(
+        Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], {
+          cwd: bares.core,
+        }).exitCode,
+      ).not.toBe(0);
+    },
+    { timeout: 30_000 },
+  );
+}

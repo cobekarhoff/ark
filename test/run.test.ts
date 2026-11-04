@@ -201,6 +201,16 @@ test("ARK-295-AC1 any other merge_requests value is refused and the run start na
   expect(result.err).toContain("merge_requests must be one of open, none");
 });
 
+for (const [name, value] of [
+  ["null", null],
+  ["blank", ""],
+] as const) {
+  test(`ARK-295-AC1 a ${name} merge_requests value is refused, not read as open`, () => {
+    writeProject("broken", validConfig({ merge_requests: value }));
+    expect(() => loadConfig("broken")).toThrow("merge_requests must be one of open, none");
+  });
+}
+
 test("ARK-152-AC2 run start refuses a project with no ark.yml", () => {
   const ticketFile = writeTicket("ghost", "ARK-903", []);
   const result = ark("run", "start", ticketFile, "--project", "ghost");
@@ -1208,4 +1218,17 @@ test("ARK-295-AC5 an open project and a project with no ark.yml print the unchan
   expect(missing.out).toMatch(/^merge requests: none$/m);
   expect(missing.out).not.toContain("(local only)");
   expect(localBranchLines(runId)).toEqual([]);
+});
+
+test("ARK-295-AC5 ark status counts a none project with an invalid unrelated field as open instead of failing", () => {
+  const { runId, directory } = worktreeRun({ merge_requests: "none" });
+  const configFile = join(directory, "../../ark.yml");
+  writeFileSync(
+    configFile,
+    JSON.stringify({ ...JSON.parse(readFileSync(configFile, "utf8")), concurrency: 0 }),
+  );
+  const result = ark("status", runId);
+  expect(result.code).toBe(0);
+  expect(result.out).toMatch(/^merge requests: none$/m);
+  expect(result.out).not.toContain("(local only)");
 });
