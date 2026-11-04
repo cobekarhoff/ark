@@ -58,7 +58,7 @@ The run lead asks for your decision at a gate. Master Chief shows you each quest
 2. If it is shown in Master Chief's session, answer `approve`, `change` or `abort`.
 3. You can edit `plan.yml` yourself. The run lead checks the file again with `ark plan check` and asks you again.
 
-Check the Design section: every interface in `design.interfaces` must list its `callers`, and no caller may be blank, or `ark plan check` refuses the plan. The section also shows the approach and an example of the new output in a code fence. Check that every AC has an integration or E2E test case. Unit tests never prove an AC. Check that each repo the ticket touches has a step. Check which model reviews each step. By default, the reviewer is a different vendor from the implementer.
+Check the Design section: every interface in `design.interfaces` must list its `callers`, and no caller may be blank, or `ark plan check` refuses the plan. The section also shows the approach and an example of the new output in a code fence. Check that every AC without `manual: true` has an integration or E2E test case. A manual criterion needs none: the `manual` gate proves it. Unit tests never prove an AC. Check that each repo the ticket touches has a step. Check which model reviews each step. By default, the reviewer is a different vendor from the implementer.
 
 **Escalation gate.** This opens when the run spends its round budget, which defaults to two rounds. The run lead shows what still fails. Choose one of:
 
@@ -72,7 +72,7 @@ Check the Design section: every interface in `design.interfaces` must list its `
 
 After you approve the plan, the run lead creates the run's worktrees with `ark worktree create`. Workers then build the change: an implementer writes the code, a validator writes the tests that prove each AC, and a reviewer looks for defects.
 
-The run lead runs `ark test` on the composed workspace. A criterion is proven only when its tagged integration or E2E test passes. The run lead decides which review findings send work back to the implementer, and it says why. It opens the MRs only when the tests pass at the latest commit.
+The run lead runs `ark test` on the composed workspace. A criterion is proven only when its tagged integration or E2E test passes, or, with `manual: true`, when you answer the `manual` gate `ok`. The run lead decides which review findings send work back to the implementer, and it says why. It opens the MRs only when the tests pass at the latest commit.
 
 You do not need to do anything in this phase except answer gates.
 

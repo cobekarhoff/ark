@@ -17,7 +17,14 @@ export type Phase =
   | "escalation"
   | "merge_requests_open"
   | "closed";
-export type CriterionStatus = "pending" | "passing" | "failing" | "missing";
+export type CriterionStatus =
+  | "pending"
+  | "passing"
+  | "failing"
+  | "missing"
+  | "manual pending"
+  | "manual ok"
+  | "manual problem";
 export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "stopped";
 
 export type RunState = {
@@ -30,7 +37,14 @@ export type RunState = {
   criteria: { id: string; status: CriterionStatus }[];
   /** Each amended criterion: the text before its first amendment and the latest text. */
   amended_criteria: { id: string; old: string; new: string }[];
-  gates: { criteria?: string; strategy?: string; plan?: string; escalation?: string };
+  /** The manual gate is answered once for each criterion: key `manual:<criterion>`. */
+  gates: {
+    criteria?: string;
+    strategy?: string;
+    plan?: string;
+    escalation?: string;
+    [manual: `manual:${string}`]: string;
+  };
   post_mr_escalation_answered: boolean;
   evaluation: { blockers: string[]; risks: string[]; surfaces: string[] } | null;
   /** The latest strategy.recorded; `chosen` is the card the human picked, or the only card. */
@@ -157,6 +171,8 @@ export function deriveState(events: ArkEvent[]): RunState {
           old: first?.old ?? data.old,
           new: data.new,
         });
+        // New text needs a new human decision: an earlier manual answer no longer stands.
+        delete gates[`manual:${data.criterion}`];
         // The amendment changes what plan.md must show, so the plan needs a new check.
         plan = null;
         planApproved = false;
@@ -194,7 +210,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         };
         break;
       case "gate.answered":
-        gates[data.gate] = data.answer;
+        gates[data.gate === "manual" ? `manual:${data.criterion}` : data.gate] = data.answer;
         if (data.gate === "strategy" && strategy && strategy.cards.includes(data.answer))
           strategy.chosen = data.answer;
         if (data.gate === "criteria" && data.answer === "accept") blocked = false;
@@ -310,6 +326,7 @@ export function deriveState(events: ArkEvent[]): RunState {
       ...(gates.strategy === undefined ? {} : { strategy: gates.strategy }),
       ...(gates.plan === undefined ? {} : { plan: gates.plan }),
       ...(gates.escalation === undefined ? {} : { escalation: gates.escalation }),
+      ...Object.fromEntries(Object.entries(gates).filter(([key]) => key.startsWith("manual:"))),
     },
     post_mr_escalation_answered: escalationAnswered && mergeRequests.length > 0,
     evaluation,

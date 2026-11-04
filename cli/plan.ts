@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ProjectConfig, loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
+import { manualCriteria } from "./criteria.ts";
 import { type RunState, appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
@@ -198,6 +199,7 @@ export function findProblems(
   ticketCriteria: string[],
   surfaces: string[],
   configuredRoles: ProjectConfig["roles"],
+  manual: string[] = [],
 ): string[] {
   const allowedPairs = [
     ...new Set(Object.values(configuredRoles).map((role) => `${role.harness}/${role.model}`)),
@@ -249,8 +251,9 @@ export function findProblems(
     }
     proven.add(testCase.criterion);
   }
+  // A manual criterion is proved by the manual gate: a test case for it is allowed, never required.
   for (const criterion of ticketCriteria) {
-    if (!proven.has(criterion))
+    if (!proven.has(criterion) && !manual.includes(criterion))
       problems.push(`criterion ${criterion} has no integration or e2e test case`);
   }
   if (!plan.summary.why) problems.push("plan.yml has no summary.why: add a summary block");
@@ -447,6 +450,7 @@ export function planCheck(runId: string, inProject?: string): void {
     state.criteria.map((criterion) => criterion.id),
     surfaces,
     loadConfig(project).roles,
+    manualCriteria(directory),
   );
   const valid = problems.length === 0;
   const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
