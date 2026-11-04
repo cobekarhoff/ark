@@ -50,6 +50,8 @@ export type RunState = {
     [manual: `manual:${string}`]: string;
   };
   post_mr_escalation_answered: boolean;
+  /** escalation.requested is pending: no answer has followed it. */
+  escalation_requested: boolean;
   evaluation: { blockers: string[]; risks: string[]; surfaces: string[] } | null;
   /** The latest strategy.recorded; `chosen` is the card the human picked, or the only card. */
   strategy: {
@@ -350,6 +352,7 @@ export function deriveState(events: ArkEvent[]): RunState {
       ...Object.fromEntries(Object.entries(gates).filter(([key]) => key.startsWith("manual:"))),
     },
     post_mr_escalation_answered: escalationAnswered && mergeRequests.length > 0,
+    escalation_requested: escalationRequested,
     evaluation,
     strategy,
     plan,

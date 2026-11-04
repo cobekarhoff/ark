@@ -676,6 +676,12 @@ export function retro(runId: string, inProject?: string): void {
       `rework: ${metrics.rework.rounds} rounds, ${metrics.rework.escalations} escalations, ${metrics.rework.findings_sent_back} findings sent back, ${metrics.rework.merge_steps} merge steps`,
       `orchestration: ${metrics.orchestration.restarts} restarts, ${metrics.orchestration.tool_errors} tool errors, ${metrics.orchestration.context_overflows} context overflows, ${metrics.orchestration.idle_gaps} idle gaps`,
       `gate answers: ${metrics.gates.auto_answers} auto, ${metrics.gates.human_answers} human`,
+      ...gateAnswers
+        .filter((event) => event.data.gate === "escalation")
+        .map(
+          (event) =>
+            `escalation ${event.data.answer} by ${event.data.by === "auto" ? "auto" : "human"}`,
+        ),
       ...modelChangedLines,
       `same vendor review: ${sameVendorGroups.length > 0 ? `true (${sameVendorGroups.join("; ")})` : "false"}`,
       `compared with ${comparison.runs_compared} earlier closed runs`,

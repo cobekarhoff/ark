@@ -6,7 +6,7 @@ This page explains how Ark is designed and why. The [product requirements](../pr
 
 Ark has three kinds of agent and one human.
 
-- **You** talk only to Master Chief. You approve tickets, plans, escalations, and merges.
+- **You** talk only to Master Chief. You approve tickets, plans, escalations (unless `gates.escalation` is `auto`, see Gates), and merges.
 - **Master Chief** is the one session you work with. It evaluates a ticket you name, suggests related tickets to queue, starts a run lead for each approved ticket, and relays gate questions to you. It never writes product code.
 - **A run lead** owns one ticket and every repo the ticket touches. It reads the workspace, writes the plan, starts workers, judges their findings, and opens merge requests.
 - **A worker** does one step: implementer, validator, or reviewer. A worker never starts another agent.
@@ -50,7 +50,7 @@ stateDiagram-v2
   closed --> [*]
 ```
 
-The states `building`, `testing`, and `reviewing` form a loop. Each return to `building` after the first build is a round. The round budget defaults to 2. When the budget is spent, the run opens an escalation gate, and you choose one more round, take over, or abort. If you take over, you become the implementer and the run continues through testing and review.
+The states `building`, `testing`, and `reviewing` form a loop. Each return to `building` after the first build is a round. The round budget defaults to 2. When the budget is spent, the run opens an escalation gate, and you choose one more round, take over, or abort. With `gates.escalation: auto`, Ark grants the first 2 extra rounds itself and asks you after that. If you take over, you become the implementer and the run continues through testing and review.
 
 A run closes with one outcome: merged, abandoned, aborted, or handed off. The [glossary](../../CONTEXT.md) defines each term.
 
@@ -60,7 +60,7 @@ A gate is a point where the run waits for you.
 
 - **Criteria.** Opens only when the ticket lacks testable acceptance criteria. You accept or edit the criteria.
 - **Plan.** Opens before any code is written. You review the graph of steps and the test cases, then approve, edit `plan.yml`, or ask for changes in chat.
-- **Escalation.** Opens when the round budget is spent.
+- **Escalation.** Opens when the round budget is spent. With `gates.escalation: auto`, Ark answers `one_more_round` by itself, at most 2 times in a run, and the run lead only sends Master Chief a `status`. It never answers an escalation that `ark escalate` requested, and a merge-only start after a sync conflict does not count toward the 2. The third spent budget waits for you.
 
 There is no evidence gate. Review on the merge request covers that.
 

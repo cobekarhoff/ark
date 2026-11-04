@@ -237,3 +237,226 @@ test("ARK-234-AC6 run-lead and chief playbooks say an auto gate needs no Plannot
     expect(text).toMatch(/`auto`.*needs no Plannotator review and no relay/);
   }
 });
+
+// ARK-288: gates.escalation auto answers a spent budget or a post-MR implementer start, at most twice.
+
+/** A building run whose plan has one implementer step `build` (the plan gate is auto). */
+function buildingRun(gates: Record<string, unknown>) {
+  const run = startRun({ plan: "auto", ...gates });
+  recordEvaluation(run.directory);
+  expect(checkPlan(run.runId, run.directory).code).toBe(0);
+  expect(deriveState(eventsOf(run.directory)).phase).toBe("building");
+  return run;
+}
+
+const start = (runId: string, ...flags: string[]) =>
+  ark("run", "step", runId, "build", "start", ...flags);
+const finish = (runId: string, ...flags: string[]) =>
+  ark("run", "step", runId, "build", "finish", ...flags);
+const autoAnswers = (directory: string) =>
+  answers(directory, "escalation").filter((event) => event.data.by === "auto");
+const types = (directory: string) => eventsOf(directory).map((event) => event.type);
+
+function failTest(directory: string) {
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-902-AC1": "failing" },
+  });
+}
+
+/**
+ * Starts and finishes `build` twice: the default budget of 2 is then spent. A failing `ark test`
+ * follows, so the phase is escalation as in a real run; `failing: false` leaves the phase building.
+ */
+function spendRounds(runId: string, directory: string, failing = true) {
+  for (let index = 0; index < 2; index++) {
+    expect(start(runId).code).toBe(0);
+    expect(finish(runId).code).toBe(0);
+  }
+  if (failing) failTest(directory);
+}
+
+function openMergeRequest(directory: string) {
+  appendEvent(directory, "merge_request.opened", { repo: ".", url: "https://x/mr/1", number: 1 });
+}
+
+const conflictSync = (directory: string) =>
+  appendEvent(directory, "worktree.synced", { repo: ".", conflict: true });
+
+// ARK-288-AC1 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC1`
+test("ARK-288-AC1 a spent budget with gates.escalation auto records the answer by auto before step.started and starts the step", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" });
+  spendRounds(runId, directory);
+  const before = eventsOf(directory).length;
+  const result = start(runId);
+  expect(result.code).toBe(0);
+  expect(result.out).toContain("escalation one_more_round by auto (1 of 2)");
+  const added = eventsOf(directory).slice(before);
+  expect(added.map((event) => event.type)).toEqual(["gate.answered", "step.started"]);
+  expect(added[0].data).toEqual({ gate: "escalation", answer: "one_more_round", by: "auto" });
+  expect(deriveState(eventsOf(directory)).steps[0].status).toBe("running");
+});
+
+test("ARK-288-AC1 a spent budget in phase building with no test or a passing test is answered by auto", () => {
+  for (const passing of [false, true]) {
+    tempArkHome(); // one open run per ticket: each case needs its own home
+    const { runId, directory } = buildingRun({ escalation: "auto" });
+    spendRounds(runId, directory, false);
+    if (passing) {
+      appendEvent(directory, "test.completed", {
+        passed: true,
+        heads: {},
+        suites: [],
+        criteria: {},
+      });
+    }
+    expect(deriveState(eventsOf(directory)).phase).toBe("building");
+    const result = start(runId);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("escalation one_more_round by auto (1 of 2)");
+    expect(autoAnswers(directory)).toHaveLength(1);
+    expect(deriveState(eventsOf(directory)).steps[0].status).toBe("running");
+  }
+});
+
+test("ARK-288-AC1 a start refused for a running step or a --merge with no failed sync leaves no gate.answered", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" });
+  spendRounds(runId, directory);
+  expect(start(runId).code).toBe(0); // round 3, auto answer 1
+  const running = eventsOf(directory).length;
+  const again = start(runId);
+  expect(again.code).toBe(1);
+  expect(again.err).toContain("already running");
+  expect(eventsOf(directory)).toHaveLength(running);
+
+  expect(finish(runId).code).toBe(0);
+  failTest(directory);
+  const merge = eventsOf(directory).length;
+  const refusedMerge = start(runId, "--merge");
+  expect(refusedMerge.code).toBe(1);
+  expect(refusedMerge.err).toContain("--merge needs a failed ark worktree sync");
+  expect(eventsOf(directory)).toHaveLength(merge);
+  expect(autoAnswers(directory)).toHaveLength(1);
+});
+
+// ARK-288-AC2 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC2`
+test("ARK-288-AC2 the third spent budget is refused and the phase is escalation", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" });
+  spendRounds(runId, directory);
+  for (const count of [1, 2]) {
+    const result = start(runId);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(`escalation one_more_round by auto (${count} of 2)`);
+    expect(finish(runId).code).toBe(0);
+    failTest(directory);
+  }
+  const before = eventsOf(directory).length;
+  const refused = start(runId);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("round budget spent");
+  expect(autoAnswers(directory)).toHaveLength(2);
+  expect(eventsOf(directory)).toHaveLength(before);
+  expect(ark("status", runId).out).toContain("phase: escalation");
+});
+
+// ARK-288-AC3 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC3`
+test("ARK-288-AC3 after the MRs open, 3 merge starts are answered and not counted, 2 repair starts are counted and the next is refused", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" });
+  expect(start(runId).code).toBe(0);
+  expect(finish(runId).code).toBe(0);
+  openMergeRequest(directory);
+
+  for (let index = 0; index < 3; index++) {
+    conflictSync(directory);
+    const merge = start(runId, "--merge");
+    expect(merge.code).toBe(0);
+    expect(merge.out).toContain("escalation one_more_round by auto (merge, not counted)");
+    expect(finish(runId).code).toBe(0);
+  }
+  expect(autoAnswers(directory)).toHaveLength(3);
+  expect(autoAnswers(directory).every((event) => event.data.merge === true)).toBe(true);
+
+  for (const count of [1, 2]) {
+    const repair = start(runId);
+    expect(repair.code).toBe(0);
+    expect(repair.out).toContain(`escalation one_more_round by auto (${count} of 2)`);
+    expect(finish(runId).code).toBe(0);
+  }
+  expect(autoAnswers(directory).filter((event) => !event.data.merge)).toHaveLength(2);
+
+  const before = eventsOf(directory).length;
+  const refused = start(runId);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("record gate escalation");
+  expect(eventsOf(directory)).toHaveLength(before);
+  expect(autoAnswers(directory)).toHaveLength(5);
+});
+
+// ARK-288-AC4 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC4`
+test("ARK-288-AC4 a requested escalation is never answered by auto and the phase stays escalation", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" });
+  spendRounds(runId, directory, false);
+  expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
+  expect(autoAnswers(directory)).toHaveLength(0); // both automatic answers are still left
+  const before = eventsOf(directory).length;
+  const refused = start(runId);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("round budget spent");
+  expect(eventsOf(directory)).toHaveLength(before);
+  expect(autoAnswers(directory)).toHaveLength(0);
+  expect(ark("status", runId).out).toContain("phase: escalation");
+
+  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+  expect(start(runId).code).toBe(0);
+});
+
+for (const [label, gates] of [
+  ["human", { escalation: "human" }],
+  ["no setting", {}],
+] as const) {
+  // ARK-288-AC5 proof: gates.escalation: human or none, test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC5`
+  test(`ARK-288-AC5 gates.escalation ${label} refuses a spent budget as before`, () => {
+    const { runId, directory } = buildingRun(gates);
+    spendRounds(runId, directory);
+    const spent = start(runId);
+    expect(spent.code).toBe(1);
+    expect(spent.err).toContain("round budget spent");
+    expect(spent.out).not.toContain("by auto");
+    expect(answers(directory, "escalation")).toHaveLength(0);
+    expect(types(directory).filter((type) => type === "step.started")).toHaveLength(2);
+  });
+
+  test(`ARK-288-AC5 gates.escalation ${label} refuses a post-MR repair start and merge start as before`, () => {
+    const { runId, directory } = buildingRun(gates);
+    expect(start(runId).code).toBe(0);
+    expect(finish(runId).code).toBe(0);
+    openMergeRequest(directory);
+    const repair = start(runId);
+    expect(repair.code).toBe(1);
+    expect(repair.err).toContain("record gate escalation");
+    conflictSync(directory);
+    const merge = start(runId, "--merge");
+    expect(merge.code).toBe(1);
+    expect(merge.err).toContain("record gate escalation");
+    expect(answers(directory, "escalation")).toHaveLength(0);
+    expect(types(directory).filter((type) => type === "step.started")).toHaveLength(1);
+  });
+}
+
+test("ARK-288-AC8 docs/reference/cli.md equals the generator output and the gates reference documents escalation auto", () => {
+  const root = join(import.meta.dir, "..");
+  const path = join(root, "docs/reference/cli.md");
+  const committed = readFileSync(path, "utf8");
+  // The script rewrites cli.md in place, so a stale file shows as a changed file; put it back.
+  const run = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: root });
+  const reference = readFileSync(path, "utf8");
+  writeFileSync(path, committed);
+  expect(run.exitCode).toBe(0);
+  expect(committed).toBe(reference);
+  const gatesRow = reference.split("\n").find((line) => line.startsWith("| `gates`")) ?? "";
+  expect(gatesRow).toContain("`escalation: auto`");
+  expect(gatesRow).toContain("escalation one_more_round by auto (<n> of 2)");
+  expect(gatesRow).toContain("at most 2 times");
+});
