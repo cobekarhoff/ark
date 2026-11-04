@@ -180,6 +180,16 @@ test("ARK-177-AC7 chief playbook refuses a second live Master Chief and takes ov
   expect(oneChief).toMatch(/run-use --id <run id>/);
 });
 
+test("ARK-306-AC4 chief takeover step 1 reads every page of the Run list", () => {
+  const step = chiefPlaybook.split("### One Master Chief for each project")[1]?.split("\n2. ")[0];
+  expect(step).toContain("orca orchestration run-list --json --limit 100");
+  expect(step).toContain("--cursor <nextCursor>");
+  expect(step).toMatch(/until `nextCursor` is null/);
+  expect(step).toMatch(/default list holds 10 rows/);
+  const description = readFileSync(join(import.meta.dir, "..", "cli", "ark.ts"), "utf8");
+  expect(description).toContain("It reads every page of the Run list");
+});
+
 test("ARK-210-AC4 run-lead section 9 names ark escalate and forbids a failing test to open the gate", () => {
   const section = runLeadPlaybook
     .split("## 9. Escalate when the round budget is spent")[1]
