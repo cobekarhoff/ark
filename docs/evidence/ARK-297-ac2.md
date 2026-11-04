@@ -11,7 +11,7 @@ cd <run>/workspace/repos/svc-a
 omp -p --no-session 'List the names of every skill available to you in this session, one per line. If a skill named analyze is available, say "analyze: available", otherwise say "analyze: not available". Do not use any tool.'
 ```
 
-## With the key (config.yml as Ark wrote it)
+## With the key (config.yml as Ark wrote it, `skills.customDirectories` set)
 
 ```yaml
 tools:
