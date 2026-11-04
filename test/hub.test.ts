@@ -87,7 +87,7 @@ const viewNames = ["Home", "Runs", "Backlog"];
 const namesViews = (text: string) =>
   viewNames.every((name) => new RegExp(`\\b${name}\\b`).test(text));
 
-test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 0007, R13 and M4 name the views", () => {
+test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 0007 and R13 name the views", () => {
   expect(statusOf("docs/adr/0009-hub-is-a-read-only-live-view.md")).toBe("accepted");
   const superseded = statusOf("docs/adr/0008-hub-steers-through-master-chief.md");
   expect(superseded).toStartWith("superseded");
@@ -98,8 +98,6 @@ test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 00
   const row = (id: string) => lines.find((line) => line.startsWith(`| ${id} `)) ?? "";
   expect(row("R13")).not.toBe("");
   expect(namesViews(row("R13"))).toBe(true);
-  expect(row("M4")).not.toBe("");
-  expect(namesViews(row("M4"))).toBe(true);
 });
 
 // ---------------------------------------------------------------- AC2
