@@ -300,6 +300,7 @@ test("ARK-288-AC1 a spent budget with gates.escalation auto records the answer b
 
 test("ARK-288-AC1 a spent budget in phase building with no test or a passing test is answered by auto", () => {
   for (const passing of [false, true]) {
+    tempArkHome(); // one open run per ticket: each case needs its own home
     const { runId, directory } = buildingRun({ escalation: "auto" });
     spendRounds(runId, directory, false);
     if (passing) {

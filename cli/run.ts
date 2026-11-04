@@ -175,9 +175,7 @@ function answerEscalationByAuto(
     by: "auto",
     ...(start.merge ? { merge: true } : {}),
   };
-  // A spent budget in phase building (no failing test, no request) is not phase escalation: the auto path answers anyway.
-  if (state.phase !== "building" && refused(() => assertAllowed(state, "gate.answered", answer)))
-    return null;
+  if (refused(() => assertAllowed(state, "gate.answered", answer))) return null;
   const answered = deriveState([
     ...events,
     {
