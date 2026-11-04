@@ -1162,3 +1162,15 @@ test("ARK-303-AC6 chief has a Catch the human up section that replies once and d
 test("ARK-303-AC7 bootstrap spells the path of the ark project's verify.md", () => {
   expect(bootstrapPlaybook).toContain("~/.ark/projects/ark/verify.md");
 });
+
+test("ARK-303-AC8 package.json has typecheck, lint and format:check scripts that do not run bun test", () => {
+  const { scripts } = JSON.parse(
+    readFileSync(join(import.meta.dir, "../package.json"), "utf8"),
+  ) as {
+    scripts: Record<string, string>;
+  };
+  for (const name of ["typecheck", "lint", "format:check"]) {
+    expect(scripts[name]).toBeTruthy();
+    expect(scripts[name]).not.toContain("bun test");
+  }
+});

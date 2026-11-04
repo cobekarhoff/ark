@@ -37,7 +37,7 @@ Open each page in a browser tab on the live hub, with no console errors. The hea
 
 ## ARK-303-AC8
 
-Proved by the `ark test` checks: `bun test`, `bun run typecheck`, `bun run lint` and `bun run format:check`. No tagged test: a test that runs the suite inside the suite is not deterministic.
+The tagged test in `test/playbooks.test.ts` checks that `package.json` has the `typecheck`, `lint` and `format:check` scripts and that none runs `bun test`. The `ark test` checks (`bun test`, `bun run typecheck`, `bun run lint`, `bun run format:check`) run them. The test does not run the suite: that would recurse.
 
 ## ARK-303-AC9: Master Chief catch-up reply
 
