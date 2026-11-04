@@ -34,6 +34,7 @@ export function writeTicket(
     "---",
     `id: ${id}`,
     `title: ${JSON.stringify(title)}`,
+    "status: ready",
     ...(criteria.length === 0 ? ["acceptance_criteria: []"] : ["acceptance_criteria:"]),
   ];
   for (const criterion of criteria)
