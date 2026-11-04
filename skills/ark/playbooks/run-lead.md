@@ -164,7 +164,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    - Read the root context: `AGENTS.md`, `CLAUDE.md`, `README.md`, `knowledge/`, the compose file.
    - Read the ticket and each AC. Decide which repos the ticket changes, and which repo depends on which. For example, a service that builds against a shared package needs the package's change first.
 2. Read `$ARK_HOME/projects/<project>/learnings.md` if it exists. It holds lessons from earlier runs. Apply each one that fits this ticket: for example, a step layout to avoid, a test case to add, or a model to choose. Note each one you apply, and each one you decide does not fit and why, for section 4.
-3. Look for work that overlaps this ticket in the project's recent MRs, open and merged: `gh pr list --state all --limit 10` (`glab mr list` on GitLab). Note each overlapping file or concept in the plan `summary`, so that two runs do not build the same thing.
+3. Look for work that overlaps this ticket in the project's recent MRs, open and merged: `gh pr list --state all --limit 10` (`glab mr list` on GitLab). When `ark.yml` says `merge_requests: none`, skip `gh pr list` and `glab mr list`: the project has no MRs to read. Note each overlapping file or concept in the plan `summary`, so that two runs do not build the same thing.
 
 ## 4. Write the plan
 
@@ -447,6 +447,8 @@ If the phase is `escalation` because the last test failed, first read `test head
 
 ## 10. Open the MRs
 
+Local-only project (`ark.yml` says `merge_requests: none`): never run `ark merge-request open <run>`; it refuses. When the last `ark test <run>` passed at the latest commit and no review sends work back, run `ark worktree sync <run>` as its own command, read that it exited 0, and go to section 11. The run stays in `building`. Master Chief hands the branches to the human.
+
 Open the MRs only when the last `ark test <run>` passed at the latest commit and no review sends work back. First run `ark worktree sync <run>` as its own command and read that it exited 0. A sync conflict goes back to an implementer before any MR opens. Then run, as a separate command:
 
 ```sh
@@ -465,7 +467,7 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 
 1. Run `ark retro <run>`. It writes `<run folder>/metrics.json`.
 2. Write `<run folder>/retro.md` on top of those numbers. Read `playbooks/retro.md` and follow "Part 1: Close check", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
-3. Send your final report to Master Chief. Use the exact `worker_done` command in your Orca preamble. Use `--outcome succeeded`, and write three sentences: what changed, the MR links in the order to merge them, and what remains for the human. Use `--outcome failed` if the human aborted or you could not finish, and say why.
+3. Send your final report to Master Chief. For a `none` project, list the branches from `ark status <run>` in place of MR links. Use the exact `worker_done` command in your Orca preamble. Use `--outcome succeeded`, and write three sentences: what changed, the MR links in the order to merge them (for a `none` project, the branches from `ark status <run>` in place of MR links), and what remains for the human. Use `--outcome failed` if the human aborted or you could not finish, and say why.
 4. End your turn and idle.
 
 ## Rules
