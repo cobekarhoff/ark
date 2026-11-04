@@ -70,6 +70,8 @@ Check the Design section: every interface in `design.interfaces` must list its `
 | `take_over`      | You write the change yourself in the run's worktree. Tell the run lead when you finish. |
 | `abort`          | The run stops before any MR is opened.                                                  |
 
+If `ark.yml` sets `gates.escalation: auto`, Ark answers `one_more_round` for you the first 2 times a run spends its budget. `ark run step ... start` prints `escalation one_more_round by auto (<n> of 2)`, and Master Chief tells you in one line, with nothing to answer. The third spent budget, and any escalation the run lead opens with `ark escalate`, wait for you as above.
+
 ## 5. Wait for the build
 
 After you approve the plan, the run lead creates the run's worktrees with `ark worktree create`. Workers then build the change: an implementer writes the code, a validator writes the tests that prove each AC, and a reviewer looks for defects.

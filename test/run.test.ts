@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { loadConfig } from "../cli/config.ts";
 import { appendEvent } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
+import { timelineOf } from "../hub/run-detail.ts";
 import {
   ark,
   recordEvaluation,
@@ -1261,6 +1262,60 @@ test("ARK-295-AC5 ark status counts a none project with an invalid unrelated fie
   expect(result.code).toBe(0);
   expect(result.out).toMatch(/^merge requests: none$/m);
   expect(result.out).not.toContain("(local only)");
+});
+
+/** A run with gates.escalation auto whose spent budget `ark run step ... start` answers by auto. */
+function autoEscalatedRun(): { runId: string; directory: string } {
+  writeProject("demo", validConfig({ gates: { escalation: "auto" } }));
+  const { runId, directory } = startRun();
+  approvePlan(directory);
+  for (let round = 1; round <= 2; round++) {
+    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  }
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": "failing" },
+  });
+  const started = ark("run", "step", runId, "build", "start");
+  expect(started.err).toBe("");
+  expect(started.out).toContain("escalation one_more_round by auto (1 of 2)");
+  return { runId, directory };
+}
+
+// ARK-288-AC7 proof: `bun test test/run.test.ts -t ARK-288-AC7`
+test("ARK-288-AC7 ark status prints escalation one_more_round by auto after an automatic answer", () => {
+  const { runId } = autoEscalatedRun();
+  const status = ark("status", runId);
+  expect(status.code).toBe(0);
+  expect(status.out).toContain("escalation one_more_round by auto");
+  expect(status.out).not.toContain("escalation one_more_round by human");
+});
+
+test("ARK-288-AC7 the retro counts the automatic escalation answer as auto and the run page timeline shows by auto", () => {
+  const { runId, directory } = autoEscalatedRun();
+  expect(ark("retro", runId).code).toBe(0);
+  const metrics = JSON.parse(readFileSync(join(directory, "metrics.json"), "utf8"));
+  expect(metrics.gates).toMatchObject({ auto_answers: 1 });
+  const events = readFileSync(join(directory, "events.ndjson"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const entry = timelineOf(events).find((item) => item.why.startsWith("escalation gate"));
+  expect(entry?.why).toBe("escalation gate: one_more_round by auto");
+});
+
+test("ARK-288-AC7 the retro text prints one by auto line for the automatic escalation answer and one by human line for a human one", () => {
+  const { runId } = autoEscalatedRun();
+  expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
+  expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
+  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+  const retro = ark("retro", runId);
+  expect(retro.code).toBe(0);
+  expect(retro.out.match(/^escalation one_more_round by auto$/gm)).toHaveLength(1);
+  expect(retro.out.match(/^escalation one_more_round by human$/gm)).toHaveLength(1);
 });
 
 function startKindRun(kind: string | undefined, ticketId = "ARK-900", acCount = 1) {

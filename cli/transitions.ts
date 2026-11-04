@@ -203,6 +203,8 @@ function assertGateAllowed(state: RunState, data: EventData): void {
   if (
     state.phase !== phaseOfGate &&
     !(data.gate === "escalation" && state.phase === "merge_requests_open") &&
+    // A spent budget at step start in building: only the auto path answers there.
+    !(data.gate === "escalation" && state.phase === "building" && data.by === "auto") &&
     !(data.gate === "manual" && state.phase === "escalation")
   ) {
     throw new ArkError(
