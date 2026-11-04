@@ -6,7 +6,7 @@ import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
 import { Unknown, known } from "./format.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import { runHref } from "./RunDetail.tsx";
-import { useLive } from "./store.tsx";
+import { roadmapHash, useLive } from "./store.tsx";
 
 /** Paragraphs and bullet lists of plain text: Markdown marks stay as written, nothing becomes HTML. */
 function Prose({ text, testId }: { text: string; testId: string }) {
@@ -57,13 +57,14 @@ export function TicketPage({ id }: { id: string }) {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [id]);
+  const project = entry?.ticket.project ?? null;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") location.hash = "#/backlog";
+      if (event.key === "Escape") location.hash = roadmapHash(project);
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, []);
+  }, [project]);
 
   if (!snapshot || !entries || !known(snapshot.tickets))
     return (
@@ -76,10 +77,10 @@ export function TicketPage({ id }: { id: string }) {
     return (
       <>
         <p className="crumb">
-          <a href="#/backlog">← Backlog</a>
+          <a href="#/roadmap">← Roadmap</a>
         </p>
         <h1>{id}</h1>
-        <p className="mut">No ticket {id} in the backlog.</p>
+        <p className="mut">No ticket {id} in the roadmap.</p>
       </>
     );
   const { ticket } = entry;
@@ -102,7 +103,8 @@ export function TicketPage({ id }: { id: string }) {
   return (
     <div className="ticket-page" data-testid="ticket-page">
       <p className="crumb">
-        <a href="#/backlog">← Backlog</a> <span className="mut">Esc returns to the list</span>
+        <a href={roadmapHash(project)}>← Roadmap</a>{" "}
+        <span className="mut">Esc returns to the list</span>
       </p>
       <div className="ticket-cols">
         <article>

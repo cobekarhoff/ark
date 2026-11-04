@@ -1,0 +1,2395 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ark hub v2 · Roadmap · hybrid 2 (PROTOTYPE)</title>
+    <style>
+      /* PROTOTYPE, throwaway. Tokens copied from hub-v2/hybrid-1.html so the page sits in the approved design language.
+   Base: variant C (milestone rail, vision lead, Now cards, review column, lane graph).
+   Borrowed from variant B: dense two-line rows, one-line Shipped footer bar.
+   hybrid 2: done milestones fold into one rail line; review rows are two lines; dense rows carry relations on line 1;
+   graph collapses finished dependencies into a thin strip; review tooltip opens inside its own column. */
+      :root {
+        color-scheme: light dark;
+        --bg: light-dark(#f6f4ef, #090b0f);
+        --nav: light-dark(#fbfaf6, #0d1015);
+        --panel: light-dark(#ffffff, #11141a);
+        --panel-2: light-dark(#f8f6f0, #171b23);
+        --panel-3: light-dark(#efece4, #1d222c);
+        --line: light-dark(#e6e2d8, #222833);
+        --line-2: light-dark(#d3cdbf, #2e3644);
+        --line-3: light-dark(#b3ac9b, #3b4658);
+        --text: light-dark(#1d1c1a, #dde2ea);
+        --dim: light-dark(#4f4c45, #a0abba);
+        --mute: light-dark(#65615a, #8591a2);
+        --red: light-dark(#c2371f, #ff6b5e);
+        --amber: light-dark(#c27a0e, #f2b04a);
+        --green: light-dark(#2d8a57, #46c48a);
+        --blue: light-dark(#2f62d8, #6aa6ff);
+        --red-t: light-dark(#b0301a, #ff9a90);
+        --amber-t: light-dark(#85500a, #f5c26b);
+        --green-t: light-dark(#23693f, #74d8a8);
+        --blue-t: light-dark(#2553c7, #94bfff);
+        --link: light-dark(#2553c7, #9cc3ff);
+        --primary: light-dark(#1d1c1a, #2d6cdf);
+        --primary-hover: light-dark(#34322e, #3a7af0);
+        --on-primary: #ffffff;
+        --code-bg: light-dark(#ece8de, #1d222c);
+        --ease: cubic-bezier(0.23, 1, 0.32, 1);
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+        --serif: "Iowan Old Style", "Charter", "Palatino Linotype", Georgia, serif;
+        --foot: 36px;
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+        scrollbar-color: var(--line-2) transparent;
+        scrollbar-width: thin;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.4 var(--sans);
+        font-variant-numeric: tabular-nums;
+        min-width: 1280px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      ::selection {
+        background: color-mix(in srgb, var(--blue) 35%, transparent);
+        color: var(--text);
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button,
+      select {
+        font: inherit;
+        color: inherit;
+      }
+      h1,
+      h2,
+      h3,
+      p,
+      ul {
+        margin: 0;
+        padding: 0;
+      }
+      ul {
+        list-style: none;
+      }
+      .mono {
+        font-family: var(--mono);
+      }
+      code {
+        font: 0.92em var(--mono);
+        padding: 0 4px;
+        border-radius: 3px;
+        background: var(--code-bg);
+      }
+      :focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+
+      /* ---------- nav (same as hub v2) ---------- */
+      .nav {
+        height: 44px;
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 16px;
+        background: var(--nav);
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-right: 18px;
+        font-weight: 700;
+        font-size: 14px;
+      }
+      .brand .mono {
+        letter-spacing: -0.02em;
+      }
+      .tab {
+        position: relative;
+        height: 44px;
+        display: inline-flex;
+        align-items: center;
+        padding: 0 10px;
+        color: var(--dim);
+        font-weight: 500;
+        transition: color 120ms;
+      }
+      .tab[aria-current="page"] {
+        color: var(--text);
+      }
+      .tab[aria-current="page"]::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: -1px;
+        height: 2px;
+        background: var(--blue);
+        border-radius: 2px;
+      }
+      @media (hover: hover) {
+        .tab:hover {
+          color: var(--text);
+        }
+      }
+      .nav-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .project {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .project select {
+        height: 26px;
+        padding: 0 8px;
+        border-radius: 6px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .seg {
+        display: inline-flex;
+        padding: 2px;
+        gap: 2px;
+        border-radius: 7px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+      }
+      .seg button {
+        height: 22px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--dim);
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition:
+          background-color 120ms,
+          color 120ms,
+          transform 120ms var(--ease);
+      }
+      .seg button:active {
+        transform: scale(0.96);
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--panel-3);
+        color: var(--text);
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      @media (hover: hover) {
+        .seg button:hover {
+          color: var(--text);
+        }
+      }
+
+      /* ---------- shared bits ---------- */
+      .ic {
+        width: 14px;
+        height: 14px;
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+        flex: none;
+        background: var(--chip-bg, color-mix(in srgb, var(--dim) 16%, transparent));
+        color: var(--chip-fg, var(--dim));
+      }
+      .chip.amber {
+        --chip-bg: color-mix(in srgb, var(--amber) 15%, transparent);
+        --chip-fg: var(--amber-t);
+      }
+      .chip.green {
+        --chip-bg: color-mix(in srgb, var(--green) 15%, transparent);
+        --chip-fg: var(--green-t);
+      }
+      .chip.blue {
+        --chip-bg: color-mix(in srgb, var(--blue) 15%, transparent);
+        --chip-fg: var(--blue-t);
+      }
+      .chip.red {
+        --chip-bg: color-mix(in srgb, var(--red) 16%, transparent);
+        --chip-fg: var(--red-t);
+      }
+      .chip.outline {
+        background: transparent;
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      /* proposed: amber outline, the same colour as the review column it also lives in */
+      .chip.proposed {
+        background: transparent;
+        color: var(--amber-t);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 60%, transparent);
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex: none;
+        background: currentColor;
+      }
+      .dot.hollow {
+        background: transparent;
+        box-shadow: inset 0 0 0 1.5px currentColor;
+      }
+      .idchip {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 6px;
+        border-radius: 4px;
+        background: var(--panel-3);
+        font: 600 11px var(--mono);
+        color: var(--text);
+        transition: background-color 120ms;
+        white-space: nowrap;
+        flex: none;
+      }
+      .idchip.open {
+        color: var(--amber-t);
+        background: color-mix(in srgb, var(--amber) 12%, transparent);
+      }
+      .idchip.short {
+        height: 18px;
+        padding: 0 5px;
+      }
+      @media (hover: hover) {
+        a.idchip:hover {
+          background: var(--line-2);
+        }
+      }
+      .btn {
+        height: 28px;
+        padding: 0 11px;
+        border-radius: 6px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        font-size: 12px;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          background-color 120ms,
+          border-color 120ms,
+          transform 120ms var(--ease);
+      }
+      .btn:active {
+        transform: scale(0.97);
+      }
+      .btn.primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: var(--on-primary);
+      }
+      @media (hover: hover) {
+        .btn:hover {
+          background: var(--panel-3);
+          border-color: var(--line-3);
+        }
+        .btn.primary:hover {
+          background: var(--primary-hover);
+          border-color: var(--primary-hover);
+        }
+      }
+      .count {
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: var(--panel-3);
+        color: var(--dim);
+        font-size: 11px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* ---------- shell ---------- */
+      .shell {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+      }
+      .shell.solo {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .rail {
+        border-right: 1px solid var(--line);
+        background: var(--nav);
+        overflow: auto;
+        padding: 14px 10px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .rail[hidden] {
+        display: none;
+      }
+      .main {
+        overflow: auto;
+        padding: 20px 24px 48px;
+        min-width: 0;
+      }
+      .solo-line {
+        padding: 56px 24px;
+        font-size: 15px;
+        color: var(--dim);
+      }
+
+      /* ---------- rail ---------- */
+      .rail-head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 0 6px;
+      }
+      .rail-head h2 {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      .rail-head span {
+        color: var(--mute);
+        font-size: 11px;
+        margin-left: auto;
+      }
+      .rail > * {
+        flex: none;
+      } /* expanded done rows overflow the rail and scroll; nothing may squash */
+      .ms-all {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        height: 30px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--dim);
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background-color 120ms,
+          transform 120ms var(--ease);
+      }
+      .ms-all:active {
+        transform: scale(0.98);
+      }
+      .ms-all[aria-pressed="true"] {
+        background: var(--panel-3);
+        color: var(--text);
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      @media (hover: hover) {
+        .ms-all:hover {
+          background: var(--panel-2);
+          color: var(--text);
+        }
+      }
+      .ms-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .ms {
+        position: relative;
+        border-radius: 8px;
+      }
+      .ms-pick {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        width: 100%;
+        text-align: left;
+        padding: 8px 10px 9px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        cursor: pointer;
+        transition:
+          background-color 120ms,
+          transform 120ms var(--ease);
+      }
+      .ms-pick:active {
+        transform: scale(0.985);
+      }
+      @media (hover: hover) {
+        .ms-pick:hover {
+          background: var(--panel-2);
+        }
+      }
+      .ms-pick[aria-pressed="true"] {
+        background: var(--panel-3);
+        box-shadow: inset 0 0 0 1.5px var(--blue);
+      }
+      .ms-head {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        min-width: 0;
+      }
+      .ms-id {
+        font: 700 11px var(--mono);
+        color: var(--dim);
+        flex: none;
+        width: 24px;
+      }
+      .ms-name {
+        font-weight: 600;
+        font-size: 13px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ms-state {
+        margin-left: auto;
+        flex: none;
+        align-self: center;
+      }
+      .ms-outcome {
+        font-size: 12px;
+        line-height: 1.35;
+        color: var(--dim);
+        padding-left: 31px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .ms-meter {
+        display: block;
+        height: 5px;
+        margin: 5px 0 0 31px;
+        border-radius: 3px;
+        background: var(--panel-3);
+        overflow: hidden;
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      .ms-pick[aria-pressed="true"] .ms-meter {
+        background: var(--panel);
+      }
+      .ms-meter i {
+        display: block;
+        height: 100%;
+        background: var(--green);
+        border-radius: 3px;
+        transform-origin: left;
+        animation: fill 700ms var(--ease) both;
+      }
+      @keyframes fill {
+        from {
+          transform: scaleX(0);
+        }
+      }
+      .ms-foot {
+        padding-left: 31px;
+        font-size: 11.5px;
+        color: var(--dim);
+      }
+      .ms-foot b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      /* finished milestones: one quiet line, the thin bar is the shipped part */
+      .ms.done .ms-pick {
+        padding: 6px 10px 9px;
+      }
+      .ms.done .ms-name {
+        color: var(--dim);
+        font-weight: 500;
+        font-size: 12.5px;
+      }
+      .ms.done .ms-outcome {
+        display: none;
+      }
+      .ms.done .ms-meter {
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: 3px;
+        margin: 0;
+        height: 2px;
+        box-shadow: none;
+      }
+      .ms.done .ms-meter i {
+        background: color-mix(in srgb, var(--green) 60%, transparent);
+      }
+      .ms-count {
+        margin-left: auto;
+        flex: none;
+        font-size: 11.5px;
+        color: var(--dim);
+      }
+      .ms-count b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      /* folded done milestones: one quiet line, expands to the per-milestone rows */
+      .ms-fold > .ms-list {
+        margin-top: 4px;
+      }
+      .ms-foldbtn {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 10px 0 8px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--dim);
+        font-size: 12px;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          background-color 120ms,
+          transform 120ms var(--ease);
+      }
+      .ms-foldbtn:active {
+        transform: scale(0.98);
+      }
+      @media (hover: hover) {
+        .ms-foldbtn:hover {
+          background: var(--panel-2);
+          color: var(--text);
+        }
+      }
+      .ms-foldbtn .ic {
+        width: 11px;
+        height: 11px;
+        color: var(--mute);
+        transition: transform 140ms var(--ease);
+      }
+      .ms-foldbtn[aria-expanded="true"] .ic {
+        transform: rotate(90deg);
+      }
+      .ms-foldbtn b {
+        font: 700 11px var(--mono);
+        color: var(--text);
+      }
+      .ms-foldbtn.has-filter {
+        box-shadow: inset 0 0 0 1.5px var(--blue);
+        background: var(--panel-3);
+      }
+      /* active milestones: the rail's loud part */
+      .ms.active {
+        background: var(--panel);
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      .ms.active .ms-name {
+        font-size: 14px;
+      }
+      .ms.active .ms-outcome {
+        color: var(--text);
+        font-size: 12.5px;
+      }
+      .ms.active .ms-meter {
+        height: 7px;
+      }
+      .ms.later .ms-name {
+        color: var(--text);
+      }
+
+      /* ---------- main ---------- */
+      .vision {
+        font: 400 22px/1.3 var(--serif);
+        letter-spacing: -0.01em;
+        max-width: 64ch;
+        text-wrap: balance;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin: 16px 0 22px;
+        flex-wrap: wrap;
+      }
+      .seg.big {
+        padding: 3px;
+        border-radius: 9px;
+        border-color: var(--line-2);
+      }
+      .seg.big button {
+        height: 28px;
+        padding: 0 14px;
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: 6px;
+      }
+      .seg.big button .ic {
+        width: 15px;
+        height: 15px;
+      }
+      .filter {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12.5px;
+        color: var(--dim);
+        min-width: 0;
+      }
+      .filter b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .filter button {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 22px;
+        padding: 0 7px;
+        border: 0;
+        border-radius: 5px;
+        background: var(--panel-3);
+        color: var(--text);
+        font-size: 11.5px;
+        cursor: pointer;
+      }
+      .toolbar .right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .cmd {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: 6px;
+        border: 1px dashed var(--line-3);
+        background: transparent;
+        color: var(--text);
+        font: 12px var(--mono);
+        cursor: pointer;
+        transition:
+          background-color 120ms,
+          transform 120ms var(--ease);
+      }
+      .cmd:active {
+        transform: scale(0.97);
+      }
+      @media (hover: hover) {
+        .cmd:hover {
+          background: var(--panel);
+        }
+      }
+      .cmd .ic {
+        color: var(--mute);
+      }
+      .linkbtn {
+        border: 0;
+        background: transparent;
+        color: var(--link);
+        font-size: 12px;
+        cursor: pointer;
+        padding: 0;
+      }
+      @media (hover: hover) {
+        .linkbtn:hover {
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 24px;
+        align-items: start;
+      }
+      .lists {
+        display: flex;
+        flex-direction: column;
+        gap: 26px;
+        min-width: 0;
+      }
+      .sec-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .sec-head h2 {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      .sec-head .hint {
+        color: var(--mute);
+        font-size: 12px;
+      }
+      .sec.now .sec-head h2 {
+        font-size: 18px;
+        letter-spacing: -0.01em;
+      }
+      .sec-empty {
+        padding: 14px 16px;
+        border-radius: 8px;
+        border: 1px dashed var(--line-2);
+        color: var(--dim);
+        font-size: 12.5px;
+        max-width: 70ch;
+      }
+      .grid-now {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      /* Now: big cards. Elevation is the border only. */
+      .card {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 16px 18px;
+        border-radius: 10px;
+        background: var(--panel);
+        border: 1px solid var(--line-2);
+        transition:
+          border-color 120ms,
+          transform 160ms var(--ease);
+        min-width: 0;
+      }
+      @media (hover: hover) {
+        .card:hover {
+          border-color: var(--line-3);
+        }
+      }
+      .card:has(.card-title a:active) {
+        transform: scale(0.99);
+      }
+      .card.proposed {
+        border-color: color-mix(in srgb, var(--amber) 50%, var(--line-2));
+      }
+      .card-top {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+      }
+      .card-top .push {
+        margin-left: auto;
+      }
+      .rank {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: var(--text);
+        color: var(--bg);
+        font: 700 15px/28px var(--mono);
+        text-align: center;
+        flex: none;
+      }
+      .idtext {
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .card-title {
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 1.35;
+        letter-spacing: -0.005em;
+      }
+      .card-title a::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 10px;
+      }
+      .card-title a {
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .card-why {
+        font-size: 13px;
+        color: var(--dim);
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .rels {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin-top: auto;
+        padding-top: 2px;
+      }
+      .rels:empty {
+        display: none;
+      }
+      .rel {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 5px;
+        position: relative;
+        z-index: 1;
+      }
+      .rel-label {
+        font-size: 11px;
+        color: var(--mute);
+        margin-right: 2px;
+      }
+
+      /* Next / Later / Unranked: dense two-line rows (from variant B) */
+      .rows {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        overflow: hidden;
+      }
+      .row {
+        position: relative;
+        display: grid;
+        grid-template-columns: 18px 54px 86px minmax(0, 1fr);
+        align-items: center;
+        column-gap: 10px;
+        min-height: 50px;
+        padding: 5px 12px;
+        border-bottom: 1px solid var(--line);
+        transition: background-color 100ms;
+      }
+      .row:last-child {
+        border-bottom: 0;
+      }
+      .row.proposed {
+        box-shadow: inset 2px 0 0 color-mix(in srgb, var(--amber) 75%, transparent);
+      }
+      @media (hover: hover) {
+        .row:hover {
+          background: var(--panel-2);
+        }
+      }
+      .row:has(.rtitle:active) {
+        background: var(--panel-3);
+      }
+      .rk {
+        font: 700 12px var(--mono);
+        color: var(--dim);
+        text-align: right;
+      }
+      .rk.none {
+        color: var(--line-3);
+        font-weight: 400;
+      }
+      .rid {
+        font: 700 12px var(--mono);
+      }
+      .row .chip {
+        justify-self: start;
+      }
+      .rmain {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .rtitle {
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.3;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .rtitle::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+      }
+      .rline {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        min-height: 20px;
+      }
+      .rwhy {
+        min-width: 0;
+        font-size: 12px;
+        color: var(--dim);
+        line-height: 1.3;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .rrels {
+        position: relative;
+        z-index: 1;
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .rrel {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      /* review callout: compact, one line per ticket */
+      .review {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        border-radius: 12px;
+        border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent);
+        background: color-mix(in srgb, var(--amber) 7%, var(--panel));
+      }
+      .review-head {
+        padding: 12px 14px 11px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        border-bottom: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+      }
+      .review-head .row-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .review-head h2 {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.005em;
+      }
+      .review-head p {
+        font-size: 12px;
+        color: var(--dim);
+        line-height: 1.45;
+      }
+      .review .btn {
+        width: 100%;
+        height: 30px;
+      }
+      .review-list li {
+        border-bottom: 1px solid color-mix(in srgb, var(--amber) 22%, transparent);
+      }
+      .review-list li:last-child {
+        border-bottom: 0;
+      }
+      .rv {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1px;
+        padding: 4px 12px 5px;
+        transition: background-color 100ms;
+      }
+      .review-list li:last-child .rv {
+        border-radius: 0 0 11px 11px;
+      }
+      @media (hover: hover) {
+        .rv:hover {
+          background: color-mix(in srgb, var(--amber) 10%, transparent);
+        }
+      }
+      .rv-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .rv .idtext {
+        font-size: 11px;
+        line-height: 15px;
+      }
+      .rv .chip {
+        height: 15px;
+        padding: 0 5px;
+        font-size: 10.5px;
+      }
+      .rv .rvt {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        font-size: 12.5px;
+        font-weight: 500;
+        line-height: 1.25;
+      }
+      /* hover tooltip: opens inside the review column (below the row, above it for the last rows), never over the Now cards */
+      .tip {
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        top: calc(100% + 2px);
+        z-index: 6;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--panel);
+        border: 1px solid var(--line-3);
+        box-shadow: 0 12px 28px -8px rgb(0 0 0 / 0.35);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(-4px);
+        transition:
+          opacity 120ms,
+          transform 160ms var(--ease);
+      }
+      .review-list li:nth-last-child(-n + 4) .tip {
+        top: auto;
+        bottom: calc(100% + 2px);
+        transform: translateY(4px);
+      }
+      .tip b {
+        font-size: 12.5px;
+        font-weight: 600;
+        line-height: 1.35;
+        white-space: normal;
+      }
+      .tip span {
+        font-size: 12px;
+        color: var(--dim);
+        line-height: 1.4;
+        white-space: normal;
+        font-weight: 400;
+      }
+      @media (hover: hover) {
+        .review-list .rv:hover .tip {
+          opacity: 1;
+          transform: none;
+          transition-delay: 150ms;
+        }
+      }
+      .review-list .rv:focus-visible .tip {
+        opacity: 1;
+        transform: none;
+      }
+      .rv:focus-visible {
+        outline-offset: -2px;
+      }
+      body:has(.drawer.open) .tip {
+        display: none;
+      }
+      .review-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px;
+        margin-bottom: 14px;
+        border-radius: 10px;
+        border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent);
+        background: color-mix(in srgb, var(--amber) 7%, var(--panel));
+        font-size: 12.5px;
+        color: var(--dim);
+      }
+      .review-bar b {
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .review-bar .btn {
+        margin-left: auto;
+      }
+
+      /* notes: quiet, not an error */
+      .notes {
+        margin-top: 8px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+        color: var(--dim);
+        font-size: 12px;
+        max-width: 84ch;
+      }
+      .notes h2 {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--mute);
+        margin-bottom: 6px;
+      }
+      .notes li {
+        display: flex;
+        gap: 8px;
+        padding: 2px 0;
+        line-height: 1.45;
+      }
+      .notes li .mono {
+        color: var(--mute);
+        font-size: 11px;
+        flex: none;
+        width: 150px;
+        padding-top: 1px;
+      }
+
+      /* graph */
+      .graph-wrap {
+        min-width: 0;
+      }
+      .legend {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        margin-bottom: 10px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .legend svg {
+        width: 28px;
+        height: 8px;
+        overflow: visible;
+      }
+      .legend i {
+        width: 14px;
+        height: 10px;
+        border-radius: 3px;
+        border: 1px solid color-mix(in srgb, var(--amber) 60%, transparent);
+        background: color-mix(in srgb, var(--amber) 8%, var(--panel));
+      }
+      .graph-scroll {
+        overflow: auto;
+        padding-bottom: 6px;
+      }
+      .graph {
+        position: relative;
+      }
+      .graph svg.edges {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .edge {
+        fill: none;
+        stroke-width: 1.5;
+      }
+      .edge.finished {
+        stroke: var(--line-3);
+      }
+      .edge.unfinished {
+        stroke: var(--amber);
+        stroke-dasharray: 5 4;
+      }
+      .lane {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        border-radius: 10px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+      }
+      .lane.active {
+        border-color: var(--line-3);
+      }
+      /* collapsed strip of finished dependencies: dots anchor the solid edges */
+      .lane.strip {
+        background: var(--panel-2);
+      }
+      .lane.strip .lane-head {
+        left: 0;
+        right: 0;
+        align-items: center;
+        gap: 0;
+        font-size: 10px;
+        line-height: 1.3;
+        white-space: nowrap;
+        color: var(--dim);
+      }
+      .lane.strip .lane-head b {
+        font-weight: 700;
+      }
+      .lane.strip .lane-head span {
+        color: var(--mute);
+      }
+      .gdot {
+        position: absolute;
+        left: 12px;
+        height: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 4px;
+        font: 600 10px var(--mono);
+        color: var(--mute);
+      }
+      .gdot i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--line-3);
+        flex: none;
+      }
+      @media (hover: hover) {
+        .gdot:hover {
+          color: var(--text);
+        }
+        .gdot:hover i {
+          background: var(--blue);
+        }
+      }
+      .lane-head {
+        position: absolute;
+        top: 10px;
+        left: 12px;
+        right: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .lane-head .id {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font: 700 11px var(--mono);
+        color: var(--dim);
+      }
+      .lane-head .nm {
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.25;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .gnode {
+        position: absolute;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 6px 8px;
+        border-radius: 7px;
+        background: var(--panel-2);
+        border: 1px solid var(--line-2);
+        transition:
+          border-color 120ms,
+          transform 160ms var(--ease);
+      }
+      .gnode:active {
+        transform: scale(0.98);
+      }
+      @media (hover: hover) {
+        .gnode:hover {
+          border-color: var(--blue);
+        }
+      }
+      .gnode .top {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font: 700 11px var(--mono);
+      }
+      .gnode .top .rk {
+        font: 600 10.5px var(--mono);
+        color: var(--mute);
+        text-align: left;
+      }
+      .gnode .top .tag {
+        margin-left: auto;
+        font: 600 10px var(--mono);
+        color: var(--mute);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .gnode .t {
+        flex: none;
+        font-size: 11.5px;
+        line-height: 1.3;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .gnode.ghost {
+        flex-direction: row;
+        align-items: center;
+        background: transparent;
+        border-style: dashed;
+        color: var(--mute);
+      }
+      .gnode.ghost .top {
+        font-weight: 600;
+      }
+      .gnode.ghost .tag {
+        font: 11px var(--sans);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .gnode.review {
+        border-color: color-mix(in srgb, var(--amber) 55%, transparent);
+        background: color-mix(in srgb, var(--amber) 6%, var(--panel));
+      }
+
+      /* shipped footer bar (from variant B) */
+      .foot {
+        position: relative;
+        flex: none;
+        height: var(--foot);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 16px;
+        background: var(--nav);
+        border-top: 1px solid var(--line);
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .foot[hidden] {
+        display: none;
+      }
+      .shipped-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 26px;
+        padding: 0 8px 0 4px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        cursor: pointer;
+        color: var(--dim);
+        transition:
+          background-color 120ms,
+          transform 120ms var(--ease);
+        min-width: 0;
+      }
+      .shipped-toggle:active {
+        transform: scale(0.98);
+      }
+      @media (hover: hover) {
+        .shipped-toggle:hover {
+          background: var(--panel-3);
+        }
+      }
+      .shipped-toggle .ic {
+        transition: transform 160ms var(--ease);
+      }
+      .shipped-toggle[aria-expanded="true"] .ic {
+        transform: rotate(-90deg);
+      }
+      .shipped-toggle b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .ship-mini {
+        font: 11.5px var(--mono);
+        color: var(--mute);
+        white-space: nowrap;
+      }
+      .ship-panel {
+        position: absolute;
+        left: 12px;
+        bottom: calc(100% + 6px);
+        width: 760px;
+        max-height: min(62vh, 560px);
+        overflow: auto;
+        background: var(--panel);
+        border: 1px solid var(--line-2);
+        border-radius: 10px;
+        box-shadow: 0 12px 32px color-mix(in srgb, #000 22%, transparent);
+        z-index: 12;
+        animation: rise 180ms var(--ease) both;
+      }
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+      .ship-panel .intro {
+        padding: 10px 14px;
+        color: var(--dim);
+        font-size: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .fold {
+        border-bottom: 1px solid var(--line);
+      }
+      .fold:last-child {
+        border-bottom: 0;
+      }
+      .fold-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        height: 32px;
+        padding: 0 14px;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+        font-size: 12.5px;
+      }
+      .fold-head .ic {
+        width: 11px;
+        height: 11px;
+        color: var(--mute);
+        transition: transform 140ms var(--ease);
+      }
+      .fold-head[aria-expanded="true"] .ic {
+        transform: rotate(90deg);
+      }
+      .fold-head b {
+        font: 700 12px var(--mono);
+        flex: none;
+        min-width: 28px;
+      }
+      .fold-head .nm {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .fold-head .sub {
+        margin-left: auto;
+        flex: none;
+        color: var(--mute);
+        font-size: 11.5px;
+      }
+      @media (hover: hover) {
+        .fold-head:hover {
+          background: var(--panel-2);
+        }
+      }
+      .fold .outcome {
+        padding: 0 14px 6px 40px;
+        font-size: 11.5px;
+        color: var(--dim);
+      }
+      .done-list {
+        padding: 0 14px 8px 40px;
+        display: grid;
+        grid-template-columns: 62px minmax(0, 1fr);
+        gap: 0 10px;
+        font-size: 12px;
+      }
+      .done-list a {
+        display: contents;
+      }
+      .done-list b {
+        font: 600 11.5px var(--mono);
+        color: var(--mute);
+        line-height: 22px;
+      }
+      .done-list span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--dim);
+        line-height: 22px;
+      }
+      @media (hover: hover) {
+        .done-list a:hover span {
+          color: var(--text);
+        }
+        .done-list a:hover b {
+          color: var(--text);
+        }
+      }
+      .fold .fold-head.nested {
+        height: 26px;
+        padding-left: 40px;
+        color: var(--mute);
+        font-size: 11.5px;
+      }
+      .fold .fold-head.nested .sub {
+        margin-left: 0;
+      }
+
+      /* drawer (ticket side view) */
+      .drawer {
+        position: fixed;
+        top: 44px;
+        right: 0;
+        bottom: var(--foot);
+        width: 400px;
+        background: var(--panel);
+        border-left: 1px solid var(--line-2);
+        box-shadow: -12px 0 32px -12px rgb(0 0 0 / 0.28);
+        transform: translateX(100%);
+        visibility: hidden;
+        transition:
+          transform 240ms var(--ease),
+          visibility 0s linear 240ms;
+        display: flex;
+        flex-direction: column;
+        z-index: 10;
+      }
+      .drawer.open {
+        transform: none;
+        visibility: visible;
+        transition:
+          transform 240ms var(--ease),
+          visibility 0s;
+      }
+      .drawer-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px 0 16px;
+        height: 44px;
+        border-bottom: 1px solid var(--line);
+        flex: none;
+      }
+      .drawer-head .btn {
+        margin-left: auto;
+        height: 26px;
+        width: 26px;
+        padding: 0;
+      }
+      .drawer-body {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        overflow: auto;
+      }
+      .drawer-body h2 {
+        font-size: 17px;
+        line-height: 1.3;
+        font-weight: 600;
+        text-wrap: balance;
+      }
+      .drawer-body .why {
+        font-size: 13.5px;
+        color: var(--dim);
+        line-height: 1.5;
+      }
+      .drawer-body dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: 84px 1fr;
+        gap: 10px 8px;
+        font-size: 12.5px;
+      }
+      .drawer-body dt {
+        color: var(--mute);
+      }
+      .drawer-body dd {
+        margin: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+        min-width: 0;
+      }
+      .drawer-body .stub {
+        font-size: 12px;
+        color: var(--mute);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition-duration: 1ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="nav" id="nav"></nav>
+    <div class="shell" id="shell">
+      <aside class="rail" id="rail" aria-label="Milestones"></aside>
+      <main class="main" id="main"></main>
+    </div>
+    <footer class="foot" id="foot"></footer>
+    <aside class="drawer" id="drawer" aria-label="Ticket" aria-hidden="true"></aside>
+    <script src="data.js"></script>
+    <script>
+      const DATA = window.ROADMAP_DATA;
+      const FINISHED = new Set(["done", "superseded"]);
+      const ticketById = new Map(DATA.tickets.map((ticket) => [ticket.id, ticket]));
+      const milestoneById = new Map(
+        DATA.roadmap.milestones.map((milestone) => [milestone.id, milestone]),
+      );
+      const isOpen = (ticket) => !FINISHED.has(ticket.status);
+      const openTickets = DATA.tickets.filter(isOpen);
+      const milestoneStats = new Map(
+        DATA.roadmap.milestones.map((milestone) => {
+          const tickets = DATA.tickets.filter((ticket) => ticket.milestone === milestone.id);
+          return [
+            milestone.id,
+            {
+              done: tickets.filter((t) => t.status === "done"),
+              superseded: tickets.filter((t) => t.status === "superseded"),
+              open: tickets.filter(isOpen),
+            },
+          ];
+        }),
+      );
+      const state = {
+        projectId: "ark",
+        milestoneFilter: null,
+        view: "list",
+        theme: "system",
+        shippedOpen: false,
+        railDoneOpen: false,
+        foldsOpen: new Set(),
+        supersededOpen: new Set(),
+      };
+
+      const escapeHtml = (text) =>
+        String(text ?? "").replace(
+          /[&<>"]/g,
+          (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char],
+        );
+      const inline = (text) => escapeHtml(text).replace(/`([^`]+)`/g, "<code>$1</code>"); // why texts carry `code` spans
+      const plain = (text) => String(text ?? "").replace(/`/g, "");
+      const ICONS = {
+        chevron: '<path d="M6 3.5 10.5 8 6 12.5"/>',
+        copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>',
+        list: '<path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.5" cy="4" r=".6"/><circle cx="2.5" cy="8" r=".6"/><circle cx="2.5" cy="12" r=".6"/>',
+        graph:
+          '<circle cx="3.5" cy="4" r="1.7"/><circle cx="3.5" cy="12" r="1.7"/><circle cx="12.5" cy="8" r="1.7"/><path d="M5 4.6c3 0 4 1.6 6 3M5 11.4c3 0 4-1.6 6-3"/>',
+        x: '<path d="m4 4 8 8M12 4l-8 8"/>',
+        info: '<circle cx="8" cy="8" r="6"/><path d="M8 7.2V11M8 5v.1"/>',
+      };
+      const icon = (name, size) =>
+        `<svg class="ic" ${size ? `style="width:${size}px;height:${size}px"` : ""} viewBox="0 0 16 16" aria-hidden="true">${ICONS[name]}</svg>`;
+
+      // ---------- derived data ----------
+      const blockersOf = (ticket) =>
+        ticket.depends_on.filter((id) => ticketById.has(id) && isOpen(ticketById.get(id)));
+      const unblocksOf = (ticket) =>
+        openTickets
+          .filter((other) => other.depends_on.includes(ticket.id))
+          .map((other) => other.id);
+      const inFilter = (ticket) =>
+        !state.milestoneFilter || ticket.milestone === state.milestoneFilter;
+      // One global rank over Now, Next, Later. A proposed ticket that is ranked keeps its place; unknown and finished ids are skipped (the notes explain them).
+      const rankOf = new Map();
+      const rankedByList = Object.fromEntries(
+        ["now", "next", "later"].map((listName) => [
+          listName,
+          DATA.roadmap[listName]
+            .map((id) => ticketById.get(id))
+            .filter((ticket) => ticket && isOpen(ticket)),
+        ]),
+      );
+      ["now", "next", "later"].forEach((listName) =>
+        rankedByList[listName].forEach((ticket) => rankOf.set(ticket.id, rankOf.size + 1)),
+      );
+      const listOf = (id) =>
+        ["now", "next", "later"].find((listName) =>
+          rankedByList[listName].some((ticket) => ticket.id === id),
+        );
+      const reviewTickets = () =>
+        openTickets.filter((t) => t.status === "proposed").filter(inFilter);
+      const reviewPrompt = () =>
+        `Evaluate ${reviewTickets()
+          .map((t) => t.id)
+          .join(", ")}.`;
+
+      // ---------- small renderers ----------
+      const PHASE_TONE = {
+        building: "blue",
+        running: "blue",
+        planning: "blue",
+        escalation: "amber",
+        waiting: "amber",
+        failed: "red",
+      };
+      const STATUS_TONE = {
+        ready: "green",
+        in_progress: "blue",
+        proposed: "proposed",
+        done: "",
+        superseded: "outline",
+      };
+      function statusChip(ticket) {
+        if (ticket.run && ticket.run.phase !== "closed") {
+          const label = ticket.run.phase.replace(/_/g, " ");
+          return `<span class="chip ${PHASE_TONE[ticket.run.phase] ?? "blue"}" title="Run ${escapeHtml(ticket.run.run)}"><span class="dot"></span>${escapeHtml(label)}</span>`;
+        }
+        return `<span class="chip ${STATUS_TONE[ticket.status] ?? ""}" ${ticket.status === "proposed" ? 'title="Proposed: waiting for your approval"' : ""}>${ticket.status === "proposed" ? '<span class="dot hollow"></span>' : ""}${escapeHtml(ticket.status.replace(/_/g, " "))}</span>`;
+      }
+      const milestoneChip = (ticket, withName) => {
+        const milestone = milestoneById.get(ticket.milestone);
+        return `<span class="chip outline mono" title="${escapeHtml(ticket.milestone)} ${escapeHtml(milestone?.name ?? "")}">${escapeHtml(ticket.milestone)}${withName && milestone ? `<span style="font-family:var(--sans)">&nbsp;${escapeHtml(milestone.name)}</span>` : ""}</span>`;
+      };
+      const idChip = (id, short) => {
+        const ticket = ticketById.get(id);
+        const open = ticket && isOpen(ticket);
+        return `<a class="idchip ${open ? "open" : ""} ${short ? "short" : ""}" href="#/ticket/${id}" title="${id}: ${escapeHtml(plain(ticket?.title ?? "Not in this snapshot"))}${open ? " (not finished)" : " (finished)"}">${short ? id.replace("ARK-", "") : id}</a>`;
+      };
+      function relations(ticket) {
+        const blockers = blockersOf(ticket);
+        const unblocks = unblocksOf(ticket);
+        return `${blockers.length ? `<span class="rel"><span class="rel-label">Blocked by</span>${blockers.map((id) => idChip(id)).join("")}</span>` : ""}${unblocks.length ? `<span class="rel"><span class="rel-label">Unblocks</span>${unblocks.map((id) => idChip(id)).join("")}</span>` : ""}`;
+      }
+      const tooltipText = (ticket) =>
+        `${plain(ticket.title)}${ticket.why ? `\n\n${plain(ticket.why)}` : ""}`;
+      function card(ticket) {
+        return `<article class="card ${ticket.status === "proposed" ? "proposed" : ""}">
+    <div class="card-top"><span class="rank" title="Your rank">${rankOf.get(ticket.id)}</span><span class="idtext mono">${ticket.id}</span>${milestoneChip(ticket, true)}<span class="push"></span>${statusChip(ticket)}</div>
+    <h3 class="card-title"><a href="#/ticket/${ticket.id}" title="${escapeHtml(plain(ticket.title))}">${escapeHtml(ticket.title)}</a></h3>
+    ${ticket.why ? `<p class="card-why" title="${escapeHtml(plain(ticket.why))}">${inline(ticket.why)}</p>` : ""}
+    <div class="rels">${relations(ticket)}</div></article>`;
+      }
+      function denseRow(ticket) {
+        const blockers = blockersOf(ticket);
+        const unblocks = unblocksOf(ticket);
+        const rank = rankOf.get(ticket.id);
+        const rels = `${blockers.length ? `<span class="rrel"><span class="rel-label">Blocked by</span>${blockers.map((id) => idChip(id, true)).join("")}</span>` : ""}${unblocks.length ? `<span class="rrel"><span class="rel-label">Unblocks</span>${unblocks.map((id) => idChip(id, true)).join("")}</span>` : ""}`;
+        return `<li class="row ${ticket.status === "proposed" ? "proposed" : ""}">
+    <span class="rk ${rank ? "" : "none"}" ${rank ? 'title="Your rank"' : ""}>${rank ?? "·"}</span><span class="rid">${ticket.id}</span>${statusChip(ticket)}
+    <span class="rmain"><span class="rline"><a class="rtitle" href="#/ticket/${ticket.id}" title="${escapeHtml(tooltipText(ticket))}">${escapeHtml(ticket.title)}</a>${rels ? `<span class="rrels">${rels}</span>` : ""}${milestoneChip(ticket)}</span>
+      <span class="rwhy">${ticket.why ? inline(ticket.why) : "No reason recorded."}</span></span></li>`;
+      }
+      function reviewItem(ticket) {
+        return `<li><a class="rv" href="#/ticket/${ticket.id}"><span class="rv-top"><span class="idtext mono">${ticket.id}</span>${milestoneChip(ticket)}</span><span class="rvt">${escapeHtml(ticket.title)}</span>
+    <span class="tip" aria-hidden="true"><b>${escapeHtml(plain(ticket.title))}</b>${ticket.why ? `<span>${inline(ticket.why)}</span>` : ""}</span></a></li>`;
+      }
+
+      // ---------- rail ----------
+      function railItem(milestone) {
+        const stats = milestoneStats.get(milestone.id);
+        const total = stats.done.length + stats.open.length;
+        const percent = total ? (stats.done.length / total) * 100 : 0;
+        const selected = state.milestoneFilter === milestone.id;
+        const finished = milestone.state === "done";
+        const summary = `${stats.done.length} done${finished && !stats.open.length ? "" : ` · <b>${stats.open.length} open</b>`}`;
+        const stateChip = finished
+          ? `<span class="ms-count">${summary}</span>`
+          : `<span class="ms-state chip ${milestone.state === "active" ? "blue" : "outline"}">${milestone.state}</span>`;
+        return `<li class="ms ${milestone.state}">
+    <button class="ms-pick" data-ms="${milestone.id}" aria-pressed="${selected}" title="${escapeHtml(milestone.outcome)}">
+      <span class="ms-head"><span class="ms-id">${milestone.id}</span><span class="ms-name">${escapeHtml(milestone.name)}</span>${stateChip}</span>
+      <span class="ms-outcome">${escapeHtml(milestone.outcome)}</span>
+      <span class="ms-meter" role="img" aria-label="${stats.done.length} done, ${stats.open.length} open"><i style="width:${percent}%"></i></span>
+      ${finished ? "" : `<span class="ms-foot">${summary}</span>`}
+    </button></li>`;
+      }
+      function renderRail() {
+        const doneCount = DATA.tickets.filter((t) => t.status === "done").length;
+        const finished = DATA.roadmap.milestones.filter((m) => m.state === "done");
+        const finishedShipped = finished.reduce(
+          (sum, m) => sum + milestoneStats.get(m.id).done.length,
+          0,
+        );
+        const range =
+          finished.length > 1 ? `${finished[0].id}–${finished.at(-1).id}` : finished[0]?.id;
+        const fold = finished.length
+          ? `<li class="ms-fold"><button class="ms-foldbtn ${!state.railDoneOpen && finished.some((m) => m.id === state.milestoneFilter) ? "has-filter" : ""}" data-rail-done="1" aria-expanded="${state.railDoneOpen}">${icon("chevron")}<b>${range}</b><span>· ${finished.length} ${finished.length === 1 ? "milestone" : "milestones"} · ${finishedShipped} done</span></button>${state.railDoneOpen ? `<ul class="ms-list">${finished.map(railItem).join("")}</ul>` : ""}</li>`
+          : "";
+        return `<div class="rail-head"><h2>Milestones</h2><span>in order</span></div>
+    <button class="ms-all" data-ms="" aria-pressed="${!state.milestoneFilter}"><span>All milestones</span><span class="mono" style="font-size:11.5px">${openTickets.length} open · ${doneCount} shipped</span></button>
+    <ul class="ms-list">${fold}${DATA.roadmap.milestones
+      .filter((m) => m.state !== "done")
+      .map(railItem)
+      .join("")}</ul>`;
+      }
+
+      // ---------- main: list view ----------
+      function section(kind, title, hint, listName) {
+        const tickets = rankedByList[listName].filter(inFilter);
+        if (state.milestoneFilter && !tickets.length) return "";
+        const body = !tickets.length
+          ? `<div class="sec-empty">Nothing ranked here.</div>`
+          : kind === "now"
+            ? `<div class="grid-now">${tickets.map(card).join("")}</div>`
+            : `<ul class="rows">${tickets.map(denseRow).join("")}</ul>`;
+        return `<section class="sec ${kind}"><div class="sec-head"><h2>${title}</h2><span class="count">${tickets.length}</span><span class="hint">${hint}</span></div>${body}</section>`;
+      }
+      function unrankedSection() {
+        const tickets = openTickets
+          .filter((t) => t.status !== "proposed" && !rankOf.has(t.id))
+          .filter(inFilter);
+        if (!tickets.length) return "";
+        return `<section class="sec"><div class="sec-head"><h2>Unranked</h2><span class="count">${tickets.length}</span><span class="hint">Open and approved, but in no list in ROADMAP.md</span></div><ul class="rows">${tickets.map(denseRow).join("")}</ul></section>`;
+      }
+      function reviewCallout() {
+        const tickets = reviewTickets();
+        if (!tickets.length) return "";
+        return `<aside class="review" aria-labelledby="review-title">
+    <div class="review-head"><div class="row-top"><h2 id="review-title">Needs your review</h2><span class="count">${tickets.length}</span></div>
+      <p>Master Chief evaluates each one; you approve. Nothing here is queued until you do.</p>
+      <button class="btn primary" data-copy="review">${icon("copy")}<span>Copy prompt for Master Chief</span></button></div>
+    <ul class="review-list">${tickets.map(reviewItem).join("")}</ul></aside>`;
+      }
+      function notesBlock() {
+        if (!DATA.warnings.length) return "";
+        return `<section class="notes" id="notes" aria-label="Notes on ROADMAP.md"><h2>${icon("info")}${DATA.warnings.length} notes on ROADMAP.md</h2><ul>${DATA.warnings.map((warning) => `<li><span class="mono">${escapeHtml(warning.kind.replace(/_/g, " "))}</span><span>${escapeHtml(warning.message)}</span></li>`).join("")}</ul></section>`;
+      }
+      function renderEmptyFilter() {
+        const milestone = milestoneById.get(state.milestoneFilter);
+        const stats = milestoneStats.get(state.milestoneFilter);
+        return `<div class="sec-empty">Nothing open in ${milestone.id} · ${escapeHtml(milestone.name)}. ${stats.done.length} ${stats.done.length === 1 ? "ticket" : "tickets"} shipped. <button class="linkbtn" data-shipped-open="${milestone.id}">Show them in the Shipped bar</button></div>`;
+      }
+
+      // ---------- main: graph view ----------
+      // Layout: lanes are milestones, rows are global slots. Every edge points to a lower row, and is routed through the gaps between rows
+      // and the side channels inside the target lane, so no edge ever runs behind a node.
+      const GRAPH = {
+        head: 50,
+        nodeHeight: 76,
+        ghostHeight: 26,
+        rowGap: 40,
+        trackStep: 5,
+        inset: 20,
+        wideLane: 192,
+        maxLane: 260,
+        ghostLane: 136,
+        strip: 48,
+        doneStep: 12,
+        channelEdge: 7,
+        channelStep: 4,
+        radius: 6,
+      };
+      function roundedPath(points, radius) {
+        const clean = points.filter(
+          (point, index) =>
+            index === 0 || point[0] !== points[index - 1][0] || point[1] !== points[index - 1][1],
+        );
+        let path = `M${clean[0][0]} ${clean[0][1]}`;
+        for (let index = 1; index < clean.length - 1; index++) {
+          const [px, py] = clean[index - 1],
+            [cx, cy] = clean[index],
+            [nx, ny] = clean[index + 1];
+          const before = Math.hypot(cx - px, cy - py),
+            after = Math.hypot(nx - cx, ny - cy);
+          const corner = Math.min(radius, before / 2, after / 2);
+          path += ` L${cx - ((cx - px) / before) * corner} ${cy - ((cy - py) / before) * corner} Q${cx} ${cy} ${cx + ((nx - cx) / after) * corner} ${cy + ((ny - cy) / after) * corner}`;
+        }
+        return `${path} L${clean.at(-1)[0]} ${clean.at(-1)[1]}`;
+      }
+      function renderGraph() {
+        const shown = openTickets.filter(inFilter);
+        if (!shown.length) return `<div class="sec-empty">Nothing open to draw here.</div>`;
+        const shownIds = new Set(shown.map((t) => t.id));
+        const nodeIds = new Set(shownIds);
+        shown.forEach((t) => t.depends_on.forEach((id) => ticketById.has(id) && nodeIds.add(id)));
+        const edges = [];
+        shown.forEach((t) =>
+          t.depends_on.forEach(
+            (id) =>
+              ticketById.has(id) &&
+              edges.push({ from: id, to: t.id, unfinished: isOpen(ticketById.get(id)) }),
+          ),
+        );
+        // finished dependencies leave the grid: they sit in the thin strip and do not push their targets down
+        const collapsed = new Set(
+          [...nodeIds].filter((id) => !shownIds.has(id) && !isOpen(ticketById.get(id))),
+        );
+        const laidOut = [...nodeIds].filter((id) => !collapsed.has(id));
+        const flow = edges.filter((e) => !collapsed.has(e.from));
+        const doneEdges = edges.filter((e) => collapsed.has(e.from));
+        const depthCache = new Map();
+        const depthOf = (id) => {
+          if (!depthCache.has(id))
+            depthCache.set(
+              id,
+              Math.max(-1, ...flow.filter((e) => e.to === id).map((e) => depthOf(e.from))) + 1,
+            );
+          return depthCache.get(id);
+        };
+        const laneIds = DATA.roadmap.milestones
+          .map((m) => m.id)
+          .filter((id) => laidOut.some((nodeId) => ticketById.get(nodeId).milestone === id));
+        const laneIndex = new Map(laneIds.map((id, index) => [id, index]));
+        const strip = collapsed.size ? GRAPH.strip : 0;
+        const isWide = (id) =>
+          [...shownIds].some((nodeId) => ticketById.get(nodeId).milestone === id);
+        const wideCount = laneIds.filter(isWide).length,
+          ghostCount = laneIds.length - wideCount;
+        // the open lanes share whatever width the strip leaves (main padding 48 + a little slack for a scrollbar)
+        const spare =
+          document.getElementById("main").clientWidth -
+          48 -
+          16 -
+          strip -
+          ghostCount * GRAPH.ghostLane;
+        const wide = wideCount
+          ? Math.min(GRAPH.maxLane, Math.max(GRAPH.wideLane, Math.floor(spare / wideCount)))
+          : 0;
+        const laneWidth = laneIds.map((id) => (isWide(id) ? wide : GRAPH.ghostLane));
+        const laneLeft = laneWidth.map(
+          (_, index) => strip + laneWidth.slice(0, index).reduce((sum, w) => sum + w, 0),
+        );
+        const slotOf = new Map();
+        const nextFree = new Map();
+        laidOut
+          .sort(
+            (a, b) =>
+              depthOf(a) - depthOf(b) ||
+              laneIndex.get(ticketById.get(a).milestone) -
+                laneIndex.get(ticketById.get(b).milestone) ||
+              a.localeCompare(b),
+          )
+          .forEach((id) => {
+            const lane = ticketById.get(id).milestone;
+            const slot = Math.max(
+              nextFree.get(lane) ?? 0,
+              ...flow.filter((e) => e.to === id).map((e) => slotOf.get(e.from) + 1),
+              0,
+            );
+            slotOf.set(id, slot);
+            nextFree.set(lane, slot + 1);
+          });
+        const nodeHeight = (id) => (shownIds.has(id) ? GRAPH.nodeHeight : GRAPH.ghostHeight);
+        const rows = Math.max(...slotOf.values()) + 1;
+        const rowHeight = Array.from({ length: rows }, (_, row) =>
+          Math.max(...laidOut.filter((id) => slotOf.get(id) === row).map(nodeHeight)),
+        );
+        // finished-dependency edges run in the gap above their target row; leave room for them above row 0
+        const doneInRow = new Map();
+        doneEdges.forEach((e) =>
+          doneInRow.set(slotOf.get(e.to), (doneInRow.get(slotOf.get(e.to)) ?? 0) + 1),
+        );
+        const rowTop = [];
+        rowHeight.forEach((height, row) =>
+          rowTop.push(
+            row
+              ? rowTop[row - 1] + rowHeight[row - 1] + GRAPH.rowGap
+              : GRAPH.head + (doneInRow.has(0) ? 10 + (doneInRow.get(0) - 1) * GRAPH.doneStep : 0),
+          ),
+        );
+        const width = strip + laneWidth.reduce((sum, w) => sum + w, 0);
+        const height = rowTop.at(-1) + rowHeight.at(-1) + 12;
+        const box = (id) => {
+          const lane = laneIndex.get(ticketById.get(id).milestone),
+            row = slotOf.get(id),
+            nodeWidth = laneWidth[lane] - GRAPH.inset * 2;
+          return {
+            lane,
+            row,
+            x: laneLeft[lane] + GRAPH.inset,
+            y: rowTop[row],
+            width: nodeWidth,
+            height: nodeHeight(id),
+            center: laneLeft[lane] + laneWidth[lane] / 2,
+          };
+        };
+        // each gap between two rows holds several horizontal "tracks", each side channel several vertical ones; edges take the next free one
+        const used = new Map();
+        const take = (key) => {
+          const index = used.get(key) ?? 0;
+          used.set(key, index + 1);
+          return index;
+        };
+        const gapY = (row) => rowTop[row] - GRAPH.rowGap + 8 + take(`gap${row}`) * GRAPH.trackStep;
+        const paths = flow.map((edge) => {
+          const source = box(edge.from),
+            target = box(edge.to);
+          const startY = source.y + source.height,
+            endY = target.y - 1;
+          let points;
+          if (target.row === source.row + 1) {
+            const y = source.center === target.center ? null : gapY(target.row);
+            points =
+              y === null
+                ? [
+                    [source.center, startY],
+                    [target.center, endY],
+                  ]
+                : [
+                    [source.center, startY],
+                    [source.center, y],
+                    [target.center, y],
+                    [target.center, endY],
+                  ];
+          } else {
+            const leftSide = target.lane > source.lane,
+              step = take(`channel${target.lane}${leftSide}`) * GRAPH.channelStep;
+            const channelX = leftSide
+              ? laneLeft[target.lane] + GRAPH.channelEdge + step
+              : laneLeft[target.lane] + laneWidth[target.lane] - GRAPH.channelEdge - step;
+            const yA = gapY(source.row + 1),
+              yB = gapY(target.row);
+            points = [
+              [source.center, startY],
+              [source.center, yA],
+              [channelX, yA],
+              [channelX, yB],
+              [target.center, yB],
+              [target.center, endY],
+            ];
+          }
+          const kind = edge.unfinished ? "unfinished" : "finished";
+          return `<path class="edge ${kind}" d="${roundedPath(points, GRAPH.radius)}" marker-end="url(#arrow-${kind})"><title>${edge.from} ${edge.unfinished ? "still blocks" : "finished before"} ${edge.to}</title></path>`;
+        });
+        // strip edges: farthest target takes the top track of its gap so no strip edge crosses another
+        const dotRight = strip - 5,
+          dotX = dotRight - 3.5,
+          seen = new Map(),
+          dots = [];
+        doneEdges
+          .sort((a, b) => box(a.to).row - box(b.to).row || box(b.to).center - box(a.to).center)
+          .forEach((edge) => {
+            const target = box(edge.to),
+              index = seen.get(target.row) ?? 0;
+            seen.set(target.row, index + 1);
+            const y =
+              rowTop[target.row] - 8 - (doneInRow.get(target.row) - 1 - index) * GRAPH.doneStep;
+            dots.push({ id: edge.from, y });
+            paths.push(
+              `<path class="edge finished" d="${roundedPath(
+                [
+                  [dotX, y],
+                  [target.center, y],
+                  [target.center, target.y - 1],
+                ],
+                GRAPH.radius,
+              )}" marker-end="url(#arrow-finished)"><title>${edge.from} finished before ${edge.to}</title></path>`,
+            );
+          });
+        const lanes = (
+          strip
+            ? [
+                `<div class="lane strip" style="left:3px;width:${strip - 6}px" title="${escapeHtml([...collapsed].map((id) => `${id} (${ticketById.get(id).milestone})`).join(", "))}"><div class="lane-head"><b>done</b><span>${collapsed.size} ${collapsed.size === 1 ? "dep" : "deps"}</span></div></div>`,
+              ]
+            : []
+        )
+          .concat(
+            laneIds.map((id, index) => {
+              const milestone = milestoneById.get(id);
+              return `<div class="lane ${milestone.state}" style="left:${laneLeft[index] + 3}px;width:${laneWidth[index] - 6}px"><div class="lane-head"><span class="id">${id}<span class="chip ${milestone.state === "active" ? "blue" : milestone.state === "done" ? "" : "outline"}" style="font-family:var(--sans)">${milestone.state}</span></span><span class="nm" title="${escapeHtml(milestone.outcome)}">${escapeHtml(milestone.name)}</span></div></div>`;
+            }),
+          )
+          .join("");
+        const dotHtml = dots
+          .map(
+            ({ id, y }) =>
+              `<a class="gdot" href="#/ticket/${id}" style="top:${y - 7}px;width:${dotRight - 12}px" title="${id}: ${escapeHtml(plain(ticketById.get(id).title))} (finished)"><span>${id.replace("ARK-", "")}</span><i></i></a>`,
+          )
+          .join("");
+        const nodes = laidOut
+          .map((id) => {
+            const ticket = ticketById.get(id);
+            const { x, y, width: nodeWidth, height: nodeHeightPx } = box(id);
+            const place = `left:${x}px;top:${y}px;width:${nodeWidth}px;height:${nodeHeightPx}px`;
+            if (!shownIds.has(id))
+              return `<a class="gnode ghost" href="#/ticket/${id}" style="${place}" title="${escapeHtml(plain(ticket.title))}"><span class="top">${id}</span><span class="tag" style="margin-left:auto">outside filter</span></a>`;
+            const running = ticket.run && ticket.run.phase !== "closed";
+            const tone = running
+              ? (PHASE_TONE[ticket.run.phase] ?? "blue")
+              : STATUS_TONE[ticket.status];
+            const color =
+              {
+                amber: "var(--amber-t)",
+                blue: "var(--blue-t)",
+                green: "var(--green-t)",
+                red: "var(--red-t)",
+                proposed: "var(--amber-t)",
+              }[tone] ?? "var(--mute)";
+            const label = running
+              ? ticket.run.phase.replace(/_/g, " ")
+              : ticket.status.replace(/_/g, " ");
+            const rank = rankOf.get(id);
+            return `<a class="gnode ${ticket.status === "proposed" ? "review" : ""}" href="#/ticket/${id}" style="${place}" title="${escapeHtml(plain(ticket.title))} · ${escapeHtml(label)}${rank ? ` · rank ${rank} in ${listOf(id)}` : ""}">
+      <span class="top"><span class="dot ${ticket.status === "proposed" ? "hollow" : ""}" style="color:${color}"></span>${id.replace("ARK-", "")}${rank ? `<span class="rk">#${rank}</span>` : ""}<span class="tag">${escapeHtml(label)}</span></span><span class="t">${escapeHtml(plain(ticket.title))}</span></a>`;
+          })
+          .join("");
+        const marker = (name) =>
+          `<marker id="arrow-${name}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0.5 8 4 0 7.5z" style="fill:${name === "unfinished" ? "var(--amber)" : "var(--line-3)"}"/></marker>`;
+        return `<div class="graph-wrap"><div class="legend"><span><svg viewBox="0 0 28 8"><path d="M0 4h28" class="edge finished"/></svg>Dependency finished</span><span><svg viewBox="0 0 28 8"><path d="M0 4h28" class="edge unfinished"/></svg>Dependency still open, blocks the ticket</span><span><i></i>Proposed</span><span style="margin-left:auto;color:var(--mute)">${shown.length} open tickets · #n is your rank · arrows run from a ticket to what it unblocks</span></div>
+    <div class="graph-scroll"><div class="graph" style="width:${width}px;height:${height}px">${lanes}<svg class="edges" width="${width}" height="${height}"><defs>${marker("unfinished")}${marker("finished")}</defs>${paths.join("")}</svg>${dotHtml}${nodes}</div></div></div>`;
+      }
+
+      // ---------- main ----------
+      function renderMain() {
+        const project = DATA.projects.find((p) => p.id === state.projectId);
+        if (!project.has_roadmap)
+          return `<p class="solo-line">This project's roadmap lives in ${escapeHtml(project.ticket_source)}.</p>`;
+        const milestone = milestoneById.get(state.milestoneFilter);
+        const viewButton = (key, label) =>
+          `<button data-view="${key}" aria-pressed="${state.view === key}">${icon(key)}${label}</button>`;
+        const filter = milestone
+          ? `<span class="filter">Showing <b>${milestone.id} · ${escapeHtml(milestone.name)}</b><button data-ms="">${icon("x", 10)}Clear</button></span>`
+          : `<span class="filter">All milestones</span>`;
+        const toolbar = `<div class="toolbar"><div class="seg big" role="group" aria-label="View">${viewButton("list", "List")}${viewButton("graph", "Graph")}</div>${filter}
+    <div class="right"><button class="linkbtn" data-notes="1">${DATA.warnings.length} notes on ROADMAP.md</button><span>Add an idea:</span><button class="cmd" data-copy="brainstorm" title="Copy command">${escapeHtml(DATA.brainstorm_command)}${icon("copy")}</button></div></div>`;
+        const head = `<h1 class="vision">${escapeHtml(DATA.roadmap.vision)}</h1>${toolbar}`;
+        if (state.view === "graph") {
+          const tickets = reviewTickets();
+          const bar = tickets.length
+            ? `<div class="review-bar"><b>Needs your review</b><span class="count">${tickets.length}</span><span>Master Chief evaluates these proposals; you approve. Amber nodes below.</span><button class="btn primary" data-copy="review">${icon("copy")}<span>Copy prompt for Master Chief</span></button></div>`
+            : "";
+          return `${head}${bar}${renderGraph()}${notesBlock()}`;
+        }
+        const lists = [
+          section("now", "Now", "Your top picks, in the order you ranked them", "now"),
+          section("next", "Next", "After Now", "next"),
+          section("later", "Later", "Not started on purpose", "later"),
+          unrankedSection(),
+        ].join("");
+        const review = reviewCallout();
+        const empty = state.milestoneFilter && !lists && !review ? renderEmptyFilter() : "";
+        return `${head}<div class="layout"><div class="lists">${lists}${empty}${notesBlock()}</div>${review}</div>`;
+      }
+
+      // ---------- shipped footer bar ----------
+      function renderFoot() {
+        const foot = document.getElementById("foot");
+        const previousPanel = document.getElementById("ship-panel");
+        const previousScroll = previousPanel?.scrollTop ?? 0;
+        const project = DATA.projects.find((p) => p.id === state.projectId);
+        foot.hidden = !project.has_roadmap;
+        if (!project.has_roadmap) {
+          foot.innerHTML = "";
+          return;
+        }
+        const entries = DATA.roadmap.milestones
+          .map((milestone) => ({ milestone, ...milestoneStats.get(milestone.id) }))
+          .filter((entry) => entry.done.length || entry.superseded.length);
+        const doneTotal = entries.reduce((sum, entry) => sum + entry.done.length, 0);
+        const supersededTotal = entries.reduce((sum, entry) => sum + entry.superseded.length, 0);
+        const list = (tickets) =>
+          `<div class="done-list">${tickets.map((ticket) => `<a href="#/ticket/${ticket.id}" title="${escapeHtml(plain(ticket.title))}"><b>${ticket.id}</b><span>${escapeHtml(plain(ticket.title))}</span></a>`).join("")}</div>`;
+        const fold = ({ milestone, done, superseded }) => {
+          const open = state.foldsOpen.has(milestone.id),
+            supersededOpen = state.supersededOpen.has(milestone.id);
+          return `<div class="fold"><button class="fold-head" data-fold="${milestone.id}" aria-expanded="${open}">${icon("chevron")}<b>${milestone.id}</b><span class="nm">${escapeHtml(milestone.name)}</span><span class="sub">${done.length} done${superseded.length ? ` · ${superseded.length} superseded` : ""}</span></button>
+      ${open ? `<p class="outcome">${escapeHtml(milestone.outcome)}</p>${list(done)}${superseded.length ? `<button class="fold-head nested" data-sup="${milestone.id}" aria-expanded="${supersededOpen}">${icon("chevron")}<span class="sub">${superseded.length} superseded</span></button>${supersededOpen ? list(superseded) : ""}` : ""}` : ""}</div>`;
+        };
+        const panel = state.shippedOpen
+          ? `<div class="ship-panel" id="ship-panel"><p class="intro">${doneTotal} done and ${supersededTotal} superseded tickets. Finished work stays out of every list.</p>${entries.map(fold).join("")}</div>`
+          : "";
+        foot.innerHTML = `${panel}<button class="shipped-toggle" id="shipped-toggle" aria-expanded="${state.shippedOpen}" aria-controls="ship-panel">${icon("chevron")}<span>Shipped <b>${doneTotal} done</b></span><span class="ship-mini">${entries.map(({ milestone, done }) => `${milestone.id} ${done.length}`).join(" · ")}</span></button>`;
+        const shownPanel = document.getElementById("ship-panel");
+        if (shownPanel && previousPanel) {
+          shownPanel.style.animation = "none";
+          shownPanel.scrollTop = previousScroll;
+        }
+      }
+
+      // ---------- nav, drawer, render ----------
+      function renderNav() {
+        const themeButton = (key, label) =>
+          `<button data-theme-set="${key}" aria-pressed="${state.theme === key}">${label}</button>`;
+        document.getElementById("nav").innerHTML =
+          `<div class="brand"><span class="mono">ark</span><span>hub</span></div>
+    <a class="tab" href="#/" data-stub="1">Home</a><a class="tab" href="#/" data-stub="1">Runs</a><a class="tab" href="#/" aria-current="page">Roadmap</a>
+    <div class="nav-right"><label class="project">Project <select id="project" aria-label="Project">${DATA.projects.map((p) => `<option value="${p.id}" ${p.id === state.projectId ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}</select></label>
+      <div class="seg" role="group" aria-label="Theme">${themeButton("system", "Auto")}${themeButton("light", "Light")}${themeButton("dark", "Dark")}</div></div>`;
+      }
+      function renderDrawer() {
+        const drawer = document.getElementById("drawer");
+        const match = location.hash.match(/^#\/ticket\/(.+)$/);
+        const id = match ? decodeURIComponent(match[1]) : null;
+        drawer.classList.toggle("open", Boolean(id));
+        drawer.setAttribute("aria-hidden", String(!id));
+        if (!id) return;
+        const ticket = ticketById.get(id);
+        const chips = (ids) =>
+          ids.length
+            ? ids.map((other) => idChip(other)).join("")
+            : '<span style="color:var(--mute)">none</span>';
+        const milestone = ticket && milestoneById.get(ticket.milestone);
+        const rank = ticket && rankOf.get(id);
+        drawer.innerHTML = `<div class="drawer-head"><span class="mono" style="font-weight:700">${escapeHtml(id)}</span>${ticket ? statusChip(ticket) : ""}<button class="btn" data-close="1" aria-label="Close ticket">${icon("x")}</button></div>
+    <div class="drawer-body">${
+      ticket
+        ? `<h2>${escapeHtml(plain(ticket.title))}</h2>${ticket.why ? `<p class="why">${inline(ticket.why)}</p>` : ""}
+      <dl><dt>Milestone</dt><dd>${milestone ? `<span><b>${milestone.id}</b> ${escapeHtml(milestone.name)}<br><span style="color:var(--dim)">${escapeHtml(milestone.outcome)}</span></span>` : ticket.milestone}</dd>
+      <dt>Rank</dt><dd>${rank ? `${listOf(id)[0].toUpperCase()}${listOf(id).slice(1)} · #${rank}` : '<span style="color:var(--mute)">not ranked</span>'}</dd>
+      <dt>Blocked by</dt><dd>${chips(blockersOf(ticket))}</dd><dt>Depends on</dt><dd>${chips(ticket.depends_on)}</dd><dt>Unblocks</dt><dd>${chips(unblocksOf(ticket))}</dd></dl>
+      ${ticket.status === "proposed" ? '<p class="stub">Proposed. Master Chief evaluates it; you approve.</p>' : ""}
+      <p class="stub">Side view only. The full ticket page would live at #/ticket/${escapeHtml(id)}.</p>`
+        : `<h2>${escapeHtml(id)}</h2><p class="why">Not in this snapshot.</p>`
+    }</div>`;
+      }
+      function applyTheme() {
+        if (state.theme === "system") document.documentElement.removeAttribute("data-theme");
+        else document.documentElement.dataset.theme = state.theme;
+      }
+      function render() {
+        const rail = document.getElementById("rail");
+        const main = document.getElementById("main");
+        const scroll = { rail: rail.scrollTop, main: main.scrollTop };
+        const project = DATA.projects.find((p) => p.id === state.projectId);
+        document.getElementById("shell").className = project.has_roadmap ? "shell" : "shell solo";
+        rail.hidden = !project.has_roadmap;
+        rail.innerHTML = project.has_roadmap ? renderRail() : "";
+        main.innerHTML = renderMain();
+        renderNav();
+        renderFoot();
+        rail.scrollTop = scroll.rail;
+        main.scrollTop = scroll.main;
+        renderDrawer();
+      }
+      function copyText(text, button) {
+        const done = () => {
+          const label = button.querySelector("span") ?? button;
+          const original = button.dataset.original ?? label.textContent;
+          button.dataset.original = original;
+          if (label !== button) label.textContent = "Copied";
+          else button.firstChild.textContent = "Copied ";
+          clearTimeout(button._timer);
+          button._timer = setTimeout(() => {
+            if (label !== button) label.textContent = original;
+            else button.firstChild.textContent = original;
+          }, 1400);
+        };
+        (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(done, () => {
+          const area = Object.assign(document.createElement("textarea"), { value: text });
+          document.body.append(area);
+          area.select();
+          document.execCommand("copy");
+          area.remove();
+          done();
+        });
+      }
+
+      document.addEventListener("click", (event) => {
+        if (
+          state.shippedOpen &&
+          !event.target.closest("#ship-panel, #shipped-toggle, [data-shipped-open]")
+        ) {
+          state.shippedOpen = false;
+          renderFoot();
+        }
+        const target = event.target.closest(
+          "[data-ms],[data-view],[data-theme-set],[data-fold],[data-sup],[data-copy],[data-notes],[data-close],[data-stub],[data-shipped-open],[data-rail-done],#shipped-toggle",
+        );
+        if (!target) return;
+        const data = target.dataset;
+        if (data.stub) {
+          event.preventDefault();
+          return;
+        }
+        if (data.railDone) {
+          state.railDoneOpen = !state.railDoneOpen;
+          render();
+          return;
+        }
+        if (data.close) {
+          location.hash = "#/";
+          return;
+        }
+        if (data.copy) {
+          copyText(data.copy === "review" ? reviewPrompt() : DATA.brainstorm_command, target);
+          return;
+        }
+        if (data.notes) {
+          document.getElementById("notes")?.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+        if (target.id === "shipped-toggle") {
+          state.shippedOpen = !state.shippedOpen;
+          renderFoot();
+          return;
+        }
+        if (data.shippedOpen) {
+          state.shippedOpen = true;
+          state.foldsOpen.add(data.shippedOpen);
+          renderFoot();
+          return;
+        }
+        if (data.fold) {
+          state.foldsOpen.has(data.fold)
+            ? state.foldsOpen.delete(data.fold)
+            : state.foldsOpen.add(data.fold);
+          renderFoot();
+          return;
+        }
+        if (data.sup) {
+          state.supersededOpen.has(data.sup)
+            ? state.supersededOpen.delete(data.sup)
+            : state.supersededOpen.add(data.sup);
+          renderFoot();
+          return;
+        }
+        if (data.themeSet) ((state.theme = data.themeSet), applyTheme());
+        else if (data.view) state.view = data.view;
+        else if (data.ms !== undefined)
+          state.milestoneFilter = state.milestoneFilter === data.ms ? null : data.ms || null;
+        render();
+      });
+      document.addEventListener("change", (event) => {
+        if (event.target.id === "project") {
+          state.projectId = event.target.value;
+          state.milestoneFilter = null;
+          state.shippedOpen = false;
+          render();
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (state.shippedOpen) {
+          state.shippedOpen = false;
+          renderFoot();
+        } else if (location.hash.startsWith("#/ticket/")) location.hash = "#/";
+      });
+      window.addEventListener("resize", () => {
+        if (state.view === "graph") render();
+      }); // graph lanes are sized from the available width
+      window.addEventListener("hashchange", renderDrawer);
+      applyTheme();
+      render();
+    </script>
+  </body>
+</html>

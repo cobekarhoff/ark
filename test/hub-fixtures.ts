@@ -567,3 +567,43 @@ export function writeEventLog(
   });
   writeFileSync(join(directory, "events.ndjson"), `${lines.join("\n")}\n`);
 }
+
+export type FixtureRoadmap = {
+  vision?: string;
+  /** `[id, name, outcome, state]`. Default: `M4` active. */
+  milestones?: [string, string, string, string][];
+  now?: string[];
+  next?: string[];
+  later?: string[];
+};
+
+/** Writes `$ARK_HOME/projects/<project>/ROADMAP.md` in the format of docs/reference/roadmap.md. */
+export function writeRoadmap(project: string, roadmap: FixtureRoadmap = {}): void {
+  const list = (title: string, ids: string[] = []) => [
+    `## ${title}`,
+    "",
+    ...ids.map((id) => `- ${id}`),
+    "",
+  ];
+  const milestones = roadmap.milestones ?? [
+    ["M4", "Fixture milestone", "A fixture outcome.", "active"],
+  ];
+  const text = [
+    "# Roadmap",
+    "",
+    "## Vision",
+    "",
+    roadmap.vision ?? "A fixture vision.",
+    "",
+    "## Milestones",
+    "",
+    "| id | name | outcome | state |",
+    "| --- | --- | --- | --- |",
+    ...milestones.map((row) => `| ${row.join(" | ")} |`),
+    "",
+    ...list("Now", roadmap.now),
+    ...list("Next", roadmap.next),
+    ...list("Later", roadmap.later),
+  ].join("\n");
+  writeFileSync(join(process.env.ARK_HOME as string, "projects", project, "ROADMAP.md"), text);
+}

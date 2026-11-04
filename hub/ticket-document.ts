@@ -12,6 +12,18 @@ function sectionOf(body: string, heading: string): string {
     .trim();
 }
 
+/** Text without inline code marks: ticket titles and `why` are shown as plain text. */
+export const withoutCodeMarks = (text: string): string => text.replaceAll("`", "");
+
+/** The first sentence of the `## Problem` section, else of `## Why`, as plain text (no backticks, never past a heading or paragraph); null when neither has text. */
+export function whyOf(source: string): string | null {
+  const body = source.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/)?.[1] ?? source;
+  const text = sectionOf(body, "problem") || sectionOf(body, "why");
+  const paragraph = text.split(/\r?\n\s*\r?\n|\r?\n#{1,6}\s/)[0];
+  const sentence = paragraph.replace(/\s+/g, " ").match(/^.*?(?:[.!?](?=\s)|[.!?]$|$)/)?.[0];
+  return sentence ? withoutCodeMarks(sentence) || null : null;
+}
+
 /**
  * The Problem and Change sections and the numbered acceptance criteria of a ticket file. Leaves as
  * plain strings: the page puts them in the document as text, never as Markdown HTML.
