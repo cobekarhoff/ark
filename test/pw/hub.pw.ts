@@ -1911,7 +1911,7 @@ test("ARK-285-AC8 Roadmap lists the tickets by horizon, keys move and open them,
 
   // Esc returns to the list: same row, same scroll position.
   await page.keyboard.press("Escape");
-  await expect(page).toHaveURL(/#\/roadmap$/);
+  await expect(page).toHaveURL(/#\/roadmap\?project=p$/);
   await expect(selected).toHaveAttribute("data-ticket", target);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 
@@ -2479,6 +2479,52 @@ test("ARK-291-AC3 Now shows cards and Next, Later and Unranked rows in rank orde
   await expect(page.locator("main h1")).toHaveText("Title of ARK-104");
 });
 
+test("ARK-291-AC3 the project is picked at the top of Roadmap or by a header chip, each project shows only its own tickets, vision and review, and the URL keeps it over a reload and Esc", async ({
+  page,
+}) => {
+  isolate();
+  roadmapTicket("ARK-111", "ready", { project: "alpha" });
+  roadmapTicket("ARK-112", "proposed", { project: "alpha" });
+  roadmapTicket("QC-211", "ready", { project: "beta" });
+  roadmapTicket("QC-212", "proposed", { project: "beta" });
+  writeRoadmap("alpha", { vision: "Alpha vision.", now: ["ARK-111"] });
+  writeRoadmap("beta", { vision: "Beta vision.", now: ["QC-211"] });
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "roadmap");
+
+  const pick = (name: string) =>
+    page.getByRole("group", { name: "Project" }).getByRole("button", { name });
+  const expectOnly = async (vision: string, ranked: string, review: string) => {
+    await expect(page.getByTestId("roadmap-vision")).toHaveText(vision);
+    await expect.poll(() => ticketsOf(page)).toEqual([ranked]);
+    await expect(page.getByTestId("review-item")).toHaveAttribute("data-ticket", review);
+    await expect(page.getByTestId("review-item")).toHaveCount(1);
+  };
+
+  await expect(pick("alpha")).toHaveAttribute("aria-pressed", "true");
+  await expectOnly("Alpha vision.", "ARK-111", "ARK-112");
+
+  await pick("beta").click();
+  await expect(page).toHaveURL(/#\/roadmap\?project=beta$/);
+  await expectOnly("Beta vision.", "QC-211", "QC-212");
+
+  // Reload keeps the project; Esc from a ticket returns to it.
+  await page.reload();
+  await expectOnly("Beta vision.", "QC-211", "QC-212");
+  await rowOf(page, "QC-211").getByTestId("ticket-link").click();
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/roadmap\?project=beta$/);
+  await expectOnly("Beta vision.", "QC-211", "QC-212");
+
+  // A header chip drives the same project.
+  await page.locator("header .chip", { hasText: "alpha" }).click();
+  await expect(page).toHaveURL(/#\/roadmap\?project=alpha$/);
+  await expect(pick("alpha")).toHaveAttribute("aria-pressed", "true");
+  await expectOnly("Alpha vision.", "ARK-111", "ARK-112");
+});
+
 test("ARK-291-AC4 the rail shows each active and later milestone with its outcome and bar, folds the done milestones into one line that unfolds, and a milestone click filters the lists and the graph", async ({
   page,
 }) => {
@@ -2944,7 +2990,7 @@ test("ARK-291-AC8 a warning shows in a notice with its ticket IDs, an error repl
   // The switcher stays on every state, and lists the projects of the header.
   await expect(projectButton("b-bad")).toBeVisible();
   await expect(page.getByRole("group", { name: "Project" }).getByRole("button")).toHaveCount(
-    await page.locator('.nav-right [title="project"]').count(),
+    await page.locator(".nav-right a.chip").count(),
   );
 
   // Only GETs, and nothing after the first load but the event stream it opened.
@@ -3021,7 +3067,7 @@ test("ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same s
   await expect(page).toHaveURL(new RegExp(`#/ticket/${target}$`));
   await expect(page.getByTestId("ticket-page")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page).toHaveURL(/#\/roadmap$/);
+  await expect(page).toHaveURL(/#\/roadmap\?project=p$/);
   await expect(selected).toHaveAttribute("data-ticket", target);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 

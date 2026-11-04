@@ -19,7 +19,7 @@ import {
   type ShippedFolds,
   type RoadmapData,
 } from "./RoadmapParts.tsx";
-import { useLive } from "./store.tsx";
+import { parseRoute, roadmapHash, useHash, useLive } from "./store.tsx";
 import type { Roadmap as RoadmapModel, RoadmapItem } from "../roadmap.ts";
 import type { Snapshot, TicketView } from "../types.ts";
 
@@ -74,7 +74,6 @@ type Remembered = {
   text: string;
   milestone: string | null;
   view: "list" | "graph";
-  project: string | null;
   shipped: ShippedFolds | undefined;
 };
 let remembered: Remembered | null = null;
@@ -152,7 +151,8 @@ export function Roadmap() {
   const [milestone, setMilestone] = useState<string | null>(() => remembered?.milestone ?? null);
   const [view, setView] = useState<"list" | "graph">(() => remembered?.view ?? "list");
   const [cursor, setCursor] = useState<string | null>(() => remembered?.cursor ?? null);
-  const [chosen, setChosen] = useState<string | null>(() => remembered?.project ?? null);
+  // The project is in the URL only: the header chips and the picker both set it.
+  const chosen = parseRoute(useHash()).project;
   // The projects the header lists: those with tickets.
   const names =
     snapshot && known(snapshot.tickets)
@@ -185,7 +185,6 @@ export function Roadmap() {
       text,
       milestone,
       view,
-      project,
       shipped: folds.at,
     };
   };
@@ -336,24 +335,22 @@ export function Roadmap() {
     </div>
   );
 
-  const switcher =
-    names.length > 1 ? (
-      <div className="seg rm-projects" role="group" aria-label="Project">
-        {names.map((name) => (
-          <button
-            key={name}
-            type="button"
-            aria-pressed={name === project}
-            onClick={() => {
-              setChosen(name);
-              setMilestone(null);
-            }}
-          >
-            {name}
-          </button>
-        ))}
-      </div>
-    ) : null;
+  const switcher = (
+    <div className="seg big rm-projects" role="group" aria-label="Project">
+      {names.map((name) => (
+        <button
+          key={name}
+          type="button"
+          aria-pressed={name === project}
+          onClick={() => {
+            location.hash = roadmapHash(name);
+          }}
+        >
+          {name}
+        </button>
+      ))}
+    </div>
+  );
 
   if (roadmap && "none" in roadmap)
     return (

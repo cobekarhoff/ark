@@ -228,6 +228,9 @@ nav {
 a.chip {
   color: var(--link);
 }
+a.chip[aria-current] {
+  border-color: var(--link);
+}
 .dot {
   display: inline-block;
   width: 9px;

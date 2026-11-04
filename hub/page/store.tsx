@@ -109,7 +109,13 @@ export type Route = {
   sub: { kind: "step" | "lead" | "session" | "file"; arg: string | null } | null;
   /** `#/ticket/<id>`: the ticket of the page. A ticket id is taken as unique across projects. */
   arg: string | null;
+  /** `#/roadmap?project=<name>`: the project the Roadmap shows. The URL is its only state. */
+  project: string | null;
 };
+
+/** The hash of the Roadmap for a project: what a pick, a header chip and Esc from a ticket go to. */
+export const roadmapHash = (project: string | null) =>
+  project === null ? "#/roadmap" : `#/roadmap?project=${encodeURIComponent(project)}`;
 
 /** A hash that does not decode (a truncated pasted link) keeps its raw text instead of crashing. */
 const decode = (part: string): string => {
@@ -124,20 +130,22 @@ const decode = (part: string): string => {
 export const isRetiredRoute = (hash: string): boolean => /^#\/(map(\/|$)|run\/?$)/.test(hash);
 
 export function parseRoute(hash: string): Route {
-  const [, view, part, kind, subArg] = hash.split("/");
+  const [path, query = ""] = hash.split("?");
+  const project = new URLSearchParams(query).get("project");
+  const [, view, part, kind, subArg] = path.split("/");
   const arg = part ? decode(part) : null;
+  const none = { run: null, sub: null, arg: null, project: null };
   if (view === "run" && arg !== null) {
     const subKinds = ["step", "lead", "session", "file"] as const;
     const subKind = subKinds.find((candidate) => candidate === kind);
     const sub = subKind ? { kind: subKind, arg: subArg ? decode(subArg) : null } : null;
-    return { view, run: arg, sub, arg: null };
+    return { ...none, view, run: arg, sub };
   }
-  if (view === "runs" || view === "run" || view === "map")
-    return { view: "runs", run: null, sub: null, arg: null };
-  if (view === "roadmap" && arg === null) return { view, run: null, sub: null, arg: null };
+  if (view === "runs" || view === "run" || view === "map") return { ...none, view: "runs" };
+  if (view === "roadmap" && arg === null) return { ...none, view, project };
   if ((view === "ticket" || view === "roadmap") && arg !== null)
-    return { view: "ticket", run: null, sub: null, arg };
-  return { view: "home", run: null, sub: null, arg: null };
+    return { ...none, view: "ticket", arg };
+  return { ...none, view: "home" };
 }
 
 export type ThemeChoice = "auto" | "light" | "dark";

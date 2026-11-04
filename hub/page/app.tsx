@@ -11,6 +11,7 @@ import {
   applyTheme,
   isRetiredRoute,
   parseRoute,
+  roadmapHash,
   savedTheme,
   sourceNames,
   useHash,
@@ -101,9 +102,19 @@ function Shell() {
         </nav>
         <div className="nav-right">
           {projects.map((project) => (
-            <span key={project} className="chip mono" title="project">
+            <a
+              key={project}
+              className="chip mono"
+              href={roadmapHash(project)}
+              title="Show this project's roadmap"
+              aria-current={
+                route.view === "roadmap" && (route.project ?? projects[0]) === project
+                  ? "true"
+                  : undefined
+              }
+            >
               {project}
-            </span>
+            </a>
           ))}
           <span
             className="chip"
@@ -135,7 +146,7 @@ function Shell() {
         {route.view === "home" ? <Home /> : null}
         {route.view === "runs" ? <Runs /> : null}
         {route.view === "run" ? <Run run={route.run!} sub={route.sub} /> : null}
-        {route.view === "roadmap" ? <Roadmap /> : null}
+        {route.view === "roadmap" ? <Roadmap key={route.project} /> : null}
         {route.view === "ticket" ? <TicketPage id={route.arg!} /> : null}
       </main>
     </>
