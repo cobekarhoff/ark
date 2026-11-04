@@ -36,6 +36,7 @@ import {
   writeBacklogTicket,
   writeFakeToolState,
   writeOmpSession,
+  writeRoadmap,
   writeRun,
   writeSessionFile,
 } from "./hub-fixtures.ts";
@@ -1659,4 +1660,134 @@ test("ARK-298-AC6 the hub name rule in cli/proxy.ts matches the ticket", () => {
     "",
   ])
     expect(isHubName(bad), JSON.stringify(bad)).toBe(false);
+});
+
+// ---------------------------------------------------------------- ARK-291
+
+const projectFolder = (project: string) =>
+  join(process.env.ARK_HOME as string, "projects", project);
+
+test("ARK-291-AC2 the snapshot has roadmap per project (the readRoadmap result, an error with its line, or none with the ticket_source) and why per ticket", async () => {
+  isolatedEnvironment();
+  installFakeTools({});
+  // Project `full`: a valid file. ARK-701 has a two-sentence Problem, ARK-702 a Why, ARK-703 neither.
+  writeBacklogTicket({
+    project: "full",
+    id: "ARK-701",
+    title: "Ranked",
+    status: "ready",
+    milestone: "M4",
+    problem: "The first sentence. The second sentence.",
+  });
+  writeFileSync(
+    join(projectFolder("full"), "tickets", "ARK-702.md"),
+    "---\nid: ARK-702\ntitle: Why only\nstatus: ready\n---\n## Why\n\nBecause it is needed! More words.\n",
+  );
+  writeFileSync(
+    join(projectFolder("full"), "tickets", "ARK-703.md"),
+    "---\nid: ARK-703\ntitle: No text\nstatus: ready\n---\n## Change\n\nSomething.\n",
+  );
+  writeRoadmap("full", { vision: "Ship it.", now: ["ARK-701"] });
+  // Project `bare`: tickets, no ROADMAP.md, ticket_source jira in ark.yml.
+  writeBacklogTicket({ project: "bare", id: "ARK-710", title: "Bare", status: "ready" });
+  writeFileSync(join(projectFolder("bare"), "ark.yml"), "ticket_source: jira\n");
+  // Project `broken`: a milestone row with an unknown state on line 9 of the file.
+  writeBacklogTicket({ project: "broken", id: "ARK-720", title: "Broken", status: "ready" });
+  writeFileSync(
+    join(projectFolder("broken"), "ROADMAP.md"),
+    "# Roadmap\n\n## Vision\n\nA vision.\n\n## Milestones\n\n| id | name | outcome | state |\n| M1 | One | Out | sideways |\n",
+  );
+
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) => current.tickets !== "unknown" && current.roadmap !== "unknown",
+  );
+  if (snapshot.roadmap === "unknown" || snapshot.tickets === "unknown")
+    throw new Error("unreachable");
+
+  const full = snapshot.roadmap.full;
+  if (!("vision" in full)) throw new Error(`full has no roadmap: ${JSON.stringify(full)}`);
+  expect(full.vision).toBe("Ship it.");
+  expect(full.now.map((item) => item.id)).toEqual(["ARK-701"]);
+  expect(full.unranked.map((item) => item.id)).toEqual(["ARK-702", "ARK-703"]);
+  expect(snapshot.roadmap.bare).toEqual({ none: "jira" });
+  const broken = snapshot.roadmap.broken;
+  if (!("error" in broken)) throw new Error(`broken has no error: ${JSON.stringify(broken)}`);
+  expect(broken.error).toMatch(/^line 10: .*sideways/);
+
+  const tickets = snapshot.tickets;
+  const why = (id: string) => tickets.find((ticket) => ticket.id === id)?.why;
+  expect(why("ARK-701")).toBe("The first sentence.");
+  expect(why("ARK-702")).toBe("Because it is needed!");
+  expect(why("ARK-703")).toBeNull();
+});
+
+test("ARK-291-AC2 a change to ROADMAP.md reaches a client of the event stream within 5 s", async () => {
+  isolatedEnvironment();
+  installFakeTools({});
+  writeBacklogTicket({ project: "p", id: "ARK-701", title: "Ranked", status: "ready" });
+  writeRoadmap("p", { vision: "Before the change.", now: ["ARK-701"] });
+  const { baseUrl } = await start();
+  await snapshotWhen(baseUrl, (current) => current.roadmap !== "unknown");
+
+  const controller = new AbortController();
+  const reader = (
+    await fetch(`${baseUrl}/events`, { signal: controller.signal })
+  ).body!.getReader();
+  const decoder = new TextDecoder();
+  let seen = "";
+  const readUntil = async (text: string, milliseconds: number): Promise<number> => {
+    const startedAt = performance.now();
+    const deadline = startedAt + milliseconds;
+    while (!seen.includes(text) && performance.now() < deadline) {
+      const chunk = await Promise.race([
+        reader.read(),
+        Bun.sleep(Math.max(1, deadline - performance.now())).then(() => null),
+      ]);
+      if (chunk === null || chunk.done) break;
+      seen += decoder.decode(chunk.value);
+    }
+    expect(seen).toContain(text);
+    return performance.now() - startedAt;
+  };
+  try {
+    await readUntil("Before the change.", 5000);
+    writeRoadmap("p", { vision: "After the change.", now: ["ARK-701"] });
+    expect(await readUntil("After the change.", 5000)).toBeLessThan(5000);
+  } finally {
+    controller.abort();
+  }
+});
+
+test("ARK-291-AC10 with a ROADMAP.md present, / and /nope answer with a p95 below 200 ms", async () => {
+  isolatedEnvironment();
+  installFakeTools({});
+  for (let number = 0; number < 40; number++)
+    writeBacklogTicket({
+      project: "p",
+      id: `ARK-${800 + number}`,
+      title: `Ticket ${number}`,
+      status: number % 5 === 0 ? "done" : "ready",
+      milestone: "M4",
+      problem: "A reason. More.",
+    });
+  writeRoadmap("p", { now: ["ARK-801", "ARK-802"], next: ["ARK-803"], later: ["ARK-804"] });
+  const { baseUrl } = await start();
+  await snapshotWhen(baseUrl, (current) => {
+    const roadmap = current.roadmap;
+    return roadmap !== "unknown" && "vision" in roadmap.p;
+  });
+  for (const route of ["/", "/nope"]) {
+    const durations: number[] = [];
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const startedAt = performance.now();
+      await (await fetch(`${baseUrl}${route}`)).arrayBuffer();
+      durations.push(performance.now() - startedAt);
+    }
+    const p95 = durations.toSorted((left, right) => left - right)[
+      Math.ceil(durations.length * 0.95) - 1
+    ];
+    expect(p95, route).toBeLessThan(200);
+  }
 });
