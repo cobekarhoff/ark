@@ -150,7 +150,11 @@ export function Roadmap() {
   const [view, setView] = useState<"list" | "graph">(() => remembered?.view ?? "list");
   const [cursor, setCursor] = useState<string | null>(() => remembered?.cursor ?? null);
   const [chosen, setChosen] = useState<string | null>(() => remembered?.project ?? null);
-  const names = snapshot && known(snapshot.roadmap) ? Object.keys(snapshot.roadmap).sort() : [];
+  // The projects the header lists: those with tickets.
+  const names =
+    snapshot && known(snapshot.tickets)
+      ? [...new Set(snapshot.tickets.map((ticket) => ticket.project))].sort()
+      : [];
   const project = chosen !== null && names.includes(chosen) ? chosen : (names[0] ?? null);
   const needle = text.trim().toLowerCase();
   const model = useMemo(
@@ -320,10 +324,30 @@ export function Roadmap() {
     </div>
   );
 
+  const switcher =
+    names.length > 1 ? (
+      <div className="seg rm-projects" role="group" aria-label="Project">
+        {names.map((name) => (
+          <button
+            key={name}
+            type="button"
+            aria-pressed={name === project}
+            onClick={() => {
+              setChosen(name);
+              setMilestone(null);
+            }}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+    ) : null;
+
   if (roadmap && "none" in roadmap)
     return (
       <div className="rm-page solo" data-testid="roadmap-page">
         <h1 className="sr">Roadmap</h1>
+        {switcher}
         <p className="rm-solo" data-testid="roadmap-none">
           {"This project's roadmap lives in "}
           {roadmap.none}.
@@ -335,23 +359,7 @@ export function Roadmap() {
   return (
     <div className={`rm-page${ok ? "" : " solo"}`} data-testid="roadmap-page">
       <h1 className="sr">Roadmap</h1>
-      {names.length > 1 ? (
-        <div className="seg rm-projects" role="group" aria-label="Project">
-          {names.map((name) => (
-            <button
-              key={name}
-              type="button"
-              aria-pressed={name === project}
-              onClick={() => {
-                setChosen(name);
-                setMilestone(null);
-              }}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {switcher}
       {ok ? (
         <Rail
           milestones={ok.milestones}

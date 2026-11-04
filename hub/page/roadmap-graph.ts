@@ -29,7 +29,7 @@ export type GraphLayout = {
   edges: { from: string; to: string; finished: boolean; points: Point[] }[];
 };
 
-export const node = { width: 176, height: 76 };
+export const node = { width: 176, height: 88 };
 const header = 58;
 const lanePadding = 12;
 const laneGap = 8;

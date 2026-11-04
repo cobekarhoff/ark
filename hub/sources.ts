@@ -9,7 +9,7 @@ import { loadPlan, type PlanStep } from "../cli/plan.ts";
 import { stepWindows, type StepWindow } from "../cli/retro.ts";
 import { readEventsLeniently } from "./run-detail.ts";
 import { readRoadmap, type RoadmapTicket } from "./roadmap.ts";
-import { parseTicketDocument, whyOf } from "./ticket-document.ts";
+import { parseTicketDocument, whyOf, withoutCodeMarks } from "./ticket-document.ts";
 import type {
   Agent,
   AgentActivity,
@@ -163,7 +163,7 @@ export function createArkReader() {
         ticket = {
           project,
           id: fields.id,
-          title: fields.title,
+          title: withoutCodeMarks(fields.title),
           status: typeof fields.status === "string" ? fields.status : "unknown",
           milestone: typeof fields.milestone === "string" ? fields.milestone : null,
           depends_on: Array.isArray(fields.depends_on) ? fields.depends_on.map(String) : [],

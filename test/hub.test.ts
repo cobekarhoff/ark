@@ -1687,6 +1687,11 @@ test("ARK-291-AC2 the snapshot has roadmap per project (the readRoadmap result, 
     join(projectFolder("full"), "tickets", "ARK-703.md"),
     "---\nid: ARK-703\ntitle: No text\nstatus: ready\n---\n## Change\n\nSomething.\n",
   );
+  // Inline code marks and a sub-heading directly under the first sentence never reach `why` or the title.
+  writeFileSync(
+    join(projectFolder("full"), "tickets", "ARK-704.md"),
+    "---\nid: ARK-704\ntitle: Show `ark chief state`\nstatus: ready\n---\n## Problem\n\nRun `ark chief state` first\n### Run leads\nMore words.\n",
+  );
   writeRoadmap("full", { vision: "Ship it.", now: ["ARK-701"] });
   // Project `bare`: tickets, no ROADMAP.md, ticket_source jira in ark.yml.
   writeBacklogTicket({ project: "bare", id: "ARK-710", title: "Bare", status: "ready" });
@@ -1710,7 +1715,8 @@ test("ARK-291-AC2 the snapshot has roadmap per project (the readRoadmap result, 
   if (!("vision" in full)) throw new Error(`full has no roadmap: ${JSON.stringify(full)}`);
   expect(full.vision).toBe("Ship it.");
   expect(full.now.map((item) => item.id)).toEqual(["ARK-701"]);
-  expect(full.unranked.map((item) => item.id)).toEqual(["ARK-702", "ARK-703"]);
+  expect(full.unranked.map((item) => item.id)).toEqual(["ARK-702", "ARK-703", "ARK-704"]);
+  expect(full.unranked.find((item) => item.id === "ARK-704")?.title).toBe("Show ark chief state");
   expect(snapshot.roadmap.bare).toEqual({ none: "jira" });
   const broken = snapshot.roadmap.broken;
   if (!("error" in broken)) throw new Error(`broken has no error: ${JSON.stringify(broken)}`);
@@ -1721,6 +1727,7 @@ test("ARK-291-AC2 the snapshot has roadmap per project (the readRoadmap result, 
   expect(why("ARK-701")).toBe("The first sentence.");
   expect(why("ARK-702")).toBe("Because it is needed!");
   expect(why("ARK-703")).toBeNull();
+  expect(why("ARK-704")).toBe("Run ark chief state first");
 });
 
 test("ARK-291-AC2 a change to ROADMAP.md reaches a client of the event stream within 5 s", async () => {

@@ -1839,16 +1839,24 @@ a.rm-id:hover {
 }
 .rm-node-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 2px 6px;
   font-size: 11px;
+}
+.rm-node-top .rm-chip {
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 .rm-node-title {
   font-size: 11.5px;
   line-height: 1.3;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

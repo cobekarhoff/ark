@@ -2724,6 +2724,12 @@ test("ARK-291-AC7 Graph draws every open ticket in a lane for its milestone in r
   await open(page, baseUrl, "roadmap");
   await page.getByTestId("view-graph").click();
   await expect(page.getByTestId("roadmap-graph")).toBeVisible();
+  // No node clips its content: the id row, chip and title all fit the node box.
+  expect(
+    await page
+      .getByTestId("graph-node")
+      .evaluateAll((nodes) => nodes.filter((box) => box.scrollHeight > box.clientHeight).length),
+  ).toBe(0);
 
   // Every open ticket is a node, with or without a run, in the lane of its milestone.
   expect(
@@ -2932,6 +2938,11 @@ test("ARK-291-AC8 a warning shows in a notice with its ticket IDs, an error repl
   await expect(page.getByTestId("milestone-rail")).toHaveCount(0);
   await expect(page.getByTestId("shipped-bar")).toHaveCount(0);
   await expect(page.getByTestId("copy-command")).toBeVisible();
+  // The switcher stays on every state, and lists the projects of the header.
+  await expect(projectButton("b-bad")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Project" }).getByRole("button")).toHaveCount(
+    await page.locator('.nav-right [title="project"]').count(),
+  );
 
   // Only GETs, and nothing after the first load but the event stream it opened.
   await page.waitForTimeout(1000);
