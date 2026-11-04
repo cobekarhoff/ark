@@ -1354,6 +1354,7 @@ function junitReport(criteria: [string, "passing" | "failing"][]): string {
  * result of each criterion, a JUnit report and a findings file with 1 P1, 2 P2 and 1 P3.
  */
 function reviewRun(options: {
+  project?: string;
   ticket: string;
   title: string;
   number: number;
@@ -1366,7 +1367,7 @@ function reviewRun(options: {
   const run = runId(options.ticket);
   const url = `https://github.com/example/repo/pull/${options.number}`;
   const directory = writeRun({
-    project: "p",
+    project: options.project ?? "p",
     run,
     ticket: { id: options.ticket, title: options.title },
     phase: "merge_requests_open",
@@ -3116,5 +3117,568 @@ test("ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same s
       expect(checked, `text checked on ${view} in ${choice}`).toBeGreaterThan(30);
       expect(weak, `${view} in ${choice}`).toEqual([]);
     }
+  }
+});
+
+// ---------------------------------------------------------------- ARK-309
+
+const costOf = (project: string) => (project === "alpha" ? 1.25 : 2.5);
+const ids = (prefix: string) => [1, 2, 3, 4].map((number) => `${prefix}${number}`);
+const worlds = [
+  { project: "alpha", prefix: "ARK-11" },
+  { project: "beta", prefix: "QC-21" },
+].map((world) => ({ ...world, ids: ids(world.prefix), run: runId(`${world.prefix}1`) }));
+const [alpha, beta] = worlds;
+
+/**
+ * Two projects with the same shape: X1 building (cost), X2 queued behind X1 in M5, X3 done with a
+ * closed run, X4 proposed. Both ROADMAP.md files carry M4 and M5. `crowd` adds proposed tickets to alpha.
+ */
+function filterWorld(crowd = 0) {
+  isolate();
+  for (const {
+    project,
+    ids: [x1, x2, x3, x4],
+    run,
+  } of worlds) {
+    const ticket = (id: string, status: string, extra: TicketOptions = {}) =>
+      roadmapTicket(id, status, { project, ...extra });
+    ticket(x1, "ready");
+    ticket(x2, "ready", { milestone: "M5", dependsOn: [x1] });
+    ticket(x3, "done");
+    ticket(x4, "proposed", { milestone: "M5" });
+    writeRun({
+      project,
+      run,
+      ticket: { id: x1, title: `Title of ${x1}` },
+      phase: "building",
+      steps: [
+        {
+          id: "build",
+          role: "implementer",
+          harness: "omp",
+          model: "m",
+          needs: [],
+          startedAfter: 40,
+        },
+      ],
+    });
+    writeRun({
+      project,
+      run: runId(x3),
+      ticket: { id: x3, title: `Title of ${x3}` },
+      phase: "closed",
+      startedAt: ago(7200),
+    });
+    writeRoadmap(project, {
+      vision: `${project} vision.`,
+      milestones: [
+        ["M4", "Fourth", "Outcome four.", "active"],
+        ["M5", "Fifth", "Outcome five.", "later"],
+      ],
+      now: [x1],
+      next: [x2],
+      later: project === "alpha" ? Array.from({ length: crowd }, (_, n) => `ARK-9${n}`) : [],
+    });
+  }
+  for (let number = 0; number < crowd; number++)
+    roadmapTicket(`ARK-9${number}`, "proposed", { project: "alpha" });
+  installFakeTools({});
+}
+
+const projectButton = (page: Page, name: string) =>
+  page.getByRole("group", { name: "Project" }).getByRole("button", { name, exact: true });
+const hrefsOf = (page: Page) =>
+  page.locator("a[href^='#/']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("href")!));
+
+test("ARK-309-AC1 the filter is the project query on Home, Runs, a run, Roadmap and a ticket: every link keeps it, a reload keeps it, a click sends no request, an unknown name shows an empty state", async ({
+  page,
+}) => {
+  filterWorld();
+  const baseUrl = await launch();
+  const pages: [string, () => Promise<unknown>][] = [
+    ["", () => expect(page.getByTestId("run").first()).toBeVisible()],
+    ["runs", () => expect(page.getByTestId("run-card").first()).toBeVisible()],
+    [`run/${alpha.run}`, () => expect(page.getByTestId("timeline")).toBeVisible()],
+    ["roadmap", () => expect(page.getByTestId("ticket-row").first()).toBeVisible()],
+    [`ticket/${alpha.ids[0]}`, () => expect(page.getByTestId("ticket-page")).toBeVisible()],
+  ];
+  for (const [hash, ready] of pages) {
+    await open(page, baseUrl, `${hash}?project=alpha`);
+    for (const reload of [false, true]) {
+      if (reload) await page.reload();
+      await ready();
+      await expect(projectButton(page, "alpha")).toHaveAttribute("aria-pressed", "true");
+      const links = await hrefsOf(page);
+      expect(links.length, hash).toBeGreaterThan(3);
+      for (const href of links) expect(href, `${hash} link`).toContain("project=alpha");
+    }
+  }
+
+  // A click on another button changes the hash and sends no request.
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(request.url()));
+  await projectButton(page, "beta").click();
+  await expect(page).toHaveURL(new RegExp(`#/ticket/${alpha.ids[0]}\\?project=beta$`));
+  await page.waitForTimeout(500);
+  expect(requests).toEqual([]);
+
+  // A name that is no project is an empty state with a way out, never another project's data.
+  await open(page, baseUrl, "runs?project=nope");
+  await expect(page.getByTestId("unknown-project")).toContainText("No project named nope");
+  await expect(page.getByTestId("run-card")).toHaveCount(0);
+  await page.getByTestId("unknown-project").getByRole("link", { name: "All projects" }).click();
+  await expect(page).toHaveURL(/#\/runs$/);
+  await expect(page.getByTestId("run-card").first()).toBeVisible();
+});
+
+/** 2 projects, each with a gate, a waiting question, a stuck agent, an open MR and a cost. */
+async function homeWorld() {
+  isolate();
+  const runs = [alpha, beta].map((world, at) => {
+    const run = runId(`${world.prefix}1`);
+    const directory = writeRun({
+      project: world.project,
+      run,
+      ticket: { id: world.ids[0], title: `Building ${world.project}` },
+      phase: "building",
+      steps: [
+        {
+          id: "hub-server",
+          role: "implementer",
+          harness: "omp",
+          model: "m",
+          needs: [],
+          startedAfter: 120,
+        },
+      ],
+    });
+    // Closed runs carry the cost (metrics.json), dated by the local day the page reads.
+    const now = new Date();
+    const localDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    writeRun({
+      project: world.project,
+      run: `${localDay}-${world.ids[3]}-1`,
+      ticket: { id: world.ids[3], title: `Closed ${world.project}` },
+      phase: "closed",
+      metricsCostUsd: costOf(world.project),
+    });
+    writeRun({
+      project: world.project,
+      run: runId(world.ids[1]),
+      ticket: { id: world.ids[1], title: `Gate ${world.project}` },
+      phase: "awaiting_criteria",
+    });
+    const review = reviewRun({
+      project: world.project,
+      ticket: world.ids[2],
+      title: `Review ${world.project}`,
+      number: 70 + at,
+      criteria: [[`${world.ids[2]}-AC1`, "passing"]],
+      createdAgo: 600,
+      conclusion: "SUCCESS",
+      size: { additions: 1, deletions: 1, changedFiles: 1 },
+      findings: "### P3: z\n",
+    });
+    return { world, run, directory, review };
+  });
+  const message = (run: string, dispatch: string) => ({
+    type: "question",
+    from_handle: `dispatch:${dispatch}`,
+    to_handle: `run:orca-${run}`,
+    subject: "which port?",
+    read: 0,
+    created_at: new Date().toISOString(),
+  });
+  installFakeTools({
+    orca: {
+      ...orcaAnswersFor(runs[0].run),
+      runs: runs.map(({ run }) => ({
+        id: `orca-${run}`,
+        objective: `Ark run ${run}`,
+        coordinator_handle: "term-lead",
+      })),
+      workers: runs.map(({ world }, at) => ({
+        taskId: `task-${at}`,
+        dispatchId: `ctx_${world.project}`,
+        state: "running",
+        agentTerminalHandle: "term-worker",
+      })),
+      tasks: runs.map((_, at) => ({ id: `task-${at}`, title: "hub-server (implementer, .)" })),
+      messages: runs.map(({ run, world }) => message(run, `ctx_${world.project}`)),
+      worktrees: runs.map(({ directory }) => ({
+        path: join(directory, "workspace"),
+        agents: [
+          {
+            taskTitle: "hub-server (implementer, .)",
+            state: "working",
+            toolName: "bash",
+            updatedAt: Date.now(),
+            agentWait: { reason: "approval", source: "hook" },
+            lastAssistantMessage: "Allow bash?\n",
+          },
+        ],
+      })),
+    },
+    mergeRequestViews: Object.fromEntries(runs.map(({ review }) => [review.url, review.view])),
+    ompUsage: usageAt(0.82),
+  });
+  return launch();
+}
+
+test("ARK-309-AC2 Home counts only the chosen project in its tiles, lists, cost and the header, and the provider limit says all projects, for All, each project and after a reload", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const baseUrl = await homeWorld();
+  const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"] .big`);
+  const expected = [
+    { hash: "", count: 2, cost: "$3.75", badge: "4 need you" },
+    { hash: "?project=alpha", count: 1, cost: "$1.25", badge: "2 need you" },
+    { hash: "?project=beta", count: 1, cost: "$2.50", badge: "2 need you" },
+  ];
+  for (const { hash, count, cost, badge } of expected)
+    for (const reload of [false, true]) {
+      await open(page, baseUrl, hash);
+      if (reload) await page.reload();
+      await expect(tile("usage")).toHaveText("82%", { timeout: 20_000 });
+      await expect(page.getByTestId("stuck")).toHaveCount(count, { timeout: 20_000 });
+      await expect(page.getByTestId("review")).toHaveCount(count, { timeout: 20_000 });
+      await expect(page.getByTestId("gate")).toHaveCount(count);
+      await expect(page.getByTestId("waiting")).toHaveCount(count);
+      await expect(page.getByTestId("run")).toHaveCount(count * 3);
+      await expect(tile("needs-me")).toHaveText(String(count * 2));
+      await expect(tile("reviews")).toHaveText(String(count));
+      await expect(tile("stuck")).toHaveText(String(count));
+      await expect(tile("runs")).toHaveText(String(count * 3));
+      await expect(tile("cost")).toHaveText(cost);
+      await expect(page.getByTestId("nav-cost")).toHaveText(`${cost} today`);
+      await expect(page.getByLabel(badge)).toBeVisible();
+      await expect(page.getByTestId("cost-day").last()).toContainText(cost);
+      // The limit is one per account: the same in every case, and named so.
+      await expect(page.locator('[data-testid="tile"][data-tile="usage"]')).toContainText(
+        "all projects",
+      );
+      await expect(page.getByTestId("usage-window")).toContainText("all projects");
+      await expect(page.getByTestId("nav-usage")).toContainText("82%");
+      await expect(page.getByTestId("nav-usage")).toContainText("all projects");
+    }
+});
+
+test("ARK-309-AC3 Runs shows only the chosen project in its lanes, heading and filter counts, graph and unblocks list, and the heading names the filter", async ({
+  page,
+}) => {
+  filterWorld();
+  const baseUrl = await launch();
+  const lane = (name: string) => page.locator(`[data-testid="lane"][data-lane="${name}"]`);
+  const filter = (name: string) =>
+    page.locator(`[data-testid="graph-filter"][data-filter="${name}"]`);
+  const nodes = () =>
+    page
+      .getByTestId("graph-node")
+      .evaluateAll((all) =>
+        all.map((node) => node.getAttribute("data-ticket")!).toSorted((a, b) => a.localeCompare(b)),
+      );
+  const unblocked = () =>
+    page
+      .getByTestId("unblocks")
+      .evaluateAll((all) =>
+        all.map((node) => node.getAttribute("data-ticket")!).toSorted((a, b) => a.localeCompare(b)),
+      );
+  const cases = [
+    { hash: "runs", shown: [alpha, beta], name: "All projects" },
+    { hash: "runs?project=alpha", shown: [alpha], name: "alpha" },
+    { hash: "runs?project=beta", shown: [beta], name: "beta" },
+  ];
+  for (const { hash, shown, name } of cases) {
+    await open(page, baseUrl, hash);
+    await expect(page.getByTestId("run-card").first()).toBeVisible();
+    const count = shown.length;
+    await expect(page.locator("main h1")).toContainText(`· ${name}`);
+    await expect(page.locator("main h1")).toContainText(
+      `${count} open · ${count} queued · ${count} closed`,
+    );
+    await expect(lane("Queued").getByTestId("run-card")).toHaveCount(count);
+    await expect(lane("Building").getByTestId("run-card")).toHaveCount(count);
+    await expect(lane("Closed").getByTestId("run-card")).toHaveCount(count);
+    for (const button of ["Active", "Queued", "Old"])
+      await expect(filter(button)).toHaveText(new RegExp(`${button}\\s*${count}`));
+    // Active: the open tickets and the queued ones that wait on them.
+    expect(await nodes()).toEqual(shown.flatMap((world) => world.ids.slice(0, 2)).toSorted());
+    expect(await unblocked()).toEqual(shown.map((world) => world.ids[0]).toSorted());
+    for (const world of shown)
+      await expect(
+        page.locator(`[data-testid="unblocks"][data-ticket="${world.ids[0]}"]`),
+      ).toContainText(world.ids[1]);
+  }
+});
+
+test("ARK-309-AC4 Roadmap shows every project in name order under its name with All projects, one project with a project, and a milestone, view or key acts in one section only", async ({
+  page,
+}) => {
+  filterWorld();
+  const baseUrl = await launch();
+  const section = (project: string) => page.locator(`section[data-project="${project}"]`);
+  const rows = (project: string) =>
+    section(project)
+      .getByTestId("ticket-row")
+      .evaluateAll((all) => all.map((node) => node.getAttribute("data-ticket")));
+  const selected = (project: string) =>
+    section(project).locator('[data-testid="ticket-row"][aria-current="true"]');
+
+  // All projects: both roadmaps in name order, each with its own vision, rail and rows.
+  await open(page, baseUrl, "roadmap");
+  await expect(page.getByTestId("ticket-row")).toHaveCount(4);
+  expect(
+    await page
+      .locator("section[data-project]")
+      .evaluateAll((all) => all.map((node) => node.getAttribute("data-project"))),
+  ).toEqual(["alpha", "beta"]);
+  expect(await page.locator("h2.rm-project").allTextContents()).toEqual(["alpha", "beta"]);
+  for (const world of worlds) {
+    await expect(section(world.project).getByTestId("roadmap-vision")).toHaveText(
+      `${world.project} vision.`,
+    );
+    await expect(section(world.project).getByTestId("milestone-pick")).toHaveCount(2);
+    expect(await rows(world.project)).toEqual(world.ids.slice(0, 2));
+  }
+
+  // Keys act on the section last touched: the first at the start, then the one clicked.
+  await expect(selected("alpha")).toHaveAttribute("data-ticket", alpha.ids[0]);
+  await page.keyboard.press("j");
+  await expect(selected("alpha")).toHaveAttribute("data-ticket", alpha.ids[1]);
+  await expect(selected("beta")).toHaveCount(0);
+  await section("beta").getByTestId("roadmap-vision").click();
+  await expect(selected("alpha")).toHaveCount(0);
+  await expect(selected("beta")).toHaveAttribute("data-ticket", beta.ids[0]);
+  await page.keyboard.press("j");
+  await expect(selected("beta")).toHaveAttribute("data-ticket", beta.ids[1]);
+  await section("alpha").getByTestId("roadmap-vision").click();
+  await expect(selected("alpha")).toHaveAttribute("data-ticket", alpha.ids[1]);
+
+  // The same milestone id in two sections: a click filters its own section.
+  const pick = (project: string, id: string) =>
+    section(project).locator(`[data-testid="milestone-pick"][data-milestone="${id}"]`);
+  await pick("alpha", "M5").click();
+  await expect(pick("alpha", "M5")).toHaveAttribute("aria-pressed", "true");
+  await expect(pick("beta", "M5")).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => rows("alpha")).toEqual([alpha.ids[1]]);
+  expect(await rows("beta")).toEqual(beta.ids.slice(0, 2));
+  // The List and Graph switch too.
+  await section("beta").getByTestId("view-graph").click();
+  await expect(section("beta").getByTestId("roadmap-graph")).toBeVisible();
+  await expect(section("alpha").getByTestId("roadmap-graph")).toHaveCount(0);
+
+  // One project: only its section, no project heading. The ARK-291 link still opens it.
+  await page.reload(); // a section keeps its own state while the page stays open
+  for (const world of worlds) {
+    await open(page, baseUrl, `roadmap?project=${world.project}`);
+    await expect(page.getByTestId("ticket-row")).toHaveCount(2);
+    await expect(page.locator("section[data-project]")).toHaveCount(1);
+    await expect(page.getByTestId("roadmap-vision")).toHaveText(`${world.project} vision.`);
+    await expect(page.locator("h2.rm-project")).toHaveCount(0);
+    expect(await rows(world.project)).toEqual(world.ids.slice(0, 2));
+  }
+});
+
+test("ARK-309-AC5 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it", async ({
+  page,
+}) => {
+  filterWorld(40);
+  const baseUrl = await launch();
+  const [ticket, run] = [`ticket/${beta.ids[0]}`, `run/${beta.run}`];
+  const ready = (hash: string) =>
+    hash.startsWith("ticket")
+      ? expect(page.getByTestId("ticket-page")).toBeVisible()
+      : expect(page.getByTestId("timeline")).toBeVisible();
+
+  for (const hash of [ticket, run]) {
+    // The filter is alpha, the page is beta's.
+    await open(page, baseUrl, `${hash}?project=alpha`);
+    await ready(hash);
+    await expect(page.getByTestId("page-project")).toHaveText("Project beta");
+    await expect(page.getByTestId("outside-filter")).toContainText("Outside the filter alpha");
+    await expect(projectButton(page, "alpha")).toHaveAttribute("aria-pressed", "true");
+    await expect(projectButton(page, "beta")).toHaveAttribute("aria-pressed", "false");
+    // The note's link sets the filter to the page's project.
+    await page.getByTestId("outside-filter").getByRole("link").click();
+    await expect(page).toHaveURL(new RegExp(`#/${hash}\\?project=beta$`));
+    await expect(page.getByTestId("outside-filter")).toHaveCount(0);
+    await expect(projectButton(page, "beta")).toHaveAttribute("aria-pressed", "true");
+    // No filter: the project shows, there is nothing to be outside of.
+    await open(page, baseUrl, hash);
+    await ready(hash);
+    await expect(page.getByTestId("page-project")).toHaveText("Project beta");
+    await expect(page.getByTestId("outside-filter")).toHaveCount(0);
+    await expect(projectButton(page, "All projects")).toHaveAttribute("aria-pressed", "true");
+  }
+
+  // Back links and Esc keep the filter of the URL, never the page's project.
+  await open(page, baseUrl, `${ticket}?project=alpha`);
+  await ready(ticket);
+  await page.getByRole("link", { name: "← Roadmap" }).click();
+  await expect(page).toHaveURL(/#\/roadmap\?project=alpha$/);
+  await open(page, baseUrl, `${ticket}?project=alpha`);
+  await ready(ticket);
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/roadmap\?project=alpha$/);
+  await open(page, baseUrl, `${run}?project=alpha`);
+  await ready(run);
+  await page.getByRole("link", { name: "← Runs" }).click();
+  await expect(page).toHaveURL(/#\/runs\?project=alpha$/);
+  await expect(projectButton(page, "alpha")).toHaveAttribute("aria-pressed", "true");
+
+  // From a ticket of the filter's project, Esc returns to the same scroll position.
+  await open(page, baseUrl, "roadmap?project=alpha");
+  await expect(page.getByTestId("stale-label")).toHaveCount(0); // the layout settles once every source has answered
+  const item = page.locator('[data-testid="review-item"][data-ticket="ARK-939"]');
+  await item.evaluate((node) => node.scrollIntoView({ block: "center" }));
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(100);
+  await item.click();
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await expect(page.getByTestId("outside-filter")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/roadmap\?project=alpha$/);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+});
+
+test("ARK-309-AC6 #/backlog and #/map redirects keep their tail and their query, and #/backlog?project=<name> shows Roadmap, not Home", async ({
+  page,
+}) => {
+  filterWorld();
+  const baseUrl = await launch();
+  const t1 = alpha.ids[0];
+  const cases = [
+    ["backlog?project=alpha", "roadmap?project=alpha"],
+    ["backlog", "roadmap"],
+    [`backlog/${t1}`, `roadmap/${t1}`],
+    [`backlog/${t1}?project=alpha`, `roadmap/${t1}?project=alpha`],
+    ["map?project=alpha", "runs?project=alpha"],
+  ];
+  for (const [from, to] of cases) {
+    await open(page, baseUrl, from);
+    await expect(page).toHaveURL(`${baseUrl}/#/${to}`);
+  }
+  await open(page, baseUrl, "backlog?project=alpha");
+  await expect(page.getByTestId("roadmap-page")).toBeVisible();
+  await expect(page.getByTestId("tile")).toHaveCount(0);
+  await expect(projectButton(page, "alpha")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("ARK-309-AC7 the Project group is named, has aria-pressed buttons set with Tab, Enter and Space with a visible focus ring, headings name the filter, the keys work and text keeps its contrast in light and dark", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  filterWorld();
+  const baseUrl = await launch();
+  await page.emulateMedia({ colorScheme: "light" });
+
+  // Tab moves along the group, Enter and Space set the filter, and the focused button shows a ring.
+  await open(page, baseUrl, "roadmap?project=alpha");
+  await expect(page.getByTestId("ticket-row").first()).toBeVisible();
+  await projectButton(page, "All projects").focus();
+  await page.keyboard.press("Tab");
+  await expect(projectButton(page, "alpha")).toBeFocused();
+  const ring = await projectButton(page, "alpha").evaluate((node) => {
+    const style = getComputedStyle(node);
+    return (
+      (style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0) ||
+      style.boxShadow !== "none"
+    );
+  });
+  expect(ring, "focus ring on the focused button").toBe(true);
+  await page.keyboard.press("Tab");
+  await expect(projectButton(page, "beta")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/roadmap\?project=beta$/);
+  await expect(projectButton(page, "beta")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Space");
+  await expect(page).toHaveURL(/#\/roadmap\?project=alpha$/);
+  await expect(projectButton(page, "alpha")).toHaveAttribute("aria-pressed", "true");
+  await expect(projectButton(page, "beta")).toHaveAttribute("aria-pressed", "false");
+
+  // Keys of ARK-285 and ARK-291 with the filter on: j k / Enter Esc.
+  await page.locator("main").click({ position: { x: 2, y: 2 } });
+  const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
+  await expect(selected).toHaveAttribute("data-ticket", alpha.ids[0]);
+  await page.keyboard.press("j");
+  await expect(selected).toHaveAttribute("data-ticket", alpha.ids[1]);
+  await page.keyboard.press("k");
+  await expect(selected).toHaveAttribute("data-ticket", alpha.ids[0]);
+  await page.keyboard.press("/");
+  await expect(page.getByTestId("filter-text")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("filter-text")).not.toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`#/ticket/${alpha.ids[0]}\\?project=alpha$`));
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/roadmap\?project=alpha$/);
+
+  // Each list view names the filter; text keeps 4.5:1 (3:1 large) with a filter on, in both themes.
+  const theme = (name: string) =>
+    page.getByRole("group", { name: "Theme" }).getByRole("button", { name });
+  const views: [string, string, () => Promise<unknown>][] = [
+    ["", "Home · alpha", () => expect(page.getByTestId("run")).toHaveCount(1)],
+    ["runs", "Runs · alpha", () => expect(page.getByTestId("run-card").first()).toBeVisible()],
+    [
+      "roadmap",
+      "Roadmap · alpha",
+      () => expect(page.getByTestId("ticket-row").first()).toBeVisible(),
+    ],
+  ];
+  for (const choice of ["Light", "Dark"]) {
+    for (const [hash, heading, ready] of views) {
+      await open(page, baseUrl, `${hash}?project=alpha`);
+      await theme(choice).click();
+      await expect(theme(choice)).toHaveAttribute("aria-pressed", "true");
+      await ready();
+      await expect(page.locator("main h1")).toContainText(heading);
+      await expect(page.getByRole("group", { name: "Project" })).toBeVisible();
+      await page.evaluate(() =>
+        Promise.all(document.getAnimations().map((fade) => fade.finished.catch(() => undefined))),
+      );
+      const { checked, weak } = await weakContrast(page);
+      expect(checked, `text checked on ${heading} in ${choice}`).toBeGreaterThan(15);
+      expect(weak, `${heading} in ${choice}`).toEqual([]);
+    }
+  }
+});
+
+test("ARK-309-AC8 a filter change on Home, Runs and Roadmap sends no request, and / and /nope answer with a p95 under 200 ms", async ({
+  page,
+}) => {
+  filterWorld();
+  const baseUrl = await launch();
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  const views: [string, () => Promise<unknown>][] = [
+    ["", () => expect(page.getByTestId("run")).toHaveCount(2)],
+    ["runs", () => expect(page.getByTestId("run-card").first()).toBeVisible()],
+    ["roadmap", () => expect(page.getByTestId("ticket-row").first()).toBeVisible()],
+  ];
+  for (const [hash, ready] of views) {
+    await open(page, baseUrl, hash);
+    await ready();
+    await expect(page.getByTestId("stale-label")).toHaveCount(0); // the first load is complete
+    requests.length = 0;
+    for (const name of ["alpha", "beta", "All projects"]) {
+      await projectButton(page, name).click();
+      await expect(projectButton(page, name)).toHaveAttribute("aria-pressed", "true");
+    }
+    await page.waitForTimeout(1000);
+    expect(requests, `requests after a filter change on /${hash}`).toEqual([]);
+  }
+
+  for (const route of ["/", "/nope"]) {
+    const durations: number[] = [];
+    for (let request = 0; request < 50; request++) {
+      const startedAt = performance.now();
+      await (await fetch(`${baseUrl}${route}`)).arrayBuffer();
+      durations.push(performance.now() - startedAt);
+    }
+    expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
   }
 });
