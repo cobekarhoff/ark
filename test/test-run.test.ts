@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ark,
@@ -34,6 +34,8 @@ function buildingRun(options: {
   compose?: string;
   manual?: string[];
   roundBudget?: number;
+  kind?: string;
+  checks?: { name: string; repo: string; command: string }[];
 }): { runId: string; runDirectory: string; workspace: string; arkHome: string } {
   const arkHome = tempArkHome();
   const workspace = tempGitRepo({
@@ -44,6 +46,7 @@ function buildingRun(options: {
     workspace,
     ticket_source: "local",
     compose: options.compose,
+    ...(options.checks === undefined ? {} : { checks: options.checks }),
     ...(options.roundBudget === undefined ? {} : { round_budget: options.roundBudget }),
     suites: [
       { name: "unit", level: "unit", repo: ".", command: junit("unit.test.ts"), parser: "bun" },
@@ -59,6 +62,8 @@ function buildingRun(options: {
       text: `criterion ${id}`,
       ...(options.manual?.includes(id) ? { manual: true } : {}),
     })),
+    "Ticket FAKE-1",
+    options.kind,
   );
   const runId = ark("run", "start", ticket, "--project", "demo").out.match(
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
@@ -339,5 +344,108 @@ describe("ark test with manual criteria", () => {
     const events = readFileSync(join(runDirectory, "events.ndjson"), "utf8");
     expect(events).toContain('"type":"plan.checked"');
     expect(events).toContain('"valid":true');
+  });
+});
+
+const checkFixtures = {
+  passing: {
+    name: "in-worktree",
+    repo: ".",
+    command: 'case "$PWD" in */workspace) ;; *) echo "ran in $PWD"; exit 1 ;; esac',
+  },
+  failing: {
+    name: "lint-fail",
+    repo: ".",
+    command: 'i=1; while [ $i -le 25 ]; do echo "out-$i"; i=$((i + 1)); done; exit 1',
+  },
+};
+
+describe("ark test checks", () => {
+  test("ARK-302-AC1 a passing check in the repo worktree keeps passed true and prints nothing about it", () => {
+    const { runId, runDirectory } = buildingRun({
+      criteria: ["FAKE-1-AC1"],
+      e2e: [passing("FAKE-1-AC1 works")],
+      checks: [checkFixtures.passing],
+    });
+    const result = ark("test", runId);
+
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("check in-worktree failed");
+    expect(testCompleted(runDirectory)[0].passed).toBe(true);
+  });
+
+  test("ARK-302-AC1 a failing check records passed false, prints check <name> failed and the last 20 lines before the suites", () => {
+    const { runId, runDirectory } = buildingRun({
+      criteria: ["FAKE-1-AC1"],
+      e2e: [passing("FAKE-1-AC1 works")],
+      checks: [checkFixtures.passing, checkFixtures.failing],
+    });
+    const result = ark("test", runId);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("check lint-fail failed");
+    expect(result.out).toContain("check lint-fail failed");
+    expect(result.out).not.toContain("check in-worktree failed");
+    const lines = result.out.split("\n");
+    expect(lines).not.toContain("out-5");
+    for (const line of ["out-6", "out-25"]) expect(lines).toContain(line);
+    expect(result.out.indexOf("check lint-fail failed")).toBeLessThan(result.out.indexOf("suite "));
+    // The suites still ran and the AC passes: only the check fails the run.
+    expect(result.out).toContain("FAKE-1-AC1  passing");
+    const [event] = testCompleted(runDirectory);
+    expect(event.passed).toBe(false);
+    expect(event.criteria).toEqual({ "FAKE-1-AC1": "passing" });
+  });
+});
+
+describe("ark test on a refactor run", () => {
+  const fixHead = (runDirectory: string) => {
+    const mirror = join(runDirectory, "workspace");
+    writeFileSync(join(mirror, "e2e.test.ts"), suiteTests([passing("FAKE-1-AC1 works")]));
+    Bun.spawnSync(["git", "-C", mirror, "add", "-A"]);
+    Bun.spawnSync(["git", "-C", mirror, "commit", "-q", "-m", "fix"]);
+  };
+
+  test("ARK-302-AC7 a base that fails records base_passed false once per run and merge-request open refuses", () => {
+    const { runId, runDirectory } = buildingRun({
+      kind: "refactor",
+      criteria: ["FAKE-1-AC1"],
+      e2e: [failing("FAKE-1-AC1 works")],
+    });
+    fixHead(runDirectory);
+
+    const first = ark("test", runId);
+    expect(first.code).toBe(0);
+    expect(first.out).toContain("base      failed");
+    const [event] = testCompleted(runDirectory);
+    expect(event.base_passed).toBe(false);
+    expect(event.passed).toBe(true);
+    const baseLog = join(runDirectory, "results/base-e2e.log");
+    expect(existsSync(baseLog)).toBe(true);
+
+    // Second run: the base result is kept and the base suites do not run again.
+    rmSync(baseLog);
+    const second = ark("test", runId);
+    expect(second.code).toBe(0);
+    expect(testCompleted(runDirectory)[1].base_passed).toBe(false);
+    expect(existsSync(baseLog)).toBe(false);
+
+    const refused = ark("merge-request", "open", runId);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("base commit");
+  });
+
+  test("ARK-302-AC7 a base that passes records base_passed true and merge-request open no longer refuses on the base", () => {
+    const { runId, runDirectory } = buildingRun({
+      kind: "refactor",
+      criteria: ["FAKE-1-AC1"],
+      e2e: [passing("FAKE-1-AC1 works")],
+    });
+
+    const result = ark("test", runId);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("base      passed");
+    expect(testCompleted(runDirectory)[0].base_passed).toBe(true);
+    expect(ark("merge-request", "open", runId).err).not.toContain("base commit");
   });
 });

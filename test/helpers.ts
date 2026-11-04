@@ -27,6 +27,7 @@ export function writeTicket(
   id: string,
   criteria: { id: string; text: string; manual?: boolean }[],
   title = `Ticket ${id}`,
+  kind?: string,
 ): string {
   const file = join(process.env.ARK_HOME as string, "projects", project, "tickets", `${id}.md`);
   mkdirSync(dirname(file), { recursive: true });
@@ -35,6 +36,7 @@ export function writeTicket(
     `id: ${id}`,
     `title: ${JSON.stringify(title)}`,
     "status: ready",
+    ...(kind === undefined ? [] : [`kind: ${kind}`]),
     ...(criteria.length === 0 ? ["acceptance_criteria: []"] : ["acceptance_criteria:"]),
   ];
   for (const criterion of criteria)

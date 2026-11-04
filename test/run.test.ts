@@ -1232,3 +1232,72 @@ test("ARK-295-AC5 ark status counts a none project with an invalid unrelated fie
   expect(result.out).toMatch(/^merge requests: none$/m);
   expect(result.out).not.toContain("(local only)");
 });
+
+function startKindRun(kind: string | undefined, ticketId = "ARK-900") {
+  const ticketFile = writeTicket(
+    "demo",
+    ticketId,
+    [{ id: `${ticketId}-AC1`, text: "It works" }],
+    "Demo ticket",
+    kind,
+  );
+  const started = ark("run", "start", ticketFile, "--project", "demo");
+  const runId = started.out.trim();
+  return {
+    started,
+    runId,
+    directory: join(process.env.ARK_HOME as string, "projects", "demo", "runs", runId),
+  };
+}
+
+test("ARK-302-AC4 each kind and a missing kind land in run.started and ark status, and a bad kind exits 1 naming the allowed values", () => {
+  const expected: [string | undefined, string][] = [
+    ["bug", "bug"],
+    ["perf", "perf"],
+    ["refactor", "refactor"],
+    ["feature", "feature"],
+    [undefined, "feature"],
+  ];
+  expected.forEach(([kind, shown], i) => {
+    const { started, runId, directory } = startKindRun(kind, `ARK-91${i}`);
+    expect(started.code).toBe(0);
+    expect(JSON.parse(eventLines(directory)[0]).data.kind).toBe(shown);
+    expect(ark("status", runId).out).toContain(`kind: ${shown}`);
+  });
+
+  const bad = startKindRun("chore", "ARK-919");
+  expect(bad.started.code).toBe(1);
+  for (const allowed of ["bug", "perf", "refactor", "feature"])
+    expect(bad.started.err).toContain(allowed);
+  expect(bad.started.err).toContain("chore");
+  expect(ark("status").out).not.toContain("ARK-919");
+});
+
+test("ARK-302-AC5 a bug run refuses an implementer step start until a test.completed has every non-manual AC failing", () => {
+  const { runId, directory } = startKindRun("bug");
+  approvePlan(directory);
+  const message = "bug run: record a failing ark test of the ACs before the fix";
+
+  const refused = ark("run", "step", runId, "build", "start");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain(message);
+  const before = eventLines(directory);
+
+  // A test where the AC is missing (no test tagged) is not a failing test.
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": "missing" },
+  });
+  expect(ark("run", "step", runId, "build", "start").err).toContain(message);
+  expect(eventLines(directory)).toHaveLength(before.length + 1);
+
+  appendEvent(directory, "test.completed", {
+    passed: false,
+    heads: {},
+    suites: [],
+    criteria: { "ARK-900-AC1": "failing" },
+  });
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+});

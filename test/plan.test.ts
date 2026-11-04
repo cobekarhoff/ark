@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
 import {
@@ -706,5 +706,84 @@ describe("plan check UI skills", () => {
     expect(stepsHeader()).toBe("| Step | Role | Repo | Needs | Criteria |");
     expect(withSkills(["made-up-skill"]).code).toBe(0);
     expect(stepsHeader()).not.toContain("Skills");
+  });
+});
+
+describe("plan check by ticket kind", () => {
+  /** Starts a run of `kind` on a second ticket with the same ACs as `criteria`, and makes it the current run. */
+  function startKindRun(kind: string) {
+    const ticket = writeTicket("demo", "ARK-901", criteria, undefined, kind);
+    const started = ark("run", "start", ticket);
+    expect(started.code).toBe(0);
+    runId = started.out.trim();
+    runDirectory = join(dirname(runDirectory), runId);
+    recordEvaluation(runDirectory);
+  }
+  const both = ["ARK-900-AC1", "ARK-900-AC2"];
+
+  test("ARK-302-AC5 a bug run refuses a plan whose first step is not a validator step serving every AC, and accepts one that is", () => {
+    startKindRun("bug");
+    const refusals = [
+      validPlan(), // first step is an implementer
+      {
+        ...validPlan(),
+        steps: [step("tests", { role: "validator" }), step("build", { needs: ["tests"] })], // validator serves AC1 only
+      },
+      {
+        ...validPlan(),
+        steps: [
+          step("build", { criteria: both }),
+          step("tests", { role: "validator", criteria: both }),
+        ],
+      },
+    ];
+    for (const plan of refusals) {
+      writePlan(plan);
+      const result = ark("plan", "check", runId);
+      expect(result.code).toBe(1);
+      expect(result.out).toContain("bug run");
+    }
+
+    writePlan({
+      ...validPlan(),
+      steps: [
+        step("tests", { role: "validator", criteria: both }),
+        step("build", { needs: ["tests"], criteria: both }),
+      ],
+    });
+    expect(ark("plan", "check", runId).code).toBe(0);
+  });
+
+  test("ARK-302-AC5 a feature run accepts a plan that starts with an implementer step", () => {
+    startKindRun("feature");
+    writePlan(validPlan());
+    expect(ark("plan", "check", runId).code).toBe(0);
+  });
+
+  test("ARK-302-AC6 a perf run refuses a plan with no first step naming results/baseline.md or no last step naming results/compare.md, and accepts one with both", () => {
+    startKindRun("perf");
+    const withGoals = (first: string, last: string) => ({
+      ...validPlan(),
+      steps: [
+        step("measure", { goal: first, criteria: both }),
+        step("compare", { goal: last, needs: ["measure"], role: "validator", criteria: both }),
+      ],
+    });
+
+    writePlan(validPlan());
+    const none = ark("plan", "check", runId);
+    expect(none.code).toBe(1);
+    expect(none.out).toContain("results/baseline.md");
+    expect(none.out).toContain("results/compare.md");
+
+    // The baseline named on the last step, the compare on the first: both rules still fail.
+    writePlan(withGoals("Write results/compare.md", "Write results/baseline.md"));
+    const swapped = ark("plan", "check", runId);
+    expect(swapped.code).toBe(1);
+    expect(swapped.out).toContain("results/baseline.md");
+    expect(swapped.out).toContain("results/compare.md");
+
+    writePlan(withGoals("Measure and write results/baseline.md", "Write results/compare.md"));
+    expect(ark("plan", "check", runId).code).toBe(0);
   });
 });
