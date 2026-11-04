@@ -88,6 +88,20 @@ function removeWorktree(source: string, path: string, branch: string, forces: nu
   return left;
 }
 
+/** The commit a new worktree of `repo` starts from: origin/<base> after a fetch when the project sets a base, else the clone HEAD. */
+function resolveBase(config: ProjectConfig, repo: string): string {
+  const source = join(config.workspace, repo);
+  const configured = repoBase(config, repo);
+  if (configured === undefined) return git(source, "rev-parse", "HEAD");
+  try {
+    git(source, "fetch", "origin", configured);
+    return git(source, "rev-parse", `origin/${configured}`);
+  } catch (err) {
+    if (err instanceof ArkError) throw new ArkError(`repo ${repo}: ${err.message}`);
+    throw err;
+  }
+}
+
 /** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. */
 function addRepoWorktree(
   directory: string,
@@ -95,6 +109,7 @@ function addRepoWorktree(
   state: RunState,
   repo: string,
   log: (line: string) => void,
+  resolvedBase?: string,
 ): void {
   const { workspace, setup } = config;
   const mirror = mirrorRoot(directory);
@@ -122,19 +137,7 @@ function addRepoWorktree(
   if (isSymlink) unlinkSync(path); // an earlier call left this repo untouched
   mkdirSync(dirname(path), { recursive: true });
   const { branch, taken } = freeBranchName(source, baseBranchName(state.ticket));
-  const configured = repoBase(config, repo);
-  let base: string;
-  if (configured === undefined) base = git(source, "rev-parse", "HEAD");
-  else {
-    // before `git worktree add` and the worktree.created event: a failed fetch leaves nothing behind
-    try {
-      git(source, "fetch", "origin", configured);
-      base = git(source, "rev-parse", `origin/${configured}`);
-    } catch (err) {
-      if (err instanceof ArkError) throw new ArkError(`repo ${repo}: ${err.message}`);
-      throw err;
-    }
-  }
+  const base = resolvedBase ?? resolveBase(config, repo);
   git(source, "worktree", "add", "-b", branch, path, base);
   log(`created  ${repo} -> ${path}`);
   // yolo: lower tools.approvalMode values stopped a worker at its first shell call (findings/permission-modes.md).
@@ -246,7 +249,14 @@ export function worktreeCreate(
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
   checkClean(workspace, knownRepos, touched, state, allowDirty);
 
-  for (const repo of touched) addRepoWorktree(directory, config, state, repo, console.log);
+  // every fetch happens before the first worktree add or event: one bad base leaves nothing behind
+  const bases = new Map(
+    touched
+      .filter((repo) => !state.worktrees.some((worktree) => worktree.repo === repo))
+      .map((repo) => [repo, resolveBase(config, repo)]),
+  );
+  for (const repo of touched)
+    addRepoWorktree(directory, config, state, repo, console.log, bases.get(repo));
 
   const mirror = mirrorRoot(directory);
   if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror

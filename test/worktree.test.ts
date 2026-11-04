@@ -1117,7 +1117,8 @@ describe("ARK-296 repos.<repo>.base starts the worktree from origin/<base>", () 
       expect(result.err).toContain("repo .");
       expect(result.err).toContain("git fetch origin release/none");
       expect(result.err).toContain("couldn't find remote ref release/none");
-      expect(readdirSync(join(runDirectory, "workspace"))).toEqual([]); // the empty mirror folder is made before the fetch
+      const mirror = join(runDirectory, "workspace");
+      expect(existsSync(mirror) ? readdirSync(mirror) : []).toEqual([]); // anchor makes the empty mirror folder before the fetch
       expect(
         gitOutput(workspace, "worktree", "list", "--porcelain").match(/^worktree /gm),
       ).toHaveLength(1);
@@ -1127,6 +1128,26 @@ describe("ARK-296 repos.<repo>.base starts the worktree from origin/<base>", () 
       );
     });
   }
+
+  test("ARK-296-AC2 worktree create with a later repo whose base fetch fails makes no worktree, branch or event for the earlier repo", () => {
+    const workspace = tempTwoRepoWorkspace();
+    for (const repo of ["a", "b"]) addRemote(join(workspace, repo));
+    const { runId, runDirectory } = startRun(workspace);
+    setRepos(runDirectory, { a: { base: "main" }, b: { base: "release/none" } });
+
+    const result = ark("worktree", "create", runId, "a", "b");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("repo b");
+    expect(result.err).toContain("git fetch origin release/none");
+    for (const repo of ["a", "b"]) {
+      expect(existsSync(join(runDirectory, "workspace", repo, ".git"))).toBe(false);
+      expect(
+        gitOutput(join(workspace, repo), "worktree", "list", "--porcelain").match(/^worktree /gm),
+      ).toHaveLength(1);
+      expect(gitOutput(join(workspace, repo), "branch", "--list", "ark/*")).toBe("");
+    }
+    expect(createdEvents(runDirectory)).toEqual([]);
+  }, 30_000);
 });
 
 describe("ARK-296 repos.<repo>.base is the target of worktree cleanup and workspace sync", () => {
