@@ -25,7 +25,7 @@ ark run close <run> <outcome>
 ark retro <run>
 ```
 
-`outcome` is `merged`, `abandoned`, `aborted` or `handed_off`. Check MR states with `gh pr view <number> --json state` or `glab mr view <number>` before you pick `merged` or `abandoned`.
+`outcome` is `merged`, `abandoned`, `aborted` or `handed_off`. Check MR states with `gh pr view <number> --json state` or `glab mr view <number>` before you pick `merged` or `abandoned`. `handed_off` needs no host check: the run has no MR.
 
 `ark retro` writes `~/.ark/projects/<project>/runs/<run>/metrics.json`. If it exits 1, fix the cause it prints and run it again. Do not write `retro.md` without `metrics.json`.
 
