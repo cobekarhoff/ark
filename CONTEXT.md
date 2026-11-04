@@ -33,7 +33,7 @@ The run stopped before any MR was opened.
 _Avoid_: Cancelled, failed
 
 **Handed off**:
-The run's tests passed and its branches were given to a human without Ark opening MRs.
+The run's tests passed and its branches were given to a human without Ark opening MRs. Each branch with commits beyond its base stays in its clone; the worktrees are removed.
 _Avoid_: Delivered
 
 **Hub**:

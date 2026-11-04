@@ -1,7 +1,10 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const repositoryRoot = join(import.meta.dir, "..");
 
