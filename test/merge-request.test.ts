@@ -873,14 +873,18 @@ test(
   { timeout: 30_000 },
 );
 
-test("ARK-307-AC1 refuses a required string that is only a slash", () => {
-  const { runDirectory } = scenario({ core: "github", app: "github" });
-  setCriterionText(runDirectory, "ARK-900-AC1", "Reads `/`");
-  const refused = ark("merge-request", "open", run);
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("AC string in no tracked file at head:");
-  expect(refused.err).toContain("`/`");
-});
+test(
+  "ARK-307-AC1 refuses a required string that is only a slash",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" });
+    setCriterionText(runDirectory, "ARK-900-AC1", "Reads `/`");
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("AC string in no tracked file at head:");
+    expect(refused.err).toContain("`/`");
+  },
+  { timeout: 30_000 },
+);
 
 test("ARK-307-AC3 the descriptions, CLI reference and how-to say a path string passes when the path exists", () => {
   const root = resolve(import.meta.dir, "..");
