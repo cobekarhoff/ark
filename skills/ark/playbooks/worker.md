@@ -73,7 +73,7 @@ You make the mockups that let the human choose a strategy before code exists. Yo
 
 You write the product code.
 
-1. Implement the change the step's AC describe, in this repo only. Keep the change as small as the AC allow.
+1. Implement the change the step's AC describe, in this repo only. Keep the change as small as the AC allow. Read `skills/ark/principles.md` in the Ark repo first.
 2. Use the repo's own checks while you work: its build and unit tests. Unit tests are for you. They never prove an AC.
 3. Before each commit and before `worker_done`, run every check script that the repo's `package.json` lists. For this repo that is `format` (it writes), then `format:check`, `typecheck` and `lint`. Run them in rework rounds too, and for Markdown-only changes. Fix every failure first. Commit the files `format` changed.
 4. If a findings file or a failing test list names your step (a rework round), fix exactly what it lists. The file is `<run folder>/findings/round-<round>.md`. Do not widen the change.
@@ -84,7 +84,7 @@ You write the product code.
 
 You turn the plan's test cases into tests that prove the AC, and you make them pass.
 
-1. Read the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Find the suite whose `repo` is yours: its `level`, its `command` and its `parser`. Your tests must live where that suite's command finds them.
+1. Read `skills/ark/principles.md` in the Ark repo. Read the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Find the suite whose `repo` is yours: its `level`, its `command` and its `parser`. Your tests must live where that suite's command finds them. When `verify.md` exists in the same folder, use it for a live check: start the app and reach it as it says, and run each feature of its feature map that the step's criteria touch. Quote what you saw in your report. When `verify.md` is wrong (a command fails or a result differs), say so in your findings file, so the run lead can write a proposal.
 2. Write one or more tests for each test case of your step's criteria. Set up its `given` context, perform its `when` actions, and assert its `then` results and `expected` EARS sentence. Each test:
    - Is an integration or E2E test, at the level the test case names. Never write a unit test to prove an AC.
    - Carries its AC ID so the suite's parser can read it. Put the ID in the test name for the `bun` parser, for example `test("ARK-156-AC1 lists the five playbooks", ...)`. Use the AC marker or tag your parser reads for `pytest` and `behave`.
@@ -107,7 +107,7 @@ You look for defects in the run's changes and report findings. You never edit.
 
 1. Read the diff of the branch against its base: `git diff $(git merge-base HEAD <base>)..HEAD`. The base is in the `worktree.created` event in `<run folder>/events.ndjson`.
 2. Check the diff against each AC the step serves, against the plan, and against the repo's conventions. Judge the AC text in the run's `ticket.md`: a human-approved amendment, listed in the Amended criteria section of `plan.md`, replaces the backlog text. Look for wrong behavior, missing edge cases, security problems, broken contracts between repos, and tests that do not prove what their name says. If the step has a `skills` list in `plan.yml`, read each skill with `skill://<name>` and check the diff against every skill in it. Rank what they find like any other finding.
-3. Run read-only checks to reproduce what you suspect: read the code, run the tests, run a command. Do not change any file in the worktree. Do not commit, stash, reset or checkout.
+3. Run read-only checks to reproduce what you suspect: read the code, run the tests, run a command. Do not change any file in the worktree. Do not commit, stash, reset or checkout. Read `skills/ark/principles.md` in the Ark repo and name the principle a finding breaks, when one applies.
 4. Write the findings to `<run folder>/findings/<step>.md`. It is the only file you create. Rank each finding from P0 (must fix) to P3 (minor):
 
    | Rank | Meaning                                                       |
@@ -124,10 +124,13 @@ You look for defects in the run's changes and report findings. You never edit.
 
    - **File:** `path/from/repo/root.ts`
    - **Line:** 42
+   - **Repro:** <command>
    - **Evidence:** <the code you read, or the command you ran and its output>
    - **Problem:** <what is wrong and what it breaks>
    - **Suggested fix:** <the direction, not a patch>
    ```
+
+   A P0 or P1 finding has a line `- **Repro:** <command>`, and its Evidence quotes the output that shows the problem. A P0 or P1 without it is written as P2: keep the heading `### P2` and drop the Repro line. A P2 or P3 needs no Repro.
 
    A finding from a skill in the `skills` list of your step also has the lines `- **Skill:** <skill>` and `- **Rule:** <name of the rule or guideline>`, after `**Line:**`.
 

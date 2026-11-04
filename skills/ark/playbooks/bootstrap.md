@@ -314,3 +314,17 @@ Tell the human, in one short list:
 - Anything left for the human (a missing `ac` marker hook, a missing `description`, a skipped repo).
 
 The first ticket, `/skill:ark chief` with a ticket ID, is the E2E check of the whole setup.
+
+## 12. Write `verify.md`
+
+`verify.md` tells the validator how to check the real app live, because fixture tests can pass while the live app breaks. Write `$ARK_HOME/projects/<project>/verify.md` (for the `ark` project: `~/.ark/projects/ark/verify.md`). Run this step before you print the step 11 report, and add the line `verify.md: <path>, <written, kept or declined>` to it.
+
+- When the file exists, ask whether to keep, replace or edit it. Never overwrite it without the answer.
+- Detect before you ask, from the README, `package.json` scripts, the compose file, CLI help and the docs. Ask only what you could not detect, as in step 3: one question at a time, each with a recommended answer. A project with no running app (a library) gets a CLI-only `verify.md`, or none, when the human declines.
+- The file has three parts, in this order:
+  1. **Start:** the exact command that starts the app, and how to stop it. Start a server on a free port with `portless <project> --app-port <port> <command>`, as in the Designer section of `worker.md`.
+  2. **Reach:** the URL or the command that reaches it (a web app at `http://<project>.localhost`, a CLI as `<command> --help`), and the command that proves it is up, such as `curl -sf <url>/<health path>`.
+  3. **Feature map:** a table with one row for each feature: the feature, the command or page that exercises it, and what a working result shows (a value, a text, an exit code). Name what you would see, not "it works".
+- Run the start and reach commands once. A part that fails is not written as fact: fix it or mark it `unverified` in the file.
+- For the `ark` project, the hub and the CLI are detectable. The hub starts with `ark ui` (port 4317 unless `--port` says otherwise, see `cli/ui.ts`) and is reached at `http://127.0.0.1:4317`, or at `http://ark.localhost` once `ark ui install` ran (`docs/how-to/local-names.md`). The CLI runs as `ark <command>`, or `bun cli/ark.ts <command>` from a worktree. Write the file `~/.ark/projects/ark/verify.md` with a feature map row for each hub view and each CLI command family.
+- Never put a secret in the file. It is not committed: it lives in `$ARK_HOME`, so a run's worktree does not hold it.
