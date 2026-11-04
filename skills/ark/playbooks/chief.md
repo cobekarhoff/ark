@@ -115,8 +115,6 @@ Do these steps in order for one ready ticket.
 
    The command prints the run name. Use it as `<run>` below.
 
-   Then update the Status cell of the row of this ticket in `$ARK_HOME/projects/<project>/tickets/README.md` to `in_progress`. `ark run start` already set the ticket file; the README is yours.
-
 3. **Start the run lead.** First make the run worktree, so the run lead does not start in the main workspace. You stay in the main workspace.
 
    ```sh
@@ -197,7 +195,7 @@ When the human amends a criterion of a run before its plan gate, do not put the 
 
 1. Check that it is from the run lead you started for that run.
 2. Run `ark status <run>`. A run lead that finished its work leaves the run in `merge_requests_open`, or in `closed` if it was aborted.
-3. If the run is in phase `building`, the outcome is not `failed`, and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask whether they took the branches. On their answer run `ark run close <run> handed_off`, then go to section 8 after-close steps. Skip steps 4 and 5, then release the run lead as in step 6.
+3. If the run is in phase `building`, the outcome is not `failed`, and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask whether they took the branches. On their answer run `ark run close <run> handed_off`. `ark run close` applies the refusals of `ark merge-request open`; on a refusal, run `ark test <run>` again or `ark criteria amend`, and tell the human which AC is open. Then go to section 8 after-close steps. Skip steps 4 and 5, then release the run lead as in step 6.
 4. If the outcome is `failed`, or the run is not in `merge_requests_open`, tell the human what the run lead reported and decide with them.
 5. Otherwise give the human the MR links from `ark status <run>`, in the order they must merge, and tell them: review each MR, merge them in that order, then tell you.
 6. Release the run lead: `orca orchestration worker-release --dispatch <dispatch id> --json`.
@@ -220,12 +218,12 @@ orca orchestration worker-release --dispatch <dispatch id> --json
 
 Choose the outcome:
 
-| What you find                                | Command                                                                                                                                                                                                                 |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Every MR merged                              | `ark run close <run> merged`                                                                                                                                                                                            |
-| MRs opened, then closed without merging      | `ark run close <run> abandoned`                                                                                                                                                                                         |
-| The human took the branches and wants no MRs | `ark run close <run> handed_off` (the last test must have passed). Each branch with commits stays in its clone, and `ark run close` prints a `kept` line for it: `git -C <repo> log <base>..<branch>` lists the commits |
-| The human stops the run before any MR exists | `ark run close <run> aborted`, see below                                                                                                                                                                                |
+| What you find                                | Command                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every MR merged                              | `ark run close <run> merged`                                                                                                                                                                                                                                                                                                                                     |
+| MRs opened, then closed without merging      | `ark run close <run> abandoned`                                                                                                                                                                                                                                                                                                                                  |
+| The human took the branches and wants no MRs | `ark run close <run> handed_off` (`ark run close` applies the refusals of `ark merge-request open`; on a refusal, run `ark test <run>` again or `ark criteria amend`, and tell the human which AC is open). Each branch with commits stays in its clone, and `ark run close` prints a `kept` line for it: `git -C <repo> log <base>..<branch>` lists the commits |
+| The human stops the run before any MR exists | `ark run close <run> aborted`, see below                                                                                                                                                                                                                                                                                                                         |
 
 If some MRs are merged and others are still open, tell the human and wait. Do not close the run.
 
@@ -240,7 +238,6 @@ A `HELD: <run> #<number> ticket superseded` line from the auto-merger (section 1
 After `ark run close`:
 
 1. Mark the Task: `orca orchestration task-update --id <task id> --status completed --result "<outcome>" --json`. Tasks that depend on it become ready. Use `--status failed` for `abandoned` and `aborted`.
-   Then update the Status cell of the row of this ticket in `$ARK_HOME/projects/<project>/tickets/README.md`: `done` for `merged`, `ready` for `aborted` and `abandoned`, and leave it for `handed_off`. `ark run close` already set the ticket file; the README is yours.
 2. If the outcome is `merged`, sync and notify before you start any ticket:
    1. Run `ark workspace sync <run>`. It fast-forwards the workspace checkout's target branch and prints `<repo>  <branch>  <head>`. If it exits 1, tell the human which repo it names and wait: new runs must not start from a stale base.
    2. For every other open run, send its lead a `status` message with the target branch and the head that `ark workspace sync` printed:
@@ -307,5 +304,6 @@ Leave out a part that has no items and say "Nothing waiting" when all three are 
 - Never answer a gate yourself, and never relay a `plan` or `strategy` gate that `ark.yml` set to `auto`. Every other `ask` goes to the human, and the human's words go back with `reply`.
 - Never run `ark gate record`. The run lead records the human's answer.
 - Never queue a ticket the human did not approve.
+- Move a ticket between Now, Next and Later in `ROADMAP.md` only when the human says so. The `status:` field of the ticket file is the only status: edit no README Status cell.
 - Never start more open runs than `concurrency`.
 - Use the executable you ran `orca` with for the whole session.
