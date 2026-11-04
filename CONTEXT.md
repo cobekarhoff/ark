@@ -98,7 +98,7 @@ A smaller choice inside the chosen strategy, in the `decisions` list of `plan.ym
 _Avoid_: Question, open point
 
 **Blocker**:
-A problem the evaluator finds in an AC: it is not possible, no integration or E2E test can prove it, or it conflicts with other code. A blocker opens the criteria gate.
+A problem the evaluator finds in an AC: it is not possible, no integration or E2E test can prove it (a criterion with `manual: true` is exempt), or it conflicts with other code. A blocker opens the criteria gate.
 
 **Risk**:
 A problem the evaluator finds that the plan must handle. `plan.md` lists each risk.
@@ -136,7 +136,7 @@ _Avoid_: Issue, comment, bug report
 ## Gates and rework
 
 **Gate**:
-A point where the run waits for your decision. The gates are criteria (the ticket lacks testable ACs, or the evaluator found a blocker), strategy (2 or more strategy cards), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
+A point where the run waits for your decision. The gates are criteria (the ticket lacks testable ACs, or the evaluator found a blocker), strategy (2 or more strategy cards), manual (a criterion with `manual: true` waits for your `ok`; it shows `manual pending`, `manual ok` or `manual problem`), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
 _Avoid_: Checkpoint, approval step
 
 **Answer**:
