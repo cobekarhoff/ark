@@ -867,11 +867,13 @@ describe("ARK-297 workspace skills and dirty root", () => {
     expect(warningCount(created.out + created.err)).toBe(0);
   });
 
-  test("ARK-297-AC3 create that names the dirty root warns once and exits 0 with --allow-dirty, with no earlier anchor", () => {
+  test("ARK-297-AC3 create that names the dirty root exits 0 without --allow-dirty and warns once on stderr, never on stdout, with no earlier anchor", () => {
     const { runId } = startRun(dirtyRoot());
-    const created = ark("worktree", "create", runId, ".", "--allow-dirty");
+    const created = ark("worktree", "create", runId, ".");
     expect(created.code).toBe(0);
-    expect(warningCount(created.out + created.err)).toBe(1);
+    expect(warningCount(created.err)).toBe(1);
+    expect(created.err).toContain("has 3 uncommitted changes, not in the worktree");
+    expect(warningCount(created.out)).toBe(0);
   });
 
   test("ARK-297-AC3 a clean root with a nested repo prints no warning and exits 0", () => {
@@ -993,29 +995,29 @@ describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
     expect(existsSync(path)).toBe(true);
   });
 
-  test("ARK-188-AC4 a dirty source repo without --allow-dirty exits 1, lists the path and creates no worktree", () => {
-    const workspace = tempGitRepo();
-    writeFileSync(join(workspace, "README.md"), "changed\n");
+  test("ARK-188-AC4 a dirty nested source repo without --allow-dirty exits 1, lists the path and creates no worktree", () => {
+    const workspace = tempTwoRepoWorkspace();
+    writeFileSync(join(workspace, "a", "readme.txt"), "changed\n");
     const { runId, runDirectory } = startRun(workspace);
 
-    const result = ark("worktree", "create", runId, ".");
+    const result = ark("worktree", "create", runId, "a");
     expect(result.code).toBe(1);
-    expect(result.out + result.err).toContain("README.md");
+    expect(result.out + result.err).toContain("readme.txt");
     expect(existsSync(join(runDirectory, "workspace"))).toBe(false);
     expect(createdEvents(runDirectory)).toEqual([]);
   });
 
-  test("ARK-188-AC5 with --allow-dirty the worktree is created and the changed path is printed as a warning", () => {
-    const workspace = tempGitRepo();
-    writeFileSync(join(workspace, "README.md"), "changed\n");
+  test("ARK-188-AC5 with --allow-dirty the nested worktree is created and the changed path is printed as a warning", () => {
+    const workspace = tempTwoRepoWorkspace();
+    writeFileSync(join(workspace, "a", "readme.txt"), "changed\n");
     const { runId, runDirectory } = startRun(workspace);
 
-    const result = ark("worktree", "create", runId, ".", "--allow-dirty");
+    const result = ark("worktree", "create", runId, "a", "--allow-dirty");
     expect(result.code).toBe(0);
-    expect(result.out + result.err).toContain("warning");
-    expect(result.out + result.err).toContain("README.md");
+    expect(result.out).toContain("warning");
+    expect(result.out).toContain("readme.txt");
     expect(createdEvents(runDirectory)).toHaveLength(1);
-    expect(existsSync(join(runDirectory, "workspace"))).toBe(true);
+    expect(existsSync(join(runDirectory, "workspace", "a"))).toBe(true);
   });
 });
 

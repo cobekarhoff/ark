@@ -114,14 +114,13 @@ function dirtyWarning(repo: string, source: string, lines: string[]): string {
   ].join("\n");
 }
 
-/** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. A new root worktree warns on stderr about root changes the mirror lacks, when `warnDirtyRoot` is set (`create` leaves it off: `checkClean` already covers a root it names). */
+/** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. A new root worktree warns on stderr about root changes the mirror lacks; `checkClean` never refuses the root. */
 function addRepoWorktree(
   directory: string,
   config: ProjectConfig,
   state: RunState,
   repo: string,
   log: (line: string) => void,
-  warnDirtyRoot: boolean,
   resolvedBase?: string,
 ): void {
   const { workspace, setup } = config;
@@ -188,7 +187,7 @@ function addRepoWorktree(
     log(`setup    ${repo}: ${setup}`);
   }
   appendEvent(directory, "worktree.created", { repo, path, branch, base });
-  if (warnDirtyRoot && repo === ".") {
+  if (repo === ".") {
     const nested = discoverRepos(workspace).map((name) => join(workspace, name));
     const lines = dirtyLines(workspace, nested);
     if (lines.length > 0) console.error(dirtyWarning(repo, workspace, lines));
@@ -203,12 +202,12 @@ export function worktreeAnchor(runId: string, inProject?: string): void {
   if (repo === undefined) throw new ArkError(`workspace ${config.workspace} has no git repo`);
   const state = deriveState(readEvents(directory));
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
-  addRepoWorktree(directory, config, state, repo, () => {}, true);
+  addRepoWorktree(directory, config, state, repo, () => {});
   const mirror = mirrorRoot(directory);
   console.log(`path:${repo === "." ? mirror : join(mirror, repo)}`);
 }
 
-/** Checks every repo that still needs a worktree for uncommitted changes before any worktree is added. Throws and names the changed paths, or with `allowDirty` prints a warning per repo. */
+/** Checks every nested repo that still needs a worktree for uncommitted changes before any worktree is added. The root `.` is skipped: its worktree warns on stderr instead. Throws and names the changed paths, or with `allowDirty` prints a warning per repo. */
 function checkClean(
   workspace: string,
   knownRepos: string[],
@@ -218,7 +217,7 @@ function checkClean(
 ): void {
   const nested = knownRepos.map((repo) => join(workspace, repo));
   const dirty = repos
-    .filter((repo) => !state.worktrees.some((worktree) => worktree.repo === repo))
+    .filter((repo) => repo !== "." && !state.worktrees.some((worktree) => worktree.repo === repo))
     .map((repo) => ({ repo, source: join(workspace, repo), lines: [] as string[] }))
     .map((entry) => ({ ...entry, lines: dirtyLines(entry.source, nested) }))
     .filter(({ lines }) => lines.length > 0);
@@ -276,7 +275,7 @@ export function worktreeCreate(
       .map((repo) => [repo, resolveBase(config, repo)]),
   );
   for (const repo of touched)
-    addRepoWorktree(directory, config, state, repo, console.log, false, bases.get(repo));
+    addRepoWorktree(directory, config, state, repo, console.log, bases.get(repo));
 
   const mirror = mirrorRoot(directory);
   if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror
