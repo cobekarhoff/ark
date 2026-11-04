@@ -787,11 +787,20 @@ const commandProblems = (text: string): string[] => {
   const problems: string[] = [];
   if (/\bark route\b/.test(text)) problems.push("quotes ark route");
   for (const command of quotedCommands(text)) {
-    if (command.startsWith("portless ") && !/^portless \S+ --app-port \S+ \S/.test(command))
+    if (
+      command.startsWith("portless ") &&
+      !/^portless [^\s-]\S* --app-port (\d+|<port>) [^\s-]/.test(command)
+    )
       problems.push(`portless form: ${command}`);
     if (/^orca tab create(\s|$)/.test(command)) {
-      const flags = command.match(/--[\w-]+/g) ?? [];
-      if (flags.length !== 2 || !flags.includes("--url") || !flags.includes("--worktree"))
+      const args = command.slice("orca tab create".length).match(/(?:<[^>]*>|\S)+/g) ?? [];
+      const pairs = new Map<string, string>();
+      for (let i = 0; i < args.length; i += 2) {
+        if (!/^--(url|worktree)$/.test(args[i]) || !args[i + 1] || args[i + 1].startsWith("-"))
+          pairs.set("bad", args[i]);
+        else pairs.set(args[i], args[i + 1]);
+      }
+      if (pairs.size !== 2 || !pairs.has("--url") || !pairs.has("--worktree"))
         problems.push(`orca tab create flags: ${command}`);
     }
     const ui = command.match(/\bark ui(?=\s|$).*/)?.[0];
@@ -807,6 +816,20 @@ const commandProblems = (text: string): string[] => {
 test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead.md and worker.md has a form the CLI accepts", () => {
   expect(commandProblems(runLeadPlaybook)).toEqual([]);
   expect(commandProblems(workerPlaybookText)).toEqual([]);
+  // rejected forms, through the same checker
+  for (const bad of [
+    "orca tab create --url --worktree",
+    "orca tab create -x --url http://a.localhost --worktree current",
+    "orca tab create --url http://a.localhost",
+    "orca tab create --url http://a.localhost --worktree current --bogus x",
+    "portless hub.ark-1 --app-port --bogus bun app.ts",
+    "portless hub.ark-1 --app-port 3000",
+  ])
+    expect(commandProblems(`\`${bad}\``), bad).toHaveLength(1);
+  expect(commandProblems("`orca tab create --worktree path:x --url http://a.localhost`")).toEqual(
+    [],
+  );
+  expect(commandProblems("`portless a.proto --app-port 3000 bun app.ts`")).toEqual([]);
   // the check sees the commands: not vacuously empty
   const commands = [...quotedCommands(runLeadPlaybook), ...quotedCommands(workerPlaybookText)];
   expect(
