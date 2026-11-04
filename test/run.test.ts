@@ -1284,6 +1284,7 @@ function autoEscalatedRun(): { runId: string; directory: string } {
   return { runId, directory };
 }
 
+// ARK-288-AC7 proof: `bun test test/run.test.ts -t ARK-288-AC7`
 test("ARK-288-AC7 ark status prints escalation one_more_round by auto after an automatic answer", () => {
   const { runId } = autoEscalatedRun();
   const status = ark("status", runId);

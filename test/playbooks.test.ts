@@ -969,6 +969,7 @@ test("ARK-300-AC5 the live check evidence records a proof line", () => {
   );
 });
 
+// ARK-288-AC6 proof: `bun test test/playbooks.test.ts -t ARK-288-AC6`
 test("ARK-288-AC6 run-lead sends a status with the run, the round and <n> of 2 after an automatic escalation answer, and does not ask", () => {
   const escalate = flat(section(runLeadPlaybook, "## 9. Escalate when the round budget is spent"));
   expect(escalate).toContain("`gates.escalation: auto`");

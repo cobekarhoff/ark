@@ -285,6 +285,7 @@ function openMergeRequest(directory: string) {
 const conflictSync = (directory: string) =>
   appendEvent(directory, "worktree.synced", { repo: ".", conflict: true });
 
+// ARK-288-AC1 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC1`
 test("ARK-288-AC1 a spent budget with gates.escalation auto records the answer by auto before step.started and starts the step", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   spendRounds(runId, directory);
@@ -340,6 +341,7 @@ test("ARK-288-AC1 a start refused for a running step or a --merge with no failed
   expect(autoAnswers(directory)).toHaveLength(1);
 });
 
+// ARK-288-AC2 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC2`
 test("ARK-288-AC2 the third spent budget is refused and the phase is escalation", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   spendRounds(runId, directory);
@@ -359,6 +361,7 @@ test("ARK-288-AC2 the third spent budget is refused and the phase is escalation"
   expect(ark("status", runId).out).toContain("phase: escalation");
 });
 
+// ARK-288-AC3 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC3`
 test("ARK-288-AC3 after the MRs open, 3 merge starts are answered and not counted, 2 repair starts are counted and the next is refused", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   expect(start(runId).code).toBe(0);
@@ -391,6 +394,7 @@ test("ARK-288-AC3 after the MRs open, 3 merge starts are answered and not counte
   expect(autoAnswers(directory)).toHaveLength(5);
 });
 
+// ARK-288-AC4 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC4`
 test("ARK-288-AC4 a requested escalation is never answered by auto and the phase stays escalation", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   spendRounds(runId, directory, false);
@@ -412,6 +416,7 @@ for (const [label, gates] of [
   ["human", { escalation: "human" }],
   ["no setting", {}],
 ] as const) {
+  // ARK-288-AC5 proof: gates.escalation: human or none, test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC5`
   test(`ARK-288-AC5 gates.escalation ${label} refuses a spent budget as before`, () => {
     const { runId, directory } = buildingRun(gates);
     spendRounds(runId, directory);
