@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
-import { loadConfig, mergeRequestsMode } from "./config.ts";
+import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { manualCriteria } from "./criteria.ts";
 import {
@@ -322,6 +322,15 @@ function testHeadLines(directory: string): string[] {
   );
 }
 
+/** ark status stays readable without a valid ark.yml: a missing or invalid one counts as open. */
+function statusMergeRequestsMode(project: string): ProjectConfig["merge_requests"] {
+  try {
+    return mergeRequestsMode(project);
+  } catch {
+    return "open";
+  }
+}
+
 /** The `none` project's merge request line and one `branch` line for each worktree with commits beyond its base. */
 function localOnlyLines(project: string, state: RunState): string[] {
   const workspace = loadConfig(project).workspace;
@@ -361,7 +370,7 @@ function printRun(runId: string, inProject?: string): void {
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
     ...testHeadLines(directory),
-    ...(mergeRequestsMode(project) === "none"
+    ...(statusMergeRequestsMode(project) === "none"
       ? localOnlyLines(project, state)
       : [
           `merge requests: ${state.merge_requests.length === 0 ? "none" : ""}`,

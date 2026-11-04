@@ -196,7 +196,7 @@ When the human amends a criterion of a run before its plan gate, do not put the 
 
 1. Check that it is from the run lead you started for that run.
 2. Run `ark status <run>`. A run lead that finished its work leaves the run in `merge_requests_open`, or in `closed` if it was aborted.
-3. If the run is in phase `building` and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask whether they took the branches. On their answer run `ark run close <run> handed_off`, then go to section 8 after-close steps. Skip steps 4 and 5, then release the run lead as in step 6.
+3. If the run is in phase `building`, the outcome is not `failed`, and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask whether they took the branches. On their answer run `ark run close <run> handed_off`, then go to section 8 after-close steps. Skip steps 4 and 5, then release the run lead as in step 6.
 4. If the outcome is `failed`, or the run is not in `merge_requests_open`, tell the human what the run lead reported and decide with them.
 5. Otherwise give the human the MR links from `ark status <run>`, in the order they must merge, and tell them: review each MR, merge them in that order, then tell you.
 6. Release the run lead: `orca orchestration worker-release --dispatch <dispatch id> --json`.
