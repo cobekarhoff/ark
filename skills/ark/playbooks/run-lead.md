@@ -254,6 +254,11 @@ Rules for the plan:
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
 - When `Surfaces` is not `none`, give a `skills` list (the UI skills of `ark ui-skills <run>`) to every implementer, validator and reviewer step that touches the UI. Add the React skill that command lists to a step that touches React code. You decide which steps touch the UI and React code.
 - Keep each step small enough for one worker. Do not put two repos in one step.
+- Read `kind` in `ticket.md` (`ark status <run>` shows it; a missing `kind` is `feature`). It sets the first and last steps. `steps` may have an optional `goal` text; `ark plan check` reads it for `perf`.
+  - `bug`: the first step is a validator step that serves every AC that is not `manual: true`. It writes the AC tests before the fix, and `ark test` must show each of them `failing`. `ark run step <run> <implementer step> start` refuses with `bug run: record a failing ark test of the ACs before the fix` until then.
+  - `perf`: the first step `goal` names `results/baseline.md` (the measure before the change) and the last step `goal` names `results/compare.md` (the measure after it). `ark merge-request open` refuses when either file is missing or empty.
+  - `refactor`: `ark test` also runs the suites at the base commit, once per run, and records `base_passed`. `ark merge-request open` refuses unless `base_passed` and the last head test both passed. Plan no step for it.
+  - `feature`: no extra step.
 
 Then check it:
 

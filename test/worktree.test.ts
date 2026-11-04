@@ -581,7 +581,7 @@ describe("ARK-276 anchor worktree", () => {
       passed: true,
       heads: { ".": gitOutput(mirror, "rev-parse", "HEAD") },
       suites: [],
-      criteria: {},
+      criteria: { "FAKE-1-AC1": "passing" },
     });
 
     const opened = ark("merge-request", "open", runId);

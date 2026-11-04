@@ -25,12 +25,16 @@ export type CriterionStatus =
   | "manual pending"
   | "manual ok"
   | "manual problem";
+export const ticketKinds = ["bug", "perf", "refactor", "feature"] as const;
+export type TicketKind = (typeof ticketKinds)[number];
 export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "stopped";
 
 export type RunState = {
   run: string;
   project: string;
   ticket: { id: string; title: string };
+  /** From run.started; an event with no kind reads as feature. */
+  kind: TicketKind;
   phase: Phase;
   round: number;
   round_budget: number;
@@ -67,6 +71,10 @@ export type RunState = {
   worktrees: { repo: string; path: string; branch: string; base?: string }[];
   sync_conflicts: string[];
   last_test: { passed: boolean; heads: Record<string, string> } | null;
+  /** Some test.completed had every non-manual criterion failing: the bug run's proof that the tests fail before the fix. */
+  red_test: boolean;
+  /** Suites at the base commit of a refactor run: undefined until `ark test` ran them. */
+  base_passed?: boolean;
   merge_requests: { repo: string; url: string; number: number }[];
   outcome: string | null;
   implementer?: "human";
@@ -144,6 +152,9 @@ export function deriveState(events: ArkEvent[]): RunState {
   const worktrees: RunState["worktrees"] = [];
   const syncConflicts = new Set<string>();
   let lastTest: RunState["last_test"] = null;
+  let kind: TicketKind = "feature";
+  let redTest = false;
+  let basePassed: boolean | undefined;
   let escalationAnswered = false;
   let escalationRequested = false;
   const mergeRequests: RunState["merge_requests"] = [];
@@ -154,6 +165,7 @@ export function deriveState(events: ArkEvent[]): RunState {
     switch (type) {
       case "run.started":
         run = data.run ?? "";
+        kind = data.kind ?? "feature";
         project = data.project;
         ticket = { id: data.ticket.id, title: data.ticket.title };
         criteriaIds = data.criteria;
@@ -263,6 +275,14 @@ export function deriveState(events: ArkEvent[]): RunState {
       case "test.completed":
         criteriaStatus = data.criteria;
         lastTest = { passed: data.passed, heads: data.heads };
+        basePassed = data.base_passed ?? basePassed;
+        {
+          const automated = Object.values<string>(data.criteria ?? {}).filter(
+            (status) => !status.startsWith("manual"),
+          );
+          if (automated.length > 0 && automated.every((status) => status === "failing"))
+            redTest = true;
+        }
         if (mergeRequests.length === 0) escalationAnswered = false;
         break;
       case "escalation.requested":
@@ -313,6 +333,7 @@ export function deriveState(events: ArkEvent[]): RunState {
     run,
     project,
     ticket,
+    kind,
     phase,
     round,
     round_budget: roundBudget,
@@ -337,6 +358,8 @@ export function deriveState(events: ArkEvent[]): RunState {
     worktrees,
     sync_conflicts: [...syncConflicts],
     last_test: lastTest,
+    red_test: redTest,
+    ...(basePassed === undefined ? {} : { base_passed: basePassed }),
     merge_requests: mergeRequests,
     outcome,
     ...(human ? { implementer: "human" as const } : {}),

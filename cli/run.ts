@@ -19,7 +19,9 @@ import {
   readEvents,
   writeState,
   type EventData,
+  ticketKinds,
   type RunState,
+  type TicketKind,
 } from "./events.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
@@ -29,7 +31,12 @@ import { commitsAhead, worktreeCleanup } from "./worktree.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
 
-function readTicket(ticketFile: string): { id: string; title: string; criteria: string[] } {
+function readTicket(ticketFile: string): {
+  id: string;
+  title: string;
+  kind: TicketKind;
+  criteria: string[];
+} {
   const frontmatter = readFileSync(ticketFile, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!frontmatter)
     throw new ArkError(
@@ -40,6 +47,11 @@ function readTicket(ticketFile: string): { id: string; title: string; criteria: 
     if (typeof fields[key] !== "string" || fields[key] === "")
       throw new ArkError(`${ticketFile}: ticket field ${key} is required`);
   }
+  const kind = fields.kind ?? "feature";
+  if (!(ticketKinds as readonly unknown[]).includes(kind))
+    throw new ArkError(
+      `${ticketFile}: kind must be one of ${ticketKinds.join(", ")}, not ${JSON.stringify(kind)}`,
+    );
   const criteria = fields.acceptance_criteria ?? [];
   if (!Array.isArray(criteria))
     throw new ArkError(`${ticketFile}: acceptance_criteria must be a list`);
@@ -49,7 +61,12 @@ function readTicket(ticketFile: string): { id: string; title: string; criteria: 
     }
     return criterion.id as string;
   });
-  return { id: fields.id as string, title: fields.title as string, criteria: ids };
+  return {
+    id: fields.id as string,
+    title: fields.title as string,
+    kind: kind as TicketKind,
+    criteria: ids,
+  };
 }
 
 function resolveProject(absoluteTicketFile: string, project?: string): string {
@@ -122,6 +139,7 @@ export function runStart(ticketFile: string, project?: string): void {
       run,
       project: projectName,
       ticket: { id: ticket.id, title: ticket.title },
+      kind: ticket.kind,
       criteria: ticket.criteria,
       ticket_file: absoluteTicketFile,
       round_budget: config.round_budget,
@@ -362,6 +380,7 @@ function printRun(runId: string, inProject?: string): void {
   const lines = [
     `run: ${basename(directory)}`,
     `ticket: ${state.ticket.id} ${state.ticket.title}`,
+    `kind: ${state.kind}`,
     `phase: ${state.phase}${state.outcome ? ` (${state.outcome})` : ""}`,
     `round: ${state.round}/${state.round_budget}`,
     `current step: ${current ? `${current.id} (${current.status})` : "none"}`,
