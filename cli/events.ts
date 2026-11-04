@@ -64,7 +64,7 @@ export type RunState = {
   } | null;
   steps: { id: string; role: string; repo: string; status: StepStatus }[];
   current_step: string | null;
-  worktrees: { repo: string; path: string; branch: string }[];
+  worktrees: { repo: string; path: string; branch: string; base?: string }[];
   sync_conflicts: string[];
   last_test: { passed: boolean; heads: Record<string, string> } | null;
   merge_requests: { repo: string; url: string; number: number }[];
@@ -230,7 +230,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "worktree.created": {
         const known = worktrees.findIndex((worktree) => worktree.repo === data.repo);
-        const worktree = { repo: data.repo, path: data.path, branch: data.branch };
+        const worktree = { repo: data.repo, path: data.path, branch: data.branch, base: data.base };
         if (known === -1) worktrees.push(worktree);
         else worktrees[known] = worktree;
         break;

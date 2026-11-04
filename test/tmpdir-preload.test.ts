@@ -1,7 +1,10 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 // Each case runs a scratch `bun test` in the repo, with TMPDIR set to its own scratch directory,
 // then lists that directory. The repo's bunfig.toml (and so the preload) applies because the cwd is the repo.

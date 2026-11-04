@@ -1,8 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseBun } from "../cli/parsers/bun.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const root = resolve(import.meta.dir, "..");
 const long = 300_000;
@@ -164,7 +167,7 @@ describe("playwright migration", () => {
   );
 
   test(
-    "ARK-243-AC6 the Playwright suite leaves nothing in the temporary folder",
+    "ARK-243-AC6 ARK-301-AC2 the Playwright suite leaves nothing in the temporary folder",
     () => {
       const dir = scratch();
       try {
