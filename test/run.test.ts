@@ -92,7 +92,9 @@ test("ARK-152-AC1 run start creates the run folder, copies the ticket, logs run.
     "tickets",
     "ARK-900.md",
   );
-  expect(readFileSync(join(directory, "ticket.md"), "utf8")).toBe(readFileSync(ticketFile, "utf8"));
+  expect(readFileSync(join(directory, "ticket.md"), "utf8")).toBe(
+    readFileSync(ticketFile, "utf8").replace("status: in_progress", "status: ready"),
+  );
   const lines = eventLines(directory);
   expect(lines).toHaveLength(1);
   const first = JSON.parse(lines[0]);
@@ -310,8 +312,8 @@ test("ARK-152-AC6 status without a run lists every open run with phase and curre
   const listing = ark("status");
   expect(listing.code).toBe(0);
   const lines = listing.out.trim().split("\n");
-  expect(lines).toContain(`${first.runId}  building  build`);
-  expect(lines).toContain(`${second.runId}  planning  -`);
+  expect(lines).toContain(`${first.runId}  building  build  0m`);
+  expect(lines).toContain(`${second.runId}  planning  -  0m`);
   expect(listing.out).not.toContain(closed.runId);
 });
 
