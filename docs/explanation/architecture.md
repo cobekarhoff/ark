@@ -70,11 +70,11 @@ You answer in Master Chief's session or in Plannotator. The run lead records the
 
 The plan is `plan.yml`. It lists steps and test cases. Each step names a role, a repo, a harness, a model, the steps it needs, and the criteria it serves. Each test case names an acceptance criterion and a level, either integration or end-to-end.
 
-`ark plan check` rejects a plan with a cycle, an unknown `needs`, a step with no repo or role, a missing summary, or a criterion with no integration or end-to-end test case. It also renders `plan.md`, a readable plan with a summary, a change table and a diagram of the steps.
+`ark plan check` rejects a plan with a cycle, an unknown `needs`, a step with no repo or role, a missing summary, or a criterion without `manual: true` that has no integration or end-to-end test case. It also renders `plan.md`, a readable plan with a summary, a change table and a diagram of the steps.
 
 The plan also has a design block. `design.interfaces` lists each interface the change adds or changes, and each interface has a name and a `callers` list of the code, commands or documents that use it. The check refuses a plan with no `design.interfaces`, an interface with no name or no `callers`, and a blank caller. `design.example` is an optional sample of new or changed output. `plan.md` shows the block in its Design section: the approach, a table of interfaces and callers, and the example in a code fence that is longer than any fence inside the example.
 
-The validator writes tests from the approved test cases. The proof that a criterion holds is that its tagged tests pass at head on the composed workspace. Unit tests never prove a criterion. Each test runner has a parser that maps native tags to results. The first parser reads `bun test` names. Later parsers read pytest marks and behave tags.
+The validator writes tests from the approved test cases. The proof that a criterion holds is that its tagged tests pass at head on the composed workspace, or, for a criterion with `manual: true`, that you answer the `manual` gate `ok`. Unit tests never prove a criterion. Each test runner has a parser that maps native tags to results. The first parser reads `bun test` names. Later parsers read pytest marks and behave tags.
 
 The run lead picks review models. A plan defaults to a reviewer from a different vendor than the implementer, and you can change that per step. Ark does not enforce it. The run lead decides which findings send work back and says why.
 

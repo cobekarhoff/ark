@@ -97,15 +97,15 @@ Builds the run's workspace mirror. Each named repo, or every repo the plan uses,
 ```text
 ark test <run> [--project <name>]
 
-Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. It exits 1 unless every AC passes.
+Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. A criterion with `manual: true` in ticket.md has no test: it shows `manual pending`, `manual ok` or `manual problem` from the manual gate, even when a test is tagged with it. It exits 1 unless every AC is passing or manual ok. `passed` in test.completed counts the automated criteria only, so a manual pending never opens the escalation gate.
 ```
 
 ### gate record
 
 ```text
-ark gate record <run> <gate> <answer> [--note <text>] [--project <name>]
+ark gate record <run> <gate> [<criterion id>] <answer> [--note <text>] [--project <name>]
 
-Records your answer to a gate. The gates are criteria, strategy, plan and escalation. The strategy gate takes the ID of a card in the latest strategy record, or abort. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.
+Records your answer to a gate. The gates are criteria, strategy, plan, escalation and manual. The strategy gate takes the ID of a card in the latest strategy record, or abort. The manual gate proves one criterion that has `manual: true` in ticket.md: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]` records gate.answered with the field `criterion`; it refuses an ID that is not in the ticket or not manual, and the answer is never automatic. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.
 ```
 
 ### escalate
@@ -121,7 +121,7 @@ Opens the escalation gate when the round budget is spent, also when the last ark
 ```text
 ark merge-request open <run> [--project <name>]
 
-Pushes each repo's branch and opens one MR for each repo, in dependency order. It refuses, with exit 1 and before any push, when a repo head changed since the last test, and ends the error with `run ark test <run> again`. No command merges.
+Pushes each repo's branch and opens one MR for each repo, in dependency order. It refuses, with exit 1 and before any push, when a repo head changed since the last test, and ends the error with `run ark test <run> again`. It also refuses, before any push, when a criterion with `manual: true` has no manual ok, and names each one. No command merges.
 ```
 
 ### merge-request status
@@ -183,9 +183,9 @@ Starts a new Master Chief for the project with `orca agent launch --surface term
 ### ui
 
 ```text
-ark ui [--port <number>]
+ark ui [--port <number>] [--name <host>]
 
-Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port). One background reader builds a snapshot of the runs, plans, models, MRs, usage cost and backlog; the page gets it over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). A closed run, its decisions, files and agent transcripts are read when the page asks, not kept in the snapshot. Views: Home (tiles for what needs you, then blockers, the review queue and run progress with usage), Runs (every run on one board and a cross-run dependency graph; #/map redirects here), a run page (any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts) and Backlog (grouped table; a ticket opens as a full page with its dependency graph; the ticket text is read when the page asks, GET /api/ticket/<project>/<id>). The hub's one action is POST /api/open-in-orca, which runs orca terminal switch for a live terminal; it sends no text to a terminal, changes no run state and steers no agent.
+Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port). --name <host> (such as ark.localhost) also lets the hub answer to that name. One background reader builds a snapshot of the runs, plans, models, MRs, usage cost and backlog; the page gets it over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). A closed run, its decisions, files and agent transcripts are read when the page asks, not kept in the snapshot. Views: Home (tiles for what needs you, then blockers, the review queue and run progress with usage), Runs (every run on one board and a cross-run dependency graph; #/map redirects here), a run page (any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts) and Backlog (grouped table; a ticket opens as a full page with its dependency graph; the ticket text is read when the page asks, GET /api/ticket/<project>/<id>). The hub's one action is POST /api/open-in-orca, which runs orca terminal switch for a live terminal; it sends no text to a terminal, changes no run state and steers no agent.
 ```
 
 ### ui install
@@ -379,7 +379,7 @@ gates:
 
 A browser suite runs Playwright Test. Playwright's JUnit reporter writes the test title in `name`, so the `bun` parser reads it unchanged, and `PLAYWRIGHT_JUNIT_OUTPUT_FILE` carries the `{report}` path. The `setup` above also installs Chromium, so each new worktree can run the suite; the download is cached in `~/.cache/ms-playwright`.
 
-A test proves an AC when its name or tags contain the AC id, for example `CLARA-512-AC1`. For each AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran.
+A test proves an AC when its name or tags contain the AC id, for example `CLARA-512-AC1`. For each AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran. An AC with `manual: true` in the run's `ticket.md` is decided by the `manual` gate alone: `manual pending` until a person answers, then `manual ok` or `manual problem`. `ark test` exits 0 only when every other AC is `passing` and every manual AC is `manual ok`.
 
 ## Events
 
@@ -393,12 +393,12 @@ A test proves an AC when its name or tags contain the AC id, for example `CLARA-
 | `evaluation.recorded`  | `blockers` (strings), `risks` (strings), `surfaces` (strings)                                                                                          | `ark evaluation record`                   |
 | `strategy.recorded`    | `count`, `recommended`, `cards` (ids), optional `reason`                                                                                               | `ark strategy record`                     |
 | `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`), `open_decisions`                                                | `ark plan check`                          |
-| `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, or `escalation`), `answer`, optional `note`                                                                    | `ark gate record`                         |
+| `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, `escalation`, `manual`), optional `criterion`, `answer`, optional `note`                                       | `ark gate record`                         |
 | `escalation.requested` | `reason`                                                                                                                                               | `ark escalate`                            |
 | `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                                       | `ark worktree create`                     |
 | `worktree.synced`      | `repo`, `conflict`                                                                                                                                     | `ark worktree sync`                       |
 | `step.started`         | `step`, `role`, `repo`, `round`, optional `merge` (true)                                                                                               | `ark run step ... start`                  |
 | `step.finished`        | `step`, `outcome` (`succeeded` or `failed`), optional `merge` (true), optional `not_started` (true: the worker never ran, so the start costs no round) | `ark run step ... finish`                 |
-| `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, or `missing`)               | `ark test`                                |
+| `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, `missing`, or `manual …`)   | `ark test`                                |
 | `merge_request.opened` | `repo`, `url`, `number`                                                                                                                                | `ark merge-request open`                  |
 | `run.closed`           | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`)                                                                                          | `ark run close`                           |

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import {
   appendFileSync,
   closeSync,
@@ -19,6 +20,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { RunDetail, RunView, Snapshot, TranscriptPage } from "../hub/types.ts";
+import { createSnapshotReader } from "../hub/snapshot.ts";
+import { serve } from "../hub/server.ts";
 import { stuckAgents } from "../hub/page/derive.ts";
 import { stepTimeText } from "../hub/progress.ts";
 import { readTranscriptPage } from "../hub/transcript.ts";
@@ -1486,4 +1489,177 @@ test("ARK-285-AC11 ticket text arrives in the snapshot from the ticket's own fil
   expect(JSON.stringify(snapshot)).not.toContain("OUTSIDE TICKET DIRECTORY");
   for (const id of ["ARK-840", "..%2F..%2F..%2Foutside"])
     expect((await fetch(`${baseUrl}/api/ticket/p/${id}`)).status).toBe(404);
+});
+
+// ---------------------------------------------------------------- ARK-298
+
+const ownName = "hub.ark-1.localhost";
+
+/** One HTTP request through `node:http`, which sends exactly the `Host` and headers given (Bun `fetch` may not). */
+function sendRequest(
+  port: number,
+  { method = "GET", path = "/api/snapshot", headers = {}, body }: SendOptions,
+): Promise<{ status: number; text: string }> {
+  const { promise, resolve, reject } = Promise.withResolvers<{ status: number; text: string }>();
+  const request = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (response) => {
+    let text = "";
+    response.setEncoding("utf8");
+    response.on("data", (chunk) => void (text += chunk));
+    response.on("end", () => resolve({ status: response.statusCode ?? 0, text }));
+  });
+  request.on("error", reject);
+  request.end(body);
+  return promise;
+}
+type SendOptions = {
+  method?: string;
+  path?: string;
+  headers?: Record<string, string>;
+  body?: string;
+};
+
+/** A hub in this process on a free port, with or without a name. */
+async function serveInProcess(name?: string) {
+  isolatedEnvironment();
+  const reader = createSnapshotReader();
+  const server = await serve(reader, 0, name);
+  stoppers.push(async () => {
+    reader.stop();
+    await server.stop(true);
+  });
+  return server.port as number;
+}
+const stoppers: Array<() => Promise<void>> = [];
+afterAll(async () => void (await Promise.all(stoppers.map((stop) => stop()))));
+
+/** `bun hub/main.ts --port 0 …` to its exit, for a start that must fail. */
+const runHub = (...args: string[]) =>
+  spawnSync("bun", [join(root, "hub", "main.ts"), "--port", "0", ...args], {
+    encoding: "utf8",
+    env: process.env,
+    timeout: 30_000,
+  });
+
+test("ARK-298-AC1 a bad --name exits 1 with a message that names --name, and the hub does not start", () => {
+  for (const bad of ["Bad_Name.localhost", "example.com", "localhost"]) {
+    const result = runHub("--name", bad);
+    expect(result.status, bad).toBe(1);
+    expect(result.stderr, bad).toContain("--name");
+    expect(result.stdout, bad).not.toContain("Ark hub on");
+  }
+});
+
+test("ARK-298-AC2 GET accepts the hub's own name alone or with port 80, and no other host, port or Origin", async () => {
+  const port = await serveInProcess(ownName);
+  const get = (host: string, origin?: string) =>
+    sendRequest(port, { headers: { Host: host, ...(origin ? { Origin: origin } : {}) } });
+
+  expect((await get(ownName, `http://${ownName}`)).status).toBe(200);
+  expect((await get(`${ownName}:80`)).status).toBe(200);
+  expect((await get(`127.0.0.1:${port}`)).status).toBe(200);
+  expect((await get(`localhost:${port}`)).status).toBe(200);
+  for (const host of ["other.localhost", `${ownName}:9999`, "evil.com"])
+    expect((await get(host)).status, host).toBe(403);
+  expect((await get(ownName, "http://other.localhost")).status).toBe(403);
+
+  // Without a name the same host is foreign.
+  const unnamed = await serveInProcess();
+  expect((await sendRequest(unnamed, { headers: { Host: ownName } })).status).toBe(403);
+  expect(
+    (await sendRequest(unnamed, { headers: { Host: ownName, Origin: `http://${ownName}` } }))
+      .status,
+  ).toBe(403);
+});
+
+test("ARK-298-AC3 open-in-orca needs one same authority in Origin and Host, from 127.0.0.1:<port>, the name, or the name with port 80", async () => {
+  const port = await serveInProcess(ownName);
+  const body = '{"terminal":"x"}';
+  const post = (host: string, origin?: string) =>
+    sendRequest(port, {
+      method: "POST",
+      path: "/api/open-in-orca",
+      headers: {
+        Host: host,
+        "Content-Type": "application/json",
+        "Content-Length": String(body.length),
+        ...(origin ? { Origin: origin } : {}),
+      },
+      body,
+    });
+  const own = `127.0.0.1:${port}`;
+
+  // Past the Host check: 400, because the handle is not live.
+  for (const authority of [ownName, `${ownName}:80`, own])
+    expect((await post(authority, `http://${authority}`)).status, authority).toBe(400);
+
+  const foreign: Array<[string, string | undefined]> = [
+    [ownName, undefined],
+    [`localhost:${port}`, `http://localhost:${port}`],
+    ["other.localhost", "http://other.localhost"],
+    [ownName, `http://${own}`],
+    [own, `http://${ownName}`],
+    [ownName, `http://${ownName}:80`],
+    [`${ownName}:9999`, `http://${ownName}:9999`],
+  ];
+  for (const [host, origin] of foreign) {
+    const answer = await post(host, origin);
+    expect([answer.status, answer.text], `${host} ${origin}`).toEqual([403, "foreign origin"]);
+  }
+});
+
+test("ARK-298-AC4 the hub prints its name on line 2, and trusts only Host and Origin", async () => {
+  const hub = Bun.spawn(["bun", join(root, "hub", "main.ts"), "--port", "0", "--name", ownName], {
+    env: process.env,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  hubs.push(hub);
+  let output = "";
+  for await (const chunk of hub.stdout) {
+    output += new TextDecoder().decode(chunk);
+    if (output.split("\n").length > 2) break;
+  }
+  const [first, second] = output.split("\n");
+  expect(first).toMatch(/^Ark hub on http:\/\/127\.0\.0\.1:\d+$/);
+  expect(second).toBe(`Ark hub name http://${ownName}`);
+  const port = Number(first?.match(/127\.0\.0\.1:(\d+)/)?.[1]);
+
+  expect(
+    (
+      await sendRequest(port, {
+        headers: { Host: `127.0.0.1:${port}`, "X-Forwarded-Host": "evil.localhost" },
+      })
+    ).status,
+  ).toBe(200);
+  expect(
+    (await sendRequest(port, { headers: { Host: "evil.localhost", "X-Forwarded-Host": ownName } }))
+      .status,
+  ).toBe(403);
+  expect(
+    (await sendRequest(port, { headers: { Host: "evil.localhost", Origin: `http://${ownName}` } }))
+      .status,
+  ).toBe(403);
+});
+
+test("ARK-298-AC6 cli/proxy.ts holds only the name rule and the proxy port, and the rule matches the ticket", async () => {
+  const proxy = await import("../cli/proxy.ts");
+  expect(Object.keys(proxy).sort()).toEqual(["hubNamePattern", "isHubName", "proxyPort"]);
+  expect(proxy.proxyPort).toBe(80);
+  for (const good of ["ark.localhost", "hub.ark-284-1.localhost", `${"a".repeat(63)}.localhost`])
+    expect(proxy.isHubName(good), good).toBe(true);
+  for (const bad of [
+    "localhost",
+    "Ark.localhost",
+    "a_b.localhost",
+    "-a.localhost",
+    "a-.localhost",
+    "a..localhost",
+    `${"a".repeat(64)}.localhost`,
+    "ark.example.com",
+    "ark.localhost\n",
+    "ark.localhost:80",
+    "",
+  ])
+    expect(proxy.isHubName(bad), JSON.stringify(bad)).toBe(false);
 });

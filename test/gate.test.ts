@@ -69,7 +69,7 @@ beforeEach(() => {
 });
 
 // Starts a run for ticket ARK-901 with the given criteria and returns its id and folder.
-function startRun(ticketCriteria: { id: string; text: string }[]) {
+function startRun(ticketCriteria: { id: string; text: string; manual?: boolean }[]) {
   expect(ark("run", "start", writeTicket("demo", "ARK-901", ticketCriteria)).code).toBe(0);
   const runId = readdirSync(join(projectDirectory, "runs"))[0];
   const directory = join(projectDirectory, "runs", runId);
@@ -272,5 +272,136 @@ describe("plan approval survives only an unchanged valid recheck", () => {
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("gate.answered plan approve");
     expect(eventsOf(directory).length).toBe(before);
+  });
+});
+
+describe("manual gate", () => {
+  const manualCriteria = [
+    { id: "ARK-901-AC1", text: "first", manual: true },
+    { id: "ARK-901-AC2", text: "second" },
+    { id: "ARK-901-AC3", text: "third", manual: true },
+  ];
+  const planFor = {
+    ...plan,
+    summary: {
+      ...plan.summary,
+      changes: manualCriteria.map(({ id }) => ({ ...plan.summary.changes[0], criterion: id })),
+    },
+    steps: [{ ...plan.steps[0], criteria: manualCriteria.map(({ id }) => id) }],
+  };
+  const buildingRun = () => {
+    const { runId, directory } = startRun(manualCriteria);
+    // Two manual criteria have no test case; only AC2 has one: plan check needs none for a manual criterion.
+    writeFileSync(
+      join(directory, "plan.yml"),
+      JSON.stringify({
+        ...planFor,
+        test_cases: [{ ...plan.test_cases[0], criterion: "ARK-901-AC2" }],
+      }),
+    );
+    expect(ark("plan", "check", runId).code).toBe(0);
+    expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
+    return { runId, directory };
+  };
+  const manualEvents = (directory: string) =>
+    eventsOf(directory).filter((event) => event.data?.gate === "manual");
+
+  test("ARK-283-AC2 records gate manual with the field criterion for ok and for problem with a note", () => {
+    const { runId, directory } = buildingRun();
+    expect(ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok").code).toBe(0);
+    const second = ark(
+      "gate",
+      "record",
+      runId,
+      "manual",
+      "ARK-901-AC1",
+      "problem",
+      "--note",
+      "button is gray",
+    );
+    expect(second.code).toBe(0);
+    expect(manualEvents(directory).map((event) => event.data)).toEqual([
+      { gate: "manual", criterion: "ARK-901-AC1", answer: "ok", by: "human" },
+      {
+        gate: "manual",
+        criterion: "ARK-901-AC1",
+        answer: "problem",
+        by: "human",
+        note: "button is gray",
+      },
+    ]);
+    // The run stays in building: a manual answer moves no phase.
+    expect(stateOf(directory).phase).toBe("building");
+  });
+
+  test("ARK-283-AC2 refuses an unknown id and a criterion that is not manual, and names the id", () => {
+    const { runId, directory } = buildingRun();
+    const before = eventsOf(directory).length;
+    const unknown = ark("gate", "record", runId, "manual", "ARK-901-AC9", "ok");
+    expect(unknown.code).toBe(1);
+    expect(unknown.err).toContain("ARK-901-AC9");
+    const normal = ark("gate", "record", runId, "manual", "ARK-901-AC2", "ok");
+    expect(normal.code).toBe(1);
+    expect(normal.err).toContain("ARK-901-AC2");
+    expect(normal.err).toContain("manual");
+    expect(eventsOf(directory).length).toBe(before);
+  });
+
+  test("ARK-283-AC2 refuses an answer that is not ok or problem, and a missing criterion id", () => {
+    const { runId, directory } = buildingRun();
+    const before = eventsOf(directory).length;
+    const wrong = ark("gate", "record", runId, "manual", "ARK-901-AC1", "accept");
+    expect(wrong.code).toBe(1);
+    expect(wrong.err).toContain("ok, problem");
+    const missing = ark("gate", "record", runId, "manual", "ok");
+    expect(missing.code).toBe(1);
+    expect(eventsOf(directory).length).toBe(before);
+  });
+
+  test("ARK-283-AC2 refuses a manual answer while the run is still planning", () => {
+    const { runId, directory } = startRun(manualCriteria);
+    const result = ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("phase planning");
+    expect(manualEvents(directory)).toEqual([]);
+  });
+
+  test("ARK-283-AC2 two manual criteria keep separate answers", () => {
+    const { runId, directory } = buildingRun();
+    expect(ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok").code).toBe(0);
+    expect(ark("gate", "record", runId, "manual", "ARK-901-AC3", "problem").code).toBe(0);
+    expect(stateOf(directory).gates).toMatchObject({
+      "manual:ARK-901-AC1": "ok",
+      "manual:ARK-901-AC3": "problem",
+    });
+    expect(ark("gate", "record", runId, "manual", "ARK-901-AC3", "ok").code).toBe(0);
+    expect(stateOf(directory).gates).toMatchObject({
+      "manual:ARK-901-AC1": "ok",
+      "manual:ARK-901-AC3": "ok",
+    });
+  });
+
+  test("ARK-283-AC2 ark status lists the manual criteria that are not ok", () => {
+    const { runId } = buildingRun();
+    expect(ark("status", runId).out).toContain("manual pending: ARK-901-AC1, ARK-901-AC3");
+    expect(ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok").code).toBe(0);
+    expect(ark("status", runId).out).toContain("manual pending: ARK-901-AC3");
+  });
+
+  test("ARK-283-AC2 gates.manual in ark.yml stays an error: the manual gate is never automatic", () => {
+    writeProject("demo", {
+      workspace: tempGitRepo(),
+      ticket_source: "local",
+      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+      roles: {
+        implementer: { harness: "claude", model: "claude-sonnet" },
+        validator: { harness: "codex", model: "gpt-codex" },
+        reviewer: { harness: "codex", model: "gpt-codex" },
+      },
+      gates: { manual: "auto" },
+    });
+    const result = ark("status");
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("gates.manual");
   });
 });
