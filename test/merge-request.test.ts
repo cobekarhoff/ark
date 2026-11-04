@@ -948,3 +948,17 @@ test(
   },
   { timeout: 30_000 },
 );
+
+test(
+  "ARK-305-AC5 a plain absent string is still refused by merge-request open",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" });
+    setCriterionText(runDirectory, "ARK-900-AC1", "Needs `absent-string-xyz`");
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain(
+      "AC string in no tracked file at head: ARK-900-AC1 `absent-string-xyz`",
+    );
+  },
+  { timeout: 30_000 },
+);

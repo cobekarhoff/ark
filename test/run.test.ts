@@ -1491,7 +1491,7 @@ test("ARK-304-AC1 close handed_off refuses a missing and a failing AC, appends n
   expect(existsSync(worktree)).toBe(true);
 });
 
-test("ARK-304-AC2 close handed_off refuses a pending manual AC, then an absent AC string, and names only the absent one", () => {
+test("ARK-304-AC2 ARK-305-AC5 close handed_off refuses a pending manual AC, then an absent AC string, and names only the absent one", () => {
   const { runId, directory, worktree } = closableRun(
     [
       { id: "ARK-900-AC1", text: "Holds `ARK-900-AC1 works` and `absent-string-xyz`" },
@@ -1633,4 +1633,22 @@ test("ARK-304-AC7 run close keeps its branch-retention sentence in help and docs
   const generated = Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root });
   expect(generated.exitCode).toBe(0);
   expect(readFileSync(referencePath, "utf8")).toBe(committed);
+});
+
+test("ARK-305-AC1 close handed_off skips placeholder, glob, dots, file:line and own id, and a manual AC's strings", () => {
+  const { runId, directory } = closableRun(
+    [
+      {
+        id: "ARK-900-AC1",
+        text: "Skips `repos/<repo>/`, `src/**/*.md`, `docs/more/...`, `core.txt:38`, `ARK-900-AC1 works`",
+      },
+      { id: "ARK-900-AC2", text: "A person sees `manual-only-absent`", manual: true },
+    ],
+    { "ARK-900-AC1": "passing", "ARK-900-AC2": "manual" },
+  );
+  expect(ark("gate", "record", runId, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+  const closed = ark("run", "close", runId, "handed_off");
+  expect(closed.err).not.toContain("AC string");
+  expect(closed.code).toBe(0);
+  expect(closedEvents(directory)).toHaveLength(1);
 });
