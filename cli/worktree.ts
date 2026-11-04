@@ -364,7 +364,7 @@ export function commitsAhead(source: string, branch: string, base?: string): num
 }
 
 /** Why the branch of a handed_off or aborted run must stay: commits beyond its base, or a count that failed. Counted in the source repo, so it works with the worktree gone. */
-function keepBranchReason(
+function handedOffReason(
   outcome: string | null,
   source: string,
   branch: string,
@@ -394,7 +394,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
     };
     if (!existsSync(path)) {
       Bun.spawnSync(["git", "-C", source, "worktree", "prune"]);
-      const handedOff = keepBranchReason(state.outcome, source, branch, base);
+      const handedOff = handedOffReason(state.outcome, source, branch, base);
       if (handedOff !== undefined) {
         console.log(`kept     ${repo}  ${branch}: ${handedOff}`);
         continue;
@@ -438,7 +438,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
         }
       }
       // count in the source repo, before the worktree goes; an unknown count keeps the branch
-      const handedOff = keepBranchReason(state.outcome, source, branch, base);
+      const handedOff = handedOffReason(state.outcome, source, branch, base);
       git(source, "worktree", "remove", "--force", path); // clean but for Ark's own symlinks
       if (handedOff !== undefined) {
         // the worktree is gone, so the mirror folder may go too: no kept = true

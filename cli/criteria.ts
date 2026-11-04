@@ -98,7 +98,8 @@ export function criteriaAmend(
   );
   console.log(`  old: ${oldText}`);
   console.log(`  new: ${newText}`);
-  if (deriveState(readEvents(directory)).phase === "planning") {
+  const phase = deriveState(readEvents(directory)).phase;
+  if (phase === "planning" || phase === "awaiting_strategy") {
     if (existsSync(join(directory, "plan.md")))
       console.log(
         `plan.md may be stale: run \`ark plan check ${runId}\` again to list this amendment`,

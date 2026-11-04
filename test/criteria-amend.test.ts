@@ -323,6 +323,22 @@ test("ARK-308-AC3 an amendment in planning clears the plan check, so ark plan ch
   expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
 });
 
+test("ARK-308-AC1 an amendment in awaiting_strategy is accepted and does not say the plan is approved", () => {
+  appendEvent(runDirectory, "evaluation.recorded", { blockers: [], risks: [], surfaces: ["none"] });
+  appendEvent(runDirectory, "strategy.recorded", {
+    count: 2,
+    recommended: "A",
+    cards: ["A", "B"],
+    card_text: { A: "### A", B: "### B" },
+  });
+  expect(ark("status", runId).out).toContain("phase: awaiting_strategy");
+  const result = amend(AC1, "reworded before the strategy", "--reason", "why");
+  expect(result.code).toBe(0);
+  expect(result.out).not.toContain("the plan is approved");
+  expect(ark("status", runId).out).toContain("phase: awaiting_strategy");
+});
+
+// ark test judges each criterion by its ID, its manual flag and its gate answer, so the amended text resets a manual answer and is judged anew.
 test("ARK-308-AC3 an amendment in building keeps the phase and the approval, clears that criterion's manual answer, and ark test judges the new text", () => {
   writeFileSync(
     join(runDirectory, "ticket.md"),
