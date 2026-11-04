@@ -4,18 +4,25 @@ import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { deriveState, readEvents, type RunState } from "./events.ts";
 import { exec, execJson } from "./exec.ts";
-
-import { findLiveChief, readTerminals, retroUnanswered } from "./orca.ts";
+import {
+  findLiveChief,
+  orcaPages,
+  orcaRead,
+  orcaTimeout,
+  readTerminals,
+  retroUnanswered,
+} from "./orca.ts";
 import { listProjects, runsDirectory } from "./paths.ts";
 
 /** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for a one-off command. */
-const orcaTimeoutMilliseconds = 10_000;
+const orcaTimeoutMilliseconds = orcaTimeout(10_000);
 
 type OrcaRunRow = { id: string; objective?: string; coordinator_handle?: string };
 type WorkerRow = { dispatchId: string; agentTerminalHandle?: string };
 type TaskRow = { id: string; task_title: string; status?: string };
 
-const unavailable = (what: string): string => `unavailable: ${what} did not answer`;
+const unavailable = (verb: string, reason: string): string =>
+  `unavailable: orca orchestration ${verb} failed: ${reason}`;
 
 function resolveProject(project: string | undefined): string {
   const chosen = project ?? process.env.ARK_PROJECT;
@@ -24,14 +31,6 @@ function resolveProject(project: string | undefined): string {
   if (!listProjects().includes(chosen)) throw new ArkError(`project ${chosen} does not exist`);
   return chosen;
 }
-
-const orcaOrchestration = async <T>(...args: string[]): Promise<T | null> =>
-  (
-    await execJson<{ result?: T }>(
-      ["orca", "orchestration", ...args, "--json"],
-      orcaTimeoutMilliseconds,
-    )
-  )?.result ?? null;
 
 function table(headers: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
@@ -67,69 +66,74 @@ export async function chiefState(inProject?: string): Promise<void> {
         ),
   );
 
-  const orcaRuns = (await orcaOrchestration<{ runs?: OrcaRunRow[] }>("run-list"))?.runs;
-  const chiefRunId = (orcaRuns ?? []).find(
-    (orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`,
-  )?.id;
+  // `--full` keeps coordinator_handle, which the concise rows lack.
+  const orcaRuns = await orcaPages<OrcaRunRow>(
+    "run-list",
+    "runs",
+    ["--full"],
+    orcaTimeoutMilliseconds,
+  );
+  const noChiefRun = `unavailable: no Orca Run "Master Chief: ${project} tickets"`;
+  const chiefRunId = orcaRuns.ok
+    ? orcaRuns.value.find((orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`)?.id
+    : undefined;
   // A run lead is a worker in Master Chief's own Orca Run. It is the lead of the Ark run whose
   // Orca Run names the worker's terminal as its coordinator.
   const runOfLead = new Map(
-    (orcaRuns ?? [])
+    (orcaRuns.ok ? orcaRuns.value : [])
       .filter((orcaRun) => orcaRun.objective?.startsWith("Ark run ") && orcaRun.coordinator_handle)
       .map((orcaRun) => [orcaRun.coordinator_handle!, orcaRun.objective!.slice("Ark run ".length)]),
   );
   const openRunNames = new Set(openRuns.map((state) => state.run));
-  let leadsText = unavailable("`orca orchestration worker-list`");
-  if (orcaRuns && chiefRunId) {
-    const answer = await orcaOrchestration<{ workers?: WorkerRow[] }>(
-      "worker-list",
-      "--run",
-      chiefRunId,
-      "--terminal-state",
-      "active",
-      "--include-remote",
-    );
-    if (answer) {
-      const rows = (answer.workers ?? []).flatMap((worker) => {
+  let leadsText = noChiefRun;
+  let queueText = noChiefRun;
+  if (!orcaRuns.ok) {
+    leadsText = queueText = unavailable("run-list", orcaRuns.reason);
+  } else if (chiefRunId) {
+    const [workers, ready, pending] = await Promise.all([
+      orcaPages<WorkerRow>(
+        "worker-list",
+        "workers",
+        ["--run", chiefRunId, "--terminal-state", "active", "--include-remote"],
+        orcaTimeoutMilliseconds,
+      ),
+      // The queue is the set of Tasks in Master Chief's own Orca Run. task-list has no cursor.
+      orcaRead<{ tasks?: TaskRow[] }>(
+        ["task-list", "--run", chiefRunId, "--ready"],
+        orcaTimeoutMilliseconds,
+      ),
+      orcaRead<{ tasks?: TaskRow[] }>(
+        ["task-list", "--run", chiefRunId, "--status", "pending"],
+        orcaTimeoutMilliseconds,
+      ),
+    ]);
+    if (workers.ok) {
+      const rows = workers.value.flatMap((worker) => {
         const run = runOfLead.get(worker.agentTerminalHandle ?? "");
         return run && openRunNames.has(run)
           ? [[run, worker.dispatchId, worker.agentTerminalHandle!]]
           : [];
       });
       const leadless = openRuns.filter((state) => !rows.some((row) => row[0] === state.run));
-      leadsText = [
-        rows.length === 0 ? "" : table(["Run", "Dispatch", "Terminal"], rows),
-        ...leadless.map((state) => `Note: open run ${state.run} has no live run lead.`),
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      if (!leadsText) leadsText = "none";
-    }
-  } else if (orcaRuns) leadsText = `unavailable: no Orca Run "Master Chief: ${project} tickets"`;
-  sections.push("## Run leads", leadsText);
-
-  // The queue is the set of Tasks in Master Chief's own Orca Run.
-  let queueText = unavailable("`orca orchestration task-list`");
-  if (orcaRuns && chiefRunId) {
-    const [ready, pending] = await Promise.all([
-      orcaOrchestration<{ tasks?: TaskRow[] }>("task-list", "--run", chiefRunId, "--ready"),
-      orcaOrchestration<{ tasks?: TaskRow[] }>(
-        "task-list",
-        "--run",
-        chiefRunId,
-        "--status",
-        "pending",
-      ),
-    ]);
-    if (ready && pending) {
+      leadsText =
+        [
+          rows.length === 0 ? "" : table(["Run", "Dispatch", "Terminal"], rows),
+          ...leadless.map((state) => `Note: open run ${state.run} has no live run lead.`),
+        ]
+          .filter(Boolean)
+          .join("\n\n") || "none";
+    } else leadsText = unavailable("worker-list", workers.reason);
+    if (!ready.ok) queueText = unavailable("task-list", ready.reason);
+    else if (!pending.ok) queueText = unavailable("task-list", pending.reason);
+    else {
       const tasks = [
-        ...(ready.tasks ?? []).map((task) => [task.id, "ready", task.task_title]),
-        ...(pending.tasks ?? []).map((task) => [task.id, "pending", task.task_title]),
+        ...(ready.value.tasks ?? []).map((task) => [task.id, "ready", task.task_title]),
+        ...(pending.value.tasks ?? []).map((task) => [task.id, "pending", task.task_title]),
       ];
       queueText = tasks.length === 0 ? "none" : table(["Task", "Status", "Title"], tasks);
     }
-  } else if (orcaRuns) queueText = `unavailable: no Orca Run "Master Chief: ${project} tickets"`;
-  sections.push("## Queued Orca Tasks", queueText);
+  }
+  sections.push("## Run leads", leadsText, "## Queued Orca Tasks", queueText);
 
   const head = await exec(["git", "-C", workspace, "log", "-1", "--format=%h %s", "main"]);
   sections.push(

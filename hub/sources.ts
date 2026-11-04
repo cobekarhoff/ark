@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { execJson } from "../cli/exec.ts";
 import { deriveState, type ArkEvent, type RunState } from "../cli/events.ts";
-import { orcaOrchestration, type OrcaRun, type OrcaTerminal } from "../cli/orca.ts";
+import { orcaOrchestration, orcaPages, type OrcaRun, type OrcaTerminal } from "../cli/orca.ts";
 import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
 import { loadPlan, type PlanStep } from "../cli/plan.ts";
 import { stepWindows, type StepWindow } from "../cli/retro.ts";
@@ -223,7 +223,7 @@ export async function readOrca(
   openRuns: { run: string; project: string }[],
 ): Promise<OrcaValue | null> {
   const [runList, terminalList, inbox] = await Promise.all([
-    orcaOrchestration<{ runs?: OrcaRun[] }>("run-list", "--full"),
+    orcaPages<OrcaRun>("run-list", "runs", ["--full"]),
     execJson<{ result?: { terminals?: OrcaTerminalFull[] } }>([
       "orca",
       "terminal",
@@ -233,9 +233,9 @@ export async function readOrca(
     orcaOrchestration<{ messages?: OrcaMessage[] }>("inbox", "--limit", "200", "--full"),
   ]);
   const terminals = terminalList?.result?.terminals;
-  if (!runList || !terminals || !inbox) return null;
+  if (!runList.ok || !terminals || !inbox) return null;
   const byHandle = new Map(terminals.map((terminal) => [terminal.handle, terminal]));
-  const orcaRuns = runList.runs ?? [];
+  const orcaRuns = runList.value;
   const leadOf = new Map(
     orcaRuns
       .filter((orcaRun) => orcaRun.objective?.startsWith("Ark run "))
@@ -249,13 +249,12 @@ export async function readOrca(
     [...new Set(openRuns.map((open) => open.project))].map(async (project) => {
       const chief = chiefOf(project);
       if (!chief) return;
-      const list = await orcaOrchestration<{ workers?: OrcaWorker[] }>(
-        "worker-list",
+      const list = await orcaPages<OrcaWorker>("worker-list", "workers", [
         "--run",
         chief.id,
         "--include-remote",
-      );
-      chiefWorkers.set(project, list?.workers ?? []);
+      ]);
+      chiefWorkers.set(project, list.ok ? list.value : []);
     }),
   );
   const agents = new Map<string, Agent[]>();
@@ -266,15 +265,10 @@ export async function readOrca(
       const orcaRun = leadOf.get(run);
       if (!orcaRun) return;
       const [workers, tasks] = await Promise.all([
-        orcaOrchestration<{ workers?: OrcaWorker[] }>(
-          "worker-list",
-          "--run",
-          orcaRun.id,
-          "--include-remote",
-        ),
+        orcaPages<OrcaWorker>("worker-list", "workers", ["--run", orcaRun.id, "--include-remote"]),
         orcaOrchestration<{ tasks?: OrcaTask[] }>("task-list", "--run", orcaRun.id),
       ]);
-      if (!workers || !tasks) {
+      if (!workers.ok || !tasks) {
         failed = true;
         return;
       }
@@ -324,7 +318,7 @@ export async function readOrca(
         });
       // A released or disconnected worker stays in the list with `live: false`: the page says
       // "ended, not in Orca" instead of hiding it.
-      for (const worker of workers.workers ?? []) {
+      for (const worker of workers.value) {
         const handle = worker.agentTerminalHandle ?? worker.terminal ?? null;
         const terminal = byHandle.get(handle ?? "");
         const title = titles.get(worker.taskId ?? "") ?? worker.taskId ?? "worker";
@@ -345,7 +339,7 @@ export async function readOrca(
       agents.set(run, list);
 
       const stepOf = (handle: string | undefined): string | null => {
-        const worker = (workers.workers ?? []).find(
+        const worker = workers.value.find(
           (candidate) =>
             handle !== undefined &&
             (candidate.dispatchId === handle ||
@@ -357,7 +351,7 @@ export async function readOrca(
       };
       const pending = (inbox.messages ?? []).filter((message) => {
         const sender = message.from_handle?.replace(/^dispatch:/, "");
-        const worker = (workers.workers ?? []).find(
+        const worker = workers.value.find(
           (candidate) =>
             sender !== undefined &&
             (candidate.dispatchId === sender ||
