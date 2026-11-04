@@ -74,43 +74,75 @@ function detectHost(remoteUrl: string): Host {
   throw new ArkError(`cannot tell GitHub from GitLab for remote ${remoteUrl}`);
 }
 
-function criterionTexts(runDirectory: string): Map<string, string> {
+function criterionTexts(runDirectory: string): Map<string, Criterion> {
   const match = readFileSync(join(runDirectory, "ticket.md"), "utf8").match(
     /^---\n([\s\S]*?)\n---/,
   );
   const frontmatter = match
     ? (Bun.YAML.parse(match[1]) as { acceptance_criteria?: { id: string; text: string }[] })
     : {};
-  const criteria = frontmatter.acceptance_criteria ?? [];
-  return new Map(criteria.map((criterion) => [criterion.id, criterion.text]));
+  const manual = new Set(manualCriteria(runDirectory));
+  return new Map(
+    (frontmatter.acceptance_criteria ?? []).map(({ id, text }) => [
+      id,
+      { id, text, manual: manual.has(id) },
+    ]),
+  );
 }
 
+type Criterion = { id: string; text: string; manual: boolean };
+
 /**
- * The strings in backticks of an AC text. One rule for all of them: a span must sit on one line and be
- * non-blank, so a multi-line span and an empty `` never become a literal. Each is searched verbatim (`git grep -F`).
+ * The strings of an AC that the check counts. A span in backticks must sit on one line and be non-blank.
+ * `required` must be in a tracked file at head; `removed` (the span had a `not:` prefix, now cut) must be in none.
+ * Not counted: any string of a manual AC; a string with a placeholder (`<` then `>`, or a lone `<`), a `*`, `...`
+ * or a `:<digits>` or `:<digits>-<digits>` suffix; a string that holds the id of its own AC (`-` or `_`).
  */
-export function backtickedLiterals(text: string): string[] {
-  return [...text.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]).filter((s) => s.trim() !== "");
+export function requiredLiterals(criterion: Criterion): { required: string[]; removed: string[] } {
+  const required = new Set<string>();
+  const removed = new Set<string>();
+  if (criterion.manual) return { required: [], removed: [] };
+  const id = criterion.id.replaceAll("-", "_");
+  for (const [, span] of criterion.text.matchAll(/`([^`\n]+)`/g)) {
+    if (span.trim() === "") continue;
+    const isRemoved = span.startsWith("not:");
+    const literal = isRemoved ? span.slice(4) : span;
+    if (
+      literal.trim() === "" ||
+      literal.includes("<") ||
+      literal.includes("*") ||
+      literal.includes("...") ||
+      /:\d+(-\d+)?$/.test(literal) ||
+      literal.replaceAll("-", "_").includes(id)
+    )
+      continue;
+    (isRemoved ? removed : required).add(literal);
+  }
+  return { required: [...required], removed: [...removed] };
 }
 
 /**
- * Backticked AC strings that no tracked file at HEAD of any repo of the run holds. A touched repo is searched in
- * its run worktree, an untouched one at its workspace checkout, which the mirror links to.
+ * Required AC strings that no tracked file at HEAD of any repo of the run holds, and removed ones that some file
+ * still holds. A touched repo is searched in its run worktree, an untouched one at its workspace checkout, which
+ * the mirror links to.
  */
 function absentLiterals(
-  texts: Map<string, string>,
+  criteria: Map<string, Criterion>,
   repoPaths: string[],
-): { criterion: string; literal: string }[] {
+): {
+  absent: { criterion: string; literal: string }[];
+  present: { criterion: string; literal: string }[];
+} {
+  const found = (literal: string) =>
+    repoPaths.some((path) => spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], path).ok);
   const absent: { criterion: string; literal: string }[] = [];
-  for (const [criterion, text] of texts)
-    for (const literal of new Set(backtickedLiterals(text)))
-      if (
-        !repoPaths.some(
-          (path) => spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], path).ok,
-        )
-      )
-        absent.push({ criterion, literal });
-  return absent;
+  const present: { criterion: string; literal: string }[] = [];
+  for (const [criterion, value] of criteria) {
+    const { required, removed } = requiredLiterals(value);
+    for (const literal of required) if (!found(literal)) absent.push({ criterion, literal });
+    for (const literal of removed) if (found(literal)) present.push({ criterion, literal });
+  }
+  return { absent, present };
 }
 
 /** Result files a perf run must leave: missing or empty ones. */
@@ -160,11 +192,13 @@ function uiFindings(runDirectory: string, reviewers: string[]): string[] {
 function description(
   ticket: { id: string; title: string },
   criteriaIds: string[],
-  texts: Map<string, string>,
+  texts: Map<string, Criterion>,
   dependencyLines: string[],
   ui: { skills: string[]; findings: string[] } | null = null,
 ): string {
-  const criteria = criteriaIds.map((id) => `- ${id}${texts.has(id) ? `: ${texts.get(id)}` : ""}`);
+  const criteria = criteriaIds.map(
+    (id) => `- ${id}${texts.has(id) ? `: ${texts.get(id)?.text}` : ""}`,
+  );
   return [
     `Ticket: ${ticket.id} ${ticket.title}`,
     "",
@@ -323,11 +357,13 @@ export function assertShippable(
   const repoPaths = discoverRepos(loadConfig(project).workspace).map(
     (repo) => worktrees.get(repo)?.path ?? join(loadConfig(project).workspace, repo),
   );
-  const absent = absentLiterals(criterionTexts(directory), repoPaths);
+  const { absent, present } = absentLiterals(criterionTexts(directory), repoPaths);
+  const list = (items: typeof absent) =>
+    items.map(({ criterion, literal }) => `${criterion} \`${literal}\``).join("; ");
   if (absent.length > 0)
-    throw new ArkError(
-      `AC string in no tracked file at head: ${absent.map(({ criterion, literal }) => `${criterion} \`${literal}\``).join("; ")}`,
-    );
+    throw new ArkError(`AC string in no tracked file at head: ${list(absent)}`);
+  if (present.length > 0)
+    throw new ArkError(`AC string still in a tracked file at head: ${list(present)}`);
   if (state.kind === "perf") {
     const bad = emptyResultFiles(directory);
     if (bad.length > 0)
