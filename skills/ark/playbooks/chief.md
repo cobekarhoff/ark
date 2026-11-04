@@ -218,12 +218,12 @@ orca orchestration worker-release --dispatch <dispatch id> --json
 
 Choose the outcome:
 
-| What you find                                | Command                                                           |
-| -------------------------------------------- | ----------------------------------------------------------------- |
-| Every MR merged                              | `ark run close <run> merged`                                      |
-| MRs opened, then closed without merging      | `ark run close <run> abandoned`                                   |
-| The human took the branches and wants no MRs | `ark run close <run> handed_off` (the last test must have passed) |
-| The human stops the run before any MR exists | `ark run close <run> aborted`, see below                          |
+| What you find                                | Command                                                                                                                                                                                                                 |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every MR merged                              | `ark run close <run> merged`                                                                                                                                                                                            |
+| MRs opened, then closed without merging      | `ark run close <run> abandoned`                                                                                                                                                                                         |
+| The human took the branches and wants no MRs | `ark run close <run> handed_off` (the last test must have passed). Each branch with commits stays in its clone, and `ark run close` prints a `kept` line for it: `git -C <repo> log <base>..<branch>` lists the commits |
+| The human stops the run before any MR exists | `ark run close <run> aborted`, see below                                                                                                                                                                                |
 
 If some MRs are merged and others are still open, tell the human and wait. Do not close the run.
 
