@@ -212,7 +212,7 @@ function sandbox() {
   };
 }
 
-test("ARK-300 install with portless writes the proxy agent and the wrapped hub, then uninstall removes both", () => {
+test("ARK-300-AC1 install with portless writes the proxy agent and the wrapped hub, then uninstall removes both", () => {
   const { environment, portless, hub, proxy } = sandbox();
   const result = runArkWithEnvironment(environment, "ui", "install", "--port", "4317");
   expect(result.exitCode).toBe(0);
@@ -233,7 +233,7 @@ test("ARK-300 install with portless writes the proxy agent and the wrapped hub, 
   expect(existsSync(hub) || existsSync(proxy)).toBe(false);
 });
 
-test("ARK-300 without portless install keeps the plain hub, writes no proxy agent and exits 0", () => {
+test("ARK-300-AC2 without portless install keeps the plain hub, writes no proxy agent and exits 0", () => {
   const { environment, hub, proxy } = sandbox();
   const result = runArkWithEnvironment(
     { ...environment, ARK_PORTLESS: join(environment.PATH, "missing") },
@@ -250,7 +250,7 @@ test("ARK-300 without portless install keeps the plain hub, writes no proxy agen
   expect(existsSync(proxy)).toBe(false);
 });
 
-test("ARK-300 a switch from plain to wrapped form reloads, and a port change reports port a -> port b", () => {
+test("ARK-300-AC2 a switch from plain to wrapped form reloads, and a port change reports port a -> port b", () => {
   const { environment, hub } = sandbox();
   const missing = { ...environment, ARK_PORTLESS: join(environment.PATH, "missing") };
   runArkWithEnvironment(missing, "ui", "install", "--port", "4317");
@@ -261,7 +261,7 @@ test("ARK-300 a switch from plain to wrapped form reloads, and a port change rep
   expect(moved.stdout.toString()).toContain("(port 4317 -> 4318)");
 });
 
-test("ARK-300 a failed proxy load restores only the proxy and exits 1, the hub stays loaded", () => {
+test("ARK-300-AC1 a failed proxy load restores only the proxy and exits 1, the hub stays loaded", () => {
   const { environment, commandDirectory, hub, proxy } = sandbox();
   const failing = writeCommand(
     commandDirectory,
@@ -273,4 +273,44 @@ test("ARK-300 a failed proxy load restores only the proxy and exits 1, the hub s
   expect(result.stderr.toString()).toContain("proxy load failed");
   expect(existsSync(proxy)).toBe(false);
   expect(existsSync(hub)).toBe(true);
+});
+
+test("ARK-300-AC1 the proxy plist has RunAtLoad, the hub PATH and its own log next to the hub log", () => {
+  const { environment, hub, proxy } = sandbox();
+  runArkWithEnvironment(environment, "ui", "install");
+  const proxyPlist = readFileSync(proxy, "utf8");
+  const path = `<string>${environment.PATH}</string>`;
+  expect(proxyPlist).toContain("<key>RunAtLoad</key><true/>");
+  expect(proxyPlist).toContain(path);
+  expect(readFileSync(hub, "utf8")).toContain(path);
+  expect(proxyPlist).toContain(join(environment.ARK_HOME, "hub", "proxy.log"));
+});
+
+test("ARK-300-AC2 a failed hub load after the switch to the wrapped form restores the plain plist", () => {
+  const { environment, commandDirectory, hub } = sandbox();
+  runArkWithEnvironment(
+    { ...environment, ARK_PORTLESS: join(environment.PATH, "missing") },
+    "ui",
+    "install",
+  );
+  const plain = readFileSync(hub, "utf8");
+  const failing = writeCommand(
+    commandDirectory,
+    "launchctl-hub-fail",
+    `case "$3" in *hub.plist) while IFS= read -r line; do case "$line" in *ark.localhost*) echo "hub load failed" >&2; exit 5;; esac; done < "$3";; esac`,
+  );
+  const result = runArkWithEnvironment({ ...environment, ARK_LAUNCHCTL: failing }, "ui", "install");
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain("hub load failed");
+  expect(readFileSync(hub, "utf8")).toBe(plain);
+});
+
+test("ARK-300-AC6 the install tests run only fake launchctl and portless from a temporary HOME", () => {
+  const { environment, commandDirectory } = sandbox();
+  expect(environment.ARK_LAUNCHCTL).toStartWith(commandDirectory);
+  expect(environment.ARK_PORTLESS).toStartWith(commandDirectory);
+  expect(environment.PATH).toBe(commandDirectory);
+  expect(environment.HOME).toStartWith(tmpdir());
+  expect(readFileSync(environment.ARK_PORTLESS, "utf8")).toBe("#!/bin/sh\nexit 0\n");
+  expect(readFileSync(environment.ARK_LAUNCHCTL, "utf8")).toBe("#!/bin/sh\nexit 0\n");
 });
