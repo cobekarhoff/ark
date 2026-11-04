@@ -813,6 +813,96 @@ test(
 );
 
 test(
+  "ARK-307-AC1 counts a path string as present when it names a tracked file or folder, refuses a missing path and a lone slash",
+  () => {
+    const { runDirectory, workspace, worktrees } = scenario({ core: "github", app: "github" });
+    renameSync(
+      tempGitRepo({
+        "scripts/check_knowledge_docs.py": "x",
+        ".claude/skills/config/SKILL.md": "y",
+      }),
+      join(workspace, "repos/lib"),
+    );
+    // An untracked file is not at head, so it does not count.
+    writeFileSync(join(worktrees.app, "untracked.py"), "x");
+    setCriterionText(
+      runDirectory,
+      "ARK-900-AC1",
+      "Reads `scripts/check_knowledge_docs.py` and `.claude/skills/config/`",
+    );
+    expect(ark("merge-request", "open", run).code).toBe(0);
+
+    setCriterionText(
+      runDirectory,
+      "ARK-900-AC1",
+      "Reads `scripts/check_knowledge_docs.py`, `scripts/missing.py`, `untracked.py` and `/`",
+    );
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("AC string in no tracked file at head:");
+    expect(refused.err).toContain("`scripts/missing.py`");
+    expect(refused.err).toContain("`untracked.py`");
+    expect(refused.err).toContain("`/`");
+    expect(refused.err).not.toContain("check_knowledge_docs");
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-307-AC2 refuses a not: string that names a tracked file or folder",
+  () => {
+    const { runDirectory, workspace } = scenario({ core: "github", app: "github" });
+    renameSync(
+      tempGitRepo({ "scripts/old.py": "x", "docs/old/page.md": "y" }),
+      join(workspace, "repos/lib"),
+    );
+    setCriterionText(
+      runDirectory,
+      "ARK-900-AC1",
+      "Removes `not:scripts/old.py` and `not:docs/old/`",
+    );
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("AC string still in a tracked file at head:");
+    expect(refused.err).toContain("`scripts/old.py`");
+    expect(refused.err).toContain("`docs/old/`");
+
+    setCriterionText(runDirectory, "ARK-900-AC1", "Removes `not:scripts/gone.py` and `not:/`");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-307-AC1 refuses a required string that is only a slash",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" });
+    setCriterionText(runDirectory, "ARK-900-AC1", "Reads `/`");
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("AC string in no tracked file at head:");
+    expect(refused.err).toContain("`/`");
+  },
+  { timeout: 30_000 },
+);
+
+test("ARK-307-AC3 the descriptions, CLI reference and how-to say a path string passes when the path exists", () => {
+  const root = resolve(import.meta.dir, "..");
+  const section = (file: string, start: string, end: string) => {
+    const text = readFileSync(join(root, file), "utf8");
+    const from = text.indexOf(start);
+    expect(from).toBeGreaterThanOrEqual(0);
+    return text.slice(from + start.length, text.indexOf(end, from + start.length));
+  };
+  const phrase = "names a tracked file or folder at HEAD";
+  for (const command of ["merge-request open", "run close"]) {
+    expect(section("cli/ark.ts", `usage: "${command}`, 'usage: "')).toContain(phrase);
+    expect(section("docs/reference/cli.md", `### ${command}`, "\n### ")).toContain(phrase);
+  }
+  expect(readFileSync(join(root, "docs/how-to/project-checks.md"), "utf8")).toContain(phrase);
+});
+
+test(
   "ARK-305-AC1 skips placeholder, glob, dots, file:line, own id and every string of a manual AC, refuses only the real missing string",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
