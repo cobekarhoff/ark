@@ -13,6 +13,7 @@ import {
   writeEventLog,
   writeFakeToolState,
   writeOmpSession,
+  writeRoadmap,
   writeRun,
   writeSessionFile,
   type FixtureRun,
@@ -394,27 +395,29 @@ test("ARK-277-AC8 the run page draws one node for each plan step and one edge fo
 
 // ---------------------------------------------------------------- AC9
 
-test("ARK-277-AC9 Roadmap lists and filters the tickets, changes none, and copies the selected IDs in dependency order", async ({
+test("ARK-277-AC9 Roadmap lists and filters the tickets, changes none, and copies the review IDs in dependency order", async ({
   context,
   page,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   isolate();
-  // ARK-912 depends on ARK-919: dependency order is the reverse of ID order.
+  // ARK-912 depends on ARK-919: dependency order is the reverse of ID order. The three proposed
+  // tickets wait in Needs your review.
   const tickets = [
     {
       id: "ARK-912",
       title: "Show the ledger",
-      status: "ready",
+      status: "proposed",
       milestone: "M4",
       dependsOn: ["ARK-919"],
     },
-    { id: "ARK-915", title: "Rename a flag", status: "ready", milestone: "M4" },
-    { id: "ARK-919", title: "Write the ledger", status: "ready", milestone: "M4" },
+    { id: "ARK-915", title: "Rename a flag", status: "proposed", milestone: "M4" },
+    { id: "ARK-919", title: "Write the ledger", status: "proposed", milestone: "M4" },
     { id: "ARK-921", title: "Old ledger cleanup", status: "done", milestone: "M3" },
     { id: "ARK-923", title: "Waiting on a decision", status: "blocked" },
   ];
   for (const ticket of tickets) writeBacklogTicket({ project: "p", ...ticket });
+  writeRoadmap("p", { now: ["ARK-915", "ARK-919"], next: ["ARK-912"] });
   installFakeTools({});
   const baseUrl = await launch();
   const methods: string[] = [];
@@ -422,41 +425,28 @@ test("ARK-277-AC9 Roadmap lists and filters the tickets, changes none, and copie
   await open(page, baseUrl, "roadmap");
 
   const rows = page.getByTestId("ticket-row");
-  await expect(rows).toHaveCount(4); // the done ticket ARK-921 is hidden behind Show done
+  await expect(rows).toHaveCount(4); // the done ticket ARK-921 is in no list
   // Each ticket: ID, title, status, milestone and depends_on.
   const ledger = page.locator('[data-testid="ticket-row"][data-ticket="ARK-912"]');
   await expect(ledger).toContainText("ARK-912");
   await expect(ledger).toContainText("Show the ledger");
-  await expect(ledger).toContainText("ready");
+  await expect(ledger).toContainText("proposed");
   await expect(ledger).toContainText("M4");
+  await expect(ledger).toContainText("Blocked by");
   await expect(ledger).toContainText("ARK-919");
 
-  await page.getByTestId("filter-status").selectOption("ready");
-  await expect(rows).toHaveCount(3);
   await page.getByTestId("filter-text").fill("ledger");
-  await expect(rows).toHaveCount(2); // ready and about the ledger: ARK-912 and ARK-919
+  await expect(rows).toHaveCount(2); // about the ledger and not finished: ARK-912 and ARK-919
   await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-921"]')).toHaveCount(0);
-  await page.getByTestId("filter-status").selectOption("");
-  await expect(rows).toHaveCount(2); // the text filter alone: ARK-921 is done, so still hidden
-  await page.getByTestId("show-done").check();
-  await expect(rows).toHaveCount(3); // Show done: ARK-921 joins
-  await page.getByTestId("show-done").uncheck();
 
-  // Nothing here changes a ticket: the only button is the copy button, and the page only reads.
-  await expect(page.locator("main button")).toHaveText(["Copy prompt for Master Chief"]);
+  // Nothing here changes a ticket: the page has no form, and the copy button only copies.
   await expect(page.locator("main form")).toHaveCount(0);
 
   await page.getByTestId("filter-text").fill("");
-  await page.getByLabel("Select ARK-912").check();
-  await page.getByLabel("Select ARK-919").check();
-  await page.getByLabel("Select ARK-915").check();
   await page.getByRole("button", { name: "Copy prompt for Master Chief" }).click();
-  const copied = await page.evaluate(() => navigator.clipboard.readText());
-  const position = (id: string) => copied.indexOf(id);
-  expect(position("ARK-915")).toBeGreaterThanOrEqual(0);
-  expect(position("ARK-919")).toBeGreaterThanOrEqual(0);
-  expect(position("ARK-912")).toBeGreaterThan(position("ARK-919"));
-  expect(copied).not.toMatch(/ARK-921|ARK-923/); // only the selected IDs
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    "Evaluate ARK-915, ARK-919, ARK-912.",
+  );
 
   expect(methods.filter((method) => method !== "GET")).toEqual([]);
 });
@@ -780,6 +770,7 @@ test("ARK-277-AC9 a file in the tickets folder that is not named like a ticket i
 }) => {
   isolate();
   writeBacklogTicket({ project: "p", id: "ARK-930", title: "A ticket", status: "ready" });
+  writeRoadmap("p", { now: ["ARK-930"] });
   writeFileSync(
     join(process.env.ARK_HOME as string, "projects", "p", "tickets", "README.md"),
     "# Tickets\n\n| id | title |\n",
@@ -954,6 +945,7 @@ test("ARK-284-AC3 a closed run opens from its Roadmap row and from its Runs card
   const ticket = (id: string) => ({ id, title: `Ticket ${id}` });
   for (const id of ["ARK-841", "ARK-842"])
     writeBacklogTicket({ project: "p", id, title: `Ticket ${id}`, status: "ready" });
+  writeRoadmap("p", { now: ["ARK-841", "ARK-842"] });
   // ARK-841: a closed run and a newer open one. ARK-842: one closed run only.
   const older = runId("ARK-841", 1);
   const newer = runId("ARK-841", 2);
@@ -1814,7 +1806,7 @@ test("ARK-285-AC7 Runs shows every run on one board and graph with filters, ring
   await expect(page.locator("main h1")).toContainText("ARK-601");
 });
 
-test("ARK-285-AC8 Roadmap groups the tickets, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
+test("ARK-285-AC8 Roadmap lists the tickets by horizon, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
   page,
 }) => {
   isolate();
@@ -1854,26 +1846,31 @@ test("ARK-285-AC8 Roadmap groups the tickets, keys move and open them, a ticket 
   ticket("ARK-705", "superseded");
   ticket("ARK-706", "done");
   // Enough proposed tickets that the page scrolls.
-  for (let number = 0; number < 40; number++)
-    ticket(`ARK-8${String(number).padStart(2, "0")}`, "proposed");
+  const proposed = Array.from(
+    { length: 40 },
+    (_, number) => `ARK-8${String(number).padStart(2, "0")}`,
+  );
+  for (const id of proposed) ticket(id, "proposed");
+  writeRoadmap("p", {
+    now: ["ARK-701"],
+    next: ["ARK-702", "ARK-703"],
+    later: ["ARK-704", ...proposed, "ARK-705", "ARK-706"],
+  });
   installFakeTools({});
   const baseUrl = await launch();
   await open(page, baseUrl, "roadmap");
   const rows = page.getByTestId("ticket-row");
   await expect(rows.first()).toBeVisible();
 
-  // Rows are grouped; done and superseded tickets wait behind Show done.
+  // Sections in horizon order; a done or superseded ticket is in no list, though ROADMAP.md lists it.
   expect(
     await page
-      .getByTestId("group")
-      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-group"))),
-  ).toEqual(["In a run", "In progress", "Ready", "Proposed"]);
+      .getByTestId("roadmap-section")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-section"))),
+  ).toEqual(["Now", "Next", "Later", "Unranked"]);
   await expect(rows).toHaveCount(44);
   await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-706"]')).toHaveCount(0);
-  await page.getByTestId("show-done").check();
-  await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-706"]')).toHaveCount(1);
-  await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-705"]')).toHaveCount(1);
-  await page.getByTestId("show-done").uncheck();
+  await expect(page.locator('[data-testid="ticket-row"][data-ticket="ARK-705"]')).toHaveCount(0);
 
   // j and k move the selection; / focuses the search.
   const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
@@ -1894,10 +1891,10 @@ test("ARK-285-AC8 Roadmap groups the tickets, keys move and open them, a ticket 
   await expect(rows).toHaveCount(44);
   await page.keyboard.press("Escape"); // out of the search box: j and k are keys again
 
-  // Enter in the native status select belongs to the select, even with a row selected.
+  // Enter on a button belongs to the button, even with a row selected.
   await page.keyboard.press("j");
   await expect(selected).toHaveCount(1);
-  await page.getByTestId("filter-status").focus();
+  await page.getByTestId("view-list").focus();
   await page.keyboard.press("Enter");
   await page.waitForTimeout(300);
   await expect(page).toHaveURL(/#\/roadmap$/);
@@ -1919,7 +1916,9 @@ test("ARK-285-AC8 Roadmap groups the tickets, keys move and open them, a ticket 
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 
   // The full page of ARK-703: title, problem, change, numbered criteria, graph and lists.
-  await page.locator('[data-testid="ticket-link"]', { hasText: "ARK-703" }).click();
+  await page
+    .locator('[data-testid="ticket-row"][data-ticket="ARK-703"] [data-testid="ticket-link"]')
+    .click();
   await expect(page.locator("main h1")).toHaveText("The ticket page");
   await expect(page.getByTestId("ticket-problem")).toContainText("The first line.");
   await expect(page.getByTestId("ticket-problem").locator("li")).toHaveText([

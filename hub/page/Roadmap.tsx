@@ -1,12 +1,25 @@
-// test ids: ticket-row (data-ticket, aria-current marks the selection), ticket-select, filter-text,
-// filter-status, show-done, group (data-group), copy-button, copy-preview, ticket-run (data-run),
-// ticket-link. No control here changes a ticket.
+// test ids: see RoadmapParts.tsx and RoadmapGraph.tsx; here: roadmap-page, roadmap-vision, view-list,
+// view-graph, filter-text, milestone-filter, notes-link, roadmap-error (the message and line),
+// roadmap-none (the line). No control here changes a ticket or a rank.
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
-import { Phase, Unknown, known } from "./format.tsx";
-import { runHref } from "./RunDetail.tsx";
+import { ticketEntries, ticketKey } from "./derive.ts";
+import { Unknown, known } from "./format.tsx";
+import { RoadmapGraph } from "./RoadmapGraph.tsx";
+import {
+  BrainstormCommand,
+  Card,
+  Icon,
+  Notices,
+  Rail,
+  ReviewPanel,
+  Row,
+  Section,
+  ShippedBar,
+  type RoadmapData,
+} from "./RoadmapParts.tsx";
 import { useLive } from "./store.tsx";
-import type { TicketView } from "../types.ts";
+import type { Roadmap as RoadmapModel, RoadmapItem } from "../roadmap.ts";
+import type { Snapshot, TicketView } from "../types.ts";
 
 /**
  * Selected IDs in dependency order: a ticket comes after every selected ticket it depends on,
@@ -43,34 +56,23 @@ export function dependencyOrder(selected: string[], tickets: TicketView[]): stri
   return order;
 }
 
-export const promptFor = (ids: string[]) => `Queue ${ids.join(", ")} in this order.`;
-
-const groups = [
-  ["In a run", "an agent is on it right now"],
-  ["In progress", "started by hand"],
-  ["Ready", "unblocked tickets first"],
-  ["Proposed", "not approved yet"],
-  ["Other", "any other status"],
-  ["Done", "done and superseded"],
+const horizons = [
+  ["now", "Now", "Your top picks, in the order you ranked them"],
+  ["next", "Next", "After Now"],
+  ["later", "Later", "Not started on purpose"],
+  ["unranked", "Unranked", "Open and approved, but in no list in ROADMAP.md"],
 ] as const;
 
-function groupOf(entry: TicketEntry): (typeof groups)[number][0] {
-  const { status } = entry.ticket;
-  if (status === "done" || status === "superseded") return "Done";
-  if (entry.open) return "In a run";
-  if (status === "in_progress") return "In progress";
-  if (status === "ready") return "Ready";
-  if (status === "proposed") return "Proposed";
-  return "Other";
-}
+const isFinished = (status: string) => status === "done" || status === "superseded";
 
-/** What the list keeps while a ticket page is open, so Esc lands on the same row and scroll position. */
+/** What the page keeps while a ticket page is open, so Esc lands on the same row and scroll position. */
 type Remembered = {
   scroll: number;
   cursor: string | null;
   text: string;
-  status: string;
-  showDone: boolean;
+  milestone: string | null;
+  view: "list" | "graph";
+  project: string | null;
 };
 let remembered: Remembered | null = null;
 
@@ -80,67 +82,100 @@ const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLTextAreaElement ||
   target instanceof HTMLSelectElement;
 
+type Pick = { rank: number | null; item: RoadmapItem; horizon: string };
+
+/** One project's roadmap against its tickets, narrowed by the search text and the milestone. */
+function build(snapshot: Snapshot, project: string, needle: string, milestone: string | null) {
+  if (!known(snapshot.tickets) || snapshot.roadmap === "unknown") return null;
+  const tickets = snapshot.tickets.filter((ticket) => ticket.project === project);
+  const entries = ticketEntries(snapshot);
+  const open = tickets.filter((ticket) => !isFinished(ticket.status));
+  const data: RoadmapData = {
+    project,
+    byId: new Map(tickets.map((ticket) => [ticket.id, ticket])),
+    entries,
+    runsOf: new Map(
+      (known(snapshot.ticket_runs) ? snapshot.ticket_runs : []).map((entry) => [
+        ticketKey(entry.project, entry.ticket),
+        entry.all,
+      ]),
+    ),
+    open,
+  };
+  const matches = (id: string, title: string | null, own: string | null) =>
+    (milestone === null || (own ?? "") === milestone) &&
+    (needle === "" ||
+      [id, title ?? "", own ?? ""].some((field) => field.toLowerCase().includes(needle)));
+  const roadmap = snapshot.roadmap[project];
+  const ok = roadmap && "vision" in roadmap ? (roadmap as RoadmapModel) : null;
+
+  // A finished ticket never shows in a horizon, even when ROADMAP.md still lists it.
+  let rank = 0;
+  const sections = ok
+    ? horizons.map(([key, name, hint]) => ({
+        name,
+        hint,
+        picks: ok[key]
+          .filter((item) => !isFinished(item.status))
+          .map((item): Pick => ({
+            rank: key === "unranked" ? null : ++rank,
+            item,
+            horizon: key,
+          }))
+          .filter(({ item }) => matches(item.id, item.title, item.milestone)),
+      }))
+    : [];
+  const review = (
+    ok
+      ? ok.review
+      : tickets.filter((ticket) => ["proposed", "unreadable", "unknown"].includes(ticket.status))
+  ).map((item) => ({ id: item.id, title: item.title, milestone: item.milestone }));
+
+  // Graph: ranked tickets first, then the rest by id.
+  const ranked = sections.flatMap((section) => section.picks.map((pick) => pick.item.id));
+  const graphTickets = [
+    ...ranked.map((id) => data.byId.get(id)!),
+    ...open
+      .filter((ticket) => !ranked.includes(ticket.id))
+      .filter((ticket) => matches(ticket.id, ticket.title, ticket.milestone))
+      .toSorted((a, b) => a.id.localeCompare(b.id)),
+  ].filter((ticket, at, all) => all.indexOf(ticket) === at);
+  return { data, roadmap, sections, review, graphTickets, tickets, ok };
+}
+
 export function Roadmap() {
   const { snapshot } = useLive();
   const [text, setText] = useState(() => remembered?.text ?? "");
-  const [status, setStatus] = useState(() => remembered?.status ?? "");
-  const [showDone, setShowDone] = useState(() => remembered?.showDone ?? false);
+  const [milestone, setMilestone] = useState<string | null>(() => remembered?.milestone ?? null);
+  const [view, setView] = useState<"list" | "graph">(() => remembered?.view ?? "list");
   const [cursor, setCursor] = useState<string | null>(() => remembered?.cursor ?? null);
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [copied, setCopied] = useState("");
-  const tickets = snapshot && known(snapshot.tickets) ? snapshot.tickets : null;
-  const entries = useMemo(
-    () => (snapshot ? ticketEntries(snapshot) : new Map<string, TicketEntry>()),
-    [snapshot],
-  );
-  // Every run of a ticket, newest first (the order of `all`).
-  const runsOf = new Map(
-    (snapshot && known(snapshot.ticket_runs) ? snapshot.ticket_runs : []).map((entry) => [
-      ticketKey(entry.project, entry.ticket),
-      entry.all,
-    ]),
-  );
-  const statuses = useMemo(
-    () => [...new Set((tickets ?? []).map((ticket) => ticket.status))].sort(),
-    [tickets],
+  const [chosen, setChosen] = useState<string | null>(() => remembered?.project ?? null);
+  const names = snapshot && known(snapshot.roadmap) ? Object.keys(snapshot.roadmap).sort() : [];
+  const project = chosen !== null && names.includes(chosen) ? chosen : (names[0] ?? null);
+  const needle = text.trim().toLowerCase();
+  const model = useMemo(
+    () => (snapshot && project !== null ? build(snapshot, project, needle, milestone) : null),
+    [snapshot, project, needle, milestone],
   );
 
-  const needle = text.trim().toLowerCase();
-  const matching = (tickets ?? []).filter(
-    (ticket) =>
-      (status === "" || ticket.status === status) &&
-      (needle === "" ||
-        [ticket.id, ticket.title ?? "", ticket.milestone ?? "", ...ticket.depends_on].some(
-          (field) => field.toLowerCase().includes(needle),
-        )),
-  );
-  const doneCount = matching.filter(
-    (ticket) => groupOf(entries.get(ticketKey(ticket.project, ticket.id))!) === "Done",
-  ).length;
-  const grouped = groups
-    .map(([name, hint]) => ({
-      name,
-      hint,
-      rows: matching
-        .filter((ticket) => groupOf(entries.get(ticketKey(ticket.project, ticket.id))!) === name)
-        // Unblocked tickets first, then by id.
-        .toSorted(
-          (left, right) =>
-            Number(left.depends_on.length > 0 && name === "Ready") -
-              Number(right.depends_on.length > 0 && name === "Ready") ||
-            left.id.localeCompare(right.id),
-        ),
-    }))
-    .filter((group) => group.rows.length > 0 && (group.name !== "Done" || showDone));
-  const order = grouped.flatMap((group) => group.rows.map((ticket) => ticket.id));
+  const order = useMemo(() => {
+    if (!model) return [];
+    if (view === "list") return model.sections.flatMap((s) => s.picks.map((pick) => pick.item.id));
+    const lanes = model.ok ? model.ok.milestones.map((entry) => entry.id) : [];
+    const laneAt = (ticket: TicketView) => {
+      const at = lanes.indexOf(ticket.milestone ?? "");
+      return at === -1 ? lanes.length : at;
+    };
+    return model.graphTickets.toSorted((a, b) => laneAt(a) - laneAt(b)).map((ticket) => ticket.id);
+  }, [model, view]);
   const current = cursor !== null && order.includes(cursor) ? cursor : (order[0] ?? null);
 
-  const remember = () => {
-    remembered = { scroll: window.scrollY, cursor: current, text, status, showDone };
+  const remember = (id: string | null = current) => {
+    remembered = { scroll: window.scrollY, cursor: id, text, milestone, view, project };
   };
 
   // Back from a ticket page: the same scroll position, once the rows exist.
-  const loaded = tickets !== null;
+  const loaded = model !== null;
   useLayoutEffect(() => {
     if (!loaded || !remembered) return;
     window.scrollTo(0, remembered.scroll);
@@ -168,18 +203,19 @@ export function Roadmap() {
         if (next === undefined) return;
         setCursor(next);
         document
-          .querySelector(`[data-testid="ticket-row"][data-ticket="${CSS.escape(next)}"]`)
+          .querySelector(
+            `:is([data-testid="ticket-row"],[data-testid="graph-node"])[data-ticket="${CSS.escape(next)}"]`,
+          )
           ?.scrollIntoView({ block: "nearest" });
         return;
       }
-      // Enter on a link, button, select or textarea keeps its own action; anywhere else (the search
-      // field included) it opens the selected ticket.
+      // Enter on a link, button or textarea keeps its own action; anywhere else (the search field
+      // included) it opens the selected ticket.
       const control =
         event.target instanceof HTMLElement ? event.target.closest("a, button") : null;
-      const checkbox = event.target instanceof HTMLInputElement && event.target.type === "checkbox";
       const native =
         event.target instanceof HTMLSelectElement || event.target instanceof HTMLTextAreaElement;
-      if (event.key === "Enter" && current !== null && !control && !checkbox && !native) {
+      if (event.key === "Enter" && current !== null && !control && !native) {
         event.preventDefault();
         remember();
         location.hash = `#/ticket/${encodeURIComponent(current)}`;
@@ -189,194 +225,241 @@ export function Roadmap() {
     return () => removeEventListener("keydown", onKey);
   });
 
-  if (!tickets)
+  if (!snapshot || !known(snapshot.tickets) || !known(snapshot.roadmap))
     return (
       <>
         <h1>Roadmap</h1>
         <Unknown />
       </>
     );
-  const ids = dependencyOrder([...selected], tickets);
-  const prompt = promptFor(ids);
-  const toggle = (id: string) =>
-    setSelected((previous) => {
-      const next = new Set(previous);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      setCopied("Copied");
-    } catch {
-      setCopied("Copy failed: select the text below");
-    }
+  if (!model || project === null)
+    return (
+      <>
+        <h1>Roadmap</h1>
+        <p className="mut">No project has tickets yet.</p>
+      </>
+    );
+
+  const { data, roadmap, sections, review, graphTickets, ok } = model;
+  const prompt = `Evaluate ${dependencyOrder(
+    review.map((item) => item.id),
+    model.tickets,
+  ).join(", ")}.`;
+  const picked = ok?.milestones.find((entry) => entry.id === milestone);
+  const shown = sections.reduce((sum, section) => sum + section.picks.length, 0);
+  const onOpen = (id: string) => () => {
+    setCursor(id);
+    remember(id);
   };
-  const open = tickets.filter((ticket) => !["done", "superseded"].includes(ticket.status)).length;
-  return (
-    <>
-      <h1>
-        Roadmap{" "}
-        <span className="mut sub">
-          Done tickets are hidden. j / k to move, Enter to read, / to search.
-        </span>
-      </h1>
-      <div className="toolbar">
-        <input
-          type="search"
-          name="q"
-          autoComplete="off"
-          spellCheck={false}
-          aria-label="Search id or title"
-          placeholder="Search id or title…"
-          data-testid="filter-text"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-        />
-        <select
-          name="status"
-          aria-label="Filter by status"
-          data-testid="filter-status"
-          value={status}
-          onChange={(event) => setStatus(event.target.value)}
-        >
-          <option value="">status: all</option>
-          {statuses.map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </select>
-        <label className="check">
-          <input
-            type="checkbox"
-            data-testid="show-done"
-            checked={showDone}
-            onChange={(event) => setShowDone(event.target.checked)}
-          />
-          Show done ({doneCount})
-        </label>
-        <span className="mut end" aria-live="polite">
-          {open} open · {ids.length} selected {copied}
-        </span>
+
+  const toolbar = (
+    <div className="rm-toolbar">
+      <div className="seg big" role="group" aria-label="View">
         <button
           type="button"
-          className="btn primary"
-          data-testid="copy-button"
-          disabled={ids.length === 0}
-          onClick={copy}
+          aria-pressed={view === "list"}
+          data-testid="view-list"
+          onClick={() => setView("list")}
         >
-          Copy prompt for Master Chief
+          <Icon name="list" />
+          List
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === "graph"}
+          data-testid="view-graph"
+          onClick={() => setView("graph")}
+        >
+          <Icon name="graph" />
+          Graph
         </button>
       </div>
-      <table className="btable">
-        <thead>
-          <tr>
-            <th className="sel-col">
-              <span className="sr">Select</span>
-            </th>
-            <th>ID</th>
-            <th>Title</th>
-            <th>Status</th>
-            <th>M</th>
-            <th>Depends on</th>
-            <th className="num">Unblocks</th>
-            <th>Runs</th>
-          </tr>
-        </thead>
-        {grouped.map((group) => (
-          <tbody key={group.name} data-testid="group" data-group={group.name}>
-            <tr className="group-row">
-              <th colSpan={8} scope="colgroup">
-                {group.name} <span className="count">{group.rows.length}</span>{" "}
-                <span className="hint">{group.hint}</span>
-              </th>
-            </tr>
-            {group.rows.map((ticket) => {
-              const runs = runsOf.get(ticketKey(ticket.project, ticket.id)) ?? [];
-              const unblocks = tickets.filter(
-                (other) => other.project === ticket.project && other.depends_on.includes(ticket.id),
-              ).length;
-              return (
-                <tr
-                  key={`${ticket.project}/${ticket.id}`}
-                  data-testid="ticket-row"
-                  data-ticket={ticket.id}
-                  aria-current={ticket.id === current ? "true" : undefined}
-                  onClick={(event) => {
-                    if (!(event.target as HTMLElement).closest("a, input, button"))
-                      setCursor(ticket.id);
-                  }}
-                >
-                  <td className="sel-col">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${ticket.id}`}
-                      data-testid="ticket-select"
-                      checked={selected.has(ticket.id)}
-                      onChange={() => toggle(ticket.id)}
-                    />
-                  </td>
-                  <td className="id nw">
-                    <a
-                      href={`#/ticket/${encodeURIComponent(ticket.id)}`}
-                      data-testid="ticket-link"
-                      onClick={() => {
-                        setCursor(ticket.id);
-                        remembered = {
-                          scroll: window.scrollY,
-                          cursor: ticket.id,
-                          text,
-                          status,
-                          showDone,
-                        };
-                      }}
+      <input
+        type="search"
+        name="q"
+        autoComplete="off"
+        spellCheck={false}
+        aria-label="Search id or title"
+        placeholder="Search id or title…"
+        data-testid="filter-text"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+      />
+      <span className="rm-filter" data-testid="milestone-filter">
+        {milestone === null ? (
+          "All milestones"
+        ) : (
+          <>
+            Milestone <b>{picked ? `${picked.id} ${picked.name}` : milestone}</b>
+            <button
+              type="button"
+              aria-label="Show all milestones"
+              onClick={() => setMilestone(null)}
+            >
+              <Icon name="x" />
+              Clear
+            </button>
+          </>
+        )}
+      </span>
+      <span className="rm-right">
+        {ok && ok.warnings.length > 0 ? (
+          <button
+            type="button"
+            className="rm-linkbtn"
+            data-testid="notes-link"
+            onClick={() =>
+              document.getElementById("roadmap-notes")?.scrollIntoView({ block: "center" })
+            }
+          >
+            {ok.warnings.length} {ok.warnings.length === 1 ? "note" : "notes"} on ROADMAP.md
+          </button>
+        ) : null}
+        <BrainstormCommand />
+      </span>
+    </div>
+  );
+
+  if (roadmap && "none" in roadmap)
+    return (
+      <div className="rm-page solo" data-testid="roadmap-page">
+        <h1 className="sr">Roadmap</h1>
+        <p className="rm-solo" data-testid="roadmap-none">
+          {"This project's roadmap lives in "}
+          {roadmap.none}.
+        </p>
+        <BrainstormCommand />
+      </div>
+    );
+
+  return (
+    <div className={`rm-page${ok ? "" : " solo"}`} data-testid="roadmap-page">
+      <h1 className="sr">Roadmap</h1>
+      {names.length > 1 ? (
+        <div className="seg rm-projects" role="group" aria-label="Project">
+          {names.map((name) => (
+            <button
+              key={name}
+              type="button"
+              aria-pressed={name === project}
+              onClick={() => {
+                setChosen(name);
+                setMilestone(null);
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {ok ? (
+        <Rail
+          milestones={ok.milestones}
+          selected={milestone}
+          onSelect={setMilestone}
+          openCount={data.open.length}
+        />
+      ) : null}
+      <div className="rm-main">
+        {ok ? (
+          <p className="rm-vision" data-testid="roadmap-vision">
+            {ok.vision}
+          </p>
+        ) : null}
+        {toolbar}
+        {ok && view === "graph" ? (
+          <>
+            <ReviewPanel items={review} prompt={prompt} bar />
+            <div className="rm-legend">
+              <span>
+                <svg viewBox="0 0 28 8" aria-hidden="true">
+                  <path d="M0 4h28" className="rm-edge finished" />
+                </svg>
+                Dependency finished
+              </span>
+              <span>
+                <svg viewBox="0 0 28 8" aria-hidden="true">
+                  <path d="M0 4h28" className="rm-edge open" />
+                </svg>
+                Dependency still open, blocks the ticket
+              </span>
+              <span>
+                <i className="rm-swatch" />
+                Proposed
+              </span>
+              <span className="rm-legend-end">
+                {graphTickets.length} open tickets · arrows run from a ticket to what it unblocks
+              </span>
+            </div>
+            {graphTickets.length === 0 ? (
+              <p className="rm-empty">No open ticket matches.</p>
+            ) : (
+              <RoadmapGraph
+                tickets={graphTickets}
+                milestones={ok?.milestones ?? []}
+                data={data}
+                cursor={current}
+                onOpen={(id) => onOpen(id)()}
+              />
+            )}
+          </>
+        ) : (
+          <div className="rm-layout">
+            <div className="rm-lists">
+              {ok ? (
+                <>
+                  {sections.map((section) => (
+                    <Section
+                      key={section.name}
+                      name={section.name}
+                      hint={section.hint}
+                      count={section.picks.length}
                     >
-                      {ticket.id}
-                    </a>
-                  </td>
-                  <td className="wrap">{ticket.title}</td>
-                  <td className="nw">
-                    <span className="pill">{ticket.status}</span>
-                  </td>
-                  <td className="nw">{ticket.milestone ?? "—"}</td>
-                  <td className="mono">
-                    {ticket.depends_on.length === 0
-                      ? "—"
-                      : ticket.depends_on.map((id) => (
-                          <span key={id} className="chip nw">
-                            {id}
-                          </span>
-                        ))}
-                  </td>
-                  <td className="num">{unblocks === 0 ? "" : unblocks}</td>
-                  <td className="nw">
-                    {runs.map((entry) => (
-                      <div key={entry.run}>
-                        <a
-                          className="mono"
-                          href={runHref(entry.run)}
-                          data-testid="ticket-run"
-                          data-run={entry.run}
-                        >
-                          {entry.run}
-                        </a>{" "}
-                        <span className="pill">
-                          <Phase phase={entry.phase} />
-                        </span>
-                      </div>
-                    ))}
-                    {runs.length === 0 ? <span className="mut">no runs</span> : null}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        ))}
-      </table>
-      {order.length === 0 ? <p className="mut">No ticket matches.</p> : null}
-      <p className="mut" data-testid="copy-preview">
-        {ids.length === 0 ? "Select tickets to copy a prompt." : `Copies: “${prompt}”`} No button
-        changes a ticket.
-      </p>
-    </>
+                      {section.picks.length === 0 ? (
+                        <p className="rm-empty">Nothing here.</p>
+                      ) : section.name === "Now" ? (
+                        <div className="rm-grid-now">
+                          {section.picks.map((pick) => (
+                            <Card
+                              key={pick.item.id}
+                              pick={pick}
+                              data={data}
+                              current={pick.item.id === current}
+                              onOpen={onOpen(pick.item.id)}
+                              onHover={() => setCursor(pick.item.id)}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <ul className="rm-rows">
+                          {section.picks.map((pick) => (
+                            <Row
+                              key={pick.item.id}
+                              pick={pick}
+                              data={data}
+                              current={pick.item.id === current}
+                              onOpen={onOpen(pick.item.id)}
+                              onHover={() => setCursor(pick.item.id)}
+                            />
+                          ))}
+                        </ul>
+                      )}
+                    </Section>
+                  ))}
+                  {shown === 0 ? <p className="rm-empty">No ticket matches.</p> : null}
+                </>
+              ) : (
+                <p className="rm-error" role="alert" data-testid="roadmap-error">
+                  ROADMAP.md does not read. {(roadmap as { error: string }).error}
+                </p>
+              )}
+            </div>
+            <ReviewPanel items={review} prompt={prompt} bar={false} />
+          </div>
+        )}
+        {ok ? <Notices warnings={ok.warnings} /> : null}
+      </div>
+      {ok ? <ShippedBar shipped={ok.shipped} milestones={ok.milestones} /> : null}
+    </div>
   );
 }
