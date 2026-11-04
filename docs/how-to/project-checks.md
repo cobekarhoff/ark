@@ -130,3 +130,5 @@ The ACs of ARK-302 and ARK-304 name these strings. `ark merge-request open` find
 - `bun test test/chief.test.ts -t ARK-306-AC3`
 - `ARK-306-AC4`
 - `bun test test/playbooks.test.ts -t ARK-306-AC4`
+- ``ARK-306-AC4 ` (line 174) matches the new text, and a test whose title starts with ``
+- ``ARK-306-AC4 ` in the same file checks the page rule. ``
