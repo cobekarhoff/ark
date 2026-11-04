@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { mergeOrder } from "../cli/merge-request";
+import { mergeOrder, requiredLiterals } from "../cli/merge-request";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills";
 import {
   ark,
@@ -811,6 +811,99 @@ test(
   },
   { timeout: 30_000 },
 );
+
+test(
+  "ARK-305-AC1 skips placeholder, glob, dots, file:line, own id and every string of a manual AC, refuses only the real missing string",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
+    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+    setCriterionText(
+      runDirectory,
+      "ARK-900-AC1",
+      "Skips `repos/<repo>/`, `src/**/*.md`, `docs/more/...`, `core.txt:38`, `ARK-900-AC1 works`, `test_ARK_900_AC1_*`",
+    );
+    setCriterionText(runDirectory, "ARK-900-AC2", "A person sees `manual-only-absent`");
+    expect(ark("merge-request", "open", run).code).toBe(0);
+
+    setCriterionText(runDirectory, "ARK-900-AC1", "Skips `repos/<repo>/` and needs `real-missing`");
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain(
+      "AC string in no tracked file at head: ARK-900-AC1 `real-missing`",
+    );
+    expect(refused.err).not.toContain("repos/<repo>/");
+    expect(refused.err).not.toContain("manual-only-absent");
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-305-AC2 refuses a not: string that a tracked file still holds, passes an absent one, and counts not: alone as no literal",
+  () => {
+    const { runDirectory } = scenario({ core: "github", app: "github" });
+    // `core` is tracked at head (core.txt), `gone-everywhere` is in no file.
+    setCriterionText(runDirectory, "ARK-900-AC1", "Removes `not:core`");
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("AC string still in a tracked file at head: ARK-900-AC1 `core`");
+    expect(refused.err).not.toContain("not:");
+    expect(calls()).toHaveLength(0);
+    expect(openedEvents(runDirectory)).toHaveLength(0);
+
+    setCriterionText(
+      runDirectory,
+      "ARK-900-AC1",
+      "Removes `not:gone-everywhere` and writes `not:`",
+    );
+    expect(ark("merge-request", "open", run).code).toBe(0);
+
+    // The same text without the prefix is a required string again.
+    setCriterionText(runDirectory, "ARK-900-AC1", "Writes `gone-everywhere`");
+    const required = ark("merge-request", "open", run);
+    expect(required.code).toBe(1);
+    expect(required.err).toContain(
+      "AC string in no tracked file at head: ARK-900-AC1 `gone-everywhere`",
+    );
+  },
+  { timeout: 30_000 },
+);
+
+// Fixture: test/fixtures/merge-request/sqc-1-criteria.md
+test("ARK-305-AC3 the SQC-1 fixture lists only real strings as required and the six stale docs/ paths as removed", () => {
+  const text = readFileSync(join(fixtures, "sqc-1-criteria.md"), "utf8");
+  const frontmatter = Bun.YAML.parse(text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "") as {
+    acceptance_criteria: { id: string; text: string; manual?: boolean }[];
+  };
+  const literals = new Map(
+    frontmatter.acceptance_criteria.map(({ id, text, manual }) => [
+      id,
+      requiredLiterals({ id, text, manual: manual === true }),
+    ]),
+  );
+  const required = [...literals.values()].flatMap((entry) => entry.required);
+  expect(literals.get("SQC-1-AC7")).toEqual({ required: [], removed: [] });
+  for (const literal of [
+    "## Finding the knowledge base",
+    "uv run check-knowledge-docs",
+    "Paths are relative to the workspace root",
+  ])
+    expect(required).toContain(literal);
+  for (const literal of required) {
+    expect(literal).not.toMatch(/[<*]|\.\.\.|:\d+$|^not:/);
+    expect(literal).not.toMatch(/SQC[-_]1[-_]AC/);
+  }
+  expect(literals.get("SQC-1-AC6")?.removed).toEqual([
+    "docs/00-master-reference.md",
+    "docs/architecture/",
+    "docs/references/",
+    "docs/workflows/",
+    "docs/operations/",
+    "docs/templates/",
+  ]);
+  expect(frontmatter.acceptance_criteria.find(({ id }) => id === "SQC-1-AC6")?.text).toContain(
+    "(N docs)",
+  );
+});
 
 test(
   "ARK-302-AC6 a perf run refuses a missing baseline.md and an empty compare.md, names each, and opens once both have content",

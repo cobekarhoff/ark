@@ -1565,7 +1565,7 @@ test("ARK-304-AC4 a perf run with no results/compare.md is refused by close hand
   expect(closedEvents(directory)).toEqual([]);
 });
 
-test("ARK-304-AC4 each of the five shared refusal messages is in exactly one file of cli/", () => {
+test("ARK-304-AC4 ARK-305-AC4 each of the six shared refusal messages is in exactly one file of cli/", () => {
   const directory = join(import.meta.dir, "../cli");
   const sources = readdirSync(directory)
     .filter((name) => name.endsWith(".ts"))
@@ -1575,6 +1575,7 @@ test("ARK-304-AC4 each of the five shared refusal messages is in exactly one fil
     "manual criterion without ok:",
     "manual criteria without ok:",
     "AC string in no tracked file at head:",
+    "AC string still in a tracked file at head:",
     "changed since the last test run",
   ])
     expect(
