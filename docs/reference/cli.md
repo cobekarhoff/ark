@@ -193,7 +193,7 @@ Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 p
 ```text
 ark ui install [--port <number>]
 
-Writes the LaunchAgent dev.ark.hub in ~/Library/LaunchAgents and loads it, so the hub starts at login and restarts after a crash (port 4317 unless --port says otherwise). A second run with the same settings changes nothing; with a new port it rewrites the plist and reloads. If loading an update fails, install restores and reloads the previous plist, reports any reload failure, and exits 1. If loading a new install fails, it removes the new plist and exits 1.
+Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents and loads them (proxy first), so the name proxy (portless proxy start --unprivileged) starts at login and the hub starts at login and restarts after a crash (port 4317 unless --port says otherwise). When portless is found (ARK_PORTLESS, else PATH; it needs Node 24+ on the PATH of the shell that runs install), the hub runs through it as http://ark.localhost and install prints the line '  name:   http://ark.localhost'. When it is not found, install writes no proxy agent, keeps the plain hub, prints 'portless not found: the hub stays at http://127.0.0.1:<port>' and exits 0. A second run with the same settings changes nothing; with a new port or a switch between the two forms it rewrites the plist and reloads. If loading an agent fails, install restores and reloads the previous plist of that agent only (or removes a new plist), reports any reload failure, and exits 1. See docs/how-to/local-names.md.
 ```
 
 ### ui uninstall
@@ -201,7 +201,7 @@ Writes the LaunchAgent dev.ark.hub in ~/Library/LaunchAgents and loads it, so th
 ```text
 ark ui uninstall
 
-Unloads and deletes the LaunchAgent dev.ark.hub. It does nothing, and exits 0, when the agent is not installed.
+Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy. It does nothing, and exits 0, when neither agent is installed.
 ```
 
 <!-- generated:commands:end -->

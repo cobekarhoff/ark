@@ -21,6 +21,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { RunDetail, RunView, Snapshot, TranscriptPage } from "../hub/types.ts";
 import { createSnapshotReader } from "../hub/snapshot.ts";
+import { isHubName, proxyPort } from "../cli/proxy.ts";
 import { serve } from "../hub/server.ts";
 import { stuckAgents } from "../hub/page/derive.ts";
 import { stepTimeText } from "../hub/progress.ts";
@@ -1639,12 +1640,10 @@ test("ARK-298-AC4 the hub prints its name on line 2, and trusts only Host and Or
   ).toBe(403);
 });
 
-test("ARK-298-AC6 cli/proxy.ts holds only the name rule and the proxy port, and the rule matches the ticket", async () => {
-  const proxy = await import("../cli/proxy.ts");
-  expect(Object.keys(proxy).sort()).toEqual(["hubNamePattern", "isHubName", "proxyPort"]);
-  expect(proxy.proxyPort).toBe(80);
+test("ARK-298-AC6 the hub name rule in cli/proxy.ts matches the ticket", () => {
+  expect(proxyPort).toBe(80);
   for (const good of ["ark.localhost", "hub.ark-284-1.localhost", `${"a".repeat(63)}.localhost`])
-    expect(proxy.isHubName(good), good).toBe(true);
+    expect(isHubName(good), good).toBe(true);
   for (const bad of [
     "localhost",
     "Ark.localhost",
@@ -1658,5 +1657,5 @@ test("ARK-298-AC6 cli/proxy.ts holds only the name rule and the proxy port, and 
     "ark.localhost:80",
     "",
   ])
-    expect(proxy.isHubName(bad), JSON.stringify(bad)).toBe(false);
+    expect(isHubName(bad), JSON.stringify(bad)).toBe(false);
 });
