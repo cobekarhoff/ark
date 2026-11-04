@@ -691,6 +691,15 @@ test("ARK-287-AC5 run-lead.md tells the lead to re-test a stale head before aski
   );
 });
 
+test("ARK-298-AC5 ADR 0009 names --name and *.localhost", () => {
+  const adr = readFileSync(
+    join(import.meta.dir, "../docs/adr/0009-hub-is-a-read-only-live-view.md"),
+    "utf8",
+  );
+  expect(adr).toContain("--name");
+  expect(adr).toContain("*.localhost");
+});
+
 test("ARK-283-AC5 cli.md and run-lead.md name the manual gate, cli.md equals the generator output, and the ticket playbooks keep manual: true", () => {
   const root = join(import.meta.dir, "..");
   const path = join(root, "docs/reference/cli.md");
