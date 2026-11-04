@@ -60,7 +60,11 @@ export async function execResult(
 ): Promise<ExecResult> {
   try {
     const child = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-    const killer = setTimeout(() => child.kill(), timeoutMilliseconds);
+    let deadlineFired = false;
+    const killer = setTimeout(() => {
+      deadlineFired = true;
+      child.kill();
+    }, timeoutMilliseconds);
     // The backstop also covers a killed shell whose grandchild still holds a pipe open.
     let backstop: ReturnType<typeof setTimeout> | undefined;
     const result = await Promise.race([
@@ -76,8 +80,8 @@ export async function execResult(
     ]);
     clearTimeout(backstop);
     clearTimeout(killer);
-    // A killed child exits by signal; the killer fired when the exit came after the deadline.
-    return { ...result, timedOut: result.timedOut || child.signalCode !== null };
+    // Only this call's own deadline counts: a child killed by another signal keeps its stderr.
+    return { ...result, timedOut: result.timedOut || deadlineFired };
   } catch (err) {
     return { stdout: "", stderr: String(err), code: null, timedOut: false };
   }

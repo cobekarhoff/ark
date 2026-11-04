@@ -26,8 +26,9 @@ const closedRun = "2026-11-01-ARK-899-1";
 // absent, at most 100 with it, and a `nextCursor` (`c<offset>`) that --cursor continues.
 // A shell script: a bun script starts too slowly.
 const fakeOrca = `#!/bin/sh
-printf '%s\\037' "$@" >> "$FAKE_ORCA_LOG"
-printf '\\036' >> "$FAKE_ORCA_LOG"
+# One append per call, so concurrent calls cannot interleave their records.
+record=$(printf '%s\\037' "$@"; printf '\\036')
+printf '%s' "$record" >> "$FAKE_ORCA_LOG"
 d=$FAKE_ORCA_DIR
 if [ -f "$d/fail" ]; then
   read -r only code < "$d/fail"
