@@ -102,13 +102,26 @@ function resolveBase(config: ProjectConfig, repo: string): string {
   }
 }
 
-/** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. */
+const SKILL_DIRECTORIES = [".claude/skills", ".agents/skills", ".omp/skills"];
+
+/** The `--allow-dirty` warning text: one header and up to 10 changed paths. */
+function dirtyWarning(repo: string, source: string, lines: string[]): string {
+  const shown = 10;
+  return [
+    `warning  ${repo.padEnd(8)} ${source} has ${lines.length} uncommitted ${lines.length === 1 ? "change" : "changes"}, not in the worktree`,
+    ...lines.slice(0, shown).map((line) => `             ${line}`),
+    ...(lines.length > shown ? [`             ... and ${lines.length - shown} more`] : []),
+  ].join("\n");
+}
+
+/** Makes the worktree of one repo in the run's mirror: branch, `git worktree add`, `setup`, then the worktree.created event. Does nothing when the repo already has a recorded worktree. A new root worktree warns on stderr about root changes the mirror lacks, when `warnDirtyRoot` is set (`create` leaves it off: `checkClean` already covers a root it names). */
 function addRepoWorktree(
   directory: string,
   config: ProjectConfig,
   state: RunState,
   repo: string,
   log: (line: string) => void,
+  warnDirtyRoot: boolean,
   resolvedBase?: string,
 ): void {
   const { workspace, setup } = config;
@@ -143,7 +156,16 @@ function addRepoWorktree(
   // yolo: lower tools.approvalMode values stopped a worker at its first shell call (findings/permission-modes.md).
   // `.omp/.gitignore` ("*") hides the folder, itself included, from status and `git add`; it touches no shared git file.
   mkdirSync(join(path, ".omp"), { recursive: true });
-  writeFileSync(join(path, ".omp", "config.yml"), "tools:\n  approvalMode: yolo\n");
+  const skillDirectories =
+    repo === "." ? [] : SKILL_DIRECTORIES.filter((name) => existsSync(join(workspace, name)));
+  const settings = {
+    tools: { approvalMode: "yolo" },
+    // omp reads <cwd>/.claude/skills natively, so only a nested worktree needs the root's folders.
+    ...(skillDirectories.length > 0 && {
+      skills: { customDirectories: skillDirectories.map((name) => join(mirror, name)) },
+    }),
+  };
+  writeFileSync(join(path, ".omp", "config.yml"), `${Bun.YAML.stringify(settings, null, 2)}\n`);
   writeFileSync(join(path, ".omp", ".gitignore"), "*\n");
   log(`setting  ${repo}: .omp/config.yml`);
   if (taken) log(`branch   ${repo}  ${branch} (${taken})`);
@@ -166,6 +188,11 @@ function addRepoWorktree(
     log(`setup    ${repo}: ${setup}`);
   }
   appendEvent(directory, "worktree.created", { repo, path, branch, base });
+  if (warnDirtyRoot && repo === ".") {
+    const nested = discoverRepos(workspace).map((name) => join(workspace, name));
+    const lines = dirtyLines(workspace, nested);
+    if (lines.length > 0) console.error(dirtyWarning(repo, workspace, lines));
+  }
 }
 
 /** Early worktree of the first repo of the workspace, so the run lead and its first workers have their own folder. Prints `path:<absolute path>`; a second call prints the same line and records nothing. */
@@ -176,7 +203,7 @@ export function worktreeAnchor(runId: string, inProject?: string): void {
   if (repo === undefined) throw new ArkError(`workspace ${config.workspace} has no git repo`);
   const state = deriveState(readEvents(directory));
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
-  addRepoWorktree(directory, config, state, repo, () => {});
+  addRepoWorktree(directory, config, state, repo, () => {}, true);
   const mirror = mirrorRoot(directory);
   console.log(`path:${repo === "." ? mirror : join(mirror, repo)}`);
 }
@@ -198,14 +225,7 @@ function checkClean(
   if (dirty.length === 0) return;
   const shown = 10;
   if (allowDirty) {
-    for (const { repo, source, lines } of dirty)
-      console.log(
-        [
-          `warning  ${repo.padEnd(8)} ${source} has ${lines.length} uncommitted ${lines.length === 1 ? "change" : "changes"}, not in the worktree`,
-          ...lines.slice(0, shown).map((line) => `             ${line}`),
-          ...(lines.length > shown ? [`             ... and ${lines.length - shown} more`] : []),
-        ].join("\n"),
-      );
+    for (const { repo, source, lines } of dirty) console.log(dirtyWarning(repo, source, lines));
     return;
   }
   const report = dirty.flatMap(({ repo, source, lines }) => [
@@ -256,7 +276,7 @@ export function worktreeCreate(
       .map((repo) => [repo, resolveBase(config, repo)]),
   );
   for (const repo of touched)
-    addRepoWorktree(directory, config, state, repo, console.log, bases.get(repo));
+    addRepoWorktree(directory, config, state, repo, console.log, false, bases.get(repo));
 
   const mirror = mirrorRoot(directory);
   if (knownRepos.length === 1 && knownRepos[0] === ".") return; // single-repo workspace: the worktree is the mirror

@@ -632,7 +632,7 @@ describe("ARK-278 close removes workspace/", () => {
 });
 
 describe("ARK-280 worker permission setting", () => {
-  const settingFile = "tools:\n  approvalMode: yolo\n";
+  const expectedSettings = { tools: { approvalMode: "yolo" } };
 
   /** Every file under `directory` as `relative path -> content or link target`, skipping `skip` prefixes. */
   function snapshot(directory: string, skip: string[] = []): Record<string, string> {
@@ -678,12 +678,16 @@ describe("ARK-280 worker permission setting", () => {
     const anchor = ark("worktree", "anchor", runId);
     expect(anchor.code).toBe(0);
     expect(anchor.out).toContain(`path:${mirror}`);
-    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     assertHiddenFromGit(mirror);
 
     // create after anchor keeps the file and the clean status
     expect(ark("worktree", "create", runId, ".").code).toBe(0);
-    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     assertHiddenFromGit(mirror);
   });
 
@@ -692,7 +696,9 @@ describe("ARK-280 worker permission setting", () => {
     const { runId, runDirectory } = startRun(workspace);
     expect(ark("worktree", "create", runId, ".").code).toBe(0);
     const mirror = join(runDirectory, "workspace");
-    expect(readFileSync(join(mirror, ".omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     assertHiddenFromGit(mirror);
   });
 
@@ -707,7 +713,9 @@ describe("ARK-280 worker permission setting", () => {
     expect(result.code).toBe(0);
 
     const mirror = join(runDirectory, "workspace");
-    expect(readFileSync(join(mirror, "repos/a/.omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, "repos/a/.omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     assertHiddenFromGit(join(mirror, "repos/a"));
 
     // repos/b/c is a link to the workspace: a write through it would land in the main workspace
@@ -722,7 +730,9 @@ describe("ARK-280 worker permission setting", () => {
 
     // a second repo gets its own file
     expect(ark("worktree", "create", runId, "repos/b/c").code).toBe(0);
-    expect(readFileSync(join(mirror, "repos/b/c/.omp/config.yml"), "utf8")).toBe(settingFile);
+    expect(Bun.YAML.parse(readFileSync(join(mirror, "repos/b/c/.omp/config.yml"), "utf8"))).toEqual(
+      expectedSettings,
+    );
     expect(existsSync(join(workspace, "repos/b/c/.omp"))).toBe(false);
   });
 
