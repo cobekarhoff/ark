@@ -859,3 +859,33 @@ test("ARK-299-AC4 the evidence file holds curl -sf, orca tab create and portless
   expect(lists[1]).toContain("http://hub.ark-299-check.localhost  ->");
   expect(lists[2]).toMatch(/^No active routes\./);
 });
+
+const root300 = join(import.meta.dir, "..");
+const read300 = (file: string) => readFileSync(join(root300, file), "utf8");
+
+test("ARK-300-AC3 local-names.md has the install, check, remove steps and the smoke test evidence", () => {
+  const page = read300("docs/how-to/local-names.md");
+  for (const text of [
+    "npm i -g portless",
+    "ark ui install",
+    "portless doctor",
+    "portless list",
+    "curl -sf http://ark.localhost/api/snapshot",
+    "ark ui uninstall",
+    "192.168.0.174",
+    "exit 56",
+    "404",
+  ])
+    expect(page).toContain(text);
+});
+
+test("ARK-300-AC4 run-a-ticket.md links local-names.md and cli.md mentions dev.ark.proxy", () => {
+  expect(read300("docs/how-to/run-a-ticket.md")).toContain("(local-names.md)");
+  expect(read300("docs/reference/cli.md")).toContain("dev.ark.proxy");
+});
+
+test("ARK-300-AC5 the live check evidence records a proof line", () => {
+  expect(read300("docs/evidence/ARK-300-ac5.md").split("\n")).toContainEqual(
+    expect.stringMatching(/^proof: (passed|partial)$/),
+  );
+});
