@@ -37,6 +37,7 @@ import type {
   TicketRunView,
   TranscriptPage,
 } from "./types.ts";
+import { stageTimes } from "../cli/retro.ts";
 import { roleTimesOf } from "./progress.ts";
 import { listRunFiles, timelineOf } from "./run-detail.ts";
 import { UsageIndex, type RunCost } from "./usage.ts";
@@ -161,9 +162,16 @@ export function createSnapshotReader() {
       run.directory,
       run.windows,
       Date.parse(run.events[0].time),
+      stageTimes(run.events),
     );
     return agents.map((agent) => {
-      const owner = agent.step ?? (agent.role === "run lead" ? "lead" : null);
+      const owner =
+        agent.step ??
+        (agent.role === "run lead"
+          ? "lead"
+          : agent.role === "evaluator" || agent.role === "designer"
+            ? agent.role
+            : null);
       const model = agent.model ?? (owner === null ? null : (sessionModels.get(owner) ?? null));
       const step = run.plan?.find((candidate) => candidate.id === agent.step);
       if (model !== null) {
@@ -559,7 +567,12 @@ export function createSnapshotReader() {
           : null,
         timeline: timelineOf(events),
         files: listRunFiles(found.directory),
-        sessions: usage.sessionsOf(found.directory, found.windows, Date.parse(events[0].time)),
+        sessions: usage.sessionsOf(
+          found.directory,
+          found.windows,
+          Date.parse(events[0].time),
+          stageTimes(events),
+        ),
         sessions_ready: slots.usage.readAt !== null,
       };
     },
