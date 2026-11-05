@@ -3752,3 +3752,166 @@ test("ARK-309-AC8 a filter change on Home, Runs and Roadmap sends no request, an
     expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
   }
 });
+
+// ---------------------------------------------------------------- ARK-293
+
+/**
+ * One open run of 4 step agents (a model from Orca, a model from a session, no model and no
+ * session, and state `done`) and Master Chief, who Orca lists twice: as a terminal and in `ps`.
+ */
+function agentStateWorld() {
+  const { sessions } = isolate();
+  const started = ago(3600);
+  const run = runId("ARK-293");
+  const names = ["from-orca", "from-session", "no-model", "finished"];
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-293", title: "True agent state" },
+    phase: "building",
+    startedAt: started,
+    steps: names.map((id, number) => ({
+      id,
+      role: "implementer",
+      harness: "omp",
+      model: `plan/${id}`,
+      needs: [],
+      startedAfter: 100 + number * 600,
+      finishedAfter: 600 + number * 600,
+    })),
+  });
+  writeOmpSession(
+    sessions,
+    "from-session",
+    join(directory, "workspace"),
+    [
+      { time: ago(500), costUsd: 0.01, model: "session/model-first" },
+      { time: ago(400), costUsd: 0.01, model: "session/model-last" },
+    ],
+    new Date(started.getTime() + (100 + 600 + 10) * 1000),
+  );
+  const answers = orcaAnswersFor(run);
+  const worker = (name: string, model?: string) => ({
+    taskId: `task-${name}`,
+    state: "running",
+    agentTerminalHandle: `term-${name}`,
+    ...(model ? { projection: { provider: { model } } } : {}),
+  });
+  installFakeTools({
+    orca: {
+      terminals: [
+        { handle: "term-lead", connected: true, agentIdentity: "omp", model: "lead/model" },
+        { handle: "term-chief", connected: true, agentIdentity: "omp", model: "chief/model" },
+        ...names
+          .filter((name) => name !== "no-model")
+          .map((name) => ({ handle: `term-${name}`, connected: true, agentIdentity: "omp" })),
+        { handle: "term-no-model", connected: true },
+      ],
+      runs: [
+        ...answers.runs!,
+        {
+          id: "orca-chief",
+          objective: "Master Chief: p tickets",
+          coordinator_handle: "term-chief",
+        },
+      ],
+      workers: [
+        worker("from-orca", "orca/model-reported"),
+        worker("from-session"),
+        worker("no-model"),
+        worker("finished", "orca/model-finished"),
+      ],
+      tasks: names.map((name) => ({ id: `task-${name}`, title: `${name} (implementer, .)` })),
+      worktrees: [
+        {
+          path: join(directory, "workspace"),
+          agents: [
+            ...names.map((name) => ({
+              taskTitle: `${name} (implementer, .)`,
+              state: name === "finished" ? "done" : "working",
+              toolName: "bash",
+              updatedAt: name === "finished" ? Date.now() - 3_600_000 : Date.now(),
+            })),
+            { taskTitle: "Master Chief: p tickets", state: "working", updatedAt: Date.now() },
+          ],
+        },
+      ],
+    },
+  });
+  return { run };
+}
+
+const agentRow = (page: Page, step: string) =>
+  page.locator('[data-testid="agent"]', { has: page.locator(`.mono >> text="${step}"`) });
+
+test("ARK-293-AC3 a run page row shows the model of Orca or of the session without a label, done for a done agent, the plan model (planned) for the rest, and Master Chief once", async ({
+  page,
+}) => {
+  const { run } = agentStateWorld();
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("run")).toHaveCount(1);
+  await expect(page.getByText("Master Chief")).toHaveCount(1);
+
+  await open(page, baseUrl, `run/${run}`);
+  const activity = (step: string) => agentRow(page, step).getByTestId("agent-activity");
+  const unlabelled = async (step: string, model: string, kind: string, text: string) => {
+    const row = agentRow(page, step);
+    await expect(row).toContainText(model);
+    await expect(row).not.toContainText("(planned)");
+    await expect(row).not.toContainText("(configured)");
+    await expect(activity(step)).toHaveAttribute("data-kind", kind);
+    await expect(activity(step)).toHaveText(`· ${text}`);
+  };
+  // The session model reads from the file the cost holds: it appears with the first parse.
+  await unlabelled("from-session", "session/model-last", "working", "working");
+  await unlabelled("from-orca", "orca/model-reported", "working", "working");
+  await unlabelled("finished", "orca/model-finished", "done", "done");
+  await expect(agentRow(page, "from-session")).not.toContainText("session/model-first");
+
+  const bare = agentRow(page, "no-model");
+  await expect(bare).toContainText("omp (planned)");
+  await expect(bare).toContainText("plan/no-model (planned)");
+
+  // The run lead and Master Chief have Orca models: no label anywhere but the one planned row.
+  await expect(page.getByText("(configured)")).toHaveCount(0);
+  await expect(page.getByText("(planned)")).toHaveCount(2);
+  await expect(page.locator('[data-testid="agent"][data-role="Master Chief"]')).toHaveCount(1);
+  await expect(page.getByTestId("agent")).toHaveCount(6);
+});
+
+test("ARK-293-AC5 with session models on the run page, / and /nope answer with a p95 under 200 ms and the page sends no request but the ones ARK-285 allows", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const { run } = agentStateWorld();
+  const baseUrl = await launch();
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("run")).toHaveCount(1);
+  await expect(page.getByTestId("stale-label")).toHaveCount(0);
+  for (const path of requests.splice(0))
+    expect(path === "/" || path === "/events" || path.startsWith("/assets/"), path).toBe(true);
+
+  // The run page reads its own run (`/api/run`, ARK-284) and nothing for the session models.
+  await open(page, baseUrl, `run/${run}`);
+  await expect(agentRow(page, "from-session")).toContainText("session/model-last");
+  await page.waitForTimeout(2000);
+  const extra = requests.filter(
+    (path) => path !== "/" && path !== "/events" && !path.startsWith("/assets/"),
+  );
+  for (const path of extra) expect(path.startsWith("/api/run/"), path).toBe(true);
+
+  for (const route of ["/", "/nope"]) {
+    const durations: number[] = [];
+    for (let request = 0; request < 50; request++) {
+      const startedAt = performance.now();
+      await (await fetch(`${baseUrl}${route}`)).arrayBuffer();
+      durations.push(performance.now() - startedAt);
+    }
+    expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
+  }
+});

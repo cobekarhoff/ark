@@ -1,0 +1,27 @@
+{
+  "paneKey": "c6e5df18-78a6-48a8-8d00-af2f0b5e87d0:8bb78def-a219-4f62-9994-79b0523a21c1",
+  "parentPaneKey": null,
+  "state": "blocked",
+  "agentType": "omp",
+  "prompt": "Run exactly one shell command: echo hi. Nothing else.",
+  "taskTitle": null,
+  "displayName": null,
+  "conversationName": "ark293-probe",
+  "lastAssistantMessage": null,
+  "toolName": "bash",
+  "toolInput": null,
+  "interrupted": false,
+  "stateStartedAt": 1793854050861,
+  "updatedAt": 1793854050861,
+  "hasLivePty": true,
+  "programStatus": {
+    "state": "blocked",
+    "kind": "permission",
+    "message": "Allow tool: bash Command: echo hi",
+    "observedAt": 1793854050867
+  },
+  "agentWait": {
+    "source": "hook",
+    "since": 1793854050861
+  }
+}
