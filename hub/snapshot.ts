@@ -165,8 +165,15 @@ export function createSnapshotReader() {
     return agents.map((agent) => {
       const owner = agent.step ?? (agent.role === "run lead" ? "lead" : null);
       const model = agent.model ?? (owner === null ? null : (sessionModels.get(owner) ?? null));
-      if (model !== null) return { ...agent, model, planned: null };
       const step = run.plan?.find((candidate) => candidate.id === agent.step);
+      if (model !== null) {
+        const harness =
+          agent.harness ??
+          step?.harness ??
+          (agent.step === null ? chiefRole(run.state.project)?.harness : null) ??
+          null;
+        return { ...agent, harness, model, planned: null };
+      }
       if (step)
         return {
           ...agent,

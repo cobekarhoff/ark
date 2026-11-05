@@ -292,7 +292,7 @@ export class UsageIndex {
   /**
    * The model of the last message of the newest (last written) parsed session file of each owner:
    * a step id, or `lead` for the run lead. Reads the parse that the cost already holds, so it costs
-   * no request. An owner whose files are unparsed or hold no named model is absent.
+   * no request. An owner whose files are unparsed or hold no named model in their last message is absent.
    */
   modelsOf(directory: string, windows: StepWindow[], runStarted: number): Map<string, string> {
     const models = new Map<string, string>();
@@ -300,12 +300,11 @@ export class UsageIndex {
     for (const session of this.sessionsOf(directory, windows, runStarted)) {
       if (session.owner.kind === "unassigned") continue;
       const owner = session.owner.kind === "lead" ? "lead" : session.owner.step;
-      const model = this.#entries
-        .get(session.file)
-        ?.messages?.findLast((message) => message.model !== null)?.model;
-      if (!model || session.end < (newest.get(owner) ?? "")) continue;
+      if (session.end < (newest.get(owner) ?? "")) continue;
       newest.set(owner, session.end);
-      models.set(owner, model);
+      const model = this.#entries.get(session.file)?.messages?.at(-1)?.model;
+      if (model) models.set(owner, model);
+      else models.delete(owner);
     }
     return models;
   }

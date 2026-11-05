@@ -1888,7 +1888,16 @@ test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of
   });
   const started = new Date(Date.now() - 3_600_000);
   const at = (seconds: number) => new Date(started.getTime() + seconds * 1000);
-  const ids = ["orca", "single", "newest", "changes", "bare"];
+  const ids = [
+    "orca",
+    "single",
+    "newest",
+    "changes",
+    "bare",
+    "emptynew",
+    "lastunknown",
+    "noharness",
+  ];
   const step = (id: string, number: number) => ({
     id,
     role: "implementer",
@@ -1921,6 +1930,13 @@ test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of
   utimesSync(older, past, past);
   // A model change in the last message: the last one is the model.
   put("changes-file", windowOf("changes"), "first-model", "second-model", "last-model");
+  // The newest file holds no message, or its last message names no model: the older model is not shown.
+  const olderEmpty = put("emptynew-old", windowOf("emptynew"), "obsolete-model");
+  put("emptynew-new", windowOf("emptynew") + 5);
+  utimesSync(olderEmpty, past, past);
+  put("lastunknown-file", windowOf("lastunknown"), "known-model", "unknown");
+  // Orca names no harness for this agent: the plan's stays beside the session model.
+  put("noharness-file", windowOf("noharness"), "session-model");
   // A run with no session file: a lead with no model gets roles.chief.
   const bareRun = `${today()}-ARK-294-1`;
   writeRun({
@@ -1940,7 +1956,7 @@ test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of
         ...workerNames.map((name) => ({
           handle: `term-${name}`,
           connected: true,
-          agentIdentity: "omp",
+          ...(name === "noharness" ? {} : { agentIdentity: "omp" }),
         })),
       ],
       runs: [
@@ -1981,7 +1997,21 @@ test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of
   expect(shown("newest")).toEqual(["new-session", null]);
   expect(shown("changes")).toEqual(["last-model", null]);
   expect(shown("run lead")).toEqual(["lead-session", null]);
+  expect(shown("emptynew")).toEqual([
+    null,
+    { harness: "omp", model: "plan/emptynew", source: "plan" },
+  ]);
+  expect(shown("lastunknown")).toEqual([
+    null,
+    { harness: "omp", model: "plan/lastunknown", source: "plan" },
+  ]);
+  expect([agents.noharness.harness, agents.noharness.model, agents.noharness.planned]).toEqual([
+    "omp",
+    "session-model",
+    null,
+  ]);
   expect(shown("bare")).toEqual([null, { harness: "omp", model: "plan/bare", source: "plan" }]);
+  expect(agents["run lead"].harness).toBe("omp");
   expect(modelsOf(bareRun)["run lead"]).toMatchObject({
     model: null,
     planned: { harness: "claude", model: "claude-opus", source: "configured" },
