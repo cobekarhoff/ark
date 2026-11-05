@@ -185,12 +185,16 @@ export function writeBacklogTicket(ticket: FixtureTicket): void {
   writeFileSync(file, lines.join("\n"));
 }
 
-export type FixtureMessage = { time: Date; costUsd: number };
+export type FixtureMessage = { time: Date; costUsd: number; model?: string };
 
 /** One OMP session file: a `session` record with the cwd, then one assistant message per entry. */
-export function ompSessionText(cwd: string, messages: FixtureMessage[]): string {
+export function ompSessionText(
+  cwd: string,
+  messages: FixtureMessage[],
+  start: Date = new Date(),
+): string {
   const lines = [
-    JSON.stringify({ type: "session", version: 3, id: "fixture", timestamp: new Date(), cwd }),
+    JSON.stringify({ type: "session", version: 3, id: "fixture", timestamp: start, cwd }),
   ];
   for (const message of messages)
     lines.push(
@@ -201,7 +205,7 @@ export function ompSessionText(cwd: string, messages: FixtureMessage[]): string 
         message: {
           role: "assistant",
           provider: "anthropic",
-          model: "claude-fixture",
+          model: message.model ?? "claude-fixture",
           content: [],
           usage: {
             input: 1,
@@ -223,10 +227,11 @@ export function writeOmpSession(
   name: string,
   cwd: string,
   messages: FixtureMessage[],
+  start?: Date,
 ): string {
   const file = join(sessionsRoot, `${name}.jsonl`);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, ompSessionText(cwd, messages));
+  writeFileSync(file, ompSessionText(cwd, messages, start));
   return file;
 }
 

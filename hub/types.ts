@@ -40,11 +40,11 @@ export type ProviderWindow = {
 
 /**
  * What an agent does now, from `orca worktree ps --agent-wait --json`:
- * `waiting on a prompt`, `idle N min`, `working`, or `unknown` when Orca did not list the agent
- * or the field it needs is missing.
+ * `waiting on a prompt`, `idle N min`, `working`, `done` (Orca state `done`: never stuck), or
+ * `unknown` when Orca did not list the agent or the field it needs is missing.
  */
 export type AgentActivity = {
-  kind: "waiting" | "idle" | "working" | "unknown";
+  kind: "waiting" | "idle" | "working" | "done" | "unknown";
   text: string;
   /** Last non-empty line of the agent's last message, for the Stuck agents list. */
   last_line: string | null;
@@ -139,11 +139,12 @@ export type Agent = {
   role: string;
   /** `omp`, `claude`, `codex`, ...: null when Orca did not name it. */
   harness: string | null;
+  /** What Orca reports, else the model of the agent's last session message (ARK-293). */
   model: string | null;
   title: string;
   /** The plan step this agent works on, from its Orca task title; null for a lead or Chief. */
   step: string | null;
-  /** Harness and model from the plan step or, for a run lead and Master Chief, `roles.chief` of `ark.yml`: shown when Orca reports none, labelled when they differ. */
+  /** Harness and model from the plan step or, for a run lead, `roles.chief` of `ark.yml`: set only while `model` is unknown, so the row labels it. */
   planned: { harness: string; model: string; source: "plan" | "configured" } | null;
   /** The Orca terminal handle, or null when Orca named none. */
   terminal: string | null;

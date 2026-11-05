@@ -3,7 +3,7 @@ import { Unknown, known } from "./format.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import type { Agent } from "../types.ts";
 
-/** What Orca reports wins; the plan or `ark.yml` fills a gap and says so, and a difference shows both. */
+/** What Orca or a session reports wins; the plan or `ark.yml` fills a gap and says so. */
 function Field({
   reported,
   planned,
@@ -13,26 +13,16 @@ function Field({
   planned: string | undefined;
   source: "plan" | "configured";
 }) {
-  const label = source === "plan" ? "planned" : "configured";
-  if (reported === null && planned === undefined)
+  if (reported !== null) return <>{reported}</>;
+  if (planned === undefined)
     return (
       <span className="mut" title="Orca did not report it and no plan step names it">
         unknown
       </span>
     );
-  if (reported === null)
-    return (
-      <>
-        {planned} <span className="mut">({label})</span>
-      </>
-    );
-  if (planned === undefined || planned === reported) return <>{reported}</>;
   return (
     <>
-      {reported}{" "}
-      <span className="mut">
-        ({label} {planned})
-      </span>
+      {planned} <span className="mut">({source === "plan" ? "planned" : "configured"})</span>
     </>
   );
 }

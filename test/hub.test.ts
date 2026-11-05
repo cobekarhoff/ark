@@ -23,6 +23,7 @@ import type { RunDetail, RunView, Snapshot, TranscriptPage } from "../hub/types.
 import { createSnapshotReader } from "../hub/snapshot.ts";
 import { isHubName, proxyPort } from "../cli/proxy.ts";
 import { serve } from "../hub/server.ts";
+import { activityOf } from "../hub/sources.ts";
 import { stuckAgents } from "../hub/page/derive.ts";
 import { stepTimeText } from "../hub/progress.ts";
 import { readTranscriptPage } from "../hub/transcript.ts";
@@ -40,7 +41,14 @@ import {
   writeRun,
   writeSessionFile,
 } from "./hub-fixtures.ts";
-import { installFakeTools, startHub, stopHub, tempArkHome, type StartedHub } from "./helpers.ts";
+import {
+  installFakeTools,
+  startHub,
+  stopHub,
+  tempArkHome,
+  writeProject,
+  type StartedHub,
+} from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -1798,3 +1806,302 @@ test("ARK-291-AC10 with a ROADMAP.md present, / and /nope answer with a p95 belo
     expect(p95, route).toBeLessThan(200);
   }
 });
+
+// ---------------------------------------------------------------- ARK-293
+
+test("ARK-293-AC1 an agent in Orca state done shows done, also 60 min old, with agentWait null or set, and is never stuck; the other kinds keep their ARK-285-AC3 result", () => {
+  const now = Date.now();
+  const minutesAgo = (minutes: number) => now - minutes * 60_000;
+  const agents = {
+    doneOld: { state: "done", updatedAt: minutesAgo(60), lastOutputAt: minutesAgo(60) },
+    doneNullWait: { state: "done", updatedAt: now, agentWait: null },
+    doneWithWait: { state: "done", updatedAt: now, agentWait: { source: "hook", since: now } },
+    prompt: { state: "working", updatedAt: now, agentWait: { source: "hook", since: now } },
+    waiting: { state: "waiting", updatedAt: now },
+    blocked: { state: "blocked", updatedAt: now },
+    idle: { state: "working", toolName: "bash", updatedAt: minutesAgo(10) },
+    working: { state: "working", toolName: "bash", updatedAt: now },
+    unknown: {},
+  };
+  const activities = Object.fromEntries(
+    Object.entries(agents).map(([name, agent]) => [name, activityOf(agent, now)]),
+  );
+  const kinds = Object.fromEntries(Object.entries(activities).map(([name, a]) => [name, a.kind]));
+  expect(kinds).toEqual({
+    doneOld: "done",
+    doneNullWait: "done",
+    doneWithWait: "done",
+    prompt: "waiting",
+    waiting: "waiting",
+    blocked: "waiting",
+    idle: "idle",
+    working: "working",
+    unknown: "unknown",
+  });
+  for (const name of ["doneOld", "doneNullWait", "doneWithWait"])
+    expect(activities[name]).toMatchObject({ kind: "done", text: "done" });
+
+  // Home's Stuck agents list holds the stuck kinds and none of the done agents.
+  const snapshot = {
+    runs: [
+      {
+        run: "r",
+        updated_at: "now",
+        waiting: [],
+        plan: [],
+        agents: Object.entries(activities).map(([name, activity]) => ({
+          step: name,
+          activity,
+        })),
+      },
+    ],
+    sources: { agentWait: { ok: true, read_at: "now" } },
+  } as unknown as Snapshot;
+  expect(stuckAgents(snapshot, () => 0).map((item) => item.step)).toEqual([
+    "prompt",
+    "waiting",
+    "blocked",
+    "idle",
+  ]);
+});
+
+/** The messages of one fixture session file: each one a model, in order. */
+const modelMessages = (...models: string[]) =>
+  models.map((model, number) => ({
+    time: new Date(Date.now() - 600_000 + number),
+    costUsd: 0.01,
+    model,
+  }));
+
+test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of its newest session file, else the plan model (planned), and a run lead the roles.chief model (configured)", async () => {
+  const { sessions } = isolatedEnvironment();
+  writeProject("p", {
+    workspace: scratch("ark-workspace-"),
+    ticket_source: "local",
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    roles: {
+      implementer: { harness: "omp", model: "m" },
+      validator: { harness: "omp", model: "m" },
+      reviewer: { harness: "omp", model: "m" },
+      chief: { harness: "claude", model: "claude-opus" },
+    },
+  });
+  const started = new Date(Date.now() - 3_600_000);
+  const at = (seconds: number) => new Date(started.getTime() + seconds * 1000);
+  const ids = [
+    "orca",
+    "single",
+    "newest",
+    "changes",
+    "bare",
+    "emptynew",
+    "lastunknown",
+    "noharness",
+  ];
+  const step = (id: string, number: number) => ({
+    id,
+    role: "implementer",
+    harness: "omp",
+    model: `plan/${id}`,
+    needs: [],
+    startedAfter: 100 + number * 600,
+    finishedAfter: 600 + number * 600,
+  });
+  const run = `${today()}-ARK-293-1`;
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-293", title: "Models" },
+    phase: "building",
+    startedAt: started,
+    steps: ids.map(step),
+  });
+  const cwd = join(directory, "workspace");
+  const put = (name: string, startSeconds: number, ...models: string[]) =>
+    writeOmpSession(sessions, name, cwd, modelMessages(...models), at(startSeconds));
+  const windowOf = (id: string) => 100 + ids.indexOf(id) * 600 + 10;
+  put("lead", 30, "lead-session"); // before the first step: the run lead
+  put("orca-file", windowOf("orca"), "ignored-session"); // Orca reports a model: this file is not read
+  put("single-file", windowOf("single"), "single-session");
+  // The newest file of a step wins, whatever its name or start say.
+  const older = put("newest-old", windowOf("newest"), "old-session");
+  put("newest-new", windowOf("newest") + 5, "new-session");
+  const past = new Date(Date.now() - 60_000);
+  utimesSync(older, past, past);
+  // A model change in the last message: the last one is the model.
+  put("changes-file", windowOf("changes"), "first-model", "second-model", "last-model");
+  // The newest file holds no message, or its last message names no model: the older model is not shown.
+  const olderEmpty = put("emptynew-old", windowOf("emptynew"), "obsolete-model");
+  put("emptynew-new", windowOf("emptynew") + 5);
+  utimesSync(olderEmpty, past, past);
+  put("lastunknown-file", windowOf("lastunknown"), "known-model", "unknown");
+  // Orca names no harness for this agent: the plan's stays beside the session model.
+  put("noharness-file", windowOf("noharness"), "session-model");
+  // A run with no session file: a lead with no model gets roles.chief.
+  const bareRun = `${today()}-ARK-294-1`;
+  writeRun({
+    project: "p",
+    run: bareRun,
+    ticket: { id: "ARK-294", title: "No model" },
+    phase: "building",
+  });
+
+  const answers = orcaAnswersFor(run);
+  const workerNames = ids;
+  installFakeTools({
+    orca: {
+      terminals: [
+        { handle: "term-lead", connected: true, agentIdentity: "omp" },
+        { handle: "term-lead-2", connected: true, agentIdentity: "omp" },
+        ...workerNames.map((name) => ({
+          handle: `term-${name}`,
+          connected: true,
+          ...(name === "noharness" ? {} : { agentIdentity: "omp" }),
+        })),
+      ],
+      runs: [
+        ...answers.runs!,
+        {
+          id: `orca-${bareRun}`,
+          objective: `Ark run ${bareRun}`,
+          coordinator_handle: "term-lead-2",
+        },
+      ],
+      workers: workerNames.map((name) => ({
+        taskId: `task-${name}`,
+        state: "running",
+        agentTerminalHandle: `term-${name}`,
+        ...(name === "orca" ? { projection: { provider: { model: "orca/reported" } } } : {}),
+      })),
+      tasks: workerNames.map((name) => ({ id: `task-${name}`, title: `${name} (implementer, .)` })),
+    },
+  });
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(baseUrl, (current) => {
+    if (current.runs === "unknown") return false;
+    const agents = current.runs.find((candidate) => candidate.run === run)?.agents;
+    return (
+      Array.isArray(agents) &&
+      agents.some((agent) => agent.step === "changes" && agent.model !== null)
+    );
+  });
+  const modelsOf = (name: string) => {
+    const agents = openRunOf(snapshot, name).agents;
+    if (agents === "unknown") throw new Error("agents are unknown");
+    return Object.fromEntries(agents.map((agent) => [agent.step ?? agent.role, agent]));
+  };
+  const agents = modelsOf(run);
+  const shown = (name: string) => [agents[name].model, agents[name].planned];
+  expect(shown("orca")).toEqual(["orca/reported", null]);
+  expect(shown("single")).toEqual(["single-session", null]);
+  expect(shown("newest")).toEqual(["new-session", null]);
+  expect(shown("changes")).toEqual(["last-model", null]);
+  expect(shown("run lead")).toEqual(["lead-session", null]);
+  expect(shown("emptynew")).toEqual([
+    null,
+    { harness: "omp", model: "plan/emptynew", source: "plan" },
+  ]);
+  expect(shown("lastunknown")).toEqual([
+    null,
+    { harness: "omp", model: "plan/lastunknown", source: "plan" },
+  ]);
+  expect([agents.noharness.harness, agents.noharness.model, agents.noharness.planned]).toEqual([
+    "omp",
+    "session-model",
+    null,
+  ]);
+  expect(shown("bare")).toEqual([null, { harness: "omp", model: "plan/bare", source: "plan" }]);
+  expect(agents["run lead"].harness).toBe("omp");
+  expect(modelsOf(bareRun)["run lead"]).toMatchObject({
+    model: null,
+    planned: { harness: "claude", model: "claude-opus", source: "configured" },
+  });
+}, 60_000);
+
+test("ARK-293-AC4 the recorded real prompt wait gives waiting, by agentWait alone too, and docs/evidence/ARK-293-ac4.md holds its raw JSON, the text the hub shows and human: ok", () => {
+  const raw = readDoc("test/fixtures/orca-agent-wait.json");
+  const entry = JSON.parse(raw);
+  expect(entry.agentWait).toMatchObject({ source: "hook" });
+  const activity = activityOf(entry, Date.now());
+  expect(activity.kind).toBe("waiting");
+  // The state alone is not what holds it: with state `working` the agentWait object still does.
+  expect(activityOf({ ...entry, state: "working" }, Date.now()).kind).toBe("waiting");
+
+  const evidence = readDoc("docs/evidence/ARK-293-ac4.md");
+  expect(evidence).toContain(raw.trim());
+  expect(evidence).toContain(activity.text);
+  expect(evidence.split("\n")).toContain("human: ok");
+});
+
+test("ARK-293-AC5 the run page reads session models from the parse the cost already holds: no second parse, no request, and the last message of the newest file", async () => {
+  const { sessions } = isolatedEnvironment();
+  const directory = writeRun({
+    project: "p",
+    run: `${today()}-ARK-295-1`,
+    ticket: { id: "ARK-295", title: "No new read" },
+    phase: "building",
+  });
+  const cwd = join(directory, "workspace");
+  writeOmpSession(sessions, "lead", cwd, modelMessages("one-model", "two-model"));
+  const index = new UsageIndex();
+  indexes.push(index);
+  await index.refresh([directory]);
+  const parsed = index.parseCount;
+  expect(parsed).toBe(1);
+
+  const first = index.modelsOf(directory, [], Date.now() - 3_600_000);
+  for (let read = 0; read < 5; read++) index.modelsOf(directory, [], Date.now() - 3_600_000);
+  expect(first.get("lead")).toBe("two-model");
+  expect(index.parseCount).toBe(parsed);
+  await index.refresh([directory]);
+  expect(index.parseCount).toBe(parsed);
+});
+
+test("ARK-293-AC3 Master Chief listed by Orca and by worktree ps is one agent of a run", async () => {
+  isolatedEnvironment();
+  const run = `${today()}-ARK-296-1`;
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-296", title: "Chief once" },
+    phase: "building",
+  });
+  const answers = orcaAnswersFor(run);
+  installFakeTools({
+    orca: {
+      ...answers,
+      terminals: [
+        ...answers.terminals!,
+        { handle: "term-chief", connected: true, agentIdentity: "omp", model: "chief-model" },
+      ],
+      runs: [
+        ...answers.runs!,
+        {
+          id: "orca-chief",
+          objective: "Master Chief: p tickets",
+          coordinator_handle: "term-chief",
+        },
+      ],
+      worktrees: [
+        {
+          path: join(directory, "workspace"),
+          agents: [
+            { taskTitle: "Master Chief: p tickets", state: "working", updatedAt: Date.now() },
+          ],
+        },
+      ],
+    },
+  });
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(baseUrl, (current) => {
+    if (current.runs === "unknown") return false;
+    const agents = current.runs.find((candidate) => candidate.run === run)?.agents;
+    return Array.isArray(agents) && agents.some((agent) => agent.activity.kind === "working");
+  });
+  const agents = openRunOf(snapshot, run).agents;
+  if (agents === "unknown") throw new Error("agents are unknown");
+  const chiefs = agents.filter((agent) => agent.role === "Master Chief");
+  expect(chiefs).toHaveLength(1);
+  expect(chiefs[0]).toMatchObject({ model: "chief-model", live: true });
+  expect(chiefs[0].activity.kind).toBe("working");
+}, 60_000);

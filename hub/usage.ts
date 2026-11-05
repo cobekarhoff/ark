@@ -6,7 +6,7 @@ import type { StepWindow } from "../cli/retro.ts";
 import type { SessionFile, TranscriptPage } from "./types.ts";
 
 export type Harness = "omp" | "claude" | "codex";
-export type CompactMessage = { time: number; cost: number | null };
+export type CompactMessage = { time: number; cost: number | null; model: string | null };
 export type WorkerRequest = {
   id: number;
   kind: "head" | "parse" | "transcript";
@@ -287,6 +287,26 @@ export class UsageIndex {
     return sessions.sort((left, right) =>
       (left.start ?? "9999").localeCompare(right.start ?? "9999"),
     );
+  }
+
+  /**
+   * The model of the last message of the newest (last written) parsed session file of each owner:
+   * a step id, or `lead` for the run lead. Reads the parse that the cost already holds, so it costs
+   * no request. An owner whose files are unparsed or hold no named model in their last message is absent.
+   */
+  modelsOf(directory: string, windows: StepWindow[], runStarted: number): Map<string, string> {
+    const models = new Map<string, string>();
+    const newest = new Map<string, string>();
+    for (const session of this.sessionsOf(directory, windows, runStarted)) {
+      if (session.owner.kind === "unassigned") continue;
+      const owner = session.owner.kind === "lead" ? "lead" : session.owner.step;
+      if (session.end < (newest.get(owner) ?? "")) continue;
+      newest.set(owner, session.end);
+      const model = this.#entries.get(session.file)?.messages?.at(-1)?.model;
+      if (model) models.set(owner, model);
+      else models.delete(owner);
+    }
+    return models;
   }
 
   /**
