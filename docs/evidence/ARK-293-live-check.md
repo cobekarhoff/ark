@@ -4,15 +4,15 @@ Hub: `http://hub.ark-293-1.localhost`, started from this worktree on the real `A
 
 ## Observed rows, open run page, Agents
 
-| Row | Shown | Orca model | Session model |
-| --- | --- | --- | --- |
-| Master Chief | `omp · anthropic/claude-sonnet-5-5 (configured) · unknown` | none, row not matched to its Orca agent | none |
-| run lead | `unknown · gpt-6-luna · working` | none | `gpt-6-luna` |
-| validator hub-live-check | `unknown · claude-sonnet-5-5 · working` | none | yes |
-| validator hub-agent-state-tests | `unknown · claude-sonnet-5-5 · unknown` (ended, not in Orca) | none | yes |
-| implementer hub-done-model | `unknown · claude-sonnet-5-5 · unknown` (ended, not in Orca) | none | yes |
-| designer | `omp (configured) · anthropic/claude-sonnet-5-5 (configured) · unknown` | none | yes, file unassigned |
-| evaluator | `omp (configured) · anthropic/claude-sonnet-5-5 (configured) · unknown` | none | yes, file unassigned |
+| Row                             | Shown                                                                   | Orca model                              | Session model        |
+| ------------------------------- | ----------------------------------------------------------------------- | --------------------------------------- | -------------------- |
+| Master Chief                    | `omp · anthropic/claude-sonnet-5-5 (configured) · unknown`              | none, row not matched to its Orca agent | none                 |
+| run lead                        | `unknown · gpt-6-luna · working`                                        | none                                    | `gpt-6-luna`         |
+| validator hub-live-check        | `unknown · claude-sonnet-5-5 · working`                                 | none                                    | yes                  |
+| validator hub-agent-state-tests | `unknown · claude-sonnet-5-5 · unknown` (ended, not in Orca)            | none                                    | yes                  |
+| implementer hub-done-model      | `unknown · claude-sonnet-5-5 · unknown` (ended, not in Orca)            | none                                    | yes                  |
+| designer                        | `omp (configured) · anthropic/claude-sonnet-5-5 (configured) · unknown` | none                                    | yes, file unassigned |
+| evaluator                       | `omp (configured) · anthropic/claude-sonnet-5-5 (configured) · unknown` | none                                    | yes, file unassigned |
 
 Master Chief appears once in the list and once in the header chip (`Master Chief · 1 runs`).
 
