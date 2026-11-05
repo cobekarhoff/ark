@@ -2,6 +2,7 @@
 // run-lead-link, unassigned-file (data-file), closed-banner, session-link (data-step)
 import { useEffect, useState } from "react";
 import { ExternalLink } from "./format.tsx";
+import { hashOf } from "./store.tsx";
 import type { RunDetail, SessionFile, TimelineEntry } from "../types.ts";
 
 export type DetailState =
@@ -76,7 +77,7 @@ export function Timeline({ entries }: { entries: TimelineEntry[] }) {
 }
 
 export const runHref = (run: string, ...parts: string[]) =>
-  `#/run/${[run, ...parts].map(encodeURIComponent).join("/")}`;
+  hashOf(`#/run/${[run, ...parts].map(encodeURIComponent).join("/")}`);
 
 export function RunFiles({ run, files }: { run: string; files: string[] }) {
   if (files.length === 0)

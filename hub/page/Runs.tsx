@@ -3,10 +3,17 @@
 // ring (data-steps-done, data-steps-total)
 import { useState } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
-import { closedRuns, ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
-import { Ring, Unknown, known } from "./format.tsx";
+import {
+  closedRuns,
+  isUnknownProject,
+  scoped,
+  ticketEntries,
+  ticketKey,
+  type TicketEntry,
+} from "./derive.ts";
+import { Ring, Unknown, UnknownProject, known } from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
-import { useLive } from "./store.tsx";
+import { ticketHref, useLive, useProject } from "./store.tsx";
 import type { RunView, Snapshot } from "../types.ts";
 
 const lanes = [
@@ -35,7 +42,7 @@ const hrefOf = (entry: TicketEntry) =>
     ? runHref(entry.open.run)
     : entry.newest
       ? runHref(entry.newest.run)
-      : `#/ticket/${encodeURIComponent(entry.ticket.id)}`;
+      : ticketHref(entry.ticket.id);
 
 /** The ticket-level state of a ticket in its card: `waits on ARK-282 (building)` for a blocked one. */
 function waitsOn(entry: TicketEntry, entries: Map<string, TicketEntry>): string {
@@ -203,15 +210,24 @@ function graphKeys(filter: Filter, entries: Map<string, TicketEntry>): Set<strin
 }
 
 export function Runs() {
-  const { snapshot } = useLive();
+  const { snapshot: whole } = useLive();
+  const project = useProject();
   const [filter, setFilter] = useState<Filter>("Active");
-  if (!snapshot || !known(snapshot.tickets) || !known(snapshot.runs))
+  if (!whole || !known(whole.tickets) || !known(whole.runs))
     return (
       <>
         <h1>Runs</h1>
         <Unknown />
       </>
     );
+  if (isUnknownProject(whole, project))
+    return (
+      <>
+        <h1>Runs</h1>
+        <UnknownProject project={project!} />
+      </>
+    );
+  const snapshot = scoped(whole, project);
   const entries = ticketEntries(snapshot);
   const counts: Record<Filter, number> = {
     Active: [...entries.values()].filter((entry) => entry.open !== null).length,
@@ -242,11 +258,11 @@ export function Runs() {
           other.ticket.project === entry.ticket.project,
       ),
     }));
-  const open = snapshot.runs.length;
+  const open = known(snapshot.runs) ? snapshot.runs.length : 0;
   return (
     <>
       <h1>
-        Runs{" "}
+        Runs <span className="filter-name">· {project ?? "All projects"}</span>{" "}
         <span className="mut sub">
           {open} open · {counts.Queued} queued · {counts.Old} closed. Click a run for its plan.
         </span>
@@ -300,11 +316,7 @@ export function Runs() {
                     <span className="mut">unblocks nothing</span>
                   ) : (
                     next.map((other) => (
-                      <a
-                        key={other.key}
-                        className="chip mono"
-                        href={`#/ticket/${encodeURIComponent(other.ticket.id)}`}
-                      >
+                      <a key={other.key} className="chip mono" href={ticketHref(other.ticket.id)}>
                         {other.ticket.id}
                       </a>
                     ))

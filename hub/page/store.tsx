@@ -109,13 +109,25 @@ export type Route = {
   sub: { kind: "step" | "lead" | "session" | "file"; arg: string | null } | null;
   /** `#/ticket/<id>`: the ticket of the page. A ticket id is taken as unique across projects. */
   arg: string | null;
-  /** `#/roadmap?project=<name>`: the project the Roadmap shows. The URL is its only state. */
+  /** `?project=<name>` on every route: the site-wide project filter. The URL is its only state; null is All projects. */
   project: string | null;
 };
 
-/** The hash of the Roadmap for a project: what a pick, a header chip and Esc from a ticket go to. */
-export const roadmapHash = (project: string | null) =>
-  project === null ? "#/roadmap" : `#/roadmap?project=${encodeURIComponent(project)}`;
+/** The filter of the URL as the browser holds it now. Links read it at render, so every link keeps it. */
+export const currentProject = (): string | null => parseRoute(location.hash).project;
+
+/**
+ * A hash for `path` (`#/runs`, `#/ticket/ARK-1`) with the project filter: the filter of the URL, or
+ * `project` when the caller sets one (`null` for All projects). The one builder of every link.
+ */
+export const hashOf = (path: string, project: string | null = currentProject()) =>
+  project === null ? path : `${path}?project=${encodeURIComponent(project)}`;
+
+export const ticketHref = (id: string) => hashOf(`#/ticket/${encodeURIComponent(id)}`);
+
+/** The same page with another filter: the header control keeps the route and swaps the query. */
+export const withProject = (hash: string, project: string | null) =>
+  hashOf(hash.split("?")[0] || "#/", project);
 
 /** A hash that does not decode (a truncated pasted link) keeps its raw text instead of crashing. */
 const decode = (part: string): string => {
@@ -126,15 +138,23 @@ const decode = (part: string): string => {
   }
 };
 
-/** The Map is gone: its route, and a bare `#/run` with no run to pick, open Runs. */
-export const isRetiredRoute = (hash: string): boolean => /^#\/(map(\/|$)|run\/?$)/.test(hash);
+/**
+ * Where a retired hash goes, or null. The Map is gone, and a bare `#/run` with no run to pick: both
+ * open Runs. Backlog is now Roadmap. The query (the filter) and `#/backlog/<ticket>`'s tail stay.
+ */
+export const retiredTarget = (hash: string): string | null =>
+  /^#\/(map(\/|\?|$)|run\/?(\?|$))/.test(hash)
+    ? `#/runs${hash.includes("?") ? hash.slice(hash.indexOf("?")) : ""}`
+    : /^#\/backlog(\/|\?|$)/.test(hash)
+      ? hash.replace("#/backlog", "#/roadmap")
+      : null;
 
 export function parseRoute(hash: string): Route {
   const [path, query = ""] = hash.split("?");
   const project = new URLSearchParams(query).get("project");
   const [, view, part, kind, subArg] = path.split("/");
   const arg = part ? decode(part) : null;
-  const none = { run: null, sub: null, arg: null, project: null };
+  const none = { run: null, sub: null, arg: null, project };
   if (view === "run" && arg !== null) {
     const subKinds = ["step", "lead", "session", "file"] as const;
     const subKind = subKinds.find((candidate) => candidate === kind);
@@ -142,7 +162,7 @@ export function parseRoute(hash: string): Route {
     return { ...none, view, run: arg, sub };
   }
   if (view === "runs" || view === "run" || view === "map") return { ...none, view: "runs" };
-  if (view === "roadmap" && arg === null) return { ...none, view, project };
+  if (view === "roadmap" && arg === null) return { ...none, view };
   if ((view === "ticket" || view === "roadmap") && arg !== null)
     return { ...none, view: "ticket", arg };
   return { ...none, view: "home" };
@@ -177,3 +197,6 @@ const subscribeHash = (notify: () => void) => {
   return () => removeEventListener("hashchange", notify);
 };
 export const useHash = () => useSyncExternalStore(subscribeHash, () => location.hash);
+
+/** The project filter of the URL; null is All projects. */
+export const useProject = () => parseRoute(useHash()).project;

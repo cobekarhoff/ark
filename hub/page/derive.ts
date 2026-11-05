@@ -200,3 +200,36 @@ export function ticketEntries(snapshot: Snapshot): Map<string, TicketEntry> {
   }
   return entries;
 }
+
+/** Every project of the tickets, the runs and the gates that answered, in name order. */
+export function projectsOf(snapshot: Snapshot): string[] {
+  const names = new Set<string>();
+  for (const list of [snapshot.tickets, snapshot.runs, snapshot.gates])
+    if (known(list)) for (const item of list) names.add(item.project);
+  return [...names].toSorted();
+}
+
+/** The filter names no project. Said only once the tickets, runs and gates all answered. */
+export const isUnknownProject = (snapshot: Snapshot, project: string | null): boolean =>
+  project !== null &&
+  known(snapshot.tickets) &&
+  known(snapshot.runs) &&
+  known(snapshot.gates) &&
+  !projectsOf(snapshot).includes(project);
+
+/** The snapshot cut to one project (`null` is All projects). Every record carries its project. */
+export function scoped(snapshot: Snapshot, project: string | null): Snapshot {
+  if (project === null) return snapshot;
+  const only = <T extends { project: string }>(list: T[] | "unknown") =>
+    known(list) ? list.filter((item) => item.project === project) : list;
+  return {
+    ...snapshot,
+    runs: only(snapshot.runs),
+    gates: only(snapshot.gates),
+    tickets: only(snapshot.tickets),
+    ticket_runs: only(snapshot.ticket_runs),
+    roadmap: known(snapshot.roadmap)
+      ? Object.fromEntries(Object.entries(snapshot.roadmap).filter(([name]) => name === project))
+      : snapshot.roadmap,
+  };
+}

@@ -16,6 +16,8 @@ import {
   known,
   stepStatus,
   currentStepText,
+  OutsideNote,
+  ProjectValue,
 } from "./format.tsx";
 import type { Attention } from "./format.tsx";
 import { MergeRequest } from "./Home.tsx";
@@ -28,7 +30,7 @@ import {
   sessionName,
   useRunDetail,
 } from "./RunDetail.tsx";
-import { useAge, useLive, type Route } from "./store.tsx";
+import { hashOf, ticketHref, useAge, useLive, type Route } from "./store.tsx";
 import { FileView, Transcript } from "./Transcript.tsx";
 import type { PlanStepView, RunDetail, RunView } from "../types.ts";
 
@@ -431,11 +433,7 @@ function Body({
             </header>
             <div className="body">
               <p className="strong">{run.ticket.title}</p>
-              <a
-                className="btn"
-                href={`#/ticket/${encodeURIComponent(run.ticket.id)}`}
-                data-testid="ticket-link"
-              >
+              <a className="btn" href={ticketHref(run.ticket.id)} data-testid="ticket-link">
                 Read ticket and dependency graph
               </a>
             </div>
@@ -477,7 +475,8 @@ export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
         <h1>Run</h1>
         {state.status === "missing" ? (
           <p className="mut">
-            No open run {wanted}, and no closed run by that name. <a href="#/runs">Back to Runs</a>
+            No open run {wanted}, and no closed run by that name.{" "}
+            <a href={hashOf("#/runs")}>Back to Runs</a>
           </p>
         ) : state.status === "failed" ? (
           <p className="bad-text">The hub could not read run {wanted}.</p>
@@ -533,7 +532,7 @@ export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
   return (
     <>
       <p className="crumb">
-        <a href="#/runs">← Runs</a>
+        <a href={hashOf("#/runs")}>← Runs</a>
       </p>
       <h1 className="run-title">
         <span className="pill">
@@ -541,7 +540,11 @@ export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
         </span>{" "}
         <span className="mono">{run.ticket.id}</span> {run.ticket.title}
       </h1>
-      <p className="mut mono small">{run.run}</p>
+      <p className="meta mut mono small">
+        <span>{run.run}</span>
+        <ProjectValue project={run.project} />
+      </p>
+      <OutsideNote project={run.project} />
       <Body run={run} detail={detail} loading={state.status === "loading"} open={open !== null} />
     </>
   );

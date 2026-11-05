@@ -1,5 +1,6 @@
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { stepTimeText } from "../progress.ts";
+import { currentProject, withProject } from "./store.tsx";
 import type { PlanStepView, RunProgress, RunView, Snapshot } from "../types.ts";
 
 const dollars = new Intl.NumberFormat("en-US", {
@@ -107,6 +108,39 @@ export function ArrowMarker({ id }: { id: string }) {
 export const phaseLabel = (phase: string) => phase.replaceAll("_", " ");
 
 export const Unknown = () => <span className="pill unk">unknown</span>;
+
+/** A filter that names no project: an empty state with the way out, never another project's data. */
+export const UnknownProject = ({ project }: { project: string }) => (
+  <p className="mut" data-testid="unknown-project">
+    No project named <b className="mono">{project}</b>.{" "}
+    <a href={withProject(location.hash, null)}>All projects</a>
+  </p>
+);
+
+/** The project of a run or ticket page, as a labelled value. */
+export const ProjectValue = ({ project }: { project: string }) => (
+  <span data-testid="page-project">
+    <b>Project</b> <span className="mono">{project}</span>
+  </span>
+);
+
+/**
+ * Said when a page opened by a direct link belongs to another project than the filter of the URL.
+ * The control keeps the URL's filter; the link is the only way to change it from here.
+ */
+export function OutsideNote({ project }: { project: string }) {
+  const filter = currentProject();
+  if (filter === null || filter === project) return null;
+  return (
+    <p className="outside" role="note" data-testid="outside-filter">
+      <span>
+        Outside the filter <b className="mono">{filter}</b>: this page is in{" "}
+        <b className="mono">{project}</b>.
+      </span>
+      <a href={withProject(location.hash, project)}>Show {project}</a>
+    </p>
+  );
+}
 
 /** Colour group of a run phase: the legend of the Map. */
 export function phaseClass(phase: string | null): string {

@@ -38,6 +38,7 @@ _Avoid_: Delivered
 
 **Hub**:
 The browser page `ark ui` serves, from `hub/`. Home shows what needs the human, then each open run with its agents, models, MRs and cost; Run shows any run, open or closed, with its plan DAG, decisions, run files and agent transcripts; Runs lists every run on one board with a cross-run dependency graph; Roadmap shows the vision, the milestones and the ranked tickets with their runs, and a ticket opens as a full page. It is a view. Its one action is "Open in Orca", which focuses a live agent's terminal in Orca (live = Orca lists the terminal as connected; an agent session Orca lists only as a worker shows "running in Orca, open it from its chat tab", a released one "ended, not in Orca"). It steers no agent, sends no text and changes no run state (ADR 0009).
+The project filter is site-wide: the `project` query of the hash, with "All projects" (no query) the default; the header's Project group sets it, and every link keeps it.
 _Avoid_: Control center, dashboard
 
 **Merge request (MR)**:
