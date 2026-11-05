@@ -55,6 +55,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
         messages: session.messages.map((message) => ({
           time: Date.parse(message.time),
           cost: message.costUsd === "unknown" ? null : message.costUsd,
+          model: message.model === "unknown" ? null : message.model,
         })),
       };
     }

@@ -650,9 +650,10 @@ type OrcaPs = { result?: { worktrees?: { path?: unknown; agents?: unknown }[] } 
 export type PsAgent = { title: string; harness: string | null; activity: AgentActivity };
 
 /**
- * `agentWait` is an object while Orca sees an approval or input prompt, and null when there is
- * none (Orca's own CLI prints "none" for it): any truthy value counts. A state of `waiting` or
- * `blocked` counts too.
+ * `agentWait` is an object `{ source, since }` while Orca sees an approval or input prompt (seen
+ * live, ARK-293-AC4), and null when there is none (Orca's own CLI prints "none" for it): any truthy
+ * value counts. A state of `waiting` or `blocked` counts too. State `done` is checked first: a done
+ * agent is never waiting, idle or stuck.
  */
 export function activityOf(agent: OrcaPsAgent, now: number): AgentActivity {
   const lastLine =
@@ -664,6 +665,7 @@ export function activityOf(agent: OrcaPsAgent, now: number): AgentActivity {
           ?.slice(0, 200) ?? null)
       : null;
   const state = typeof agent.state === "string" ? agent.state : null;
+  if (state === "done") return { kind: "done", text: "done", last_line: lastLine };
   if (agent.agentWait || state === "waiting" || state === "blocked")
     return { kind: "waiting", text: "waiting on a prompt", last_line: lastLine };
   if (state === null) return { kind: "unknown", text: "unknown", last_line: lastLine };
@@ -718,7 +720,11 @@ export async function readAgentWait(now = Date.now()): Promise<Map<string, PsAge
 /** What an Orca task title says: the step id, the role (`run lead` included) and their join key (the step id, else the role). */
 export function parseAgentTitle(title: string): { key: string; role: string; step: string | null } {
   const step = title.match(stepTask)?.[1] ?? null;
-  const role = /\brun lead\b/.test(title) ? "run lead" : roleOfTask(title);
+  const role = /^Master Chief\b/.test(title)
+    ? "Master Chief"
+    : /\brun lead\b/.test(title)
+      ? "run lead"
+      : roleOfTask(title);
   return { key: step ?? role, role, step };
 }
 

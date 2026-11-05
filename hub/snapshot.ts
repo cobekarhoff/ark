@@ -155,7 +155,17 @@ export function createSnapshotReader() {
         activity: listed.activity,
       });
     }
+    // A model that Orca does not report comes from the last message of the agent's session file
+    // (the parse the cost already holds), then from the plan or `roles.chief`, labelled.
+    const sessionModels = usage.modelsOf(
+      run.directory,
+      run.windows,
+      Date.parse(run.events[0].time),
+    );
     return agents.map((agent) => {
+      const owner = agent.step ?? (agent.role === "run lead" ? "lead" : null);
+      const model = agent.model ?? (owner === null ? null : (sessionModels.get(owner) ?? null));
+      if (model !== null) return { ...agent, model, planned: null };
       const step = run.plan?.find((candidate) => candidate.id === agent.step);
       if (step)
         return {
