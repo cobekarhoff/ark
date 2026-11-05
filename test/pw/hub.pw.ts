@@ -3134,8 +3134,9 @@ const [alpha, beta] = worlds;
 /**
  * Two projects with the same shape: X1 building (cost), X2 queued behind X1 in M5, X3 done with a
  * closed run, X4 proposed. Both ROADMAP.md files carry M4 and M5. `crowd` adds proposed tickets to alpha.
+ * `withNotes` lists a ticket with no file in each Now list: one note on ROADMAP.md per project.
  */
-function filterWorld(crowd = 0) {
+function filterWorld(crowd = 0, withNotes = false) {
   isolate();
   for (const {
     project,
@@ -3177,7 +3178,7 @@ function filterWorld(crowd = 0) {
         ["M4", "Fourth", "Outcome four.", "active"],
         ["M5", "Fifth", "Outcome five.", "later"],
       ],
-      now: [x1],
+      now: withNotes ? [x1, `${x1}9`] : [x1],
       next: [x2],
       later: project === "alpha" ? Array.from({ length: crowd }, (_, n) => `ARK-9${n}`) : [],
     });
@@ -3480,6 +3481,74 @@ test("ARK-309-AC4 Roadmap shows every project in name order under its name with 
     await expect(page.locator("h2.rm-project")).toHaveCount(0);
     expect(await rows(world.project)).toEqual(world.ids.slice(0, 2));
   }
+});
+
+test("ARK-309-AC4 a ticket opened from the second project's section returns to both sections with their milestone and the second one active, and / j k Enter keep acting there", async ({
+  page,
+}) => {
+  filterWorld();
+  const baseUrl = await launch();
+  const section = (project: string) => page.locator(`section[data-project="${project}"]`);
+  const pick = (project: string, id: string) =>
+    section(project).locator(`[data-testid="milestone-pick"][data-milestone="${id}"]`);
+  const rows = (project: string) =>
+    section(project)
+      .getByTestId("ticket-row")
+      .evaluateAll((all) => all.map((node) => node.getAttribute("data-ticket")));
+  const selected = (project: string) =>
+    section(project).locator('[data-testid="ticket-row"][aria-current="true"]');
+
+  // A milestone in each section; the last click makes beta the active one.
+  await open(page, baseUrl, "roadmap");
+  await pick("alpha", "M5").click();
+  await pick("beta", "M4").click();
+  await expect.poll(() => rows("alpha")).toEqual([alpha.ids[1]]);
+  await expect.poll(() => rows("beta")).toEqual([beta.ids[0]]);
+  await expect(selected("beta")).toHaveAttribute("data-ticket", beta.ids[0]);
+  await section("beta").getByTestId("roadmap-vision").click(); // off the button: Enter on it is its own action
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`#/ticket/${beta.ids[0]}`));
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+
+  // Esc: both sections keep their milestone, the selected row is beta's, and the keys act in beta.
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("roadmap-page").first()).toBeVisible();
+  await expect(pick("alpha", "M5")).toHaveAttribute("aria-pressed", "true");
+  await expect(pick("beta", "M4")).toHaveAttribute("aria-pressed", "true");
+  expect(await rows("alpha")).toEqual([alpha.ids[1]]);
+  expect(await rows("beta")).toEqual([beta.ids[0]]);
+  await expect(selected("beta")).toHaveAttribute("data-ticket", beta.ids[0]);
+  await expect(selected("alpha")).toHaveCount(0);
+  await page.keyboard.press("/");
+  await expect(section("beta").getByTestId("filter-text")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await section("beta")
+    .getByTestId("milestone-filter")
+    .getByRole("button", { name: "Show all milestones" })
+    .click();
+  await expect.poll(() => rows("beta")).toEqual(beta.ids.slice(0, 2));
+  await page.keyboard.press("j");
+  await expect(selected("beta")).toHaveAttribute("data-ticket", beta.ids[1]);
+  await page.keyboard.press("k");
+  await expect(selected("beta")).toHaveAttribute("data-ticket", beta.ids[0]);
+  await expect(selected("alpha")).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`#/ticket/${beta.ids[0]}`));
+});
+
+test("ARK-309-AC4 the notes button of a later project's section scrolls to that section's notes", async ({
+  page,
+}) => {
+  filterWorld(40, true);
+  const baseUrl = await launch();
+  await open(page, baseUrl, "roadmap");
+  const notes = (project: string) =>
+    page.locator(`section[data-project="${project}"]`).getByTestId("roadmap-notes");
+  await expect(notes("beta")).toHaveCount(1);
+  await expect(notes("beta")).not.toBeInViewport();
+  await page.locator('section[data-project="beta"]').getByTestId("notes-link").click();
+  await expect(notes("beta")).toBeInViewport();
+  await expect(notes("alpha")).not.toBeInViewport();
 });
 
 test("ARK-309-AC5 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it", async ({

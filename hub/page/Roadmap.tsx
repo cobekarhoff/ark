@@ -67,19 +67,21 @@ const horizons = [
 
 const isFinished = (status: string) => status === "done" || status === "superseded";
 
-/** What the page keeps while a ticket page is open, so Esc lands on the same row and scroll position. */
+/** One section's state, kept while a ticket page is open so Esc lands on the same rows. */
 type Remembered = {
-  /** `<filter>|<project>`: only the section of that filter and project takes it back. */
-  key: string;
-  scroll: number;
   cursor: string | null;
   text: string;
   milestone: string | null;
   view: "list" | "graph";
   shipped: ShippedFolds | undefined;
 };
-let remembered: Remembered | null = null;
-const rememberedFor = (key: string) => (remembered?.key === key ? remembered : null);
+/** What the sections took with them, by `<filter>|<project>`; each takes its own back once. */
+const remembered = new Map<string, Remembered>();
+let rememberedScroll = 0;
+/** The section that was active when the page left, for the filter it left under. */
+let rememberedActive: { scope: string | null; project: string } | null = null;
+/** Every mounted section's current state, so the one that leaves can save them all. */
+const mounted = new Map<string, () => Remembered>();
 
 /** A form field has the focus: its keys are text, not shortcuts. */
 const isTyping = (target: EventTarget | null) =>
@@ -172,12 +174,12 @@ function ProjectRoadmap({
 }) {
   const key = `${scope ?? ""}|${project}`;
   const root = useRef<HTMLElement>(null);
-  const [text, setText] = useState(() => rememberedFor(key)?.text ?? "");
+  const [text, setText] = useState(() => remembered.get(key)?.text ?? "");
   const [milestone, setMilestone] = useState<string | null>(
-    () => rememberedFor(key)?.milestone ?? null,
+    () => remembered.get(key)?.milestone ?? null,
   );
-  const [view, setView] = useState<"list" | "graph">(() => rememberedFor(key)?.view ?? "list");
-  const [cursor, setCursor] = useState<string | null>(() => rememberedFor(key)?.cursor ?? null);
+  const [view, setView] = useState<"list" | "graph">(() => remembered.get(key)?.view ?? "list");
+  const [cursor, setCursor] = useState<string | null>(() => remembered.get(key)?.cursor ?? null);
   const needle = text.trim().toLowerCase();
   const model = useMemo(
     () => build(snapshot, project, needle, milestone),
@@ -198,26 +200,30 @@ function ProjectRoadmap({
   // Only the active section shows a cursor: it is the one the keys move.
   const marked = isActive ? current : null;
 
-  const [folds] = useState(() => ({ at: rememberedFor(key)?.shipped as ShippedFolds | undefined }));
+  const [folds] = useState(() => ({
+    at: remembered.get(key)?.shipped as ShippedFolds | undefined,
+  }));
+  const latest = useRef<Omit<Remembered, "shipped">>(null!);
+  latest.current = { cursor: current, text, milestone, view };
+  useEffect(() => {
+    mounted.set(key, () => ({ ...latest.current, shipped: folds.at }));
+    return () => void mounted.delete(key);
+  }, [key]);
+  // Leaving for a ticket page saves every mounted section, not only this one, and this one as active.
   const remember = (id: string | null = current) => {
-    remembered = {
-      key,
-      scroll: window.scrollY,
-      cursor: id,
-      text,
-      milestone,
-      view,
-      shipped: folds.at,
-    };
+    for (const [sectionKey, state] of mounted) remembered.set(sectionKey, state());
+    remembered.set(key, { ...latest.current, cursor: id, shipped: folds.at });
+    rememberedScroll = window.scrollY;
+    rememberedActive = { scope, project };
   };
 
   // Back from a ticket page: the same scroll position, once the rows exist, and only for the
   // filter and project that left.
   const loaded = model !== null;
   useLayoutEffect(() => {
-    if (!loaded || remembered?.key !== key) return;
-    window.scrollTo(0, remembered.scroll);
-    remembered = null;
+    if (!loaded || !remembered.has(key)) return;
+    window.scrollTo(0, rememberedScroll);
+    remembered.delete(key);
   }, [loaded, key]);
 
   useEffect(() => {
@@ -335,7 +341,9 @@ function ProjectRoadmap({
             className="rm-linkbtn"
             data-testid="notes-link"
             onClick={() =>
-              document.getElementById("roadmap-notes")?.scrollIntoView({ block: "center" })
+              root.current
+                ?.querySelector('[data-testid="roadmap-notes"]')
+                ?.scrollIntoView({ block: "center" })
             }
           >
             {ok.warnings.length} {ok.warnings.length === 1 ? "note" : "notes"} on ROADMAP.md
@@ -506,7 +514,10 @@ function ProjectRoadmap({
 export function Roadmap() {
   const { snapshot: whole } = useLive();
   const project = useProject();
-  const [active, setActive] = useState<string | null>(null);
+  const [active, setActive] = useState<string | null>(() =>
+    rememberedActive?.scope === project ? rememberedActive.project : null,
+  );
+  useEffect(() => void (rememberedActive = null), []);
   if (!whole || !known(whole.tickets) || !known(whole.roadmap))
     return (
       <>

@@ -550,7 +550,7 @@ function MilestonePick({
 export function Notices({ warnings }: { warnings: RoadmapWarning[] }) {
   if (warnings.length === 0) return null;
   return (
-    <section className="rm-notes" id="roadmap-notes" data-testid="roadmap-notes" tabIndex={-1}>
+    <section className="rm-notes" data-testid="roadmap-notes" tabIndex={-1}>
       <h2>
         <Icon name="info" />
         {warnings.length} {warnings.length === 1 ? "note" : "notes"} on ROADMAP.md
