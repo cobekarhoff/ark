@@ -1023,7 +1023,7 @@ test("ARK-288-AC6 run-lead sends a status with the run, the round and <n> of 2 a
   );
   expect(escalate).toContain("Run <run>");
   expect(escalate).toContain("`ark escalate` (a requested escalation)");
-  const repair = flat(section(runLeadPlaybook, "## 10. Open the MRs"));
+  const repair = flat(section(runLeadPlaybook, "## 10a. Work on the open MRs"));
   expect(repair).toContain(
     "With `gates.escalation: auto`, `ark run step ... start` records it by auto",
   );

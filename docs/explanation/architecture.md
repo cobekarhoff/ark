@@ -46,11 +46,14 @@ stateDiagram-v2
   reviewing --> escalation: round budget spent
   escalation --> building: one more round, or you take over
   escalation --> closed: you abort
+  merge_requests_open --> merge_requests_open: ci fails, a comment or a conflict starts an MR round
   merge_requests_open --> closed: you record the outcome
   closed --> [*]
 ```
 
 The states `building`, `testing`, and `reviewing` form a loop. Each return to `building` after the first build is a round. The round budget defaults to 2. When the budget is spent, the run opens an escalation gate, and you choose one more round, take over, or abort. With `gates.escalation: auto`, Ark grants the first 2 extra rounds itself and asks you after that. If you take over, you become the implementer and the run continues through testing and review.
+
+The run stays in `merge_requests_open` while the MRs are open. Master Chief polls `ark merge-request status`. When ci fails, a human comments, or an MR has a conflict, it starts the run lead again, and the run lead runs an MR round: a fix, `ark test <run>`, and a push to the same branch, until the MR is clean. A change request in a comment starts a round; a question gets a reply and a note gets nothing. You resolve the comment threads and merge. `scripts/auto-merger.sh` can still merge a CLEAN MR while an MR round is open, so tell Master Chief to hold it if you want the round to finish first.
 
 A run closes with one outcome: merged, abandoned, aborted, or handed off. The [glossary](../../CONTEXT.md) defines each term.
 
