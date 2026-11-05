@@ -888,4 +888,49 @@ describe("ark retro models and vendors", () => {
     runRetro();
     expect(readMetrics().same_vendor_review).toBe(false);
   });
+
+  /** The review step runs in repos/platform. Its main session ran `main`; `sub` adds a sub-session on another model. */
+  function reviewOnModels(main: string, sub?: string): void {
+    reviewInPlatform();
+    const text = (model: string) =>
+      readFileSync(join(fixtures, "omp", "review.jsonl"), "utf8")
+        .replaceAll("__RUN__", runDirectory)
+        .replaceAll("/workspace/repos/shared", "/workspace/repos/platform")
+        .replaceAll('"model":"claude-opus-5-5"', `"model":"${model}"`);
+    writeFileSync(join(ompRoot, "platform", "session-review.jsonl"), text(main));
+    if (sub) {
+      mkdirSync(join(ompRoot, "platform", "session-review"), { recursive: true });
+      writeFileSync(join(ompRoot, "platform", "session-review", "Helper.jsonl"), text(sub));
+    }
+    writePlan([
+      ["build", "implementer", "repos/platform", "claude-haiku-4-5"],
+      ["review", "reviewer", "repos/platform", main],
+    ]);
+  }
+
+  test("ARK-310-AC3 same vendor review is true when every model of the review step shares the implementer vendor", () => {
+    reviewOnModels("claude-opus-5-5", "claude-sonnet-5");
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(true);
+    expect(out).toContain("same vendor review: true (review with build in repos/platform)");
+    expect(out).not.toContain("mixed");
+  });
+
+  test("ARK-310-AC3 same vendor review is false and nothing is mixed when the review step ran on another vendor", () => {
+    reviewOnModels("gpt-6.1-sol");
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(out).toContain("same vendor review: false");
+    expect(out).not.toContain("mixed");
+  });
+
+  test("ARK-310-AC3 a review step with a codex model and an anthropic sub-session is mixed, not same vendor", () => {
+    reviewOnModels("gpt-6.1-sol", "claude-opus-5-5");
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(out).toContain("same vendor review: false");
+    const mixedLine = out.split("\n").find((line) => line.includes("mixed"));
+    expect(mixedLine).toBeDefined();
+    expect(mixedLine).toContain("review");
+  });
 });
