@@ -50,7 +50,7 @@ export type RepoLedger = {
   head: string;
   /** `git diff --shortstat` text, or `unknown` when the base cannot be read. */
   shortstat: string;
-  commits: { sha: string; subject: string }[];
+  commits: { sha: string; subject: string; message: string }[];
   files: { path: string; status: string }[];
   /** `Depends on #N` or `Depends on !N` lines for the upstream repos whose MR is open. */
   dependsOn: string[];
@@ -104,6 +104,8 @@ export type Ledger = {
   /** Findings no later review closed with `No findings.` or a `send back` decision. */
   findings: Finding[];
   hasReviewerStep: boolean;
+  /** Each `checks` entry of `ark.yml` with the outcome of the last `test.completed`; `not run` when that event has no result for it. */
+  checks: { name: string; state: "passed" | "failed" | "not run" }[];
   /** The block of the latest findings file; `null` when the file has none, or there is no file. */
   reviewer: ReviewerBlock | null;
   mergeOrder: string[];
@@ -113,7 +115,15 @@ export type Ledger = {
   template: { path: string; text: string } | null;
   risk: RiskScore;
   prWriting: PrWriting;
-  run: { id: string; directory: string; project: string } | null;
+  run: {
+    id: string;
+    directory: string;
+    project: string;
+    /** Time of the first and the last event. */
+    startedAt: string;
+    endedAt: string;
+    rounds: number;
+  } | null;
 };
 
 export type LedgerSource =
@@ -437,11 +447,15 @@ function repoLedger(
       dependsOn,
     };
   const commits = (
-    capture(["git", "log", "--format=%H%x09%s", `${baseSha}..HEAD`], directory) ?? ""
+    capture(["git", "log", "--format=%H%x1f%B%x1e", `${baseSha}..HEAD`], directory) ?? ""
   )
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => ({ sha: line.split("\t")[0], subject: line.split("\t").slice(1).join("\t") }));
+    .split("\x1e")
+    .map((record) => record.trim())
+    .filter((record) => record !== "")
+    .map((record) => {
+      const [sha, message] = record.split("\x1f");
+      return { sha, subject: message.split("\n")[0], message: message.trim() };
+    });
   const files = (capture(["git", "diff", "--name-status", `${baseRef}...HEAD`], directory) ?? "")
     .split("\n")
     .filter((line) => line !== "")
@@ -548,6 +562,7 @@ function gitLedger(source: { directory: string; base?: string; prWriting?: PrWri
     evidence: null,
     findings: [],
     hasReviewerStep: false,
+    checks: [],
     reviewer: null,
     mergeOrder: ["."],
     repos: [repo],
@@ -650,11 +665,23 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
       entry.text,
     ]),
   );
-  const prWriting =
-    source.prWriting ??
-    (existsSync(join(projectDirectory(state.project), "ark.yml"))
-      ? loadConfig(state.project).pr_writing
-      : defaultPrWriting);
+  const hasConfig = existsSync(join(projectDirectory(state.project), "ark.yml"));
+  const config = hasConfig ? loadConfig(state.project) : null;
+  const prWriting = source.prWriting ?? config?.pr_writing ?? defaultPrWriting;
+  const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
+  const recordedChecks = (lastTest?.data.checks ?? []) as { name: string; passed: boolean }[];
+  const checks = (config?.checks ?? []).map((check) => {
+    const recorded = recordedChecks.find((entry) => entry.name === check.name);
+    return {
+      name: check.name,
+      state:
+        recorded === undefined
+          ? ("not run" as const)
+          : recorded.passed
+            ? ("passed" as const)
+            : ("failed" as const),
+    };
+  });
 
   const planFile = join(directory, "plan.yml");
   const plan = existsSync(planFile) ? loadPlan(directory, state.ticket.id) : null;
@@ -776,6 +803,7 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
     evidence,
     findings: openFindings(findingsFiles),
     hasReviewerStep: (plan?.steps ?? []).some((step) => step.role === "reviewer"),
+    checks,
     reviewer,
     mergeOrder: order,
     repos,
@@ -784,7 +812,14 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
       worktrees[0] && existsSync(worktrees[0].path) ? findTemplate(worktrees[0].path) : null,
     risk: scoreRisk(files, ledgerCriteria, planWithWhere, reviewer, prWriting),
     prWriting,
-    run: { id: state.run, directory, project: state.project },
+    run: {
+      id: state.run,
+      directory,
+      project: state.project,
+      startedAt: events[0]?.time ?? "",
+      endedAt: events.at(-1)?.time ?? "",
+      rounds: state.round,
+    },
   };
 }
 

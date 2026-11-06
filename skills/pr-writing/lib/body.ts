@@ -1,0 +1,430 @@
+/**
+ * `buildBody(ledger)` writes the MR body from the ledger. Section order: provenance and dependency lines,
+ * problem, what is different, evidence, how to verify, Not done, risk and revert, acceptance criteria.
+ * It never pastes an AC text. All generated text sits between the two markers; `post.ts` replaces only that.
+ */
+import type { Ledger, Rating } from "./ledger.ts";
+import { gapsOf, shortId, tierOfLedger } from "./lint.ts";
+
+export const beginMarker = "<!-- pr-writing:begin -->";
+export const endMarker = "<!-- pr-writing:end -->";
+
+type Key = "problem" | "different" | "evidence" | "verify" | "notdone" | "risk" | "acs";
+type Block = { key: Key; title: string; lines: string[] };
+
+const ratingOf = (score: number): Rating => (["good", "decent", "poor"] as const)[score - 1];
+
+/** `> Written by an AI agent on behalf of @handle, ...` : the strategy gate beats the criteria gate. */
+export function provenanceLine(ledger: Ledger): string {
+  const handle = ledger.tokenOwner;
+  const shape = ledger.humanGates.includes("strategy")
+    ? ", who shaped the solution."
+    : ledger.humanGates.includes("criteria")
+      ? ", following their spec."
+      : ".";
+  return `> Written by an AI agent on behalf of @${handle}${shape} @${handle} has not reviewed it yet.`;
+}
+
+function duration(startedAt: string, endedAt: string): string | null {
+  const minutes = Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 0) return null;
+  return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+}
+
+function introLines(ledger: Ledger, tier: number): string[] {
+  const facts = [`Refs: ${ledger.trackerRefs.join(", ") || "none"}.`];
+  const took = ledger.run && duration(ledger.run.startedAt, ledger.run.endedAt);
+  if (tier > 0 && ledger.run && took)
+    facts.push(
+      `Run took ${took}, ${ledger.run.rounds} round${ledger.run.rounds === 1 ? "" : "s"}.`,
+    );
+  if (tier > 0)
+    for (const repo of ledger.repos)
+      if (repo.shortstat !== "unknown") facts.push(`${repo.shortstat.trim()}.`);
+  const dependencies = [
+    ...new Set(
+      ledger.repos.flatMap((repo) =>
+        repo.dependsOn.map((line) => line.replace(/^Depends on\s+/i, "")),
+      ),
+    ),
+  ];
+  return [
+    facts.join(" "),
+    ...(dependencies.length > 0 ? [`Depends on ${dependencies.join(", ")}.`] : []),
+    ...(ledger.mergeOrder.length > 1 ? [`Merge order: ${ledger.mergeOrder.join(", then ")}.`] : []),
+  ];
+}
+
+/** The first paragraph of text, on one line, cut at a sentence end when it is long. */
+function firstParagraph(text: string, limit = 500): string {
+  const paragraph = (text.trim().split(/\n\s*\n/)[0] ?? "").replace(/\s+/g, " ").trim();
+  if (paragraph.length <= limit) return paragraph;
+  const cut = paragraph.slice(0, limit);
+  const end = cut.lastIndexOf(". ");
+  return end > 0 ? cut.slice(0, end + 1) : `${cut.trimEnd()}...`;
+}
+
+function problemBlock(ledger: Ledger): Block {
+  const commit = ledger.repos[0]?.commits.at(-1);
+  const text =
+    ledger.ticket?.problem ||
+    ledger.plan?.why ||
+    (commit && commit.message.split("\n").slice(1).join("\n").trim()) ||
+    commit?.subject ||
+    "";
+  return {
+    key: "problem",
+    title: "Problem",
+    lines: [firstParagraph(text) || "No problem text in the ticket or the plan."],
+  };
+}
+
+function differentBlock(ledger: Ledger): Block {
+  const items = (ledger.ticket?.change ?? "")
+    .split("\n")
+    .map((line) => line.match(/^\s*(?:\d+\.|[-*])\s+(.*)$/)?.[1])
+    .filter((item): item is string => item !== undefined)
+    .map((item) =>
+      item
+        .replace(/\s+/g, " ")
+        .match(/^.*?(?:\.(?=\s)|$)/)![0]
+        .slice(0, 180),
+    );
+  const subjects = ledger.repos.flatMap((repo) => repo.commits.map((commit) => commit.subject));
+  const lines = (items.length > 0 ? items : subjects).slice(0, 6).map((item) => `- ${item}`);
+  return {
+    key: "different",
+    title: "What is different",
+    lines: lines.length > 0 ? lines : ["- No change text and no commits."],
+  };
+}
+
+const shortSha = (sha: string) => sha.slice(0, 7);
+
+/** One screenshot for each flow (`login-1.png` and `login-2.png` are the flow `login`), head first, five at most. */
+function screenshotFlows(ledger: Ledger): { shown: string[]; total: number } {
+  const paths = (ledger.evidence ?? []).flatMap((entry) => entry.screenshots);
+  const sorted = [...paths].sort(
+    (a, b) => Number(a.includes("/base/")) - Number(b.includes("/base/")) || a.localeCompare(b),
+  );
+  const flows = new Map<string, string>();
+  for (const path of sorted) {
+    const flow = path
+      .split("/")
+      .at(-1)!
+      .replace(/\.[^.]+$/, "")
+      .replace(/[-_]\d+$/, "");
+    if (!flows.has(flow)) flows.set(flow, path);
+  }
+  const shown = [...flows.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, path]) => path);
+  return { shown: shown.slice(0, 5), total: paths.length };
+}
+
+function evidenceBlock(ledger: Ledger): Block {
+  const kind = ledger.ticket?.kind;
+  const lines = (ledger.evidence ?? []).map(
+    (entry) =>
+      `- \`${entry.testCase}\`: base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`,
+  );
+  if (kind === "perf")
+    lines.push(
+      "- Perf: `results/baseline.md` and `results/compare.md` in the run folder, not uploaded.",
+    );
+  if (ledger.evidence === null && kind !== "perf")
+    lines.push("- No base and head evidence recorded: the run has no `results/evidence/`.");
+  const { shown, total } = screenshotFlows(ledger);
+  if (shown.length > 0)
+    lines.push(
+      `- Screenshots, ${shown.length} flows of ${total} files, kept in the run folder and not uploaded: ${shown.map((path) => `\`${path}\``).join(", ")}`,
+    );
+  return { key: "evidence", title: "Evidence", lines };
+}
+
+function verifyBlock(ledger: Ledger): Block {
+  const head = shortSha(ledger.repos[0]?.head ?? "");
+  const lines: string[] = [];
+  if (ledger.run) {
+    const checks = ledger.checks.map((check) => check.name);
+    lines.push(
+      `- [ ] \`ark test ${ledger.run.id}\`. Expect: every AC passing at head ${head}${checks.length > 0 ? ` and the checks ${checks.join(", ")} passing` : ""}.`,
+    );
+    if (ledger.ticket?.kind === "perf")
+      lines.push(
+        "- [ ] `cat results/compare.md`. Expect: no result slower than `results/baseline.md`.",
+      );
+  } else
+    for (const repo of ledger.repos)
+      lines.push(`- [ ] \`git diff ${repo.base}...HEAD --stat\`. Expect: ${repo.shortstat}.`);
+  return { key: "verify", title: "How to verify", lines };
+}
+
+function notDoneBlock(ledger: Ledger): Block {
+  const gaps = gapsOf(ledger);
+  return {
+    key: "notdone",
+    title: "Not done",
+    lines: gaps.length > 0 ? gaps.map((gap) => `- ${gap.text}.`) : ["- Nothing open."],
+  };
+}
+
+function riskBlock(ledger: Ledger, tier: number): Block {
+  const { risk, reviewer } = ledger;
+  const caller = (ledger.plan?.interfaces ?? [])
+    .filter((entry) => entry.callers.length > 0)
+    .map((entry) => entry.name.split(" (")[0]);
+  const unproven = ledger.criteria.filter(
+    (criterion) => criterion.status !== "passing" && criterion.status !== "manual ok",
+  );
+  const unevidenced = ledger.criteria.filter(
+    (criterion) => criterion.evidenced === false && !unproven.includes(criterion),
+  );
+  const gap = (items: string[], none: string) => {
+    const text = items.length > 0 ? items.join("; ") : none;
+    return text[0].toUpperCase() + text.slice(1);
+  };
+  const rows: [string, number, string, Rating | undefined][] = [
+    [
+      "Verification",
+      risk.verification,
+      gap(
+        [
+          ...[...new Set(unproven.map((criterion) => criterion.status))].map(
+            (status) =>
+              `${unproven
+                .filter((criterion) => criterion.status === status)
+                .map((criterion) => shortId(criterion.id))
+                .join(" ")} ${status}`,
+          ),
+          ...(unevidenced.length > 0
+            ? [
+                `${unevidenced.map((criterion) => shortId(criterion.id)).join(" ")} have no evidence`,
+              ]
+            : []),
+        ],
+        "all ACs pass with evidence",
+      ),
+      reviewer?.ratings.Verification,
+    ],
+    [
+      "Alignment",
+      risk.alignment,
+      gap(
+        risk.unplanned.length > 0
+          ? [`${risk.unplanned.length} source file(s) outside the plan`]
+          : [],
+        "every changed file is in the plan",
+      ),
+      reviewer?.ratings.Alignment,
+    ],
+    [
+      "Impact",
+      risk.impact,
+      gap(
+        [
+          ...(risk.sensitiveHits.length > 0
+            ? [`touches ${risk.sensitiveHits.map((path) => `\`${path}\``).join(", ")}`]
+            : []),
+          ...(caller.length > 0 ? [`callers of ${caller.join(", ")}`] : []),
+        ],
+        "no sensitive path and no interface callers",
+      ),
+      reviewer?.ratings.Impact,
+    ],
+    [
+      "Rollback cost",
+      risk.rollback,
+      gap(
+        [
+          ...(risk.oneWayHits.length > 0
+            ? [`one-way path ${risk.oneWayHits.map((path) => `\`${path}\``).join(", ")}`]
+            : []),
+          ...(risk.deleted.length > 0
+            ? [`deleted ${risk.deleted.map((path) => `\`${path}\``).join(", ")}`]
+            : []),
+        ],
+        "no one-way path and no deleted file",
+      ),
+      reviewer?.ratings["Rollback cost"],
+    ],
+  ];
+  const differs = risk.reviewer !== null && risk.reviewer !== risk.script;
+  const scores = `${risk.verification}/${risk.alignment}/${risk.impact}/${risk.rollback}`;
+  const why = differs
+    ? ` The levels differ: the script scored Verification, Alignment, Impact and Rollback cost ${scores} from run data, the reviewer rated them ${["Verification", "Alignment", "Impact", "Rollback cost"].map((name) => reviewer?.ratings[name as "Verification"] ?? "?").join(", ")}. The higher level is shown.`
+    : "";
+  const oneWay = risk.door === "one-way" || reviewer?.door === "one-way";
+  const recovery = reviewer?.recovery.trim() || "none named";
+  const unplanned = new Map(risk.unplanned.map((entry) => [entry.file, entry.reason]));
+  const door = oneWay ? `Door: one-way. Recovery: ${recovery}` : "Door: two-way";
+  const blast = `Blast radius: ${reviewer?.blastRadius || `${ledger.repos.reduce((sum, repo) => sum + repo.files.length, 0)} changed files in ${ledger.repos.length} repo(s)`}`;
+  const compact = tier === 0;
+  const lines = [
+    `Merge risk: ${risk.level} (script ${risk.script}, reviewer ${risk.reviewer ?? "none"}).${why}`,
+    "",
+    ...rows.map(
+      ([name, score, gaps, rated]) =>
+        `- ${name}: ${ratingOf(score)}${rated && rated !== ratingOf(score) ? ` (reviewer: ${rated})` : ""}. ${gaps}.`,
+    ),
+    "",
+    ...(compact ? [`- ${door}.`, `- ${blast}.`] : [`${door}`, "", `${blast}`]),
+    "",
+    ...(unplanned.size === 0
+      ? [compact ? "- Also changed, not in plan: none." : "Also changed, not in plan: none."]
+      : compact
+        ? [
+            `- Also changed, not in plan: ${[...unplanned].map(([file, reason]) => `\`${file}\`: ${reason}`).join("; ")}`,
+          ]
+        : [
+            "Also changed, not in plan:",
+            "",
+            ...[...unplanned].map(([file, reason]) => `- \`${file}\`: ${reason}`),
+          ]),
+  ];
+  const migration = ledger.repos
+    .flatMap((repo) => repo.files)
+    .filter((file) => /(^|\/)(migrations?|migrate)\/|\.sql$/i.test(file.path));
+  if (migration.length > 0)
+    lines.push(
+      "",
+      `Migration files changed (${migration.map((file) => `\`${file.path}\``).join(", ")}). Migration rollback: revert the merge, then undo the migration by hand; no down script is recorded.`,
+    );
+  const ci = ledger.repos
+    .flatMap((repo) => repo.files)
+    .filter((file) =>
+      /^\.github\/workflows\/|^\.gitlab-ci\.ya?ml$|(^|\/)\.circleci\/|(^|\/)Jenkinsfile$/.test(
+        file.path,
+      ),
+    );
+  if (ci.length > 0)
+    lines.push(
+      "",
+      `CI files changed (${ci.map((file) => `\`${file.path}\``).join(", ")}): the pipeline on this MR runs the new definition.`,
+    );
+  const only = ledger.mergeOrder.length < 2;
+  lines.push(
+    "",
+    "```text",
+    "# Revert, newest merge first",
+    ...[...ledger.mergeOrder]
+      .reverse()
+      .map((repo) => `git revert -m 1 <merge sha of the MR for ${only ? "this repo" : repo}>`),
+    "```",
+  );
+  return { key: "risk", title: "Risk and revert", lines };
+}
+
+function acsBlock(ledger: Ledger): Block {
+  const byStatus = new Map<string, string[]>();
+  for (const criterion of ledger.criteria) {
+    const status = criterion.status === "passing" ? "tested" : criterion.status;
+    byStatus.set(status, [...(byStatus.get(status) ?? []), shortId(criterion.id)]);
+  }
+  return {
+    key: "acs",
+    title: "Acceptance criteria",
+    lines: [...byStatus].map(
+      ([status, ids]) =>
+        `- [${status === "tested" || status === "manual ok" ? "x" : " "}] ${ids.join(" ")} ${status}`,
+    ),
+  };
+}
+
+// --- template ---------------------------------------------------------------------------------
+
+type Heading = { level: number; text: string };
+
+/** Headings of a repo template, or of the template inside a fence in a rule file; bold bullets when it has none. */
+function templateHeadings(text: string): Heading[] {
+  const read = (source: string): Heading[] =>
+    [...source.matchAll(/^(#{1,6})\s+(.+?)\s*#*\s*$/gm)].map((match) => ({
+      level: match[1].length,
+      text: match[2].replace(/:$/, ""),
+    }));
+  const fenced = [...text.matchAll(/^```[^\n]*\n([\s\S]*?)^```/gm)]
+    .map((match) => read(match[1]))
+    .find((found) => found.length > 1);
+  let headings = fenced ?? read(text);
+  const shallowest = Math.min(...headings.map((heading) => heading.level));
+  if (
+    !fenced &&
+    headings.length > 1 &&
+    headings.filter((heading) => heading.level === shallowest).length === 1
+  )
+    headings = headings.filter((heading) => heading.level !== shallowest);
+  if (headings.length === 0)
+    headings = [...text.matchAll(/^\s*[-*]\s+\*\*(.+?)\*\*/gm)].map((match) => ({
+      level: 2,
+      text: match[1].replace(/:$/, ""),
+    }));
+  return headings;
+}
+
+const headingRules: Record<Key, RegExp> = {
+  problem: /summary|overview|description|problem|why|context|purpose|motivation/i,
+  different: /change|different|solution|approach|what/i,
+  evidence: /test|verif|evidence|validation|qa/i,
+  verify: /test|verif|evidence|validation|qa/i,
+  notdone: /test|verif|evidence|validation|qa/i,
+  risk: /related|link|ticket|issue|depend|risk|rollout|deploy|revert/i,
+  acs: /related|link|ticket|issue|depend|risk|rollout|deploy|revert/i,
+};
+
+function renderBlocks(blocks: Block[], template: Heading[] | null, bare: boolean): string[] {
+  if (template === null || template.length === 0) {
+    const title = (block: Block) => (bare ? `**${block.title}**` : `## ${block.title}`);
+    return blocks.flatMap((block) => ["", title(block), "", ...block.lines]);
+  }
+  // A key goes under the first template heading that fits; `different` shares the problem's heading when none fits.
+  const placed = new Map<Heading, Block[]>();
+  const loose: Block[] = [];
+  for (const block of blocks) {
+    const heading =
+      template.find((candidate) => headingRules[block.key].test(candidate.text)) ??
+      (block.key === "different"
+        ? template.find((candidate) => headingRules.problem.test(candidate.text))
+        : undefined);
+    if (heading) placed.set(heading, [...(placed.get(heading) ?? []), block]);
+    else loose.push(block);
+  }
+  const lines: string[] = [];
+  for (const heading of template) {
+    const owned = placed.get(heading);
+    if (!owned) continue;
+    lines.push("", `${"#".repeat(heading.level)} ${heading.text}`);
+    owned.forEach((block, i) =>
+      lines.push(
+        "",
+        ...(i === 0 && (block.key === "problem" || block.key === "different")
+          ? []
+          : [`### ${block.title}`, ""]),
+        ...block.lines,
+      ),
+    );
+  }
+  for (const block of loose) lines.push("", `## ${block.title}`, "", ...block.lines);
+  return lines;
+}
+
+export function buildBody(ledger: Ledger): string {
+  const { tier } = tierOfLedger(ledger);
+  const blocks: Block[] = [problemBlock(ledger), differentBlock(ledger)];
+  if (ledger.source === "run") blocks.push(evidenceBlock(ledger));
+  blocks.push(verifyBlock(ledger), notDoneBlock(ledger), riskBlock(ledger, tier));
+  if (ledger.ticket) blocks.push(acsBlock(ledger));
+  const intro = [
+    ...(ledger.prWriting.agent_authored ? [provenanceLine(ledger), ""] : []),
+    ...introLines(ledger, tier).flatMap((line) => [line, ""]),
+  ];
+  const body = [
+    beginMarker,
+    ...intro,
+    ...renderBlocks(
+      blocks,
+      ledger.template ? templateHeadings(ledger.template.text) : null,
+      tier === 0,
+    ),
+    "",
+    endMarker,
+  ];
+  return `${body.join("\n").replace(/\n{3,}/g, "\n\n")}\n`;
+}
