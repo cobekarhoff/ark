@@ -390,6 +390,33 @@ test("ARK-152-AC2 ARK_PROJECT limits the status config check to one project", ()
     delete process.env.ARK_PROJECT;
   }
 });
+
+test("ARK-T16 ARK-321/AC1 ark status skips a project folder that holds no run", () => {
+  const home = tempArkHome();
+  writeProject("good", validConfig());
+  mkdirSync(join(home, "projects/empty-runs/runs"), { recursive: true });
+  mkdirSync(join(home, "projects/no-runs"), { recursive: true });
+  mkdirSync(join(home, "projects/stray-file/runs"), { recursive: true });
+  writeFileSync(join(home, "projects/stray-file/runs/notes.txt"), "stray\n");
+
+  const result = ark("status");
+  expect(result.code).toBe(0);
+  expect(result.out + result.err).not.toContain("has no ark.yml");
+  expect(result.out + result.err).not.toContain("config(s) invalid");
+  for (const name of ["empty-runs", "no-runs", "stray-file"]) {
+    expect(result.out + result.err).not.toContain(name);
+  }
+});
+
+test("ARK-T17 ARK-321/AC2 ark status reports a folder with a run and no ark.yml", () => {
+  const home = tempArkHome();
+  mkdirSync(join(home, "projects/orphan/runs/2026-01-01-X-1"), { recursive: true });
+
+  const result = ark("status");
+  expect(result.code).toBe(1);
+  expect(result.out + result.err).toContain("project orphan has no ark.yml");
+  expect(result.err).toContain("project config(s) invalid");
+});
 test("ARK-164-AC2 status accepts --project for config checks and run state", () => {
   writeProject("broken", validConfig({ ticket_source: "trello" }));
 
