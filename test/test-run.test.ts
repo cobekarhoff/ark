@@ -247,7 +247,7 @@ describe("ark test", () => {
     expect(testCompleted(runDirectory)[0].criteria).toEqual({ "FAKE-1/AC1": "passing" });
   });
 
-  test("ARK-154-AC3 runs compose up on the mirror before the suites and compose down afterwards, even when a suite fails", () => {
+  test("ARK-T11 ark test runs compose up and down on the mirror and again for the base run", () => {
     const { runId, runDirectory, arkHome } = buildingRun({
       criteria: ["FAKE-1-AC1"],
       e2e: [failing("FAKE-1-AC1 breaks")],
@@ -266,6 +266,10 @@ describe("ark test", () => {
     expect(readFileSync(composeLog, "utf8").trim().split("\n")).toEqual([
       `--project-directory ${mirror} -p ${runId.toLowerCase()} up -d --wait`,
       `--project-directory ${mirror} -p ${runId.toLowerCase()} down`,
+      expect.stringMatching(
+        new RegExp(`ark-base-\\w+ -p ${runId.toLowerCase()}-base up -d --wait$`),
+      ),
+      expect.stringMatching(new RegExp(`ark-base-\\w+ -p ${runId.toLowerCase()}-base down$`)),
     ]);
   });
 });
@@ -421,7 +425,7 @@ describe("ark test on a refactor run", () => {
     Bun.spawnSync(["git", "-C", mirror, "commit", "-q", "-m", "fix"]);
   };
 
-  test("ARK-302-AC7 a base that fails records base_passed false once per run and merge-request open refuses", () => {
+  test("ARK-T12 a refactor run whose base fails exits 1, reruns the base on each ark test and merge-request open refuses", () => {
     const { runId, runDirectory } = buildingRun({
       kind: "refactor",
       criteria: ["FAKE-1-AC1"],
@@ -430,7 +434,7 @@ describe("ark test on a refactor run", () => {
     fixHead(runDirectory);
 
     const first = ark("test", runId);
-    expect(first.code).toBe(0);
+    expect(first.code).toBe(1);
     expect(first.out).toContain("base      failed");
     const [event] = testCompleted(runDirectory);
     expect(event.base_passed).toBe(false);
@@ -438,12 +442,12 @@ describe("ark test on a refactor run", () => {
     const baseLog = join(runDirectory, "results/base-e2e.log");
     expect(existsSync(baseLog)).toBe(true);
 
-    // Second run: the base result is kept and the base suites do not run again.
+    // Second run: the base suites run again, so the log is written again.
     rmSync(baseLog);
     const second = ark("test", runId);
-    expect(second.code).toBe(0);
+    expect(second.code).toBe(1);
     expect(testCompleted(runDirectory)[1].base_passed).toBe(false);
-    expect(existsSync(baseLog)).toBe(false);
+    expect(existsSync(baseLog)).toBe(true);
 
     const refused = ark("merge-request", "open", runId);
     expect(refused.code).toBe(1);

@@ -32,7 +32,36 @@ checks:
 - A string that starts with `not:` is a removed string. The text after `not:` must be in no tracked file of any repo at HEAD and name no tracked file or folder there, else the command refuses with `AC string still in a tracked file at head:`, the AC and the string without the prefix. `not:` alone is no string. `git grep -F` matches a substring, so a stale path inside a longer path that stays is still found: write that one outside backticks, as you do a string that the run rewrites or that only describes the old state.
 - Fix the text of an AC of a run with `ark criteria amend`.
 - `ark run close <run> handed_off` applies the same refusals, and those of the `kind` rules below, before it appends `run.closed` or removes a worktree. On a refusal run `ark test <run>` again or `ark criteria amend`.
-- A ticket may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`). `bug`: `ark run step <run> <implementer step> start` refuses until a failing `ark test` of every AC exists. `perf`: `results/baseline.md` and `results/compare.md` must exist and not be empty. `refactor`: `ark test` runs the suites at the base commit once and records `base_passed`.
+- A ticket may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`). `bug`: `ark run step <run> <implementer step> start` refuses until a failing `ark test` of every AC exists. `perf`: `results/baseline.md` and `results/compare.md` must exist and not be empty. `refactor`: the suites must pass at the base commit. `ark test` runs them there on every run, records `base_passed` and exits 1 when they fail.
+- Both commands also refuse missing, malformed or stale evidence. See Evidence below.
+
+## Evidence
+
+`ark test <run>` runs the suites twice, on every run and for every `kind`: at head on the run's workspace, and at base on a throwaway checkout of each touched repo at its `worktree.created` commit. Before the base run it copies the head's version of each file that the diff adds or changes under a `test`, `tests` or `features` folder, at any depth, into the base checkout, so a new test meets the base build. A deleted file stays at base, and production files are never copied. A failure at base is data: a new test fails there, and `ark test` still exits 0. A failure at head fails `ark test`. A `refactor` run also needs its suites to pass at base. The base run is never reused.
+
+The base logs stay in `<run folder>/results/base-<suite>.log`. The evidence goes to the run folder:
+
+```text
+results/evidence/<test case id>/base/result.json
+results/evidence/<test case id>/base/command.log
+results/evidence/<test case id>/base/screenshots/<checkpoint name>.png
+results/evidence/<test case id>/head/...
+results/evidence/<AC id>.md
+```
+
+- `result.json` holds `case`, `name` (the JUnit name), `status` (`passed`, `failed` or `skipped`) and `sha`, the commit of the checkout that ran. A case that the head run reports and the base run does not, for example when the new test file crashes at base, gets a `failed` base `result.json`. `ark test` removes the folder of a case that no longer appears.
+- `command.log` has the suite command on its first line, then the whole output of the suite for that checkout, and `exit <code>` on its last line. Every case of one suite shares the same `command.log`.
+- `ARK_EVIDENCE_DIR` is set for each suite run to a scratch folder. In a Playwright test, `checkpoint(page, "<name>")` from `test/pw/helpers.ts` writes `screenshots/<name>.png` under it, under a subfolder keyed by the first test case id in the test's title. Call it before the assertion of that step, so the screenshot exists when the assertion fails at base. It writes nothing when the variable is not set. `ark test` moves the screenshots to the `screenshots/` folder of each case in the title and drops the screenshots of a test with no case id. The setting `screenshot: "only-on-failure"` in `playwright.config.ts` is separate and stays.
+- A non-test AC (`demonstration`, `inspection` or `analysis`; an old `manual: true` AC reads as `demonstration`) has one file `results/evidence/<AC id>.md`, where `<AC id>` is the local id such as `AC6`:
+  - `demonstration`: the sections What the human did, What the human saw, Before and After (each with a screenshot path, checked for shape, not for existence), and the last line `human: ok`. `ark gate record <run> manual <AC id> ok` appends that line once; a `problem` answer appends nothing, and the other methods keep their file as written.
+  - `inspection`: the sections Files (each `path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`.
+  - `analysis`: the sections Command, Output, Threshold and Result, each given for Base and for Head.
+- `ark merge-request open` and `ark run close <run> handed_off` check the evidence last, before any push and before any event, and name every AC and case that fails, after `refused: evidence is not complete`:
+  - `evidence missing: <AC id> (<method>)` when a non-test AC has no file.
+  - `evidence malformed: <AC id>: <reason>` when the file lacks a section of its method or a required value, and the reason names it.
+  - `test evidence missing: <AC id> <test case id> (<base|head>)` when a case in the `verified_by` of a `test` AC has no `base/` or no `head/` folder.
+  - `test evidence stale: <AC id> <test case id>` when the `sha` in its `head` `result.json` is not the current head of a repo of the run. Run `ark test <run>` again after the last commit.
+  - An AC with no `verified_by` needs no test evidence.
 
 ## Literals
 

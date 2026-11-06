@@ -1,8 +1,8 @@
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
-import { manualCriteria, parseCriteria } from "./criteria.ts";
+import { evidenceFile, manualCriteria, parseCriteria, runCriteria } from "./criteria.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 
@@ -93,6 +93,17 @@ export function gateRecord(
     by: "human",
     ...(note === undefined ? {} : { note }),
   });
+  // A demonstration file ends with the human's `human: ok`, once. The other methods' files are the reviewer's or a command's.
+  if (criterion !== undefined && answer === "ok") {
+    const file = evidenceFile(directory, criterion);
+    const method = runCriteria(directory).find((entry) => entry.id === criterion)?.method;
+    if (method === "demonstration" && existsSync(file)) {
+      const kept = readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => line.trim() !== "human: ok");
+      writeFileSync(file, `${kept.join("\n").trimEnd()}\n\nhuman: ok\n`);
+    }
+  }
   console.log(`recorded ${gate} ${answer}`);
 }
 

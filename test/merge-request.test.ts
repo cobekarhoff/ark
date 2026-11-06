@@ -18,6 +18,7 @@ import {
   tempArkHome,
   tempGitRepo,
   writeProject,
+  writeEvidenceFile,
   writeTicket,
 } from "./helpers";
 
@@ -97,6 +98,7 @@ function scenario(
   const runDirectory = join(projectDirectory, "runs", run);
   mkdirSync(runDirectory, { recursive: true });
   copyFileSync(ticketFile, join(runDirectory, "ticket.md"));
+  for (const id of manual) writeEvidenceFile(runDirectory, id);
 
   const step = (id: string, repo: string, needs: string[], criteria: string[]) => ({
     id,

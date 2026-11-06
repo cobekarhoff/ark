@@ -76,7 +76,7 @@ If `ark.yml` sets `gates.escalation: auto`, Ark answers `one_more_round` for you
 
 After you approve the plan, the run lead creates the run's worktrees with `ark worktree create`. Workers then build the change: an implementer writes the code, a validator writes the tests that prove each AC, and a reviewer looks for defects.
 
-The run lead runs `ark test` on the composed workspace. A criterion is proven only when its tagged integration or E2E test passes, or, with `manual: true`, when you answer the `manual` gate `ok`. The run lead decides which review findings send work back to the implementer, and it says why. It opens the MRs only when the tests pass at the latest commit.
+The run lead runs `ark test` on the composed workspace. A criterion is proven only when its tagged integration or E2E test passes, or, with `manual: true`, when you answer the `manual` gate `ok`. `ark test` also runs the suites at the base commit, so each test case has a before and an after in `results/evidence/`, and a non-test AC needs its evidence file there (see `docs/how-to/project-checks.md`). The run lead decides which review findings send work back to the implementer, and it says why. It opens the MRs only when the tests pass at the latest commit.
 
 You do not need to do anything in this phase except answer gates.
 
@@ -101,7 +101,7 @@ Master Chief checks the state of each PR with `gh` or `glab`, and then closes th
 | You took the branches and want no PRs     | `handed_off` |
 | You stopped the run before any PR existed | `aborted`    |
 
-With `handed_off`, `ark run close` first applies the refusals of `ark merge-request open`: a non-manual AC not `passing`, a manual AC with no ok, a repo head changed since the last test, a counted AC string in no tracked file or a `not:` string still in one (see `docs/how-to/project-checks.md`), and the `perf` and `refactor` rules. It refuses with exit 1, appends no event and removes nothing; run `ark test <run>` again or `ark criteria amend`. Then each branch that has commits beyond its base stays in its clone, and `ark run close` prints a `kept` line for it. The worktrees are removed. `git -C <repo> log <base>..<branch>` lists the commits; the `kept` line names the branch and the first 8 characters of the base.
+With `handed_off`, `ark run close` first applies the refusals of `ark merge-request open`: a non-manual AC not `passing`, a manual AC with no ok, a repo head changed since the last test, a counted AC string in no tracked file or a `not:` string still in one (see `docs/how-to/project-checks.md`), the `perf` and `refactor` rules, and missing, malformed or stale evidence. It refuses with exit 1, appends no event and removes nothing; run `ark test <run>` again or `ark criteria amend`. Then each branch that has commits beyond its base stays in its clone, and `ark run close` prints a `kept` line for it. The worktrees are removed. `git -C <repo> log <base>..<branch>` lists the commits; the `kept` line names the branch and the first 8 characters of the base.
 
 ## 8. Answer the retro questions
 

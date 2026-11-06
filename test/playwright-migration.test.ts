@@ -69,9 +69,9 @@ describe("playwright migration", () => {
     long,
   );
 
-  test("ARK-243-AC1 bun test discovers no *.pw.ts file", () => {
-    const pw = [...new Bun.Glob("test/pw/*.pw.ts").scanSync({ cwd: root })];
-    expect(pw).toEqual(["test/pw/hub.pw.ts"]);
+  test("ARK-T9 bun test discovers no Playwright spec", () => {
+    const pw = [...new Bun.Glob("test/pw/*.pw.ts").scanSync({ cwd: root })].sort();
+    expect(pw).toEqual(["test/pw/checkpoint.pw.ts", "test/pw/hub.pw.ts"]);
     const result = Bun.spawnSync(["bun", "test", "--dry-run", "test/pw"], {
       cwd: root,
       stdout: "pipe",
@@ -82,7 +82,7 @@ describe("playwright migration", () => {
   });
 
   test(
-    "ARK-243-AC2 every migrated criterion id appears in a Playwright test title",
+    "ARK-T10 every Playwright test title starts with an AC id or a test case id",
     () => {
       const titles = listed().map((t) => t.title);
       for (const id of hubSpecIds)
@@ -90,7 +90,7 @@ describe("playwright migration", () => {
           titles.some((title) => title.startsWith(`${id} `)),
           id,
         ).toBe(true);
-      expect(titles.every((title) => /^ARK-\d+-AC\d+ /.test(title))).toBe(true);
+      expect(titles.every((title) => /^(ARK-\d+-AC\d+|ARK-T\d+) /.test(title))).toBe(true);
     },
     long,
   );

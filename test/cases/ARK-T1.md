@@ -31,8 +31,8 @@ Prove that `ark test` runs every suite at the `worktree.created` base commit for
 6. Run `ark test` for K2 (`bug`) and K3 (`perf`). For each assert exit 0 and the same base assertions of steps 3 to 5.
 7. Run `ark test` for K4 (`refactor`). Assert exit non-zero. Run it a second time after changing `test/new.test.ts` at head so the suites pass at base the second time; assert the second run executed the suites again (suite output carries a fresh run counter written by the suite to a file outside the repo) and its exit code reflects the second result (0), not the first.
 8. Run `ark test` for K5. Assert exit non-zero although base failed as well.
-8a. Run `ark test` for K6 (`bug`), K7 (`perf`) and K8 (`refactor`, suites pass at base, `test/new.test.ts` fails at head). For each assert exit non-zero and that the head suite output shows the failure.
-9. Run `ark test` for K1 twice with `test/new.test.ts` content changed in head between the runs; assert the second run's base checkout holds the second content and the suite run counter increased for K1 as well.
+9. Run `ark test` for K6 (`bug`), K7 (`perf`) and K8 (`refactor`, suites pass at base, `test/new.test.ts` fails at head). For each assert exit non-zero and that the head suite output shows the failure.
+10. Run `ark test` for K1 twice with `test/new.test.ts` content changed in head between the runs; assert the second run's base checkout holds the second content and the suite run counter increased for K1 as well.
 
 ## Expected results
 
