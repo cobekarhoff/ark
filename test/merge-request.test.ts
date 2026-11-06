@@ -1009,3 +1009,95 @@ test(
   },
   { timeout: 30_000 },
 );
+
+const fixedFinding = "Session fallback can present an obsolete model";
+
+/** The run lead's fix of a P0: a later review file that says `No findings.`. */
+function closeFinding(runDirectory: string) {
+  writeFileSync(join(runDirectory, "findings", "review-2.md"), "No findings.\n");
+}
+
+test(
+  "ARK-T24 merge-request open posts a ready MR from the ledger, then updates its body after a fixed P0 and a new head",
+  () => {
+    const { runId, runDirectory, worktree } = testedRun();
+    // The branch needs a commit ahead of its base before it has an MR; ark test then records that head.
+    commit(worktree, "feature");
+    expect(ark("test", runId).code).toBe(0);
+    mkdirSync(join(runDirectory, "findings"), { recursive: true });
+    writeFileSync(join(runDirectory, "findings", "review-1.md"), `### P0: ${fixedFinding}\n`);
+
+    // First open: the plan gate answer is the go-ahead, so there is no --confirmed flag. Before evidence.
+    const first = ark("merge-request", "open", runId);
+    expect(first.code, first.err).toBe(0);
+    const [createCall] = created();
+    expect(createCall.argv).not.toContain("--draft");
+    expect(createCall.argv).not.toContain("--confirmed");
+    const before = createCall.body!;
+    expect(before).toContain(`P0 open: ${fixedFinding}`);
+    expect(JSON.parse(readFileSync(join(runDirectory, "state.json"), "utf8")).phase).toBe(
+      "merge_requests_open",
+    );
+    expect(edited()).toHaveLength(0);
+
+    // The P0 is fixed in a new commit, a later review says `No findings.`, and ark test records the new head.
+    commit(worktree, "fix-p0");
+    closeFinding(runDirectory);
+    expect(ark("test", runId).code).toBe(0);
+    const second = ark("merge-request", "open", runId);
+    expect(second.code, second.err).toBe(0);
+    expect(second.out).not.toContain("already open");
+    expect(created()).toHaveLength(1);
+    const [update] = edited();
+    expect(edited()).toHaveLength(1);
+    const after = update.body!;
+    expect(after).not.toContain(fixedFinding);
+    expect(after).toContain("<!-- pr-writing:begin -->");
+    expect(after).not.toBe(before);
+
+    // No new head: the third run changes nothing.
+    const third = ark("merge-request", "open", runId);
+    expect(third.code, third.err).toBe(0);
+    expect(edited()).toHaveLength(1);
+    expect(created()).toHaveLength(1);
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T24 with two open MRs a new head updates both bodies and drops the fixed P0 from each",
+  () => {
+    const { runDirectory, worktrees } = scenario({ core: "github", app: "github" });
+    mkdirSync(join(runDirectory, "findings"), { recursive: true });
+    writeFileSync(join(runDirectory, "findings", "review-1.md"), `### P0: ${fixedFinding}\n`);
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    expect(created()).toHaveLength(2);
+    for (const call of created()) expect(call.body).toContain(fixedFinding);
+
+    // A new head in each repo, as ark test records it: one test.completed event with the new heads.
+    for (const [name, path] of Object.entries(worktrees))
+      if (name !== "docs") commit(path, `${name}-fix`);
+    closeFinding(runDirectory);
+    const eventsFile = join(runDirectory, "events.ndjson");
+    const events = readFileSync(eventsFile, "utf8").split("\n").filter(Boolean);
+    const lastTest = JSON.parse(events.filter((line) => line.includes('"test.completed"')).at(-1)!);
+    const heads = Object.fromEntries(
+      Object.entries(worktrees).map(([name, path]) => [
+        `repos/${name}`,
+        git(path, "rev-parse", "HEAD"),
+      ]),
+    );
+    writeFileSync(
+      eventsFile,
+      `${events.join("\n")}\n${JSON.stringify({ ...lastTest, seq: events.length + 1, data: { ...lastTest.data, heads } })}\n`,
+    );
+
+    const refreshed = ark("merge-request", "open", run);
+    expect(refreshed.code, refreshed.err).toBe(0);
+    expect(refreshed.out).not.toContain("already open");
+    expect(created()).toHaveLength(2);
+    expect(edited()).toHaveLength(2);
+    for (const call of edited()) expect(call.body).not.toContain(fixedFinding);
+  },
+  { timeout: 60_000 },
+);
