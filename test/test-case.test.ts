@@ -17,6 +17,7 @@ const arkEntry = join(import.meta.dir, "..", "cli", "ark.ts");
 
 describe("ark test-case new", () => {
   test("ARK-311-AC6 eight concurrent processes print eight different consecutive ids and write eight entries", async () => {
+    // Eight `ark test-case new ARK` processes at once in one repo.
     const repo = tempGitRepo();
     // An existing entry sets the floor: the next id is one above the highest, not one above the count.
     mkdirSync(join(repo, "test", "cases"), { recursive: true });
