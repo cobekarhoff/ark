@@ -453,7 +453,7 @@ describe("ark retro", () => {
     expect(readMetrics().rework.findings_sent_back).toBe(0);
   });
 
-  test("ARK-160-AC5 reports rework, plan changes and escaped defects linked to the run", () => {
+  test("ARK-T7 reports rework, plan changes and escaped defects linked to the run", () => {
     writeFileSync(
       join(arkHome, "projects", "demo", "escaped-defects.yml"),
       `- { ticket: ARK-901, run: ${runId}, note: "rounding bug found in production" }\n- { ticket: ARK-777, run: 2026-09-01-ARK-777-1, note: "other run" }\n`,
