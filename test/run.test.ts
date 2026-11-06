@@ -106,7 +106,7 @@ test("ARK-152-AC1 run start creates the run folder, copies the ticket, logs run.
     data: {
       project: "demo",
       ticket: { id: "ARK-900", title: "Demo ticket" },
-      criteria: ["ARK-900-AC1"],
+      criteria: ["ARK-900/AC1"],
       round_budget: 2,
     },
   });
@@ -354,7 +354,7 @@ test("ARK-152-AC6 status without a run lists every open run with phase and curre
   expect(listing.code).toBe(0);
   const lines = listing.out.trim().split("\n");
   expect(lines).toContain(`${first.runId}  building  build  0m`);
-  expect(lines).toContain(`${second.runId}  planning  -  0m`);
+  expect(lines).toContain(`${second.runId}  awaiting_criteria  -  0m`);
   expect(listing.out).not.toContain(closed.runId);
 });
 
@@ -399,7 +399,7 @@ test("ARK-164-AC2 status accepts --project for config checks and run state", () 
   const { runId } = startRun();
   const runStatus = ark("status", runId, "--project", "demo");
   expect(runStatus.code).toBe(0);
-  expect(runStatus.out).toContain("phase: planning");
+  expect(runStatus.out).toContain("phase: awaiting_criteria");
 
   const missingProject = ark("status", "--project", "missing");
   expect(missingProject.code).toBe(1);
@@ -410,7 +410,7 @@ test("ARK-152-AC6 status for one run shows phase, round, waiting gate and cost",
   const { runId } = startRun();
   const result = ark("status", runId);
   expect(result.code).toBe(0);
-  expect(result.out).toContain("phase: planning");
+  expect(result.out).toContain("phase: awaiting_criteria");
   expect(result.out).toContain("round: 1/2");
   expect(result.out).toContain("cost:");
 });
@@ -579,7 +579,7 @@ test("ARK-210-AC2 ark escalate outside phase building exits 1 and names the phas
   const early = startRun("demo", "ARK-901");
   const planningRefusal = ark("escalate", early.runId, "--reason", "x");
   expect(planningRefusal.code).toBe(1);
-  expect(planningRefusal.err).toContain("planning");
+  expect(planningRefusal.err).toContain("awaiting_criteria");
 
   const open = spentBudgetRun(false);
   expect(ark("status", open.runId).out).toContain("phase: escalation");
@@ -1483,7 +1483,7 @@ test("ARK-304-AC1 close handed_off refuses a missing and a failing AC, appends n
   const refused = ark("run", "close", runId, "handed_off");
   expect(refused.code).toBe(1);
   expect(refused.err).toContain(
-    "criteria not passing in the last test run: ARK-900-AC2 (missing), ARK-900-AC3 (failing)",
+    "criteria not passing in the last test run: ARK-900/AC2 (missing), ARK-900/AC3 (failing)",
   );
   expect(refused.err).not.toContain("ARK-900-AC1");
   expect(eventLines(directory)).toEqual(eventsBefore);
@@ -1503,7 +1503,7 @@ test("ARK-304-AC2 ARK-305-AC5 close handed_off refuses a pending manual AC, then
 
   const manual = ark("run", "close", runId, "handed_off");
   expect(manual.code).toBe(1);
-  expect(manual.err).toContain("manual criterion without ok: ARK-900-AC2");
+  expect(manual.err).toContain("manual criterion without ok: ARK-900/AC2");
   expect(manual.err).not.toContain("manual criteria without ok:");
 
   expect(ark("gate", "record", runId, "manual", "ARK-900-AC2", "ok").code).toBe(0);
@@ -1511,7 +1511,7 @@ test("ARK-304-AC2 ARK-305-AC5 close handed_off refuses a pending manual AC, then
   const absent = ark("run", "close", runId, "handed_off");
   expect(absent.code).toBe(1);
   expect(absent.err).toContain("AC string in no tracked file at head:");
-  expect(absent.err).toContain("ARK-900-AC1 `absent-string-xyz`");
+  expect(absent.err).toContain("ARK-900/AC1 `absent-string-xyz`");
   expect(absent.err).not.toContain("`ARK-900-AC1 works`");
   expect(eventLines(directory)).toEqual(eventsAfterGate);
   expect(eventsAfterGate.length).toBeGreaterThan(eventsBefore.length);
@@ -1529,7 +1529,7 @@ test("ARK-304-AC2 close handed_off says criteria for several pending manual ACs"
   );
   const refused = ark("run", "close", runId, "handed_off");
   expect(refused.code).toBe(1);
-  expect(refused.err).toContain("manual criteria without ok: ARK-900-AC1, ARK-900-AC2");
+  expect(refused.err).toContain("manual criteria without ok: ARK-900/AC1, ARK-900/AC2");
 });
 
 test("ARK-304-AC3 close handed_off refuses a commit after the test, then closes after ark test at the new head", () => {

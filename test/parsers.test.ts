@@ -15,27 +15,39 @@ const fixture = (name: string) =>
 test("ARK-158-AC5 pytest maps ac markers to per-test results", () => {
   const results = parsePytest({ report: fixture("pytest-report.xml"), stdout: "" });
   expect(results).toEqual([
-    { name: "test_sample::test_passes", criteria: ["CLARA-12-AC1"], status: "passed" },
+    { name: "test_sample::test_passes", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
     {
       name: "test_sample::test_fails",
       criteria: ["CLARA-12-AC2", "CLARA-12-AC3"],
+      cases: [],
       status: "failed",
     },
-    { name: "test_sample::test_skipped", criteria: [], status: "skipped" },
-    { name: "test_sample::test_untagged", criteria: [], status: "passed" },
+    { name: "test_sample::test_skipped", criteria: [], cases: [], status: "skipped" },
+    { name: "test_sample::test_untagged", criteria: [], cases: [], status: "passed" },
   ]);
 });
 
 test("ARK-158-AC5 behave maps feature and scenario tags to per-scenario results", () => {
   const results = parseBehave({ report: fixture("behave-report.json"), stdout: "" });
   expect(results).toEqual([
-    { name: "Other: Untagged", criteria: [], status: "passed" },
-    { name: "Sample: Passes", criteria: ["CLARA-12-AC1"], status: "passed" },
-    { name: "Sample: Fails", criteria: ["CLARA-12-AC1", "CLARA-12-AC2"], status: "failed" },
-    { name: "Sample: Skipped", criteria: ["CLARA-12-AC1", "CLARA-12-AC3"], status: "skipped" },
+    { name: "Other: Untagged", criteria: [], cases: [], status: "passed" },
+    { name: "Sample: Passes", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
+    {
+      name: "Sample: Fails",
+      criteria: ["CLARA-12-AC1", "CLARA-12-AC2"],
+      cases: [],
+      status: "failed",
+    },
+    {
+      name: "Sample: Skipped",
+      criteria: ["CLARA-12-AC1", "CLARA-12-AC3"],
+      cases: [],
+      status: "skipped",
+    },
     {
       name: "Sample: Outline 1 -- @1.1",
       criteria: ["CLARA-12-AC1", "CLARA-12-AC5"],
+      cases: [],
       status: "passed",
     },
   ]);

@@ -214,7 +214,10 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
     waits.push(wait);
   };
   for (const event of events) {
-    if (event.type === "run.started" && event.data.criteria.length === 0)
+    if (
+      event.type === "run.started" &&
+      (event.data.criteria.length === 0 || event.data.criteria_gate === true)
+    )
       ask("criteria", event.time);
     if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
       ask("criteria", event.time, true);

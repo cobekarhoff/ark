@@ -130,8 +130,9 @@ export async function stopHub(hub: { kill(): void; exited: Promise<number> }): P
 }
 
 /**
- * Records an evaluation the way ark evaluation record does. A clear evaluation that leaves the run
- * in planning also records a one-card strategy, so the run can pass ark plan check.
+ * Records an evaluation the way ark evaluation record does. A run always waits for the criteria gate
+ * (ARK-311): a clear evaluation of a run with criteria also records the human's criteria accept, then
+ * a one-card strategy, so the run can pass ark plan check. An evaluation with blockers leaves the gate open.
  */
 export function recordEvaluation(
   runDirectory: string,
@@ -139,6 +140,9 @@ export function recordEvaluation(
   risks: string[] = [],
 ): void {
   appendEvent(runDirectory, "evaluation.recorded", { blockers, risks, surfaces: ["none"] });
+  const waiting = deriveState(readEvents(runDirectory));
+  if (blockers.length === 0 && waiting.phase === "awaiting_criteria" && waiting.criteria.length > 0)
+    appendEvent(runDirectory, "gate.answered", { gate: "criteria", answer: "accept", by: "human" });
   if (deriveState(readEvents(runDirectory)).phase !== "planning") return;
   appendEvent(runDirectory, "strategy.recorded", {
     count: 1,

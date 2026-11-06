@@ -1078,12 +1078,12 @@ test("ARK-285-AC4 an open MR gets its AC status and only its own testcases with 
 
   const evidence = openRunOf(snapshot, open).evidence;
   expect(evidence?.criteria.map(({ id, status }) => ({ id, status }))).toEqual([
-    { id: "ARK-816-AC1", status: "passing" },
-    { id: "ARK-816-AC2", status: "failing" },
-    { id: "ARK-816-AC3", status: "missing" },
+    { id: "ARK-816/AC1", status: "passing" },
+    { id: "ARK-816/AC2", status: "failing" },
+    { id: "ARK-816/AC3", status: "missing" },
   ]);
   const proof = (id: string) => evidence?.criteria.find((criterion) => criterion.id === id)?.proof;
-  expect(proof("ARK-816-AC1")).toEqual([
+  expect(proof("ARK-816/AC1")).toEqual([
     { name: "ARK-816-AC1 lists the runs", file: "test/a.test.ts", line: 10, result: "pass" },
     {
       name: "ARK-816-AC1 doesn't list a closed run",
@@ -1092,10 +1092,10 @@ test("ARK-285-AC4 an open MR gets its AC status and only its own testcases with 
       result: "pass",
     },
   ]);
-  expect(proof("ARK-816-AC2")).toEqual([
+  expect(proof("ARK-816/AC2")).toEqual([
     { name: "ARK-816-AC2 refuses a bad token", file: "test/a.test.ts", line: 31, result: "fail" },
   ]);
-  expect(proof("ARK-816-AC3")).toEqual([]);
+  expect(proof("ARK-816/AC3")).toEqual([]);
   // Testcases of the other ticket are shown nowhere.
   expect(JSON.stringify(snapshot)).not.toContain("ARK-999");
 

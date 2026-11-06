@@ -1,7 +1,8 @@
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
-import { manualCriteria } from "./criteria.ts";
+import { canonicalCriterion } from "./criterion-id.ts";
+import { manualCriteria, parseCriteria } from "./criteria.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 
@@ -23,15 +24,23 @@ function acceptCriteria(runDirectory: string): void {
   }
   const content = readFileSync(ticketFile, "utf8");
   const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  const criteria = frontmatter
-    ? (Bun.YAML.parse(frontmatter[1]) as Record<string, unknown>)?.acceptance_criteria
-    : undefined;
-  const ids = Array.isArray(criteria)
-    ? criteria.map((criterion) => String(criterion?.id ?? "")).filter(Boolean)
-    : [];
+  const fields = frontmatter
+    ? ((Bun.YAML.parse(frontmatter[1]) ?? {}) as Record<string, unknown>)
+    : {};
+  const parsed = parseCriteria(fields, ticketFile);
+  const ids = parsed.map((criterion) => criterion.id);
   if (ids.length === 0) {
     throw new ArkError(
       `ticket ${ticketFile} has no acceptance criteria: add at least one, then record criteria accept again`,
+    );
+  }
+  const empty = parsed.filter(
+    (criterion) =>
+      criterion.newScheme && criterion.method === "test" && criterion.verified_by.length === 0,
+  );
+  if (empty.length > 0) {
+    throw new ArkError(
+      `cannot accept criteria: ${empty.map((criterion) => `${criterion.id} has method "test" and an empty verified_by list`).join("; ")}. Add an integration or e2e test case id to verified_by, or set method to demonstration, inspection or analysis.`,
     );
   }
   copyFileSync(ticketFile, join(runDirectory, "ticket.md"));
@@ -46,7 +55,7 @@ export function gateRecord(
   inProject?: string,
 ): void {
   // The manual gate is answered for one criterion: `<criterion id> <answer>`; the others take `<answer>`.
-  const [criterion, answer] = gate === "manual" ? args : [undefined, args[0]];
+  const [criterionArgument, answer] = gate === "manual" ? args : [undefined, args[0]];
   if (answer === undefined) {
     throw new ArkError(
       gate === "manual"
@@ -63,6 +72,10 @@ export function gateRecord(
     );
   }
   const { directory } = findRun(runId, inProject);
+  const criterion =
+    criterionArgument === undefined
+      ? undefined
+      : canonicalCriterion(criterionArgument, deriveState(readEvents(directory)).ticket.id);
   if (criterion !== undefined) {
     if (!deriveState(readEvents(directory)).criteria.some((c) => c.id === criterion))
       throw new ArkError(`criterion ${criterion} is not in the ticket`);

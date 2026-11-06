@@ -43,6 +43,8 @@ beforeEach(() => {
   expect(ark("run", "start", writeTicket("demo", "ARK-173", criteria)).code).toBe(0);
   runId = readdirSync(join(projectDirectory, "runs"))[0];
   runDirectory = join(projectDirectory, "runs", runId);
+  // The criteria gate opens on every run (ARK-311); these tests start at the strategy.
+  expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(0);
 });
 
 const events = () =>
@@ -257,6 +259,7 @@ test("ARK-173-AC5 multiple strategies wait for a valid card choice or abort", ()
   expect(ark("run", "start", writeTicket("demo", "ARK-173", criteria)).code).toBe(0);
   runId = readdirSync(join(projectDirectory, "runs"))[0];
   runDirectory = join(projectDirectory, "runs", runId);
+  expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(0);
   evaluation();
   strategies(card("S1"), card("S2", "Recommended: no\n"));
   expect(ark("strategy", "record", runId).code).toBe(0);

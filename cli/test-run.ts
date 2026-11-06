@@ -10,7 +10,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadConfig, type ProjectConfig } from "./config.ts";
-import { manualCriteria } from "./criteria.ts";
+import { runCriteria } from "./criteria.ts";
+import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
 import {
   appendEvent,
@@ -20,6 +21,7 @@ import {
   type RunState,
 } from "./events.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
+import { readCaseEntries } from "./test-case.ts";
 import { findRun } from "./paths.ts";
 import { discoverRepos, mirrorRoot } from "./workspace.ts";
 import { linkUntouched } from "./worktree.ts";
@@ -45,10 +47,27 @@ function headOf(repo: string, workspace: string, mirror: string): string {
   return result.stdout.trim();
 }
 
-function criterionStatus(criterion: string, provingResults: TestResult[]): Status {
-  const tagged = provingResults.filter((result) => result.criteria.includes(criterion));
+// The old path: the results tagged with the AC id. `proofResults` holds integration and e2e results only.
+function criterionStatus(criterion: string, proofResults: TestResult[]): Status {
+  const tagged = proofResults.filter((result) =>
+    result.criteria.some((id) => canonicalCriterion(id) === criterion),
+  );
   if (tagged.some((result) => result.status === "failed")) return "failing";
   return tagged.some((result) => result.status === "passed") ? "passing" : "missing";
+}
+
+/** The `verified_by` join over the results of every level. A failing result of a case wins; a case with no passing result is missing. */
+function caseStatus(id: string, allResults: TestResult[]): "passed" | "failed" | "missing" {
+  const carrying = allResults.filter((result) => result.cases.includes(id));
+  if (carrying.some((result) => result.status === "failed")) return "failed";
+  return carrying.some((result) => result.status === "passed") ? "passed" : "missing";
+}
+
+function verifiedByStatus(
+  cases: { id: string; status: "passed" | "failed" | "missing" }[],
+): Status {
+  if (cases.some((entry) => entry.status === "failed")) return "failing";
+  return cases.some((entry) => entry.status === "missing") ? "missing" : "passing";
 }
 
 function manualStatus(answer: string | undefined): Status {
@@ -143,7 +162,21 @@ export function testRun(runId: string, inProject?: string): void {
   mkdirSync(resultsDirectory, { recursive: true });
   const state = deriveState(readEvents(directory));
   const criteria = state.criteria.map((criterion) => criterion.id);
-  const manual = new Set(manualCriteria(directory));
+  const ticketCriteria = new Map(
+    runCriteria(directory).map((criterion) => [criterion.id, criterion]),
+  );
+  const manual = new Set(
+    [...ticketCriteria.values()]
+      .filter((criterion) => criterion.method !== "test")
+      .map((criterion) => criterion.id),
+  );
+  const entryProblems = discoverRepos(config.workspace).flatMap(
+    (repo) =>
+      readCaseEntries(join(mirror, repo), repo === "." ? "test/cases" : `${repo}/test/cases`)
+        .problems,
+  );
+  if (entryProblems.length > 0)
+    throw new ArkError(entryProblems.map((problem) => `test case entry ${problem}`).join("; "));
 
   const composeBase = composeFor(config, mirror, runId);
   const checks: { name: string; passed: boolean }[] = [];
@@ -158,6 +191,8 @@ export function testRun(runId: string, inProject?: string): void {
     }
   }
   const suites: { name: string; level: string; passed: boolean }[] = [];
+  // The join through `verified_by` counts every level; the old tag path only integration and e2e.
+  const allResults: TestResult[] = [];
   const provingResults: TestResult[] = [];
 
   try {
@@ -168,6 +203,7 @@ export function testRun(runId: string, inProject?: string): void {
     }
     for (const suite of config.suites) {
       const { results, passed } = runSuite(suite, join(mirror, suite.repo), resultsDirectory);
+      allResults.push(...results);
       if (suite.level !== "unit") provingResults.push(...results);
       suites.push({
         name: suite.name,
@@ -179,15 +215,23 @@ export function testRun(runId: string, inProject?: string): void {
     if (composeBase) run([...composeBase, "down"], mirror);
   }
 
-  const criterionStatuses = Object.fromEntries(
-    criteria.map((criterion) => [
-      criterion,
+  const criterionStatuses: Record<string, Status> = {};
+  const via: Record<string, string> = {};
+  for (const criterion of criteria) {
+    const verifiedBy = ticketCriteria.get(criterion)?.verified_by ?? [];
+    if (manual.has(criterion)) {
       // A manual criterion is decided by the manual gate alone, also when a test is tagged with it.
-      manual.has(criterion)
-        ? manualStatus(state.gates[`manual:${criterion}`])
-        : criterionStatus(criterion, provingResults),
-    ]),
-  );
+      criterionStatuses[criterion] = manualStatus(state.gates[`manual:${criterion}`]);
+      via[criterion] = `method ${ticketCriteria.get(criterion)?.method}`;
+    } else if (verifiedBy.length > 0) {
+      const cases = verifiedBy.map((id) => ({ id, status: caseStatus(id, allResults) }));
+      criterionStatuses[criterion] = verifiedByStatus(cases);
+      via[criterion] = `via ${cases.map((entry) => `${entry.id} ${entry.status}`).join(", ")}`;
+    } else {
+      criterionStatuses[criterion] = criterionStatus(criterion, provingResults);
+      via[criterion] = "via tag";
+    }
+  }
   const heads = Object.fromEntries(
     discoverRepos(config.workspace).map((repo) => [repo, headOf(repo, config.workspace, mirror)]),
   );
@@ -218,7 +262,7 @@ export function testRun(runId: string, inProject?: string): void {
   for (const suite of suites)
     console.log(`suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}`);
   for (const [criterion, status] of Object.entries(criterionStatuses))
-    console.log(`criterion  ${criterion}  ${status}`);
+    console.log(`criterion  ${criterion}  ${status.padEnd(14)}  ${via[criterion]}`);
 
   const problems = [
     ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed`),

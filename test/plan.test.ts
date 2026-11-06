@@ -123,8 +123,8 @@ describe("plan check", () => {
     expect(checked.data.problems).toEqual([]);
     expect(checked.data.plan_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(checked.data.steps).toEqual([
-      { id: "build", role: "implementer", repo: ".", needs: [], criteria: ["ARK-900-AC1"] },
-      { id: "check", role: "validator", repo: ".", needs: ["build"], criteria: ["ARK-900-AC1"] },
+      { id: "build", role: "implementer", repo: ".", needs: [], criteria: ["ARK-900/AC1"] },
+      { id: "check", role: "validator", repo: ".", needs: ["build"], criteria: ["ARK-900/AC1"] },
     ]);
   });
 
@@ -232,7 +232,7 @@ describe("plan check", () => {
       (plan) => {
         plan.test_cases[1].criterion = "ARK-900-AC9";
       },
-      "ARK-900-AC9",
+      "ARK-900/AC9",
     ],
   ];
   for (const [name, edit, expected] of refusals) {
@@ -261,7 +261,7 @@ describe("plan check", () => {
     expect(lines.some((line) => line.includes("has no repo"))).toBe(true);
     expect(lines.some((line) => line.includes('level "unit"'))).toBe(true);
     // the unit-level test case no longer proves AC1
-    expect(lines.some((line) => line.includes("ARK-900-AC1 has no integration or e2e"))).toBe(true);
+    expect(lines.some((line) => line.includes("ARK-900/AC1 has no integration or e2e"))).toBe(true);
   });
 
   test("ARK-153-AC3 refuses a criterion with no integration or e2e test case and names it", () => {
@@ -270,8 +270,8 @@ describe("plan check", () => {
     writePlan(plan);
     const result = ark("plan", "check", runId);
     expect(result.code).toBe(1);
-    expect(result.out).toContain("ARK-900-AC2 has no integration or e2e test case");
-    expect(result.out).not.toContain("ARK-900-AC1 has no");
+    expect(result.out).toContain("ARK-900/AC2 has no integration or e2e test case");
+    expect(result.out).not.toContain("ARK-900/AC1 has no");
   });
   test("ARK-166-AC2 rejects a plan without summary", () => {
     const plan = validPlan();
@@ -297,7 +297,7 @@ describe("plan check", () => {
     writePlan(plan);
     const result = ark("plan", "check", runId);
     expect(result.code).toBe(1);
-    expect(result.out).toContain("criterion ARK-900-AC2 has no row in summary.changes");
+    expect(result.out).toContain("criterion ARK-900/AC2 has no row in summary.changes");
   });
 
   test("ARK-166-AC2 rejects a summary row for a criterion not in the ticket", () => {
@@ -306,7 +306,7 @@ describe("plan check", () => {
     writePlan(plan);
     const result = ark("plan", "check", runId);
     expect(result.code).toBe(1);
-    expect(result.out).toContain('criterion "ARK-900-AC9", which is not in the ticket');
+    expect(result.out).toContain('criterion "ARK-900/AC9", which is not in the ticket');
   });
 
   test("ARK-172-AC1 accepts explicit groups and empty given through plan check", () => {
@@ -412,7 +412,7 @@ describe("plan check", () => {
     const first = readFileSync(join(runDirectory, "plan.md"), "utf8");
     expect(first).toContain("# Plan\n\n## Summary\n\nMake the plan readable.");
     expect(first).toContain("| Criterion | Where | Now | Fix |");
-    expect(first).toContain("| ARK-900-AC1 | cli/plan.ts | Writes plan.yml. | Write plan.md. |");
+    expect(first).toContain("| ARK-900/AC1 | cli/plan.ts | Writes plan.yml. | Write plan.md. |");
     expect(first).toContain("```mermaid\nflowchart LR\n");
     expect(existsSync(join(runDirectory, "plan.mmd"))).toBe(false);
     expect(ark("plan", "check", runId).code).toBe(0);

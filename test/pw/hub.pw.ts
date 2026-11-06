@@ -2091,10 +2091,10 @@ test("ARK-285-AC9 the run page puts a progress strip, the vertical step plan, th
   await expect(evidence).toContainText("+5 −2 · 1 files");
   const criterion = (id: string) =>
     evidence.locator(`[data-testid="evidence-criterion"][data-id="${id}"]`);
-  await expect(criterion("ARK-902-AC1")).toHaveAttribute("data-status", "passing", {
+  await expect(criterion("ARK-902/AC1")).toHaveAttribute("data-status", "passing", {
     timeout: 30_000,
   });
-  await expect(criterion("ARK-902-AC2")).toContainText("some failing");
+  await expect(criterion("ARK-902/AC2")).toContainText("some failing");
   await expect(evidence).toContainText("P2 1");
 });
 

@@ -153,18 +153,18 @@ describe("ark test", () => {
     const result = ark("test", runId);
 
     expect(result.code).toBe(1);
-    expect(result.out).toContain("FAKE-1-AC1  passing");
-    expect(result.out).toContain("FAKE-1-AC2  failing");
-    expect(result.out).toContain("FAKE-1-AC3  missing");
-    expect(result.out).toContain("FAKE-1-AC4  missing");
-    expect(result.err).toContain("FAKE-1-AC2");
-    expect(result.err).toContain("FAKE-1-AC4");
-    expect(result.err).not.toContain("FAKE-1-AC1");
+    expect(result.out).toContain("FAKE-1/AC1  passing");
+    expect(result.out).toContain("FAKE-1/AC2  failing");
+    expect(result.out).toContain("FAKE-1/AC3  missing");
+    expect(result.out).toContain("FAKE-1/AC4  missing");
+    expect(result.err).toContain("FAKE-1/AC2");
+    expect(result.err).toContain("FAKE-1/AC4");
+    expect(result.err).not.toContain("FAKE-1/AC1");
     expect(testCompleted(runDirectory)[0].criteria).toEqual({
-      "FAKE-1-AC1": "passing",
-      "FAKE-1-AC2": "failing",
-      "FAKE-1-AC3": "missing",
-      "FAKE-1-AC4": "missing",
+      "FAKE-1/AC1": "passing",
+      "FAKE-1/AC2": "failing",
+      "FAKE-1/AC3": "missing",
+      "FAKE-1/AC4": "missing",
     });
   });
 
@@ -176,7 +176,7 @@ describe("ark test", () => {
     const result = ark("test", runId);
 
     expect(result.code).toBe(1);
-    expect(result.out).toContain("FAKE-1-AC1  missing");
+    expect(result.out).toContain("FAKE-1/AC1  missing");
     const [event] = testCompleted(runDirectory);
     expect(event.suites).toEqual([
       { name: "unit", level: "unit", passed: true },
@@ -204,7 +204,7 @@ describe("ark test", () => {
         { name: "unit", level: "unit", passed: true },
         { name: "e2e", level: "e2e", passed: true },
       ],
-      criteria: { "FAKE-1-AC1": "passing", "FAKE-1-AC2": "passing" },
+      criteria: { "FAKE-1/AC1": "passing", "FAKE-1/AC2": "passing" },
     });
     expect(event.heads["."]).not.toBe(head(workspace));
     expect(readFileSync(join(runDirectory, "results/e2e.report"), "utf8")).toContain(
@@ -226,7 +226,7 @@ describe("ark test", () => {
     expect(result.code).toBe(1);
     expect(result.err).toContain("unit");
     const [event] = testCompleted(runDirectory);
-    expect(event.criteria).toEqual({ "FAKE-1-AC1": "passing" });
+    expect(event.criteria).toEqual({ "FAKE-1/AC1": "passing" });
     expect(event.passed).toBe(false);
   });
 
@@ -238,7 +238,7 @@ describe("ark test", () => {
       ],
     });
     expect(ark("test", runId).code).toBe(0);
-    expect(testCompleted(runDirectory)[0].criteria).toEqual({ "FAKE-1-AC1": "passing" });
+    expect(testCompleted(runDirectory)[0].criteria).toEqual({ "FAKE-1/AC1": "passing" });
   });
 
   test("ARK-154-AC3 runs compose up on the mirror before the suites and compose down afterwards, even when a suite fails", () => {
@@ -282,22 +282,22 @@ describe("ark test with manual criteria", () => {
 
     const pending = ark("test", runId);
     expect(pending.code).toBe(1);
-    expect(pending.out).toContain("FAKE-1-AC1  passing");
-    expect(pending.out).toContain("FAKE-1-AC3  manual pending");
-    expect(pending.err).toContain("FAKE-1-AC3 is manual pending");
+    expect(pending.out).toContain("FAKE-1/AC1  passing");
+    expect(pending.out).toContain("FAKE-1/AC3  manual pending");
+    expect(pending.err).toContain("FAKE-1/AC3 is manual pending");
 
     expect(answer(runId, "ok").code).toBe(0);
     const ok = ark("test", runId);
     expect(ok.code).toBe(0);
-    expect(ok.out).toContain("FAKE-1-AC3  manual ok");
+    expect(ok.out).toContain("FAKE-1/AC3  manual ok");
 
     expect(answer(runId, "problem").code).toBe(0);
     const problem = ark("test", runId);
     expect(problem.code).toBe(1);
-    expect(problem.out).toContain("FAKE-1-AC3  manual problem");
-    expect(problem.err).toContain("FAKE-1-AC3 is manual problem");
+    expect(problem.out).toContain("FAKE-1/AC3  manual problem");
+    expect(problem.err).toContain("FAKE-1/AC3 is manual problem");
 
-    expect(testCompleted(runDirectory).map((event) => event.criteria["FAKE-1-AC3"])).toEqual([
+    expect(testCompleted(runDirectory).map((event) => event.criteria["FAKE-1/AC3"])).toEqual([
       "manual pending",
       "manual ok",
       "manual problem",
@@ -307,10 +307,10 @@ describe("ark test with manual criteria", () => {
   test("ARK-283-AC1 a problem answer followed by ok reads manual ok", () => {
     const { runId } = manualRun();
     expect(answer(runId, "problem").code).toBe(0);
-    expect(ark("test", runId).out).toContain("FAKE-1-AC3  manual problem");
+    expect(ark("test", runId).out).toContain("FAKE-1/AC3  manual problem");
     expect(answer(runId, "ok").code).toBe(0);
     const result = ark("test", runId);
-    expect(result.out).toContain("FAKE-1-AC3  manual ok");
+    expect(result.out).toContain("FAKE-1/AC3  manual ok");
     expect(result.code).toBe(0);
   });
 
@@ -330,7 +330,7 @@ describe("ark test with manual criteria", () => {
       manual: ["FAKE-1-AC2"],
       e2e: [failing("FAKE-1-AC1 breaks")],
     });
-    expect(ark("gate", "record", runId, "manual", "FAKE-1-AC2", "ok").code).toBe(0);
+    expect(ark("gate", "record", runId, "manual", "FAKE-1/AC2", "ok").code).toBe(0);
     expect(ark("test", runId).code).toBe(1);
     expect(testCompleted(runDirectory)[0].passed).toBe(false);
   });
@@ -339,8 +339,8 @@ describe("ark test with manual criteria", () => {
     const { runId, runDirectory } = manualRun({ e2e: [passing("FAKE-1-AC3 tagged test passes")] });
     const result = ark("test", runId);
     expect(result.code).toBe(1);
-    expect(result.out).toContain("FAKE-1-AC3  manual pending");
-    expect(testCompleted(runDirectory)[0].criteria["FAKE-1-AC3"]).toBe("manual pending");
+    expect(result.out).toContain("FAKE-1/AC3  manual pending");
+    expect(testCompleted(runDirectory)[0].criteria["FAKE-1/AC3"]).toBe("manual pending");
   });
 
   test("ARK-283-AC1 plan check accepted a plan with no test case for the manual criterion", () => {
@@ -400,10 +400,10 @@ describe("ark test checks", () => {
     for (const line of ["out-6", "out-25"]) expect(lines).toContain(line);
     expect(result.out.indexOf("check lint-fail failed")).toBeLessThan(result.out.indexOf("suite "));
     // The suites still ran and the AC passes: only the check fails the run.
-    expect(result.out).toContain("FAKE-1-AC1  passing");
+    expect(result.out).toContain("FAKE-1/AC1  passing");
     const [event] = testCompleted(runDirectory);
     expect(event.passed).toBe(false);
-    expect(event.criteria).toEqual({ "FAKE-1-AC1": "passing" });
+    expect(event.criteria).toEqual({ "FAKE-1/AC1": "passing" });
   });
 });
 

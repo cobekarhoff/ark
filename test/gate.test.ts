@@ -119,8 +119,8 @@ describe("gate record", () => {
     expect(readFileSync(join(directory, "ticket.md"), "utf8")).toContain("ARK-901-AC2");
     const events = eventsOf(directory);
     expect(events.findLast((event) => event.type === "criteria.updated").data.criteria).toEqual([
-      "ARK-901-AC1",
-      "ARK-901-AC2",
+      "ARK-901/AC1",
+      "ARK-901/AC2",
     ]);
     expect(events.at(-1).type).toBe("gate.answered");
     expect(events.at(-1).data).toEqual({
@@ -133,8 +133,8 @@ describe("gate record", () => {
     expect(state.phase).toBe("planning");
     expect(state.gates.criteria).toBe("accept");
     expect(state.criteria.map((criterion: { id: string }) => criterion.id)).toEqual([
-      "ARK-901-AC1",
-      "ARK-901-AC2",
+      "ARK-901/AC1",
+      "ARK-901/AC2",
     ]);
   });
 
@@ -314,17 +314,17 @@ describe("manual gate", () => {
       "record",
       runId,
       "manual",
-      "ARK-901-AC1",
+      "ARK-901/AC1",
       "problem",
       "--note",
       "button is gray",
     );
     expect(second.code).toBe(0);
     expect(manualEvents(directory).map((event) => event.data)).toEqual([
-      { gate: "manual", criterion: "ARK-901-AC1", answer: "ok", by: "human" },
+      { gate: "manual", criterion: "ARK-901/AC1", answer: "ok", by: "human" },
       {
         gate: "manual",
-        criterion: "ARK-901-AC1",
+        criterion: "ARK-901/AC1",
         answer: "problem",
         by: "human",
         note: "button is gray",
@@ -339,10 +339,10 @@ describe("manual gate", () => {
     const before = eventsOf(directory).length;
     const unknown = ark("gate", "record", runId, "manual", "ARK-901-AC9", "ok");
     expect(unknown.code).toBe(1);
-    expect(unknown.err).toContain("ARK-901-AC9");
+    expect(unknown.err).toContain("ARK-901/AC9");
     const normal = ark("gate", "record", runId, "manual", "ARK-901-AC2", "ok");
     expect(normal.code).toBe(1);
-    expect(normal.err).toContain("ARK-901-AC2");
+    expect(normal.err).toContain("ARK-901/AC2");
     expect(normal.err).toContain("manual");
     expect(eventsOf(directory).length).toBe(before);
   });
@@ -371,21 +371,21 @@ describe("manual gate", () => {
     expect(ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok").code).toBe(0);
     expect(ark("gate", "record", runId, "manual", "ARK-901-AC3", "problem").code).toBe(0);
     expect(stateOf(directory).gates).toMatchObject({
-      "manual:ARK-901-AC1": "ok",
-      "manual:ARK-901-AC3": "problem",
+      "manual:ARK-901/AC1": "ok",
+      "manual:ARK-901/AC3": "problem",
     });
     expect(ark("gate", "record", runId, "manual", "ARK-901-AC3", "ok").code).toBe(0);
     expect(stateOf(directory).gates).toMatchObject({
-      "manual:ARK-901-AC1": "ok",
-      "manual:ARK-901-AC3": "ok",
+      "manual:ARK-901/AC1": "ok",
+      "manual:ARK-901/AC3": "ok",
     });
   });
 
   test("ARK-283-AC2 ark status lists the manual criteria that are not ok", () => {
     const { runId } = buildingRun();
-    expect(ark("status", runId).out).toContain("manual pending: ARK-901-AC1, ARK-901-AC3");
-    expect(ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok").code).toBe(0);
-    expect(ark("status", runId).out).toContain("manual pending: ARK-901-AC3");
+    expect(ark("status", runId).out).toContain("manual pending: ARK-901/AC1, ARK-901/AC3");
+    expect(ark("gate", "record", runId, "manual", "ARK-901/AC1", "ok").code).toBe(0);
+    expect(ark("status", runId).out).toContain("manual pending: ARK-901/AC3");
   });
 
   test("ARK-283-AC2 gates.manual in ark.yml stays an error: the manual gate is never automatic", () => {

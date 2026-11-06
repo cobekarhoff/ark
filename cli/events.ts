@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
 import { planHash } from "./plan.ts";
 import { now } from "./clock.ts";
@@ -134,6 +135,10 @@ export function deriveState(events: ArkEvent[]): RunState {
   let project = "";
   let ticket = { id: "", title: "" };
   let startedWithoutCriteria = false;
+  // run.started has `criteria_gate: true` on every run since ARK-311; an older log keeps its old phase rule.
+  let gateAlwaysOpen = false;
+  // Old events name an AC `<ticket>-AC<k>` or `AC<k>`: read them as `<ticket>/AC<k>`.
+  const alias = (id: string) => canonicalCriterion(id, ticket.id);
   let evaluation: RunState["evaluation"] = null;
   let strategy: RunState["strategy"] = null;
   let blocked = false;
@@ -170,25 +175,27 @@ export function deriveState(events: ArkEvent[]): RunState {
         kind = data.kind ?? "feature";
         project = data.project;
         ticket = { id: data.ticket.id, title: data.ticket.title };
-        criteriaIds = data.criteria;
+        criteriaIds = data.criteria.map(alias);
+        gateAlwaysOpen = data.criteria_gate === true;
         startedWithoutCriteria = criteriaIds.length === 0;
         roundBudget = data.round_budget ?? 0;
         break;
       case "criteria.updated":
-        criteriaIds = data.criteria;
+        criteriaIds = data.criteria.map(alias);
         criteriaStatus = {};
         break;
       case "criteria.amended": {
-        const first = amendments.get(data.criterion);
-        amendments.set(data.criterion, {
-          id: data.criterion,
+        const id = alias(data.criterion);
+        const first = amendments.get(id);
+        amendments.set(id, {
+          id,
           old: first?.old ?? data.old,
           new: data.new,
           by: data.by ?? "human",
           reason: data.reason ?? "",
         });
         // New text needs a new human decision: an earlier manual answer no longer stands.
-        delete gates[`manual:${data.criterion}`];
+        delete gates[`manual:${id}`];
         // The amendment changes what plan.md must show, so the plan needs a new check.
         if (!planApproved) plan = null;
         break;
@@ -225,7 +232,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         };
         break;
       case "gate.answered":
-        gates[data.gate === "manual" ? `manual:${data.criterion}` : data.gate] = data.answer;
+        gates[data.gate === "manual" ? `manual:${alias(data.criterion)}` : data.gate] = data.answer;
         if (data.gate === "strategy" && strategy && strategy.cards.includes(data.answer))
           strategy.chosen = data.answer;
         if (data.gate === "criteria" && data.answer === "accept") blocked = false;
@@ -276,10 +283,14 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       }
       case "test.completed":
-        criteriaStatus = data.criteria;
+        criteriaStatus = Object.fromEntries(
+          Object.entries((data.criteria ?? {}) as Record<string, CriterionStatus>).map(
+            ([id, status]) => [alias(id), status],
+          ),
+        );
         lastTest = { passed: data.passed, heads: data.heads };
         basePassed = data.base_passed ?? basePassed;
-        testRuns.push(data.criteria ?? {});
+        testRuns.push(criteriaStatus);
         if (mergeRequests.length === 0) escalationAnswered = false;
         break;
       case "escalation.requested":
@@ -313,7 +324,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   let phase: Phase;
   if (outcome !== null) phase = "closed";
   else if (mergeRequests.length > 0) phase = "merge_requests_open";
-  else if (blocked || (startedWithoutCriteria && gates.criteria !== "accept"))
+  else if (blocked || ((startedWithoutCriteria || gateAlwaysOpen) && gates.criteria !== "accept"))
     phase = "awaiting_criteria";
   else if (strategy && strategy.count >= 2 && strategy.chosen === null) phase = "awaiting_strategy";
   else if (!planApproved) phase = "planning";

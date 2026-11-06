@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { canonicalCriterion } from "../cli/criterion-id.ts";
 import { execJson } from "../cli/exec.ts";
 import { deriveState, type ArkEvent, type RunState } from "../cli/events.ts";
 import { orcaOrchestration, orcaPages, type OrcaRun, type OrcaTerminal } from "../cli/orca.ts";
@@ -755,8 +756,10 @@ export function readJunitProof(xml: string): Map<string, ProofCase[]> {
       [...match[1].matchAll(attributePattern)].map(([, key, value]) => [key, unescapeXml(value)]),
     );
     const name = attributes.get("name") ?? "";
-    const id = name.match(criterionPrefix)?.[1];
-    if (!id) continue;
+    const written = name.match(criterionPrefix)?.[1];
+    if (!written) continue;
+    // Run state names an AC `<ticket>/AC<k>`; the title still carries the old form.
+    const id = canonicalCriterion(written);
     const line = Number(attributes.get("line"));
     const body = match[2] ?? "";
     const list = proof.get(id) ?? [];

@@ -97,7 +97,7 @@ test("ARK-208-AC1 post-MR validator and reviewer steps persist starts, finishes 
   expect(result.code).toBe(0);
   expect(readEvents(directory).at(-1)).toMatchObject({
     type: "test.completed",
-    data: { passed: true, criteria: { "ARK-900-AC1": "passing" } },
+    data: { passed: true, criteria: { "ARK-900/AC1": "passing" } },
   });
   expect(ark("status", runId).out).toContain("phase: merge_requests_open");
 });
