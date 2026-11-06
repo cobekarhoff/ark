@@ -466,6 +466,7 @@ describe("ark retro", () => {
       rounds: 2,
       escalations: 1,
       findings_sent_back: 1,
+      findings_left_p0p1: 0,
       merge_steps: 0,
     });
     expect(metrics.human_intervention).toEqual({
@@ -474,7 +475,13 @@ describe("ark retro", () => {
       mr_commits_after_open: 0,
     });
     expect(metrics.escaped_defects).toEqual([
-      { ticket: "ARK-901", run: runId, note: "rounding bug found in production" },
+      {
+        ticket: "ARK-901",
+        run: runId,
+        note: "rounding bug found in production",
+        fix: "",
+        reviewer: "",
+      },
     ]);
   });
 

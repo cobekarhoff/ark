@@ -188,6 +188,8 @@ Every `ask` from a run lead is a gate or a decision for the human. Relay every o
 
 If a run lead says it opened a Plannotator review, tell the human to answer there. Do not reply to that message yourself.
 
+A question that is not a gate is relayed the same way: a reviewer's `human_decision_needed` verdict reaches you as an `ask` from the run lead, with the `## Question for the human` text and its options, and no gate name. Put it to the human with the run, the ticket and the findings file path, then `reply` with the answer unchanged.
+
 The strategy gate is one of these questions. Its options are the card IDs of `<run folder>/strategies.md`, and `abort`. Tell the human the path of `strategies.md` and of each mockup in `<run folder>/mockups/`, and that one Plannotator review can hold them all. If the human writes a note instead of a card ID (a change or a mix of cards), send the note back unchanged: the run lead asks the Designer to revise and asks again. Do not pick a card for the human.
 
 ### An `escalation` from a run lead
@@ -266,9 +268,11 @@ When the human gives you a bug ticket and it traces back to an earlier run, or y
    - ticket: BUG-42
      run: 2026-10-29-ARK-156-1
      note: One line on what escaped and why the run missed it.
+     fix: 6e4bd35
+     reviewer: missed
    ```
 
-   `ticket` is the bug ticket. `run` is the earlier run it traces to.
+   `ticket` is the bug ticket. `run` is the earlier run it traces to. `fix` is the commit sha of the fix, or the id of the follow-up ticket that will fix it. `reviewer` is what the run's reviewer did with the defect, read from the run's findings files: `caught` (reported at P0 or P1 and sent back), `missed` (never reported) or `downgraded` (reported, then left or ranked down).
 
 3. Then queue and run the bug ticket like any other ticket.
 

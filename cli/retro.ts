@@ -376,19 +376,21 @@ function mergeRequestActivity(
 function escapedDefects(
   project: string,
   runId: string,
-): { ticket: string; run: string; note: string }[] {
+): { ticket: string; run: string; note: string; fix: string; reviewer: string }[] {
   const file = join(projectDirectory(project), "escaped-defects.yml");
   if (!existsSync(file)) return [];
   const parsed = Bun.YAML.parse(readFileSync(file, "utf8"));
   if (parsed === null || parsed === undefined) return [];
   if (!Array.isArray(parsed))
-    throw new ArkError(`${file}: must be a list of { ticket, run, note }`);
+    throw new ArkError(`${file}: must be a list of { ticket, run, note, fix, reviewer }`);
   return parsed
     .filter((entry) => entry?.run === runId)
     .map((entry) => ({
       ticket: String(entry.ticket ?? ""),
       run: runId,
       note: String(entry.note ?? ""),
+      fix: String(entry.fix ?? ""),
+      reviewer: String(entry.reviewer ?? ""),
     }))
     .sort((left, right) => (left.ticket < right.ticket ? -1 : left.ticket > right.ticket ? 1 : 0));
 }
@@ -435,6 +437,26 @@ const ROUND_FILE = /^round-\d+\.md$/;
 const RANKED_LINE = /^\s*#*\s*(?:(?:\d+\.|[-*])\s+)?(?:\*\*|__)?P[0-3]\b/;
 
 /** Ranked P0 to P3 lines in every findings/round-<number>.md file. No findings folder means 0. */
+const DECISION_LINE = /^\s*(?:[-*]\s+)?(?:\*\*|__)?P[01]\b/;
+
+/** P0 and P1 lines of `## Run lead decision` whose first of `leave` and `send back` is `leave`. */
+function countFindingsLeftP0P1(runDirectory: string): number {
+  const findingsDirectory = join(runDirectory, "findings");
+  if (!existsSync(findingsDirectory)) return 0;
+  let count = 0;
+  for (const name of readdirSync(findingsDirectory).filter((file) => file.endsWith(".md"))) {
+    let inDecision = false;
+    for (const line of readFileSync(join(findingsDirectory, name), "utf8").split("\n")) {
+      if (/^#{1,6}\s/.test(line)) inDecision = /^##\s+Run lead decision\s*$/i.test(line);
+      else if (inDecision && DECISION_LINE.test(line)) {
+        const decision = /\b(leave|send back)\b/i.exec(line)?.[1].toLowerCase();
+        if (decision === "leave") count++;
+      }
+    }
+  }
+  return count;
+}
+
 function countFindingsSentBack(runDirectory: string): number {
   const findingsDirectory = join(runDirectory, "findings");
   if (!existsSync(findingsDirectory)) return 0;
@@ -677,6 +699,7 @@ export function retro(runId: string, inProject?: string): void {
         (event) => event.type === "gate.answered" && event.data.gate === "escalation",
       ).length,
       findings_sent_back: findingsSentBack,
+      findings_left_p0p1: countFindingsLeftP0P1(runDirectory),
       merge_steps: events.filter((event) => event.type === "step.started" && event.data.merge)
         .length,
     },

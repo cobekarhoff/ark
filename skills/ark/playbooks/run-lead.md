@@ -373,6 +373,8 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 
    When the step has a `skills` list in `plan.yml`, add a line `UI skills: <the skills of the step>` to the worker spec.
 
+   For a reviewer step, add the line `Last reviewed head: <sha>` to the worker spec: the `Reviewed head:` of the previous findings file of the run. The first review has none and reads the full diff.
+
    Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`. When no worker ran (the output has `failedStage` and no running terminal), run `ark run step <run> <step> finish --failed --not-started`, and not `finish --failed`: `--not-started` gives back the round that `start` took. Never use `--not-started` for a worker that ran. When the error names a model, harness or ACP model, read `roles` in `ark.yml` again, fix `harness` and `model` in `plan.yml` to a pair that `roles` has, and run `ark plan check <run>`. Then decide what to do.
 
 3. Keep the terminal handle from the `worker-start --json` output: the `id` of the entry in `result.effects[]` with `"kind": "terminal"` (`term_...`). About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds, then read its terminal, without waiting for the long wait below:
@@ -440,9 +442,11 @@ Run the reviewer steps after the tests pass. Each reviewer writes its findings t
 - P0 sends work back. Tell the implementer to fix it.
 - P1 sends work back unless you can show it is wrong or out of scope. Before you send a P0 or P1 back to the implementer, run its Repro yourself. When the output does not show the problem, treat the finding as P2 and write why under `## Run lead decision`. A P0 or P1 with no Repro line is a P2 already: never send it on the reviewer's evidence alone.
 - P2 and P3 do not send work back unless several of them point at one real problem. Record them in the retro. A P2 that names a CI risk on another platform sends work back, because you cannot test it locally.
-- Write each decision and its reason in `<run folder>/findings/<step>.md`, under the heading `## Run lead decision`. For each finding, write: send back or leave, and why.
+- Write each decision and its reason in `<run folder>/findings/<step>.md`, under the heading `## Run lead decision`. Write one list line for each P0 and P1 finding, in this form: `- P1 <title>: send back, <reason>` or `- P1 <title>: leave, <reason>`. The line starts (after `-` or `*` and bold marks) with `P0` or `P1`; the first of the words `leave` and `send back` in the line is the decision. `ark retro` counts `rework.findings_left_p0p1` from the lines that say `leave`. P2 and P3 lines are free form.
 
-To send work back, write the findings you accept into `<run folder>/findings/round-<round>.md`, start the implementer step again, run `ark test <run>` when it finishes, and then start the reviewer step again to check the fixes. Stop when a review sends nothing back and the tests pass.
+To send work back, write the findings you accept into `<run folder>/findings/round-<round>.md`, start the implementer step again, and run `ark test <run>` when it finishes. Start a second or later reviewer step only when the last review sent at least one P0 or P1 back to the implementer. When only P2 or P3 went back, the implementer round ends with `ark test <run>`, and no reviewer step follows. Stop when a review sends nothing back and the tests pass.
+
+A review ends with a `Verdict:` line. On `Verdict: human_decision_needed`, send the text under `## Question for the human` to Master Chief with `ask`, hold the step that the question blocks, and keep running the other steps. It is not a send-back and counts no round. Record the human's answer under `## Run lead decision`, then go on as it says (start the implementer step again for a change, or leave the code).
 
 `ark retro` counts `rework.findings_sent_back` from these files. Only files named `round-` plus digits plus `.md` count. It counts each line that starts, after optional `#` marks, one list marker (`N.`, `-` or `*`) and bold marks, with `P0`, `P1`, `P2` or `P3`. Start every accepted finding with its rank, for example `### P1: export drops the unit` or `- P2 (cli/report.ts): wrong label`. Lines without a rank (test failures, CI logs) count 0. No findings folder counts 0.
 
@@ -450,7 +454,7 @@ A findings file never forbids an implementer commit. The implementer commits its
 
 ## 9. Escalate when the round budget is spent
 
-Each return to the implementer after the first build is a round. `ark run step <run> <implementer step> start` refuses once the next round would pass the round budget. The message is `round budget spent: record gate escalation (one_more_round, take_over or abort)`. The same applies when `ark status <run>` shows the phase `escalation`.
+Each return to the implementer after the first build is a round. A `human_decision_needed` verdict returns nothing to the implementer and counts no round. `ark run step <run> <implementer step> start` refuses once the next round would pass the round budget. The message is `round budget spent: record gate escalation (one_more_round, take_over or abort)`. The same applies when `ark status <run>` shows the phase `escalation`.
 
 With `gates.escalation: auto` in `ark.yml`, Ark answers the first 2 of these refusals itself. `start` records `gate: escalation`, `answer: one_more_round`, `by: auto`, prints `escalation one_more_round by auto (<n> of 2)` and then starts the step. Do not record the answer and do not `ask`. Send Master Chief a `status` instead, and go on with section 7:
 
