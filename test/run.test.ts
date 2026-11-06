@@ -21,6 +21,7 @@ import {
   tempArkHome,
   tempGitRepo,
   writeProject,
+  writeEvidenceFile,
   writeTicket,
 } from "./helpers.ts";
 
@@ -1438,6 +1439,8 @@ function closableRun(
     "",
   ].join("\n");
   writeFileSync(join(run.directory, "ticket.md"), ticket);
+  for (const criterion of criteria)
+    if (criterion.manual) writeEvidenceFile(run.directory, criterion.id);
   // criteria.updated is refused while building, so the run.started event carries the criteria and the kind.
   const file = join(run.directory, "events.ndjson");
   writeFileSync(

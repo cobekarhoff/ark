@@ -1,8 +1,12 @@
 import {
+  appendFileSync,
+  copyFileSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -28,8 +32,13 @@ import { linkUntouched } from "./worktree.ts";
 
 type Status = CriterionStatus;
 
-function run(command: string[], cwd: string) {
-  const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" });
+function run(command: string[], cwd: string, env?: Record<string, string>) {
+  const result = Bun.spawnSync(command, {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
+  });
   return {
     code: result.exitCode,
     stdout: result.stdout.toString(),
@@ -76,17 +85,152 @@ function manualStatus(answer: string | undefined): Status {
 
 type Suite = ProjectConfig["suites"][number];
 
-/** Runs one suite in `cwd`. Its log goes to `<name>.log` of `logDirectory` under `logPrefix`; passed also needs no failed test in the report. */
-function runSuite(suite: Suite, cwd: string, logDirectory: string, logPrefix = "") {
-  const reportPath = join(logDirectory, `${logPrefix}${suite.name}.report`);
-  const outcome = run(["sh", "-c", suite.command.replaceAll("{report}", reportPath)], cwd);
-  writeFileSync(
-    join(logDirectory, `${logPrefix}${suite.name}.log`),
-    outcome.stdout + outcome.stderr,
+type Side = "base" | "head";
+/** What one side knows of a case: the winning result of every suite that carries it, and the suites that did. */
+type CaseEntry = {
+  name: string;
+  status: TestResult["status"];
+  repo: string;
+  sha: string;
+  suites: string[];
+};
+/** One side of a run: the evidence of each case and, for each suite, the repo, SHA and command log that ran. */
+type SideRun = {
+  side: Side;
+  cases: Map<string, CaseEntry>;
+  suites: Map<string, { repo: string; sha: string; log: string }>;
+};
+const statusRank = { skipped: 0, passed: 1, failed: 2 };
+
+const newSide = (side: Side): SideRun => ({ side, cases: new Map(), suites: new Map() });
+
+/** Merges the results of one suite into the side. A failed test wins over a passed one, a passed over a skipped one, across suites too. */
+function addSuite(
+  run: SideRun,
+  suite: Suite,
+  sha: string,
+  log: string,
+  results: TestResult[],
+  scratch: string,
+  evidenceDirectory: string,
+): void {
+  run.suites.set(suite.name, { repo: suite.repo, sha, log });
+  for (const result of results) {
+    for (const id of result.cases) {
+      const entry = run.cases.get(id);
+      // ponytail: a case carried by suites of two repos records the repo and SHA of its winning result only
+      if (entry === undefined)
+        run.cases.set(id, {
+          name: result.name,
+          status: result.status,
+          repo: suite.repo,
+          sha,
+          suites: [suite.name],
+        });
+      else {
+        if (!entry.suites.includes(suite.name)) entry.suites.push(suite.name);
+        if (statusRank[result.status] > statusRank[entry.status])
+          Object.assign(entry, { name: result.name, status: result.status, repo: suite.repo, sha });
+      }
+    }
+  }
+  for (const [id, entry] of run.cases) {
+    if (!entry.suites.includes(suite.name)) continue;
+    const folder = join(evidenceDirectory, id, run.side);
+    mkdirSync(folder, { recursive: true });
+    appendFileSync(join(folder, "command.log"), log);
+    const screenshots = join(scratch, id, "screenshots");
+    if (existsSync(screenshots))
+      cpSync(screenshots, join(folder, "screenshots"), { recursive: true });
+  }
+}
+
+/**
+ * A case that one side found and the other did not (a base crash, or a test file the run deleted) gets a failed
+ * result and the command log of the suite that carried it on the side that found it, run on this side.
+ */
+function addMissing(run: SideRun, other: SideRun, evidenceDirectory: string): void {
+  for (const [id, found] of other.cases) {
+    if (run.cases.has(id)) continue;
+    const suite = run.suites.get(found.suites[0]!);
+    if (suite === undefined) continue;
+    run.cases.set(id, {
+      name: found.name,
+      status: "failed",
+      repo: suite.repo,
+      sha: suite.sha,
+      suites: [found.suites[0]!],
+    });
+    const folder = join(evidenceDirectory, id, run.side);
+    mkdirSync(folder, { recursive: true });
+    appendFileSync(join(folder, "command.log"), suite.log);
+  }
+}
+
+function writeResults(run: SideRun, evidenceDirectory: string): void {
+  for (const [id, { name, status, repo, sha }] of run.cases)
+    writeFileSync(
+      join(evidenceDirectory, id, run.side, "result.json"),
+      `${JSON.stringify({ case: id, name, status, sha, repo }, null, 2)}\n`,
+    );
+}
+
+/**
+ * Runs one suite in `cwd`. Its log goes to `<name>.log` of `resultsDirectory` (`base-<name>.log` at base).
+ * `ARK_EVIDENCE_DIR` names a scratch folder for the run; the evidence of each test case is merged into `sideRun`.
+ * `command.log` is the whole suite output, so every case of the suite shares it. Passed also needs no failed test.
+ */
+function runSuite(
+  suite: Suite,
+  cwd: string,
+  resultsDirectory: string,
+  sideRun: SideRun,
+  sha: string,
+) {
+  const prefix = sideRun.side === "base" ? "base-" : "";
+  const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
+  const command = suite.command.replaceAll("{report}", reportPath);
+  const scratch = mkdtempSync(join(tmpdir(), "ark-evidence-"));
+  try {
+    const outcome = run(["sh", "-c", command], cwd, { ARK_EVIDENCE_DIR: scratch });
+    const output = outcome.stdout + outcome.stderr;
+    writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
+    const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
+    const results = parsers[suite.parser]({ report, stdout: outcome.stdout });
+    const separator = output === "" || output.endsWith("\n") ? "" : "\n";
+    addSuite(
+      sideRun,
+      suite,
+      sha,
+      `${command}\n${output}${separator}exit ${outcome.code}\n`,
+      results,
+      scratch,
+      join(resultsDirectory, "evidence"),
+    );
+    return {
+      results,
+      passed: outcome.code === 0 && results.every((result) => result.status !== "failed"),
+    };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+const testFolder = /(^|\/)(test|tests|features)\//;
+
+/** Copies the head's version of each file the diff adds or changes under a test folder into the base checkout. Deleted and renamed-from files stay at base. */
+function copyHeadTests(headPath: string, basePath: string, base: string): void {
+  const changed = run(
+    ["git", "diff", "--name-only", "--no-renames", "--diff-filter=AM", "-z", base, "HEAD"],
+    headPath,
   );
-  const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
-  const results = parsers[suite.parser]({ report, stdout: outcome.stdout });
-  return { results, passed: outcome.code === 0 && results.every((r) => r.status !== "failed") };
+  if (changed.code !== 0)
+    throw new ArkError(`git diff against the base failed in ${headPath}: ${changed.stderr.trim()}`);
+  for (const path of changed.stdout.split("\0")) {
+    if (path === "" || !testFolder.test(path) || !existsSync(join(headPath, path))) continue;
+    mkdirSync(dirname(join(basePath, path)), { recursive: true });
+    copyFileSync(join(headPath, path), join(basePath, path));
+  }
 }
 
 function composeFor(config: ProjectConfig, root: string, runId: string): string[] | null {
@@ -102,14 +246,17 @@ function composeFor(config: ProjectConfig, root: string, runId: string): string[
 }
 
 /**
- * Runs every suite on a throwaway checkout of each touched repo at its worktree.created base, so the run's own
- * changes are absent. Untouched repos run on the workspace checkout, as in the head run. Returns whether all passed.
+ * Runs every suite on a throwaway checkout of each touched repo at its worktree.created base, after the head's
+ * test files are copied in, so a new test meets the base build. Untouched repos run on the workspace checkout,
+ * as in the head run. Returns whether all passed; a failure here is data except for `kind: refactor`.
  */
 function baseSuitesPassed(
   config: ProjectConfig,
   runId: string,
   resultsDirectory: string,
+  mirror: string,
   worktrees: RunState["worktrees"],
+  baseRun: SideRun,
 ): boolean {
   const root = mkdtempSync(join(tmpdir(), "ark-base-"));
   const added: { source: string; path: string }[] = [];
@@ -125,6 +272,7 @@ function baseSuitesPassed(
       if (created.code !== 0)
         throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
       added.push({ source, path });
+      copyHeadTests(join(mirror, repo), path, base);
     }
     linkUntouched(config.workspace, root, discoverRepos(config.workspace));
     for (const { repo } of worktrees) {
@@ -142,7 +290,16 @@ function baseSuitesPassed(
         throw new ArkError(`compose up failed: ${(up.stderr || up.stdout).trim()}`);
     }
     return config.suites
-      .map((suite) => runSuite(suite, join(root, suite.repo), resultsDirectory, "base-").passed)
+      .map(
+        (suite) =>
+          runSuite(
+            suite,
+            join(root, suite.repo),
+            resultsDirectory,
+            baseRun,
+            headOf(suite.repo, root, root),
+          ).passed,
+      )
       .every(Boolean);
   } finally {
     if (compose) run([...compose, "down"], root);
@@ -160,6 +317,11 @@ export function testRun(runId: string, inProject?: string): void {
     throw new ArkError(`${runId} has no workspace mirror: run ark worktree create first`);
   const resultsDirectory = join(directory, "results");
   mkdirSync(resultsDirectory, { recursive: true });
+  // The folders of the cases this run finds are written again below; a case that no longer appears loses its folder.
+  const evidenceDirectory = join(resultsDirectory, "evidence");
+  if (existsSync(evidenceDirectory))
+    for (const entry of readdirSync(evidenceDirectory, { withFileTypes: true }))
+      if (entry.isDirectory()) rmSync(join(evidenceDirectory, entry.name), { recursive: true });
   const state = deriveState(readEvents(directory));
   const criteria = state.criteria.map((criterion) => criterion.id);
   const ticketCriteria = new Map(
@@ -194,6 +356,8 @@ export function testRun(runId: string, inProject?: string): void {
   // The join through `verified_by` counts every level; the old tag path only integration and e2e.
   const allResults: TestResult[] = [];
   const provingResults: TestResult[] = [];
+  const headRun = newSide("head");
+  const baseRun = newSide("base");
 
   try {
     if (composeBase) {
@@ -202,7 +366,13 @@ export function testRun(runId: string, inProject?: string): void {
         throw new ArkError(`compose up failed: ${(up.stderr || up.stdout).trim()}`);
     }
     for (const suite of config.suites) {
-      const { results, passed } = runSuite(suite, join(mirror, suite.repo), resultsDirectory);
+      const { results, passed } = runSuite(
+        suite,
+        join(mirror, suite.repo),
+        resultsDirectory,
+        headRun,
+        headOf(suite.repo, config.workspace, mirror),
+      );
       allResults.push(...results);
       if (suite.level !== "unit") provingResults.push(...results);
       suites.push({
@@ -235,15 +405,23 @@ export function testRun(runId: string, inProject?: string): void {
   const heads = Object.fromEntries(
     discoverRepos(config.workspace).map((repo) => [repo, headOf(repo, config.workspace, mirror)]),
   );
-  // A refactor run proves behavior stayed the same: the suites also run at the base commit, once per run.
-  const events = readEvents(directory);
-  const earlier = events.findLast(
-    (event) => event.type === "test.completed" && event.data.base_passed !== undefined,
-  )?.data.base_passed;
-  const basePassed =
+  // Every run also runs the suites at the base commit, on each `ark test`: the new tests change from round to round.
+  // A base failure is data, except that a refactor run must keep its behavior.
+  const basePassed = baseSuitesPassed(
+    config,
+    runId,
+    resultsDirectory,
+    mirror,
+    // An old worktree.created event may hold no base: only a refactor run, which needs the base, refuses it.
     state.kind === "refactor"
-      ? (earlier ?? baseSuitesPassed(config, runId, resultsDirectory, state.worktrees))
-      : undefined;
+      ? state.worktrees
+      : state.worktrees.filter((worktree) => worktree.base !== undefined),
+    baseRun,
+  );
+  addMissing(baseRun, headRun, evidenceDirectory);
+  addMissing(headRun, baseRun, evidenceDirectory);
+  writeResults(headRun, evidenceDirectory);
+  writeResults(baseRun, evidenceDirectory);
   const passed =
     checks.every((check) => check.passed) &&
     suites.every((suite) => suite.passed) &&
@@ -255,18 +433,23 @@ export function testRun(runId: string, inProject?: string): void {
     heads,
     suites,
     criteria: criterionStatuses,
-    ...(basePassed === undefined ? {} : { base_passed: basePassed }),
+    ...(state.kind === "refactor" ? { base_passed: basePassed } : {}),
   });
 
-  if (basePassed !== undefined) console.log(`base      ${basePassed ? "passed" : "failed"}`);
+  console.log(`base      ${basePassed ? "passed" : "failed"}`);
   for (const suite of suites)
     console.log(`suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}`);
   for (const [criterion, status] of Object.entries(criterionStatuses))
     console.log(`criterion  ${criterion}  ${status.padEnd(14)}  ${via[criterion]}`);
+  for (const id of [...new Set([...headRun.cases.keys(), ...baseRun.cases.keys()])].sort())
+    console.log(`evidence   results/evidence/${id}/{base,head}`);
 
   const problems = [
     ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed`),
     ...suites.filter((suite) => !suite.passed).map((suite) => `suite ${suite.name} failed`),
+    ...(state.kind === "refactor" && !basePassed
+      ? ["refactor run: the suites fail at the base commit"]
+      : []),
     ...Object.entries(criterionStatuses)
       .filter(([criterion, status]) => status !== (manual.has(criterion) ? "manual ok" : "passing"))
       .map(([criterion, status]) => `${criterion} is ${status}`),

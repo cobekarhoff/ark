@@ -70,6 +70,11 @@ export function manualCriteria(runDirectory: string): string[] {
     .map((criterion) => criterion.id);
 }
 
+/** The evidence file of a criterion that no test proves: `results/evidence/AC<k>.md` in the run folder. */
+export function evidenceFile(runDirectory: string, criterionId: string): string {
+  return join(runDirectory, "results", "evidence", `${criterionId.split("/").pop()}.md`);
+}
+
 /** Replaces the `text:` line of one criterion in the frontmatter and its `| ID | ... |` table row.
  * YAML has no round trip in Bun, so only that one line and that one row change; a ticket with no
  * table row keeps only the frontmatter change. Returns the new ticket and the old frontmatter text.

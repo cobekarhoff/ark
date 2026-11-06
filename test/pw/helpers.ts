@@ -1,10 +1,11 @@
 // Node-safe helpers for the Playwright specs. No bun:test, no Bun.* globals: Playwright runs under Node.
-import { test } from "@playwright/test";
+import { test, type Page } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../../cli/events.ts";
+import { caseIdsIn } from "../../cli/parsers/case.ts";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { fakeToolScripts, writeFakeToolState, type FakeToolOptions } from "../hub-fixtures.ts";
@@ -200,4 +201,24 @@ export function testNow(): number {
 /** ISO instant `millisecondsAgo` before the frozen clock. */
 export function isoAgo(millisecondsAgo: number): string {
   return new Date(testNow() - millisecondsAgo).toISOString();
+}
+
+/**
+ * Takes the screenshot of one named step of a UI test: `<ARK_EVIDENCE_DIR>/<key>/screenshots/<name>.png` for each
+ * `<key>` that is a test case id in the test's title path, else the sanitized title (that folder is dropped by
+ * `ark test`). Call it before the assertion of the step, so a failing assertion still leaves the picture.
+ * It writes nothing when `ARK_EVIDENCE_DIR` is not set. `screenshot: "only-on-failure"` in the config is separate.
+ */
+export async function checkpoint(page: Page, name: string): Promise<void> {
+  const evidenceDirectory = process.env.ARK_EVIDENCE_DIR;
+  if (!evidenceDirectory) return;
+  const { title, titlePath } = test.info();
+  const keys = caseIdsIn(titlePath.join(" "));
+  if (keys.length === 0) keys.push(title.replace(/[^\w.-]+/g, "_"));
+  const picture = await page.screenshot();
+  for (const key of keys) {
+    const folder = join(evidenceDirectory, key, "screenshots");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, `${name}.png`), picture);
+  }
 }
