@@ -84,6 +84,7 @@ Do these steps in order for one ready ticket.
    ---
    id: ARK-156
    title: "Router skill and playbooks"
+   summary: "Router skill and playbooks open each run" # the outcome, short enough that "<ticket id>: <summary>" is 72 characters or less; it is the MR title. Write it in every new ticket
    kind: feature # bug, perf, refactor or feature: copy it from the proposed ticket and set it in every new ticket
    acceptance_criteria:
      - id: AC1

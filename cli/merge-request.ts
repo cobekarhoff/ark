@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ArkError } from "./errors";
 import { evidenceFile, manualCriteria, runCriteria, type Method } from "./criteria.ts";
@@ -8,7 +9,10 @@ import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths";
 import { loadPlan } from "./plan";
 import { discoverRepos, repoBase } from "./workspace.ts";
-import { uiSkillsFor } from "./ui-skills";
+import { buildBody } from "../skills/pr-writing/lib/body.ts";
+import { buildLedger, type Ledger } from "../skills/pr-writing/lib/ledger.ts";
+import { lintBody } from "../skills/pr-writing/lib/lint.ts";
+import { buildTitle, postMergeRequest } from "../skills/pr-writing/lib/post.ts";
 
 type PlanStep = { id: string; repo: string; needs: string[]; criteria: string[] };
 type PlanSteps = { steps: PlanStep[] };
@@ -174,106 +178,6 @@ function defaultBranch(worktree: Worktree, base: string | undefined): string {
     worktree.path,
   );
   return result.ok ? result.stdout.replace(/^origin\//, "") : worktree.base;
-}
-
-/**
- * UI findings of the reviewer steps: `### <rank>: <title>` headings with `**File:**`, `**Line:**`,
- * `**Skill:**` and `**Rule:**` lines. A finding with no Skill line is not a UI finding.
- */
-function uiFindings(runDirectory: string, reviewers: string[]): string[] {
-  const bullets: string[] = [];
-  for (const step of reviewers) {
-    const file = join(runDirectory, "findings", `${step}.md`);
-    if (!existsSync(file)) continue;
-    for (const block of readFileSync(file, "utf8").split(/^(?=### )/m)) {
-      const heading = block.match(/^###\s+([^:\n]+):\s*(.*)$/m);
-      const field = (name: string) =>
-        block
-          .match(new RegExp(`\\*\\*${name}:\\*\\*\\s*(.*)$`, "m"))?.[1]
-          .replaceAll("`", "")
-          .trim() ?? "";
-      const skill = field("Skill");
-      if (!heading || !skill) continue;
-      bullets.push(
-        `- ${heading[1].trim()} ${heading[2].trim()} (${skill}: ${field("Rule")}, ${field("File")}:${field("Line")})`,
-      );
-    }
-  }
-  return bullets;
-}
-
-function description(
-  ticket: { id: string; title: string },
-  criteriaIds: string[],
-  texts: Map<string, Criterion>,
-  dependencyLines: string[],
-  ui: { skills: string[]; findings: string[] } | null = null,
-): string {
-  const criteria = criteriaIds.map(
-    (id) => `- ${id}${texts.has(id) ? `: ${texts.get(id)?.text}` : ""}`,
-  );
-  return [
-    `Ticket: ${ticket.id} ${ticket.title}`,
-    "",
-    "Acceptance criteria this repo serves:",
-    ...(criteria.length > 0 ? criteria : ["- none"]),
-    ...(dependencyLines.length > 0 ? ["", ...dependencyLines] : []),
-    ...(ui
-      ? [
-          "",
-          "## UI/UX checks",
-          "",
-          `Skills applied: ${ui.skills.join(", ")}`,
-          "",
-          ...(ui.findings.length > 0 ? ui.findings : ["- No UI/UX findings."]),
-        ]
-      : []),
-  ].join("\n");
-}
-
-function createMergeRequest(
-  host: Host,
-  worktree: Worktree,
-  base: string,
-  title: string,
-  body: string,
-): OpenedMergeRequest {
-  const command =
-    host === "github"
-      ? [
-          "gh",
-          "pr",
-          "create",
-          "--base",
-          base,
-          "--head",
-          worktree.branch,
-          "--title",
-          title,
-          "--body",
-          body,
-        ]
-      : [
-          "glab",
-          "mr",
-          "create",
-          "--source-branch",
-          worktree.branch,
-          "--target-branch",
-          base,
-          "--title",
-          title,
-          "--description",
-          body,
-          "--yes",
-        ];
-  const output = run(command, worktree.path);
-  const url = output.match(/https?:\/\/\S+/)?.[0];
-  const number = Number(url?.match(/\/(\d+)\/?$/)?.[1]);
-  if (url === undefined || !Number.isInteger(number)) {
-    throw new ArkError(`could not read the merge request URL for ${worktree.repo} from: ${output}`);
-  }
-  return { repo: worktree.repo, url, number };
 }
 
 // GitLab merge request dependencies need a paid tier. A failure is fine:
@@ -534,7 +438,15 @@ export function assertShippable(
     throw new ArkError(`refused: evidence is not complete\n${evidence.join("\n")}`);
 }
 
-export function mergeRequestOpen(runId: string, inProject?: string): void {
+/**
+ * Pushes each repo, then opens its MR, or, for a repo that has one open, rewrites the generated part of its body
+ * from the ledger of the run now. A repo whose MR is merged, closed or of unknown state is left alone.
+ */
+export function mergeRequestOpen(
+  runId: string,
+  inProject?: string,
+  options: { summary?: string } = {},
+): void {
   const { project, directory } = findRun(runId, inProject);
   if (mergeRequestsMode(project) === "none")
     throw new ArkError(
@@ -549,66 +461,100 @@ export function mergeRequestOpen(runId: string, inProject?: string): void {
 
   assertShippable(runId, project, directory, events, state);
 
+  const ledger = buildLedger({ runFolder: directory });
   const worktrees = worktreeMap(events);
   const plan = loadPlan(directory);
   const upstream = upstreamRepos(plan);
   const order = mergeOrder(plan);
   const repos = [...order, ...[...worktrees.keys()].filter((repo) => !order.includes(repo))];
-  const texts = criterionTexts(directory);
-  // A run with no recorded evaluation counts as Surfaces none.
-  const ui =
-    uiSkillsFor(state.evaluation?.surfaces ?? ["none"]).length > 0
-      ? {
-          skills: [...new Set(plan.steps.flatMap((step) => step.skills))],
-          findings: uiFindings(
-            directory,
-            plan.steps.filter((step) => step.role === "reviewer").map((step) => step.id),
-          ),
-        }
-      : null;
-  const ticket = state.ticket;
   const opened = new Map<string, OpenedMergeRequest>();
   for (const event of events)
     if (event.type === "merge_request.opened")
       opened.set(event.data.repo, event.data as OpenedMergeRequest);
-
-  for (const repo of repos) {
+  const ahead = (worktree: Worktree) =>
+    Number(run(["git", "rev-list", "--count", `${worktree.base}..HEAD`], worktree.path));
+  const needsMergeRequest = (repo: string) => {
     const worktree = worktrees.get(repo);
-    if (worktree === undefined) continue;
-    if (opened.has(repo)) {
-      console.log(`${repo}  already open  ${opened.get(repo)!.url}`);
-      continue;
-    }
-    const ahead = Number(
-      run(["git", "rev-list", "--count", `${worktree.base}..HEAD`], worktree.path),
-    );
-    if (ahead === 0) continue;
+    return worktree !== undefined && !opened.has(repo) && ahead(worktree) > 0;
+  };
+  // The title of the MRs this call creates, before any push: a title the rule refuses must not leave a pushed
+  // branch. An open MR keeps its title, so a refresh needs none.
+  const title = repos.some(needsMergeRequest) ? buildTitle(ledger, options.summary) : "";
+  const folder = mkdtempSync(join(tmpdir(), "ark-mr-body-"));
 
-    run(["git", "push", "-u", "origin", worktree.branch], worktree.path);
-    const host = detectHost(run(["git", "remote", "get-url", "origin"], worktree.path));
-    const upstreamOpened = [...(upstream.get(repo) ?? [])].flatMap(
-      (name) => opened.get(name) ?? [],
-    );
-    const dependencyLines = upstreamOpened.map(
-      (merge) => `Depends on ${host === "github" ? "#" : "!"}${merge.number}`,
-    );
-    const criteriaIds = [
-      ...new Set(plan.steps.filter((step) => step.repo === repo).flatMap((step) => step.criteria)),
-    ];
-    const created = createMergeRequest(
-      host,
-      worktree,
-      defaultBranch(worktree, repoBase(projectConfig, repo)),
-      `${ticket.id}: ${ticket.title}`,
-      description(ticket, criteriaIds, texts, dependencyLines, ui),
-    );
-    if (host === "gitlab") {
-      for (const merge of upstreamOpened)
-        blockOnGitLab(created, merge, worktree.path, worktrees.get(merge.repo)!.path);
+  try {
+    for (const repo of repos) {
+      const worktree = worktrees.get(repo);
+      if (worktree === undefined) continue;
+      const existing = opened.get(repo);
+      if (existing !== undefined) {
+        const current = mergeRequestState(existing, worktree.path);
+        if (current !== "open") {
+          console.log(`${repo}  ${current}  ${existing.url}`);
+          continue;
+        }
+      } else if (!needsMergeRequest(repo)) continue;
+
+      const host = detectHost(run(["git", "remote", "get-url", "origin"], worktree.path));
+      const upstreamOpened = [...(upstream.get(repo) ?? [])].flatMap(
+        (name) => opened.get(name) ?? [],
+      );
+      const dependsOn = upstreamOpened.map(
+        (merge) => `Depends on ${host === "github" ? "#" : "!"}${merge.number}`,
+      );
+      // ponytail: one token owner for the run, probed in the first repo's host; a run that spans GitHub and GitLab
+      // names that owner on both. Probe per repo if the two accounts ever differ.
+      const repoLedger: Ledger = {
+        ...ledger,
+        // A repo with no commits opens no MR, so the merge order leaves it out.
+        mergeOrder: ledger.mergeOrder.filter((name) =>
+          ledger.repos.some((entry) => entry.repo === name && entry.commits.length > 0),
+        ),
+        repos: ledger.repos
+          .filter((entry) => entry.repo === repo)
+          .map((entry) => ({ ...entry, dependsOn })),
+      };
+      const bodyFile = join(folder, "body.md");
+      const body = buildBody(repoLedger);
+      writeFileSync(bodyFile, body);
+      // A new MR is linted before the push: a body the lint refuses must not leave a pushed branch behind. A refresh
+      // keeps the title of its MR, so `postMergeRequest` does its lint.
+      if (existing === undefined) {
+        const failed = lintBody({ body, title, ledger: repoLedger }).filter(
+          (check) => check.result === "fail",
+        );
+        if (failed.length > 0)
+          throw new ArkError(
+            `lint failed for ${repo}, nothing was pushed:\n${failed.map((check) => `${check.id}: ${check.reason}`).join("\n")}`,
+          );
+      }
+      run(["git", "push", "-u", "origin", worktree.branch], worktree.path);
+      const posted = postMergeRequest({
+        host,
+        directory: worktree.path,
+        branch: worktree.branch,
+        base: defaultBranch(worktree, repoBase(projectConfig, repo)),
+        title,
+        bodyFile,
+        ledger: repoLedger,
+        reviewers: ledger.prWriting.reviewers,
+      });
+      if (posted.note) console.log(`${repo}  ${posted.note}`);
+      if (existing !== undefined) {
+        console.log(`${repo}  ${posted.action}  ${posted.url}`);
+        continue;
+      }
+      const created = { repo, url: posted.url, number: posted.number };
+      if (host === "gitlab") {
+        for (const merge of upstreamOpened)
+          blockOnGitLab(created, merge, worktree.path, worktrees.get(merge.repo)!.path);
+      }
+      appendEvent(directory, "merge_request.opened", created);
+      opened.set(repo, created);
+      console.log(`${repo}  ${created.url}`);
     }
-    appendEvent(directory, "merge_request.opened", created);
-    opened.set(repo, created);
-    console.log(`${repo}  ${created.url}`);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
   }
 }
 

@@ -119,7 +119,7 @@ export type Ledger = {
     id: string;
     directory: string;
     project: string;
-    /** Time of the first and the last event. */
+    /** Time of the first event and of the last `test.completed` (else the last event): opening or refreshing an MR must not change it. */
     startedAt: string;
     endedAt: string;
     rounds: number;
@@ -817,7 +817,7 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
       directory,
       project: state.project,
       startedAt: events[0]?.time ?? "",
-      endedAt: events.at(-1)?.time ?? "",
+      endedAt: lastTest?.time ?? events.at(-1)?.time ?? "",
       rounds: state.round,
     },
   };
