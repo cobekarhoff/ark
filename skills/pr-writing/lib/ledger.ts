@@ -204,7 +204,7 @@ function readFindingsFiles(directory: string, reviewerSteps: string[]): Findings
 
 function parseFindings(file: FindingsFile): Finding[] {
   const findings: Finding[] = [];
-  for (const match of file.text.matchAll(/^###\s+(P[0-3])\b:?\s*(.*)$/gm))
+  for (const match of file.text.matchAll(/^###\s+(P[0-3])(?:-\d+)?\b:?\s*(.*)$/gm))
     findings.push({ rank: match[1] as Finding["rank"], title: match[2].trim(), file: file.name });
   return findings;
 }
@@ -225,9 +225,17 @@ function sentBack(file: FindingsFile, finding: Finding): boolean {
   return false;
 }
 
+/** `round-N.md` is the run lead's send-back file, not a review: each finding in it is the fix decision for the review finding with the same title. */
+const roundFile = /^round-\d+\.md$/;
+
 function openFindings(files: FindingsFile[]): Finding[] {
+  const decided = new Set(
+    files
+      .filter((file) => roundFile.test(file.name))
+      .flatMap((file) => parseFindings(file).map((finding) => finding.title.toLowerCase())),
+  );
   const openByGroup = new Map<string, Finding[]>();
-  for (const file of files) {
+  for (const file of files.filter((entry) => !roundFile.test(entry.name))) {
     if (/^\s*No findings\.\s*$/m.test(file.text)) {
       openByGroup.set(file.group, []);
       continue;
@@ -235,7 +243,9 @@ function openFindings(files: FindingsFile[]): Finding[] {
     const kept = parseFindings(file).filter((finding) => !sentBack(file, finding));
     openByGroup.set(file.group, [...(openByGroup.get(file.group) ?? []), ...kept]);
   }
-  return [...openByGroup.values()].flat();
+  return [...openByGroup.values()]
+    .flat()
+    .filter((finding) => !decided.has(finding.title.toLowerCase()));
 }
 
 const ratings: Rating[] = ["good", "decent", "poor"];
@@ -706,7 +716,7 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
     ),
   ];
   const findingsFiles = readFindingsFiles(directory, reviewerSteps);
-  const latest = findingsFiles.at(-1);
+  const latest = findingsFiles.filter((file) => !roundFile.test(file.name)).at(-1);
   const reviewer = latest ? parseReviewerBlock(latest.text) : null;
 
   const { order, upstream } = orderRepos(plan?.steps ?? []);

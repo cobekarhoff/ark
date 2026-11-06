@@ -4,7 +4,7 @@
  * It never pastes an AC text. All generated text sits between the two markers; `post.ts` replaces only that.
  */
 import type { Ledger, Rating } from "./ledger.ts";
-import { gapsOf, shortId, tierOfLedger } from "./lint.ts";
+import { gapsOf, noRecoveryText, shortId, tierOfLedger } from "./lint.ts";
 
 export const beginMarker = "<!-- pr-writing:begin -->";
 export const endMarker = "<!-- pr-writing:end -->";
@@ -253,7 +253,7 @@ function riskBlock(ledger: Ledger, tier: number): Block {
     ? ` The levels differ: the script scored Verification, Alignment, Impact and Rollback cost ${scores} from run data, the reviewer rated them ${["Verification", "Alignment", "Impact", "Rollback cost"].map((name) => reviewer?.ratings[name as "Verification"] ?? "?").join(", ")}. The higher level is shown.`
     : "";
   const oneWay = risk.door === "one-way" || reviewer?.door === "one-way";
-  const recovery = reviewer?.recovery.trim() || "none named";
+  const recovery = reviewer?.recovery.trim() || noRecoveryText;
   const unplanned = new Map(risk.unplanned.map((entry) => [entry.file, entry.reason]));
   const door = oneWay ? `Door: one-way. Recovery: ${recovery}` : "Door: two-way";
   const blast = `Blast radius: ${reviewer?.blastRadius || `${ledger.repos.reduce((sum, repo) => sum + repo.files.length, 0)} changed files in ${ledger.repos.length} repo(s)`}`;

@@ -444,7 +444,9 @@ const RISK03: Check = ({ body, ledger }) => {
     : pass("the CI file change is noted");
 };
 
-const noRecovery = /^(none|not named|tbd|unknown|n\/a|-|\s)*$/i;
+/** What the body writes for a one-way door with no recovery named; the lint refuses it. */
+export const noRecoveryText = "none named";
+const noRecovery = new RegExp(`^(${noRecoveryText}|none|not named|tbd|unknown|n/a|-|\\s)*$`, "i");
 
 const RISK04: Check = ({ body, ledger }) => {
   if (!ledger.hasReviewerStep) return skip("the run has no reviewer step");
