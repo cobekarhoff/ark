@@ -98,7 +98,7 @@ type Criterion = { id: string; text: string; manual: boolean };
 
 /**
  * The strings of an AC that the check counts. A span in backticks must sit on one line and be non-blank.
- * `required` must be in a tracked file at head; `removed` (the span had a `not:` prefix, now cut) must be in none.
+ * `required` passes when a tracked file at head holds it or it names a tracked file or folder at head; `removed` (the span had a `not:` prefix, now cut) must be in none.
  * Not counted: any string of a manual AC; a string with a placeholder (`<` then `>`, or a lone `<`), a `*`, `...`
  * or a `:<digits>` or `:<digits>-<digits>` suffix; a string that holds the id of its own AC (`-` or `_`).
  */

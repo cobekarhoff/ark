@@ -88,6 +88,45 @@ export function runningCost(runDirectory: string): { usd: number | "unknown"; to
   return { usd: group.includes_unknown ? "unknown" : group.usd, tokens: group.tokens };
 }
 
+export type StageTimes = { evaluationEnd?: number; designStart?: number; designEnd?: number };
+
+/**
+ * When the evaluator and the Designer sessions ran, in milliseconds. The evaluator session ends at
+ * the last evaluation.recorded (the run lead session outlasts it). The Designer session runs after
+ * the first evaluation and ends by the last strategy record or strategy answer.
+ */
+export function stageTimes(events: ArkEvent[]): StageTimes {
+  const time = (event: ArkEvent | undefined) => (event ? Date.parse(event.time) : undefined);
+  return {
+    evaluationEnd: time(events.findLast((event) => event.type === "evaluation.recorded")),
+    designStart: time(events.find((event) => event.type === "evaluation.recorded")),
+    designEnd: time(
+      events.findLast(
+        (event) =>
+          event.type === "strategy.recorded" ||
+          (event.type === "gate.answered" && event.data.gate === "strategy"),
+      ),
+    ),
+  };
+}
+
+/** The evaluator reports to the run lead after the lead recorded the evaluation: allow that closing message. */
+export const evaluatorGraceMilliseconds = 60_000;
+
+/** An evaluator session starts at or before the evaluation boundary; only its closing message may follow. */
+export const isEvaluatorSession = (times: number[], evaluationEnd: number | undefined): boolean =>
+  evaluationEnd !== undefined &&
+  times.length > 0 &&
+  Math.min(...times) <= evaluationEnd &&
+  Math.max(...times) <= evaluationEnd + evaluatorGraceMilliseconds;
+
+export const isDesignerTime = (
+  time: number,
+  designStart: number | undefined,
+  designEnd: number | undefined,
+): boolean =>
+  designStart !== undefined && designEnd !== undefined && time >= designStart && time <= designEnd;
+
 export function stepWindows(events: ArkEvent[]): StepWindow[] {
   const windows: StepWindow[] = [];
   for (const event of events) {
@@ -433,30 +472,22 @@ export function retro(runId: string, inProject?: string): void {
   const { messages, sessions } = collectMessages(runDirectory);
 
   const stepOf = assignSteps(messages, windows, runDirectory, runEnd);
-  // The evaluator session ends at the last evaluation.recorded. The run lead session outlasts it.
-  const evaluationEnd = events.findLast((event) => event.type === "evaluation.recorded")?.time;
+  const { evaluationEnd, designStart, designEnd } = stageTimes(events);
   const evaluatorSessions = new Set(
     messages
       .filter((message) => !stepOf.has(message))
       .map((message) => message.sessionKey)
-      .filter((key) =>
-        messages
-          .filter((message) => message.sessionKey === key)
-          .every(
-            (message) =>
-              !stepOf.has(message) &&
-              evaluationEnd !== undefined &&
-              toMilliseconds(message.time) <= toMilliseconds(evaluationEnd),
-          ),
-      ),
+      .filter((key) => {
+        const own = messages.filter((message) => message.sessionKey === key);
+        return (
+          own.every((message) => !stepOf.has(message)) &&
+          isEvaluatorSession(
+            own.map((message) => toMilliseconds(message.time)),
+            evaluationEnd,
+          )
+        );
+      }),
   );
-  // The Designer session runs after the first evaluation and ends by the last strategy record or answer.
-  const designStart = events.find((event) => event.type === "evaluation.recorded")?.time;
-  const designEnd = events.findLast(
-    (event) =>
-      event.type === "strategy.recorded" ||
-      (event.type === "gate.answered" && event.data.gate === "strategy"),
-  )?.time;
   const designerKeys = new Set(
     messages
       .filter((message) => !stepOf.has(message) && !evaluatorSessions.has(message.sessionKey))
@@ -467,10 +498,7 @@ export function retro(runId: string, inProject?: string): void {
           .every(
             (message) =>
               !stepOf.has(message) &&
-              designStart !== undefined &&
-              designEnd !== undefined &&
-              toMilliseconds(message.time) >= toMilliseconds(designStart) &&
-              toMilliseconds(message.time) <= toMilliseconds(designEnd),
+              isDesignerTime(toMilliseconds(message.time), designStart, designEnd),
           ),
       ),
   );
@@ -523,7 +551,9 @@ export function retro(runId: string, inProject?: string): void {
       id,
       [
         ...new Set(
-          [...stepOf].filter(([, window]) => window.id === id).map(([message]) => message.model),
+          [...stepOf]
+            .filter(([message, window]) => window.id === id && !message.helper)
+            .map(([message]) => message.model),
         ),
       ].sort(),
     ]),
@@ -554,6 +584,7 @@ export function retro(runId: string, inProject?: string): void {
   // Same vendor review: judged on the executed step windows (the repo and role the messages ran in), not on plan.yml.
   const vendorsByRepoStep = new Map<string, Map<string, { role: string; vendors: Set<string> }>>();
   for (const [message, window] of stepOf) {
+    if (message.helper) continue;
     const vendorName = message.model.slice(message.model.lastIndexOf("/") + 1);
     const vendor = vendorName.startsWith("claude-")
       ? "anthropic"
@@ -568,6 +599,7 @@ export function retro(runId: string, inProject?: string): void {
     vendorsByRepoStep.set(window.repo, stepsInRepo);
   }
   const sameVendorGroups: string[] = [];
+  const mixedSteps: string[] = [];
   for (const [repo, stepsInRepo] of [...vendorsByRepoStep].sort(([left], [right]) =>
     left < right ? -1 : 1,
   )) {
@@ -576,14 +608,25 @@ export function retro(runId: string, inProject?: string): void {
     const checkers = entries.filter(
       ([, entry]) => entry.role === "validator" || entry.role === "reviewer",
     );
-    const sharing = (candidates: typeof entries, others: typeof entries) =>
-      candidates.filter(([, entry]) =>
-        others.some(([, other]) => [...entry.vendors].some((vendor) => other.vendors.has(vendor))),
-      );
-    const checkersShared = sharing(checkers, builders);
+    // A checker with two vendors is mixed: neither same vendor nor cross vendor.
+    for (const [id, entry] of checkers)
+      if (entry.vendors.size > 1)
+        mixedSteps.push(`${id} (${[...entry.vendors].sort().join(", ")}) in ${repo}`);
+    const checkersShared = checkers.filter(
+      ([, entry]) =>
+        entry.vendors.size === 1 &&
+        builders.some(([, builder]) =>
+          [...entry.vendors].every((vendor) => builder.vendors.has(vendor)),
+        ),
+    );
     if (checkersShared.length > 0)
       sameVendorGroups.push(
-        `${checkersShared.map(([id]) => id).join(", ")} with ${sharing(builders, checkers)
+        `${checkersShared.map(([id]) => id).join(", ")} with ${builders
+          .filter(([, builder]) =>
+            checkersShared.some(([, entry]) =>
+              [...entry.vendors].every((vendor) => builder.vendors.has(vendor)),
+            ),
+          )
           .map(([id]) => id)
           .join(", ")} in ${repo}`,
       );
@@ -687,6 +730,7 @@ export function retro(runId: string, inProject?: string): void {
         ),
       ...modelChangedLines,
       `same vendor review: ${sameVendorGroups.length > 0 ? `true (${sameVendorGroups.join("; ")})` : "false"}`,
+      ...(mixedSteps.length > 0 ? [`mixed review steps: ${mixedSteps.join("; ")}`] : []),
       `compared with ${comparison.runs_compared} earlier closed runs`,
       `wrote ${metricsFile}`,
     ].join("\n"),

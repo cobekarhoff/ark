@@ -3915,3 +3915,133 @@ test("ARK-293-AC5 with session models on the run page, / and /nope answer with a
     expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
   }
 });
+
+// ---------------------------------------------------------------- ARK-310
+
+/**
+ * An open run in planning with an evaluator and a designer in Orca. The evaluator session ends at
+ * `evaluation.recorded` plus its closing message to the run lead and a helper call (`purpose`
+ * job-caption); the designer session runs after it, up to `strategy.recorded`. Both ran
+ * another model than `roles.chief`. Orca reports no model for either terminal; Master Chief's
+ * terminal reports one.
+ */
+function stageModelWorld(options: { designerSession: boolean }) {
+  const { sessions } = isolate();
+  writeProject("p", {
+    workspace: tempDirectory("ark-workspace-"),
+    ticket_source: "local",
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    roles: {
+      implementer: { harness: "omp", model: "m" },
+      validator: { harness: "omp", model: "m" },
+      reviewer: { harness: "omp", model: "m" },
+      chief: { harness: "claude", model: "claude-opus" },
+      evaluator: { harness: "codex", model: "evaluator-configured" },
+      designer: { harness: "codex", model: "designer-configured" },
+    },
+  });
+  const startedAt = ago(3600);
+  const run = runId("ARK-310");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-310", title: "Stage models" },
+    phase: "planning",
+    startedAt,
+  });
+  appendRawEvent(directory, "strategy.recorded", { count: 1, recommended: "S1", cards: ["S1"] }, 4);
+  const after = (seconds: number) => new Date(startedAt.getTime() + seconds * 1000);
+  const workspacePath = join(directory, "workspace");
+  writeOmpSession(
+    sessions,
+    "evaluator",
+    workspacePath,
+    [
+      { time: after(2), costUsd: 0.01, model: "session/evaluator-first" },
+      { time: after(6), costUsd: 0.01, model: "session/evaluator-last" },
+      // The closing report lands after `evaluation.recorded` (at 10 s), then an omp helper call.
+      { time: after(12), costUsd: 0.01, model: "session/evaluator-last" },
+      { time: after(13), costUsd: 0.01, model: "session/helper-model", purpose: "job-caption" },
+    ],
+    after(1),
+  );
+  if (options.designerSession)
+    writeOmpSession(
+      sessions,
+      "designer",
+      workspacePath,
+      [
+        { time: after(20), costUsd: 0.01, model: "session/designer-first" },
+        { time: after(25), costUsd: 0.01, model: "session/designer-last" },
+        { time: after(26), costUsd: 0.01, model: "session/helper-model", purpose: "job-widget" },
+      ],
+      after(19),
+    );
+  // The designer started after evaluation.recorded (10 s) and ended inside the evaluator's grace
+  // interval (to 70 s): a session that starts after the boundary is never the evaluator.
+  const worker = (stage: string) => ({
+    taskId: `task-${stage}`,
+    state: "running",
+    agentTerminalHandle: `term-${stage}`,
+  });
+  const answers = orcaAnswersFor(run);
+  installFakeTools({
+    orca: {
+      terminals: [
+        { handle: "term-lead", connected: true, agentIdentity: "omp", model: "lead/model" },
+        { handle: "term-chief", connected: true, agentIdentity: "omp", model: "chief/model" },
+        { handle: "term-evaluator", connected: true, agentIdentity: "omp" },
+        { handle: "term-designer", connected: true, agentIdentity: "omp" },
+      ],
+      runs: [
+        ...answers.runs!,
+        {
+          id: "orca-chief",
+          objective: "Master Chief: p tickets",
+          coordinator_handle: "term-chief",
+        },
+      ],
+      workers: [worker("evaluator"), worker("designer")],
+      tasks: ["evaluator", "designer"].map((stage) => ({
+        id: `task-${stage}`,
+        title: `${stage} (${run})`,
+      })),
+    },
+  });
+  return { run };
+}
+
+const roleRow = (page: Page, role: string) =>
+  page.locator(`[data-testid="agent"][data-role="${role}"]`);
+
+test("ARK-310-AC4 the evaluator and designer rows show the model their session ran, not the plan or configured model, and Master Chief keeps the Orca model", async ({
+  page,
+}) => {
+  const { run } = stageModelWorld({ designerSession: true });
+  const baseUrl = await launch();
+  await open(page, baseUrl, `run/${run}`);
+
+  await expect(roleRow(page, "evaluator")).toContainText("session/evaluator-last");
+  await expect(roleRow(page, "designer")).toContainText("session/designer-last");
+  await expect(roleRow(page, "Master Chief")).toContainText("chief/model");
+  for (const role of ["evaluator", "designer"]) {
+    await expect(roleRow(page, role)).not.toContainText("claude-opus");
+    await expect(roleRow(page, role)).not.toContainText("(configured)");
+    await expect(roleRow(page, role)).not.toContainText("(planned)");
+  }
+  await expect(roleRow(page, "evaluator")).not.toContainText("session/evaluator-first");
+  for (const role of ["evaluator", "designer"])
+    await expect(roleRow(page, role)).not.toContainText("session/helper-model");
+});
+
+test("ARK-310-AC4 a designer row with no session model keeps the configured model, labelled", async ({
+  page,
+}) => {
+  const { run } = stageModelWorld({ designerSession: false });
+  const baseUrl = await launch();
+  await open(page, baseUrl, `run/${run}`);
+
+  await expect(roleRow(page, "designer")).toContainText("designer-configured (configured)");
+  await expect(roleRow(page, "designer")).not.toContainText("claude-opus");
+  await expect(roleRow(page, "evaluator")).toContainText("session/evaluator-last");
+});

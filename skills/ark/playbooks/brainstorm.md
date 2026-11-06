@@ -96,7 +96,7 @@ Copy the newest ticket's structure:
 The next number is one above the highest `ARK-*.md` in the tickets folder.
 
 - Every AC with `method: test` is provable by at least one integration or E2E test case (ADR 0010); any other method is proved by the `manual` gate. A done ticket's ACs never change.
-- A string in backticks in an AC must be in a tracked file when the MR opens, except one with a placeholder, a `*`, `...`, a `:<line>` suffix or the AC's own id, and any string of a manual AC. Put a path or string that the run removes in `not:` (`` `not:docs/old/` ``): it must then be in no tracked file. Put a string that the run rewrites, or that only describes the old state, outside backticks.
+- A string in backticks in an AC passes when a tracked file contains it or when it names a tracked file or folder at head, except one with a placeholder, a `*`, `...`, a `:<line>` suffix or the AC's own id, and any string of a manual AC. Put a path or string that the run removes in `not:` (`` `not:docs/old/` ``): it must then be in no tracked file. Put a string that the run rewrites, or that only describes the old state, outside backticks.
 - Evidence quotes the human's words and the date, and names the brainstorm choices.
 
 ## UI ideas
