@@ -1,6 +1,6 @@
 ---
 id: ARK-T18
-title: ARK-T18 title is at most 72 characters: summary, ticket title, --summary, a refusal or a title_prefix rule
+title: "ARK-T18 title is at most 72 characters: summary, ticket title, --summary, a refusal or a title_prefix rule"
 level: integration
 technique: decision table (summary field, ticket title, --summary flag, title_prefix) with boundary values at 72 and 73 characters of the whole title
 priority: high
