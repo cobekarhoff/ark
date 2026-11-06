@@ -29,7 +29,13 @@ const root = resolve(import.meta.dir, "..");
 const fixtures = resolve(import.meta.dir, "fixtures/merge-request");
 const lintFixtures = resolve(import.meta.dir, "fixtures/pr-writing/lint");
 const originalPath = process.env.PATH;
-const hostVariables = ["FAKE_LOG", "FAKE_TOKEN_OWNER", "FAKE_PROBE_FAIL", "FAKE_RACE_MR"];
+const hostVariables = [
+  "FAKE_LOG",
+  "FAKE_TOKEN_OWNER",
+  "FAKE_PROBE_FAIL",
+  "FAKE_RACE_MR",
+  "FAKE_EDIT_BODY",
+];
 
 // A token made at run time, so no file of the repo holds a string a secret scanner would flag.
 const githubToken = `ghp${"_"}${"0".repeat(36)}`;
@@ -941,6 +947,63 @@ for (const [path, text] of templateSources)
     expect(body.split("## Testing")[1].split("## Related")[0]).toContain("P1 open: Missing guard");
   });
 
+// The base commit whose `description()` wrote MR bodies before this change. Only that function is run, from `git show`.
+const pinnedBase = "9b85039";
+
+/** The MR body that the pinned-base `description()` writes for the criteria of a ledger. */
+async function pinnedBaseBody(ledger: Ledger): Promise<string> {
+  const source = git(root, "show", `${pinnedBase}:cli/merge-request.ts`);
+  const text = source.slice(
+    source.indexOf("function description("),
+    source.indexOf("function createMergeRequest("),
+  );
+  const js = new Bun.Transpiler({ loader: "ts" }).transformSync(text);
+  const { description } = (await import(
+    `data:text/javascript;base64,${Buffer.from(`${js}\nexport { description };`).toString("base64")}`
+  )) as {
+    description: (
+      ticket: { id: string; title: string },
+      criteriaIds: string[],
+      texts: Map<string, { text: string }>,
+      dependencyLines: string[],
+    ) => string;
+  };
+  return description(
+    { id: ledger.ticket!.id, title: ledger.ticket!.title },
+    ledger.criteria.map((criterion) => criterion.id),
+    new Map(ledger.ticket!.criteria.map((criterion) => [criterion.id, criterion])),
+    [],
+  );
+}
+
+test("ARK-T19 the body of the same run no longer pastes the AC text that the pinned-base builder pasted", async () => {
+  const ledger = gappyRun().ledger();
+  const before = await pinnedBaseBody(ledger);
+  const after = buildBody(ledger);
+
+  // The base builder ran on this fixture and pasted the AC text, so the absence below is not vacuous.
+  expect(before).toContain("Acceptance criteria this repo serves:");
+  expect(before).toContain("AC-TEXT-MARKER AC1");
+  expect(after).not.toContain("AC-TEXT-MARKER");
+  expect(after).toContain("## Not done");
+
+  // ARK_T19_EVIDENCE_DIR (a run folder's results/evidence/) keeps both outputs with the case result.
+  const keep = process.env.ARK_T19_EVIDENCE_DIR;
+  if (keep !== undefined) {
+    mkdirSync(keep, { recursive: true });
+    const note = (side: string, text: string) =>
+      `<!-- ARK-T19 ${side}: same fixture (gappyRun in test/pr-writing.test.ts) -->\n\n${text}\n`;
+    writeFileSync(
+      join(keep, "ARK-T19-before.md"),
+      note(
+        `before, description() of commit ${pinnedBase} (git show ${pinnedBase}:cli/merge-request.ts)`,
+        before,
+      ),
+    );
+    writeFileSync(join(keep, "ARK-T19-after.md"), note("after, buildBody()", after));
+  }
+});
+
 // --- ARK-T20 ----------------------------------------------------------------------------------
 
 const provenanceText = (handle: string, shape: string) =>
@@ -1421,7 +1484,22 @@ function postScenario(host: HostName, existingBody?: string) {
     existsSync(`${logFile}.state`) ? JSON.parse(readFileSync(`${logFile}.state`, "utf8")) : [];
   if (existingBody !== undefined) writeFileSync(`${logFile}.state`, JSON.stringify([mergeRequest]));
   const bodyFile = join(directory, "generated.md");
-  const post = (body: string, options: { reviewers?: string[]; dryRun?: boolean } = {}) => {
+  /** Makes the directory a git repo: `main`, then the branch with one more commit that adds `added` to cli/a.ts. Returns its head. */
+  const commitBranch = (added: string) => {
+    git(directory, "init", "-b", "main");
+    mkdirSync(join(directory, "cli"));
+    writeFileSync(join(directory, "cli/a.ts"), "base\n");
+    git(directory, "add", ".");
+    git(directory, "commit", "-m", "base");
+    git(directory, "checkout", "-b", branch);
+    writeFileSync(join(directory, "cli/a.ts"), `${added}\n`);
+    git(directory, "commit", "-am", "ARK-316: change");
+    return git(directory, "rev-parse", "HEAD");
+  };
+  const post = (
+    body: string,
+    options: { reviewers?: string[]; dryRun?: boolean; ledger?: Ledger } = {},
+  ) => {
     writeFileSync(bodyFile, body);
     const driven = drive<{ action: string }>("post", {
       host,
@@ -1430,14 +1508,14 @@ function postScenario(host: HostName, existingBody?: string) {
       base: "main",
       title: postedTitle,
       bodyFile,
-      ledger: baseLedger(),
+      ledger: options.ledger ?? baseLedger(),
       reviewers: options.reviewers ?? [],
       dryRun: options.dryRun,
     });
     if (driven.error !== undefined) throw new Error(driven.error);
     return driven;
   };
-  return { directory, mergeRequest, state, post };
+  return { directory, mergeRequest, state, post, commitBranch };
 }
 
 const changedBody = goodBody.replace(
@@ -1484,6 +1562,37 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(loggedCalls().filter((call) => call.argv.includes("create"))).toHaveLength(0);
     expect(scenario.state()).toHaveLength(1);
     expect(scenario.state()[0].body).toBe(withHumanText(changedBody));
+  });
+
+  test(`ARK-T23 an MR whose body a person edits between the two probes keeps the edit on ${host}`, () => {
+    const scenario = postScenario(host, withHumanText(goodBody));
+    const edited = withHumanText(
+      goodBody,
+      "Edited while the post ran.\n\n- [x] Checked by hand\n\n",
+    );
+    process.env.FAKE_EDIT_BODY = edited;
+    expect(scenario.post(changedBody).value!.action).toBe("updated");
+    expect(scenario.state()).toHaveLength(1);
+    expect(scenario.state()[0].body).toBe(
+      withHumanText(changedBody, "Edited while the post ran.\n\n- [x] Checked by hand\n\n"),
+    );
+  });
+
+  test(`ARK-T23 STALE01 refuses the post when the head changed after the ledger, and SEC01 only warns on ${host}`, () => {
+    const stale = postScenario(host);
+    const head = stale.commitBranch("changed");
+    const current = baseLedger({ repos: [{ head }] });
+    expect(() => stale.post(goodBody, { ledger: baseLedger() })).toThrow(
+      /STALE01.*differs from the current head/,
+    );
+    expect(writeCalls()).toEqual([]);
+    expect(stale.post(goodBody, { ledger: current }).value!.action).toBe("created");
+
+    const secure = postScenario(host);
+    const secureHead = secure.commitBranch("const key = process.env.API_TOKEN;");
+    const posted = secure.post(goodBody, { ledger: baseLedger({ repos: [{ head: secureHead }] }) });
+    expect(posted.value!.action).toBe("created");
+    expect(posted.err.join("\n")).toMatch(/warning: SEC01/);
   });
 
   test(`ARK-T23 a lint fail in the generated region, or in the merged body outside the markers, refuses the post on ${host}`, () => {
@@ -1540,7 +1649,16 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     const create = postScenario(host);
     const created = create.post(goodBody, { dryRun: true });
     expect(created.value!.action).toBe("dry-run");
-    expect(created.out.join("\n")).toMatch(
+    // Both probes are reads and are printed too, in order, before the write.
+    const probe =
+      host === "github"
+        ? /dry-run: gh pr list --head/
+        : /dry-run: glab api projects\/:fullpath\/merge_requests\?state=opened&source_branch=/;
+    const lines = created.out.filter((line) => line.startsWith("dry-run:"));
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toMatch(probe);
+    expect(lines[1]).toMatch(probe);
+    expect(lines[2]).toMatch(
       host === "github" ? /dry-run: gh pr create/ : /dry-run: glab mr create/,
     );
     expect(writeCalls()).toEqual([]);
@@ -1894,6 +2012,27 @@ test("ARK-T27 the reviewer level comes from the latest findings file and wins wh
   expect(equalRisk).not.toContain("The levels differ");
 });
 
+test("ARK-T27 the reviewer block comes from reviewer-step findings files only, never from a validator report or live-check file", () => {
+  const ledger = mainRun({
+    findings: {
+      "review-1.md": reviewerBlock("high"),
+      "review-2.md": reviewerBlock("low", [
+        "- Not in plan: cli/helpers.ts - shared helper used by the gate change",
+      ]),
+      // Sorts after the review files by name, carries no block, and is not a file of the reviewer step.
+      "pr-writing-tests.md": "# pr-writing-tests (validator)\n\n### P1: A product defect\n",
+      "zz-live-check.md": "No findings.\n",
+    },
+  }).ledger();
+  expect(ledger.risk).toMatchObject({ reviewer: "low", level: "medium" });
+  expect(buildBody(ledger)).toContain("Merge risk: medium (script medium, reviewer low)");
+  expect(
+    lintBody({ body: buildBody(ledger), title: defaultTitle, ledger }).find(
+      (c) => c.id === "RISK04",
+    )!.result,
+  ).toBe("pass");
+});
+
 test("ARK-T27 the script level is low below 1.5, medium to below 2.25, high from 2.25, at the tuples either side of each threshold", () => {
   const events = {
     where: "cli/a.ts, cli/events.ts, cli/old.ts",
@@ -2157,6 +2296,18 @@ test("ARK-T29 EVID04 passes the complete body, fails with no section, warns past
 
 test("ARK-T29 a run with no results/evidence/ needs no Evidence section", () => {
   const { body, evid04 } = evidenceBody(null);
-  expect(body).not.toContain("results/evidence/ exists");
-  expect(evid04().result).not.toBe("fail");
+  // The input has no Evidence section at all, so the result below is the exemption and not a heading that was found.
+  const withoutSection = body.replace(/^## Evidence\n[\s\S]*?(?=^## )/m, "");
+  expect(body).toContain("## Evidence");
+  expect(withoutSection).not.toContain("## Evidence");
+  expect(evid04(withoutSection)).toMatchObject({
+    result: "skip",
+    reason: "the run has no results/evidence/",
+  });
+
+  // The same input fails for a run that has evidence, so the skip comes from the missing folder.
+  const ledger = evidenceBody(evidenceWith(["a.png"], ["b.png"])).ledger;
+  expect(
+    result(lintBody({ body: withoutSection, title: defaultTitle, ledger }), "EVID04").result,
+  ).toBe("fail");
 });

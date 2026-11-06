@@ -1101,3 +1101,60 @@ test(
   },
   { timeout: 60_000 },
 );
+
+test(
+  "ARK-T20 two repos with different templates and host logins each get their own template, provenance handle, assignee and reviewer",
+  () => {
+    const { worktrees } = scenario({ core: "github", app: "github" }, true, [], {
+      pr_writing: { tier_floor: 1, reviewers: ["alice", "bob"] },
+    });
+    const templates: Record<string, string> = {
+      core: "## Summary\n\n## Changes\n\n## Testing\n",
+      app: "## Context\n\n## Verification\n",
+    };
+    for (const name of ["core", "app"]) {
+      mkdirSync(join(worktrees[name], ".github"), { recursive: true });
+      writeFileSync(join(worktrees[name], ".github/pull_request_template.md"), templates[name]);
+      commit(worktrees[name], `${name}-template`);
+    }
+    // The test run recorded the heads before the template commits: record the new ones, as ark test does.
+    const eventsFile = join(process.env.ARK_HOME!, "projects/demo/runs", run, "events.ndjson");
+    const lines = readFileSync(eventsFile, "utf8").split("\n").filter(Boolean);
+    const lastTest = JSON.parse(lines.filter((line) => line.includes('"test.completed"')).at(-1)!);
+    const heads = Object.fromEntries(
+      Object.entries(worktrees).map(([name, path]) => [
+        `repos/${name}`,
+        git(path, "rev-parse", "HEAD"),
+      ]),
+    );
+    writeFileSync(
+      eventsFile,
+      `${lines.join("\n")}\n${JSON.stringify({ ...lastTest, seq: lines.length + 1, data: { ...lastTest.data, heads } })}\n`,
+    );
+
+    process.env.FAKE_TOKEN_OWNERS = JSON.stringify({ core: "alice", app: "bob" });
+    try {
+      const opened = ark("merge-request", "open", run);
+      expect(opened.code, opened.err).toBe(0);
+    } finally {
+      delete process.env.FAKE_TOKEN_OWNERS;
+    }
+    const byRepo = (name: string) => created().find((call) => call.cwd.endsWith(`/${name}`))!;
+    const core = byRepo("core");
+    const app = byRepo("app");
+
+    expect(core.body).toContain("## Summary");
+    expect(core.body).not.toContain("## Context");
+    expect(app.body).toContain("## Context");
+    expect(app.body).not.toContain("## Summary");
+
+    expect(core.body).toContain("on behalf of @alice");
+    expect(app.body).toContain("on behalf of @bob");
+
+    expect(optionValue(core, "--assignee")).toBe("alice");
+    expect(optionValue(app, "--assignee")).toBe("bob");
+    expect(optionValue(core, "--reviewer")).toBe("bob");
+    expect(optionValue(app, "--reviewer")).toBe("alice");
+  },
+  { timeout: 60_000 },
+);

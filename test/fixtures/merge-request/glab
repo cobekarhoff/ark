@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Fake `glab`: records each call, keeps open MRs in the fake host state, and answers the calls `ark merge-request open` makes.
 // The blocks call fails when FAKE_GLAB_BLOCK_FAIL is set.
-import { creates, option, owner, raceAfterFirstProbe, readState, record, repo, writeState } from "./fake-host.ts";
+import { creates, editAfterFirstProbe, option, owner, raceAfterFirstProbe, readState, record, repo, writeState } from "./fake-host.ts";
 
 const argv = process.argv.slice(2);
 const body = option(argv, "--description");
@@ -37,6 +37,7 @@ if (argv[0] === "mr" && argv[1] === "create") {
       process.exit(0);
     }
     const head = decodeURIComponent(path.match(/source_branch=([^&]+)/)![1]);
+    editAfterFirstProbe("source_branch=", state);
     console.log(
       JSON.stringify(state.filter((mr) => mr.repo === repo && mr.head === head).map((mr) => ({ iid: mr.number, web_url: mr.url, description: mr.body }))),
     );

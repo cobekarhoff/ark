@@ -13,8 +13,12 @@ export type FakeMergeRequest = {
 const logFile = process.env.FAKE_LOG!;
 const stateFile = `${logFile}.state`;
 
-export const owner = process.env.FAKE_TOKEN_OWNER ?? "cobekarhoff";
 export const repo = basename(process.cwd());
+// FAKE_TOKEN_OWNERS (JSON, repo folder name -> login) gives a repo its own host login; else FAKE_TOKEN_OWNER.
+export const owner =
+  JSON.parse(process.env.FAKE_TOKEN_OWNERS ?? "{}")[repo] ??
+  process.env.FAKE_TOKEN_OWNER ??
+  "cobekarhoff";
 
 export function readState(): FakeMergeRequest[] {
   return existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, "utf8")) : [];
@@ -47,6 +51,15 @@ export function raceAfterFirstProbe(probeText: string, state: FakeMergeRequest[]
   if (!process.env.FAKE_RACE_MR || logged(probeText) !== 1) return false;
   writeState([...state, JSON.parse(process.env.FAKE_RACE_MR)]);
   return true;
+}
+
+/**
+ * FAKE_EDIT_BODY: a person edits the body of every open MR on the branch right after the first probe. The first probe
+ * still answers the old body, so only a second probe sees the edit. The MR number stays the same.
+ */
+export function editAfterFirstProbe(probeText: string, state: FakeMergeRequest[]) {
+  if (process.env.FAKE_EDIT_BODY === undefined || logged(probeText) !== 1) return;
+  writeState(state.map((mr) => ({ ...mr, body: process.env.FAKE_EDIT_BODY! })));
 }
 
 /** Appends the call to the log, with `body` when the call writes one. */
