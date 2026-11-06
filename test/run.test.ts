@@ -391,7 +391,7 @@ test("ARK-152-AC2 ARK_PROJECT limits the status config check to one project", ()
   }
 });
 
-test("ARK-T16 ARK-321/AC1 ark status skips a project folder that holds no run", () => {
+test("ARK-T18 ARK-321/AC1 ark status skips a project folder that holds no run", () => {
   const home = tempArkHome();
   writeProject("good", validConfig());
   mkdirSync(join(home, "projects/empty-runs/runs"), { recursive: true });
@@ -408,7 +408,7 @@ test("ARK-T16 ARK-321/AC1 ark status skips a project folder that holds no run", 
   }
 });
 
-test("ARK-T17 ARK-321/AC2 ark status reports a folder with a run and no ark.yml", () => {
+test("ARK-T19 ARK-321/AC2 ark status reports a folder with a run and no ark.yml", () => {
   const home = tempArkHome();
   mkdirSync(join(home, "projects/orphan/runs/2026-01-01-X-1"), { recursive: true });
   mkdirSync(join(home, "projects/empty-sibling/runs"), { recursive: true });

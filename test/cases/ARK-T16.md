@@ -1,41 +1,39 @@
 ---
 id: ARK-T16
-title: ARK-T16 ark status skips a project folder that holds no run
+title: ARK-T16 loadConfig reads the optional test_writer and test_reviewer roles
 level: integration
-technique: equivalence classes (runs/ empty, runs/ missing, runs/ holding only a stray file) and boundary on the run count (zero runs)
+technique: equivalence classes (both roles, no test roles, role without model) with a boundary on the missing field
 priority: high
-risk: a folder under $ARK_HOME/projects with no ark.yml and no run folder is listed or counted as an invalid project, so ark status exits 1 on a harmless leftover folder
+risk: a config with a test role and no model loads, and the run lead starts a test step with no model; or an old config with no test roles stops loading
 status: active
-changed_by: 2026-11-06-ARK-321-1
+changed_by: 2026-11-06-ARK-313-1
 ---
 
 ## Objective
 
-Prove that a folder under `$ARK_HOME/projects` with no `ark.yml` and no run folder is not a project. `ark status` neither lists it nor counts it as invalid, and exits 0. A run folder is any directory entry under `runs/`. A stray file does not count. Every consumer of `listProjects` in `cli/paths.ts`, namely `ark status`, `ark chief state` and the hub, skips such a folder the same way.
+Prove that `loadConfig` (through an `ark` command that reads `ark.yml`) accepts `roles.test_writer` and `roles.test_reviewer` when both carry a harness and a model, accepts a config with neither, and refuses a test role that has no model, naming the role.
 
 ## Preconditions
 
-- A temporary `ARK_HOME` holds `projects/good/ark.yml`, a valid project config, with no runs.
-- The folder `projects/empty-runs/` has no `ark.yml` and an empty `runs/` directory.
-- The folder `projects/no-runs/` has no `ark.yml` and no `runs/` directory.
-- The folder `projects/stray-file/` has no `ark.yml`. Its `runs/` directory holds one regular file (for example `runs/notes.txt`) and no directory.
+- A temporary `ARK_HOME` and a temporary git repo as the workspace (`tempArkHome`, `tempGitRepo`, `writeProject` in `test/helpers.ts`).
+- Three projects, each with a valid `suites` entry and the roles `implementer`, `validator` and `reviewer`:
+  - `with-test-roles`: also `test_writer` and `test_reviewer`, each with `harness` and `model`.
+  - `without-test-roles`: no test role.
+  - `writer-no-model`: `test_writer` has `harness` and no `model`.
 
 ## Steps
 
-1. Run `ark status` with `ARK_HOME` set to the temporary directory.
-2. Record the output and the exit code.
-3. Run `ark chief state` with the same `ARK_HOME`. Read the project list in its output.
+1. Run `ark status --project with-test-roles` and read the exit code.
+2. Run `ark status --project without-test-roles` and read the exit code.
+3. Run `ark status --project writer-no-model` and read the exit code and the error text.
+4. Load the first config through `loadConfig` and read `roles.test_writer` and `roles.test_reviewer`.
 
 ## Expected results
 
-- When `ark status` runs and the only folders without `ark.yml` hold no run folder, the system shall exit with code 0.
-- When `ark status` runs, the system shall list project `good`.
-- When `ark status` runs, the system shall print none of `empty-runs`, `no-runs` and `stray-file`.
-- When `ark status` runs, the system shall not print "project <name> has no ark.yml" or "project config(s) invalid" for these folders.
-- When `runs/` is empty, missing, or holds only a stray file, the system shall treat the folder as no project, because `listProjects` in `cli/paths.ts` skips it.
-- When `ark chief state` runs, the system shall skip these folders, because it reads projects through `listProjects` in `cli/paths.ts`.
-- When the hub loads its project list, the system shall skip these folders for the same reason: it also uses `listProjects` in `cli/paths.ts`.
+- Step 1 exits 0, and step 4 returns both roles with the harness and the model written in the file.
+- Step 2 exits 0 with no error: old configs still load.
+- Step 3 exits non-zero, and the error names `roles.test_writer` and the missing `model`.
 
 ## Screenshot checkpoints
 
-none: integration case on CLI output and exit code; no UI surface.
+none: integration case on CLI exit codes and error text; no UI surface.

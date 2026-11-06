@@ -1,36 +1,36 @@
 ---
 id: ARK-T17
-title: ARK-T17 ark status flags a project folder with runs but no ark.yml
+title: ARK-T17 the default roles block of bootstrap.md is a valid config on two vendors
 level: integration
-technique: equivalence classes (folder without ark.yml with a run folder, folder without ark.yml with empty runs/) and boundary on the run count (one run next to zero runs)
-priority: high
-risk: a project that lost its ark.yml but still holds runs is hidden from ark status, so the broken config goes unnoticed and ark status exits 0
+technique: equivalence classes (vendor of each role) over the block that a human copies
+priority: medium
+risk: the default block that bootstrap shows has a typo or a role on one vendor, so a bootstrapped project fails to load or has a reviewer that shares the writer's blind spots
 status: active
-changed_by: 2026-11-06-ARK-321-1
+changed_by: 2026-11-06-ARK-313-1
 ---
 
 ## Objective
 
-Prove that a folder under `$ARK_HOME/projects` with no `ark.yml` and at least one run folder under `runs/` is an invalid project. `ark status` names it, reports the invalid config count, and exits 1. A run folder is any directory entry under `runs/`. An empty sibling folder in the same `projects/` directory is not reported (see ARK-T16).
+Prove that the default `roles:` block in `skills/ark/playbooks/bootstrap.md` (the fenced block in section 2 with real harness and model values) loads through `loadConfig` with `test_writer` and `test_reviewer`, and that the reviewer is on a different vendor from the implementer and the test writer. This reads the block, not its prose: wording is proved by inspection.
 
 ## Preconditions
 
-- A temporary `ARK_HOME` holds `projects/orphan/` with no `ark.yml`.
-- The folder `projects/orphan/runs/` holds one directory, for example `runs/2026-01-01-X-1/`.
-- The folder `projects/empty-sibling/` has no `ark.yml` and an empty `runs/` directory.
+- `bootstrap.md` has the default roles block in section 2 (the one with real values; not the `<harness>` template in section 8).
+- A temporary `ARK_HOME` and a temporary git repo as the workspace.
 
 ## Steps
 
-1. Run `ark status` with `ARK_HOME` set to the temporary directory.
-2. Record the output and the exit code.
+1. Extract the fenced block that starts with `roles:` from section 2 of `bootstrap.md`.
+2. Write a project config with a valid `suites` entry and the extracted `roles` value, then run `ark status --project <name>`.
+3. Load the config through `loadConfig` and read each role's `harness` and `model`.
+4. Map each harness to its vendor (`claude` is Anthropic, `codex` is OpenAI, `omp` takes the vendor from the model prefix).
 
 ## Expected results
 
-- When `ark status` runs, the system shall print "project orphan has no ark.yml".
-- When `ark status` runs, the system shall print "project config(s) invalid".
-- When `ark status` runs, the system shall not print a "has no ark.yml" line naming `empty-sibling`.
-- When `ark status` finds a project folder with no `ark.yml` and a run folder, the system shall exit with code 1.
+- Step 2 exits 0, and step 3 returns `test_writer` and `test_reviewer` with a harness and a model.
+- The vendor of `test_reviewer` differs from the vendor of `implementer` and from the vendor of `test_writer`.
+- The existing roles (`implementer`, `validator`, `reviewer`, `evaluator`, `designer`, `chief`) still load from the same block.
 
 ## Screenshot checkpoints
 
-none: integration case on CLI output and exit code; no UI surface.
+none: integration case on a config block; no UI surface.
