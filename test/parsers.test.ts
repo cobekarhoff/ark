@@ -59,9 +59,13 @@ test("ARK-158-AC5 an empty report is an error, not zero results", () => {
   expect(() => parseBehave({ report: "", stdout: "" })).toThrow("behave report is empty");
 });
 
-// ARK-311-AC1: the bun report is real (`bun test --reporter=junit` on a four-test file). pytest and behave
-// are not installed on this machine, so their reports are built by hand in the format of the real runs
-// captured for ARK-158 (pytest-report.xml, behave-report.json), with `case` properties and case tags added.
+// ARK-311-AC1: all three reports are real, one per runner, captured from the same five cases: case id,
+// old AC id, both, neither, and the slash form `ARK-9/AC1`. Bun source (`a.test.ts`, run with
+// `bun test --reporter=junit --reporter-outfile=bun-report.xml`): five `test("<title>", () => {})` calls titled
+// `ARK-T12 case only`, `CLARA-12-AC1 old only`, `ARK-T13 CLARA-12-AC2 both`, `neither`, `ARK-9/AC1 slash`.
+// pytest and behave sources are in fixtures/parsers/suites/, run through `uv run --with pytest --with behave`:
+//   pytest -o junit_family=xunit1 --junitxml=pytest-cases-report.xml
+//   behave --format json -o behave-cases-report.json
 test("ARK-311-AC1 bun reads case ids and old AC ids from the JUnit title into cases and criteria", () => {
   expect(parseBun({ report: fixture("bun-report.xml"), stdout: "" })).toEqual([
     { name: "ARK-T12 case only", criteria: [], cases: ["ARK-T12"], status: "passed" },
@@ -73,6 +77,7 @@ test("ARK-311-AC1 bun reads case ids and old AC ids from the JUnit title into ca
       status: "passed",
     },
     { name: "neither", criteria: [], cases: [], status: "passed" },
+    { name: "ARK-9/AC1 slash", criteria: ["ARK-9/AC1"], cases: [], status: "passed" },
   ]);
 });
 
@@ -92,6 +97,7 @@ test("ARK-311-AC1 pytest reads case properties into cases and ac properties into
       status: "passed",
     },
     { name: "test_cases::test_neither", criteria: [], cases: [], status: "passed" },
+    { name: "test_cases::test_slash", criteria: ["ARK-9/AC1"], cases: [], status: "passed" },
   ]);
 });
 
@@ -107,5 +113,6 @@ test("ARK-311-AC1 behave reads @ARK-T12 and @case:ARK-T12 tags into cases and AC
       status: "passed",
     },
     { name: "Cases: Neither", criteria: [], cases: [], status: "passed" },
+    { name: "Cases: Slash", criteria: ["ARK-9/AC1"], cases: [], status: "passed" },
   ]);
 });

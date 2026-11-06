@@ -11,21 +11,15 @@
         "keyword": "Scenario",
         "name": "Case only",
         "tags": ["ARK-T12"],
-        "location": "features/cases.feature:3",
+        "location": "features/cases.feature:4",
         "steps": [
           {
             "keyword": "Given",
             "step_type": "given",
             "name": "a passing step",
-            "location": "features/cases.feature:4",
-            "match": {
-              "location": "features/steps/steps.py:4",
-              "arguments": []
-            },
-            "result": {
-              "status": "passed",
-              "duration": 2.5e-5
-            }
+            "location": "features/cases.feature:5",
+            "match": { "location": "features/steps/steps.py:4", "arguments": [] },
+            "result": { "status": "passed", "duration": 2.5987625122070312e-5 }
           }
         ],
         "status": "passed"
@@ -35,21 +29,15 @@
         "keyword": "Scenario",
         "name": "Case with prefix",
         "tags": ["case:ARK-T15"],
-        "location": "features/cases.feature:6",
+        "location": "features/cases.feature:8",
         "steps": [
           {
             "keyword": "Given",
             "step_type": "given",
             "name": "a passing step",
-            "location": "features/cases.feature:7",
-            "match": {
-              "location": "features/steps/steps.py:4",
-              "arguments": []
-            },
-            "result": {
-              "status": "passed",
-              "duration": 2.5e-5
-            }
+            "location": "features/cases.feature:9",
+            "match": { "location": "features/steps/steps.py:4", "arguments": [] },
+            "result": { "status": "passed", "duration": 2.6941299438476562e-5 }
           }
         ],
         "status": "passed"
@@ -59,21 +47,15 @@
         "keyword": "Scenario",
         "name": "Old only",
         "tags": ["ac:CLARA-12-AC1"],
-        "location": "features/cases.feature:9",
+        "location": "features/cases.feature:12",
         "steps": [
           {
             "keyword": "Given",
             "step_type": "given",
             "name": "a passing step",
-            "location": "features/cases.feature:10",
-            "match": {
-              "location": "features/steps/steps.py:4",
-              "arguments": []
-            },
-            "result": {
-              "status": "passed",
-              "duration": 2.5e-5
-            }
+            "location": "features/cases.feature:13",
+            "match": { "location": "features/steps/steps.py:4", "arguments": [] },
+            "result": { "status": "passed", "duration": 2.193450927734375e-5 }
           }
         ],
         "status": "passed"
@@ -83,21 +65,15 @@
         "keyword": "Scenario",
         "name": "Both",
         "tags": ["CLARA-12-AC2", "case:ARK-T13"],
-        "location": "features/cases.feature:12",
+        "location": "features/cases.feature:16",
         "steps": [
           {
             "keyword": "Given",
             "step_type": "given",
             "name": "a passing step",
-            "location": "features/cases.feature:13",
-            "match": {
-              "location": "features/steps/steps.py:4",
-              "arguments": []
-            },
-            "result": {
-              "status": "passed",
-              "duration": 2.5e-5
-            }
+            "location": "features/cases.feature:17",
+            "match": { "location": "features/steps/steps.py:4", "arguments": [] },
+            "result": { "status": "passed", "duration": 1.9073486328125e-5 }
           }
         ],
         "status": "passed"
@@ -107,21 +83,33 @@
         "keyword": "Scenario",
         "name": "Neither",
         "tags": ["smoke"],
-        "location": "features/cases.feature:15",
+        "location": "features/cases.feature:20",
         "steps": [
           {
             "keyword": "Given",
             "step_type": "given",
             "name": "a passing step",
-            "location": "features/cases.feature:16",
-            "match": {
-              "location": "features/steps/steps.py:4",
-              "arguments": []
-            },
-            "result": {
-              "status": "passed",
-              "duration": 2.5e-5
-            }
+            "location": "features/cases.feature:21",
+            "match": { "location": "features/steps/steps.py:4", "arguments": [] },
+            "result": { "status": "passed", "duration": 2.002716064453125e-5 }
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Slash",
+        "tags": ["ARK-9/AC1"],
+        "location": "features/cases.feature:24",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/cases.feature:25",
+            "match": { "location": "features/steps/steps.py:4", "arguments": [] },
+            "result": { "status": "passed", "duration": 2.1457672119140625e-5 }
           }
         ],
         "status": "passed"
