@@ -83,29 +83,29 @@ Skip this part when `ark status <run>` shows that the run has an `evaluation.rec
 
    The command refuses when `evaluation.md` has no `Blockers` list, no `Risks` list or no `Surfaces` list, or when `Surfaces` holds a value other than `web_ui`, `cli_output`, `document` and `none`. An empty `Blockers` or `Risks` list is valid. Never write the event by hand.
 
-4. Run `ark status <run>`. With no blockers and a ticket with ACs, the phase is `planning`: skip the criteria gate and go to the strategy part below. Never record a gate answer for the human. Carry each risk into your plan: a step, a test case or a line in `summary`. `plan.md` lists them.
+4. Run `ark status <run>`. The phase is `awaiting_criteria` on every run, also with no blockers and a ticket with ACs: go to the criteria gate below. Never record a gate answer for the human. Carry each risk into your plan: a step, a test case or a line in `summary`. `plan.md` lists them.
 
 ### Criteria gate
 
-The gate opens when the phase is `awaiting_criteria`. That means the ticket has no ACs, or the evaluation has blockers.
+The gate opens on every run, because the phase is `awaiting_criteria` for each new run. The human approves each AC's `method` and `verified_by` here, also when the ticket has ACs and the evaluation has no blockers.
 
-1. If the ticket has no ACs, read the ticket and the code it touches. Draft testable AC. Each one is one statement that an integration or E2E test can prove. Give each an ID: `<ticket id>-AC1`, `<ticket id>-AC2` and so on. If the evaluation has blockers, revise the ACs they name, or list them as questions for the human.
+1. If the ticket has no ACs, read the ticket and the code it touches. Draft testable AC. Each one is one statement that a test case can prove. Give each a local ID: `AC1`, `AC2` and so on (a ticket on the old scheme keeps its `<ticket id>-AC<k>` ids). Give each AC a `method` (`test`, the default, `demonstration`, `inspection` or `analysis`) and a `verified_by` list of test case IDs. Each AC with `method: test` needs at least one integration or E2E case. Reuse an active entry of `test/cases/` when one fits. For a new case, run `ark test-case new <KEY>` and use the ID it prints. If the evaluation has blockers, revise the ACs they name, or list them as questions for the human.
 2. Ask Master Chief to show the draft and the blockers to the human:
 
    ```sh
-   orca orchestration ask --question "Run <run>: <the ticket has no testable ACs | the evaluator found blockers: <list, one per line>>. Proposed ACs: <list, one per line>. Accept them?" --options "accept,edit,abort" --timeout-ms 600000
+   orca orchestration ask --question "Run <run>: <the ticket has no testable ACs | the evaluator found blockers: <list, one per line>>. Proposed ACs, each with its `method` and `verified_by`: <list, one per line>. Accept them?" --options "accept,edit,abort" --timeout-ms 600000
    ```
 
    Add your recommendation to the question. If the ask times out, resume it with `--resume <message id>`. Never send a second question.
 
 3. On `edit`, the human's reply holds the changes. Revise the draft, and ask again.
-4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`. Put them in its frontmatter as `acceptance_criteria: [{id, text}]`. Keep `manual: true` on every criterion that has it. Then record the answer:
+4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`. Put them in its frontmatter as `acceptance_criteria: [{id, text, method, verified_by}]`. Keep `manual: true` on every criterion that has it. Then record the answer:
 
    ```sh
    ark gate record <run> criteria accept
    ```
 
-   The command re-reads the ticket file and copies it to `<run folder>/ticket.md`. It refuses when the file has no criteria. Blockers that the human accepts stay in `evaluation.md`: treat each as a risk in your plan. Then go to the strategy part below.
+   The command re-reads the ticket file and copies it to `<run folder>/ticket.md`. It refuses when the file has no criteria, and when a new-scheme AC with `method: test` has an empty `verified_by` list: the message names the AC. Blockers that the human accepts stay in `evaluation.md`: treat each as a risk in your plan. Then go to the strategy part below.
 
 5. On `abort`, run `ark gate record <run> criteria abort`, then run `ark run close <run> aborted` and go to section 11 with outcome `aborted`.
 
@@ -207,7 +207,7 @@ steps:
     harness: claude
     model: claude-sonnet
     needs: []
-    criteria: [CLARA-512-AC1]
+    criteria: [CLARA-512/AC1]
 design:
   approach: Add a unit field to each exported result.
   interfaces:
@@ -221,13 +221,14 @@ design:
 summary:
   why: Exported files do not show units.
   changes:
-    - criterion: CLARA-512-AC1
+    - criterion: CLARA-512/AC1
       where: shared/packages/export.ts
       now: The export does not write units.
       fix: The export writes the unit of each result.
 test_cases:
-  - id: export-includes-units
-    criterion: CLARA-512-AC1
+  - id: CLARA-T7
+    action: add # add, update, reuse or retire
+    title: CLARA-T7 export includes units
     level: integration
     given:
       - A result has a unit.
@@ -249,7 +250,8 @@ Rules for the plan:
 - Use one implementer step for each repo the ticket changes. A step that needs another repo's change lists that step in `needs`.
 - Add a validator step that writes the integration and E2E tests. Put it in the repo that owns the suite (see `suites[].repo` in `ark.yml`). It needs the implementer steps whose code it tests.
 - Add a reviewer step for each repo the ticket changes. It needs the implementer and validator steps for that repo.
-- `test_cases` has: `id`, `criterion`, `level` (`integration` or `e2e`), `given` (context), `when` (actions), `then` (observable results) and `expected`. All three groups are lists of strings. `given` can be empty; `when` and `then` must not be empty. The old test-case `steps` field is rejected. Every AC without `manual: true` needs at least one test case; a manual criterion needs none, because the gate `manual` answer `ok` proves it. Unit tests never prove an AC, so do not list them.
+- `test_cases` plans every test case the run touches. Each entry has `id` (a test case ID `<KEY>-T<n>`), `action` (`add`, `update`, `reuse` or `retire`) and `level` (`unit`, `integration` or `e2e`). An `add` or `update` entry also has `given` (context), `when` (actions), `then` (observable results) and `expected`; the three groups are lists of strings, `given` can be empty, `when` and `then` must not be empty. A `retire` entry has a `reason`; the entry stays in `test/cases/` with status `retired` and its test code is deleted. A `reuse`, `update` or `retire` entry needs an entry in `test/cases/`. The old test-case `steps` field is rejected. Every AC with `method: test` needs at least one integration or E2E case in its `verified_by` list that is an active entry or an `add` entry of the plan; a criterion with another method needs none, because the gate `manual` answer `ok` proves it. Any level can be a test case, but prefer integration and E2E: a unit case must earn its place.
+- Conversion on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. When the run's diff touches such a test, plan a test case for it: the implementer or validator writes the entry with `ark test-case new <KEY>`, renames the test title to start with the test case ID, and the plan names the case (`add`, or `update` for an existing entry). The reviewer rejects a diff that touches such a test and leaves its title unchanged. Do not migrate old tests in bulk.
 - `design` is required. `ark plan check` rejects a plan with no `design.interfaces`, or with an interface that has no `callers`. `interfaces` lists each interface the change touches: a command, a playbook section, an event, a file format or an exported function. Find the callers of each one before you write it: search the repo, and read the playbooks and docs that name it. A removed or changed interface with a caller you did not list is how earlier runs broke. `approach` (the method, in a few sentences) and `example` (a sample of new or changed output) are optional, but give both. Plan.md shows "No approach given." or "No example given." for a missing part, and the human can ask for it with `change` at the plan gate.
 - `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.

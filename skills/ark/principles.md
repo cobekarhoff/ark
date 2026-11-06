@@ -4,8 +4,9 @@ One line for each principle that Ark already uses, with a link to the rule that 
 
 ## Proof
 
-- Only integration or E2E tests passing at head prove an AC; unit tests never do. [ADR 0006](../../docs/adr/0006-integration-and-e2e-proof-only.md#an-ac-is-proven-only-by-integration-or-e2e-tests-passing-at-head)
-- A criterion with `manual: true` is proven by the human's `manual` gate answer, not by a test. [Reviewer rubric: Proof](rubrics/reviewer.md#what-to-check)
+- An AC is proven by the test cases in its `verified_by`, passing at head. Any level can be a test case, but each `method: test` AC needs an integration or E2E one. [ADR 0010](../../docs/adr/0010-test-cases-describe-the-product.md)
+- A test with an old AC id in its title converts when a run touches it: a test case, a renamed title, a plan entry. [Reviewer rubric: Proof](rubrics/reviewer.md#what-to-check)
+- A criterion with a method other than `test` (or `manual: true`) is proven by the human's `manual` gate answer, not by a test. [Reviewer rubric: Proof](rubrics/reviewer.md#what-to-check)
 - A test asserts observable behavior and fails for a credible regression. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)
 - One contract has one owning test, at the strongest practical boundary. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)
 - Never mock the thing a test proves, and never take the expected value from the code under test. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)

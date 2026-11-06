@@ -9,8 +9,16 @@ A piece of requested work with acceptance criteria, from the project's ticket so
 _Avoid_: Issue, story, task
 
 **Acceptance criterion (AC)**:
-One testable statement of what a ticket must achieve. Its ID, such as `ARK-150-AC2`, never changes.
+One testable statement of what a ticket must achieve. It is local to its ticket: the ticket writes `AC1`, and another ticket names it `ARK-243/AC1`. The old form `ARK-243-AC1` is the same AC. A done ticket's ACs never change. Each has a `method` and a `verified_by` list of test cases (ADR 0010).
 _Avoid_: Requirement, condition
+
+**Test case**:
+One lasting statement of what the product does, in `test/cases/<KEY>-T<n>.md`. Its ID starts the title of the test that runs it. An AC links to its test cases through `verified_by`, many to many (ADR 0010).
+_Avoid_: Test, scenario
+
+**Evidence**:
+What shows that an AC holds: a passing result of each `verified_by` test case at head, or for a method other than `test`, the human's `manual` gate answer.
+_Avoid_: Proof file, report
 
 **Run**:
 One attempt to take a ticket from start to a closed outcome. A ticket can have several runs over time, but only one open at once.
@@ -111,7 +119,7 @@ A smaller choice inside the chosen strategy, in the `decisions` list of `plan.ym
 _Avoid_: Question, open point
 
 **Blocker**:
-A problem the evaluator finds in an AC: it is not possible, no integration or E2E test can prove it (a criterion with `manual: true` is exempt), or it conflicts with other code. A blocker opens the criteria gate.
+A problem the evaluator finds in an AC: it is not possible, no integration or E2E test case can prove it (a criterion with a method other than `test` is exempt), or it conflicts with other code. A blocker opens the criteria gate.
 
 **Risk**:
 A problem the evaluator finds that the plan must handle. `plan.md` lists each risk.

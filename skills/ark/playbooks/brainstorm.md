@@ -90,12 +90,12 @@ When no Run has the objective 'Master Chief: <project> tickets', or the send exi
 
 Copy the newest ticket's structure:
 
-- Frontmatter: `id`, `title`, `status: proposed`, `kind` (`bug`, `perf`, `refactor` or `feature`; set it in every new ticket, and a missing `kind` reads as `feature`), `milestone`, `traces` (PRD requirement IDs), `depends_on`, and `acceptance_criteria` with IDs `<ticket>-AC<k>`. A criterion that only a person can prove gets `manual: true`; leave the field out for every other criterion.
+- Frontmatter: `id`, `title`, `status: proposed`, `kind` (`bug`, `perf`, `refactor` or `feature`; set it in every new ticket, and a missing `kind` reads as `feature`), `milestone`, `traces` (PRD requirement IDs), `depends_on`, and `acceptance_criteria` with IDs `AC1`, `AC2` (an AC is local to its ticket; another ticket names it `<ticket>/AC<k>`, and the old form `<ticket>-AC<k>` is the same AC). Each criterion has a `method` (`test`, the default, `demonstration`, `inspection` or `analysis`) and a `verified_by` list of test case IDs (`<KEY>-T<n>`); the human approves both at the criteria gate. A criterion that only a person can prove gets `method: demonstration` (or `manual: true`); leave `method` out for a `test` criterion.
 - Sections: Problem, Change, Acceptance criteria (a table), Evidence.
 
 The next number is one above the highest `ARK-*.md` in the tickets folder.
 
-- Every AC is provable by an integration or E2E test (ADR 0006), or has `manual: true` and is proved by the `manual` gate.
+- Every AC with `method: test` is provable by at least one integration or E2E test case (ADR 0010); any other method is proved by the `manual` gate. A done ticket's ACs never change.
 - A string in backticks in an AC must be in a tracked file when the MR opens, except one with a placeholder, a `*`, `...`, a `:<line>` suffix or the AC's own id, and any string of a manual AC. Put a path or string that the run removes in `not:` (`` `not:docs/old/` ``): it must then be in no tracked file. Put a string that the run rewrites, or that only describes the old state, outside backticks.
 - Evidence quotes the human's words and the date, and names the brainstorm choices.
 

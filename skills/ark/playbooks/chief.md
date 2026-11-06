@@ -86,9 +86,11 @@ Do these steps in order for one ready ticket.
    title: "Router skill and playbooks"
    kind: feature # bug, perf, refactor or feature: copy it from the proposed ticket and set it in every new ticket
    acceptance_criteria:
-     - id: ARK-156-AC1
+     - id: AC1
        text: "The statement, copied word for word"
-       manual: true # only when the ticket says a person proves the criterion; omit otherwise
+       method: test # test (default), demonstration, inspection or analysis
+       verified_by: [ARK-T12] # test case IDs; the human approves them at the criteria gate
+       manual: true # old form, reads as method: demonstration; omit otherwise
    ---
 
    ## Problem
@@ -101,12 +103,12 @@ Do these steps in order for one ready ticket.
 
    ## Acceptance criteria
 
-   | ID          | Criterion                           |
-   | ----------- | ----------------------------------- |
-   | ARK-156-AC1 | The statement, copied word for word |
+   | ID  | Criterion                           |
+   | --- | ----------------------------------- |
+   | AC1 | The statement, copied word for word |
    ```
 
-   If the ticket lists criteria without IDs, number them `<ticket id>-AC1`, `<ticket id>-AC2` and so on, in order. Do not invent or reword criteria. Keep `manual: true` on a criterion that has it. If the ticket has none, write `acceptance_criteria: []`. The run lead then opens the criteria gate.
+   If the ticket lists criteria without IDs, number them `AC1`, `AC2` and so on, in order (an AC is local to its ticket; from another ticket it is `<ticket id>/AC1`, and the old `<ticket id>-AC1` is the same AC). Do not invent or reword criteria. Keep `method`, `verified_by` and `manual: true` on a criterion that has them. A ticket on the old scheme keeps its `<ticket id>-AC<k>` ids. If the ticket has none, write `acceptance_criteria: []`. The criteria gate opens on every run: the run lead then drafts the ACs.
 
 2. **Start the run.**
 

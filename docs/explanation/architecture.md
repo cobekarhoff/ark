@@ -141,5 +141,5 @@ Nothing changes until you approve it. Cost is tracked live in `ark status` and j
 
 - **Agents are trusted.** They act with your access, and the git host's branch protection makes sure only you merge. This replaces the old ledger, packet hashing, launcher, and credential scrubbing. See [ADR 0004](../adr/0004-trusted-agents-lightweight-harness.md).
 - **Orca and Plannotator do the hosting and review.** Ark does not build agent hosting, messaging, a queue, or a review interface. See [ADR 0005](../adr/0005-orca-and-plannotator.md).
-- **Only integration and end-to-end tests prove a criterion.** Product repos keep their own validation, and Ark does not add a second proof system. See [ADR 0006](../adr/0006-integration-and-e2e-proof-only.md).
+- **Test cases describe the product, and an AC is proven through them.** An AC lists its test cases in `verified_by`; any level can be a test case, but each `method: test` AC needs an integration or end-to-end one. Product repos keep their own validation, and Ark does not add a second proof system. See [ADR 0010](../adr/0010-test-cases-describe-the-product.md), which replaces [ADR 0006](../adr/0006-integration-and-e2e-proof-only.md).
 - **If a spike fails, Ark falls back to a tmux host.** The two spikes, ARK-150 and ARK-151, test the parts that depend most on Orca.

@@ -280,17 +280,19 @@ Each entry in `steps`:
 
 Each entry in `test_cases`:
 
-| Field       | Type            | Meaning                                                   |
-| ----------- | --------------- | --------------------------------------------------------- |
-| `id`        | string          | Name of the test case.                                    |
-| `criterion` | string          | The AC the test case proves.                              |
-| `level`     | string          | `integration` or `e2e`.                                   |
-| `given`     | list of strings | Context for the test. Required; can be empty.             |
-| `when`      | list of strings | Actions in order. Must not be empty.                      |
-| `then`      | list of strings | Observable results in order. Must not be empty.           |
-| `expected`  | string          | Required EARS sentence: "When ..., the system shall ...". |
+| Field      | Type            | Meaning                                                   |
+| ---------- | --------------- | --------------------------------------------------------- |
+| `id`       | string          | The test case ID `<KEY>-T<n>` from `ark test-case new`.   |
+| `action`   | string          | `add`, `update`, `reuse` or `retire`.                     |
+| `title`    | string          | Optional. The test title; it starts with the ID.          |
+| `reason`   | string          | Required for `retire`: why the case goes.                 |
+| `level`    | string          | `unit`, `integration` or `e2e`.                           |
+| `given`    | list of strings | Context for the test. Required; can be empty.             |
+| `when`     | list of strings | Actions in order. Must not be empty.                      |
+| `then`     | list of strings | Observable results in order. Must not be empty.           |
+| `expected` | string          | Required EARS sentence: "When ..., the system shall ...". |
 
-`ark plan check` rejects missing or malformed groups, an empty `when` or `then`, a missing `expected`, and any old test-case `steps` field. The error names the test case.
+The ACs that a case serves are the ones whose `verified_by` lists it. Only `add` and `update` entries need `given`, `when`, `then` and `expected`. A `reuse`, `update` or `retire` entry needs an entry in `test/cases/`. An old plan may still use a free `id` with one `criterion` and no `action`; ARK-311 itself does. `ark plan check` rejects missing or malformed groups, an empty `when` or `then`, a missing `expected`, and any old test-case `steps` field. The error names the test case.
 
 In `plan.md`, each group starts with Given, When or Then, in that order. Later lines in each group start with And. An empty `given` emits no Given line. The unchanged EARS sentence follows the Gherkin block on its own `Expected:` line.
 
@@ -304,17 +306,18 @@ steps:
     harness: claude
     model: claude-sonnet
     needs: []
-    criteria: [CLARA-512-AC1]
+    criteria: [CLARA-512/AC1]
   - id: core-package-review
     role: reviewer
     repo: repos/shared/packages
     harness: codex
     model: gpt-codex
     needs: [core-package]
-    criteria: [CLARA-512-AC1]
+    criteria: [CLARA-512/AC1]
 test_cases:
-  - id: export-includes-units
-    criterion: CLARA-512-AC1
+  - id: CLARA-T7
+    action: add
+    title: CLARA-T7 export includes units
     level: integration
     given:
       - A result has a unit.
@@ -395,7 +398,7 @@ gates:
 
 A browser suite runs Playwright Test. Playwright's JUnit reporter writes the test title in `name`, so the `bun` parser reads it unchanged, and `PLAYWRIGHT_JUNIT_OUTPUT_FILE` carries the `{report}` path. The `setup` above also installs Chromium, so each new worktree can run the suite; the download is cached in `~/.cache/ms-playwright`.
 
-A test proves an AC when its name or tags contain the AC id, for example `CLARA-512-AC1`. For each AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran. An AC with `manual: true` in the run's `ticket.md` is decided by the `manual` gate alone: `manual pending` until a person answers, then `manual ok` or `manual problem`. `ark test` exits 0 only when every other AC is `passing` and every manual AC is `manual ok`.
+An AC is written `AC1` in its ticket and `CLARA-512/AC1` elsewhere; the old form `CLARA-512-AC1` is the same AC. Each AC has a `method` (`test`, the default, `demonstration`, `inspection` or `analysis`) and a `verified_by` list of test case IDs. A test carries its case ID at the start of its title, for example `CLARA-T7`. `ark test` decides an AC with a `verified_by` list from the results of its cases at every level: `passing` when all pass, `failing` when one fails, `missing` when one has no result. An old-scheme AC with no `verified_by` is proven when its name or tags contain the AC id, for example `CLARA-512-AC1`, and only integration and E2E results count. For such an AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran. An AC with `manual: true` or a `method` other than `test` in the run's `ticket.md` is decided by the `manual` gate alone: `manual pending` until a person answers, then `manual ok` or `manual problem`. `ark test` exits 0 only when every other AC is `passing` and every manual AC is `manual ok`.
 
 ## Events
 

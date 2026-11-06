@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR 0010
 ---
 
 # An AC is proven only by integration or E2E tests passing at head

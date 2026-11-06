@@ -117,7 +117,7 @@ Apply a proposal only after the human answers "approve". Then change the status 
 Create a ticket on the Ark backlog in `~/.ark/projects/ark/tickets/`:
 
 1. Find the next free ID: `ls ~/.ark/projects/ark/tickets/` and take the highest number plus one.
-2. Write `~/.ark/projects/ark/tickets/ARK-<number>.md` in the same format as the other tickets there: frontmatter with `id`, `title`, `status: ready`, `milestone`, `traces`, `depends_on` and `acceptance_criteria` (a list of `id` and `text`, each id `ARK-<number>-AC<k>`, plus `manual: true` for a criterion that only a person can prove), then a `## Why` section that cites the retro evidence. Every AC must be testable at integration or E2E level, or have `manual: true`.
+2. Write `~/.ark/projects/ark/tickets/ARK-<number>.md` in the same format as the other tickets there: frontmatter with `id`, `title`, `status: ready`, `milestone`, `traces`, `depends_on` and `acceptance_criteria` (a list of `id` and `text`, each id `AC<k>`, a `method` and a `verified_by` list of test case IDs, plus `manual: true` or a `method` other than `test` for a criterion that only a person can prove), then a `## Why` section that cites the retro evidence. Every AC with `method: test` must have an integration or E2E test case; any other AC has another `method`.
 3. Write the ticket into no list of `~/.ark/projects/ark/ROADMAP.md`. Add no row to the tickets README. Only the human ranks it.
 
 ### Scope: skill

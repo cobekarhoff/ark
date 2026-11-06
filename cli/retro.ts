@@ -245,7 +245,7 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
 
 /**
  * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
- * run start when the ticket has no ACs and at an evaluation with blockers, the strategy gate at a
+ * run start (it opens on every run since ARK-311; an older log opens it only without ACs or with blockers), the strategy gate at a
  * strategy record of 2 or more cards, the plan gate at the first valid plan check after its last answer, the escalation gate
  * at the failed step that spent the round budget. An unanswered gate adds nothing.
  */

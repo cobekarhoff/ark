@@ -34,7 +34,7 @@ You check the ticket before the run lead plans. Your harness and model come from
    ```markdown
    ## Blockers
 
-   - ARK-163-AC1: a worker cannot call `worker-start`, so no test can prove it.
+   - AC1: a worker cannot call `worker-start`, so no test can prove it.
 
    ## Risks
 
@@ -46,7 +46,7 @@ You check the ticket before the run lead plans. Your harness and model come from
    ```
 
    - A surface is what a person sees when the ticket is done. Use `web_ui`, `cli_output`, `document` or `none`. Use `none` alone when the change shows a person nothing. Any other value makes the run lead start a Designer, so list a surface only when the ticket changes it.
-   - A blocker is an AC that is not possible, that no integration or E2E test can prove (a criterion with `manual: true` is exempt: its proof is the gate `manual` answer `ok`), or that conflicts with other code. Each blocker names the AC ID and the reason, with your evidence.
+   - A blocker is an AC that is not possible, that no integration or E2E test case can prove (a criterion with a method other than `test`, or `manual: true`, is exempt: its proof is the gate `manual` answer `ok`), or that conflicts with other code. Each blocker names the AC ID and the reason, with your evidence.
    - A risk is a problem the plan must handle. It is not a reason to stop.
    - A ticket with no ACs has no AC to block: put your doubts about the ticket in the risks.
 
@@ -78,7 +78,7 @@ You write the product code.
 3. Before each commit and before `worker_done`, run every check script that the repo's `package.json` lists. For this repo that is `format` (it writes), then `format:check`, `typecheck` and `lint`. Run them in rework rounds too, and for Markdown-only changes. Fix every failure first. Commit the files `format` changed.
 4. If a findings file or a failing test list names your step (a rework round), fix exactly what it lists. The file is `<run folder>/findings/round-<round>.md`. Do not widen the change.
 5. Commit your own work on the branch `ark/<ticket id>-<slug>` before `worker_done`. Do not leave it uncommitted for the reviewer or the run lead. `ark test` runs on the latest commit, so uncommitted work counts for nothing. Do not push, and do not open an MR. `ark merge-request open` does that.
-6. Do not write the AC-tagged integration or E2E tests. The validator writes them.
+6. Do not write the integration or E2E tests of the plan's test cases. The validator writes them. Conversion on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. When your diff touches such a test, write a test case with `ark test-case new <KEY>`, rename the test title to start with the test case ID, and make sure the plan names the case. If it does not, say so in your report. The reviewer rejects a diff that touches such a test and leaves its title unchanged.
 
 ### Validator
 
@@ -86,10 +86,11 @@ You turn the plan's test cases into tests that prove the AC, and you make them p
 
 1. Read `skills/ark/principles.md` in the Ark repo. Read the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Find the suite whose `repo` is yours: its `level`, its `command` and its `parser`. Your tests must live where that suite's command finds them. When `verify.md` exists in the same folder, use it for a live check: start the app and reach it as it says, and run each feature of its feature map that the step's criteria touch. Quote what you saw in your report. When `verify.md` is wrong (a command fails or a result differs), say so in your findings file, so the run lead can write a proposal.
 2. Write one or more tests for each test case of your step's criteria. Set up its `given` context, perform its `when` actions, and assert its `then` results and `expected` EARS sentence. Each test:
-   - Is an integration or E2E test, at the level the test case names. Never write a unit test to prove an AC.
-   - Carries its AC ID so the suite's parser can read it. Put the ID in the test name for the `bun` parser, for example `test("ARK-156-AC1 lists the five playbooks", ...)`. Use the AC marker or tag your parser reads for `pytest` and `behave`.
+   - Is a test at the level the test case names. An AC with `method: test` needs an integration or E2E case among its `verified_by` cases, so a unit test alone never proves it.
+   - Carries its test case ID so the suite's parser can read it. Put the ID at the start of the test name for the `bun` parser, for example `test("ARK-T12 lists the five playbooks", ...)`. Use the `case` marker for `pytest` and the `@case:<id>` tag for `behave`. For an `add` entry, run `ark test-case new <KEY>` first and use the ID it prints; write the entry's fields and sections.
+   - Converts on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. When you change such a test, write a test case with `ark test-case new <KEY>`, rename the title to start with the test case ID, and name the case in the plan (tell the run lead if the plan lacks it). The reviewer rejects a diff that touches such a test and leaves its title unchanged. Leave an untouched old-id test alone.
    - Exercises the real system or an emulated dependency you own. Never mock the thing the test proves.
-3. Run the suites and make the tests pass: `ark test <run>`. It runs every suite on the composed workspace and lists each AC as passing, failing, missing, manual pending, manual ok or manual problem. It is the only command that proves an AC. A criterion with `manual: true` needs no test: its proof is the gate `manual` answer `ok`, and you never write a test for it. Commit your tests and any evidence files before the last `ark test <run>`, so that no commit follows that test: a later commit makes the test head stale.
+3. Run the suites and make the tests pass: `ark test <run>`. It runs every suite on the composed workspace and lists each AC as passing, failing, missing, manual pending, manual ok or manual problem. It is the only command that proves an AC. A criterion with a method other than `test` (or `manual: true`) needs no test: its proof is the gate `manual` answer `ok`, and you never write a test for it. An AC with a `verified_by` list is decided by the results of those cases at every level. Commit your tests and any evidence files before the last `ark test <run>`, so that no commit follows that test: a later commit makes the test head stale.
 4. If a test fails because the product code is wrong, do not fix the product code. Write the failing test names, the output and your evidence in `<run folder>/findings/<step>.md`, and report `--outcome failed`. The run lead sends the work back to the implementer.
 5. Audit each test you wrote against the test gate (`rules/test-audit.md` in the Ark repo), as your last step. Answer these for every test:
    - What observable behavior or contract does it protect?
