@@ -45,7 +45,7 @@ The human names a ticket or several. For each one:
 1. Fetch it from the project's ticket source. Use `gh issue view` for `github`, the Jira tools you have for `jira`, and read the file under `tickets/` for `local`.
 2. Evaluate it and tell the human, in a few lines:
    - Whether every AC is a testable statement. Name the weak ones.
-   - Whether the backticks of every AC follow this rule. A string in backticks in an AC must be in a tracked file when the MR opens, except one with a placeholder, a `*`, `...`, a `:<line>` suffix or the AC's own id, and any string of a manual AC. Put a path or string that the run removes in `not:` (`` `not:docs/old/` ``): it must then be in no tracked file. Put a string that the run rewrites, or that only describes the old state, outside backticks.
+   - Whether the backticks of every AC follow this rule. A string in backticks in an AC passes when a tracked file contains it or when it names a tracked file or folder at head, except one with a placeholder, a `*`, `...`, a `:<line>` suffix or the AC's own id, and any string of a manual AC. Put a path or string that the run removes in `not:` (`` `not:docs/old/` ``): it must then be in no tracked file. Put a string that the run rewrites, or that only describes the old state, outside backticks.
    - Which repos it likely touches. Read the workspace to check.
    - What it depends on, and what is unclear or risky.
 3. Run `ark status` and check that no open run already exists for the ticket. Only one run per ticket can be open.

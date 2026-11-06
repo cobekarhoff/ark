@@ -1246,3 +1246,17 @@ test("ARK-305-AC4 brainstorm and chief AC-authoring advice puts removed strings 
     );
   }
 });
+
+test("ARK-310-AC5 chief.md and brainstorm.md state the ARK-307 AC string rule in the same sentence", () => {
+  const sentenceOf = (name: string): string => {
+    const text = readFileSync(join(playbookDirectory, name), "utf8");
+    expect(text).not.toContain("must be in a tracked file");
+    const sentence = text.match(/A string in backticks[^\n]*/)?.[0];
+    expect(sentence, name).toBeDefined();
+    return sentence!;
+  };
+  const chief = sentenceOf("chief.md");
+  expect(sentenceOf("brainstorm.md")).toBe(chief);
+  expect(chief).toContain("a tracked file contains it");
+  expect(chief).toContain("names a tracked file or folder at head");
+});

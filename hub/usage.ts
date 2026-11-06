@@ -2,11 +2,22 @@ import { existsSync, readFileSync, realpathSync, statSync, type Stats } from "no
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { isInside } from "../cli/usage/index.ts";
-import type { StepWindow } from "../cli/retro.ts";
+import {
+  isDesignerTime,
+  isEvaluatorSession,
+  type StageTimes,
+  type StepWindow,
+} from "../cli/retro.ts";
 import type { SessionFile, TranscriptPage } from "./types.ts";
 
 export type Harness = "omp" | "claude" | "codex";
-export type CompactMessage = { time: number; cost: number | null; model: string | null };
+export type CompactMessage = {
+  time: number;
+  cost: number | null;
+  model: string | null;
+  /** An omp helper call: its cost counts, its model is not the agent's. */
+  helper?: boolean;
+};
 export type WorkerRequest = {
   id: number;
   kind: "head" | "parse" | "transcript";
@@ -246,7 +257,12 @@ export class UsageIndex {
    * 3. otherwise unassigned.
    * A file with no timestamp in its head cannot start inside a window: it is unassigned.
    */
-  sessionsOf(directory: string, windows: StepWindow[], runStarted: number): SessionFile[] {
+  sessionsOf(
+    directory: string,
+    windows: StepWindow[],
+    runStarted: number,
+    stages: StageTimes = {},
+  ): SessionFile[] {
     const parents = parentsOf(directory);
     const firstStep = Math.min(...windows.map((window) => window.start));
     const sessions: SessionFile[] = [];
@@ -278,6 +294,7 @@ export class UsageIndex {
       .filter(
         (session) =>
           session.owner.kind === "unassigned" &&
+          this.#stageOf(session.file, stages) === null &&
           session.start !== null &&
           (windows.length === 0 || Date.parse(session.start) < firstStep) &&
           Date.parse(session.end) >= leadFrom,
@@ -290,19 +307,46 @@ export class UsageIndex {
   }
 
   /**
-   * The model of the last message of the newest (last written) parsed session file of each owner:
-   * a step id, or `lead` for the run lead. Reads the parse that the cost already holds, so it costs
-   * no request. An owner whose files are unparsed or hold no named model in their last message is absent.
+   * Which stage an unassigned parsed session file is, by the time attribution of `ark retro`: the
+   * evaluator when every message is at or before the last evaluation, else the Designer when every
+   * message is between the first evaluation and the last strategy record or answer.
    */
-  modelsOf(directory: string, windows: StepWindow[], runStarted: number): Map<string, string> {
+  #stageOf(file: string, stages: StageTimes): "evaluator" | "designer" | null {
+    const times = this.#entries.get(file)?.messages?.map((message) => message.time) ?? [];
+    if (times.length === 0) return null;
+    if (isEvaluatorSession(times, stages.evaluationEnd)) return "evaluator";
+    if (times.every((time) => isDesignerTime(time, stages.designStart, stages.designEnd)))
+      return "designer";
+    return null;
+  }
+
+  /**
+   * The model of the last message of the newest (last written) parsed session file of each owner:
+   * a step id, `lead` for the run lead, or `evaluator` or `designer` for a stage session. Reads the
+   * parse that the cost already holds, so it costs no request. An owner whose files are unparsed or
+   * hold no named model in their last message is absent.
+   */
+  modelsOf(
+    directory: string,
+    windows: StepWindow[],
+    runStarted: number,
+    stages: StageTimes = {},
+  ): Map<string, string> {
     const models = new Map<string, string>();
     const newest = new Map<string, string>();
-    for (const session of this.sessionsOf(directory, windows, runStarted)) {
-      if (session.owner.kind === "unassigned") continue;
-      const owner = session.owner.kind === "lead" ? "lead" : session.owner.step;
+    for (const session of this.sessionsOf(directory, windows, runStarted, stages)) {
+      const owner =
+        session.owner.kind === "unassigned"
+          ? this.#stageOf(session.file, stages)
+          : session.owner.kind === "lead"
+            ? "lead"
+            : session.owner.step;
+      if (owner === null) continue;
       if (session.end < (newest.get(owner) ?? "")) continue;
       newest.set(owner, session.end);
-      const model = this.#entries.get(session.file)?.messages?.at(-1)?.model;
+      const model = this.#entries
+        .get(session.file)
+        ?.messages?.findLast((message) => !message.helper)?.model;
       if (model) models.set(owner, model);
       else models.delete(owner);
     }

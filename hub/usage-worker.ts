@@ -56,6 +56,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
           time: Date.parse(message.time),
           cost: message.costUsd === "unknown" ? null : message.costUsd,
           model: message.model === "unknown" ? null : message.model,
+          ...(message.helper ? { helper: true } : {}),
         })),
       };
     }

@@ -185,7 +185,8 @@ export function writeBacklogTicket(ticket: FixtureTicket): void {
   writeFileSync(file, lines.join("\n"));
 }
 
-export type FixtureMessage = { time: Date; costUsd: number; model?: string };
+/** `purpose` makes the entry an omp helper call (a `model_usage` record, as omp writes for job-caption). */
+export type FixtureMessage = { time: Date; costUsd: number; model?: string; purpose?: string };
 
 /** One OMP session file: a `session` record with the cwd, then one assistant message per entry. */
 export function ompSessionText(
@@ -198,26 +199,44 @@ export function ompSessionText(
   ];
   for (const message of messages)
     lines.push(
-      JSON.stringify({
-        type: "message",
-        id: "m",
-        timestamp: message.time.toISOString(),
-        message: {
-          role: "assistant",
-          provider: "anthropic",
-          model: message.model ?? "claude-fixture",
-          content: [],
-          usage: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 2,
-            cost: { total: message.costUsd },
-          },
-          stopReason: "stop",
-        },
-      }),
+      JSON.stringify(
+        message.purpose !== undefined
+          ? {
+              type: "model_usage",
+              id: "h",
+              timestamp: message.time.toISOString(),
+              purpose: message.purpose,
+              provider: "openai-codex",
+              model: message.model ?? "claude-fixture",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                cost: { total: message.costUsd },
+              },
+            }
+          : {
+              type: "message",
+              id: "m",
+              timestamp: message.time.toISOString(),
+              message: {
+                role: "assistant",
+                provider: "anthropic",
+                model: message.model ?? "claude-fixture",
+                content: [],
+                usage: {
+                  input: 1,
+                  output: 1,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  totalTokens: 2,
+                  cost: { total: message.costUsd },
+                },
+                stopReason: "stop",
+              },
+            },
+      ),
     );
   return `${lines.join("\n")}\n`;
 }
