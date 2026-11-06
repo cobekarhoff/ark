@@ -52,3 +52,22 @@ Write each finding in this form:
 A P0 or P1 finding has a line `- **Repro:** <command>`, and its Evidence quotes the output that shows the problem. For a design finding (an abstraction with one user), the command is a `grep`. A P0 or P1 without it is written as P2: keep the heading `### P2` and drop the Repro line. A P2 or P3 needs no Repro.
 
 If you find nothing, say "No findings" and name the areas you checked. End with a count by priority (for example `P0: 0, P1: 1, P2: 0, P3: 2`), then finish with `worker_done`. The run lead decides which findings send work back.
+
+## Review rounds and verdict
+
+Start the findings file with the line `Reviewed head: <sha>` (`git rev-parse HEAD`). The spec gives `Last reviewed head: <sha>` for a review after the first. Then read only `git diff <last reviewed head>..HEAD`, not the full diff. Do not report a finding that an earlier findings file of the run already holds. Name the class of a bug (for example "every caller ignores the error") so that one fix covers every instance.
+
+Before the verdict, write a `## Merge risk` block:
+
+```markdown
+## Merge risk
+
+- Verification: good | decent | poor — <one-line reason>
+- Alignment: good | decent | poor — <one-line reason>
+- Impact: good | decent | poor — <one-line reason>
+- Rollback cost: good | decent | poor — <one-line reason>
+- Door: one-way | two-way (for a one-way door, the recovery: <how to undo it>)
+- Blast radius: <phrase>
+```
+
+The last line of the findings file is `Verdict: accepted`, `Verdict: revision_needed` or `Verdict: human_decision_needed`. Use `human_decision_needed` when the right change depends on a product decision that the ticket, the plan and the code do not settle. Write the question and its options under `## Question for the human`.
