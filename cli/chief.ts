@@ -18,8 +18,10 @@ import { listProjects, runsDirectory } from "./paths.ts";
 const orcaTimeoutMilliseconds = orcaTimeout(10_000);
 
 type OrcaRunRow = { id: string; objective?: string; coordinator_handle?: string };
-type WorkerRow = { dispatchId: string; agentTerminalHandle?: string };
-type TaskRow = { id: string; task_title: string; status?: string };
+/** A `worker-list --json` row. A structured worker has `liveness: "unverifiable"` and no terminal handle; its `workspace` is `<host>::<run folder>/workspace`. */
+type WorkerRow = { dispatchId: string; terminal?: string; workspace?: string };
+/** A `task-list --json` row. */
+type TaskRow = { id: string; title: string; status?: string };
 
 const unavailable = (verb: string, reason: string): string =>
   `unavailable: orca orchestration ${verb} failed: ${reason}`;
@@ -109,9 +111,11 @@ export async function chiefState(inProject?: string): Promise<void> {
     ]);
     if (workers.ok) {
       const rows = workers.value.flatMap((worker) => {
-        const run = runOfLead.get(worker.agentTerminalHandle ?? "");
+        const run =
+          runOfLead.get(worker.terminal ?? "") ??
+          worker.workspace?.match(/\/runs\/([^/]+)\/workspace$/)?.[1];
         return run && openRunNames.has(run)
-          ? [[run, worker.dispatchId, worker.agentTerminalHandle!]]
+          ? [[run, worker.dispatchId, worker.terminal ?? "-"]]
           : [];
       });
       const leadless = openRuns.filter((state) => !rows.some((row) => row[0] === state.run));
@@ -127,8 +131,8 @@ export async function chiefState(inProject?: string): Promise<void> {
     else if (!pending.ok) queueText = unavailable("task-list", pending.reason);
     else {
       const tasks = [
-        ...(ready.value.tasks ?? []).map((task) => [task.id, "ready", task.task_title]),
-        ...(pending.value.tasks ?? []).map((task) => [task.id, "pending", task.task_title]),
+        ...(ready.value.tasks ?? []).map((task) => [task.id, "ready", task.title]),
+        ...(pending.value.tasks ?? []).map((task) => [task.id, "pending", task.title]),
       ];
       queueText = tasks.length === 0 ? "none" : table(["Task", "Status", "Title"], tasks);
     }

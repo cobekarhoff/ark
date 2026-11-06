@@ -20,6 +20,7 @@ type OmpMessage = {
   stopReason?: string;
   errorMessage?: string;
   isError?: boolean;
+  purpose?: string;
   toolCallId?: string;
   content?: { type?: string; id?: string }[] | string;
 };
@@ -100,6 +101,7 @@ export function parseOmpSession(file: string): SessionUsage {
       cacheWrite: numberOrZero(usage.cacheWrite),
       costUsd: typeof usage.cost?.total === "number" ? usage.cost.total : "unknown",
       toolError: false,
+      ...(record.purpose === undefined ? {} : { helper: true }),
       sessionFile: file,
     });
   }

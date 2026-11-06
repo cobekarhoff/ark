@@ -888,4 +888,62 @@ describe("ark retro models and vendors", () => {
     runRetro();
     expect(readMetrics().same_vendor_review).toBe(false);
   });
+
+  /** The review step runs in repos/platform. Its main session ran `main`; `sub` adds a sub-session on another model. */
+  function reviewOnModels(main: string, sub?: string, helperModel?: string): void {
+    reviewInPlatform();
+    const text = (model: string) =>
+      readFileSync(join(fixtures, "omp", "review.jsonl"), "utf8")
+        .replaceAll("__RUN__", runDirectory)
+        .replaceAll("/workspace/repos/shared", "/workspace/repos/platform")
+        .replaceAll('"model":"claude-opus-5-5"', `"model":"${model}"`);
+    // An omp helper call (job-caption) after the real messages, inside the review window.
+    const helper = helperModel
+      ? `${JSON.stringify({ type: "model_usage", timestamp: day("14:50:30.000"), purpose: "job-caption", provider: "openai-codex", model: helperModel, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } } })}\n`
+      : "";
+    writeFileSync(join(ompRoot, "platform", "session-review.jsonl"), text(main) + helper);
+    if (sub) {
+      mkdirSync(join(ompRoot, "platform", "session-review"), { recursive: true });
+      writeFileSync(join(ompRoot, "platform", "session-review", "Helper.jsonl"), text(sub));
+    }
+    writePlan([
+      ["build", "implementer", "repos/platform", "claude-haiku-4-5"],
+      ["review", "reviewer", "repos/platform", main],
+    ]);
+  }
+
+  test("ARK-310-AC3 same vendor review is true when every model of the review step shares the implementer vendor", () => {
+    reviewOnModels("claude-opus-5-5", "claude-sonnet-5");
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(true);
+    expect(out).toContain("same vendor review: true (review with build in repos/platform)");
+    expect(out).not.toContain("mixed");
+  });
+
+  test("ARK-310-AC3 same vendor review is false and nothing is mixed when the review step ran on another vendor", () => {
+    reviewOnModels("gpt-6.1-sol");
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(out).toContain("same vendor review: false");
+    expect(out).not.toContain("mixed");
+  });
+
+  test("ARK-310-AC3 a review step with a codex model and an anthropic sub-session is mixed, not same vendor", () => {
+    reviewOnModels("gpt-6.1-sol", "claude-opus-5-5");
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(out).toContain("same vendor review: false");
+    const mixedLine = out.split("\n").find((line) => line.includes("mixed"));
+    expect(mixedLine).toBeDefined();
+    expect(mixedLine).toContain("review");
+  });
+
+  test("ARK-310-AC3 a helper call with a purpose field and another vendor does not make the review step mixed or changed", () => {
+    reviewOnModels("claude-opus-5-5", undefined, "gpt-6-luna");
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(true);
+    expect(out).toContain("same vendor review: true");
+    expect(out).not.toContain("mixed");
+    expect(out).not.toContain("gpt-6-luna");
+  });
 });

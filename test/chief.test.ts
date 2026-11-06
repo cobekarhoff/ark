@@ -178,6 +178,24 @@ const chiefOrcaRun = {
   coordinator_handle: "term_chief",
 };
 
+/** A `worker-list --json` row as Orca returns it. A structured worker has no terminal handle and `unverifiable` liveness. */
+const workerRow = (dispatchId: string, terminal: string, liveness: string, run: string) => ({
+  dispatchId,
+  taskId: `task_${dispatchId}`,
+  terminal,
+  liveness,
+  workspace: `host_1::${join(process.env.ARK_HOME as string, "projects", project, "runs", run, "workspace")}`,
+});
+
+/** A `task-list --json` row as Orca returns it: the title is `title`. */
+const taskRow = (id: string, status: string, title: string) => ({
+  id,
+  status,
+  title,
+  dispatchId: `ctx_${id}`,
+  assignee: null,
+});
+
 test("ARK-244-AC1 chief state prints each live source in one Markdown snapshot", () => {
   setScenario({
     runs: [
@@ -186,11 +204,11 @@ test("ARK-244-AC1 chief state prints each live source in one Markdown snapshot",
     ],
     workers: {
       // The run lead is a worker in Master Chief's own Run. The step worker is in the Ark run's Run.
-      run_chief: [{ dispatchId: "ctx_lead", runId: "run_chief", agentTerminalHandle: "term_lead" }],
-      run_ark: [{ dispatchId: "ctx_step", runId: "run_ark", agentTerminalHandle: "term_step" }],
+      run_chief: [workerRow("ctx_lead", "term_lead", "live", openRun)],
+      run_ark: [workerRow("ctx_step", "term_step", "live", openRun)],
     },
-    ready: [{ id: "task_ready", task_title: "Ready ticket ARK-1", status: "ready" }],
-    pending: [{ id: "task_pending", task_title: "Pending ticket ARK-2", status: "pending" }],
+    ready: [taskRow("task_ready", "ready", "Ready ticket ARK-1")],
+    pending: [taskRow("task_pending", "pending", "Pending ticket ARK-2")],
   });
 
   const result = ark("chief", "state", "--project", project);
@@ -229,11 +247,11 @@ test("ARK-244-AC1 chief state lists the run lead from Master Chief's own Run, no
     ],
     workers: {
       run_chief: [
-        { dispatchId: "ctx_lead", runId: "run_chief", agentTerminalHandle: "term_lead" },
+        workerRow("ctx_lead", "term_lead", "live", openRun),
         // A worker of Master Chief's Run that leads no open Ark run.
-        { dispatchId: "ctx_other", runId: "run_chief", agentTerminalHandle: "term_other" },
+        workerRow("ctx_other", "term_other", "live", "2026-11-02-ARK-777-1"),
       ],
-      run_ark: [{ dispatchId: "ctx_step", runId: "run_ark", agentTerminalHandle: "term_step" }],
+      run_ark: [workerRow("ctx_step", "term_step", "live", openRun)],
     },
   });
 
@@ -256,6 +274,72 @@ test("ARK-244-AC1 chief state lists the run lead from Master Chief's own Run, no
   expect(workerLists.map((argv) => argv[argv.indexOf("--run") + 1])).toEqual(
     workerLists.map(() => "run_chief"),
   );
+});
+
+function startOpenRun(run: string): void {
+  const directory = join(process.env.ARK_HOME as string, "projects", project, "runs", run);
+  mkdirSync(directory, { recursive: true });
+  appendEvent(directory, "run.started", {
+    run,
+    project,
+    round_budget: 2,
+    ticket: { id: run.slice(11, -2), title: `Ticket of ${run}` },
+    criteria: [],
+  });
+}
+
+test("ARK-310-AC1 chief state lists a structured run lead with liveness unverifiable and a terminal lead, and notes only the run with no lead", () => {
+  const terminalRun = "2026-11-02-ARK-901-1";
+  const leadlessRun = "2026-11-02-ARK-902-1";
+  startOpenRun(terminalRun);
+  startOpenRun(leadlessRun);
+  setScenario({
+    runs: [
+      chiefOrcaRun,
+      // A structured lead has no terminal handle, so its Run names no coordinator_handle.
+      { id: "run_structured", objective: `Ark run ${openRun}` },
+      { id: "run_terminal", objective: `Ark run ${terminalRun}`, coordinator_handle: "term_lead" },
+    ],
+    workers: {
+      run_chief: [
+        workerRow("ctx_structured", "structworker_abc123", "unverifiable", openRun),
+        workerRow("ctx_terminal", "term_lead", "live", terminalRun),
+      ],
+    },
+  });
+
+  const result = ark("chief", "state", "--project", project);
+  expect(result.code).toBe(0);
+  const leads = section(result.out, "Run leads");
+  const structuredRow = leads.split("\n").find((line) => line.includes("ctx_structured"));
+  expect(structuredRow).toBeDefined();
+  expect(structuredRow).toContain(openRun);
+  const terminalRow = leads.split("\n").find((line) => line.includes("ctx_terminal"));
+  expect(terminalRow).toBeDefined();
+  expect(terminalRow).toContain(terminalRun);
+  const notes = leads.split("\n").filter((line) => line.includes("has no live run lead"));
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toContain(leadlessRun);
+});
+
+test("ARK-310-AC2 chief state prints the title of every row that task-list --json returns", () => {
+  setScenario({
+    runs: [chiefOrcaRun],
+    ready: [
+      taskRow("task_a", "ready", "ARK-1 run lead"),
+      taskRow("task_b", "ready", "ARK-2 run lead"),
+    ],
+    pending: [taskRow("task_c", "pending", "ARK-3 run lead")],
+  });
+
+  const result = ark("chief", "state", "--project", project);
+  expect(result.code).toBe(0);
+  const rows = section(result.out, "Queued Orca Tasks")
+    .split("\n")
+    .filter((line) => line.startsWith("| task_"));
+  expect(rows).toHaveLength(3);
+  for (const [index, title] of ["ARK-1 run lead", "ARK-2 run lead", "ARK-3 run lead"].entries())
+    expect(rows[index]!.split("|").map((cell) => cell.trim())).toContain(title);
 });
 
 test("ARK-244-AC1 chief state says unavailable for Orca sections and still prints the rest", () => {
@@ -327,10 +411,10 @@ function manyRuns(count: number, chiefRow: number | null) {
 const leadScenario = (count: number, chiefRow: number | null): Scenario => ({
   runs: manyRuns(count, chiefRow),
   workers: {
-    run_chief: [{ dispatchId: "ctx_lead", runId: "run_chief", agentTerminalHandle: "term_lead" }],
+    run_chief: [workerRow("ctx_lead", "term_lead", "live", openRun)],
   },
-  ready: [{ id: "task_ready", task_title: "Ready ticket ARK-1", status: "ready" }],
-  pending: [{ id: "task_pending", task_title: "Pending ticket ARK-2", status: "pending" }],
+  ready: [taskRow("task_ready", "ready", "Ready ticket ARK-1")],
+  pending: [taskRow("task_pending", "pending", "Pending ticket ARK-2")],
 });
 
 const runListPages = () => callsTo("orchestration", "run-list").length;
