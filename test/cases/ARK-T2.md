@@ -30,9 +30,9 @@ Prove `results/evidence/<case id>/{base,head}/result.json` is written for every 
 1. Run `ark test` on suites A, C, D.
 2. For every FAKE-T1, T2, T3, T5, T6 list `results/evidence/<id>/`; assert `base/` and `head/` exist.
 3. Parse each `result.json`; assert it has `case`, `name`, `status`, `sha`.
-4. Assert per case `case` equals the id, `name` equals the exact JUnit name above, and statuses: T1 base failed / head passed; T2, T5, T6 both passed; T3 both skipped.
-5. Assert SHAs against the git-derived values: T1 base `sha` equals the base SHA and head `sha` equals the head SHA, and they differ. T5 head `sha` equals the workspace checkout head and not the mirror head. T6 base `sha` equals head `sha` equals the untouched repo's one SHA.
-6. Run `ark test` on suite B. Assert `FAKE-T4/base/result.json` has `case` `FAKE-T4`, a `name`, status `failed` and the base SHA; `FAKE-T4/head/result.json` has status `passed` and the head SHA. Assert `FAKE-T4/base/command.log` exists and is byte-identical to the suite B base command.log shared by every case of that suite (first line the suite command, last line `exit <code>`).
+4. Assert per case `case` equals the id, `name` equals the exact JUnit name above, and statuses, for both `base/` and `head/` of all six cases: T1 base failed / head passed; T2, T5, T6 both passed; T3 both skipped. T4 is covered in step 6.
+5. Assert `sha` for both sides of every case against the git-derived values, never against the code under test: T1, T2 and T3 base `sha` equals the `touched` base SHA and head `sha` equals the `touched` head SHA, and base differs from head. T5 base `sha` equals the `touched2` base SHA and head `sha` equals the workspace checkout head, not the mirror head. T6 base `sha` equals head `sha` equals the untouched repo's one SHA.
+6. Run `ark test` on suite B. Assert `FAKE-T4/base/result.json` has `case` `FAKE-T4`, `name` exactly `FAKE-T4 needs head module`, status `failed` and the `touched` base SHA; `FAKE-T4/head/result.json` has `case` `FAKE-T4`, name `FAKE-T4 needs head module`, status `passed` and the `touched` head SHA. Assert `FAKE-T4/base/command.log` exists and is byte-identical to the suite B base command.log shared by every case of that suite (first line the suite command, last line `exit <code>`).
 7. Re-run `ark test` after the head test file drops FAKE-T2. Assert `results/evidence/FAKE-T2` is gone and the other case folders remain.
 
 ## Expected results
