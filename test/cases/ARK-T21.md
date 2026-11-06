@@ -18,7 +18,11 @@ Prove the run page shows the evidence file of each demonstration, inspection and
 - Playwright spec in `test/pw/hub.pw.ts`. Fixture run of ticket ARK-900 with ACs in `results/evidence/<AC id>.md`, shapes of ARK-312 (see ARK-T6):
   - AC1 `demonstration`: sections `What the human did` (`opened the run page`), `What the human saw` (`five rows`), `Before` and `After` (screenshot path lines, real PNGs in the evidence folder), last line `human: ok`.
   - AC2 `inspection`: `Files` with `hub/server.ts:120-150`, `Checked against` (`ADR 0009`), `Verdict`, line `reviewer: pass`.
-  - AC3 `analysis`: `Command` `bun test`, `Output` `42 pass`, `Threshold` `0 fail`, `Result`, each with `Base` and `Head` subsections.
+  - AC3 `analysis`, sections `Command`, `Output`, `Threshold`, `Result`, each with a `Base` and a `Head` subsection holding these distinct values:
+    - Command: Base `bun test --base`, Head `bun test --head`.
+    - Output: Base `40 pass 2 fail`, Head `42 pass 0 fail`.
+    - Threshold: Base `fail <= 0 (base)`, Head `fail <= 0 (head)`.
+    - Result: Base `threshold missed`, Head `threshold met`.
   - AC4 `demonstration` with no evidence file.
   - AC5 `inspection` whose file lacks the `Verdict` section and the reviewer line (wrong shape).
 - Text of each file contains a `<b>` and a `<script>` element string in one line to check escaping.
@@ -28,7 +32,7 @@ Prove the run page shows the evidence file of each demonstration, inspection and
 1. Open the run page. `checkpoint(page, "evidence-files")`.
 2. AC1: assert the text `opened the run page`, `five rows`, a before and an after image and the line `human: ok`.
 3. AC2: assert `hub/server.ts:120-150`, `ADR 0009` and the verdict `reviewer: pass`.
-4. AC3: assert `bun test`, `42 pass`, `0 fail`, and result texts for Base and Head.
+4. AC3: within the `Command` section assert Base `bun test --base` and Head `bun test --head`; within `Output`, Base `40 pass 2 fail` and Head `42 pass 0 fail`; within `Threshold`, Base `fail <= 0 (base)` and Head `fail <= 0 (head)`; within `Result`, Base `threshold missed` and Head `threshold met`. Assert no Head value appears under Base or the reverse (no swap, no side missing).
 5. AC4: assert the exact text `no evidence` in an element with the warning style (same warning class or `data-` marker used by the ticket page warning), not an empty element.
 6. AC5: assert `no evidence` and not the partial text of its file.
 7. Assert the `<b>` and `<script>` strings appear as visible text, no element is created from them and no dialog fired.
@@ -39,7 +43,7 @@ Prove the run page shows the evidence file of each demonstration, inspection and
 - The system shall show the evidence file of each `demonstration`, `inspection` and `analysis` AC as text in the fixed shape of its method.
 - A demonstration shall show what the human did and saw, its before and after screenshots and the line `human: ok`.
 - An inspection shall show its files and line ranges, what was checked against what and the reviewer verdict.
-- An analysis shall show the command, the output, the threshold and the result at base and head.
+- An analysis shall show the command, the output, the threshold and the result, each at base and at head, in its own section and side.
 - If an evidence file is missing or has the wrong shape, then the system shall show `no evidence` in the warning style, never a blank.
 
 ## Screenshot checkpoints

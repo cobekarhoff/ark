@@ -22,19 +22,19 @@ Prove the new ticket and run page parts keep the accessibility and request limit
 
 1. For each theme and each page (ticket, run), open the page and collect the requests.
 2. Text status: assert each case result, status, method and warning in the new parts has a text word (`pass`, `fail`, `not run`, `active`, `retired`, `missing`, `no evidence`), not only a color.
-3. Keyboard: press Tab from the page start until focus has visited every link and image-link of the new parts; assert each element is reached, that the focused element has a non-`none` outline (or box-shadow) with width >= 2px against its background, and that each image has non-empty `alt`.
+3. Keyboard: enumerate every required target of the new parts independently of whether it is focusable now: on the ticket page every case link, every ticket-id link of the shared case listing and every warning-bearing criterion's links; on the run page every AC link of the evidence panel and every present screenshot image (a missing side has no image and is not counted). Assert each has a keyboard focus target (the element or its enclosing link/button has `tabindex` >= 0 or is natively focusable); a plain non-focusable image fails here. Press Tab from the page start at most `targets + 20` times; assert every enumerated target was focused, else fail naming the unvisited targets. For each focused target assert a non-`none` outline (or box-shadow) of width >= 2px against its background, and for each image assert non-empty `alt`.
 4. Headings: read `h1`..`h6` in order; assert no level is skipped (each heading is at most one level deeper than the previous) and the new panels sit under an existing heading.
 5. Contrast: for each text node of the new parts compute the contrast ratio; assert >= 4.5 for normal and >= 3 for text of 24px or 18.66px bold and larger, in both themes.
-6. Requests: assert the set of requests after load equals the ones ARK-285-AC11 allows plus exactly one read of the run's test evidence and one read per image (three pairs, so images counted individually) and nothing else.
+6. Requests: for each page record every individual request (a list, not a set, so duplicates count) from navigation until the network is idle plus 1 s. Remove those ARK-285/AC11 allows. Ticket page: the rest shall be exactly one read of the ticket test cases (the route of ARK-T17) and nothing else. Run page: the rest shall be exactly one read of the run test evidence plus one read for each image that is present (the fixture has 3 checkpoints, 2 with both sideswith real images: `login` 2, `list` 1, `detail` 1, so 4 image reads) and nothing else; a second read of any of them fails.
 7. Speed: time 50 GETs each of `/` and `/nope`; assert p95 under 200 ms for each.
 8. Run `bun test`, `bun run typecheck`, `bun run lint`, `bun run format:check`; assert exit 0 (scripts, not part of the spec).
 
 ## Expected results
 
 - The system shall show every result and status of the new parts as text as well as color.
-- The system shall make every link and image of the new parts reachable with the keyboard and readable, with a visible focus ring.
+- The system shall make every link and every present image of the new parts reachable with the keyboard (each with its own focus target) and readable, with a visible focus ring.
 - Headings shall go in order; text shall keep a contrast of at least 4.5:1 (3:1 for large text) in light and dark.
-- The pages shall send no request that ARK-285/AC11 does not allow, except one read for the run's test evidence and one for each image; `/` and `/nope` shall answer with a p95 under 200 ms.
+- The pages shall send no request that ARK-285/AC11 does not allow, except one read of the ticket test cases on the ticket page, one read of the run test evidence on the run page, and one read for each image; `/` and `/nope` shall answer with a p95 under 200 ms.
 
 ## Screenshot checkpoints
 
