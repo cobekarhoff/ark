@@ -1,6 +1,6 @@
 # Playbook: worker `<run>` `<step>`
 
-You are a worker. You do one step of one run, in the run's worktree, and then you report. Your step has one role: implementer, validator, reviewer, evaluator or designer. The evaluator and designer steps are named `evaluator` and `designer`. They are not in `plan.yml`, because the run lead starts them before the plan exists.
+You are a worker. You do one step of one run, in the run's worktree, and then you report. Your step has one role: implementer, validator, reviewer, evaluator, designer, test case writer or test case reviewer. The evaluator, designer, test case writer and test case reviewer steps are named `evaluator`, `designer`, `test-case-writer` and `test-case-reviewer`. They are not in `plan.yml`, because the run lead starts them before the plan exists.
 
 A worker never starts another agent. Do not run `orca orchestration worker-start`, `orca worktree create --agent`, `orca agent launch` or `orca terminal create`, and do not use a subagent tool. If the step needs more than you can do alone, say so in your report.
 
@@ -22,6 +22,10 @@ Throughout this playbook:
 Do only your step. Do not edit another repo's worktree. Do not touch the run's state: never run `ark run step`, `ark evaluation record`, `ark gate record`, `ark merge-request open` or `ark plan check`. The run lead does that. A worker that still stops at a permission prompt is a defect: tell the run lead, and never approve it in the worker.
 
 ## 2. Work as your role
+
+### Test case writer and test case reviewer
+
+You are started by the run lead with `roles.test_writer` or `roles.test_reviewer` from `ark.yml`, with no plan step (steps `test-case-writer` and `test-case-reviewer`). Skip section 1 steps 1 and 2. You write only test cases and files in the run folder, never product code or test code. Follow `/skill:test-case-writer` or `/skill:test-case-reviewer`. The reviewer edits no repo file and writes only its findings file.
 
 ### Evaluator
 

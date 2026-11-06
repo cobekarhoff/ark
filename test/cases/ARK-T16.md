@@ -1,40 +1,39 @@
 ---
 id: ARK-T16
-title: ARK-T16 parallel test-case new in two worktrees gives unique ids
+title: ARK-T16 loadConfig reads the optional test_writer and test_reviewer roles
 level: integration
-technique: concurrency (parallel callers) and state transition (counter after each call)
+technique: equivalence classes (both roles, no test roles, role without model) with a boundary on the missing field
 priority: high
-risk: two worktrees of one repo, each on its own branch, read only their own test/cases/ and print the same id, so two parallel runs write colliding cases and one must renumber by hand
+risk: a config with a test role and no model loads, and the run lead starts a test step with no model; or an old config with no test roles stops loading
 status: active
-changed_by: 2026-11-06-ARK-319-1
+changed_by: 2026-11-06-ARK-313-1
 ---
 
 ## Objective
 
-Prove that `ark test-case new ARK` never prints the same id twice across the worktrees of one repo, even when each worktree holds none of the other's entries. Serves ARK-319/AC1.
-
-Expected: When ark test-case new runs in several worktrees of one repo, the system shall print a different id for each call.
+Prove that `loadConfig` (through an `ark` command that reads `ark.yml`) accepts `roles.test_writer` and `roles.test_reviewer` when both carry a harness and a model, accepts a config with neither, and refuses a test role that has no model, naming the role.
 
 ## Preconditions
 
-- One git repo with a bare origin (origin/HEAD names main) and no id counter yet.
-- Two worktrees of it, `run-a` and `run-b`, on two branches created from the same commit. Neither holds entries the other writes.
+- A temporary `ARK_HOME` and a temporary git repo as the workspace (`tempArkHome`, `tempGitRepo`, `writeProject` in `test/helpers.ts`).
+- Three projects, each with a valid `suites` entry and the roles `implementer`, `validator` and `reviewer`:
+  - `with-test-roles`: also `test_writer` and `test_reviewer`, each with `harness` and `model`.
+  - `without-test-roles`: no test role.
+  - `writer-no-model`: `test_writer` has `harness` and no `model`.
 
 ## Steps
 
-1. Run `ark test-case new ARK` four times at once in `run-a` and four times at once in `run-b`, all eight processes in parallel.
-2. Collect the eight printed ids.
-3. Run `ark test-case new ARK` once more in `run-a`, then once in `run-b`.
-4. Write `test/cases/ARK-T20.md` in `run-a` (not committed), then run `ark test-case new ARK` in `run-a`.
-5. Commit `test/cases/ARK-T30.md` to origin/main, fetch it, then run `ark test-case new ARK` in `run-b`.
+1. Run `ark status --project with-test-roles` and read the exit code.
+2. Run `ark status --project without-test-roles` and read the exit code.
+3. Run `ark status --project writer-no-model` and read the exit code and the error text.
+4. Load the first config through `loadConfig` and read `roles.test_writer` and `roles.test_reviewer`.
 
 ## Expected results
 
-- All eight commands exit 0 and print the eight ids `ARK-T1` to `ARK-T8`, each once.
-- The two later calls print `ARK-T9` in `run-a` and `ARK-T10` in `run-b`: the counter makes them new although neither worktree holds the other's entries.
-- The call after the higher local entry prints `ARK-T21` in `run-a`: one above the highest entry of the current worktree.
-- The call after the higher fetched target entry prints `ARK-T31` in `run-b`: one above the highest entry at the target head.
+- Step 1 exits 0, and step 4 returns both roles with the harness and the model written in the file.
+- Step 2 exits 0 with no error: old configs still load.
+- Step 3 exits non-zero, and the error names `roles.test_writer` and the missing `model`.
 
 ## Screenshot checkpoints
 
-None, CLI output. The surface is the id printed on stdout; no screen applies.
+none: integration case on CLI exit codes and error text; no UI surface.

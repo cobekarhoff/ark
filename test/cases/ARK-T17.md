@@ -1,35 +1,36 @@
 ---
 id: ARK-T17
-title: ARK-T17 first call without counter reads the target branch
+title: ARK-T17 the default roles block of bootstrap.md is a valid config on two vendors
 level: integration
-technique: boundary values (first use, no counter) and equivalence classes (own key, other key)
-priority: high
-risk: the first call after the counter is introduced starts from the worktree's entries only and reuses an id that the target branch already holds
+technique: equivalence classes (vendor of each role) over the block that a human copies
+priority: medium
+risk: the default block that bootstrap shows has a typo or a role on one vendor, so a bootstrapped project fails to load or has a reviewer that shares the writer's blind spots
 status: active
-changed_by: 2026-11-06-ARK-319-1
+changed_by: 2026-11-06-ARK-313-1
 ---
 
 ## Objective
 
-Prove that with no counter yet, the next id is one above the highest entry of the same key on the head of the target branch, although the worktree lacks those entries. Serves ARK-319/AC2.
-
-Expected: When no counter exists, the system shall number the next case above the highest entry on the target branch.
+Prove that the default `roles:` block in `skills/ark/playbooks/bootstrap.md` (the fenced block in section 2 with real harness and model values) loads through `loadConfig` with `test_writer` and `test_reviewer`, and that the reviewer is on a different vendor from the implementer and the test writer. This reads the block, not its prose: wording is proved by inspection.
 
 ## Preconditions
 
-- One git repo with a bare origin (origin/HEAD names main) and no id counter.
-- A worktree `run-a` on a branch created before main gained its entries, so its `test/cases/` is empty.
-- origin/main holds `test/cases/ARK-T3.md`, `ARK-T12.md` and `OTHER-T40.md`, and the repo has fetched them.
+- `bootstrap.md` has the default roles block in section 2 (the one with real values; not the `<harness>` template in section 8).
+- A temporary `ARK_HOME` and a temporary git repo as the workspace.
 
 ## Steps
 
-1. Run `ark test-case new ARK` in `run-a`.
-2. Read the printed id.
+1. Extract the fenced block that starts with `roles:` from section 2 of `bootstrap.md`.
+2. Write a project config with a valid `suites` entry and the extracted `roles` value, then run `ark status --project <name>`.
+3. Load the config through `loadConfig` and read each role's `harness` and `model`.
+4. Map each harness to its vendor (`claude` is Anthropic, `codex` is OpenAI, `omp` takes the vendor from the model prefix).
 
 ## Expected results
 
-- The command exits 0 and prints `ARK-T13`: one above the highest `ARK-` entry on main. The `OTHER-T40` entry of another key does not raise it.
+- Step 2 exits 0, and step 3 returns `test_writer` and `test_reviewer` with a harness and a model.
+- The vendor of `test_reviewer` differs from the vendor of `implementer` and from the vendor of `test_writer`.
+- The existing roles (`implementer`, `validator`, `reviewer`, `evaluator`, `designer`, `chief`) still load from the same block.
 
 ## Screenshot checkpoints
 
-None, CLI output. The surface is the id printed on stdout; no screen applies.
+none: integration case on a config block; no UI surface.
