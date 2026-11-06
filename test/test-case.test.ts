@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { appendEvent } from "../cli/events.ts";
+import { planHash } from "../cli/plan.ts";
 import {
   ark,
   recordEvaluation,
@@ -262,5 +272,166 @@ describe("test case entry format", () => {
     expect(refused.err).toContain("test_case_source");
     expect(refused.err).toContain("zephyr");
     expect(refused.err).toContain("local");
+  });
+});
+
+/** Runs git in `directory`, throws on failure, returns trimmed stdout. */
+function git(directory: string, ...args: string[]): string {
+  const result = Bun.spawnSync(["git", "-C", directory, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0)
+    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+  return result.stdout.toString().trim();
+}
+
+/** A repo whose origin is a bare repo and whose origin/HEAD names main. */
+function repoWithOrigin(files: Record<string, string> = { "README.md": "# test\n" }): string {
+  const repo = tempGitRepo(files);
+  const bare = mkdtempSync(join(tmpdir(), "ark-case-origin-"));
+  git(bare, "init", "--bare", "-q", "-b", "main");
+  git(repo, "remote", "add", "origin", bare);
+  git(repo, "push", "-q", "-u", "origin", "main");
+  git(repo, "remote", "set-head", "origin", "main");
+  return repo;
+}
+
+/** Commits `files` to main of the origin of `repo` through a throwaway clone, then fetches into `repo`. */
+function advanceOrigin(repo: string, files: Record<string, string>): void {
+  const clone = mkdtempSync(join(tmpdir(), "ark-case-clone-"));
+  git(clone, "clone", "-q", git(repo, "remote", "get-url", "origin"), ".");
+  git(clone, "config", "user.name", "Ark Test");
+  git(clone, "config", "user.email", "ark@example.com");
+  mkdirSync(join(clone, "test", "cases"), { recursive: true });
+  for (const [name, content] of Object.entries(files)) writeFileSync(join(clone, name), content);
+  git(clone, "add", "-A");
+  git(clone, "commit", "-q", "-m", "advance main");
+  git(clone, "push", "-q", "origin", "main");
+  git(repo, "fetch", "-q", "origin");
+}
+
+function addWorktree(repo: string, branch: string): string {
+  const path = mkdtempSync(join(tmpdir(), "ark-case-worktree-"));
+  git(repo, "worktree", "add", "-q", "-b", branch, join(path, "tree"));
+  return join(path, "tree");
+}
+
+async function newCaseIds(directory: string, count: number): Promise<string[]> {
+  const children = Array.from({ length: count }, () =>
+    Bun.spawn(["bun", arkEntry, "test-case", "new", "ARK"], {
+      cwd: directory,
+      env: process.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    }),
+  );
+  return Promise.all(
+    children.map(async (child) => {
+      const [code, out] = await Promise.all([child.exited, new Response(child.stdout).text()]);
+      expect(code).toBe(0);
+      return out.trim();
+    }),
+  );
+}
+
+describe("test case ids across worktrees (ARK-319)", () => {
+  test("ARK-T16 parallel test-case new in two worktrees gives unique ids", async () => {
+    const repo = repoWithOrigin();
+    const first = addWorktree(repo, "run-a");
+    const second = addWorktree(repo, "run-b");
+
+    const parallel = (await Promise.all([newCaseIds(first, 4), newCaseIds(second, 4)])).flat();
+    expect(new Set(parallel).size).toBe(8);
+
+    // A third call in either worktree is again new, although neither worktree holds the other's entries.
+    const later = [...(await newCaseIds(first, 1)), ...(await newCaseIds(second, 1))];
+    expect(new Set([...parallel, ...later]).size).toBe(10);
+  });
+
+  test("ARK-T17 first call without counter reads the target branch", async () => {
+    const repo = repoWithOrigin();
+    // The worktree starts before main gains entries up to ARK-T12, so its own test/cases/ lacks them.
+    const worktree = addWorktree(repo, "run-a");
+    advanceOrigin(repo, {
+      "test/cases/ARK-T3.md": "three\n",
+      "test/cases/ARK-T12.md": "twelve\n",
+      "test/cases/OTHER-T40.md": "another key\n",
+    });
+
+    expect(await newCaseIds(worktree, 1)).toEqual(["ARK-T13"]);
+  });
+
+  test("ARK-T18 worktree sync refuses an id the target already holds", () => {
+    tempArkHome();
+    const workspace = repoWithOrigin({
+      "test/cases/ARK-T3.md": "three\n",
+    });
+    const projectDirectory = writeProject("demo", {
+      workspace,
+      ticket_source: "local",
+      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+      roles: {
+        implementer: { harness: "claude", model: "claude-sonnet" },
+        validator: { harness: "codex", model: "gpt-codex" },
+        reviewer: { harness: "codex", model: "gpt-codex" },
+      },
+    });
+    const started = ark(
+      "run",
+      "start",
+      writeTicket("demo", "ARK-920", [{ id: "ARK-920-AC1", text: "first" }]),
+      "--project",
+      "demo",
+    );
+    expect(started.code).toBe(0);
+    const runId = started.out.trim();
+    const runDirectory = join(projectDirectory, "runs", runId);
+    recordEvaluation(runDirectory);
+    const steps = [
+      { id: "build", role: "implementer", repo: ".", needs: [], criteria: ["ARK-920-AC1"] },
+    ];
+    writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify({ steps }));
+    appendEvent(runDirectory, "plan.checked", {
+      valid: true,
+      problems: [],
+      plan_hash: planHash(runDirectory),
+      steps,
+    });
+    expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
+    expect(ark("worktree", "create", runId, ".").code).toBe(0);
+    const worktree = join(runDirectory, "workspace", ".");
+
+    // The run adds T5 and T6 (main will take both with other content), T7 (main never takes it)
+    // and T8 (main takes it with the same content).
+    for (const [id, content] of [
+      ["ARK-T5", "run five\n"],
+      ["ARK-T6", "run six\n"],
+      ["ARK-T7", "run seven\n"],
+      ["ARK-T8", "same eight\n"],
+    ])
+      writeFileSync(join(worktree, "test", "cases", `${id}.md`), content);
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-q", "-m", "run cases");
+    const before = git(worktree, "rev-parse", "HEAD");
+
+    // Another run merged first: main took T5 and T6 with other content, T8 with the same content,
+    // and changed T3, which the run did not touch.
+    advanceOrigin(workspace, {
+      "test/cases/ARK-T5.md": "main five\n",
+      "test/cases/ARK-T6.md": "main six\n",
+      "test/cases/ARK-T8.md": "same eight\n",
+      "test/cases/ARK-T3.md": "three, edited on main\n",
+    });
+
+    const result = ark("worktree", "sync", runId);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("test case id taken on the target branch: ARK-T5");
+    expect(result.err).toContain("test case id taken on the target branch: ARK-T6");
+    for (const untouched of ["ARK-T3", "ARK-T7", "ARK-T8"])
+      expect(result.err).not.toContain(`target branch: ${untouched}`);
+    // Refused before the merge: nothing merged, nothing half-done.
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
+    expect(git(worktree, "status", "--porcelain")).toBe("");
   });
 });
