@@ -1,6 +1,7 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseBun } from "../cli/parsers/bun";
 import { parseBehave } from "../cli/parsers/behave";
 import { parsePytest } from "../cli/parsers/pytest";
 
@@ -56,4 +57,55 @@ test("ARK-158-AC5 behave maps feature and scenario tags to per-scenario results"
 test("ARK-158-AC5 an empty report is an error, not zero results", () => {
   expect(() => parsePytest({ report: "", stdout: "" })).toThrow("pytest report has no test cases");
   expect(() => parseBehave({ report: "", stdout: "" })).toThrow("behave report is empty");
+});
+
+// ARK-311-AC1: the bun report is real (`bun test --reporter=junit` on a four-test file). pytest and behave
+// are not installed on this machine, so their reports are built by hand in the format of the real runs
+// captured for ARK-158 (pytest-report.xml, behave-report.json), with `case` properties and case tags added.
+test("ARK-311-AC1 bun reads case ids and old AC ids from the JUnit title into cases and criteria", () => {
+  expect(parseBun({ report: fixture("bun-report.xml"), stdout: "" })).toEqual([
+    { name: "ARK-T12 case only", criteria: [], cases: ["ARK-T12"], status: "passed" },
+    { name: "CLARA-12-AC1 old only", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
+    {
+      name: "ARK-T13 CLARA-12-AC2 both",
+      criteria: ["CLARA-12-AC2"],
+      cases: ["ARK-T13"],
+      status: "passed",
+    },
+    { name: "neither", criteria: [], cases: [], status: "passed" },
+  ]);
+});
+
+test("ARK-311-AC1 pytest reads case properties into cases and ac properties into criteria", () => {
+  expect(parsePytest({ report: fixture("pytest-cases-report.xml"), stdout: "" })).toEqual([
+    { name: "test_cases::test_case_only", criteria: [], cases: ["ARK-T12"], status: "passed" },
+    {
+      name: "test_cases::test_ac_only",
+      criteria: ["CLARA-12-AC1"],
+      cases: [],
+      status: "passed",
+    },
+    {
+      name: "test_cases::test_both",
+      criteria: ["CLARA-12-AC2"],
+      cases: ["ARK-T13", "ARK-T14"],
+      status: "passed",
+    },
+    { name: "test_cases::test_neither", criteria: [], cases: [], status: "passed" },
+  ]);
+});
+
+test("ARK-311-AC1 behave reads @ARK-T12 and @case:ARK-T12 tags into cases and AC tags into criteria", () => {
+  expect(parseBehave({ report: fixture("behave-cases-report.json"), stdout: "" })).toEqual([
+    { name: "Cases: Case only", criteria: [], cases: ["ARK-T12"], status: "passed" },
+    { name: "Cases: Case with prefix", criteria: [], cases: ["ARK-T15"], status: "passed" },
+    { name: "Cases: Old only", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
+    {
+      name: "Cases: Both",
+      criteria: ["CLARA-12-AC2"],
+      cases: ["ARK-T13"],
+      status: "passed",
+    },
+    { name: "Cases: Neither", criteria: [], cases: [], status: "passed" },
+  ]);
 });

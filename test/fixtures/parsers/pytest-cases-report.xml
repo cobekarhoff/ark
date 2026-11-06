@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="4" time="0.010" timestamp="2026-11-05T17:00:00.000000-07:00" hostname="host.local">
+<testcase classname="test_cases" name="test_case_only" file="test_cases.py" line="3" time="0.000"><properties><property name="case" value="ARK-T12" /></properties></testcase>
+<testcase classname="test_cases" name="test_ac_only" file="test_cases.py" line="8" time="0.000"><properties><property name="ac" value="CLARA-12-AC1" /></properties></testcase>
+<testcase classname="test_cases" name="test_both" file="test_cases.py" line="13" time="0.000"><properties><property name="ac" value="CLARA-12-AC2" /><property name="case" value="ARK-T13" /><property name="case" value="ARK-T14" /></properties></testcase>
+<testcase classname="test_cases" name="test_neither" file="test_cases.py" line="19" time="0.000" /></testsuite></testsuites>

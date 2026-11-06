@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { loadConfig } from "../cli/config.ts";
 import { appendEvent } from "../cli/events.ts";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
 import {
@@ -808,5 +809,223 @@ describe("plan check by ticket kind", () => {
 
     writePlan(withGoals("Measure and write results/baseline.md", "Write results/compare.md"));
     expect(ark("plan", "check", runId).code).toBe(0);
+  });
+});
+
+describe("plan check test case entries", () => {
+  const workspace = () => loadConfig("demo").workspace;
+
+  /** Writes `test/cases/<id>.md` in the project workspace, in the entry format `ark test-case new` writes. */
+  function writeEntry(id: string, level: string, status = "active") {
+    mkdirSync(join(workspace(), "test", "cases"), { recursive: true });
+    writeFileSync(
+      join(workspace(), "test", "cases", `${id}.md`),
+      [
+        "---",
+        `id: ${id}`,
+        `title: ${id} case ${id}`,
+        `level: ${level}`,
+        "technique: equivalence classes",
+        "priority: medium",
+        "risk: the defect it catches",
+        `status: ${status}`,
+        "changed_by: earlier-run",
+        ...(status === "retired" ? ["retired_reason: product removed"] : []),
+        "---",
+        "",
+        ...[
+          "Objective",
+          "Preconditions",
+          "Steps",
+          "Expected results",
+          "Screenshot checkpoints",
+        ].flatMap((section) => [`## ${section}`, ""]),
+      ].join("\n"),
+    );
+  }
+
+  const planCase = (id: string, action: string, level = "e2e", extra = {}) => ({
+    id,
+    action,
+    level,
+    ...(action === "add" || action === "update"
+      ? {
+          given: [],
+          when: ["do the thing"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+          then: ["the task completes"],
+          expected: "the system shall complete the task",
+        }
+      : {}),
+    ...extra,
+  });
+
+  /** A run of a new-scheme ticket: local AC ids with `verified_by`. The plan serves them all in one step. */
+  function newSchemeRun(
+    ticketId: string,
+    acs: { id: string; verified_by: string[]; method?: string }[],
+    testCases: Record<string, unknown>[],
+  ) {
+    const ticket = writeTicket(
+      "demo",
+      ticketId,
+      acs.map((ac) => ({ ...ac, text: `criterion ${ac.id}` })),
+    );
+    expect(ark("run", "start", ticket).code).toBe(0);
+    const directory = join(
+      dirname(runDirectory),
+      readdirSync(dirname(runDirectory)).find((name) => name.endsWith(`${ticketId}-1`)) as string,
+    );
+    const runName = directory.split("/").at(-1) as string;
+    recordEvaluation(directory);
+    const ids = acs.map((ac) => `${ticketId}/${ac.id}`);
+    writeFileSync(
+      join(directory, "plan.yml"),
+      JSON.stringify({
+        ...validPlan(),
+        summary: {
+          why: "Plan the test cases.",
+          changes: ids.map((criterion) => ({
+            criterion,
+            where: "cli/plan.ts",
+            now: "Free ids.",
+            fix: "Test case ids.",
+          })),
+        },
+        steps: [step("build", { criteria: ids })],
+        test_cases: testCases,
+      }),
+    );
+    // `ark plan check` prints the count; the problems are in the plan.checked event.
+    const check = () => {
+      const { code } = ark("plan", "check", runName);
+      const checked = readFileSync(join(directory, "events.ndjson"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .findLast((event) => event.type === "plan.checked");
+      return { code, err: checked.data.problems.join("\n") as string };
+    };
+    return { directory, check };
+  }
+
+  test("ARK-311-AC4 a valid plan with each action passes and plan.md shows the action of each case", () => {
+    writeEntry("ARK-T1", "e2e");
+    writeEntry("ARK-T2", "unit");
+    writeEntry("ARK-T4", "integration");
+    const { directory, check } = newSchemeRun(
+      "ARK-905",
+      [
+        { id: "AC1", verified_by: ["ARK-T1", "ARK-T2"] },
+        { id: "AC2", verified_by: ["ARK-T3"] },
+      ],
+      [
+        planCase("ARK-T1", "reuse"),
+        planCase("ARK-T2", "update", "unit"),
+        planCase("ARK-T3", "add", "integration"),
+        planCase("ARK-T4", "retire", "integration", { reason: "the screen was removed" }),
+      ],
+    );
+    const result = check();
+    expect(result.err).toBe("");
+    expect(result.code).toBe(0);
+    const markdown = readFileSync(join(directory, "plan.md"), "utf8");
+    expect(markdown).toContain("| ARK-T1 | reuse | e2e | ARK-905/AC1 |");
+    expect(markdown).toContain("| ARK-T2 | update | unit | ARK-905/AC1 |");
+    expect(markdown).toContain("| ARK-T3 | add | integration | ARK-905/AC2 |");
+    expect(markdown).toContain("| ARK-T4 | retire | integration | none |");
+    expect(markdown).toContain("the screen was removed");
+  });
+
+  test("ARK-311-AC4 refuses an unknown action and a retire entry with no reason", () => {
+    writeEntry("ARK-T4", "e2e");
+    const { check } = newSchemeRun(
+      "ARK-905",
+      [{ id: "AC1", verified_by: ["ARK-T1"] }],
+      [planCase("ARK-T1", "add"), planCase("ARK-T2", "delete"), planCase("ARK-T4", "retire")],
+    );
+    const result = check();
+    expect(result.code).toBe(1);
+    expect(result.err).toContain(
+      'test case ARK-T2 has action "delete": use add, update, reuse or retire',
+    );
+    expect(result.err).toContain("test case ARK-T4 is retired with no reason");
+  });
+
+  test("ARK-311-AC4 refuses a reuse, update or retire entry that has no entry in test/cases/", () => {
+    const { check } = newSchemeRun(
+      "ARK-905",
+      [{ id: "AC1", verified_by: ["ARK-T1"] }],
+      [
+        planCase("ARK-T1", "add"),
+        planCase("ARK-T5", "reuse"),
+        planCase("ARK-T6", "update"),
+        planCase("ARK-T7", "retire", "e2e", { reason: "gone" }),
+      ],
+    );
+    const result = check();
+    expect(result.code).toBe(1);
+    for (const [id, action] of [
+      ["ARK-T5", "reuse"],
+      ["ARK-T6", "update"],
+      ["ARK-T7", "retire"],
+    ])
+      expect(result.err).toContain(
+        `test case ${id} is ${action}, but no entry ${id}.md is in test/cases/ of a repo of the workspace`,
+      );
+  });
+
+  test("ARK-311-AC4 refuses a verified_by id that is no active entry and no add entry of the plan", () => {
+    writeEntry("ARK-T8", "e2e", "retired");
+    const { check } = newSchemeRun(
+      "ARK-905",
+      [
+        { id: "AC1", verified_by: ["ARK-T8"] },
+        { id: "AC2", verified_by: ["ARK-T9"] },
+        { id: "AC3", verified_by: ["ARK-T1"] },
+      ],
+      [planCase("ARK-T1", "add")],
+    );
+    const result = check();
+    expect(result.code).toBe(1);
+    for (const id of ["ARK-T8", "ARK-T9"])
+      expect(result.err).toContain(
+        `verified_by ${id}, which is no active entry in test/cases/ and no add entry of the plan`,
+      );
+    expect(result.err).not.toContain("verified_by ARK-T1");
+  });
+
+  test("ARK-311-AC4 refuses a method test AC whose verified_by is empty or holds only unit cases", () => {
+    writeEntry("ARK-T2", "unit");
+    const { check } = newSchemeRun(
+      "ARK-905",
+      [
+        { id: "AC1", verified_by: [] },
+        { id: "AC2", verified_by: ["ARK-T2"] },
+        { id: "AC3", verified_by: [], method: "demonstration" },
+      ],
+      [planCase("ARK-T2", "reuse", "unit")],
+    );
+    const result = check();
+    expect(result.code).toBe(1);
+    expect(result.err).toContain(
+      "criterion ARK-905/AC1 has no integration or e2e test case in verified_by",
+    );
+    expect(result.err).toContain(
+      "criterion ARK-905/AC2 has no integration or e2e test case in verified_by",
+    );
+    expect(result.err).not.toContain("ARK-905/AC3");
+  });
+
+  test("ARK-311-AC4 an old-scheme AC keeps the rule of one integration or e2e test case", () => {
+    const plan = validPlan();
+    plan.test_cases = [testCase("t1", "ARK-900-AC1", "unit"), testCase("t2", "ARK-900-AC2", "e2e")];
+    writePlan(plan);
+    expect(ark("plan", "check", runId).code).toBe(1);
+    const problems = events().findLast((event) => event.type === "plan.checked").data.problems;
+    expect(problems.join("\n")).toContain(
+      "criterion ARK-900/AC1 has no integration or e2e test case",
+    );
+    expect(problems.join("\n")).not.toContain("ARK-900/AC2 has no");
   });
 });

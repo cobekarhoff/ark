@@ -25,7 +25,14 @@ export function writeProject(name: string, config: Record<string, unknown>): str
 export function writeTicket(
   project: string,
   id: string,
-  criteria: { id: string; text: string; manual?: boolean }[],
+  criteria: {
+    id: string;
+    text: string;
+    manual?: boolean;
+    method?: string;
+    /** Any value, so a test can write a `verified_by` that is not a list. */
+    verified_by?: unknown;
+  }[],
   title = `Ticket ${id}`,
   kind?: string,
 ): string {
@@ -44,6 +51,10 @@ export function writeTicket(
       `  - id: ${criterion.id}`,
       `    text: ${JSON.stringify(criterion.text)}`,
       ...(criterion.manual ? ["    manual: true"] : []),
+      ...(criterion.method === undefined ? [] : [`    method: ${criterion.method}`]),
+      ...(criterion.verified_by === undefined
+        ? []
+        : [`    verified_by: ${JSON.stringify(criterion.verified_by)}`]),
     );
   writeFileSync(file, `${frontmatter.join("\n")}\n---\n## Why\n\nTest ticket.\n`);
   return file;

@@ -1652,3 +1652,131 @@ test("ARK-305-AC1 close handed_off skips placeholder, glob, dots, file:line and 
   expect(closed.code).toBe(0);
   expect(closedEvents(directory)).toHaveLength(1);
 });
+
+const methodTicket = [
+  { id: "AC1", text: "local id with a test case", verified_by: ["ARK-T1"] },
+  { id: "ARK-910-AC2", text: "old id, manual true", manual: true },
+  { id: "AC3", text: "analysis", method: "analysis" },
+  { id: "ARK-910/AC4", text: "inspection, written from outside", method: "inspection" },
+  { id: "AC5", text: "demonstration", method: "demonstration" },
+  { id: "AC6", text: "method test written out", method: "test", verified_by: ["ARK-T1"] },
+];
+
+test("ARK-311-AC3 the reader names every AC <ticket>/AC<k>, reads each method, and ark test lists non-test methods through the manual gate with both id forms", () => {
+  writeProject("methods", {
+    ...validConfig(),
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+  });
+  const ticketFile = writeTicket("methods", "ARK-910", methodTicket);
+  const started = ark("run", "start", ticketFile, "--project", "methods");
+  expect(started.err).toBe("");
+  const runId = started.out.trim();
+  const directory = join(process.env.ARK_HOME as string, "projects", "methods", "runs", runId);
+  const ids = ["AC1", "AC2", "AC3", "AC4", "AC5", "AC6"].map((id) => `ARK-910/${id}`);
+  expect(JSON.parse(eventLines(directory)[0]).data.criteria).toEqual(ids);
+
+  recordEvaluation(directory);
+  const plan = {
+    design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
+    summary: {
+      why: "Read the methods.",
+      changes: ids.map((criterion) => ({
+        criterion,
+        where: "tests",
+        now: "Suites run against the plan.",
+        fix: "Suites prove each criterion.",
+      })),
+    },
+    steps: [
+      {
+        id: "build",
+        role: "implementer",
+        repo: ".",
+        harness: "claude",
+        model: "claude-sonnet",
+        needs: [],
+        criteria: ids,
+      },
+    ],
+    test_cases: [
+      {
+        id: "ARK-T1",
+        action: "add",
+        level: "e2e",
+        given: [],
+        when: ["run it"],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+        then: ["it works"],
+        expected: "it works",
+      },
+    ],
+  };
+  writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
+  for (const args of [
+    ["plan", "check", runId],
+    ["gate", "record", runId, "plan", "approve"],
+    ["worktree", "create", runId, "."],
+  ])
+    expect(ark(...args).code).toBe(0);
+
+  const pending = ark("test", runId);
+  expect(pending.code).toBe(1);
+  expect(pending.out).toContain("ARK-910/AC1  missing");
+  expect(pending.out).toContain("ARK-910/AC6  missing");
+  for (const id of ["AC2", "AC3", "AC4", "AC5"])
+    expect(pending.out).toContain(`ARK-910/${id}  manual pending`);
+
+  // The old form, the local form and the new form name the same AC.
+  expect(ark("gate", "record", runId, "manual", "ARK-910-AC2", "ok").code).toBe(0);
+  expect(ark("gate", "record", runId, "manual", "AC3", "problem").code).toBe(0);
+  expect(ark("gate", "record", runId, "manual", "ARK-910/AC4", "ok").code).toBe(0);
+  const answered = ark("test", runId);
+  expect(answered.out).toContain("ARK-910/AC2  manual ok");
+  expect(answered.out).toContain("ARK-910/AC3  manual problem");
+  expect(answered.out).toContain("ARK-910/AC4  manual ok");
+  expect(answered.out).toContain("ARK-910/AC5  manual pending");
+  const refused = ark("gate", "record", runId, "manual", "ARK-910-AC1", "ok");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("ARK-910/AC1 is not manual");
+});
+
+for (const [name, criteria, message] of [
+  [
+    "an unknown method",
+    [{ id: "AC1", text: "x", method: "guess" }],
+    'criterion ARK-910/AC1 has method "guess": use test, demonstration, inspection, analysis',
+  ],
+  [
+    "a duplicate AC id written in two forms",
+    [
+      { id: "AC1", text: "x" },
+      { id: "ARK-910-AC1", text: "y" },
+    ],
+    "duplicate criterion id ARK-910/AC1",
+  ],
+  [
+    "a verified_by that is a string",
+    [{ id: "AC1", text: "x", verified_by: "ARK-T1" }],
+    "criterion ARK-910/AC1 verified_by must be a list of strings",
+  ],
+  [
+    "a verified_by list with a number",
+    [{ id: "AC1", text: "x", verified_by: ["ARK-T1", 2] }],
+    "criterion ARK-910/AC1 verified_by must be a list of strings",
+  ],
+] as const) {
+  test(`ARK-311-AC3 run start refuses ${name} and starts no run`, () => {
+    const result = ark(
+      "run",
+      "start",
+      writeTicket("demo", "ARK-910", [...criteria]),
+      "--project",
+      "demo",
+    );
+    expect(result.code).toBe(1);
+    expect(result.err).toContain(message);
+    expect(existsSync(join(process.env.ARK_HOME as string, "projects", "demo", "runs"))).toBe(
+      false,
+    );
+  });
+}

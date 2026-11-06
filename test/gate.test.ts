@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { appendEvent } from "../cli/events.ts";
 import {
   ark,
   recordEvaluation,
@@ -403,5 +404,70 @@ describe("manual gate", () => {
     const result = ark("status");
     expect(result.code).toBe(1);
     expect(result.out).toContain("gates.manual");
+  });
+});
+
+describe("criteria gate on every run", () => {
+  /** Starts ARK-901 with the given ACs and records an evaluation without accepting the criteria. */
+  function startUnaccepted(
+    ticketCriteria: Parameters<typeof writeTicket>[2],
+    blockers: string[] = [],
+  ) {
+    expect(ark("run", "start", writeTicket("demo", "ARK-901", ticketCriteria)).code).toBe(0);
+    const runId = readdirSync(join(projectDirectory, "runs"))[0];
+    const directory = join(projectDirectory, "runs", runId);
+    appendEvent(directory, "evaluation.recorded", { blockers, risks: [], surfaces: ["none"] });
+    return { runId, directory };
+  }
+
+  test("ARK-311-AC5 a ticket with ACs and no blockers waits in awaiting_criteria until the human accepts", () => {
+    const { runId, directory } = startUnaccepted([
+      { id: "AC1", text: "first", verified_by: ["ARK-T1"] },
+      { id: "AC2", text: "second", method: "demonstration" },
+    ]);
+    expect(stateOf(directory).phase).toBe("awaiting_criteria");
+    expect(ark("status", runId).out).toContain("awaiting_criteria");
+    const early = ark("run", "step", runId, "build", "start");
+    expect(early.code).toBe(1);
+
+    const accepted = ark("gate", "record", runId, "criteria", "accept");
+    expect(accepted.code).toBe(0);
+    expect(stateOf(directory).phase).toBe("planning");
+    expect(eventsOf(directory).findLast((event) => event.type === "criteria.updated").data).toEqual(
+      { criteria: ["ARK-901/AC1", "ARK-901/AC2"] },
+    );
+  });
+
+  test("ARK-311-AC5 a ticket with a blocker waits in awaiting_criteria too, and accept still ends the wait", () => {
+    const { runId, directory } = startUnaccepted(
+      [{ id: "AC1", text: "first", verified_by: ["ARK-T1"] }],
+      ["ARK-901/AC1: no test can prove it"],
+    );
+    expect(stateOf(directory).phase).toBe("awaiting_criteria");
+    expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(0);
+    expect(stateOf(directory).phase).not.toBe("awaiting_criteria");
+  });
+
+  test("ARK-311-AC5 accept refuses a new-scheme method test AC with an empty verified_by, names the AC id, and takes the fixed ticket", () => {
+    const { runId, directory } = startUnaccepted([
+      { id: "AC1", text: "first", verified_by: ["ARK-T1"] },
+      { id: "AC2", text: "second", verified_by: [] },
+      { id: "AC3", text: "third", method: "inspection", verified_by: [] },
+    ]);
+    const before = eventsOf(directory).length;
+    const refused = ark("gate", "record", runId, "criteria", "accept");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("ARK-901/AC2");
+    expect(refused.err).not.toContain("ARK-901/AC1");
+    expect(refused.err).not.toContain("ARK-901/AC3");
+    expect(eventsOf(directory).length).toBe(before);
+    expect(stateOf(directory).phase).toBe("awaiting_criteria");
+
+    writeTicket("demo", "ARK-901", [
+      { id: "AC1", text: "first", verified_by: ["ARK-T1"] },
+      { id: "AC2", text: "second", verified_by: ["ARK-T2"] },
+    ]);
+    expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(0);
+    expect(stateOf(directory).phase).toBe("planning");
   });
 });

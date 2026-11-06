@@ -1,0 +1,131 @@
+[
+  {
+    "keyword": "Feature",
+    "name": "Cases",
+    "tags": [],
+    "location": "features/cases.feature:1",
+    "status": "passed",
+    "elements": [
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Case only",
+        "tags": ["ARK-T12"],
+        "location": "features/cases.feature:3",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/cases.feature:4",
+            "match": {
+              "location": "features/steps/steps.py:4",
+              "arguments": []
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2.5e-5
+            }
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Case with prefix",
+        "tags": ["case:ARK-T15"],
+        "location": "features/cases.feature:6",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/cases.feature:7",
+            "match": {
+              "location": "features/steps/steps.py:4",
+              "arguments": []
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2.5e-5
+            }
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Old only",
+        "tags": ["ac:CLARA-12-AC1"],
+        "location": "features/cases.feature:9",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/cases.feature:10",
+            "match": {
+              "location": "features/steps/steps.py:4",
+              "arguments": []
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2.5e-5
+            }
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Both",
+        "tags": ["CLARA-12-AC2", "case:ARK-T13"],
+        "location": "features/cases.feature:12",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/cases.feature:13",
+            "match": {
+              "location": "features/steps/steps.py:4",
+              "arguments": []
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2.5e-5
+            }
+          }
+        ],
+        "status": "passed"
+      },
+      {
+        "type": "scenario",
+        "keyword": "Scenario",
+        "name": "Neither",
+        "tags": ["smoke"],
+        "location": "features/cases.feature:15",
+        "steps": [
+          {
+            "keyword": "Given",
+            "step_type": "given",
+            "name": "a passing step",
+            "location": "features/cases.feature:16",
+            "match": {
+              "location": "features/steps/steps.py:4",
+              "arguments": []
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2.5e-5
+            }
+          }
+        ],
+        "status": "passed"
+      }
+    ]
+  }
+]
