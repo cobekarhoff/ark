@@ -1,9 +1,11 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 import {
   appendRawEvent,
+  commitCase,
   ompMessagesText,
   orcaAnswersFor,
   today,
@@ -20,6 +22,7 @@ import {
   type SessionHarness,
 } from "../hub-fixtures.ts";
 import {
+  checkpoint,
   installFakeTools,
   startHub,
   stopHub,
@@ -2297,7 +2300,13 @@ test("ARK-285-AC11 Home, Runs and Roadmap send no request after the first load, 
 }) => {
   test.setTimeout(120_000);
   const { baseUrl, older, stuckRun } = await homeWithBlockers();
-  writeBacklogTicket({ project: "p", id: "ARK-521", title: "Ticket", status: "ready" });
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-521",
+    title: "Ticket",
+    status: "ready",
+    criteria: [{ id: "AC1", text: "It works", method: "test", verifiedBy: ["ARK-T1"] }],
+  });
   const requests: string[] = [];
   page.on("request", (request) => requests.push(new URL(request.url()).pathname));
   await open(page, baseUrl, "");
@@ -2325,11 +2334,13 @@ test("ARK-285-AC11 Home, Runs and Roadmap send no request after the first load, 
   await page.waitForTimeout(2000);
   expect(requests.splice(0)).toEqual([]);
 
-  // The ticket page reads from the snapshot: no request but the first load and the event stream.
+  // The ticket page reads its text from the snapshot and, amended AC7 of ARK-314, its test cases once.
   await open(page, baseUrl, "ticket/ARK-521");
   await expect(page.getByTestId("ticket-page")).toBeVisible();
   await page.waitForTimeout(1000);
-  expect(requests.filter((path) => path.startsWith("/api/ticket"))).toEqual([]);
+  expect(requests.filter((path) => path.startsWith("/api/ticket"))).toEqual([
+    "/api/ticket/p/ARK-521/cases",
+  ]);
   // The run page does read (`/api/run`, from ARK-284): the one place the page goes past AC11.
   await open(page, baseUrl, `run/${stuckRun}`);
   await expect(page.getByTestId("timeline")).toBeVisible();
@@ -2340,7 +2351,11 @@ test("ARK-285-AC11 Home, Runs and Roadmap send no request after the first load, 
     (path) => path !== "/" && path !== "/events" && !path.startsWith("/assets/"),
   );
   expect(extra.length).toBeGreaterThan(0);
-  for (const path of extra) expect(path.startsWith("/api/run/"), path).toBe(true);
+  for (const path of extra.filter((path) => !path.startsWith("/api/ticket/")))
+    expect(path.startsWith("/api/run/"), path).toBe(true);
+  // One read of the test evidence for each of the two run pages (these plans have no image).
+  expect(extra.filter((path) => path.endsWith("/evidence"))).toHaveLength(2);
+  expect(extra.filter((path) => path.endsWith("/image"))).toEqual([]);
 });
 
 // ---------------------------------------------------------------- ARK-291
@@ -4044,4 +4059,833 @@ test("ARK-310-AC4 a designer row with no session model keeps the configured mode
   await expect(roleRow(page, "designer")).toContainText("designer-configured (configured)");
   await expect(roleRow(page, "designer")).not.toContainText("claude-opus");
   await expect(roleRow(page, "evaluator")).toContainText("session/evaluator-last");
+});
+
+// ---------------------------------------------------------------- ARK-314
+
+/** A real PNG (solid grey) that the image route accepts and the browser decodes. */
+function pngBytes(width = 64, height = 40): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, checksum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // RGB
+  const rowLength = width * 3 + 1;
+  const rows = Buffer.alloc(rowLength * height, 0x99);
+  for (let row = 0; row < height; row++) rows[row * rowLength] = 0; // filter: none
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(rows)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+type CaseSide = {
+  status: "pass" | "fail";
+  sha: string;
+  command?: string;
+  output?: string;
+  exit?: number;
+};
+type PlanCase = { id: string; action: string; level: string; base?: CaseSide; head?: CaseSide };
+
+/** The plan's `test_cases`, the `ticket.md` criteria and `results/evidence/<case>/<side>/` of a run folder. */
+function writeRunEvidence(
+  directory: string,
+  ticket: string,
+  cases: PlanCase[],
+  criteria: { id: string; method: string }[] = [],
+  withResults = true,
+): void {
+  writeFileSync(
+    join(directory, "plan.yml"),
+    JSON.stringify({
+      steps: [],
+      test_cases: cases.map(({ id, action, level }) => ({ id, action, level })),
+    }),
+  );
+  writeFileSync(
+    join(directory, "ticket.md"),
+    `---\n${JSON.stringify({
+      id: ticket,
+      title: "Evidence",
+      acceptance_criteria: criteria.map((criterion) => ({
+        ...criterion,
+        text: `${criterion.id} text`,
+        verified_by: [],
+      })),
+    })}\n---\n`,
+  );
+  if (!withResults) return;
+  for (const { id, base, head } of cases)
+    for (const [name, side] of [
+      ["base", base],
+      ["head", head],
+    ] as const) {
+      if (!side) continue;
+      const folder = join(directory, "results", "evidence", id, name);
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(
+        join(folder, "result.json"),
+        JSON.stringify({ id, name: `${id} case`, status: side.status, sha: side.sha }),
+      );
+      if (side.command)
+        writeFileSync(
+          join(folder, "command.log"),
+          `${side.command}\n${side.output}\nexit ${side.exit}\n`,
+        );
+    }
+}
+
+/** Writes `results/evidence/<path>` of a run folder; a Buffer or text. */
+function writeEvidenceFile(directory: string, path: string, content: string | Buffer): void {
+  const file = join(directory, "results", "evidence", path);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, content);
+}
+
+/** Screenshots of one UI case: `login` on both sides, `list` on head only, `detail` on base only. */
+function writeShots(directory: string, id: string): void {
+  for (const path of ["base/login", "head/login", "head/list", "base/detail"])
+    writeEvidenceFile(
+      directory,
+      `${id}/${path.split("/")[0]}/screenshots/${path.split("/")[1]}.png`,
+      pngBytes(),
+    );
+}
+
+const planOfT19: PlanCase[] = [
+  {
+    id: "ARK-T1",
+    action: "add",
+    level: "integration",
+    base: {
+      status: "fail",
+      sha: "9b85039",
+      command: "bun test test/a.test.ts",
+      output: "1 fail",
+      exit: 1,
+    },
+    head: {
+      status: "pass",
+      sha: "1a2b3c4",
+      command: "bun test test/a.test.ts",
+      output: "1 pass",
+      exit: 0,
+    },
+  },
+  {
+    id: "ARK-T2",
+    action: "update",
+    level: "e2e",
+    base: { status: "pass", sha: "9b85039" },
+    head: { status: "pass", sha: "1a2b3c4" },
+  },
+  {
+    id: "ARK-T3",
+    action: "reuse",
+    level: "unit",
+    base: { status: "pass", sha: "9b85039" },
+    head: { status: "pass", sha: "1a2b3c4" },
+  },
+  { id: "ARK-T4", action: "retire", level: "integration" },
+  { id: "ARK-T5", action: "add", level: "e2e", head: { status: "fail", sha: "1a2b3c4" } },
+];
+
+/** Project `p` with local cases ARK-T1 (integration), ARK-T2 (unit), ARK-T3 (e2e, retired) and tickets ARK-900 to ARK-902. */
+function ticketWorld(): void {
+  isolate();
+  installFakeTools({});
+  const repository = tempDirectory("ark-cases-");
+  const fields = { technique: "boundary values", priority: "high", risk: "a defect" };
+  commitCase(repository, "ARK-T1", {
+    title: "ARK-T1 first",
+    level: "integration",
+    status: "active",
+    changed_by: "2026-01-01-ARK-1-1",
+    ...fields,
+  });
+  commitCase(repository, "ARK-T2", {
+    title: "ARK-T2 second",
+    level: "unit",
+    status: "active",
+    changed_by: "2026-01-01-ARK-1-1",
+    ...fields,
+  });
+  commitCase(repository, "ARK-T3", {
+    title: "ARK-T3 third",
+    level: "e2e",
+    status: "retired",
+    retired_reason: "replaced by ARK-T1",
+    changed_by: "2026-01-01-ARK-1-1",
+    ...fields,
+  });
+  writeProject("p", { workspace: repository, ticket_source: "local", test_case_source: "local" });
+  const ticket = (id: string, criteria: [string, string, string[]][]) =>
+    writeBacklogTicket({
+      project: "p",
+      id,
+      title: `Title of ${id}`,
+      status: "ready",
+      problem: "A problem in words.",
+      change: "A change in words.",
+      criteria: criteria.map(([ac, method, verifiedBy]) => ({
+        id: ac,
+        text: `${ac} text`,
+        method,
+        verifiedBy,
+      })),
+    });
+  ticket("ARK-900", [
+    ["AC1", "test", ["ARK-T1"]],
+    ["AC2", "demonstration", []],
+    ["AC3", "inspection", ["ARK-T1", "ARK-T3", "ARK-T99"]],
+    ["AC4", "analysis", []],
+  ]);
+  ticket("ARK-901", [["AC1", "test", ["ARK-T1"]]]);
+  ticket("ARK-902", [
+    ["AC1", "test", ["ARK-T2"]],
+    ["AC2", "test", []],
+    ["AC3", "test", ["ARK-T1"]],
+  ]);
+}
+
+const criterionOf = (page: Page, id: string) =>
+  page.locator(`[data-testid="ticket-criterion"][data-id="${id}"]`);
+
+test("ARK-T18 ticket page shows method, case links and the no-integration warning", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.emulateMedia({ colorScheme: "light" });
+  ticketWorld();
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, "ticket/ARK-900");
+  await expect(criterionOf(page, "AC1").getByTestId("case-link")).toBeVisible();
+  await checkpoint(page, "ticket-criteria");
+  const criteria = page.getByTestId("ticket-criterion");
+  await expect(criteria).toHaveCount(4);
+  for (const [id, method] of [
+    ["AC1", "test"],
+    ["AC2", "demonstration"],
+    ["AC3", "inspection"],
+    ["AC4", "analysis"],
+  ])
+    await expect(criterionOf(page, id).getByTestId("criterion-method")).toHaveText(
+      `method: ${method}`,
+    );
+  for (const id of ["AC1", "AC2", "AC3", "AC4"])
+    await expect(criterionOf(page, id).locator(".crit-head .mono")).toHaveText(id);
+
+  const first = criterionOf(page, "AC1").getByTestId("case-link");
+  await expect(first).toHaveCount(1);
+  for (const word of ["ARK-T1", "integration", "active"]) await expect(first).toContainText(word);
+
+  const entries = criterionOf(page, "AC3").getByTestId("case-entry");
+  await expect(entries).toHaveCount(3);
+  expect(
+    await entries.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-id"))),
+  ).toEqual(["ARK-T1", "ARK-T3", "ARK-T99"]);
+  const links = criterionOf(page, "AC3").getByTestId("case-link");
+  await expect(links).toHaveCount(2);
+  for (const [index, words] of [
+    ["ARK-T1", "integration", "active"],
+    ["ARK-T3", "e2e", "retired"],
+  ].entries()) {
+    for (const word of words) await expect(links.nth(index)).toContainText(word);
+    expect(await links.nth(index).getAttribute("href")).toMatch(/\S/);
+  }
+  const absent = entries.nth(2);
+  await expect(absent.getByTestId("case-missing")).toContainText("ARK-T99");
+  await expect(absent).toContainText("missing");
+  await expect(absent.locator("a")).toHaveCount(0);
+
+  for (const id of ["AC2", "AC4"]) {
+    await expect(criterionOf(page, id).getByTestId("case-entry")).toHaveCount(0);
+    await expect(criterionOf(page, id).locator("a")).toHaveCount(0);
+  }
+  await expect(page.getByTestId("criterion-warning")).toHaveCount(0);
+
+  await open(page, baseUrl, "ticket/ARK-902");
+  await expect(criterionOf(page, "AC1").getByTestId("case-link")).toBeVisible();
+  const warning = (id: string) => criterionOf(page, id).getByTestId("criterion-warning");
+  for (const id of ["AC1", "AC2"]) {
+    await expect(warning(id)).toBeVisible();
+    await expect(warning(id)).toBeInViewport();
+    await expect(warning(id)).toContainText("No integration or E2E case");
+    await expect(warning(id)).toContainText("method: test");
+  }
+  await expect(warning("AC3")).toHaveCount(0);
+  await expect(page.getByTestId("criterion-warning")).toHaveCount(2);
+
+  await open(page, baseUrl, "ticket/ARK-900");
+  await criterionOf(page, "AC1").getByTestId("case-link").click();
+  const listing = criterionOf(page, "AC1").getByTestId("case-listing");
+  await expect(listing).toBeVisible();
+  await checkpoint(page, "ticket-shared-case");
+  const refs = listing.getByTestId("case-listing-ref");
+  await expect(refs).toHaveCount(4);
+  expect((await refs.allTextContents()).sort()).toEqual([
+    "ARK-900 AC1",
+    "ARK-900 AC3",
+    "ARK-901 AC1",
+    "ARK-902 AC3",
+  ]);
+  for (const ticket of ["ARK-900", "ARK-901", "ARK-902"])
+    expect(await refs.getByRole("link", { name: ticket }).first().getAttribute("href")).toMatch(
+      new RegExp(`#/ticket/${ticket}$`),
+    );
+
+  await refs.getByRole("link", { name: "ARK-901" }).click();
+  await expect(page).toHaveURL(/#\/ticket\/ARK-901$/);
+  await expect(page.getByTestId("ticket-criterion")).toHaveCount(1);
+  await expect(criterionOf(page, "AC1")).toContainText("AC1 text");
+  await expect(page.locator("main h1")).toContainText("Title of ARK-901");
+});
+
+/** A run of ARK-900 in project `p` with the T19 plan: `merge_requests_open`, evidence on disk unless told otherwise. */
+function evidenceRun(number = 1, withResults = true): string {
+  const run = runId("ARK-900", number);
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-900", title: "Evidence" },
+    phase: "merge_requests_open",
+  });
+  writeRunEvidence(directory, "ARK-900", planOfT19, [], withResults);
+  return run;
+}
+
+test("ARK-T19 run page shows a test evidence panel row for each plan case", async ({ page }) => {
+  isolate();
+  installFakeTools({});
+  writeProject("p", { workspace: tempDirectory("ark-ws-"), ticket_source: "local" });
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-900",
+    title: "Evidence",
+    status: "ready",
+    criteria: [
+      { id: "AC1", text: "one", method: "test", verifiedBy: ["ARK-T1"] },
+      { id: "AC2", text: "two", method: "test", verifiedBy: ["ARK-T1", "ARK-T2"] },
+    ],
+  });
+  const run = evidenceRun();
+  const bare = evidenceRun(2, false);
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, `run/${run}`);
+  const rows = page.getByTestId("evidence-case");
+  await expect(rows).toHaveCount(5);
+  await checkpoint(page, "evidence-panel");
+  expect(
+    await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-id"))),
+  ).toEqual(["ARK-T1", "ARK-T2", "ARK-T3", "ARK-T4", "ARK-T5"]);
+  const rowOf = (id: string) => page.locator(`[data-testid="evidence-case"][data-id="${id}"]`);
+  const side = (id: string, name: "base" | "head") =>
+    rowOf(id).locator(`[data-testid="evidence-side"][data-side="${name}"]`);
+
+  const t1 = rowOf("ARK-T1");
+  await expect(t1.locator("td").nth(1)).toHaveText("add");
+  await expect(t1.locator("td").nth(2)).toHaveText("integration");
+  await expect(side("ARK-T1", "base")).toContainText("fail");
+  await expect(side("ARK-T1", "base")).toContainText("9b85039");
+  await expect(side("ARK-T1", "head")).toContainText("pass");
+  await expect(side("ARK-T1", "head")).toContainText("1a2b3c4");
+
+  const logs = t1.locator(".ev-run");
+  await expect(logs).toHaveCount(2);
+  for (const [index, output, exit] of [
+    [0, "1 fail", "exit 1"],
+    [1, "1 pass", "exit 0"],
+  ] as const) {
+    await expect(logs.nth(index)).toContainText("bun test test/a.test.ts");
+    await expect(logs.nth(index)).toContainText(output);
+    await expect(logs.nth(index)).toContainText(exit);
+  }
+  await expect(logs.nth(0)).not.toContainText("1 pass");
+
+  for (const [id, action, level] of [
+    ["ARK-T2", "update", "e2e"],
+    ["ARK-T3", "reuse", "unit"],
+    ["ARK-T4", "retire", "integration"],
+  ]) {
+    await expect(rowOf(id).locator("td").nth(1)).toHaveText(action);
+    await expect(rowOf(id).locator("td").nth(2)).toHaveText(level);
+  }
+  for (const name of ["base", "head"] as const)
+    await expect(side("ARK-T4", name)).toHaveText(/^not run/);
+  await expect(side("ARK-T5", "base")).toHaveText(/^not run/);
+  await expect(side("ARK-T5", "head")).toHaveText(/^fail/);
+
+  await expect(t1.getByRole("link", { name: "AC1", exact: true })).toHaveAttribute(
+    "href",
+    /#\/ticket\/ARK-900$/,
+  );
+  await expect(t1.getByRole("link", { name: "AC2", exact: true })).toHaveAttribute(
+    "href",
+    /#\/ticket\/ARK-900$/,
+  );
+  await expect(rowOf("ARK-T2").getByRole("link", { name: "AC2", exact: true })).toBeVisible();
+  await expect(rowOf("ARK-T3").locator("a")).toHaveCount(0);
+
+  await open(page, baseUrl, `run/${bare}`);
+  await expect(rows).toHaveCount(5);
+  await expect(page.locator('[data-testid="evidence-side"]')).toHaveCount(10);
+  await expect(page.locator('[data-testid="evidence-side"][data-result="not run"]')).toHaveCount(
+    10,
+  );
+  await expect(page.locator('[data-testid="evidence-side"]', { hasText: "pass" })).toHaveCount(0);
+});
+
+test("ARK-T20 screenshot pairs, missing sides and image route refusals", async ({ page }) => {
+  isolate();
+  installFakeTools({});
+  writeProject("p", { workspace: tempDirectory("ark-ws-"), ticket_source: "local" });
+  const run = runId("ARK-900");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-900", title: "Shots" },
+    phase: "merge_requests_open",
+  });
+  writeRunEvidence(directory, "ARK-900", [
+    {
+      id: "ARK-T7",
+      action: "add",
+      level: "e2e",
+      base: { status: "fail", sha: "9b85039" },
+      head: { status: "pass", sha: "1a2b3c4" },
+    },
+  ]);
+  writeShots(directory, "ARK-T7");
+  const screenshots = "results/evidence/ARK-T7/head/screenshots";
+  const outside = join(tempDirectory("ark-outside-"), "outside.png");
+  writeFileSync(outside, pngBytes());
+  symlinkSync(outside, join(directory, screenshots, "escape.png"));
+  writeFileSync(join(directory, screenshots, "notes.txt"), "NOTES-SECRET");
+  writeFileSync(join(directory, "state.json"), '{"STATE-SECRET":true}');
+  const baseUrl = await launch();
+
+  const notFound: string[] = [];
+  page.on("response", (response) => {
+    if (response.status() === 404) notFound.push(response.url());
+  });
+  await open(page, baseUrl, `run/${run}`);
+  await expect(page.getByTestId("shot-pair")).toHaveCount(3);
+  await expect(page.getByTestId("shot-image").first()).toBeVisible();
+  await checkpoint(page, "screenshot-pairs");
+  const pairOf = (name: string) => page.locator(`[data-testid="shot-pair"][data-name="${name}"]`);
+  expect((await page.locator('[data-testid="shot-pair"] h4').allTextContents()).sort()).toEqual([
+    "detail",
+    "list",
+    "login",
+  ]);
+
+  const login = pairOf("login");
+  const before = login.locator('[data-testid="shot-image"][data-side="before"]');
+  const after = login.locator('[data-testid="shot-image"][data-side="after"]');
+  await expect(login.getByTestId("shot-image")).toHaveCount(2);
+  const [left, right] = [await before.boundingBox(), await after.boundingBox()];
+  expect(left!.x).toBeLessThan(right!.x);
+  expect(Math.abs(left!.y - right!.y)).toBeLessThan(4);
+  await expect(before).toHaveAttribute("alt", "ARK-T7 login before");
+  await expect(after).toHaveAttribute("alt", "ARK-T7 login after");
+
+  await expect(pairOf("list").getByTestId("shot-missing")).toHaveText("no before screenshot");
+  await expect(pairOf("list").locator('img[data-side="before"]')).toHaveCount(0);
+  await expect(pairOf("list").locator('img[data-side="after"]')).toHaveAttribute(
+    "alt",
+    "ARK-T7 list after",
+  );
+  await expect(pairOf("detail").getByTestId("shot-missing")).toHaveText("no after screenshot");
+  await expect(pairOf("detail").locator('img[data-side="after"]')).toHaveCount(0);
+
+  await expect
+    .poll(() =>
+      page
+        .locator("img")
+        .evaluateAll(
+          (images: HTMLImageElement[]) =>
+            images.length === 4 &&
+            images.every((image) => image.complete && image.naturalWidth > 0),
+        ),
+    )
+    .toBe(true);
+  expect(notFound).toEqual([]);
+
+  const source = (await after.getAttribute("src"))!;
+  const served = await page.request.get(`${baseUrl}${source}`);
+  expect(served.status()).toBe(200);
+  expect(served.headers()["content-type"]).toBe("image/png");
+  expect(served.headers()["x-content-type-options"]).toBe("nosniff");
+
+  const imagePath = (path: string) => `/api/run/${run}/image?path=${path}`;
+  for (const [path, secret] of [
+    [`${screenshots}/../../../../state.json`, "STATE-SECRET"],
+    [`${screenshots}/escape.png`, "PNG"],
+    [`${screenshots}/notes.txt`, "NOTES-SECRET"],
+  ]) {
+    const refused = await rawGet(baseUrl, imagePath(path));
+    expect(refused.status, path).toBe(404);
+    expect(refused.body, path).not.toContain(secret);
+  }
+  expect((await page.request.post(`${baseUrl}${source}`)).status()).not.toBe(200);
+});
+
+const hostile = "<b>bold</b> <script>window.__pwned = 1</script>";
+
+/** The five evidence files of T21: AC1 demonstration, AC2 inspection, AC3 analysis, AC4 none, AC5 wrong shape. */
+function writeAcEvidence(directory: string, withImages: boolean): void {
+  if (withImages) {
+    writeEvidenceFile(directory, "AC1-before.png", pngBytes());
+    writeEvidenceFile(directory, "AC1-after.png", pngBytes());
+  }
+  writeEvidenceFile(
+    directory,
+    "AC1.md",
+    [
+      "## What the human did",
+      "",
+      `opened the run page ${hostile}`,
+      "",
+      "## What the human saw",
+      "",
+      "five rows",
+      "",
+      "## Before",
+      "",
+      "AC1-before.png",
+      "",
+      "## After",
+      "",
+      "AC1-after.png",
+      "",
+      "human: ok",
+      "",
+    ].join("\n"),
+  );
+  writeEvidenceFile(
+    directory,
+    "AC2.md",
+    [
+      "## Files",
+      "",
+      "- hub/server.ts:120-150",
+      "",
+      "## Checked against",
+      "",
+      `ADR 0009 ${hostile}`,
+      "",
+      "## Verdict",
+      "",
+      "The route agrees.",
+      "",
+      "reviewer: pass",
+      "",
+    ].join("\n"),
+  );
+  const pair = (base: string, head: string) => `### Base\n\n${base}\n\n### Head\n\n${head}\n`;
+  writeEvidenceFile(
+    directory,
+    "AC3.md",
+    [
+      `## Command\n\n${pair("bun test --base", "bun test --head")}`,
+      `## Output\n\n${pair("40 pass 2 fail", `42 pass 0 fail ${hostile}`)}`,
+      `## Threshold\n\n${pair("fail <= 0 (base)", "fail <= 0 (head)")}`,
+      `## Result\n\n${pair("threshold missed", "threshold met")}`,
+    ].join("\n"),
+  );
+  writeEvidenceFile(
+    directory,
+    "AC5.md",
+    "## Files\n\n- hub/server.ts:1-2\n\n## Checked against\n\nPARTIAL-INSPECTION-TEXT\n",
+  );
+}
+
+const nonTestCriteria = [
+  { id: "AC1", method: "demonstration" },
+  { id: "AC2", method: "inspection" },
+  { id: "AC3", method: "analysis" },
+  { id: "AC4", method: "demonstration" },
+  { id: "AC5", method: "inspection" },
+];
+
+test("ARK-T21 run page shows non-test AC evidence in its shape or no evidence", async ({
+  page,
+}) => {
+  isolate();
+  installFakeTools({});
+  writeProject("p", { workspace: tempDirectory("ark-ws-"), ticket_source: "local" });
+  const run = runId("ARK-900");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-900", title: "Files" },
+    phase: "merge_requests_open",
+  });
+  writeRunEvidence(directory, "ARK-900", [], nonTestCriteria);
+  writeAcEvidence(directory, true);
+  const baseUrl = await launch();
+
+  let dialog = false;
+  page.on("dialog", (shown) => {
+    dialog = true;
+    void shown.dismiss();
+  });
+  await open(page, baseUrl, `run/${run}`);
+  const block = (id: string) => page.locator(`[data-testid="ac-evidence"][data-id="${id}"]`);
+  await expect(page.getByTestId("ac-evidence")).toHaveCount(5);
+  await expect(block("AC1")).toContainText("opened the run page");
+  await checkpoint(page, "evidence-files");
+
+  const ac1 = block("AC1");
+  await expect(ac1).toContainText("five rows");
+  await expect(ac1.locator('img[alt="AC1 Before"]')).toBeVisible();
+  await expect(ac1.locator('img[alt="AC1 After"]')).toBeVisible();
+  await expect(ac1).toContainText("human: ok");
+
+  await expect(block("AC2")).toContainText("hub/server.ts:120-150");
+  await expect(block("AC2")).toContainText("ADR 0009");
+  await expect(block("AC2")).toContainText("reviewer: pass");
+
+  const part = (title: string, side: "Base" | "Head") =>
+    block("AC3").locator(`[data-title="${title}"] [data-title="${side}"]`);
+  for (const [title, base, head] of [
+    ["Command", "bun test --base", "bun test --head"],
+    ["Output", "40 pass 2 fail", "42 pass 0 fail"],
+    ["Threshold", "fail <= 0 (base)", "fail <= 0 (head)"],
+    ["Result", "threshold missed", "threshold met"],
+  ]) {
+    await expect(part(title, "Base")).toContainText(base);
+    await expect(part(title, "Base")).not.toContainText(head);
+    await expect(part(title, "Head")).toContainText(head);
+    await expect(part(title, "Head")).not.toContainText(base);
+  }
+
+  for (const id of ["AC4", "AC5"]) {
+    const none = block(id).getByTestId("no-evidence");
+    await expect(none).toHaveText("no evidence");
+    await expect(none).toHaveClass(/warn-box/);
+  }
+  await expect(block("AC5")).not.toContainText("PARTIAL-INSPECTION-TEXT");
+
+  for (const id of ["AC1", "AC2", "AC3"]) await expect(block(id)).toContainText(hostile);
+  await expect(page.getByTestId("ac-evidence").locator("b")).toHaveCount(0);
+  await expect(page.getByTestId("ac-evidence").locator("script")).toHaveCount(0);
+  expect(
+    await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned),
+  ).toBeUndefined();
+  expect(dialog).toBe(false);
+  for (const text of await page.getByTestId("ac-evidence").allTextContents())
+    expect(text.trim().length).toBeGreaterThan(0);
+});
+
+/**
+ * Tabs from the page start. Returns the targets that have no focus target of their own (not a link,
+ * button or tabindex >= 0, or the same one as another target) and the targets no Tab reached within
+ * `targets + 20` presses.
+ */
+async function tabReach(
+  page: Page,
+  targets: Locator,
+): Promise<{ count: number; unfocusable: number[]; missed: number[] }> {
+  const unfocusable = await targets.evaluateAll((nodes) => {
+    const seen = new Set<Element>();
+    const bad: number[] = [];
+    nodes.forEach((node, index) => {
+      const own = node.closest('a[href], button, summary, [tabindex]:not([tabindex^="-"])');
+      if (!own || seen.has(own)) bad.push(index);
+      else {
+        seen.add(own);
+        own.setAttribute("data-tab-target", String(index));
+      }
+    });
+    return bad;
+  });
+  const count = await targets.count();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  const reached = new Set<string>();
+  for (let press = 0; press < count + 20; press++) {
+    await page.keyboard.press("Tab");
+    const tag = await page.evaluate(() => document.activeElement?.getAttribute("data-tab-target"));
+    if (tag) reached.add(tag);
+  }
+  const missed = Array.from({ length: count }, (_, index) => index).filter(
+    (index) => !unfocusable.includes(index) && !reached.has(String(index)),
+  );
+  return { count, unfocusable, missed };
+}
+
+/** The ring of the element that has the keyboard focus: an outline or a shadow that is drawn. */
+const focusRing = (page: Page) =>
+  page.evaluate(() => {
+    const style = getComputedStyle(document.activeElement as Element);
+    return {
+      outline: style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2,
+      shadow: style.boxShadow !== "none",
+    };
+  });
+
+test("ARK-T22 new page parts keep accessibility, request limits and speed", async ({ page }) => {
+  test.setTimeout(240_000);
+  ticketWorld();
+  // The run of the T19 to T21 fixtures, on the tickets of T18: T2 holds the three screenshot checkpoints.
+  const run = runId("ARK-900");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-900", title: "Evidence" },
+    phase: "merge_requests_open",
+  });
+  writeRunEvidence(directory, "ARK-900", planOfT19, nonTestCriteria);
+  writeShots(directory, "ARK-T2");
+  // The demonstration names its screenshots but holds no image file: the page reads 4 images, not 6.
+  writeAcEvidence(directory, false);
+  const baseUrl = await launch();
+
+  let requests: string[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  const visit = async (hash: string, ready: Locator): Promise<string[]> => {
+    // A fresh document each time: a navigation of one page would reuse images it already loaded.
+    await page.goto("about:blank");
+    requests = [];
+    await open(page, baseUrl, hash);
+    await expect(ready).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(1000);
+    return requests.filter(
+      // ARK-285/AC11 allows the first load and the event stream; ARK-284 allows the run page its detail read.
+      (path) =>
+        path !== "/" &&
+        path !== "/events" &&
+        !path.startsWith("/assets/") &&
+        path !== `/api/run/${run}`,
+    );
+  };
+  const settled = () =>
+    page.evaluate(() =>
+      Promise.all(document.getAnimations().map((fade) => fade.finished.catch(() => undefined))),
+    );
+  const headings = () =>
+    page
+      .locator("h1, h2, h3, h4, h5, h6")
+      .evaluateAll((nodes) => nodes.map((node) => Number(node.tagName[1])));
+  const expectOrderedHeadings = async (name: string) => {
+    const levels = await headings();
+    expect(levels[0], `${name} starts with h1`).toBe(1);
+    levels.forEach((level, index) => {
+      if (index > 0)
+        expect(level, `${name} heading ${index}`).toBeLessThanOrEqual(levels[index - 1] + 1);
+    });
+  };
+  const expectContrast = async (name: string) => {
+    await settled();
+    const { checked, weak } = await weakContrast(page);
+    expect(checked, name).toBeGreaterThan(20);
+    expect(weak, name).toEqual([]);
+  };
+  const expectFocus = async (targets: Locator, name: string, extraCheck?: () => Promise<void>) => {
+    const { count, unfocusable, missed } = await tabReach(page, targets);
+    expect(count, `${name} has targets`).toBeGreaterThan(0);
+    expect(unfocusable, `${name}: targets with no focus target`).toEqual([]);
+    expect(missed, `${name}: targets Tab never reached`).toEqual([]);
+    await extraCheck?.();
+  };
+
+  for (const scheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const dark = scheme === "dark";
+
+    // Ticket ARK-900: case links, then the shared-case listing.
+    let extra = await visit("ticket/ARK-900", criterionOf(page, "AC1").getByTestId("case-link"));
+    expect(extra, `ARK-900 in ${scheme}`).toEqual(["/api/ticket/p/ARK-900/cases"]);
+    await criterionOf(page, "AC1").getByTestId("case-link").click();
+    await expect(criterionOf(page, "AC1").getByTestId("case-listing")).toBeVisible();
+    for (const [selector, word] of [
+      ['[data-testid="case-link"]', /active|retired/],
+      ['[data-testid="case-missing"]', /missing/],
+      ['[data-testid="criterion-method"]', /method: (test|demonstration|inspection|analysis)/],
+    ] as const)
+      for (const text of await page.locator(selector).allTextContents()) expect(text).toMatch(word);
+    const ticketTargets = page.locator(
+      '[data-testid="case-link"], [data-testid="case-listing-ref"] a',
+    );
+    await expectFocus(ticketTargets, `ARK-900 in ${scheme}`, async () => {
+      if (!dark) return;
+      await page.keyboard.press("Shift");
+      await ticketTargets.first().focus();
+      const ring = await focusRing(page);
+      expect(ring.outline || ring.shadow).toBe(true);
+      await checkpoint(page, "ticket-dark");
+    });
+    await expectOrderedHeadings(`ARK-900 in ${scheme}`);
+    await expectContrast(`ARK-900 in ${scheme}`);
+
+    // Ticket ARK-902: the warning.
+    extra = await visit("ticket/ARK-902", criterionOf(page, "AC1").getByTestId("case-link"));
+    expect(extra, `ARK-902 in ${scheme}`).toEqual(["/api/ticket/p/ARK-902/cases"]);
+    for (const text of await page.getByTestId("criterion-warning").allTextContents())
+      expect(text).toContain("Warning");
+    await expect(page.getByTestId("criterion-warning")).toHaveCount(2);
+    const warned = page.locator(
+      '[data-testid="ticket-criterion"][data-id="AC1"] a, [data-testid="ticket-criterion"][data-id="AC2"] a',
+    );
+    await expectFocus(warned, `ARK-902 in ${scheme}`, async () => {
+      if (!dark) return;
+      await page.keyboard.press("Shift");
+      await warned.first().focus();
+      const ring = await focusRing(page);
+      expect(ring.outline || ring.shadow).toBe(true);
+      await checkpoint(page, "ticket-warning-dark");
+    });
+    await expectOrderedHeadings(`ARK-902 in ${scheme}`);
+    await expectContrast(`ARK-902 in ${scheme}`);
+
+    // The run page.
+    extra = await visit(`run/${run}`, page.getByTestId("evidence-panel"));
+    const images = extra.filter((path) => path === `/api/run/${run}/image`);
+    expect(
+      extra.filter((path) => path === `/api/run/${run}/evidence`),
+      `evidence in ${scheme}`,
+    ).toHaveLength(1);
+    expect(images, `images in ${scheme}`).toHaveLength(4);
+    expect(extra.length, `run page requests in ${scheme}`).toBe(5);
+    for (const side of await page.getByTestId("evidence-side").all())
+      await expect(side).toContainText((await side.getAttribute("data-result")) as string);
+    await expect(page.getByTestId("no-evidence")).toHaveCount(2);
+    for (const text of await page.getByTestId("no-evidence").allTextContents())
+      expect(text).toBe("no evidence");
+    const runTargets = page.locator('[data-testid="evidence-case"] a, [data-testid="shot-image"]');
+    await expectFocus(runTargets, `run page in ${scheme}`, async () => {
+      if (!dark) return;
+      await page.keyboard.press("Shift");
+      await page.locator('[data-testid="evidence-case"] a').first().focus();
+      const ring = await focusRing(page);
+      expect(ring.outline || ring.shadow).toBe(true);
+      await checkpoint(page, "run-dark");
+    });
+    await expectOrderedHeadings(`run page in ${scheme}`);
+    await expectContrast(`run page in ${scheme}`);
+  }
+
+  for (const route of ["/", "/nope"]) {
+    const durations: number[] = [];
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const startedAt = performance.now();
+      await (await fetch(`${baseUrl}${route}`)).arrayBuffer();
+      durations.push(performance.now() - startedAt);
+    }
+    expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
+  }
 });
