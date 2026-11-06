@@ -192,3 +192,34 @@ export function codexDay(): [string, string, string] {
   const [year, month, day] = new Date(testNow()).toISOString().slice(0, 10).split("-");
   return [year, month, day];
 }
+
+const evidenceBodies = {
+  demonstration: [
+    "## What the human did\n\nOpened the page.",
+    "## What the human saw\n\nThe feature.",
+    "## Before\n\n- results/evidence/FAKE-T1/base/screenshots/open.png",
+    "## After\n\n- results/evidence/FAKE-T1/head/screenshots/open.png\n\nhuman: ok",
+  ],
+  inspection: [
+    "## Files\n\n- cli/a.ts:1-10",
+    "## Checked against\n\nThe AC text.",
+    "## Verdict\n\nThe code does it.\n\nreviewer: pass",
+  ],
+  analysis: ["Command", "Output", "Threshold", "Result"].map(
+    (name) => `## ${name}\n\nBase: base value\nHead: head value`,
+  ),
+};
+
+/** Writes a well-formed `results/evidence/<AC id>.md` for a non-test AC; `id` ends in `AC<k>`. */
+export function writeEvidenceFile(
+  runDirectory: string,
+  id: string,
+  method: keyof typeof evidenceBodies = "demonstration",
+): void {
+  const directory = join(runDirectory, "results", "evidence");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, `${id.match(/AC\d+$/)![0]}.md`),
+    `${evidenceBodies[method].join("\n\n")}\n`,
+  );
+}

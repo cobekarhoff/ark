@@ -17,7 +17,7 @@ One lasting statement of what the product does, in `test/cases/<KEY>-T<n>.md`. I
 _Avoid_: Test, scenario
 
 **Evidence**:
-What shows that an AC holds: a passing result of each `verified_by` test case at head, or for a method other than `test`, the human's `manual` gate answer.
+What shows that an AC holds, kept in the run folder under `results/evidence/`: for each `verified_by` test case, a `base/` and a `head/` folder with `result.json`, `command.log` and any `screenshots/` from the base and head runs of `ark test`; for a method other than `test`, one file `<AC id>.md` in the shape of its method plus the human's `manual` gate answer.
 _Avoid_: Proof file, report
 
 **Run**:
@@ -149,7 +149,7 @@ _Avoid_: Issue, comment, bug report
 ## Gates and rework
 
 **Gate**:
-A point where the run waits for your decision. The gates are criteria (opens on every run, so you approve each AC's `method` and `verified_by`), strategy (2 or more strategy cards), manual (a criterion with `manual: true` waits for your `ok`; it shows `manual pending`, `manual ok` or `manual problem`), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
+A point where the run waits for your decision. The gates are criteria (opens on every run, so you approve each AC's `method` and `verified_by`), strategy (2 or more strategy cards), manual (a criterion with a method other than `test`, or `manual: true`, waits for your `ok`; it shows `manual pending`, `manual ok` or `manual problem`, and for a `demonstration` your `ok` ends its evidence file with `human: ok`), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
 _Avoid_: Checkpoint, approval step
 
 **Answer**:

@@ -453,7 +453,7 @@ describe("ark retro", () => {
     expect(readMetrics().rework.findings_sent_back).toBe(0);
   });
 
-  test("ARK-T7 reports rework, plan changes and escaped defects linked to the run", () => {
+  test("ARK-T15 reports rework, plan changes and escaped defects linked to the run", () => {
     writeFileSync(
       join(arkHome, "projects", "demo", "escaped-defects.yml"),
       `- { ticket: ARK-901, run: ${runId}, note: "rounding bug found in production" }\n- { ticket: ARK-777, run: 2026-09-01-ARK-777-1, note: "other run" }\n`,
@@ -492,7 +492,7 @@ describe("ark retro", () => {
       stderr: "pipe",
     });
 
-  test("ARK-T5 retro keeps fix and reviewer of an escaped defect, for caught, missed and downgraded", () => {
+  test("ARK-T13 retro keeps fix and reviewer of an escaped defect, for caught, missed and downgraded", () => {
     const base = `run: ${runId}, note: "n"`;
     writeFileSync(
       join(arkHome, "projects", "demo", "escaped-defects.yml"),
@@ -519,7 +519,7 @@ describe("ark retro", () => {
     ]);
   });
 
-  test("ARK-T6 retro counts only P0 and P1 lines marked leave inside the Run lead decision section", () => {
+  test("ARK-T14 retro counts only P0 and P1 lines marked leave inside the Run lead decision section", () => {
     const findings = join(runDirectory, "findings");
     mkdirSync(findings, { recursive: true });
     writeFileSync(
