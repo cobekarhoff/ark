@@ -158,6 +158,16 @@ The strategy comes after the evaluation and before the plan. Skip this part when
 
    The command refuses a card ID that is not in the latest `strategy.recorded`. After a card ID, the phase is `planning`: go to section 3, and write the plan for that card only. On `abort`, run `ark run close <run> aborted` and go to section 11 with outcome `aborted`.
 
+### Test design and test review
+
+This part comes after the strategy part and before the plan: wherever the strategy part says to go to section 3, do this part first. Skip it when `<run folder>/findings/test-case-review-<n>.md` has the line `Verdict: approve` for the latest design (you replace a stopped run lead). The writer and the reviewer are not plan steps: no plan step is named after a role, and they are named `test-case-writer` and `test-case-reviewer`.
+
+1. Read `roles` in `ark.yml`. If it has no `test_writer` or no `test_reviewer` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --retry-request <id> --type escalation`, and say which of `roles.test_writer` and `roles.test_reviewer` is missing: add its `harness` and `model`, then start a new run lead.
+2. **Test design.** Start the test case writer with the `harness` and `model` of `roles.test_writer`, with the command of the Designer (above), in the run worktree. Name it `test-case-writer`, and use the spec `/skill:ark worker <run> test-case-writer` and the line `You are the TEST CASE WRITER for run <run>. Follow /skill:test-case-writer.` Wait for its `worker_done` and release the terminal as in section 7. It writes the cases and `<run folder>/test-design.md`.
+3. **Test review.** Start the test case reviewer with the `harness` and `model` of `roles.test_reviewer`, named `test-case-reviewer`, the same way with `/skill:test-case-reviewer`. It writes `<run folder>/findings/test-case-review-<n>.md` with a `Verdict: approve` or `Verdict: reject` line.
+4. On `Verdict: reject`, send the rejection to the writer (`orca orchestration send --retry-request <id>` to its terminal, or start it again with the findings file), wait for its `worker_done`, and start the reviewer again. Count each rejection. After 3 rejections, send an escalation to Master Chief with the three findings files and wait. The count of 3 is separate from the round budget of section 9: a rejection is not a round.
+5. On `Verdict: approve`, go to section 3. The plan needs the cases of `test-design.md` in `test_cases`. No implementer step starts before the reviewer approves the cases.
+
 ### Live human check
 
 Use this when the human must try a running thing: a prototype for the strategy gate, or the hub of a run (the UI the run changed) before a gate or merge. Name every server by URL, never by a port.
@@ -434,6 +444,8 @@ The command runs the integration and E2E suites on the composed workspace, then 
 - **A non-test AC needs an evidence file.** `ark merge-request open` and `ark run close <run> handed_off` refuse, before any push and any event, an AC with a method other than `test` (a `manual: true` AC reads as `demonstration`) that has no well-formed `<run folder>/results/evidence/<AC id>.md` (`evidence missing: <AC id> (<method>)`, `evidence malformed: <AC id>: <reason>`). Write it from what was done and seen, before you ask the human. `demonstration`: the sections What the human did, What the human saw, Before and After (each with screenshot paths); `ark gate record <run> manual <AC id> ok` appends the last line `human: ok`. `inspection`: Files (`path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`. `analysis`: Command, Output, Threshold and Result, each given for Base and for Head. They also refuse an AC with `method: test` when a `verified_by` case has no `base` or `head` folder in `results/evidence/<test case id>/` (`test evidence missing: <AC id> <test case id> (<base|head>)`) or when the `head` SHA is not the repo head (`test evidence stale: <AC id> <test case id>`): run `ark test <run>` again after the last commit.
 - After any rework, run `ark test <run>` again. Tests must pass at the latest commit.
 - A validator commits its evidence files (for example a file written after a human check) before the last `ark test <run>`, so that no commit follows that test. A commit after the last test makes `ark status <run>` show `test head: stale`, and `ark merge-request open <run>` refuses the changed head.
+
+Before the first code review, start the test case reviewer a second time (pass 2 of `/skill:test-case-reviewer`) with the `harness` and `model` of `roles.test_reviewer`. It checks the diff after the validator step: the plan names every test case whose code the diff touches, and a touched test that still has an old AC id in its title is converted to its `<KEY>-T<n>` id. On `Verdict: reject`, send the findings to the validator step and start it again; the count of 3 rejections of section 2 applies, and the second pass counts no round.
 
 Run the reviewer steps after the tests pass. Each reviewer writes its findings to `<run folder>/findings/<step>.md`, ranked from P0 (must fix) to P3 (minor).
 

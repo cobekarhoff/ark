@@ -1503,7 +1503,7 @@ test("ARK-285-AC11 ticket text arrives in the snapshot from the ticket's own fil
 
 // ---------------------------------------------------------------- ARK-314
 
-test("ARK-T16 ticket parser returns method and verified_by with legacy ids", () => {
+test("ARK-T23 ticket parser returns method and verified_by with legacy ids", () => {
   isolatedEnvironment();
   const criteria = (rows: NonNullable<Parameters<typeof writeBacklogTicket>[0]["criteria"]>) =>
     parseTicketDocument(
@@ -1543,7 +1543,7 @@ test("ARK-T16 ticket parser returns method and verified_by with legacy ids", () 
   expect(both.map(({ id }) => id)).toEqual(["AC1"]);
 });
 
-test("ARK-T17 hub reads local test cases and zephyr evidence without a Zephyr call", async () => {
+test("ARK-T24 hub reads local test cases and zephyr evidence without a Zephyr call", async () => {
   isolatedEnvironment();
   const zephyrRequests: string[] = [];
   const zephyr = Bun.serve({

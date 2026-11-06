@@ -1,46 +1,36 @@
 ---
 id: ARK-T17
-title: ARK-T17 hub reads local test cases and zephyr evidence without a Zephyr call
+title: ARK-T17 the default roles block of bootstrap.md is a valid config on two vendors
 level: integration
-technique: equivalence classes of source (local / zephyr) times case state (active / retired / missing); boundary of version field present and absent
-priority: high
-risk: "a retired case shows without its reason, a missing id shows as an empty row, a zephyr project reads case files or calls Zephyr, or a version is invented when result.json has none"
+technique: equivalence classes (vendor of each role) over the block that a human copies
+priority: medium
+risk: the default block that bootstrap shows has a typo or a role on one vendor, so a bootstrapped project fails to load or has a reviewer that shares the writer's blind spots
 status: active
-changed_by: 2026-11-06-ARK-314-1
+changed_by: 2026-11-06-ARK-313-1
 ---
 
 ## Objective
 
-Prove the hub's on-request test case read for a ticket sends the full record of a local case, the recorded evidence of a zephyr case, and `missing` for an id with no case file, and makes no request to Zephyr.
+Prove that the default `roles:` block in `skills/ark/playbooks/bootstrap.md` (the fenced block in section 2 with real harness and model values) loads through `loadConfig` with `test_writer` and `test_reviewer`, and that the reviewer is on a different vendor from the implementer and the test writer. This reads the block, not its prose: wording is proved by inspection.
 
 ## Preconditions
 
-- Hub started on fixtures from `test/hub-fixtures.ts`, read through its HTTP test-case route (the route the ticket page calls), not through an internal function.
-- Local project (`test_case_source: local`), ticket ARK-900 with `verified_by`: AC1 `[ARK-T1, ARK-T2, ARK-T99]`.
-  - `ARK-T1` active: title `ARK-T1 first case`, level `integration`, technique `boundary values`, priority `high`, risk `the first defect`, `changed_by: 2026-01-01-ARK-1-1`; committed twice in the fixture git repo (two commits with different `changed_by`), so it has two versions.
-  - `ARK-T2` retired: `status: retired` with the reason line `replaced by ARK-T1`, one commit.
-  - `ARK-T99`: no case file.
-- Zephyr project (`test_case_source: zephyr`), same ticket ids, no case files in the repo. The run's `results/evidence/ARK-T1/head/result.json` holds `{id: ARK-T1, name: "ARK-T1 first case", status: pass, sha: 9b85039, version: 3}`; `results/evidence/ARK-T2/head/result.json` holds the same fields without `version`; `ARK-T99` has no evidence folder.
-- A stub HTTP server on a free port stands in for Zephyr; the zephyr project's config points at it and it records every request. It must record none.
+- `bootstrap.md` has the default roles block in section 2 (the one with real values; not the `<harness>` template in section 8).
+- A temporary `ARK_HOME` and a temporary git repo as the workspace.
 
 ## Steps
 
-1. Request the test cases of ticket ARK-900 from the local project. Assert the response order follows `verified_by`.
-2. Assert `ARK-T1` carries id, title, level, technique, priority, risk, status `active`, `changed_by` and a `versions` list of length 2 in newest-first order, each with its `changed_by`.
-3. Assert `ARK-T2` carries status `retired` and the reason `replaced by ARK-T1`.
-4. Assert `ARK-T99` is `{id: ARK-T99, missing: true}` with no other field, and that the ticket page JSON never holds an empty record for it.
-5. Request the same ticket from the zephyr project. Assert `ARK-T1` carries id, name `ARK-T1 first case`, status `pass`, sha `9b85039` and version 3.
-6. Assert `ARK-T2` carries id, name, status and sha and has no `version` key (a version is shown only when the file has one).
-7. Assert `ARK-T99` reads `missing` in the zephyr project too.
-8. Assert the Zephyr stub recorded zero requests across steps 5 to 7, and that the route answers 200 with the stub stopped.
+1. Extract the fenced block that starts with `roles:` from section 2 of `bootstrap.md`.
+2. Write a project config with a valid `suites` entry and the extracted `roles` value, then run `ark status --project <name>`.
+3. Load the config through `loadConfig` and read each role's `harness` and `model`.
+4. Map each harness to its vendor (`claude` is Anthropic, `codex` is OpenAI, `omp` takes the vendor from the model prefix).
 
 ## Expected results
 
-- Where `test_case_source` is `local`, the system shall send id, title, level, technique, priority, `risk`, status (with the reason of a retired case), `changed_by` and the list of versions of each case that the ticket names.
-- Where `test_case_source` is `zephyr`, the system shall send the id, name, status and sha that `result.json` records, and a version only when the file has a `version` field.
-- The system shall make no request to Zephyr.
-- If a `verified_by` id has no case file, then the system shall send the word `missing` for it, never an empty row.
+- Step 2 exits 0, and step 3 returns `test_writer` and `test_reviewer` with a harness and a model.
+- The vendor of `test_reviewer` differs from the vendor of `implementer` and from the vendor of `test_writer`.
+- The existing roles (`implementer`, `validator`, `reviewer`, `evaluator`, `designer`, `chief`) still load from the same block.
 
 ## Screenshot checkpoints
 
-none: integration case on a JSON read; the page rendering of `missing` is proven in ARK-T18.
+none: integration case on a config block; no UI surface.
