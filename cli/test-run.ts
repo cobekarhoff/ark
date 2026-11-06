@@ -85,7 +85,7 @@ function manualStatus(answer: string | undefined): Status {
 type Suite = ProjectConfig["suites"][number];
 
 type Side = "base" | "head";
-type CaseEntry = { name: string; status: TestResult["status"]; keys: Set<string> };
+type CaseEntry = { name: string; status: TestResult["status"] };
 const statusRank = { skipped: 0, passed: 1, failed: 2 };
 
 /** One entry for each test case id in the results. A failed test wins over a passed one, a passed over a skipped one. */
@@ -95,14 +95,9 @@ function caseEntries(results: TestResult[]): Map<string, CaseEntry> {
     for (const id of result.cases) {
       const entry = entries.get(id);
       if (entry === undefined) {
-        entries.set(id, {
-          name: result.name,
-          status: result.status,
-          keys: new Set(result.cases),
-        });
+        entries.set(id, { name: result.name, status: result.status });
         continue;
       }
-      for (const key of result.cases) entry.keys.add(key);
       if (statusRank[result.status] > statusRank[entry.status]) {
         entry.status = result.status;
         entry.name = result.name;
@@ -114,7 +109,7 @@ function caseEntries(results: TestResult[]): Map<string, CaseEntry> {
 
 /**
  * Writes `results/evidence/<case id>/<side>/` for each case: `result.json`, the suite's `command.log` and the
- * screenshots that `checkpoint` left in the scratch folder under the key of the test (its first case id).
+ * screenshots that `checkpoint` left in the scratch folder under the case id (`checkpoint` writes one folder for each case id of a test title).
  * `fallback` holds the cases found at head: one that the base run did not report gets a failed result.
  */
 function writeEvidence(
@@ -128,7 +123,7 @@ function writeEvidence(
 ): void {
   const all = new Map(cases);
   for (const [id, entry] of fallback ?? [])
-    if (!all.has(id)) all.set(id, { name: entry.name, status: "failed", keys: new Set() });
+    if (!all.has(id)) all.set(id, { name: entry.name, status: "failed" });
   for (const [id, entry] of all) {
     const folder = join(evidenceDirectory, id, side);
     mkdirSync(folder, { recursive: true });
@@ -137,11 +132,9 @@ function writeEvidence(
       `${JSON.stringify({ case: id, name: entry.name, status: entry.status, sha }, null, 2)}\n`,
     );
     writeFileSync(join(folder, "command.log"), commandLog);
-    for (const key of entry.keys) {
-      const screenshots = join(scratch, key, "screenshots");
-      if (existsSync(screenshots))
-        cpSync(screenshots, join(folder, "screenshots"), { recursive: true });
-    }
+    const screenshots = join(scratch, id, "screenshots");
+    if (existsSync(screenshots))
+      cpSync(screenshots, join(folder, "screenshots"), { recursive: true });
   }
 }
 

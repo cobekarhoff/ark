@@ -17,7 +17,7 @@ Prove `checkpoint(page, name)` from `test/pw/helpers.ts` writes `screenshots/<na
 
 - Spec `test/pw/checkpoint.pw.ts` (suffix `.pw.ts`), title starting `ARK-T3`: it navigates to a trivial page, calls `checkpoint(page, "after-click")`, then asserts something false, wrapped in `test.fail()` so the file is an expected failure and `bunx playwright test <spec>` exits 0. The spec must not fail as a real failure when `ark test` runs Playwright at head.
 - Temp dir `E` for evidence. Playwright config unchanged: `screenshot: "only-on-failure"` stays.
-- Second test in the spec carrying two case ids in its title, and a third with none, to fix the rule: scratch subfolder is keyed by the first case id in the title; a test with no case id writes to a subfolder keyed by its sanitized title and is dropped (not moved) after parsing.
+- Second test in the spec carrying two case ids in its title, and a third with none, to fix the rule: scratch subfolders are keyed by each case id in the title; a test with no case id writes to a subfolder keyed by its sanitized title and is dropped (not moved) after parsing.
 - Chromium installed (existing Playwright setup).
 
 ## Steps
