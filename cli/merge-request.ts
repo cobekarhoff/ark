@@ -10,7 +10,12 @@ import { findRun } from "./paths";
 import { loadPlan } from "./plan";
 import { discoverRepos, repoBase } from "./workspace.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
-import { buildLedger, type Ledger } from "../skills/pr-writing/lib/ledger.ts";
+import {
+  buildLedger,
+  findTemplate,
+  type Ledger,
+  tokenOwner,
+} from "../skills/pr-writing/lib/ledger.ts";
 import { lintBody } from "../skills/pr-writing/lib/lint.ts";
 import { buildTitle, postMergeRequest } from "../skills/pr-writing/lib/post.ts";
 
@@ -502,10 +507,12 @@ export function mergeRequestOpen(
       const dependsOn = upstreamOpened.map(
         (merge) => `Depends on ${host === "github" ? "#" : "!"}${merge.number}`,
       );
-      // ponytail: one token owner for the run, probed in the first repo's host; a run that spans GitHub and GitLab
-      // names that owner on both. Probe per repo if the two accounts ever differ.
+      // Evidence and risk are run-wide; host, token owner and template are this repo's own.
       const repoLedger: Ledger = {
         ...ledger,
+        host,
+        tokenOwner: tokenOwner(host, worktree.path),
+        template: findTemplate(worktree.path),
         // A repo with no commits opens no MR, so the merge order leaves it out.
         mergeOrder: ledger.mergeOrder.filter((name) =>
           ledger.repos.some((entry) => entry.repo === name && entry.commits.length > 0),

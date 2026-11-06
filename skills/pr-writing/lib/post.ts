@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { beginMarker, endMarker } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
-import { lintBody } from "./lint.ts";
+import { hashBody, lintBody } from "./lint.ts";
 
 export const maxTitleLength = 72;
 
@@ -63,7 +63,12 @@ export type Posted = {
 
 type Existing = { number: number; url: string; body: string };
 
-function host(command: string[], directory: string) {
+/** The one place a host command runs. In a dry run it prints each call, and a write is not run. */
+function host(command: string[], directory: string, input: PostInput, write = false) {
+  if (input.dryRun) {
+    console.log(`dry-run: ${command.join(" ")}`);
+    if (write) return { ok: true, output: "", error: "" };
+  }
   const result = Bun.spawnSync(command, { cwd: directory, stdout: "pipe", stderr: "pipe" });
   return {
     ok: result.exitCode === 0,
@@ -82,7 +87,7 @@ function probe(input: PostInput): Existing | null {
           "api",
           `projects/:fullpath/merge_requests?state=opened&source_branch=${encodeURIComponent(input.branch)}`,
         ];
-  const result = host(command, input.directory);
+  const result = host(command, input.directory, input);
   let list: unknown;
   try {
     list = result.ok ? JSON.parse(result.output) : undefined;
@@ -133,8 +138,32 @@ function finalBodyOf(
   };
 }
 
+const git = (args: string[], directory: string) => {
+  const result = Bun.spawnSync(["git", ...args], {
+    cwd: directory,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return result.exitCode === 0 ? result.stdout.toString().trim() : null;
+};
+
+/** The head of the repo now and its three-dot diff against the base, read at the moment of the lint. */
+function current(input: PostInput): { currentHeads?: Record<string, string>; diff?: string } {
+  const repo = input.ledger.repos[0];
+  const head = git(["rev-parse", "HEAD"], input.directory);
+  if (repo === undefined || head === null) return {};
+  const base = git(["rev-parse", "--verify", "--quiet", `origin/${input.base}`], input.directory)
+    ? `origin/${input.base}`
+    : input.base;
+  return {
+    currentHeads: { [repo.repo]: head },
+    diff: git(["diff", `${base}...HEAD`], input.directory) ?? undefined,
+  };
+}
+
 /**
- * Lints the final body. Text a person put above the markers must not hide the provenance line, so PROV01 reads the
+ * Lints the final body, with the repo's current head and diff so STALE01 and SEC01 run, and prints the warnings.
+ * A warning never refuses the post. Text a person put above the markers must not hide the provenance line, so PROV01 reads the
  * generated text alone. An update leaves the title alone, so it skips the title checks: an old MR may hold a long title.
  */
 function refuseOnFail(
@@ -142,11 +171,23 @@ function refuseOnFail(
   existing: Existing | null,
   body: string,
   generated: string,
+  showWarnings = true,
 ) {
-  const lint = (text: string) => lintBody({ body: text, title: input.title, ledger: input.ledger });
+  const { currentHeads, diff } = current(input);
+  const lint = (text: string) =>
+    lintBody({
+      body: text,
+      title: input.title,
+      ledger: input.ledger,
+      currentHeads,
+      diff,
+      bodyHash: hashBody(text),
+    });
   const own = lint(generated).find((check) => check.id === "PROV01")!;
-  const failed = lint(body)
-    .map((check) => (check.id === "PROV01" ? own : check))
+  const checks = lint(body).map((check) => (check.id === "PROV01" ? own : check));
+  for (const check of showWarnings ? checks.filter((entry) => entry.result === "warn") : [])
+    console.error(`warning: ${check.id}: ${check.reason}`);
+  const failed = checks
     .filter((check) => check.result === "fail")
     .filter((check) => existing === null || !check.id.startsWith("TITLE01"));
   if (failed.length > 0)
@@ -229,10 +270,9 @@ function writeCommand(input: PostInput, existing: Existing | null, bodyFile: str
 export function postMergeRequest(input: PostInput): Posted {
   const generated = readFileSync(input.bodyFile, "utf8");
   // First look: refuse early. Second look, just before the write: the host may have changed in between.
-  let existing = probe(input);
-  refuseOnFail(input, existing, finalBodyOf(generated, existing).body, generated);
-  const again = probe(input);
-  if (again?.number !== existing?.number) existing = again;
+  const first = probe(input);
+  refuseOnFail(input, first, finalBodyOf(generated, first).body, generated, false);
+  const existing = probe(input);
   const { body, note } = finalBodyOf(generated, existing);
   refuseOnFail(input, existing, body, generated);
   if (existing !== null && body === existing.body)
@@ -243,11 +283,9 @@ export function postMergeRequest(input: PostInput): Posted {
     const bodyFile = join(directory, "body.md");
     writeFileSync(bodyFile, body);
     const command = writeCommand(input, existing, bodyFile, body);
-    if (input.dryRun) {
-      console.log(`dry-run: ${command.join(" ")}`);
+    const result = host(command, input.directory, input, true);
+    if (input.dryRun)
       return { action: "dry-run", url: existing?.url ?? "", number: existing?.number ?? 0, note };
-    }
-    const result = host(command, input.directory);
     if (!result.ok)
       throw new ArkError(
         `\`${command.slice(0, 3).join(" ")}\` failed: ${result.error || result.output}`,

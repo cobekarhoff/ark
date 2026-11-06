@@ -37,7 +37,9 @@ const git = (...args: string[]) =>
     .trim();
 const branch = git("symbolic-ref", "--short", "HEAD");
 const fullLedger = buildLedger(
-  values.run === undefined ? { directory, base: values.base } : { runFolder: values.run },
+  values.run === undefined
+    ? { directory, base: values.base, dryRun: values["dry-run"] }
+    : { runFolder: values.run, dryRun: values["dry-run"] },
 );
 // A run ledger holds every repo of the run: this MR is the one for the repo on the current branch.
 const ledger =

@@ -127,8 +127,8 @@ export type Ledger = {
 };
 
 export type LedgerSource =
-  | { runFolder: string; prWriting?: PrWriting }
-  | { directory: string; base?: string; prWriting?: PrWriting };
+  | { runFolder: string; prWriting?: PrWriting; dryRun?: boolean }
+  | { directory: string; base?: string; prWriting?: PrWriting; dryRun?: boolean };
 
 const defaultPrWriting: PrWriting = {
   reviewers: [],
@@ -138,7 +138,12 @@ const defaultPrWriting: PrWriting = {
   agent_authored: true,
 };
 
+/** Set while a `--dry-run` ledger is built: each `gh`/`glab` call the build makes is printed. */
+let printHostCalls = false;
+
 function capture(command: string[], cwd: string): string | null {
+  if (printHostCalls && (command[0] === "gh" || command[0] === "glab"))
+    console.log(`dry-run: ${command.join(" ")}`);
   try {
     const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" });
     return result.exitCode === 0 ? result.stdout.toString().trim() : null;
@@ -163,7 +168,7 @@ function parseJson(text: string | null): unknown {
   }
 }
 
-function tokenOwner(host: Host, cwd: string): string {
+export function tokenOwner(host: Host, cwd: string): string {
   if (host === "unknown") return "unknown";
   const answer =
     host === "github"
@@ -416,7 +421,7 @@ const templateCandidates = [
   ".claude/rules/gitlab-mr-template.md",
 ];
 
-function findTemplate(root: string): Ledger["template"] {
+export function findTemplate(root: string): Ledger["template"] {
   const folder = join(root, ".gitlab", "merge_request_templates");
   const gitlab = existsSync(folder)
     ? readdirSync(folder)
@@ -716,7 +721,10 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
     ),
   ];
   const findingsFiles = readFindingsFiles(directory, reviewerSteps);
-  const latest = findingsFiles.filter((file) => !roundFile.test(file.name)).at(-1);
+  // Only the reviewer steps' own findings carry the risk block: validator and live-check reports never count.
+  const latest = findingsFiles
+    .filter((file) => !roundFile.test(file.name) && reviewerSteps.includes(file.group))
+    .at(-1);
   const reviewer = latest ? parseReviewerBlock(latest.text) : null;
 
   const { order, upstream } = orderRepos(plan?.steps ?? []);
@@ -834,5 +842,10 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
 }
 
 export function buildLedger(source: LedgerSource): Ledger {
-  return "runFolder" in source ? runLedger(source) : gitLedger(source);
+  printHostCalls = source.dryRun === true;
+  try {
+    return "runFolder" in source ? runLedger(source) : gitLedger(source);
+  } finally {
+    printHostCalls = false;
+  }
 }
