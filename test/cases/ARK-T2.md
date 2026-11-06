@@ -15,26 +15,32 @@ Prove `results/evidence/<case id>/{base,head}/result.json` is written for every 
 
 ## Preconditions
 
-- Fake project as in ARK-T1: touched repo, base commit and a distinct head commit; run `kind: feature`.
-- Suite A: tests with ids `FAKE-T1` (fails at base, passes at head), `FAKE-T2` (passes both), `FAKE-T3` (skipped at both).
-- Suite B (crash fixture): a new test file `FAKE-T4` that imports a module existing only at head, so at base the whole file fails to load and the JUnit has no entry for `FAKE-T4`.
-- Expected SHAs: base SHA from the `worktree.created` event; head SHA from `headOf(repo, workspace, mirror)` (the function `ark test` and `staleHeads` use), computed by the test itself with the same function.
+- Fake project as in ARK-T1, run `kind: feature`, with two touched repos and one untouched repo:
+  - `touched`: base commit and a distinct head commit.
+  - `touched2`: a mirror/worktree setup where the composed workspace checkout head differs from the mirror head (a commit exists only in the workspace checkout), so a wrong checkout choice yields a wrong SHA.
+  - `untouched`: no change in the run; base and head are the same commit.
+- Expected SHAs come only from git in the fixture: `git -C <repo base checkout> rev-parse HEAD` for base, and `git -C <workspace checkout that ran> rev-parse HEAD` for head, captured by the test before invoking `ark test`. The `worktree.created` event is written by the fixture from the same `rev-parse`. Never call `headOf` or any function of the code under test to compute an expectation.
+- Suite A (in `touched`): `FAKE-T1` fails at base, passes at head; `FAKE-T2` passes both; `FAKE-T3` skipped at both.
+- Suite B (crash fixture, in `touched`): new test file with `FAKE-T4` importing a module existing only at head, so at base the file fails to load and the JUnit has no entry for `FAKE-T4`.
+- Suite C (in `touched2`): `FAKE-T5` passes both. Suite D (in `untouched`): `FAKE-T6` passes both.
+- JUnit names: `FAKE-T1 fails at base`, `FAKE-T2 passes`, `FAKE-T3 is skipped`, `FAKE-T4 needs head module`, `FAKE-T5 workspace`, `FAKE-T6 untouched`.
 
 ## Steps
 
-1. Run `ark test` on suite A.
-2. For FAKE-T1, FAKE-T2, FAKE-T3 list `results/evidence/<id>/`; assert `base/` and `head/` exist.
-3. Parse each `result.json`. Assert keys `case`, `name`, `status`, `sha` and nothing else required.
-4. Assert FAKE-T1: base `status` failed, head `status` passed. FAKE-T2: both passed. FAKE-T3: both skipped. `name` is the JUnit test name and starts with the case id.
-5. Assert for FAKE-T1 that base `sha` equals the base SHA, head `sha` equals `headOf(...)`, and the two differ.
-6. Run `ark test` on suite B. Assert `FAKE-T4/base/result.json` exists with `status` failed and the base SHA, and `FAKE-T4/head/result.json` has status passed.
-7. Re-run `ark test` after the head test file drops FAKE-T2. Assert `results/evidence/FAKE-T2` is gone (no stale folder of a case that no longer appears).
+1. Run `ark test` on suites A, C, D.
+2. For every FAKE-T1, T2, T3, T5, T6 list `results/evidence/<id>/`; assert `base/` and `head/` exist.
+3. Parse each `result.json`; assert it has `case`, `name`, `status`, `sha`.
+4. Assert per case `case` equals the id, `name` equals the exact JUnit name above, and statuses: T1 base failed / head passed; T2, T5, T6 both passed; T3 both skipped.
+5. Assert SHAs against the git-derived values: T1 base `sha` equals the base SHA and head `sha` equals the head SHA, and they differ. T5 head `sha` equals the workspace checkout head and not the mirror head. T6 base `sha` equals head `sha` equals the untouched repo's one SHA.
+6. Run `ark test` on suite B. Assert `FAKE-T4/base/result.json` has `case` `FAKE-T4`, a `name`, status `failed` and the base SHA; `FAKE-T4/head/result.json` has status `passed` and the head SHA. Assert `FAKE-T4/base/command.log` exists and is byte-identical to the suite B base command.log shared by every case of that suite (first line the suite command, last line `exit <code>`).
+7. Re-run `ark test` after the head test file drops FAKE-T2. Assert `results/evidence/FAKE-T2` is gone and the other case folders remain.
 
 ## Expected results
 
-- When `ark test` finds a case id, the system shall write `result.json` with the case id, the JUnit name, the status and the commit SHA of the checkout that ran to its `base/` and `head/` folders.
-- When a case ran in a touched repo, the system shall record the base SHA in `base/result.json` and `headOf(repo, workspace, mirror)` in `head/result.json`, and the two shall differ.
-- If the base run crashes before reporting a case that head reports, then the system shall write a `result.json` with status `failed` to that case's `base/` folder.
+- When `ark test` finds a case id, the system shall write `result.json` with the case id, the exact JUnit name, the status and the commit SHA of the checkout that ran to its `base/` and `head/` folders.
+- When a case ran in a touched repo, the system shall record the repo's base SHA in `base/result.json` and the head SHA of the checkout that ran in `head/result.json`, and the two shall differ.
+- When a case ran in an untouched repo, the system shall record the same SHA in `base/` and `head/`.
+- If the base run crashes before reporting a case that head reports, then the system shall write a `result.json` with status `failed` and the base SHA to that case's `base/` folder, and shall write the suite `command.log` there.
 - When a case id no longer appears in the results, the system shall remove its evidence folder.
 
 ## Screenshot checkpoints

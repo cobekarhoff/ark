@@ -15,27 +15,30 @@ Prove that `ark test` runs every suite at the `worktree.created` base commit for
 
 ## Preconditions
 
-- A fake project in a temp dir (same helper the existing `test/test-run.test.ts` uses): git repo with a base commit holding `src/feature.ts` without `feature()`, and a head commit that adds `src/feature.ts: feature()` and a new file `test/new.test.ts` (calls `feature()`, title starts with `ARK-T1`-style case id of the fake plan, e.g. `FAKE-T1`).
-- Run state: `kind: feature`, a `worktree.created` event holding the base SHA, fake test config with one suite (`bun test {report}` style as the existing fixtures) and a JUnit parser.
-- Second fixture (same repo, `kind: refactor`) where the suite fails at base, for the contrast step.
-- Third fixture: `kind: feature` where the new test also fails at head.
-- Run in-process through the `ark test` function used by existing tests, or the CLI with `ARK_HOME` set to a temp dir. No mocking of git.
+- Fake project helper as in `test/test-run.test.ts`, no git mocking. Two touched repos, `repoA` and `repoB`, each with its own base commit (different SHAs). Expected base SHAs are read with `git rev-parse` in each fixture repo right after creating the base commit and written into that run's `worktree.created` event by the fixture; the assertions compare against those values.
+- Each repo's test config has two suites (`s1`, `s2`). Every suite prints `SUITE=<repo>/<suite> CHECKOUT=<base|head>` where CHECKOUT is derived from `git rev-parse HEAD` compared with the fixture's recorded base SHA, never from the code under test.
+- Base commit of each repo: production `src/feature.ts` without `feature()`; tests `test/keep.test.ts` (to be deleted at head), `test/old-name.test.ts` (to be renamed), `test/helpers/util.ts` (helper, old content `v1`), `tests/nested/a.test.ts`, `features/x.feature` (old content `v1`), `test/cases/ARK-X.md`.
+- Head commit of each repo: adds `src/feature.ts: feature()` (production, must stay absent at base); adds `test/new.test.ts`, `tests/nested/deep/b.test.ts`, `features/y.feature`, `test/fixtures/data.json`, `test/cases/ARK-Y.md`; changes `test/helpers/util.ts` (`v2`), `features/x.feature` (`v2`); deletes `test/keep.test.ts`; renames `test/old-name.test.ts` to `test/renamed.test.ts` (git rename, content unchanged).
+- Run fixtures (same repos, different `kind` in `state.json`): K1 `feature`, K2 `bug`, K3 `perf`, K4 `refactor` (suites fail at base), K5 `feature` where `test/new.test.ts` also fails at head.
 
 ## Steps
 
-1. Create the feature fixture. Confirm by hand-running the new test in the base tree that it fails (`feature` is not a function) so the premise holds.
-2. Run `ark test` for the feature run.
-3. Read the exit code and the base suite checkout used by the run (the base worktree path, or the base `command.log`/output).
-4. Assert the base checkout held `test/new.test.ts` with the head's content (the base log shows the test ran and failed with a runtime error, not "no tests found").
-5. Run `ark test` for the refactor fixture whose suite fails at base. Record the exit code.
-6. Run `ark test` for the feature fixture where the new test fails at head. Record the exit code.
-7. Run `ark test` twice in a row for the feature run, with a changed test file between runs. Assert the second run's base used the second file content (no base cache across runs).
+1. For K1: hand-run `test/new.test.ts` in a plain checkout of repoA base; assert it fails (`feature` is not a function).
+2. Run `ark test` for K1. Assert exit code 0.
+3. In each of repoA and repoB, read the base checkout the run used (or its suite output). Assert all four suite markers `repoA/s1`, `repoA/s2`, `repoB/s1`, `repoB/s2` appear with `CHECKOUT=base` and that each base run's `git rev-parse HEAD` equals that repo's own recorded base SHA (repoA's SHA is not used for repoB).
+4. In each base checkout assert by file content: `test/new.test.ts`, `tests/nested/deep/b.test.ts`, `features/y.feature`, `test/fixtures/data.json`, `test/cases/ARK-Y.md` exist and equal head; `test/helpers/util.ts` is `v2`; `features/x.feature` is `v2`; `test/renamed.test.ts` exists.
+5. In each base checkout assert: `test/keep.test.ts` still exists (deletion is not copied); `test/old-name.test.ts` still exists beside `test/renamed.test.ts`; `src/feature.ts` has no `feature()` (production stays at base); `tests/nested/a.test.ts` and `test/cases/ARK-X.md` are unchanged.
+6. Run `ark test` for K2 (`bug`) and K3 (`perf`). For each assert exit 0 and the same base assertions of steps 3 to 5.
+7. Run `ark test` for K4 (`refactor`). Assert exit non-zero. Run it a second time after changing `test/new.test.ts` at head so the suites pass at base the second time; assert the second run executed the suites again (suite output carries a fresh run counter written by the suite to a file outside the repo) and its exit code reflects the second result (0), not the first.
+8. Run `ark test` for K5. Assert exit non-zero although base failed as well.
+9. Run `ark test` for K1 twice with `test/new.test.ts` content changed in head between the runs; assert the second run's base checkout holds the second content and the suite run counter increased for K1 as well.
 
 ## Expected results
 
-- When a new test fails at base and passes at head in a `feature` run, the system shall exit 0 from `ark test`.
-- When `ark test` runs, the system shall copy the head's version of each added or changed file under a `test`, `tests` or `features` folder into the base checkout before the base suites run.
-- When `ark test` runs a `feature`, `bug` or `perf` run, the system shall run the suites at base on every invocation and shall not reuse an earlier base result.
+- When a new test fails at base and passes at head in a `feature`, `bug` or `perf` run, the system shall exit 0 from `ark test`.
+- When `ark test` runs, the system shall run every configured suite of every touched repo at that repo's own recorded base SHA.
+- When `ark test` runs, the system shall copy head's added, changed and renamed-to files under any `test`, `tests` or `features` folder (any depth, including helpers, fixtures and `test/cases/`) into the base checkout, and shall not delete a base file deleted or renamed at head, and shall not copy production files.
+- When `ark test` runs a `feature`, `bug`, `perf` or `refactor` run, the system shall run the suites at base on every invocation and shall not reuse an earlier base result.
 - When the suites fail at base in a `refactor` run, the system shall exit non-zero.
 - When a suite fails at head, the system shall exit non-zero for every kind.
 
