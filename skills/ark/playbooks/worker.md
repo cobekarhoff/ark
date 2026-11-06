@@ -74,7 +74,7 @@ You make the mockups that let the human choose a strategy before code exists. Yo
 You write the product code.
 
 1. Implement the change the step's AC describe, in this repo only. Keep the change as small as the AC allow. Read `skills/ark/principles.md` in the Ark repo first.
-2. Use the repo's own checks while you work: its build and unit tests. Unit tests are for you. They never prove an AC.
+2. Use the repo's own checks while you work: its build and unit tests. Unit tests are for you. They count as proof of an AC only as a `verified_by` test case.
 3. Before each commit and before `worker_done`, run every check script that the repo's `package.json` lists. For this repo that is `format` (it writes), then `format:check`, `typecheck` and `lint`. Run them in rework rounds too, and for Markdown-only changes. Fix every failure first. Commit the files `format` changed.
 4. If a findings file or a failing test list names your step (a rework round), fix exactly what it lists. The file is `<run folder>/findings/round-<round>.md`. Do not widen the change.
 5. Commit your own work on the branch `ark/<ticket id>-<slug>` before `worker_done`. Do not leave it uncommitted for the reviewer or the run lead. `ark test` runs on the latest commit, so uncommitted work counts for nothing. Do not push, and do not open an MR. `ark merge-request open` does that.
@@ -86,7 +86,7 @@ You turn the plan's test cases into tests that prove the AC, and you make them p
 
 1. Read `skills/ark/principles.md` in the Ark repo. Read the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Find the suite whose `repo` is yours: its `level`, its `command` and its `parser`. Your tests must live where that suite's command finds them. When `verify.md` exists in the same folder, use it for a live check: start the app and reach it as it says, and run each feature of its feature map that the step's criteria touch. Quote what you saw in your report. When `verify.md` is wrong (a command fails or a result differs), say so in your findings file, so the run lead can write a proposal.
 2. Write one or more tests for each test case of your step's criteria. Set up its `given` context, perform its `when` actions, and assert its `then` results and `expected` EARS sentence. Each test:
-   - Is a test at the level the test case names. An AC with `method: test` needs an integration or E2E case among its `verified_by` cases, so a unit test alone never proves it.
+   - Is a test at the level the test case names. An AC with `method: test` needs an integration or E2E case among its `verified_by` cases, so a unit test alone is not enough.
    - Carries its test case ID so the suite's parser can read it. Put the ID at the start of the test name for the `bun` parser, for example `test("ARK-T12 lists the five playbooks", ...)`. Use the `case` marker for `pytest` and the `@case:<id>` tag for `behave`. For an `add` entry, run `ark test-case new <KEY>` first and use the ID it prints; write the entry's fields and sections.
    - Converts on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. When you change such a test, write a test case with `ark test-case new <KEY>`, rename the title to start with the test case ID, and name the case in the plan (tell the run lead if the plan lacks it). The reviewer rejects a diff that touches such a test and leaves its title unchanged. Leave an untouched old-id test alone.
    - Exercises the real system or an emulated dependency you own. Never mock the thing the test proves.

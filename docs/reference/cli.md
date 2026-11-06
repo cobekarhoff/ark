@@ -360,7 +360,7 @@ Each entry in `suites`:
 | Field     | Type   | Meaning                                                                                                      |
 | --------- | ------ | ------------------------------------------------------------------------------------------------------------ |
 | `name`    | string | Name of the suite. It must be unique.                                                                        |
-| `level`   | string | `unit`, `integration`, or `e2e`. A unit suite never proves an AC.                                            |
+| `level`   | string | `unit`, `integration`, or `e2e`. A unit result counts for an AC through `verified_by`.                       |
 | `repo`    | string | The repo the suite runs in: a path relative to the workspace, or `.`. The command runs in `<mirror>/<repo>`. |
 | `command` | string | The shell command. `{report}` is replaced with an absolute path under the run's `results/` folder.           |
 | `parser`  | string | `bun`, `pytest`, or `behave`. It reads the report file and the command output.                               |

@@ -142,14 +142,6 @@ _Avoid_: Task list, workflow, pipeline
 One piece of a plan: one role's work in one repo, the steps it waits for, and the ACs it serves.
 _Avoid_: Task, node, job, stage
 
-**Test case**:
-One integration or E2E scenario that proves an AC, with its steps and expected result. Unit tests never prove an AC.
-_Avoid_: Spec, scenario
-
-**Evidence**:
-The results of a run's test cases at the latest commit on the composed workspace, with the reports, logs and screenshots they point to.
-_Avoid_: Proof bundle, test output
-
 **Finding**:
 A defect a reviewer reports, ranked from P0 (must fix) to P3 (minor).
 _Avoid_: Issue, comment, bug report
@@ -157,7 +149,7 @@ _Avoid_: Issue, comment, bug report
 ## Gates and rework
 
 **Gate**:
-A point where the run waits for your decision. The gates are criteria (the ticket lacks testable ACs, or the evaluator found a blocker), strategy (2 or more strategy cards), manual (a criterion with `manual: true` waits for your `ok`; it shows `manual pending`, `manual ok` or `manual problem`), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
+A point where the run waits for your decision. The gates are criteria (opens on every run, so you approve each AC's `method` and `verified_by`), strategy (2 or more strategy cards), manual (a criterion with `manual: true` waits for your `ok`; it shows `manual pending`, `manual ok` or `manual problem`), plan (before any code) and escalation (the round budget is spent). Merging an MR is your approval on the git host, not a gate.
 _Avoid_: Checkpoint, approval step
 
 **Answer**:

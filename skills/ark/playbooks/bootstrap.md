@@ -59,7 +59,7 @@ Also read `README.md`, `AGENTS.md`, `CLAUDE.md` and any `Taskfile*`, `Makefile` 
 
 ### Integration and E2E suites
 
-Ark counts only integration and E2E suites as proof of an AC. Unit suites never prove one, so leave them out of `ark.yml`.
+Ark decides an AC from the results of its `verified_by` test cases at every level. For an old-scheme AC with no `verified_by`, only integration and E2E suites count, so list unit suites only if cases use them.
 
 For each repo, find test locations and classify them:
 
