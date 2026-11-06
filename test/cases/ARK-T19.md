@@ -1,17 +1,17 @@
 ---
 id: ARK-T19
-title: ARK-T19 the five-process load test of ARK-237 runs only with ARK_LOAD_PROOF=1
+title: ARK-T19 the five-process load test of ARK-T22 runs only with ARK_LOAD_PROOF=1
 level: integration
 technique: equivalence classes (variable unset against variable set to 1)
 priority: high
-risk: the ARK-237 test that starts five `bun test` processes runs on every full `bun test`, so on a busy host it hits its 300 s limit and fails the suite; or it never runs, even with ARK_LOAD_PROOF=1
+risk: the ARK-T22 test that starts five `bun test` processes runs on every full `bun test`, so on a busy host it hits its 300 s limit and fails the suite; or it never runs, even with ARK_LOAD_PROOF=1
 status: active
 changed_by: 2026-11-06-ARK-319-1
 ---
 
 ## Objective
 
-Prove that `test/timeouts.test.ts` skips the five-process ARK-237 test unless `ARK_LOAD_PROOF=1`, and runs it when the variable is set. Serves ARK-326/AC1 and ARK-319/AC4.
+Prove that `test/timeouts.test.ts` skips the five-process ARK-T22 test unless `ARK_LOAD_PROOF=1`, and runs it when the variable is set. Serves ARK-326/AC1 and ARK-319/AC4.
 
 Expected: While ARK_LOAD_PROOF is unset, the system shall skip the five-process test and exit 0; when ARK_LOAD_PROOF is 1, the system shall run it.
 
@@ -22,7 +22,7 @@ Expected: While ARK_LOAD_PROOF is unset, the system shall skip the five-process 
 
 ## Steps
 
-1. Run `bun test test/timeouts.test.ts -t ARK-237-AC2` in a child process with `ARK_LOAD_PROOF` removed from the environment. Read the exit code and the skip and pass counts from the output.
+1. Run `bun test test/timeouts.test.ts -t ARK-T22` in a child process with `ARK_LOAD_PROOF` removed from the environment. Read the exit code and the skip and pass counts from the output.
 2. Run the same command in a child process with `ARK_LOAD_PROOF=1` and the fake `bun` first on `PATH`. Read the exit code, the counts and the log file.
 
 ## Expected results
