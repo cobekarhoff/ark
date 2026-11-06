@@ -28,12 +28,13 @@ Prove both commands refuse a `method: test` AC whose `verified_by` case lacks a 
 4. For every refusal assert remote refs, `events.ndjson` line count and run status are unchanged.
 5. Cases (5) and (6), both commands: assert no test-evidence refusal text and the commands proceed (push, or event appended). AC2 (no `verified_by`) never produces a test evidence line in any case.
 6. Wrong repo: the run has a second repo with a different head. Write FAKE-T1's head `result.json` with `repo` of the first repo and the SHA that is the second repo's head; FAKE-T2 valid. Assert both commands refuse with `test evidence stale: AC1 FAKE-T1` only.
-7. In a fresh case (5) fixture, make a new commit in the repo so head moves (record the new `rev-parse HEAD`); assert both commands refuse with `test evidence stale: AC1 FAKE-T1` and `... FAKE-T2` and nothing pushed.
+7. Unusable head evidence: write FAKE-T1's head `result.json` without a `sha`, once with an unknown `repo`, once with a known `repo`, once with no `repo` (an old file). Assert both commands refuse with `test evidence stale: AC1 FAKE-T1` only.
+8. In a fresh case (5) fixture, make a new commit in the repo so head moves (record the new `rev-parse HEAD`); assert both commands refuse with `test evidence stale: AC1 FAKE-T1` and `... FAKE-T2` and nothing pushed.
 
 ## Expected results
 
 - When a `verified_by` case has no `base/` or `head/` evidence folder, the system shall refuse with `test evidence missing: <AC id> <test case id> (<base|head>)` on both commands, naming the exact missing folder only.
-- When the SHA in the `head` `result.json` is not the git head of the repo that ran the case (the `repo` in that `result.json`), also when it is the current head of another repo of the run, the system shall refuse with `test evidence stale: <AC id> <test case id>` on both commands.
+- When the SHA in the `head` `result.json` is not the git head of the repo that ran the case (the `repo` in that `result.json`), also when the `sha` is not a string or the `repo` is missing or unknown, also when it is the current head of another repo of the run, the system shall refuse with `test evidence stale: <AC id> <test case id>` on both commands.
 - The system shall check every case in `verified_by`, not only the first.
 - Where an AC has no `verified_by`, the system shall not require test evidence.
 - When the refusal fires, the system shall push nothing and append no event.

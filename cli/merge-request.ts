@@ -458,7 +458,8 @@ function evidenceProblems(directory: string, events: ArkEvent[], lastTest: ArkEv
       } catch {
         // unreadable result.json: no SHA matches a head, so the case is stale
       }
-      if (typeof result.repo !== "string" || result.sha !== heads.get(result.repo))
+      const head = typeof result.repo === "string" ? heads.get(result.repo) : undefined;
+      if (typeof result.sha !== "string" || head === undefined || result.sha !== head)
         lines.push(`test evidence stale: ${localId(id)} ${testCase}`);
     }
   }

@@ -612,6 +612,25 @@ describe.each(commands)("ark %s evidence for verified_by cases", (_name, argsFor
   });
 
   test.each([
+    ["an unknown repo and no sha", { case: "FAKE-T1", repo: "repos/nowhere" }],
+    ["a known repo and no sha", { case: "FAKE-T1", repo: "repos/core" }],
+    ["no repo and no sha (an old file)", { case: "FAKE-T1" }],
+  ])("ARK-T8 refuses head evidence with %s", (_case, body) => {
+    const run = shipRun(testCriteria, []);
+    writeCaseEvidence(run, "FAKE-T1", valid);
+    writeCaseEvidence(run, "FAKE-T2", valid);
+    writeFileSync(
+      join(run.directory, "results", "evidence", "FAKE-T1", "head", "result.json"),
+      JSON.stringify(body),
+    );
+    const lines = expectRefused(run, argsFor(run))
+      .split("\n")
+      .filter((line) => line.includes("test evidence"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("test evidence stale: AC1 FAKE-T1");
+  });
+
+  test.each([
     ["(5) both folders, head SHA current", { base: "arbitrary-base-sha", head: "current" }],
     ["(6) both folders, base SHA is any value", { base: "0000", head: "current" }],
   ])(
