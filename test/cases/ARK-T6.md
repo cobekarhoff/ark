@@ -4,7 +4,7 @@ title: ARK-T6 evidence file shape of each method is checked
 level: integration
 technique: equivalence classes per method plus boundary of one missing section; ordering of appended gate line
 priority: high
-risk: the reader accepts a file missing a section, names the wrong section, or the manual gate leaves human: ok twice or not last, or appends it after a problem answer
+risk: "the reader accepts a file missing a section, names the wrong section, or the manual gate leaves human: ok twice or not last, or appends it after a problem answer"
 status: active
 changed_by: 2026-11-06-ARK-312-1
 ---
