@@ -6,7 +6,13 @@ import { isDesignerTime, isEvaluatorTime, type StageTimes, type StepWindow } fro
 import type { SessionFile, TranscriptPage } from "./types.ts";
 
 export type Harness = "omp" | "claude" | "codex";
-export type CompactMessage = { time: number; cost: number | null; model: string | null };
+export type CompactMessage = {
+  time: number;
+  cost: number | null;
+  model: string | null;
+  /** An omp helper call: its cost counts, its model is not the agent's. */
+  helper?: boolean;
+};
 export type WorkerRequest = {
   id: number;
   kind: "head" | "parse" | "transcript";
@@ -333,7 +339,9 @@ export class UsageIndex {
       if (owner === null) continue;
       if (session.end < (newest.get(owner) ?? "")) continue;
       newest.set(owner, session.end);
-      const model = this.#entries.get(session.file)?.messages?.at(-1)?.model;
+      const model = this.#entries
+        .get(session.file)
+        ?.messages?.findLast((message) => !message.helper)?.model;
       if (model) models.set(owner, model);
       else models.delete(owner);
     }

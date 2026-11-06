@@ -16,6 +16,8 @@ export type UsageMessage = {
   cacheWrite: number;
   costUsd: number | "unknown";
   toolError: boolean;
+  /** An omp helper call (`purpose` field: job-caption, job-widget): costs count, its model is not the agent's. */
+  helper?: boolean;
   sessionFile: string;
 };
 

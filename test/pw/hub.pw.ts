@@ -3920,7 +3920,8 @@ test("ARK-293-AC5 with session models on the run page, / and /nope answer with a
 
 /**
  * An open run in planning with an evaluator and a designer in Orca. The evaluator session ends at
- * `evaluation.recorded`; the designer session runs after it, up to `strategy.recorded`. Both ran
+ * `evaluation.recorded` plus its closing message to the run lead and a helper call (`purpose`
+ * job-caption); the designer session runs after it, up to `strategy.recorded`. Both ran
  * another model than `roles.chief`. Orca reports no model for either terminal; Master Chief's
  * terminal reports one.
  */
@@ -3935,6 +3936,8 @@ function stageModelWorld(options: { designerSession: boolean }) {
       validator: { harness: "omp", model: "m" },
       reviewer: { harness: "omp", model: "m" },
       chief: { harness: "claude", model: "claude-opus" },
+      evaluator: { harness: "codex", model: "evaluator-configured" },
+      designer: { harness: "codex", model: "designer-configured" },
     },
   });
   const startedAt = ago(3600);
@@ -3956,6 +3959,9 @@ function stageModelWorld(options: { designerSession: boolean }) {
     [
       { time: after(2), costUsd: 0.01, model: "session/evaluator-first" },
       { time: after(6), costUsd: 0.01, model: "session/evaluator-last" },
+      // The closing report lands after `evaluation.recorded` (at 10 s), then an omp helper call.
+      { time: after(12), costUsd: 0.01, model: "session/evaluator-last" },
+      { time: after(13), costUsd: 0.01, model: "session/helper-model", purpose: "job-caption" },
     ],
     after(1),
   );
@@ -3967,6 +3973,7 @@ function stageModelWorld(options: { designerSession: boolean }) {
       [
         { time: after(60), costUsd: 0.01, model: "session/designer-first" },
         { time: after(90), costUsd: 0.01, model: "session/designer-last" },
+        { time: after(91), costUsd: 0.01, model: "session/helper-model", purpose: "job-widget" },
       ],
       after(50),
     );
@@ -4021,6 +4028,8 @@ test("ARK-310-AC4 the evaluator and designer rows show the model their session r
     await expect(roleRow(page, role)).not.toContainText("(planned)");
   }
   await expect(roleRow(page, "evaluator")).not.toContainText("session/evaluator-first");
+  for (const role of ["evaluator", "designer"])
+    await expect(roleRow(page, role)).not.toContainText("session/helper-model");
 });
 
 test("ARK-310-AC4 a designer row with no session model keeps the configured model, labelled", async ({
@@ -4030,6 +4039,7 @@ test("ARK-310-AC4 a designer row with no session model keeps the configured mode
   const baseUrl = await launch();
   await open(page, baseUrl, `run/${run}`);
 
-  await expect(roleRow(page, "designer")).toContainText("claude-opus (configured)");
+  await expect(roleRow(page, "designer")).toContainText("designer-configured (configured)");
+  await expect(roleRow(page, "designer")).not.toContainText("claude-opus");
   await expect(roleRow(page, "evaluator")).toContainText("session/evaluator-last");
 });

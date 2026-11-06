@@ -110,8 +110,11 @@ export function stageTimes(events: ArkEvent[]): StageTimes {
   };
 }
 
+/** The evaluator reports to the run lead after the lead recorded the evaluation: allow that closing message. */
+export const evaluatorGraceMilliseconds = 60_000;
+
 export const isEvaluatorTime = (time: number, evaluationEnd: number | undefined): boolean =>
-  evaluationEnd !== undefined && time <= evaluationEnd;
+  evaluationEnd !== undefined && time <= evaluationEnd + evaluatorGraceMilliseconds;
 
 export const isDesignerTime = (
   time: number,
@@ -539,7 +542,9 @@ export function retro(runId: string, inProject?: string): void {
       id,
       [
         ...new Set(
-          [...stepOf].filter(([, window]) => window.id === id).map(([message]) => message.model),
+          [...stepOf]
+            .filter(([message, window]) => window.id === id && !message.helper)
+            .map(([message]) => message.model),
         ),
       ].sort(),
     ]),
@@ -570,6 +575,7 @@ export function retro(runId: string, inProject?: string): void {
   // Same vendor review: judged on the executed step windows (the repo and role the messages ran in), not on plan.yml.
   const vendorsByRepoStep = new Map<string, Map<string, { role: string; vendors: Set<string> }>>();
   for (const [message, window] of stepOf) {
+    if (message.helper) continue;
     const vendorName = message.model.slice(message.model.lastIndexOf("/") + 1);
     const vendor = vendorName.startsWith("claude-")
       ? "anthropic"

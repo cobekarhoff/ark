@@ -55,14 +55,21 @@ export const intervalMilliseconds: Record<SourceName, number> = {
 
 const usageTimeoutMilliseconds = 30_000;
 
-/** Harness and model of `roles.chief` in the project's `ark.yml`, or null when unset or unreadable. */
-function chiefRole(project: string): { harness: string; model: string } | null {
+/** Harness and model of `roles.<role>` in the project's `ark.yml`, or null when unset or unreadable. */
+function roleConfig(
+  project: string,
+  role: "chief" | "evaluator" | "designer",
+): { harness: string; model: string } | null {
   try {
-    return loadConfig(project).roles.chief ?? null;
+    return loadConfig(project).roles[role] ?? null;
   } catch {
     return null;
   }
 }
+
+/** The `ark.yml` role an Orca agent role is configured under: the run lead and Master Chief use `chief`. */
+const configRole = (role: string): "chief" | "evaluator" | "designer" =>
+  role === "evaluator" || role === "designer" ? role : "chief";
 
 type Slot<T> = { ok: boolean; readAt: string | null; value: T | null };
 const emptySlot = <T>(): Slot<T> => ({ ok: false, readAt: null, value: null });
@@ -178,7 +185,9 @@ export function createSnapshotReader() {
         const harness =
           agent.harness ??
           step?.harness ??
-          (agent.step === null ? chiefRole(run.state.project)?.harness : null) ??
+          (agent.step === null
+            ? roleConfig(run.state.project, configRole(agent.role))?.harness
+            : null) ??
           null;
         return { ...agent, harness, model, planned: null };
       }
@@ -188,8 +197,11 @@ export function createSnapshotReader() {
           planned: { harness: step.harness, model: step.model, source: "plan" as const },
         };
       // A run lead starts with the harness and model of `roles.chief` (chief playbook).
-      const chief = agent.step === null ? chiefRole(run.state.project) : null;
-      return chief ? { ...agent, planned: { ...chief, source: "configured" as const } } : agent;
+      const configured =
+        agent.step === null ? roleConfig(run.state.project, configRole(agent.role)) : null;
+      return configured
+        ? { ...agent, planned: { ...configured, source: "configured" as const } }
+        : agent;
     });
   }
 
