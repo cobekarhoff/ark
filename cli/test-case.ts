@@ -7,7 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { discoverRepos } from "./workspace.ts";
 
@@ -72,7 +72,11 @@ export function readCaseEntries(
       problems.push(`${shown} has the id ${value("id")}: the file name must be ${value("id")}.md`);
     if (value("id") && value("title") && !value("title").startsWith(value("id")))
       problems.push(`${shown} has a title that does not start with its id ${value("id")}`);
-    entries.push({ id: value("id"), level: value("level"), status: value("status") });
+    entries.push({
+      id: value("id"),
+      level: value("level"),
+      status: value("status"),
+    });
   }
   return { entries, problems };
 }
@@ -117,7 +121,11 @@ changed_by: <run id or name>
 `;
 
 function git(cwd: string, ...args: string[]): string {
-  const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync(["git", ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   if (result.exitCode !== 0) throw new ArkError("ark test-case new must run in a git repo");
   return result.stdout.toString().trim();
 }
@@ -155,17 +163,51 @@ export function testCaseNew(key: string): void {
     git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"),
     "ark-test-case.lock",
   );
+  const counter = join(dirname(lock), `ark-test-case-${key}.counter`);
   const directory = join(root, "test", "cases");
+  const pattern = new RegExp(`^${key}-T(\\d+)\\.md$`);
   const id = withLock(lock, () => {
     mkdirSync(directory, { recursive: true });
+    // The last fetched origin target branch; no origin or ref counts as no entries.
+    const originHead = Bun.spawnSync([
+      "git",
+      "-C",
+      root,
+      "symbolic-ref",
+      "--short",
+      "refs/remotes/origin/HEAD",
+    ]);
+    const onTarget =
+      originHead.exitCode === 0
+        ? Bun.spawnSync([
+            "git",
+            "-C",
+            root,
+            "ls-tree",
+            "--name-only",
+            originHead.stdout.toString().trim(),
+            "test/cases/",
+          ])
+        : undefined;
+    const targetNames =
+      onTarget?.exitCode === 0
+        ? onTarget.stdout
+            .toString()
+            .split("\n")
+            .map((path) => path.replace(/^test\/cases\//, ""))
+        : [];
     const highest = Math.max(
       0,
-      ...readdirSync(directory).map((name) =>
-        Number(name.match(new RegExp(`^${key}-T(\\d+)\\.md$`))?.[1] ?? 0),
+      Number(existsSync(counter) ? readFileSync(counter, "utf8") : 0) || 0,
+      ...[...readdirSync(directory), ...targetNames].map((name) =>
+        Number(name.match(pattern)?.[1] ?? 0),
       ),
     );
     const next = `${key}-T${highest + 1}`;
-    writeFileSync(join(directory, `${next}.md`), template(next), { flag: "wx" });
+    writeFileSync(counter, String(highest + 1));
+    writeFileSync(join(directory, `${next}.md`), template(next), {
+      flag: "wx",
+    });
     return next;
   });
   console.log(id);
