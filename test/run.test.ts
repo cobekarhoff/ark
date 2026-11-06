@@ -411,10 +411,12 @@ test("ARK-T16 ARK-321/AC1 ark status skips a project folder that holds no run", 
 test("ARK-T17 ARK-321/AC2 ark status reports a folder with a run and no ark.yml", () => {
   const home = tempArkHome();
   mkdirSync(join(home, "projects/orphan/runs/2026-01-01-X-1"), { recursive: true });
+  mkdirSync(join(home, "projects/empty-sibling/runs"), { recursive: true });
 
   const result = ark("status");
   expect(result.code).toBe(1);
   expect(result.out + result.err).toContain("project orphan has no ark.yml");
+  expect(result.out + result.err).not.toContain("empty-sibling");
   expect(result.err).toContain("project config(s) invalid");
 });
 test("ARK-164-AC2 status accepts --project for config checks and run state", () => {
