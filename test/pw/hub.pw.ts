@@ -1941,9 +1941,8 @@ test("ARK-285-AC8 Roadmap lists the tickets by horizon, keys move and open them,
   const criteria = page.getByTestId("ticket-criterion");
   await expect(criteria).toHaveCount(2);
   await expect(criteria.nth(1)).toContainText("Esc returns to the list");
-  expect(
-    await page.locator("ol.criteria").evaluate((list) => getComputedStyle(list).listStyleType),
-  ).toBe("decimal");
+  // ARK-314: each criterion shows its own id (AC1, AC2) in place of a list number.
+  await expect(criteria.locator(".crit-head .mono")).toHaveText(["AC1", "AC2"]);
   // Its own dependency graph: the ticket, what it depends on and what it unblocks.
   const graph = page.getByTestId("ticket-graph");
   expect(
