@@ -419,7 +419,7 @@ const localId = (criterionId: string): string => criterionId.split("/").pop()!;
 
 /**
  * The evidence refusals: a non-test AC needs a well-formed `results/evidence/<AC id>.md`; each case in the
- * `verified_by` of a `test` AC needs `base/` and `head/` folders, and the head SHA must be a current repo head.
+ * `verified_by` of a `test` AC needs `base/` and `head/` folders, and the head SHA must be the current head of the repo that ran the case.
  * One line for each missing or bad item, so the refusal names every AC.
  */
 function evidenceProblems(directory: string, events: ArkEvent[], lastTest: ArkEvent): string[] {
@@ -435,16 +435,13 @@ function evidenceProblems(directory: string, events: ArkEvent[], lastTest: ArkEv
     const problem = evidenceProblem(method, readFileSync(file, "utf8"));
     if (problem !== undefined) lines.push(`evidence malformed: ${localId(id)}: ${problem}`);
   }
-  // ponytail: a case's repo is not recorded, so its head SHA passes when it is the current head of any repo
-  const heads = new Set<string>();
-  const touched = new Set<string>();
-  for (const event of events) {
-    if (event.type !== "worktree.created" || !existsSync(event.data.path)) continue;
-    touched.add(event.data.repo);
-    heads.add(run(["git", "rev-parse", "HEAD"], event.data.path));
-  }
-  for (const [repo, sha] of Object.entries((lastTest.data.heads ?? {}) as Record<string, string>))
-    if (!touched.has(repo)) heads.add(sha);
+  // Each result.json names the repo that ran its case: its SHA must be that repo's current head.
+  const heads = new Map<string, string>(
+    Object.entries((lastTest.data.heads ?? {}) as Record<string, string>),
+  );
+  for (const event of events)
+    if (event.type === "worktree.created" && existsSync(event.data.path))
+      heads.set(event.data.repo, run(["git", "rev-parse", "HEAD"], event.data.path));
   for (const { id, method, verified_by } of criteria) {
     if (method !== "test") continue;
     for (const testCase of verified_by) {
@@ -455,13 +452,13 @@ function evidenceProblems(directory: string, events: ArkEvent[], lastTest: ArkEv
       for (const side of missing)
         lines.push(`test evidence missing: ${localId(id)} ${testCase} (${side})`);
       if (missing.includes("head")) continue;
-      let sha: unknown;
+      let result: { sha?: unknown; repo?: unknown } = {};
       try {
-        sha = JSON.parse(readFileSync(join(folder, "head", "result.json"), "utf8")).sha;
+        result = JSON.parse(readFileSync(join(folder, "head", "result.json"), "utf8"));
       } catch {
-        // unreadable result.json: the SHA is not a current head, so the case is stale
+        // unreadable result.json: no SHA matches a head, so the case is stale
       }
-      if (typeof sha !== "string" || !heads.has(sha))
+      if (typeof result.repo !== "string" || result.sha !== heads.get(result.repo))
         lines.push(`test evidence stale: ${localId(id)} ${testCase}`);
     }
   }

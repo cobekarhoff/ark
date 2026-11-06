@@ -343,9 +343,11 @@ function shipRun(criteria: ShipCriterion[], proven: string[]) {
   git(worktree, "add", "-A");
   git(worktree, "commit", "-q", "-m", "core");
 
+  const otherHead = git(source, "rev-parse", "HEAD");
   const testCompleted = () => ({
     passed: true,
-    heads: { "repos/core": git(worktree, "rev-parse", "HEAD") },
+    // repos/docs is untouched by the run: its head is the project clone's, which differs from the run's checkout of repos/core
+    heads: { "repos/core": git(worktree, "rev-parse", "HEAD"), "repos/docs": otherHead },
     suites: [{ name: "e2e", level: "e2e", passed: true }],
     criteria: Object.fromEntries(
       criteria
@@ -510,7 +512,13 @@ function writeCaseEvidence(run: ShipRun, id: string, evidence: CaseEvidence): vo
     mkdirSync(folder, { recursive: true });
     writeFileSync(
       join(folder, "result.json"),
-      JSON.stringify({ case: id, name: `${id} case`, status: "passed", sha: shas[side] }),
+      JSON.stringify({
+        case: id,
+        name: `${id} case`,
+        status: "passed",
+        sha: shas[side],
+        repo: "repos/core",
+      }),
     );
   }
 }
@@ -585,6 +593,22 @@ describe.each(commands)("ark %s evidence for verified_by cases", (_name, argsFor
     writeCaseEvidence(run, "FAKE-T1", { base: "x", head: git(run.source, "rev-parse", "HEAD") });
     writeCaseEvidence(run, "FAKE-T2", valid);
     expect(expectRefused(run, argsFor(run))).toContain("test evidence stale: AC1 FAKE-T1");
+  });
+
+  test("ARK-T8 refuses a head SHA that is the current head of another repo of the run", () => {
+    const run = shipRun(testCriteria, []);
+    const docsHead = git(run.source, "rev-parse", "HEAD");
+    const heads = JSON.parse(
+      readFileSync(join(run.directory, "events.ndjson"), "utf8").trim().split("\n").at(-1)!,
+    ).data.heads;
+    expect(Object.values(heads)).toContain(docsHead);
+    writeCaseEvidence(run, "FAKE-T1", { base: "x", head: docsHead });
+    writeCaseEvidence(run, "FAKE-T2", valid);
+    const lines = expectRefused(run, argsFor(run))
+      .split("\n")
+      .filter((line) => line.includes("test evidence"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("test evidence stale: AC1 FAKE-T1");
   });
 
   test.each([

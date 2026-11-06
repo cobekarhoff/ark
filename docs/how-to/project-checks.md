@@ -49,7 +49,7 @@ results/evidence/<test case id>/head/...
 results/evidence/<AC id>.md
 ```
 
-- `result.json` holds `case`, `name` (the JUnit name), `status` (`passed`, `failed` or `skipped`) and `sha`, the commit of the checkout that ran. A case that the head run reports and the base run does not, for example when the new test file crashes at base, gets a `failed` base `result.json`. `ark test` removes the folder of a case that no longer appears.
+- `result.json` holds `case`, `name` (the JUnit name), `status` (`passed`, `failed` or `skipped`) and `sha`, the commit of the checkout that ran, and `repo`, the repo that ran it. A case carried by several suites keeps the failed result of any of them and the command output of all of them. A case that one run reports and the other does not gets a `failed` result and the suite's `command.log` on the missing side: a new test file that crashes at base, or a test file the run deleted (it stays at base, so the head has no result). `ark test` removes the folder of a case that no longer appears.
 - `command.log` has the suite command on its first line, then the whole output of the suite for that checkout, and `exit <code>` on its last line. Every case of one suite shares the same `command.log`.
 - `ARK_EVIDENCE_DIR` is set for each suite run to a scratch folder. In a Playwright test, `checkpoint(page, "<name>")` from `test/pw/helpers.ts` writes `screenshots/<name>.png` under it, under one subfolder for each test case id in the test's title. Call it before the assertion of that step, so the screenshot exists when the assertion fails at base. It writes nothing when the variable is not set. `ark test` moves each subfolder to the `screenshots/` folder of its case and drops the screenshots of a test with no case id. The setting `screenshot: "only-on-failure"` in `playwright.config.ts` is separate and stays.
 - A non-test AC (`demonstration`, `inspection` or `analysis`; an old `manual: true` AC reads as `demonstration`) has one file `results/evidence/<AC id>.md`, where `<AC id>` is the local id such as `AC6`:
@@ -60,7 +60,7 @@ results/evidence/<AC id>.md
   - `evidence missing: <AC id> (<method>)` when a non-test AC has no file.
   - `evidence malformed: <AC id>: <reason>` when the file lacks a section of its method or a required value, and the reason names it.
   - `test evidence missing: <AC id> <test case id> (<base|head>)` when a case in the `verified_by` of a `test` AC has no `base/` or no `head/` folder.
-  - `test evidence stale: <AC id> <test case id>` when the `sha` in its `head` `result.json` is not the current head of a repo of the run. Run `ark test <run>` again after the last commit.
+  - `test evidence stale: <AC id> <test case id>` when the `sha` in its `head` `result.json` is not the current head of the repo named in that `result.json`. Run `ark test <run>` again after the last commit.
   - An AC with no `verified_by` needs no test evidence.
 
 ## Literals
@@ -113,8 +113,8 @@ The ACs of ARK-302, ARK-304 and ARK-305 name these strings. `ark merge-request o
 - `kind: refactor`
 - `worktree.created`
 - `base_passed`
-- `ARK-302-AC7`
-- `bun test test/test-run.test.ts -t ARK-302-AC7`
+- `ARK-T12`
+- `bun test test/test-run.test.ts -t ARK-T12`
 - `run-lead.md`
 - `brainstorm.md`
 - `chief.md`

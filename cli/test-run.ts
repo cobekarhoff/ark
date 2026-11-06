@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   copyFileSync,
   cpSync,
   existsSync,
@@ -85,53 +86,59 @@ function manualStatus(answer: string | undefined): Status {
 type Suite = ProjectConfig["suites"][number];
 
 type Side = "base" | "head";
-type CaseEntry = { name: string; status: TestResult["status"] };
+/** What one side knows of a case: the winning result of every suite that carries it, and the suites that did. */
+type CaseEntry = {
+  name: string;
+  status: TestResult["status"];
+  repo: string;
+  sha: string;
+  suites: string[];
+};
+/** One side of a run: the evidence of each case and, for each suite, the repo, SHA and command log that ran. */
+type SideRun = {
+  side: Side;
+  cases: Map<string, CaseEntry>;
+  suites: Map<string, { repo: string; sha: string; log: string }>;
+};
 const statusRank = { skipped: 0, passed: 1, failed: 2 };
 
-/** One entry for each test case id in the results. A failed test wins over a passed one, a passed over a skipped one. */
-function caseEntries(results: TestResult[]): Map<string, CaseEntry> {
-  const entries = new Map<string, CaseEntry>();
+const newSide = (side: Side): SideRun => ({ side, cases: new Map(), suites: new Map() });
+
+/** Merges the results of one suite into the side. A failed test wins over a passed one, a passed over a skipped one, across suites too. */
+function addSuite(
+  run: SideRun,
+  suite: Suite,
+  sha: string,
+  log: string,
+  results: TestResult[],
+  scratch: string,
+  evidenceDirectory: string,
+): void {
+  run.suites.set(suite.name, { repo: suite.repo, sha, log });
   for (const result of results) {
     for (const id of result.cases) {
-      const entry = entries.get(id);
-      if (entry === undefined) {
-        entries.set(id, { name: result.name, status: result.status });
-        continue;
-      }
-      if (statusRank[result.status] > statusRank[entry.status]) {
-        entry.status = result.status;
-        entry.name = result.name;
+      const entry = run.cases.get(id);
+      // ponytail: a case carried by suites of two repos records the repo and SHA of its winning result only
+      if (entry === undefined)
+        run.cases.set(id, {
+          name: result.name,
+          status: result.status,
+          repo: suite.repo,
+          sha,
+          suites: [suite.name],
+        });
+      else {
+        if (!entry.suites.includes(suite.name)) entry.suites.push(suite.name);
+        if (statusRank[result.status] > statusRank[entry.status])
+          Object.assign(entry, { name: result.name, status: result.status, repo: suite.repo, sha });
       }
     }
   }
-  return entries;
-}
-
-/**
- * Writes `results/evidence/<case id>/<side>/` for each case: `result.json`, the suite's `command.log` and the
- * screenshots that `checkpoint` left in the scratch folder under the case id (`checkpoint` writes one folder for each case id of a test title).
- * `fallback` holds the cases found at head: one that the base run did not report gets a failed result.
- */
-function writeEvidence(
-  evidenceDirectory: string,
-  side: Side,
-  sha: string,
-  commandLog: string,
-  scratch: string,
-  cases: Map<string, CaseEntry>,
-  fallback?: Map<string, CaseEntry>,
-): void {
-  const all = new Map(cases);
-  for (const [id, entry] of fallback ?? [])
-    if (!all.has(id)) all.set(id, { name: entry.name, status: "failed" });
-  for (const [id, entry] of all) {
-    const folder = join(evidenceDirectory, id, side);
+  for (const [id, entry] of run.cases) {
+    if (!entry.suites.includes(suite.name)) continue;
+    const folder = join(evidenceDirectory, id, run.side);
     mkdirSync(folder, { recursive: true });
-    writeFileSync(
-      join(folder, "result.json"),
-      `${JSON.stringify({ case: id, name: entry.name, status: entry.status, sha }, null, 2)}\n`,
-    );
-    writeFileSync(join(folder, "command.log"), commandLog);
+    appendFileSync(join(folder, "command.log"), log);
     const screenshots = join(scratch, id, "screenshots");
     if (existsSync(screenshots))
       cpSync(screenshots, join(folder, "screenshots"), { recursive: true });
@@ -139,19 +146,48 @@ function writeEvidence(
 }
 
 /**
+ * A case that one side found and the other did not (a base crash, or a test file the run deleted) gets a failed
+ * result and the command log of the suite that carried it on the side that found it, run on this side.
+ */
+function addMissing(run: SideRun, other: SideRun, evidenceDirectory: string): void {
+  for (const [id, found] of other.cases) {
+    if (run.cases.has(id)) continue;
+    const suite = run.suites.get(found.suites[0]!);
+    if (suite === undefined) continue;
+    run.cases.set(id, {
+      name: found.name,
+      status: "failed",
+      repo: suite.repo,
+      sha: suite.sha,
+      suites: [found.suites[0]!],
+    });
+    const folder = join(evidenceDirectory, id, run.side);
+    mkdirSync(folder, { recursive: true });
+    appendFileSync(join(folder, "command.log"), suite.log);
+  }
+}
+
+function writeResults(run: SideRun, evidenceDirectory: string): void {
+  for (const [id, { name, status, repo, sha }] of run.cases)
+    writeFileSync(
+      join(evidenceDirectory, id, run.side, "result.json"),
+      `${JSON.stringify({ case: id, name, status, sha, repo }, null, 2)}\n`,
+    );
+}
+
+/**
  * Runs one suite in `cwd`. Its log goes to `<name>.log` of `resultsDirectory` (`base-<name>.log` at base).
- * `ARK_EVIDENCE_DIR` names a scratch folder for the run; the evidence of each test case is written after parsing.
+ * `ARK_EVIDENCE_DIR` names a scratch folder for the run; the evidence of each test case is merged into `sideRun`.
  * `command.log` is the whole suite output, so every case of the suite shares it. Passed also needs no failed test.
  */
 function runSuite(
   suite: Suite,
   cwd: string,
   resultsDirectory: string,
-  side: Side,
+  sideRun: SideRun,
   sha: string,
-  fallback?: Map<string, CaseEntry>,
 ) {
-  const prefix = side === "base" ? "base-" : "";
+  const prefix = sideRun.side === "base" ? "base-" : "";
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
   const command = suite.command.replaceAll("{report}", reportPath);
   const scratch = mkdtempSync(join(tmpdir(), "ark-evidence-"));
@@ -161,20 +197,18 @@ function runSuite(
     writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
     const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
     const results = parsers[suite.parser]({ report, stdout: outcome.stdout });
-    const cases = caseEntries(results);
     const separator = output === "" || output.endsWith("\n") ? "" : "\n";
-    writeEvidence(
-      join(resultsDirectory, "evidence"),
-      side,
+    addSuite(
+      sideRun,
+      suite,
       sha,
       `${command}\n${output}${separator}exit ${outcome.code}\n`,
+      results,
       scratch,
-      cases,
-      fallback,
+      join(resultsDirectory, "evidence"),
     );
     return {
       results,
-      cases,
       passed: outcome.code === 0 && results.every((result) => result.status !== "failed"),
     };
   } finally {
@@ -222,7 +256,7 @@ function baseSuitesPassed(
   resultsDirectory: string,
   mirror: string,
   worktrees: RunState["worktrees"],
-  headCases: Map<string, Map<string, CaseEntry>>,
+  baseRun: SideRun,
 ): boolean {
   const root = mkdtempSync(join(tmpdir(), "ark-base-"));
   const added: { source: string; path: string }[] = [];
@@ -262,9 +296,8 @@ function baseSuitesPassed(
             suite,
             join(root, suite.repo),
             resultsDirectory,
-            "base",
+            baseRun,
             headOf(suite.repo, root, root),
-            headCases.get(suite.name),
           ).passed,
       )
       .every(Boolean);
@@ -323,7 +356,8 @@ export function testRun(runId: string, inProject?: string): void {
   // The join through `verified_by` counts every level; the old tag path only integration and e2e.
   const allResults: TestResult[] = [];
   const provingResults: TestResult[] = [];
-  const headCases = new Map<string, Map<string, CaseEntry>>();
+  const headRun = newSide("head");
+  const baseRun = newSide("base");
 
   try {
     if (composeBase) {
@@ -332,14 +366,13 @@ export function testRun(runId: string, inProject?: string): void {
         throw new ArkError(`compose up failed: ${(up.stderr || up.stdout).trim()}`);
     }
     for (const suite of config.suites) {
-      const { results, passed, cases } = runSuite(
+      const { results, passed } = runSuite(
         suite,
         join(mirror, suite.repo),
         resultsDirectory,
-        "head",
+        headRun,
         headOf(suite.repo, config.workspace, mirror),
       );
-      headCases.set(suite.name, cases);
       allResults.push(...results);
       if (suite.level !== "unit") provingResults.push(...results);
       suites.push({
@@ -383,8 +416,12 @@ export function testRun(runId: string, inProject?: string): void {
     state.kind === "refactor"
       ? state.worktrees
       : state.worktrees.filter((worktree) => worktree.base !== undefined),
-    headCases,
+    baseRun,
   );
+  addMissing(baseRun, headRun, evidenceDirectory);
+  addMissing(headRun, baseRun, evidenceDirectory);
+  writeResults(headRun, evidenceDirectory);
+  writeResults(baseRun, evidenceDirectory);
   const passed =
     checks.every((check) => check.passed) &&
     suites.every((suite) => suite.passed) &&
@@ -404,9 +441,7 @@ export function testRun(runId: string, inProject?: string): void {
     console.log(`suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}`);
   for (const [criterion, status] of Object.entries(criterionStatuses))
     console.log(`criterion  ${criterion}  ${status.padEnd(14)}  ${via[criterion]}`);
-  for (const id of [
-    ...new Set([...headCases.values()].flatMap((cases) => [...cases.keys()])),
-  ].sort())
+  for (const id of [...new Set([...headRun.cases.keys(), ...baseRun.cases.keys()])].sort())
     console.log(`evidence   results/evidence/${id}/{base,head}`);
 
   const problems = [

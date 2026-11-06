@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -560,6 +561,7 @@ test("FAKE-T4 needs head module", () => { expect(value).toBe(1); });
           name: entry.name,
           status: entry[side],
           sha: shas[entry.repo][side],
+          repo: entry.repo,
         });
       }
     }
@@ -592,6 +594,79 @@ test.skip("FAKE-T3 is skipped", () => {});
       expect(existsSync(join(evidenceOf(run.runDirectory), id, "head", "result.json")), id).toBe(
         true,
       );
+  });
+
+  /** One repo, one suite for each test file in `files`; the head commit applies `headChange`. */
+  function evidenceRun(
+    files: Record<string, string>,
+    suites: Record<string, string>,
+    headChange: (mirror: string) => void,
+  ) {
+    const bunTest = (file: string) =>
+      `bun test ${file} --reporter=junit --reporter-outfile={report}`;
+    const run = startBuildingRun({
+      workspace: tempGitRepo(files),
+      repos: ["."],
+      suites: Object.entries(suites).map(([name, file]) => ({
+        name,
+        level: "integration",
+        repo: ".",
+        command: bunTest(file),
+        parser: "bun" as const,
+      })),
+    });
+    headChange(run.mirror);
+    commitAll(run.mirror, "head");
+    return { ...run, result: ark("test", run.runId) };
+  }
+
+  test("ARK-T2 a case whose test file the run deleted still gets a failed head result and the head command.log", () => {
+    const run = evidenceRun(
+      {
+        "test/old.test.ts": `import { test } from "bun:test";\ntest("FAKE-T1 removed test", () => {});\n`,
+        "test/keep.test.ts": `import { test } from "bun:test";\ntest("FAKE-T2 kept test", () => {});\n`,
+      },
+      { all: "./test" },
+      (mirror) => {
+        rmSync(join(mirror, "test/old.test.ts"));
+      },
+    );
+    expect(run.result.code, run.result.err + run.result.out).toBe(0);
+    const base = readResult(run.runDirectory, "FAKE-T1", "base");
+    const head = readResult(run.runDirectory, "FAKE-T1", "head");
+    expect(base).toMatchObject({ name: "FAKE-T1 removed test", status: "passed" });
+    expect(head).toMatchObject({
+      case: "FAKE-T1",
+      name: "FAKE-T1 removed test",
+      status: "failed",
+      sha: git(run.mirror, "rev-parse", "HEAD"),
+    });
+    const headLog = readText(evidenceOf(run.runDirectory), "FAKE-T1", "head", "command.log");
+    expect(headLog).toBe(readText(evidenceOf(run.runDirectory), "FAKE-T2", "head", "command.log"));
+    expect(headLog.split("\n").at(-2)).toBe("exit 0");
+    expect(run.result.out).toContain("results/evidence/FAKE-T1/{base,head}");
+  });
+
+  test("ARK-T2 two suites carrying one case keep the failure and both command logs", () => {
+    const run = evidenceRun(
+      {
+        "test/a.test.ts": `import { expect, test } from "bun:test";\ntest("FAKE-T1 first fails", () => { expect(1).toBe(2); });\n`,
+        "test/b.test.ts": `import { test } from "bun:test";\ntest("FAKE-T1 second passes", () => {});\n`,
+      },
+      { first: "./test/a.test.ts", second: "./test/b.test.ts" },
+      (mirror) => writeFiles(mirror, { "src/head.txt": "head\n" }),
+    );
+    expect(run.result.code).toBe(1);
+    for (const side of ["base", "head"] as const) {
+      expect(readResult(run.runDirectory, "FAKE-T1", side)).toMatchObject({
+        name: "FAKE-T1 first fails",
+        status: "failed",
+      });
+      const log = readText(evidenceOf(run.runDirectory), "FAKE-T1", side, "command.log");
+      expect(log).toContain("./test/a.test.ts");
+      expect(log).toContain("./test/b.test.ts");
+      expect(log).toMatch(/\b1 fail\b/);
+    }
   });
 
   // --- ARK-T5: command.log ---------------------------------------------------------------------------------------
