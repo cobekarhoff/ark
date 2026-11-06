@@ -68,6 +68,9 @@ Before the verdict, write a `## Merge risk` block:
 - Rollback cost: good | decent | poor — <one-line reason>
 - Door: one-way | two-way (for a one-way door, the recovery: <how to undo it>)
 - Blast radius: <phrase>
+- Not in plan: <path> — <reason it changed> (one line for each changed file that no plan step lists under `where:`, outside `test/` and `docs/`; none when the diff stays in the plan)
 ```
+
+The PR-writing ledger (`skills/pr-writing/lib/ledger.ts`) reads this block from the latest findings file: the four ratings give the reviewer level, `Not in plan:` lines give the reason of each unplanned file (a file with no line shows "no reason given"). Keep the labels exactly as written.
 
 The last line of the findings file is `Verdict: accepted`, `Verdict: revision_needed` or `Verdict: human_decision_needed`. Use `human_decision_needed` when the right change depends on a product decision that the ticket, the plan and the code do not settle. Write the question and its options under `## Question for the human`.

@@ -27,12 +27,12 @@ Expected: When a host probe fails, the system shall record `unknown` and never `
 2. Read: the ticket fields, the `plan.yml` summary and risks, per-AC status, evidence entries, open findings, merge order and `Depends on` lines, base and head SHA, the `git diff --shortstat` text and the answered gates.
 3. Build the ledger for the fixture git repo with no run folder, with the host in succeeding mode, for each row of this table. Each row sets all three sources at once, so a wrong order picks a different base:
 
-   | Row | Host MR response | `origin/HEAD` | Host default branch | Expected base |
-   | --- | --- | --- | --- | --- |
-   | a | open MR targeting `release/2` | `main` | `develop` | `release/2` |
-   | b | no open MR (empty list) | `main` | `develop` | `main` |
-   | c | no open MR | not set | `develop` | `develop` |
-   | d | no open MR | not set | host answers with no default | none: exit 1 asking for `--base` |
+   | Row | Host MR response              | `origin/HEAD` | Host default branch          | Expected base                    |
+   | --- | ----------------------------- | ------------- | ---------------------------- | -------------------------------- |
+   | a   | open MR targeting `release/2` | `main`        | `develop`                    | `release/2`                      |
+   | b   | no open MR (empty list)       | `main`        | `develop`                    | `main`                           |
+   | c   | no open MR                    | not set       | `develop`                    | `develop`                        |
+   | d   | no open MR                    | not set       | host answers with no default | none: exit 1 asking for `--base` |
 
 4. Build the ledger for the same repo with the host in failing mode, for: (e) `origin/HEAD` set to `main`; (f) `origin/HEAD` not set.
 5. Read the commit range, the three-dot diff, the template and the tracker refs of the git ledger, and each host-derived field.

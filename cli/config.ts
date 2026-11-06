@@ -14,6 +14,16 @@ const roleNames = ["implementer", "validator", "reviewer"] as const;
 type Role = (typeof roleNames)[number];
 type RoleConfig = { harness: string; model: string };
 
+export type PrWriting = {
+  reviewers: string[];
+  /** Lowest lint tier, 0 to 3. */
+  tier_floor: number;
+  sensitive_paths: string[];
+  one_way_paths: string[];
+  agent_authored: boolean;
+  title_prefix?: string;
+};
+
 export type ProjectConfig = {
   workspace: string;
   ticket_source: "local" | "github" | "jira";
@@ -39,6 +49,8 @@ export type ProjectConfig = {
   /** Base and target branch per repo, keyed by repo path exactly as `ark worktree create` names it (`.` or `repos/a`). */
   repos?: Record<string, { base: string }>;
   concurrency: number;
+  /** The `pr_writing:` block with defaults filled in. */
+  pr_writing: PrWriting;
   round_budget: number;
   /** Each gate is answered by the human or by Ark. A missing key is human. */
   gates: Record<(typeof gateNames)[number], "human" | "auto">;
@@ -190,6 +202,31 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       };
   }
 
+  const prWritingField = asObject(fields.pr_writing ?? {}, "pr_writing");
+  const stringList = (key: string): string[] => {
+    const value = prWritingField[key] ?? [];
+    if (!Array.isArray(value) || !value.every((item) => typeof item === "string"))
+      fail(`pr_writing.${key} must be a list of strings`);
+    return value as string[];
+  };
+  const tierFloor = prWritingField.tier_floor ?? 0;
+  if (!Number.isInteger(tierFloor) || (tierFloor as number) < 0 || (tierFloor as number) > 3)
+    fail("pr_writing.tier_floor must be an integer from 0 to 3");
+  const agentAuthored = prWritingField.agent_authored ?? true;
+  if (typeof agentAuthored !== "boolean") fail("pr_writing.agent_authored must be true or false");
+  if (prWritingField.title_prefix !== undefined)
+    text(prWritingField, "title_prefix", "pr_writing.title_prefix");
+  const prWriting: PrWriting = {
+    reviewers: stringList("reviewers"),
+    tier_floor: tierFloor as number,
+    sensitive_paths: stringList("sensitive_paths"),
+    one_way_paths: stringList("one_way_paths"),
+    agent_authored: agentAuthored as boolean,
+    ...(prWritingField.title_prefix === undefined
+      ? {}
+      : { title_prefix: prWritingField.title_prefix as string }),
+  };
+
   const config: ProjectConfig = {
     workspace,
     ticket_source: ticketSource,
@@ -200,6 +237,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     roles,
     concurrency: integer(fields, "concurrency", 1, 2),
     round_budget: integer(fields, "round_budget", 0, 2),
+    pr_writing: prWriting,
     gates,
   };
   if (repos !== undefined) config.repos = repos;
