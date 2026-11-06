@@ -35,6 +35,8 @@ export type ProjectConfig = {
     evaluator?: RoleConfig;
     designer?: RoleConfig;
     chief?: RoleConfig;
+    test_writer?: RoleConfig;
+    test_reviewer?: RoleConfig;
   };
   /** Base and target branch per repo, keyed by repo path exactly as `ark worktree create` names it (`.` or `repos/a`). */
   repos?: Record<string, { base: string }>;
@@ -150,17 +152,19 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       fail(
         `checks[${i}].repo is not a repo of the workspace: ${repo} (use ${workspaceRepos.join(", ")})`,
       );
-    return { name, repo, command: text(check, "command", `checks[${i}].command`) };
+    return {
+      name,
+      repo,
+      command: text(check, "command", `checks[${i}].command`),
+    };
   });
 
   const rolesField = asObject(fields.roles ?? fail("roles is required"), "roles");
   const roles = {} as ProjectConfig["roles"];
-  // The evaluator, designer and chief are optional: ark evaluation record, ark strategy record and the chief playbook name them when missing.
-  for (const role of [...roleNames, "evaluator" as const, "designer" as const, "chief" as const]) {
-    if (
-      (role === "evaluator" || role === "designer" || role === "chief") &&
-      rolesField[role] === undefined
-    )
+  // The optional roles: ark evaluation record, ark strategy record, the chief playbook and the run lead playbook name them when missing.
+  const optionalRoles = ["evaluator", "designer", "chief", "test_writer", "test_reviewer"] as const;
+  for (const role of [...roleNames, ...optionalRoles]) {
+    if ((optionalRoles as readonly string[]).includes(role) && rolesField[role] === undefined)
       continue;
     const entry = asObject(rolesField[role] ?? fail(`roles.${role} is required`), `roles.${role}`);
     roles[role] = {

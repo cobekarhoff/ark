@@ -118,9 +118,11 @@ roles:
   evaluator: { harness: codex, model: gpt-codex }
   designer: { harness: claude, model: claude-opus }
   chief: { harness: claude, model: claude-opus }
+  test_writer: { harness: claude, model: claude-sonnet }
+  test_reviewer: { harness: codex, model: gpt-codex }
 ```
 
-The evaluator checks the ticket before the run lead plans. Give it a different vendor from the run lead. Without `roles.evaluator`, `ark evaluation record` refuses and no plan passes `ark plan check`. The designer makes mockups for the strategy gate when the ticket changes something a person sees. Without `roles.designer`, `ark strategy record` refuses such a ticket and names the role. It needs neither a designer nor a mockup when the surface is only `none`, or when there is one card and the surface is only `document`. Old configs without it still load. The chief role sets the harness and model Master Chief uses for run leads, and the hub uses it to spawn Master Chief. Without `roles.chief`, the chief playbook stops before it starts a run lead and names the role.
+The test writer designs the test cases before the plan, and the test reviewer checks them before any implementer step starts. The reviewer uses a different vendor from the implementer and the writer. Without `roles.test_writer` or `roles.test_reviewer`, the run lead stops and escalates to Master Chief. Old configs without them still load. The evaluator checks the ticket before the run lead plans. Give it a different vendor from the run lead. Without `roles.evaluator`, `ark evaluation record` refuses and no plan passes `ark plan check`. The designer makes mockups for the strategy gate when the ticket changes something a person sees. Without `roles.designer`, `ark strategy record` refuses such a ticket and names the role. It needs neither a designer nor a mockup when the surface is only `none`, or when there is one card and the surface is only `document`. Old configs without it still load. The chief role sets the harness and model Master Chief uses for run leads, and the hub uses it to spawn Master Chief. Without `roles.chief`, the chief playbook stops before it starts a run lead and names the role.
 
 Run `command -v claude codex omp`. If a harness from the default is missing, the roles are unknown: ask in step 3.
 
@@ -256,6 +258,8 @@ roles:
   evaluator: { harness: <harness>, model: <model> }
   designer: { harness: <harness>, model: <model> }
   chief: { harness: <harness>, model: <model> }
+  test_writer: { harness: <harness>, model: <model> }
+  test_reviewer: { harness: <harness>, model: <model> } # a different vendor from implementer and test_writer
 ```
 
 Rules for the file:
