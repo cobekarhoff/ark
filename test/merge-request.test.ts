@@ -244,11 +244,11 @@ test(
     const coreBody = optionValue(opened[0], "--body");
     const appBody = optionValue(opened[1], "--body");
     expect(coreBody).toContain("ARK-900 Show units");
-    expect(coreBody).toContain("ARK-900-AC1: Core exports units");
-    expect(coreBody).not.toContain("ARK-900-AC2");
+    expect(coreBody).toContain("ARK-900/AC1: Core exports units");
+    expect(coreBody).not.toContain("ARK-900/AC2");
     expect(coreBody).not.toContain("Depends on");
-    expect(appBody).toContain("ARK-900-AC2: App shows units");
-    expect(appBody).not.toContain("ARK-900-AC1");
+    expect(appBody).toContain("ARK-900/AC2: App shows units");
+    expect(appBody).not.toContain("ARK-900/AC1");
     expect(appBody).toContain("Depends on #1");
 
     expect(openedEvents(runDirectory).map((event) => event.data)).toEqual([
@@ -449,10 +449,10 @@ test(
     expect(ark("merge-request", "open", run).code).toBe(0);
     const [core, app] = created().map((call) => optionValue(call, "--body"));
     expect(core).toBe(
-      "Ticket: ARK-900 Show units\n\nAcceptance criteria this repo serves:\n- ARK-900-AC1: Core exports units",
+      "Ticket: ARK-900 Show units\n\nAcceptance criteria this repo serves:\n- ARK-900/AC1: Core exports units",
     );
     expect(app).toBe(
-      "Ticket: ARK-900 Show units\n\nAcceptance criteria this repo serves:\n- ARK-900-AC2: App shows units\n\nDepends on #1",
+      "Ticket: ARK-900 Show units\n\nAcceptance criteria this repo serves:\n- ARK-900/AC2: App shows units\n\nDepends on #1",
     );
     expect(`${core}${app}`).not.toContain("UI/UX");
   },
@@ -580,8 +580,8 @@ test(
 
     const refused = ark("merge-request", "open", run);
     expect(refused.code).toBe(1);
-    expect(refused.err).toContain("ARK-900-AC1");
-    expect(refused.err).toContain("ARK-900-AC2");
+    expect(refused.err).toContain("ARK-900/AC1");
+    expect(refused.err).toContain("ARK-900/AC2");
     expect(calls()).toEqual([]);
     expect(openedEvents(runDirectory)).toEqual([]);
     // Nothing was pushed either.
@@ -591,15 +591,15 @@ test(
     ).not.toBe(0);
 
     // A problem answer is not ok; only the unanswered or problem criteria are named.
-    expect(ark("gate", "record", run, "manual", "ARK-900-AC1", "ok").code).toBe(0);
-    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "problem").code).toBe(0);
+    expect(ark("gate", "record", run, "manual", "ARK-900/AC1", "ok").code).toBe(0);
+    expect(ark("gate", "record", run, "manual", "ARK-900/AC2", "problem").code).toBe(0);
     const partial = ark("merge-request", "open", run);
     expect(partial.code).toBe(1);
-    expect(partial.err).toContain("ARK-900-AC2");
-    expect(partial.err).not.toContain("ARK-900-AC1");
+    expect(partial.err).toContain("ARK-900/AC2");
+    expect(partial.err).not.toContain("ARK-900/AC1");
     expect(created()).toEqual([]);
 
-    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+    expect(ark("gate", "record", run, "manual", "ARK-900/AC2", "ok").code).toBe(0);
     const opened = ark("merge-request", "open", run);
     expect(opened.code).toBe(0);
     expect(created().map((call) => call.tool)).toEqual(["gh", "gh"]);
@@ -732,8 +732,8 @@ test(
     });
     const refused = ark("merge-request", "open", run);
     expect(refused.code).toBe(1);
-    expect(refused.err).toContain("ARK-900-AC1 (failing)");
-    expect(refused.err).toContain("ARK-900-AC2 (missing)");
+    expect(refused.err).toContain("ARK-900/AC1 (failing)");
+    expect(refused.err).toContain("ARK-900/AC2 (missing)");
     expect(calls()).toHaveLength(0);
     expect(openedEvents(runDirectory)).toHaveLength(0);
   },
@@ -744,7 +744,7 @@ test(
   "ARK-302-AC2 a manual criterion that is not passing does not block opening",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
-    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+    expect(ark("gate", "record", run, "manual", "ARK-900/AC2", "ok").code).toBe(0);
     rewriteEvents(runDirectory, (event) => {
       if (event.type === "test.completed")
         event.data.criteria = { "ARK-900-AC1": "passing", "ARK-900-AC2": "manual ok" };
@@ -783,8 +783,8 @@ test(
 
     const refused = ark("merge-request", "open", run);
     expect(refused.code).toBe(1);
-    expect(refused.err).toContain("ARK-900-AC2 `absent-string-xyz`");
-    expect(refused.err).not.toContain("ARK-900-AC1");
+    expect(refused.err).toContain("ARK-900/AC2 `absent-string-xyz`");
+    expect(refused.err).not.toContain("ARK-900/AC1");
     expect(refused.err).not.toContain("`core`");
     expect(refused.err).not.toContain("`# test`");
     expect(calls()).toHaveLength(0);
@@ -807,7 +807,7 @@ test(
     setCriterionText(runDirectory, "ARK-900-AC1", "Core reads `absent-everywhere`");
     const refused = ark("merge-request", "open", run);
     expect(refused.code).toBe(1);
-    expect(refused.err).toContain("ARK-900-AC1 `absent-everywhere`");
+    expect(refused.err).toContain("ARK-900/AC1 `absent-everywhere`");
   },
   { timeout: 30_000 },
 );
@@ -906,7 +906,7 @@ test(
   "ARK-305-AC1 skips placeholder, glob, dots, file:line, own id and every string of a manual AC, refuses only the real missing string",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
-    expect(ark("gate", "record", run, "manual", "ARK-900-AC2", "ok").code).toBe(0);
+    expect(ark("gate", "record", run, "manual", "ARK-900/AC2", "ok").code).toBe(0);
     setCriterionText(
       runDirectory,
       "ARK-900-AC1",
@@ -919,7 +919,7 @@ test(
     const refused = ark("merge-request", "open", run);
     expect(refused.code).toBe(1);
     expect(refused.err).toContain(
-      "AC string in no tracked file at head: ARK-900-AC1 `real-missing`",
+      "AC string in no tracked file at head: ARK-900/AC1 `real-missing`",
     );
     expect(refused.err).not.toContain("repos/<repo>/");
     expect(refused.err).not.toContain("manual-only-absent");
@@ -935,7 +935,7 @@ test(
     setCriterionText(runDirectory, "ARK-900-AC1", "Removes `not:core`");
     const refused = ark("merge-request", "open", run);
     expect(refused.code).toBe(1);
-    expect(refused.err).toContain("AC string still in a tracked file at head: ARK-900-AC1 `core`");
+    expect(refused.err).toContain("AC string still in a tracked file at head: ARK-900/AC1 `core`");
     expect(refused.err).not.toContain("not:");
     expect(calls()).toHaveLength(0);
     expect(openedEvents(runDirectory)).toHaveLength(0);
@@ -952,7 +952,7 @@ test(
     const required = ark("merge-request", "open", run);
     expect(required.code).toBe(1);
     expect(required.err).toContain(
-      "AC string in no tracked file at head: ARK-900-AC1 `gone-everywhere`",
+      "AC string in no tracked file at head: ARK-900/AC1 `gone-everywhere`",
     );
   },
   { timeout: 30_000 },
@@ -1093,7 +1093,7 @@ test(
     const refused = ark("merge-request", "open", run);
     expect(refused.code).toBe(1);
     expect(refused.err).toContain(
-      "AC string in no tracked file at head: ARK-900-AC1 `absent-string-xyz`",
+      "AC string in no tracked file at head: ARK-900/AC1 `absent-string-xyz`",
     );
   },
   { timeout: 30_000 },

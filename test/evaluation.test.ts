@@ -26,6 +26,10 @@ function record(blockers: string[], risks: string[]): void {
   appendEvent(runDirectory, "evaluation.recorded", { blockers, risks, surfaces: ["none"] });
 }
 
+function accept(): void {
+  appendEvent(runDirectory, "gate.answered", { gate: "criteria", answer: "accept", by: "human" });
+}
+
 const events = () =>
   readFileSync(join(runDirectory, "events.ndjson"), "utf8")
     .trim()
@@ -115,10 +119,12 @@ test("ARK-170-AC2 aborting an evaluator-blocked criteria gate closes the run", (
   expect(state()).toMatchObject({ phase: "closed", outcome: "aborted" });
 });
 
-test("ARK-170-AC3 a clear evaluation advances a ticket with criteria without answering a gate", () => {
+test("ARK-170-AC3 a clear evaluation leaves a ticket with criteria at the criteria gate until the human accepts", () => {
   record([], []);
-  expect(state().phase).toBe("planning");
+  expect(state().phase).toBe("awaiting_criteria");
   expect(events().some((event) => event.type === "gate.answered")).toBe(false);
+  accept();
+  expect(state().phase).toBe("planning");
 });
 
 test("ARK-170-AC3 a ticket without criteria remains gated after a clear evaluation", () => {
@@ -131,6 +137,7 @@ test("ARK-170-AC3 a ticket without criteria remains gated after a clear evaluati
 });
 
 test("ARK-170-AC4 plan check refuses a valid plan without an evaluation event", () => {
+  accept();
   writeFileSync(
     join(runDirectory, "plan.yml"),
     JSON.stringify({
@@ -172,6 +179,7 @@ test("ARK-170-AC4 plan check refuses a valid plan without an evaluation event", 
 test("ARK-170-AC5 plan markdown lists only risks from the latest evaluation", () => {
   record([], ["old risk"]);
   record([], ["latest one", "latest two"]);
+  accept();
   appendEvent(runDirectory, "strategy.recorded", {
     count: 1,
     recommended: "S1",

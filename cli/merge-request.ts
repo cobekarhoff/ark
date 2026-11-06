@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors";
 import { manualCriteria } from "./criteria.ts";
+import { canonicalCriterion } from "./criterion-id.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events";
 import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths";
@@ -79,14 +80,17 @@ function criterionTexts(runDirectory: string): Map<string, Criterion> {
     /^---\n([\s\S]*?)\n---/,
   );
   const frontmatter = match
-    ? (Bun.YAML.parse(match[1]) as { acceptance_criteria?: { id: string; text: string }[] })
+    ? (Bun.YAML.parse(match[1]) as {
+        id?: string;
+        acceptance_criteria?: { id: string; text: string }[];
+      })
     : {};
   const manual = new Set(manualCriteria(runDirectory));
   return new Map(
-    (frontmatter.acceptance_criteria ?? []).map(({ id, text }) => [
-      id,
-      { id, text, manual: manual.has(id) },
-    ]),
+    (frontmatter.acceptance_criteria ?? []).map(({ id: written, text }) => {
+      const id = canonicalCriterion(written, frontmatter.id);
+      return [id, { id, text, manual: manual.has(id) }];
+    }),
   );
 }
 
@@ -102,7 +106,8 @@ export function requiredLiterals(criterion: Criterion): { required: string[]; re
   const required = new Set<string>();
   const removed = new Set<string>();
   if (criterion.manual) return { required: [], removed: [] };
-  const id = criterion.id.replaceAll("-", "_");
+  const flat = (value: string) => value.replaceAll("-", "_").replaceAll("/", "_");
+  const id = flat(criterion.id);
   for (const [, span] of criterion.text.matchAll(/`([^`\n]+)`/g)) {
     if (span.trim() === "") continue;
     const isRemoved = span.startsWith("not:");
@@ -113,7 +118,7 @@ export function requiredLiterals(criterion: Criterion): { required: string[]; re
       literal.includes("*") ||
       literal.includes("...") ||
       /:\d+(-\d+)?$/.test(literal) ||
-      literal.replaceAll("-", "_").includes(id)
+      flat(literal).includes(id)
     )
       continue;
     (isRemoved ? removed : required).add(literal);
@@ -345,12 +350,17 @@ export function assertShippable(
         : `manual criteria without ok: ${unproven.join(", ")}`,
     );
   const manual = new Set(manualCriteria(directory));
-  const notPassing = state.criteria.filter(
-    ({ id }) => !manual.has(id) && lastTest.data.criteria?.[id] !== "passing",
+  // An old log names an AC `<ticket>-AC<k>` here: read it as `<ticket>/AC<k>`.
+  const tested: Record<string, string> = Object.fromEntries(
+    Object.entries((lastTest.data.criteria ?? {}) as Record<string, string>).map(([id, status]) => [
+      canonicalCriterion(id, state.ticket.id),
+      status,
+    ]),
   );
+  const notPassing = state.criteria.filter(({ id }) => !manual.has(id) && tested[id] !== "passing");
   if (notPassing.length > 0)
     throw new ArkError(
-      `criteria not passing in the last test run: ${notPassing.map(({ id }) => `${id} (${lastTest.data.criteria?.[id] ?? "missing"})`).join(", ")}`,
+      `criteria not passing in the last test run: ${notPassing.map(({ id }) => `${id} (${tested[id] ?? "missing"})`).join(", ")}`,
     );
   if (!lastTest.data.passed)
     throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");

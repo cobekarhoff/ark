@@ -79,6 +79,8 @@ function startRun(gates?: Record<string, unknown>) {
   expect(ark("run", "start", writeTicket("demo", "ARK-902", criteria)).code).toBe(0);
   const runId = readdirSync(join(projectDirectory, "runs"))[0];
   const directory = join(projectDirectory, "runs", runId);
+  // The criteria gate opens on every run (ARK-311); these tests start at the strategy.
+  expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(0);
   return { runId, directory };
 }
 
@@ -219,7 +221,7 @@ test("ARK-234-AC5 status and metrics.json separate auto answers from human answe
 
   expect(ark("retro", runId).code).toBe(0);
   const metrics = JSON.parse(readFileSync(join(directory, "metrics.json"), "utf8"));
-  expect(metrics.gates).toEqual({ auto_answers: 1, human_answers: 1 });
+  expect(metrics.gates).toEqual({ auto_answers: 1, human_answers: 2 });
 });
 
 test("ARK-234-AC5 an answer from before the by field reads as human", () => {

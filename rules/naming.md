@@ -10,4 +10,4 @@ Short names are fine for loop indexes (`i`, `j`), universal names (`id`, `url`, 
 
 Commands, flags, gate names and filenames use full names with no aliases: `ark worktree create`, `ark merge-request open`, gates `criteria`, `plan`, `escalation`.
 
-This rule covers code only. Prose follows the Google developer documentation style guide: common abbreviations such as CLI, PR, MR, CI, API, UI, E2E, SHA and AC are never spelled out. AC IDs such as `ARK-013-AC2` are a data format and stay as they are.
+This rule covers code only. Prose follows the Google developer documentation style guide: common abbreviations such as CLI, PR, MR, CI, API, UI, E2E, SHA and AC are never spelled out. AC IDs such as `AC2` and `ARK-013/AC2` (the old form `ARK-013-AC2` is the same AC) and test case IDs such as `ARK-T12` are a data format and stay as they are.

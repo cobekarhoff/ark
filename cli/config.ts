@@ -5,6 +5,7 @@ import { projectDirectory } from "./paths.ts";
 import { discoverRepos } from "./workspace.ts";
 
 const ticketSources = ["local", "github", "jira"];
+const testCaseSources = ["local"];
 const levels = ["unit", "integration", "e2e"];
 const parserNames = ["bun", "pytest", "behave"];
 export const gateNames = ["criteria", "strategy", "plan", "escalation"] as const;
@@ -17,6 +18,8 @@ export type ProjectConfig = {
   workspace: string;
   ticket_source: "local" | "github" | "jira";
   merge_requests: "open" | "none";
+  /** Where test case entries live. Only `local` (`test/cases/` of each repo) exists. */
+  test_case_source: "local";
   compose?: string;
   setup?: string;
   suites: {
@@ -103,6 +106,11 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   if (mergeRequests !== "open" && mergeRequests !== "none")
     fail("merge_requests must be one of open, none");
   const mergeRequestsMode = mergeRequests as ProjectConfig["merge_requests"];
+  const testCaseSource = fields.test_case_source ?? "local";
+  if (!testCaseSources.includes(testCaseSource as string))
+    fail(
+      `test_case_source ${JSON.stringify(testCaseSource)} is not supported: use one of ${testCaseSources.join(", ")}`,
+    );
   if (fields.compose !== undefined) text(fields, "compose", "compose");
   if (fields.setup !== undefined) text(fields, "setup", "setup");
 
@@ -186,6 +194,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     workspace,
     ticket_source: ticketSource,
     merge_requests: mergeRequestsMode,
+    test_case_source: "local",
     suites,
     checks,
     roles,

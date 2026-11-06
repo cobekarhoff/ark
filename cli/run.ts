@@ -12,7 +12,7 @@ import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
-import { manualCriteria } from "./criteria.ts";
+import { manualCriteria, parseCriteria } from "./criteria.ts";
 import {
   appendEvent,
   deriveState,
@@ -53,15 +53,7 @@ function readTicket(ticketFile: string): {
     throw new ArkError(
       `${ticketFile}: kind must be one of ${ticketKinds.join(", ")}, not ${JSON.stringify(kind)}`,
     );
-  const criteria = fields.acceptance_criteria ?? [];
-  if (!Array.isArray(criteria))
-    throw new ArkError(`${ticketFile}: acceptance_criteria must be a list`);
-  const ids = criteria.map((criterion, i) => {
-    if (typeof criterion?.id !== "string" || typeof criterion?.text !== "string") {
-      throw new ArkError(`${ticketFile}: acceptance_criteria[${i}] needs id and text`);
-    }
-    return criterion.id as string;
-  });
+  const ids = parseCriteria(fields, ticketFile).map((criterion) => criterion.id);
   return {
     id: fields.id as string,
     title: fields.title as string,
@@ -142,6 +134,7 @@ export function runStart(ticketFile: string, project?: string): void {
       ticket: { id: ticket.id, title: ticket.title },
       kind: ticket.kind,
       criteria: ticket.criteria,
+      criteria_gate: true,
       ticket_file: absoluteTicketFile,
       round_budget: config.round_budget,
     });

@@ -253,7 +253,10 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
     waits.push(wait);
   };
   for (const event of events) {
-    if (event.type === "run.started" && event.data.criteria.length === 0)
+    if (
+      event.type === "run.started" &&
+      (event.data.criteria.length === 0 || event.data.criteria_gate === true)
+    )
       ask("criteria", event.time);
     if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
       ask("criteria", event.time, true);
@@ -281,7 +284,7 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
 
 /**
  * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
- * run start when the ticket has no ACs and at an evaluation with blockers, the strategy gate at a
+ * run start (it opens on every run since ARK-311; an older log opens it only without ACs or with blockers), the strategy gate at a
  * strategy record of 2 or more cards, the plan gate at the first valid plan check after its last answer, the escalation gate
  * at the failed step that spent the round budget. An unanswered gate adds nothing.
  */

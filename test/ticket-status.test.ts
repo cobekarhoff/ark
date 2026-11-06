@@ -205,8 +205,8 @@ test("ARK-191-AC3 ark status shows each open run's age and marks only runs older
   process.env.ARK_NOW = new Date(statusTime).toISOString();
 
   const lines = ark("status").out.trim().split("\n");
-  expect(lines).toContain(`${fresh}  planning  -  12m`);
-  expect(lines).toContain(`${threeDays}  planning  -  3d  stale`);
-  expect(lines).toContain(`${exactly24}  planning  -  24h`);
-  expect(lines).toContain(`${hours25}  planning  -  25h  stale`);
+  expect(lines).toContain(`${fresh}  awaiting_criteria  -  12m`);
+  expect(lines).toContain(`${threeDays}  awaiting_criteria  -  3d  stale`);
+  expect(lines).toContain(`${exactly24}  awaiting_criteria  -  24h`);
+  expect(lines).toContain(`${hours25}  awaiting_criteria  -  25h  stale`);
 });

@@ -498,6 +498,11 @@ describe("ARK-276 anchor worktree", () => {
       risks: [],
       surfaces: ["none"],
     });
+    appendEvent(strategy.runDirectory, "gate.answered", {
+      gate: "criteria",
+      answer: "accept",
+      by: "human",
+    });
     appendEvent(strategy.runDirectory, "strategy.recorded", {
       count: 2,
       recommended: "S1",

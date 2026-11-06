@@ -1247,6 +1247,79 @@ test("ARK-305-AC4 brainstorm and chief AC-authoring advice puts removed strings 
   }
 });
 
+// ARK-311 AC8: the rule of conversion on touch is stated in the rubric and both playbooks.
+const repoRoot = join(import.meta.dir, "..");
+const doc = (path: string) => flat(readFileSync(join(repoRoot, path), "utf8"));
+
+test("ARK-311-AC8 rubric, run lead and worker state conversion on touch", () => {
+  const rule = [
+    /old AC id in its title/,
+    /`ark test-case new/,
+    /rename[sd]? (?:the (?:test )?)?title to start with the test case ID/,
+    /(?:name[s]? the case in the plan|the plan names the case)/,
+  ];
+  for (const path of [
+    "skills/ark/rubrics/reviewer.md",
+    "skills/ark/playbooks/run-lead.md",
+    "skills/ark/playbooks/worker.md",
+  ]) {
+    const text = doc(path);
+    expect(text).toMatch(/[Cc]onver(?:sion|ts) on touch/);
+    for (const part of rule) expect(text, `${path} ${part}`).toMatch(part);
+  }
+  expect(doc("skills/ark/rubrics/reviewer.md")).toMatch(
+    /Reject a diff \(P0\) that touches such a test and leaves its title unchanged/,
+  );
+  for (const path of ["skills/ark/playbooks/run-lead.md", "skills/ark/playbooks/worker.md"]) {
+    expect(doc(path)).toMatch(
+      /reviewer rejects a diff that touches such a test and leaves its title unchanged/,
+    );
+  }
+});
+
+// ARK-311 AC9: the docs use the new scheme.
+test("ARK-311-AC9 ADRs and CONTEXT record the new scheme", () => {
+  expect(existsSync(join(repoRoot, "docs/adr/0010-test-cases-describe-the-product.md"))).toBe(true);
+  expect(
+    readFileSync(join(repoRoot, "docs/adr/0010-test-cases-describe-the-product.md"), "utf8"),
+  ).toMatch(/^---\nstatus: accepted\n---/);
+  expect(
+    readFileSync(join(repoRoot, "docs/adr/0006-integration-and-e2e-proof-only.md"), "utf8"),
+  ).toMatch(/^---\nstatus: superseded by ADR 0010\n---/);
+
+  const context = doc("CONTEXT.md");
+  expect(context).toMatch(/local to its ticket/);
+  expect(context).toMatch(/`AC1`/);
+  expect(context).toMatch(/`ARK-243\/AC1`/);
+  expect(context).not.toMatch(/ARK-150-AC2/);
+  expect(context).toMatch(/\*\*Test case\*\*:/);
+  expect(context).toMatch(/\*\*Evidence\*\*:/);
+  expect(context).toMatch(/`verified_by`/);
+});
+
+test("ARK-311-AC9 prd, principles, architecture, naming and playbooks use the new scheme", () => {
+  const r6 = doc("docs/prd.md").match(/\| R6 \|.*/)?.[0] ?? "";
+  expect(r6).toMatch(/`verified_by`/);
+  expect(r6).toMatch(/`method: test`/);
+  expect(r6).toMatch(/test case IDs/);
+
+  expect(doc("skills/ark/principles.md")).toMatch(/proven by the test cases in its `verified_by`/);
+  expect(doc("docs/explanation/architecture.md")).toMatch(
+    /An AC lists its test cases in `verified_by`/,
+  );
+  expect(doc("rules/naming.md")).toMatch(/`AC2` and `ARK-013\/AC2`.*`ARK-T12`/);
+  expect(doc("skills/ark/playbooks/brainstorm.md")).toMatch(/ADR 0010/);
+  expect(doc("skills/ark/playbooks/retro.md")).toMatch(/each id `AC<k>`.*`verified_by`/);
+  const chief = doc("skills/ark/playbooks/chief.md");
+  expect(chief).toMatch(/verified_by: \[ARK-T12\]/);
+  expect(chief).toMatch(/local to its ticket.*`<ticket id>\/AC1`/);
+
+  const runLead = doc("skills/ark/playbooks/run-lead.md");
+  expect(runLead).not.toMatch(/skip the criteria gate/);
+  expect(runLead).toMatch(/The gate opens on every run/);
+  expect(runLead).toMatch(/`awaiting_criteria` on every run/);
+});
+
 test("ARK-310-AC5 chief.md and brainstorm.md state the ARK-307 AC string rule in the same sentence", () => {
   const sentenceOf = (name: string): string => {
     const text = readFileSync(join(playbookDirectory, name), "utf8");

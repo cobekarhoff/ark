@@ -13,7 +13,7 @@ Read the ticket and the step's ACs first. If the repo has a web UI, also load th
 ## What to check
 
 1. **Correctness.** Does the change do what each AC says? Look for wrong conditions, missed edge cases, unhandled errors, broken callers of changed code, and races. Read the callers, not only the diff.
-2. **Proof.** Each AC needs an integration or E2E test tagged with its AC ID, and that test must pass at head. Unit tests never prove an AC. A criterion with `manual: true` is exempt: its proof is the gate `manual` answer `ok` (`manual ok`), and it needs no tagged test. Audit every new or changed test against `rules/test-audit.md`:
+2. **Proof.** Each AC with `method: test` needs at least one integration or E2E test case in its `verified_by` list, and the cases of that list must pass at head. Any level can be a test case, but a unit case must earn its place. An old-scheme AC with no `verified_by` needs an integration or E2E test tagged with its AC ID. A criterion with another method, or `manual: true`, is exempt: its proof is the gate `manual` answer `ok` (`manual ok`). Conversion on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. Reject a diff (P0) that touches such a test and leaves its title unchanged: the run must write a test case with `ark test-case new`, rename the title to start with the test case ID, and name the case in the plan. Audit every new or changed test against `rules/test-audit.md`:
    - It asserts observable behavior at the real boundary.
    - It fails for a credible regression.
    - It does not take its expected value from the code under test.

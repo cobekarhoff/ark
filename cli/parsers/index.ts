@@ -4,7 +4,10 @@ import { parsePytest } from "./pytest.ts";
 
 export type TestResult = {
   name: string;
+  /** Old AC ids the test carries (`<ticket>-AC<k>`). */
   criteria: string[];
+  /** Test case ids `<KEY>-T<n>` the test carries. */
+  cases: string[];
   status: "passed" | "failed" | "skipped";
 };
 export type Parser = (input: { report: string; stdout: string }) => TestResult[];

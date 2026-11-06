@@ -1,4 +1,4 @@
-// Parser for behave. It maps feature and scenario tags that carry an AC id to per-scenario results.
+// Parser for behave. It maps feature and scenario tags that carry an AC id or a test case id to per-scenario results.
 //
 // Suite `command` to configure in ark.yml:
 //
@@ -6,16 +6,18 @@
 //
 // Tag a scenario (or a whole feature, which tags every scenario in it) with the AC id, as
 // `@CLARA-12-AC1` or `@ac:CLARA-12-AC1`. Scenarios without an AC id tag get `criteria: []`.
+// A test case id `<KEY>-T<n>` goes in `cases`: tag `@ARK-T12` or `@case:ARK-T12`. No such tag gives `cases: []`.
 // A scenario outline row counts as one scenario and inherits the tags of the outline and its
 // examples table. Scenario status "passed" maps to passed, "skipped" and "untested" to skipped,
 // and everything else (failed, undefined) to failed.
 import { ArkError } from "../errors";
+import { caseIdsIn } from "./case";
 import type { Parser, TestResult } from "./index";
 
 type BehaveElement = { type: string; name: string; tags?: string[]; status?: string };
 type BehaveFeature = { name: string; tags?: string[]; elements?: BehaveElement[] };
 
-const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+-AC\d+\b/g;
+const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+[-/]AC\d+\b/g;
 
 function statusOf(behaveStatus: string | undefined): TestResult["status"] {
   if (behaveStatus === "passed") return "passed";
@@ -35,6 +37,7 @@ export const parseBehave: Parser = ({ report }) => {
       results.push({
         name: `${feature.name}: ${element.name.trim()}`,
         criteria: [...new Set(tags.match(criterionPattern) ?? [])].sort(),
+        cases: caseIdsIn(tags).sort(),
         status: statusOf(element.status),
       });
     }

@@ -10,6 +10,9 @@ setDefaultTimeout(30_000);
 
 const AC1 = "ARK-207-AC1";
 const AC2 = "ARK-207-AC2";
+// Run state, events and output name an AC `<ticket>/AC<k>`; the ticket and the arguments use the old form.
+const S1 = "ARK-207/AC1";
+const S2 = "ARK-207/AC2";
 
 let backlogFile: string;
 let runDirectory: string;
@@ -122,7 +125,7 @@ test(`${AC1} writes the new text into ticket.md frontmatter and table and record
   );
   expect(amendments()).toEqual([
     expect.objectContaining({
-      data: { criterion: AC1, old: "original one", new: "new | one", by: "human", reason: "why" },
+      data: { criterion: S1, old: "original one", new: "new | one", by: "human", reason: "why" },
     }),
   ]);
   expect(readFileSync(backlogFile, "utf8")).toBe(ticketText);
@@ -136,8 +139,8 @@ test(`${AC1} a second amendment records the first amended text as old`, () => {
     ark("criteria", "amend", runId, AC1, textFile("b", "second"), "--reason", "why").code,
   ).toBe(0);
   expect(amendments().map((event) => event.data)).toEqual([
-    { criterion: AC1, old: "original one", new: "first", by: "human", reason: "why" },
-    { criterion: AC1, old: "first", new: "second", by: "human", reason: "why" },
+    { criterion: S1, old: "original one", new: "first", by: "human", reason: "why" },
+    { criterion: S1, old: "first", new: "second", by: "human", reason: "why" },
   ]);
   expect(read("ticket.md")).toContain(`| ${AC1} | second |`);
 });
@@ -149,13 +152,13 @@ test(`${AC2} refuses an unknown criterion, names it, and changes nothing`, () =>
     "criteria",
     "amend",
     runId,
-    "ARK-207-AC9",
+    "ARK-207/AC9",
     textFile("new", "x"),
     "--reason",
     "why",
   );
   expect(result.code).toBe(1);
-  expect(result.err).toContain("ARK-207-AC9");
+  expect(result.err).toContain("ARK-207/AC9");
   expect(read("ticket.md")).toBe(ticket);
   expect(read("events.ndjson")).toBe(log);
 });
@@ -198,10 +201,10 @@ test(`ARK-207-AC3 plan.md lists the amendment after the next plan check, and app
   expect(ark("plan", "check", runId).code).toBe(0);
   const plan = read("plan.md");
   expect(plan).toContain("## Amended criteria");
-  expect(plan).toContain(`### ${AC1}`);
+  expect(plan).toContain(`### ${S1}`);
   expect(plan).toContain("- **Old:** original one");
   expect(plan).toContain("- **New:** brand new text");
-  expect(plan).not.toContain(`### ${AC2}\n\n- **Old:**`);
+  expect(plan).not.toContain(`### ${S2}\n\n- **Old:**`);
   expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
 });
 
@@ -210,12 +213,12 @@ test("ARK-283-AC1 criteria amend keeps manual: true on the amended criterion (bl
     join(runDirectory, "ticket.md"),
     read("ticket.md").replace('text: "original one"', 'text: "original one"\n    manual: true'),
   );
-  expect(manualCriteria(runDirectory)).toEqual([AC1]);
+  expect(manualCriteria(runDirectory)).toEqual([S1]);
   expect(
     ark("criteria", "amend", runId, AC1, textFile("m", "reworded one"), "--reason", "why").code,
   ).toBe(0);
   expect(read("ticket.md")).toContain("manual: true");
-  expect(manualCriteria(runDirectory)).toEqual([AC1]);
+  expect(manualCriteria(runDirectory)).toEqual([S1]);
 });
 
 /** Plan checked, approved and a worktree made: the run is in building. */
@@ -300,7 +303,7 @@ test("ARK-308-AC2 the event holds by human and the reason, and ark status shows 
   const result = amend(AC1, "brand new text", "--reason", "the old wording named a deleted path");
   expect(result.code).toBe(0);
   expect(amendments()[0].data).toEqual({
-    criterion: AC1,
+    criterion: S1,
     old: "original one",
     new: "brand new text",
     by: "human",
@@ -308,7 +311,7 @@ test("ARK-308-AC2 the event holds by human and the reason, and ark status shows 
   });
   const status = ark("status", runId).out;
   expect(status).toContain("amended criteria:");
-  expect(status).toContain(`${AC1} by human: the old wording named a deleted path`);
+  expect(status).toContain(`${S1} by human: the old wording named a deleted path`);
   expect(status).toContain("new: ");
 });
 
@@ -347,7 +350,7 @@ test("ARK-308-AC3 an amendment in building keeps the phase and the approval, cle
   buildingRun();
   expect(ark("gate", "record", runId, "manual", AC1, "ok").code).toBe(0);
   const before = ark("test", runId);
-  expect(before.out).toContain(`criterion  ${AC1}  manual ok`);
+  expect(before.out).toContain(`criterion  ${S1}  manual ok`);
 
   const result = amend(AC1, "reworded after the plan gate", "--reason", "why");
   expect(result.code).toBe(0);
@@ -357,9 +360,9 @@ test("ARK-308-AC3 an amendment in building keeps the phase and the approval, cle
   expect(status).not.toContain("phase: planning");
 
   const after = ark("test", runId);
-  expect(after.out).toContain(`criterion  ${AC1}  manual pending`);
+  expect(after.out).toContain(`criterion  ${S1}  manual pending`);
   expect(read("ticket.md")).toContain("reworded after the plan gate");
   expect(read("ticket.md")).toContain("manual: true");
   expect(ark("gate", "record", runId, "manual", AC1, "ok").code).toBe(0);
-  expect(ark("test", runId).out).toContain(`criterion  ${AC1}  manual ok`);
+  expect(ark("test", runId).out).toContain(`criterion  ${S1}  manual ok`);
 });

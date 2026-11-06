@@ -127,7 +127,7 @@ describe("ARK-198 ark.yml setup", () => {
     expect(readFileSync(join(worktree, "marker"), "utf8")).toBe("ready\nok\n");
     const tested = ark("test", runId);
     expect(tested.code, tested.out + tested.err).toBe(0);
-    expect(tested.out).toContain("FAKE-1-AC1");
+    expect(tested.out).toContain("FAKE-1/AC1");
     expect(tested.out).not.toContain("failing");
   });
 

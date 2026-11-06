@@ -19,7 +19,7 @@ ark run start <ticket-file> [--project <name>]
 
 Starts a run from a ticket file. It creates the run folder, copies the ticket and records the first event. It prints the run ID.
 
-Where the project has `ticket_source: local`, it also sets the first `status:` line of the ticket file to `in_progress` and changes no other line. A refused start leaves the file unchanged. A ticket may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`); any other value exits 1 and names the allowed kinds. The kind is in `run.started`.
+Where the project has `ticket_source: local`, it also sets the first `status:` line of the ticket file to `in_progress` and changes no other line. A refused start leaves the file unchanged. A ticket may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`); any other value exits 1 and names the allowed kinds. The kind is in `run.started`. Every new run waits in the phase `awaiting_criteria`, also with ACs and no blockers, until the human records `ark gate record <run> criteria accept`; the event has `criteria_gate: true`, and a log without it keeps its old phase. An AC id may be local to its ticket (`AC1`) or the old `<ticket id>-AC<k>`; the run names it `<ticket id>/AC<k>`. An AC has `method` (`test`, `demonstration`, `inspection` or `analysis`; default `test`; `manual: true` reads as `demonstration`) and `verified_by`, a list of test case ids. The start refuses an unknown method, a duplicate AC id and a `verified_by` that is not a list of strings.
 ```
 
 ### run step
@@ -77,7 +77,7 @@ Prints the UI skills of the run, one line for each. When the Surfaces list in th
 ```text
 ark plan check <run> [--project <name>]
 
-Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a summary with no row for an AC of the ticket. A plan with no `design.interfaces` is invalid, and so is an interface with no name or with no `callers`, or with a blank caller. A plan with a cycle, an unknown `needs`, a duplicate step id, an unknown role, or a step with no id, role, repo, harness or model is invalid. A summary with no why, no changes, or a change with no criterion, where, now or fix is invalid. A decision with no id, a duplicate id, no question, an option with no label, or a `recommended` or `chosen` that is not an option, is invalid. A test case with a level other than integration or e2e is invalid. A criterion with no integration or e2e test case is invalid, and so is a test case with an empty list or no expected sentence. A decision with fewer than 2 or more than 4 options is invalid. A step whose harness and model are not the pair of any entry in roles in ark.yml is invalid: the problem names the step, its pair and the allowed pairs. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions. For `kind: bug` the first step must be a validator step that serves every AC, a manual one too. For `kind: perf` the `goal` of the first step must name `results/baseline.md` and the `goal` of the last step must name `results/compare.md`. `goal` is an optional step text.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a summary with no row for an AC of the ticket. A plan with no `design.interfaces` is invalid, and so is an interface with no name or with no `callers`, or with a blank caller. A plan with a cycle, an unknown `needs`, a duplicate step id, an unknown role, or a step with no id, role, repo, harness or model is invalid. A summary with no why, no changes, or a change with no criterion, where, now or fix is invalid. A decision with no id, a duplicate id, no question, an option with no label, or a `recommended` or `chosen` that is not an option, is invalid. A test case with a level other than integration or e2e is invalid. A criterion with no integration or e2e test case is invalid, and so is a test case with an empty list or no expected sentence. A decision with fewer than 2 or more than 4 options is invalid. A step whose harness and model are not the pair of any entry in roles in ark.yml is invalid: the problem names the step, its pair and the allowed pairs. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists a surface other than none, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation counts as none. It records the number of open decisions. For `kind: bug` the first step must be a validator step that serves every AC, a manual one too. For `kind: perf` the `goal` of the first step must name `results/baseline.md` and the `goal` of the last step must name `results/compare.md`. `goal` is an optional step text. A test case has an `id` of the shape `<KEY>-T<n>` and an `action` of `add`, `update`, `reuse` or `retire`; only add and update need `given`, `when` and `then`, and retire needs `reason`. It refuses an unknown action, a retire with no reason, a reuse, update or retire whose id has no entry in `test/cases/` of a repo of the workspace, a `verified_by` id that is no active entry there and no add entry of the plan, and a new-scheme AC with `method: test` whose `verified_by` holds no integration or e2e case. A plan test case in the old shape (free id, one `criterion`, no action) still loads and keeps the old rule. It also refuses any bad entry in `test/cases/` and names its file; an absent folder is valid. plan.md lists each case with its action.
 ```
 
 ### worktree anchor
@@ -101,7 +101,15 @@ Builds the run's workspace mirror. A repo with `repos.<repo>.base` in ark.yml ge
 ```text
 ark test <run> [--project <name>]
 
-Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. A criterion with `manual: true` in ticket.md has no test: it shows `manual pending`, `manual ok` or `manual problem` from the manual gate, even when a test is tagged with it. It exits 1 unless every AC is passing or manual ok. `passed` in test.completed counts the automated criteria only, so a manual pending never opens the escalation gate. It first runs each entry of `checks` in `ark.yml` (`{ name, repo, command }`) in its repo worktree, before the suites. A check that exits non-zero prints `check <name> failed` and the last 20 lines of its output, and records `passed: false`. For `kind: refactor` it also runs the suites on a throwaway checkout at the base commit of each worktree, once per run, and records `base_passed`.
+Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. A criterion with `manual: true` in ticket.md has no test: it shows `manual pending`, `manual ok` or `manual problem` from the manual gate, even when a test is tagged with it. It exits 1 unless every AC is passing or manual ok. `passed` in test.completed counts the automated criteria only, so a manual pending never opens the escalation gate. It first runs each entry of `checks` in `ark.yml` (`{ name, repo, command }`) in its repo worktree, before the suites. A check that exits non-zero prints `check <name> failed` and the last 20 lines of its output, and records `passed: false`. For `kind: refactor` it also runs the suites on a throwaway checkout at the base commit of each worktree, once per run, and records `base_passed`. An AC with a non-empty `verified_by` list is decided by its test cases at every level, unit included: passing when each has a passing result, failing when one has a failing result, missing when one has no result. An AC with no `verified_by` still reads the integration and e2e results tagged with its AC id. A method other than `test` shows through the manual gate, as `manual: true` does. Each criterion line ends with `via <case> <result>, ...`, `via tag` or `method <method>`. It refuses a bad entry in `test/cases/` and names its file.
+```
+
+### test-case new
+
+```text
+ark test-case new <KEY>
+
+Run in a git repo. It allocates the next test case ID `<KEY>-T<n>`, one above the highest `<KEY>-T*` entry in `test/cases/`, and writes `test/cases/<KEY>-T<n>.md` with status `active`. It holds a lock in the git directory while it reads the highest number and writes the file, so parallel runs get different IDs. It prints the ID alone on stdout and the path on stderr. An entry is one Markdown file with the frontmatter `id`, `title` (starts with the id), `level` (unit, integration or e2e), `technique`, `priority`, `risk` (the defect the case catches), `status` (active or retired; a retired entry also has `retired_reason`) and `changed_by`, and the sections Objective, Preconditions, Steps, Expected results and Screenshot checkpoints. `test_case_source` in ark.yml accepts `local` only. Outside a git repo it exits 1.
 ```
 
 ### gate record
@@ -109,7 +117,7 @@ Runs the project's suites on the run's workspace mirror and records which ACs ha
 ```text
 ark gate record <run> <gate> [<criterion id>] <answer> [--note <text>] [--project <name>]
 
-Records your answer to a gate. The gates are criteria, strategy, plan, escalation and manual. The strategy gate takes the ID of a card in the latest strategy record, or abort. The manual gate proves one criterion that has `manual: true` in ticket.md: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]` records gate.answered with the field `criterion`; it refuses an ID that is not in the ticket or not manual, and the answer is never automatic. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision.
+Records your answer to a gate. The gates are criteria, strategy, plan, escalation and manual. The strategy gate takes the ID of a card in the latest strategy record, or abort. The manual gate proves one criterion that has `manual: true` in ticket.md: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]` records gate.answered with the field `criterion`; it refuses an ID that is not in the ticket or not manual, and the answer is never automatic. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision. Both `<ticket id>/AC<k>` and `<ticket id>-AC<k>` name a criterion. `criteria accept` re-reads the ticket and refuses a new-scheme AC with `method: test` and an empty `verified_by` list, and names the AC.
 ```
 
 ### escalate
@@ -272,17 +280,19 @@ Each entry in `steps`:
 
 Each entry in `test_cases`:
 
-| Field       | Type            | Meaning                                                   |
-| ----------- | --------------- | --------------------------------------------------------- |
-| `id`        | string          | Name of the test case.                                    |
-| `criterion` | string          | The AC the test case proves.                              |
-| `level`     | string          | `integration` or `e2e`.                                   |
-| `given`     | list of strings | Context for the test. Required; can be empty.             |
-| `when`      | list of strings | Actions in order. Must not be empty.                      |
-| `then`      | list of strings | Observable results in order. Must not be empty.           |
-| `expected`  | string          | Required EARS sentence: "When ..., the system shall ...". |
+| Field      | Type            | Meaning                                                   |
+| ---------- | --------------- | --------------------------------------------------------- |
+| `id`       | string          | The test case ID `<KEY>-T<n>` from `ark test-case new`.   |
+| `action`   | string          | `add`, `update`, `reuse` or `retire`.                     |
+| `title`    | string          | Optional. The test title; it starts with the ID.          |
+| `reason`   | string          | Required for `retire`: why the case goes.                 |
+| `level`    | string          | `unit`, `integration` or `e2e`.                           |
+| `given`    | list of strings | Context for the test. Required; can be empty.             |
+| `when`     | list of strings | Actions in order. Must not be empty.                      |
+| `then`     | list of strings | Observable results in order. Must not be empty.           |
+| `expected` | string          | Required EARS sentence: "When ..., the system shall ...". |
 
-`ark plan check` rejects missing or malformed groups, an empty `when` or `then`, a missing `expected`, and any old test-case `steps` field. The error names the test case.
+The ACs that a case serves are the ones whose `verified_by` lists it. Only `add` and `update` entries need `given`, `when`, `then` and `expected`. A `reuse`, `update` or `retire` entry needs an entry in `test/cases/`. An old plan may still use a free `id` with one `criterion` and no `action`; ARK-311 itself does. `ark plan check` rejects missing or malformed groups, an empty `when` or `then`, a missing `expected`, and any old test-case `steps` field. The error names the test case.
 
 In `plan.md`, each group starts with Given, When or Then, in that order. Later lines in each group start with And. An empty `given` emits no Given line. The unchanged EARS sentence follows the Gherkin block on its own `Expected:` line.
 
@@ -296,17 +306,18 @@ steps:
     harness: claude
     model: claude-sonnet
     needs: []
-    criteria: [CLARA-512-AC1]
+    criteria: [CLARA-512/AC1]
   - id: core-package-review
     role: reviewer
     repo: repos/shared/packages
     harness: codex
     model: gpt-codex
     needs: [core-package]
-    criteria: [CLARA-512-AC1]
+    criteria: [CLARA-512/AC1]
 test_cases:
-  - id: export-includes-units
-    criterion: CLARA-512-AC1
+  - id: CLARA-T7
+    action: add
+    title: CLARA-T7 export includes units
     level: integration
     given:
       - A result has a unit.
@@ -349,7 +360,7 @@ Each entry in `suites`:
 | Field     | Type   | Meaning                                                                                                      |
 | --------- | ------ | ------------------------------------------------------------------------------------------------------------ |
 | `name`    | string | Name of the suite. It must be unique.                                                                        |
-| `level`   | string | `unit`, `integration`, or `e2e`. A unit suite never proves an AC.                                            |
+| `level`   | string | `unit`, `integration`, or `e2e`. A unit result counts for an AC through `verified_by`.                       |
 | `repo`    | string | The repo the suite runs in: a path relative to the workspace, or `.`. The command runs in `<mirror>/<repo>`. |
 | `command` | string | The shell command. `{report}` is replaced with an absolute path under the run's `results/` folder.           |
 | `parser`  | string | `bun`, `pytest`, or `behave`. It reads the report file and the command output.                               |
@@ -387,7 +398,7 @@ gates:
 
 A browser suite runs Playwright Test. Playwright's JUnit reporter writes the test title in `name`, so the `bun` parser reads it unchanged, and `PLAYWRIGHT_JUNIT_OUTPUT_FILE` carries the `{report}` path. The `setup` above also installs Chromium, so each new worktree can run the suite; the download is cached in `~/.cache/ms-playwright`.
 
-A test proves an AC when its name or tags contain the AC id, for example `CLARA-512-AC1`. For each AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran. An AC with `manual: true` in the run's `ticket.md` is decided by the `manual` gate alone: `manual pending` until a person answers, then `manual ok` or `manual problem`. `ark test` exits 0 only when every other AC is `passing` and every manual AC is `manual ok`.
+An AC is written `AC1` in its ticket and `CLARA-512/AC1` elsewhere; the old form `CLARA-512-AC1` is the same AC. Each AC has a `method` (`test`, the default, `demonstration`, `inspection` or `analysis`) and a `verified_by` list of test case IDs. A test carries its case ID at the start of its title, for example `CLARA-T7`. `ark test` decides an AC with a `verified_by` list from the results of its cases at every level: `passing` when all pass, `failing` when one fails, `missing` when one has no result. An old-scheme AC with no `verified_by` is proven when its name or tags contain the AC id, for example `CLARA-512-AC1`, and only integration and E2E results count. For such an AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran. An AC with `manual: true` or a `method` other than `test` in the run's `ticket.md` is decided by the `manual` gate alone: `manual pending` until a person answers, then `manual ok` or `manual problem`. `ark test` exits 0 only when every other AC is `passing` and every manual AC is `manual ok`.
 
 ## Events
 

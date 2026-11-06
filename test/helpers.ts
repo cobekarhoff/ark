@@ -25,7 +25,14 @@ export function writeProject(name: string, config: Record<string, unknown>): str
 export function writeTicket(
   project: string,
   id: string,
-  criteria: { id: string; text: string; manual?: boolean }[],
+  criteria: {
+    id: string;
+    text: string;
+    manual?: boolean;
+    method?: string;
+    /** Any value, so a test can write a `verified_by` that is not a list. */
+    verified_by?: unknown;
+  }[],
   title = `Ticket ${id}`,
   kind?: string,
 ): string {
@@ -44,6 +51,10 @@ export function writeTicket(
       `  - id: ${criterion.id}`,
       `    text: ${JSON.stringify(criterion.text)}`,
       ...(criterion.manual ? ["    manual: true"] : []),
+      ...(criterion.method === undefined ? [] : [`    method: ${criterion.method}`]),
+      ...(criterion.verified_by === undefined
+        ? []
+        : [`    verified_by: ${JSON.stringify(criterion.verified_by)}`]),
     );
   writeFileSync(file, `${frontmatter.join("\n")}\n---\n## Why\n\nTest ticket.\n`);
   return file;
@@ -130,8 +141,9 @@ export async function stopHub(hub: { kill(): void; exited: Promise<number> }): P
 }
 
 /**
- * Records an evaluation the way ark evaluation record does. A clear evaluation that leaves the run
- * in planning also records a one-card strategy, so the run can pass ark plan check.
+ * Records an evaluation the way ark evaluation record does. A run always waits for the criteria gate
+ * (ARK-311): a clear evaluation of a run with criteria also records the human's criteria accept, then
+ * a one-card strategy, so the run can pass ark plan check. An evaluation with blockers leaves the gate open.
  */
 export function recordEvaluation(
   runDirectory: string,
@@ -139,6 +151,9 @@ export function recordEvaluation(
   risks: string[] = [],
 ): void {
   appendEvent(runDirectory, "evaluation.recorded", { blockers, risks, surfaces: ["none"] });
+  const waiting = deriveState(readEvents(runDirectory));
+  if (blockers.length === 0 && waiting.phase === "awaiting_criteria" && waiting.criteria.length > 0)
+    appendEvent(runDirectory, "gate.answered", { gate: "criteria", answer: "accept", by: "human" });
   if (deriveState(readEvents(runDirectory)).phase !== "planning") return;
   appendEvent(runDirectory, "strategy.recorded", {
     count: 1,

@@ -3,10 +3,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ProjectConfig, loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
-import { manualCriteria } from "./criteria.ts";
+import { runCriteria, type TicketCriterion } from "./criteria.ts";
+import { canonicalCriterion, isCaseId } from "./criterion-id.ts";
 import { type RunState, type TicketKind, appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
+import { readWorkspaceCases, type CaseEntry } from "./test-case.ts";
 import { allowedUiSkills, uiSkillsFor } from "./ui-skills.ts";
 
 export type PlanStep = {
@@ -23,8 +25,15 @@ export type PlanStep = {
 };
 
 export type PlanTestCase = {
+  /** A test case id `<KEY>-T<n>`. An old plan (before ARK-311) has a free id here. */
   id: string;
+  /** `add`, `update`, `reuse` or `retire`. Empty in the old shape: free id, one `criterion`, no action. */
+  action: string;
+  /** Old shape only: the one AC the case proves. A new-shape case serves the ACs whose `verified_by` lists it. */
   criterion: string;
+  title: string;
+  /** Why a `retire` case goes. */
+  reason: string;
   level: string;
   given: string[];
   when: string[];
@@ -54,6 +63,8 @@ export type Plan = {
 
 const roles = ["implementer", "validator", "reviewer"];
 const levels = ["integration", "e2e"];
+const actions = ["add", "update", "reuse", "retire"];
+const caseLevels = ["unit", "integration", "e2e"];
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 const textList = (value: unknown): string[] =>
@@ -71,7 +82,8 @@ export function planHash(runDirectory: string): string {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
-export function loadPlan(runDirectory: string): Plan {
+/** `ticketId` turns `AC1` and the old `<ticket>-AC1` into `<ticket>/AC1` in the AC ids of the plan. */
+export function loadPlan(runDirectory: string, ticketId?: string): Plan {
   const file = join(runDirectory, "plan.yml");
   if (!existsSync(file)) throw new ArkError(`plan.yml not found in ${runDirectory}`);
   let raw: unknown;
@@ -84,6 +96,7 @@ export function loadPlan(runDirectory: string): Plan {
     throw new ArkError("plan.yml must be a mapping with steps and test_cases");
   }
   const { steps, test_cases, summary, design, decisions } = raw as Record<string, unknown>;
+  const criterionId = (value: string) => canonicalCriterion(value.trim(), ticketId);
   const designBlock =
     design && typeof design === "object" ? (design as Record<string, unknown>) : {};
   const summaryBlock =
@@ -92,7 +105,7 @@ export function loadPlan(runDirectory: string): Plan {
     summary: {
       why: text(summaryBlock.why),
       changes: objectList(summaryBlock.changes).map((change) => ({
-        criterion: text(change.criterion),
+        criterion: criterionId(text(change.criterion)),
         where: text(change.where),
         now: text(change.now),
         fix: text(change.fix),
@@ -127,7 +140,7 @@ export function loadPlan(runDirectory: string): Plan {
       harness: text(step.harness),
       model: text(step.model),
       needs: textList(step.needs),
-      criteria: textList(step.criteria),
+      criteria: textList(step.criteria).map(criterionId),
       skills: textList(step.skills),
       goal: text(step.goal),
     })),
@@ -136,22 +149,29 @@ export function loadPlan(runDirectory: string): Plan {
       if (Object.hasOwn(testCase, "steps")) {
         throw new ArkError(`test case ${name} has the old steps field: use given, when and then`);
       }
+      const action = text(testCase.action);
+      // A reuse or retire entry has no scenario; an unknown action is refused by the check, not here.
+      const needsScenario = action === "" || action === "add" || action === "update";
       for (const group of ["given", "when", "then"] as const) {
         if (
-          !Array.isArray(testCase[group]) ||
-          !testCase[group].every((line) => typeof line === "string")
+          needsScenario &&
+          (!Array.isArray(testCase[group]) ||
+            !testCase[group].every((line) => typeof line === "string"))
         ) {
           throw new ArkError(`test case ${name} ${group} must be a list of strings`);
         }
       }
       return {
         id: text(testCase.id),
-        criterion: text(testCase.criterion),
+        action,
+        criterion: criterionId(text(testCase.criterion)),
+        title: text(testCase.title),
+        reason: text(testCase.reason),
         level: text(testCase.level),
-        given: testCase.given as string[],
-        when: testCase.when as string[],
+        given: textList(testCase.given),
+        when: textList(testCase.when),
         // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
-        then: testCase.then as string[],
+        then: textList(testCase.then),
         expected: text(testCase.expected),
       };
     }),
@@ -204,6 +224,7 @@ export function findProblems(
   configuredRoles: ProjectConfig["roles"],
   manual: string[] = [],
   kind: TicketKind = "feature",
+  links: { criteria: TicketCriterion[]; entries: CaseEntry[] } = { criteria: [], entries: [] },
 ): string[] {
   const allowedPairs = [
     ...new Set(Object.values(configuredRoles).map((role) => `${role.harness}/${role.model}`)),
@@ -236,28 +257,82 @@ export function findProblems(
   for (const cycle of findCycles(plan)) problems.push(`cycle in needs: ${cycle.join(" -> ")}`);
 
   const proven = new Set<string>();
+  const entryById = new Map(links.entries.map((entry) => [entry.id, entry]));
+  const planById = new Map<string, PlanTestCase>();
   for (const testCase of plan.test_cases) {
     const name = testCase.id || "(no id)";
-    for (const group of ["when", "then"] as const) {
-      if (testCase[group].length === 0)
-        problems.push(`test case ${name} has an empty ${group} list`);
-    }
-    if (!testCase.expected.trim()) problems.push(`test case ${name} has no expected sentence`);
-    if (!levels.includes(testCase.level)) {
-      problems.push(`test case ${name} has level "${testCase.level}": use integration or e2e`);
+    const modern = testCase.action !== "";
+    if (modern && !actions.includes(testCase.action)) {
+      problems.push(
+        `test case ${name} has action "${testCase.action}": use add, update, reuse or retire`,
+      );
       continue;
     }
+    if (modern) {
+      if (!isCaseId(testCase.id))
+        problems.push(`test case ${name} has an id that is not a test case id <KEY>-T<n>`);
+      if (planById.has(testCase.id)) problems.push(`duplicate test case id: ${testCase.id}`);
+      planById.set(testCase.id, testCase);
+    }
+    const scenario = !modern || testCase.action === "add" || testCase.action === "update";
+    if (scenario) {
+      for (const group of ["when", "then"] as const) {
+        if (testCase[group].length === 0)
+          problems.push(`test case ${name} has an empty ${group} list`);
+      }
+      if (!testCase.expected.trim()) problems.push(`test case ${name} has no expected sentence`);
+    }
+    if (modern && testCase.action === "retire" && !testCase.reason.trim())
+      problems.push(`test case ${name} is retired with no reason`);
+    if (modern && testCase.action !== "add" && !entryById.has(testCase.id))
+      problems.push(
+        `test case ${name} is ${testCase.action}, but no entry ${testCase.id}.md is in test/cases/ of a repo of the workspace`,
+      );
+    const allowedLevels = modern ? caseLevels : levels;
+    if (testCase.level === "" && modern && !scenario) continue;
+    if (!allowedLevels.includes(testCase.level)) {
+      problems.push(
+        `test case ${name} has level "${testCase.level}": use ${allowedLevels.join(", ").replace(/, ([^,]*)$/, " or $1")}`,
+      );
+      continue;
+    }
+    if (modern && testCase.criterion === "") continue;
     if (!ticketCriteria.includes(testCase.criterion)) {
       problems.push(
         `test case ${name} is for criterion "${testCase.criterion}", which is not in the ticket`,
       );
       continue;
     }
-    proven.add(testCase.criterion);
+    if (levels.includes(testCase.level)) proven.add(testCase.criterion);
+  }
+  // A new-scheme AC with method test is proved through verified_by; the others keep the old rule.
+  const throughCases = links.criteria.filter(
+    (criterion) =>
+      criterion.newScheme && criterion.method === "test" && ticketCriteria.includes(criterion.id),
+  );
+  for (const criterion of throughCases) {
+    let integration = false;
+    for (const id of criterion.verified_by) {
+      const planned = planById.get(id);
+      const entry = entryById.get(id);
+      if (planned?.action === "retire")
+        problems.push(`criterion ${criterion.id} verified_by ${id}, which the plan retires`);
+      else if (planned?.action !== "add" && entry?.status !== "active")
+        problems.push(
+          `criterion ${criterion.id} verified_by ${id}, which is no active entry in test/cases/ and no add entry of the plan`,
+        );
+      if (levels.includes(planned?.level || entry?.level || "")) integration = true;
+    }
+    if (!integration)
+      problems.push(`criterion ${criterion.id} has no integration or e2e test case in verified_by`);
   }
   // A manual criterion is proved by the manual gate: a test case for it is allowed, never required.
   for (const criterion of ticketCriteria) {
-    if (!proven.has(criterion) && !manual.includes(criterion))
+    if (
+      !proven.has(criterion) &&
+      !manual.includes(criterion) &&
+      !throughCases.some((through) => through.id === criterion)
+    )
       problems.push(`criterion ${criterion} has no integration or e2e test case`);
   }
   if (!plan.summary.why) problems.push("plan.yml has no summary.why: add a summary block");
@@ -341,6 +416,18 @@ export function findProblems(
   return problems;
 }
 
+/** The ACs a case serves: those whose `verified_by` lists it, and the old-shape `criterion`. */
+function servedBy(testCase: PlanTestCase, criteria: TicketCriterion[]): string[] {
+  return [
+    ...new Set([
+      ...criteria
+        .filter((criterion) => criterion.verified_by.includes(testCase.id))
+        .map((criterion) => criterion.id),
+      ...(testCase.criterion ? [testCase.criterion] : []),
+    ]),
+  ];
+}
+
 // Stable output. Markdown table cells cannot hold a pipe or a newline.
 export function renderPlanMarkdown(
   plan: Plan,
@@ -348,6 +435,7 @@ export function renderPlanMarkdown(
   strategy: RunState["strategy"] = null,
   amendments: RunState["amended_criteria"] = [],
   withSkills = false,
+  criteria: TicketCriterion[] = [],
 ): string {
   const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
   const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
@@ -441,8 +529,26 @@ export function renderPlanMarkdown(
     lines.push(`| ${cells.map(tableCell).join(" | ")} |`);
   }
   lines.push("", "## Test cases", "");
+  if (plan.test_cases.some((testCase) => testCase.action !== "")) {
+    lines.push(
+      "| Case | Action | Level | Serves | Title | Reason |",
+      "| --- | --- | --- | --- | --- | --- |",
+    );
+    for (const testCase of plan.test_cases) {
+      const serves = testCase.action === "retire" ? [] : servedBy(testCase, criteria);
+      lines.push(
+        `| ${[testCase.id, testCase.action || "-", testCase.level, serves.join(", ") || "none", testCase.title, testCase.reason].map(tableCell).join(" | ")} |`,
+      );
+    }
+    lines.push("");
+  }
   for (const testCase of plan.test_cases) {
-    lines.push(`### ${testCase.id} (${testCase.criterion}, ${testCase.level})`, "", "```gherkin");
+    if (testCase.action === "reuse" || testCase.action === "retire") continue;
+    lines.push(
+      `### ${testCase.id} (${testCase.action || testCase.criterion}, ${testCase.level})`,
+      "",
+      "```gherkin",
+    );
     for (const [group, keyword] of [
       ["given", "Given"],
       ["when", "When"],
@@ -460,16 +566,22 @@ export function planCheck(runId: string, inProject?: string): void {
   const state = deriveState(readEvents(directory));
   // Refuse a run that is not ready for a plan check before reading plan.yml.
   assertAllowed(state, "plan.checked", {});
-  const plan = loadPlan(directory);
+  const plan = loadPlan(directory, state.ticket.id);
+  const ticketCriteria = runCriteria(directory);
+  const cases = readWorkspaceCases(loadConfig(project).workspace);
   const surfaces = state.evaluation?.surfaces ?? ["none"];
   const problems = findProblems(
     plan,
     state.criteria.map((criterion) => criterion.id),
     surfaces,
     loadConfig(project).roles,
-    manualCriteria(directory),
+    ticketCriteria
+      .filter((criterion) => criterion.method !== "test")
+      .map((criterion) => criterion.id),
     state.kind,
+    { criteria: ticketCriteria, entries: cases.entries },
   );
+  problems.unshift(...cases.problems);
   const valid = problems.length === 0;
   const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
   appendEvent(directory, "plan.checked", {
@@ -499,6 +611,7 @@ export function planCheck(runId: string, inProject?: string): void {
       state.strategy,
       state.amended_criteria,
       uiSkillsFor(surfaces).length > 0,
+      ticketCriteria,
     ),
   );
   console.log(

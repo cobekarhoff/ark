@@ -31,8 +31,7 @@ A run moves through the states below. The `ark` command keeps a small transition
 ```mermaid
 stateDiagram-v2
   [*] --> intake
-  intake --> criteria: ticket lacks testable criteria
-  intake --> planning: ticket has testable criteria
+  intake --> criteria: every run
   criteria --> planning: you answer
   planning --> plan_gate
   plan_gate --> planning: you ask for changes
@@ -58,7 +57,7 @@ A run closes with one outcome: merged, abandoned, aborted, or handed off. The [g
 
 A gate is a point where the run waits for you.
 
-- **Criteria.** Opens only when the ticket lacks testable acceptance criteria. You accept or edit the criteria.
+- **Criteria.** Opens on every run. You approve each criterion's `method` and `verified_by`.
 - **Plan.** Opens before any code is written. You review the graph of steps and the test cases, then approve, edit `plan.yml`, or ask for changes in chat.
 - **Escalation.** Opens when the round budget is spent. With `gates.escalation: auto`, Ark answers `one_more_round` by itself, at most 2 times in a run, and the run lead only sends Master Chief a `status`. It never answers an escalation that `ark escalate` requested, and a merge-only start after a sync conflict does not count toward the 2. The third spent budget waits for you.
 
@@ -68,13 +67,13 @@ You answer in Master Chief's session or in Plannotator. The run lead records the
 
 ## The plan and the proof
 
-The plan is `plan.yml`. It lists steps and test cases. Each step names a role, a repo, a harness, a model, the steps it needs, and the criteria it serves. Each test case names an acceptance criterion and a level, either integration or end-to-end.
+The plan is `plan.yml`. It lists steps and test cases. Each step names a role, a repo, a harness, a model, the steps it needs, and the criteria it serves. Each test case has an id, an action (`add`, `update`, `reuse` or `retire`) and a level (unit, integration or end-to-end), and the criteria it proves.
 
-`ark plan check` rejects a plan with a cycle, an unknown `needs`, a step with no repo or role, a missing summary, or a criterion without `manual: true` that has no integration or end-to-end test case. It also renders `plan.md`, a readable plan with a summary, a change table and a diagram of the steps.
+`ark plan check` rejects a plan with a cycle, an unknown `needs`, a step with no repo or role, a missing summary, or a `method: test` criterion without `manual: true` that has no integration or end-to-end test case in its `verified_by`. It also renders `plan.md`, a readable plan with a summary, a change table and a diagram of the steps.
 
 The plan also has a design block. `design.interfaces` lists each interface the change adds or changes, and each interface has a name and a `callers` list of the code, commands or documents that use it. The check refuses a plan with no `design.interfaces`, an interface with no name or no `callers`, and a blank caller. `design.example` is an optional sample of new or changed output. `plan.md` shows the block in its Design section: the approach, a table of interfaces and callers, and the example in a code fence that is longer than any fence inside the example.
 
-The validator writes tests from the approved test cases. The proof that a criterion holds is that its tagged tests pass at head on the composed workspace, or, for a criterion with `manual: true`, that you answer the `manual` gate `ok`. Unit tests never prove a criterion. Each test runner has a parser that maps native tags to results. The first parser reads `bun test` names. Later parsers read pytest marks and behave tags.
+The validator writes tests from the approved test cases. The proof that a criterion holds is its `verified_by` test cases: each one passes at head on the composed workspace. For a criterion with `manual: true` or a `method` other than `test`, the proof is that you answer the `manual` gate `ok`. A criterion is decided from the results of its `verified_by` test cases at every level. An old-scheme criterion with no `verified_by` keeps the tag path, where only its tagged integration and end-to-end tests count. Each test runner has a parser that maps native tags to results. The first parser reads `bun test` names. Later parsers read pytest marks and behave tags.
 
 The run lead picks review models. A plan defaults to a reviewer from a different vendor than the implementer, and you can change that per step. Ark does not enforce it. The run lead decides which findings send work back and says why.
 
@@ -141,5 +140,5 @@ Nothing changes until you approve it. Cost is tracked live in `ark status` and j
 
 - **Agents are trusted.** They act with your access, and the git host's branch protection makes sure only you merge. This replaces the old ledger, packet hashing, launcher, and credential scrubbing. See [ADR 0004](../adr/0004-trusted-agents-lightweight-harness.md).
 - **Orca and Plannotator do the hosting and review.** Ark does not build agent hosting, messaging, a queue, or a review interface. See [ADR 0005](../adr/0005-orca-and-plannotator.md).
-- **Only integration and end-to-end tests prove a criterion.** Product repos keep their own validation, and Ark does not add a second proof system. See [ADR 0006](../adr/0006-integration-and-e2e-proof-only.md).
+- **Test cases describe the product, and an AC is proven through them.** An AC lists its test cases in `verified_by`; any level can be a test case, but each `method: test` AC needs an integration or end-to-end one. Product repos keep their own validation, and Ark does not add a second proof system. See [ADR 0010](../adr/0010-test-cases-describe-the-product.md), which replaces [ADR 0006](../adr/0006-integration-and-e2e-proof-only.md).
 - **If a spike fails, Ark falls back to a tmux host.** The two spikes, ARK-150 and ARK-151, test the parts that depend most on Orca.
