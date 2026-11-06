@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { retro, runningCost } from "../cli/retro.ts";
@@ -483,6 +483,81 @@ describe("ark retro", () => {
         reviewer: "",
       },
     ]);
+  });
+
+  const runRetroProcess = () =>
+    Bun.spawnSync(["bun", join(import.meta.dir, "..", "cli", "ark.ts"), "retro", runId], {
+      env: { ...process.env, ARK_HOME: arkHome },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+  test("ARK-T5 retro keeps fix and reviewer of an escaped defect, for caught, missed and downgraded", () => {
+    const base = `run: ${runId}, note: "n"`;
+    writeFileSync(
+      join(arkHome, "projects", "demo", "escaped-defects.yml"),
+      [
+        `- { ticket: ARK-213, ${base}, fix: 6e4bd35, reviewer: downgraded }`,
+        `- { ticket: ARK-214, ${base}, fix: aaaaaaa, reviewer: caught }`,
+        `- { ticket: ARK-215, ${base}, fix: bbbbbbb, reviewer: missed }`,
+        `- { ticket: ARK-216, ${base} }`,
+        `- { ticket: ARK-777, run: 2026-09-01-ARK-777-1, note: "other", fix: ccccccc, reviewer: caught }`,
+      ].join("\n"),
+    );
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(
+      readMetrics().escaped_defects.map((entry: Record<string, string>) => [
+        entry.ticket,
+        entry.fix,
+        entry.reviewer,
+      ]),
+    ).toEqual([
+      ["ARK-213", "6e4bd35", "downgraded"],
+      ["ARK-214", "aaaaaaa", "caught"],
+      ["ARK-215", "bbbbbbb", "missed"],
+      ["ARK-216", "", ""],
+    ]);
+  });
+
+  test("ARK-T6 retro counts only P0 and P1 lines marked leave inside the Run lead decision section", () => {
+    const findings = join(runDirectory, "findings");
+    mkdirSync(findings, { recursive: true });
+    writeFileSync(
+      join(findings, "reviewer.md"),
+      [
+        "### P1: a",
+        "### P0: b",
+        "### P2: c",
+        "",
+        "## Run lead decision",
+        "",
+        "- P1 a: leave. minor",
+        "- P0 b: send back.",
+        "- P2 c: leave. later",
+        "",
+      ].join("\n"),
+    );
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(readMetrics().rework.findings_left_p0p1).toBe(1);
+    const sentBack = readMetrics().rework.findings_sent_back;
+
+    writeFileSync(
+      join(findings, "second.md"),
+      [
+        "## Run lead decision",
+        "",
+        "- **P1 d: leave.**",
+        "- P0 e: send back. A leave would hide the data loss.",
+        "",
+      ].join("\n"),
+    );
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(readMetrics().rework.findings_left_p0p1).toBe(2);
+    expect(readMetrics().rework.findings_sent_back).toBe(sentBack);
+
+    rmSync(findings, { recursive: true });
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(readMetrics().rework.findings_left_p0p1).toBe(0);
   });
 
   test("ARK-282-AC4 a step finished with not_started adds no round and no cost step; a plain failed one still does", () => {

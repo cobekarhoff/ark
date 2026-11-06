@@ -23,14 +23,14 @@ Expected: When a Run lead decision section leaves one P1, sends back one P0 and 
   - `- P1 <title>: leave. <reason>`
   - `- P0 <title>: send back.`
   - `- P2 <title>: leave. <reason>`
-- A second line shape, to pin the pinned format rule: `- **P1 <title>: leave.**` (bold) in a second findings file, and a line `- P0 <title>: send back. A leave would hide the data loss.` in which `leave` appears after `send back`.
+- A second findings file, to pin the format rule. It also has a `## Run lead decision` heading, followed by two list lines: `- **P1 <title>: leave.**` (bold) and `- P0 <title>: send back. A leave would hide the data loss.` (`leave` appears after `send back`).
 
 ## Steps
 
 1. Write the findings file with the three-line decision section.
 2. Run `ark retro <run>` through the CLI process, with `ARK_HOME` set to the temporary folder.
 3. Read `<run folder>/metrics.json` and note `rework.findings_left_p0p1`.
-4. Add the second findings file (the bold P1 `leave` line and the P0 line that says `send back` before `leave`). Run `ark retro <run>` again and read the value.
+4. Add the second findings file (a `## Run lead decision` heading, then the bold P1 `leave` line and the P0 line that says `send back` before `leave`). Run `ark retro <run>` again and read the value.
 5. Remove the findings folder and run `ark retro <run>` again.
 
 ## Expected results
