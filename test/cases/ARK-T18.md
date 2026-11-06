@@ -2,7 +2,7 @@
 id: ARK-T18
 title: ARK-T18 worktree sync refuses an id the target already holds
 level: integration
-technique: equivalence classes (id taken with other content, taken with same content, untouched by the run, new) and state transition (before and after the merge)
+technique: equivalence classes (id taken with other content, also when the run reached it by renaming a case, taken with same content, untouched by the run, new) and state transition (before and after the merge)
 priority: high
 risk: sync merges a branch whose new test case ids collide with ids another run already merged, failing with a generic add/add conflict that names no id, or refuses ids that are identical or untouched
 status: active
@@ -19,7 +19,7 @@ Expected: When the run branch adds a test case id that the target branch holds w
 
 - A temporary `ARK_HOME` with project `demo` whose workspace repo has a bare origin (origin/HEAD names main). main holds `test/cases/ARK-T3.md`.
 - A run with an approved plan and a worktree created from main.
-- The run branch commits `ARK-T5.md` ("run five"), `ARK-T6.md` ("run six"), `ARK-T7.md` ("run seven") and `ARK-T8.md` ("same eight").
+- The main branch also holds `ARK-T1.md` (eight lines). The run branch renames `ARK-T1.md` to `ARK-T5.md` and appends "run five" (git reports a rename, not an add), and commits `ARK-T6.md` ("run six"), `ARK-T7.md` ("run seven") and `ARK-T8.md` ("same eight").
 - Another run then merged to origin/main: `ARK-T5.md` ("main five"), `ARK-T6.md` ("main six"), `ARK-T8.md` ("same eight", identical to the run's) and an edit of `ARK-T3.md`.
 
 ## Steps

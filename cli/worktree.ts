@@ -310,6 +310,7 @@ function takenCaseIds(path: string, target: string): string[] {
   const added = run(
     "diff",
     "--name-only",
+    "--no-renames",
     "--diff-filter=A",
     base.stdout.toString().trim(),
     "HEAD",

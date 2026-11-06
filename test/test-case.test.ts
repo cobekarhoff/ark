@@ -373,8 +373,10 @@ describe("test case ids across worktrees (ARK-319)", () => {
 
   test("ARK-T18 worktree sync refuses an id the target already holds", () => {
     tempArkHome();
+    const renamedBody = Array.from({ length: 8 }, (_, i) => `line ${i}`).join("\n");
     const workspace = repoWithOrigin({
       "test/cases/ARK-T3.md": "three\n",
+      "test/cases/ARK-T1.md": `${renamedBody}\n`,
     });
     const projectDirectory = writeProject("demo", {
       workspace,
@@ -411,10 +413,11 @@ describe("test case ids across worktrees (ARK-319)", () => {
     expect(ark("worktree", "create", runId, ".").code).toBe(0);
     const worktree = join(runDirectory, "workspace", ".");
 
-    // The run adds T5 and T6 (main will take both with other content), T7 (main never takes it)
-    // and T8 (main takes it with the same content).
+    // The run adds T5 by renaming T1 (git reports a rename, not an add), T6 (main will take both
+    // with other content), T7 (main never takes it) and T8 (main takes it with the same content).
+    git(worktree, "mv", "test/cases/ARK-T1.md", "test/cases/ARK-T5.md");
+    writeFileSync(join(worktree, "test", "cases", "ARK-T5.md"), `${renamedBody}\nrun five\n`);
     for (const [id, content] of [
-      ["ARK-T5", "run five\n"],
       ["ARK-T6", "run six\n"],
       ["ARK-T7", "run seven\n"],
       ["ARK-T8", "same eight\n"],
