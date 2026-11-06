@@ -27,6 +27,8 @@ Expected: When the run branch adds a test case id that the target branch holds w
 1. Record the worktree's `HEAD`.
 2. Run `ark worktree sync <run>`.
 3. Read the exit code and stderr; read the worktree's `HEAD` and `git status`.
+4. Remove `ARK-T5.md` and `ARK-T6.md` on the run branch and commit, so only the allowed classes remain (`ARK-T8` identical, `ARK-T3` untouched by the run, `ARK-T7` new).
+5. Run `ark worktree sync <run>` again and read the exit code, the merged files and `git status`.
 
 ## Expected results
 
@@ -34,6 +36,7 @@ Expected: When the run branch adds a test case id that the target branch holds w
 - stderr holds `test case id taken on the target branch: ARK-T5` and `test case id taken on the target branch: ARK-T6`.
 - stderr does not name `ARK-T3` (edited on main, not touched by the run), `ARK-T7` (not on main) or `ARK-T8` (same content on both sides).
 - The worktree's `HEAD` equals the recorded one and `git status --porcelain` is empty: the refusal came before the merge.
+- The second sync exits 0. The worktree holds main's edit of `ARK-T3.md` ("three, edited on main"), main's `ARK-T5.md` ("main five") and the run's `ARK-T7.md` ("run seven"), and `git status --porcelain` is empty: identical and untouched ids do not cause a refusal.
 
 ## Screenshot checkpoints
 

@@ -342,11 +342,20 @@ describe("test case ids across worktrees (ARK-319)", () => {
     const second = addWorktree(repo, "run-b");
 
     const parallel = (await Promise.all([newCaseIds(first, 4), newCaseIds(second, 4)])).flat();
-    expect(new Set(parallel).size).toBe(8);
+    expect(parallel.sort()).toEqual(Array.from({ length: 8 }, (_, i) => `ARK-T${i + 1}`).sort());
 
-    // A third call in either worktree is again new, although neither worktree holds the other's entries.
-    const later = [...(await newCaseIds(first, 1)), ...(await newCaseIds(second, 1))];
-    expect(new Set([...parallel, ...later]).size).toBe(10);
+    // Neither worktree holds the other's entries, yet the counter makes each later call new.
+    expect(await newCaseIds(first, 1)).toEqual(["ARK-T9"]);
+    expect(await newCaseIds(second, 1)).toEqual(["ARK-T10"]);
+
+    // A higher entry in the current worktree wins over the counter: one above it.
+    mkdirSync(join(first, "test", "cases"), { recursive: true });
+    writeFileSync(join(first, "test", "cases", "ARK-T20.md"), "local\n");
+    expect(await newCaseIds(first, 1)).toEqual(["ARK-T21"]);
+
+    // A higher entry at the fetched target head wins over the counter and both worktrees.
+    advanceOrigin(repo, { "test/cases/ARK-T30.md": "target\n" });
+    expect(await newCaseIds(second, 1)).toEqual(["ARK-T31"]);
   });
 
   test("ARK-T17 first call without counter reads the target branch", async () => {
@@ -432,6 +441,18 @@ describe("test case ids across worktrees (ARK-319)", () => {
       expect(result.err).not.toContain(`target branch: ${untouched}`);
     // Refused before the merge: nothing merged, nothing half-done.
     expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
+    expect(git(worktree, "status", "--porcelain")).toBe("");
+
+    // The run drops its colliding ids: what remains is identical content (T8), an id the run
+    // never touched (T3, edited on main) and an id main lacks (T7). Sync must merge it.
+    git(worktree, "rm", "-q", "test/cases/ARK-T5.md", "test/cases/ARK-T6.md");
+    git(worktree, "commit", "-q", "-m", "drop colliding cases");
+    const allowed = ark("worktree", "sync", runId);
+    expect(allowed.code).toBe(0);
+    const cases = join(worktree, "test", "cases");
+    expect(readFileSync(join(cases, "ARK-T3.md"), "utf8")).toBe("three, edited on main\n");
+    expect(readFileSync(join(cases, "ARK-T5.md"), "utf8")).toBe("main five\n");
+    expect(readFileSync(join(cases, "ARK-T7.md"), "utf8")).toBe("run seven\n");
     expect(git(worktree, "status", "--porcelain")).toBe("");
   });
 });
