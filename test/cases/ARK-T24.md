@@ -18,13 +18,14 @@ Expected: When a new head follows `ark test`, the system shall update the body o
 ## Preconditions
 
 - A fixture run past the plan gate answer, with a fake `gh`/`glab` that records calls, and one open P0 in `findings/<step>.md`.
+- The fixture meets the `assertShippable` prerequisites, so a refusal there cannot hide the case: a `test.completed` event with `passed: true` and every non-manual AC `passing`; an `ok` gate for each manual AC; the head of every repo equal to the head of that last test run; each AC string present in a tracked file at head; and complete ARK-312 evidence under `results/evidence/` for each test case.
 - A fixture run with two MRs (two repos) for the multi-MR step.
 
 ## Steps
 
 1. Run `ark merge-request open <run>` with no `--confirmed` flag. Read the create call and the body. This body is the before evidence.
 2. Check the run state: the run is in `merge_requests_open`.
-3. Fix the P0 with a new commit, add a later review file with `No findings.`, and run `ark test <run>` so the head is new.
+3. Fix the P0 with a new commit, add a later review file with `No findings.`, and run `ark test <run>` so the head is new and the last test result passes with complete evidence at that head.
 4. Run `ark merge-request open <run>` again. Read the calls and the output. This body is the after evidence.
 5. Run it a third time with no new head.
 6. Repeat steps 3-4 on the run with two open MRs.

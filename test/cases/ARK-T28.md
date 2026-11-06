@@ -18,9 +18,9 @@ Expected: When a reviewer step has no `## Merge risk` block, the system shall fa
 ## Preconditions
 
 - Fixture run with a reviewer step in `plan.yml`.
-- Body 1: the latest findings file of the reviewer step has no `## Merge risk` block.
-- Body 2: the body has `Door: one-way` and names no recovery.
-- Body 3: a file under `Also changed, not in plan:` has no reason.
+- Body 1: the latest findings file of the reviewer step has no `## Merge risk` block. In the body, `Door: one-way` names its recovery and every unplanned file has a reason.
+- Body 2: the findings file has the block and every unplanned file has a reason; the body has `Door: one-way` and names no recovery.
+- Body 3: the findings file has the block and `Door: one-way` names its recovery; a file under `Also changed, not in plan:` has no reason (another file there has one).
 - Good body: a findings file with the block, `Door: one-way` with its recovery, and every unplanned file with a reason.
 - Control run: no reviewer step in the plan, so the block is not required.
 
@@ -35,7 +35,7 @@ Expected: When a reviewer step has no `## Merge risk` block, the system shall fa
 
 ## Expected results
 
-- Bodies 1, 2 and 3 each return `fail` for RISK04, and the reason names the cause (no `## Merge risk` block; no recovery for `Door: one-way`; the unplanned file without a reason).
+- Bodies 1, 2 and 3 each return `fail` for RISK04, each only for its one broken condition, and the reason names the cause (no `## Merge risk` block; no recovery for `Door: one-way`; the unplanned file without a reason).
 - The good body returns `pass` for RISK04.
 - The control run, with no reviewer step, does not fail on the missing block.
 - `bun test test/pr-writing.test.ts` exits 0.
