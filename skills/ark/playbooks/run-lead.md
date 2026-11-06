@@ -39,7 +39,7 @@ Throughout this playbook:
    orca orchestration run-create --objective "Ark run <run>" --json
    ```
 
-7. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered.
+7. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered. If the phase is `merge_requests_open` and `<run folder>/retro.md` exists, Master Chief started you again for MR work: go to section 10a, and skip sections 2 to 9 and 11. If the phase is `merge_requests_open` and `retro.md` does not exist, run section 10 (the first status read, and the items of section 10a if any) and then section 11 as normal. In every other phase, resume at the first unfinished step.
 8. Open your harness's todo list with one item for each numbered section of this playbook, in order, and mark each item done when you finish its section. When you replace a stopped run lead, mark done the sections that `ark status <run>` shows as finished.
 
 ## 2. Evaluate the ticket and open the criteria gate
@@ -493,6 +493,8 @@ Local-only project (`ark.yml` says `merge_requests: none`): never run `ark merge
 
 Open the MRs only when the last `ark test <run>` passed at the latest commit and no review sends work back. First run `ark worktree sync <run>` as its own command and read that it exited 0. A sync conflict goes back to an implementer before any MR opens. Then run, as a separate command:
 
+Just before the next command, write the current time (ISO 8601 UTC) to `<run folder>/mr-poll.txt`. Master Chief reads it as the first comment cursor.
+
 ```sh
 ark merge-request open <run>
 ```
@@ -501,11 +503,23 @@ The command pushes each repo's branch and opens one MR for each repo, in depende
 
 If `ark merge-request open <run>` refuses with `changed since the last test run`, a commit followed the last test. Run `ark test <run>` and open again. This needs no gate and no escalation answer.
 
-After the MRs open, run `ark merge-request status <run>` and read every MR. Read `ci:` (`passed`, `failed`, `running`, `none`, `unknown`), `conflict` and `conflict: unknown`. Only `ci: passed` with no `conflict` is a pass: treat `running`, `none` and `unknown` as not passed, and an error retrieving checks is not a pass. Wait for `running`; for `failed`, read CI logs for every failure and write the evidence into `<run folder>/findings/round-<round>.md`. Restart the validator for test-only fixes or the implementer for product fixes through the logged steps in section 7. Each post-MR implementer round needs a fresh escalation answer, as in section 9. With `gates.escalation: auto`, `ark run step ... start` records it by auto (the first 2 count) and you send Master Chief the `status` of section 9, with no `ask`; otherwise ask the human through Master Chief and record the answer. Do not bypass the round budget. Re-run `ark test <run>` and the reviewer steps after repair, then run `ark worktree sync <run>` to push the repair. Recheck MR status and repeat until checks pass and no review sends work back. Do not report success while CI is failing, running, or unknown.
+After the MRs open, run `ark merge-request status <run>` and read every MR. Read `ci:` (`passed`, `failed`, `running`, `none`, `unknown`), `conflict` and `conflict: unknown`. Only `ci: passed` with no `conflict` is a pass: treat `running`, `none` and `unknown` as not passed, and an error retrieving checks is not a pass. Wait for `running`. For `failed` or a `conflict`, follow section 10a before you report.
+
+## 10a. Work on the open MRs
+
+Do this after section 10 when an MR check fails, and again each time Master Chief starts you again or messages you with items for a run in `merge_requests_open`: a failed check, a human comment, or a conflict. The items name the failing checks, each comment with its author and URL, and the conflicting repo.
+
+- **CI failure.** Read the log of every failed check and write the evidence into `<run folder>/findings/round-<round>.md`. Run an MR round: the validator step for a test-only fix, the implementer step for a product fix, through the logged steps of section 7. Then re-run `ark test <run>` and the reviewer steps, and run `ark worktree sync <run>` to push the repair to the same branch. Recheck `ark merge-request status <run>` and repeat until `ci: passed`. Never open a new MR for it. Do not report success while CI is failing, running, or unknown.
+- **Comment.** Judge each one. A change request starts an MR round, as for CI. A question gets a reply on the MR with no commit. A note gets nothing. After a fix, the reply names the commit (its short hash). Never resolve the thread: the human resolves it.
+- **Conflict.** Run `ark worktree sync <run>`, which merges the target branch into each worktree and pushes the branch of every repo with an open MR; this merge is the rebase the ticket asks for. A repo that conflicts goes back to an implementer: `ark run step <run> <implementer step> start --merge` for that repo, and the implementer resolves it and finishes. Run `ark test <run>` after every sync that changed a branch, and again after an implementer `--merge` step. If it fails, run an MR round. When it passes after a `--merge` step, run `ark worktree sync <run>` to push the branch; if that sync merged a newer target head, run `ark test <run>` again. You never write product code or resolve a conflict yourself.
+
+Before an implementer MR round, ask the human for the escalation gate answer through Master Chief, as in section 9: `ark run step ... start` refuses without it (a `--merge` start is not counted). With `gates.escalation: auto`, `ark run step ... start` records it by auto (the first 2 count) and you send Master Chief the `status` of section 9, with no `ask`; otherwise ask the human through Master Chief and record the answer. Do not bypass the round budget. A validator or reviewer step needs no gate.
+
+When you are started again for an MR round, do not rewrite `retro.md`, and do not send a second first report. Resume at section 10a with the items: they are in Master Chief's first message, which you read in your Orca inbox as in section 1, step 3. Send one `worker_done` for each MR round when each delivered item is handled, CI is passed and no conflict is left: say what you fixed, the commits, and what remains, naming unresolved human-owned threads as "remaining". When the inbox holds no items, run `ark merge-request status <run>` and do nothing if it is clear.
 
 ## 11. Retro and final report
 
-Do this when the MRs are open, and also when the run ends in an abort. The human can abort in any phase before an MR opens. The run lead then runs `ark run close <run> aborted`, then does the steps below.
+Do this when the MRs are open, and also when the run ends in an abort. The human can abort in any phase before an MR opens. The run lead then runs `ark run close <run> aborted`, then does the steps below. Never do it again when `retro.md` exists: an MR round of section 10a does not rewrite it, and its `worker_done` is its own report.
 
 1. Run `ark retro <run>`. It writes `<run folder>/metrics.json`.
 2. Write `<run folder>/retro.md` on top of those numbers. Read `playbooks/retro.md` and follow "Part 1: Close check", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
