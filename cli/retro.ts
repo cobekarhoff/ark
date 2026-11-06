@@ -113,8 +113,12 @@ export function stageTimes(events: ArkEvent[]): StageTimes {
 /** The evaluator reports to the run lead after the lead recorded the evaluation: allow that closing message. */
 export const evaluatorGraceMilliseconds = 60_000;
 
-export const isEvaluatorTime = (time: number, evaluationEnd: number | undefined): boolean =>
-  evaluationEnd !== undefined && time <= evaluationEnd + evaluatorGraceMilliseconds;
+/** An evaluator session starts at or before the evaluation boundary; only its closing message may follow. */
+export const isEvaluatorSession = (times: number[], evaluationEnd: number | undefined): boolean =>
+  evaluationEnd !== undefined &&
+  times.length > 0 &&
+  Math.min(...times) <= evaluationEnd &&
+  Math.max(...times) <= evaluationEnd + evaluatorGraceMilliseconds;
 
 export const isDesignerTime = (
   time: number,
@@ -470,14 +474,16 @@ export function retro(runId: string, inProject?: string): void {
     messages
       .filter((message) => !stepOf.has(message))
       .map((message) => message.sessionKey)
-      .filter((key) =>
-        messages
-          .filter((message) => message.sessionKey === key)
-          .every(
-            (message) =>
-              !stepOf.has(message) && isEvaluatorTime(toMilliseconds(message.time), evaluationEnd),
-          ),
-      ),
+      .filter((key) => {
+        const own = messages.filter((message) => message.sessionKey === key);
+        return (
+          own.every((message) => !stepOf.has(message)) &&
+          isEvaluatorSession(
+            own.map((message) => toMilliseconds(message.time)),
+            evaluationEnd,
+          )
+        );
+      }),
   );
   const designerKeys = new Set(
     messages

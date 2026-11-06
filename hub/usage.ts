@@ -2,7 +2,12 @@ import { existsSync, readFileSync, realpathSync, statSync, type Stats } from "no
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { isInside } from "../cli/usage/index.ts";
-import { isDesignerTime, isEvaluatorTime, type StageTimes, type StepWindow } from "../cli/retro.ts";
+import {
+  isDesignerTime,
+  isEvaluatorSession,
+  type StageTimes,
+  type StepWindow,
+} from "../cli/retro.ts";
 import type { SessionFile, TranscriptPage } from "./types.ts";
 
 export type Harness = "omp" | "claude" | "codex";
@@ -309,7 +314,7 @@ export class UsageIndex {
   #stageOf(file: string, stages: StageTimes): "evaluator" | "designer" | null {
     const times = this.#entries.get(file)?.messages?.map((message) => message.time) ?? [];
     if (times.length === 0) return null;
-    if (times.every((time) => isEvaluatorTime(time, stages.evaluationEnd))) return "evaluator";
+    if (isEvaluatorSession(times, stages.evaluationEnd)) return "evaluator";
     if (times.every((time) => isDesignerTime(time, stages.designStart, stages.designEnd)))
       return "designer";
     return null;

@@ -3971,12 +3971,14 @@ function stageModelWorld(options: { designerSession: boolean }) {
       "designer",
       workspacePath,
       [
-        { time: after(60), costUsd: 0.01, model: "session/designer-first" },
-        { time: after(90), costUsd: 0.01, model: "session/designer-last" },
-        { time: after(91), costUsd: 0.01, model: "session/helper-model", purpose: "job-widget" },
+        { time: after(20), costUsd: 0.01, model: "session/designer-first" },
+        { time: after(25), costUsd: 0.01, model: "session/designer-last" },
+        { time: after(26), costUsd: 0.01, model: "session/helper-model", purpose: "job-widget" },
       ],
-      after(50),
+      after(19),
     );
+  // The designer started after evaluation.recorded (10 s) and ended inside the evaluator's grace
+  // interval (to 70 s): a session that starts after the boundary is never the evaluator.
   const worker = (stage: string) => ({
     taskId: `task-${stage}`,
     state: "running",
