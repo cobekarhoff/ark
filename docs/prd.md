@@ -69,7 +69,7 @@ Tickets are on the Ark backlog. Acceptance summaries are short. Each ticket hold
 
 ## How it works
 
-You talk to Master Chief. For each approved ticket, Master Chief starts a run lead through Orca. The run lead reads the ticket, plans the work, and asks you to approve the plan. Workers then build, test, and review. When the work passes, the run lead opens merge requests and you merge them.
+You talk to Master Chief. For each approved ticket, Master Chief starts a run lead through Orca. The run lead reads the ticket, plans the work, and asks you to approve the plan. Workers then build, test, and review. When the work passes, the run lead opens merge requests and you merge them. While the MRs are open, Master Chief watches them and starts the run lead again for a failed check, a human comment or a conflict. The run lead fixes it in an MR round and pushes to the same branch.
 
 Orca hosts the agents, carries messages, and holds the queue. Plannotator shows the plan and the merge request review. The `ark` command keeps run state and runs the mechanical steps. Skills tell each agent what to do.
 
