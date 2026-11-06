@@ -27,7 +27,7 @@ import { ArkError } from "../errors";
 import { caseIdsIn } from "./case";
 import type { Parser, TestResult } from "./index";
 
-const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+-AC\d+\b/;
+const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+[-/]AC\d+\b/;
 
 const entities: Record<string, string> = { lt: "<", gt: ">", quot: '"', apos: "'", amp: "&" };
 

@@ -17,7 +17,7 @@ import type { Parser, TestResult } from "./index";
 type BehaveElement = { type: string; name: string; tags?: string[]; status?: string };
 type BehaveFeature = { name: string; tags?: string[]; elements?: BehaveElement[] };
 
-const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+-AC\d+\b/g;
+const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+[-/]AC\d+\b/g;
 
 function statusOf(behaveStatus: string | undefined): TestResult["status"] {
   if (behaveStatus === "passed") return "passed";
