@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendEvent } from "../cli/events.ts";
+import { deriveState, readEvents } from "../cli/events.ts";
 import {
   ark,
   recordEvaluation,
@@ -512,8 +512,19 @@ describe("ark test on a refactor run", () => {
       const [event] = testCompleted(runDirectory);
       expect(event.base_passed).toBe(false);
       if (unrecorded) {
-        const { base_passed: _recorded, ...rest } = event;
-        appendEvent(runDirectory, "test.completed", rest);
+        // An old log predates base_passed: drop it from the only test.completed event.
+        const eventsFile = join(runDirectory, "events.ndjson");
+        const lines = readFileSync(eventsFile, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            const logged = JSON.parse(line);
+            if (logged.type === "test.completed") delete logged.data.base_passed;
+            return JSON.stringify(logged);
+          });
+        writeFileSync(eventsFile, `${lines.join("\n")}\n`);
+        expect(testCompleted(runDirectory)).toHaveLength(1);
+        expect(deriveState(readEvents(runDirectory)).base_passed).toBeUndefined();
       }
 
       const opened = ark("merge-request", "open", runId);
