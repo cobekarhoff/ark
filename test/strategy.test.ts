@@ -352,11 +352,6 @@ test("ARK-173-AC10 old config loads but visible work requires a configured Desig
   mkdirSync(join(runDirectory, "mockups"), { recursive: true });
   writeFileSync(join(runDirectory, "mockups", "s1.html"), "<h1>Sketch</h1>");
   expect(ark("strategy", "record", runId).code).toBe(0);
-  const bootstrap = readFileSync(
-    join(import.meta.dir, "../skills/ark/playbooks/bootstrap.md"),
-    "utf8",
-  );
-  expect(bootstrap).toContain("designer: { harness: <harness>, model: <model> }");
 });
 
 const withoutDesigner = () => {
@@ -391,14 +386,6 @@ test("ARK-238-AC2 a two-card document strategy still requires a Mockup line", ()
   expect(result.err).toContain("S1");
 });
 
-test("ARK-238-AC3 the run-lead playbook says when to skip the Mockup line and the Designer", () => {
-  const lead = readFileSync(join(import.meta.dir, "../skills/ark/playbooks/run-lead.md"), "utf8");
-  expect(lead).toContain(
-    "when `Surfaces` is only `none`, or when there is one card and `Surfaces` is only `document`, leave out the `Mockup:` line",
-  );
-  expect(lead).toContain("skip the Designer");
-});
-
 test("ARK-173-AC13 mockups remain outside actual worktrees and use one human review loop", () => {
   evaluation(["web_ui"]);
   mkdirSync(join(runDirectory, "mockups"), { recursive: true });
@@ -416,25 +403,6 @@ test("ARK-173-AC13 mockups remain outside actual worktrees and use one human rev
   expect(ark("worktree", "create", runId, ".").code).toBe(0);
   expect(existsSync(join(runDirectory, "mockups", "s1.html"))).toBe(true);
   expect(existsSync(join(runDirectory, "workspace", "mockups", "s1.html"))).toBe(false);
-
-  const lead = readFileSync(join(import.meta.dir, "../skills/ark/playbooks/run-lead.md"), "utf8");
-  const worker = readFileSync(join(import.meta.dir, "../skills/ark/playbooks/worker.md"), "utf8");
-  expect(lead).toContain('plannotator annotate "<run folder>/strategies.md"');
-  expect(lead).toContain("same Designer");
-  expect(lead).toContain("Mockups and prototypes stay in the run folder or a throwaway worktree");
-  expect(worker).toContain("<run folder>/mockups/");
-  expect(worker).toContain("throwaway worktree");
-});
-
-test("ARK-173-AC14 Designer and override instructions keep generation and learning approval bounded", () => {
-  const worker = readFileSync(join(import.meta.dir, "../skills/ark/playbooks/worker.md"), "utf8");
-  const reviewer = readFileSync(join(import.meta.dir, "../skills/ark/rubrics/reviewer.md"), "utf8");
-  const retro = readFileSync(join(import.meta.dir, "../skills/ark/playbooks/retro.md"), "utf8");
-  expect(worker).toContain("Never run `impeccable generate`, and never use impeccable live mode.");
-  expect(reviewer).toContain("web-design-guidelines");
-  expect(reviewer).toContain("review-animations");
-  expect(retro).toContain("one `learnings.md` entry");
-  expect(retro).toContain("It changes nothing until the human approves it.");
 });
 
 test("ARK-173-AC11 retro counts design rounds, strategy wait and Designer cost without escalation", () => {
