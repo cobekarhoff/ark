@@ -614,3 +614,18 @@ test("ARK-279-AC3 one card with only the surface document needs no Skills line",
   strategies(card("S1", "Reason: only.\n"));
   expect(ark("strategy", "record", runId).code).toBe(0);
 });
+
+test("ARK-T42 ARK-328/AC1 ark strategy record needs a Skills line on a mockup card only when the surface is web_ui", () => {
+  expect(evaluation(["cli_output"]).code).toBe(0);
+  writeMockup();
+  strategies(skilledCard());
+  expect(ark("strategy", "record", runId).code).toBe(0);
+
+  expect(evaluation(["web_ui"]).code).toBe(0);
+  const refused = ark("strategy", "record", runId);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("Skills:");
+
+  strategies(skilledCard(requiredUiSkills.join(", ")));
+  expect(ark("strategy", "record", runId).code).toBe(0);
+});

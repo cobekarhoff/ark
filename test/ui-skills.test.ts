@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
+import { reactSkill, requiredUiSkills, uiSkillsFor } from "../cli/ui-skills.ts";
 import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
@@ -40,19 +40,6 @@ const record = (surfaces: string[]) => {
 };
 
 describe("ui-skills", () => {
-  test.each(["web_ui", "cli_output", "document"])(
-    "ARK-279-AC1 surface %s prints the 3 required skills and the React line",
-    (surface) => {
-      record([surface]);
-      const result = ark("ui-skills", runId, "--project", "demo");
-      expect(result.code).toBe(0);
-      expect(result.out.trimEnd().split("\n")).toEqual([
-        ...requiredUiSkills,
-        `${reactSkill} (only when the change touches React code)`,
-      ]);
-    },
-  );
-
   test("ARK-279-AC1 surface none prints none", () => {
     record(["none"]);
     const result = ark("ui-skills", runId, "--project", "demo");
@@ -96,4 +83,30 @@ test("ARK-279-AC9 docs/reference/cli.md lists ui-skills, Skills: and skills and 
   expect(before).toContain("| `skills`");
   Bun.spawnSync(["bun", join(import.meta.dir, "..", "scripts/cli-reference.ts")]);
   expect(readFileSync(path, "utf8")).toBe(before);
+});
+
+describe("ARK-T40 ARK-328/AC1 ark ui-skills prints the 3 UI skills only when the surfaces include web_ui", () => {
+  const printed = [...requiredUiSkills, `${reactSkill} (only when the change touches React code)`];
+
+  test.each([
+    ["web_ui", ["web_ui"]],
+    ["document + web_ui", ["document", "web_ui"]],
+  ])("ARK-T40 ARK-328/AC1 %s prints the 3 skills and the React line", (_name, surfaces) => {
+    record(surfaces);
+    const result = ark("ui-skills", runId, "--project", "demo");
+    expect(result.code).toBe(0);
+    expect(result.out.trimEnd().split("\n")).toEqual(printed);
+    expect(uiSkillsFor(surfaces)).toEqual(requiredUiSkills);
+  });
+
+  test.each(["cli_output", "document", "none"])(
+    "ARK-T40 ARK-328/AC1 %s alone prints none",
+    (surface) => {
+      record([surface]);
+      const result = ark("ui-skills", runId, "--project", "demo");
+      expect(result.code).toBe(0);
+      expect(result.out.trim()).toBe("none");
+      expect(uiSkillsFor([surface])).toEqual([]);
+    },
+  );
 });

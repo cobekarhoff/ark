@@ -6,9 +6,9 @@ import { findRun } from "./paths.ts";
 export const requiredUiSkills = ["impeccable", "emil-design-eng", "web-design-guidelines"];
 export const reactSkill = "vercel-react-best-practices";
 
-/** Required skills for a `Surfaces` list: none for `none` or an empty list. */
+/** Required skills for a `Surfaces` list: the UI skills only when the list includes `web_ui`, else none. */
 export function uiSkillsFor(surfaces: string[]): string[] {
-  return surfaces.some((surface) => surface !== "none") ? requiredUiSkills : [];
+  return surfaces.includes("web_ui") ? requiredUiSkills : [];
 }
 
 /** Every skill `ark ui-skills` lists for these surfaces, required or optional. */

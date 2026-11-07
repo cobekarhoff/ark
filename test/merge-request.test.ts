@@ -1100,3 +1100,13 @@ test(
   },
   { timeout: 30_000 },
 );
+
+test(
+  "ARK-T43 ARK-328/AC1 the merge request has the UI/UX checks block only for web_ui",
+  () => {
+    uiRun(["cli_output"], findingsFile);
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    for (const call of created()) expect(optionValue(call, "--body")).not.toContain("UI/UX");
+  },
+  { timeout: 30_000 },
+);
