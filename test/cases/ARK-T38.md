@@ -1,35 +1,47 @@
 ---
 id: ARK-T38
-title: ARK-T38 ark test takes over a lock whose holder process has ended, at once and with one message
+title: ARK-T38 provenance line has three variants
 level: integration
-technique: equivalence classes (dead holder against no lock), error guessing (no lock at all)
+technique: equivalence classes on gate answers (criteria, strategy, none) and precedence of the strategy answer
 priority: high
-risk: a crashed `ark test` (kill -9, power loss) leaves its lock and every later `ark test` waits for ever; or the takeover message prints when no lock existed, or takeover waits out a timeout instead of acting at once
+risk: the body claims the human shaped the solution or wrote the spec when they did not, uses the wrong handle, or omits the not-reviewed sentence
 status: active
-changed_by: 2026-11-06-ARK-343-1
+changed_by: 2026-11-06-ARK-316-1
 ---
 
 ## Objective
 
-Prove that a lock naming a dead pid is taken over at once with `took over a stale ark test lock of pid <pid>`, and that a live holder is not taken over. Serves ARK-343/AC2.
+Prove that the first body line names the token owner and one of three variants chosen from the gates the human answered. Serves ARK-316/AC5.
 
-Expected: When the holder pid of the lock no longer exists, the system shall take over the lock without waiting and print `took over a stale ark test lock of pid <pid>` once; when no lock exists, the system shall not print that line.
+Expected: When the human answered a strategy gate, the system shall write `who shaped the solution`.
 
 ## Preconditions
 
-- A temporary `ARK_HOME` with a fixture project and one fixture run whose suite appends `start <ms>` to a log file.
-- A dead pid: spawn a short child, wait for it to exit, keep its pid.
+- Three fixture runs: (A) the human answered the criteria gate only; (B) the human answered a strategy gate; (C) no gate answered.
+- A fake `gh` whose `gh api user` returns login `cobekarhoff`, and a fake `glab` whose `glab api user` returns username `cobe.k`.
+- A fixture run with both a criteria and a strategy answer, both answered by the human (run D).
+- Run E: the human answered the criteria gate, and the strategy gate was answered by auto. Run F: both gates answered by auto.
 
 ## Steps
 
-1. Write the lock in the format `ark test` writes, with the dead pid and a run name. Run `ark test` for the fixture run and measure the time from start to `start` in the log.
-2. Run `ark test` again with no lock present.
+1. Build the body for run A with the fake `gh`. Read line 1 and line 2.
+2. Build the body for run B. Read the first line.
+3. Build the body for run C. Read the first line.
+4. Build the body for run D, E and F.
+5. Build the body for run A on a GitLab host with the fake `glab`.
+6. Run `bun test test/pr-writing.test.ts`.
 
 ## Expected results
 
-- Step 1: exit 0, the suite starts, the stdout holds `took over a stale ark test lock of pid <dead pid>` once and no `waiting for` line, and the start comes in well under the time one wait poll plus a margin would allow (under 2 s).
-- Step 2: no `took over` line.
+- A: `> Written by an AI agent on behalf of @cobekarhoff, following their spec.` then `@cobekarhoff has not reviewed it yet.`
+- B: `> Written by an AI agent on behalf of @cobekarhoff, who shaped the solution.` then `@cobekarhoff has not reviewed it yet.`
+- C: `> Written by an AI agent on behalf of @cobekarhoff.` then `@cobekarhoff has not reviewed it yet.`
+- D (both gates answered by the human): the strategy variant, `who shaped the solution`, not `following their spec`.
+- E: a strategy gate answered by auto does not count, so the criteria variant `following their spec`. F: no gate counts, so the plain variant of C.
+- On GitLab the handle is `@cobe.k` from `glab api user`.
+- The provenance line is the first line of the body in every variant.
+- `bun test test/pr-writing.test.ts` exits 0.
 
 ## Screenshot checkpoints
 
-None, CLI output.
+None. The surface is CLI output and Markdown text; no screenshot applies.

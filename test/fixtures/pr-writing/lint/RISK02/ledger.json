@@ -1,0 +1,8 @@
+{
+  "files": [
+    {
+      "path": "db/migrations/001_add_column.sql",
+      "status": "A"
+    }
+  ]
+}

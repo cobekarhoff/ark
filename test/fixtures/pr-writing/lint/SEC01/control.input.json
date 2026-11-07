@@ -1,0 +1,3 @@
+{
+  "diff": "+const token = process.env.GH_TOKEN;\n+await fetch(url, { headers: { Authorization: token } });\n"
+}

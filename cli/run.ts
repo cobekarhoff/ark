@@ -48,6 +48,8 @@ function readTicket(ticketFile: string): {
     if (typeof fields[key] !== "string" || fields[key] === "")
       throw new ArkError(`${ticketFile}: ticket field ${key} is required`);
   }
+  if (fields.summary !== undefined && (typeof fields.summary !== "string" || fields.summary === ""))
+    throw new ArkError(`${ticketFile}: ticket field summary must be a non-empty string`);
   const kind = fields.kind ?? "feature";
   if (!(ticketKinds as readonly unknown[]).includes(kind))
     throw new ArkError(

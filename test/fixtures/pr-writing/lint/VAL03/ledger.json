@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "rank": "P2",
+      "title": "Slow path",
+      "file": "review-1.md"
+    }
+  ]
+}

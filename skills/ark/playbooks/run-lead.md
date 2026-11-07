@@ -516,7 +516,9 @@ Just before the next command, write the current time (ISO 8601 UTC) to `<run fol
 ark merge-request open <run>
 ```
 
-The command pushes each repo's branch and opens one MR for each repo, in dependency order. If it fails, read the error. Fix what you can: for example, a push that needs a rebase goes back to the implementer. If it needs the human, such as a missing login for `gh` or `glab`, ask Master Chief.
+The command pushes each repo's branch and opens one ready MR for each repo, in dependency order. The title is `<ticket id>: <summary>` and is 72 characters or less: it uses the ticket's `summary:`, else the ticket title when that fits, else `--summary <text>`. With none it refuses before any push with `ticket has no summary: pass --summary`: run it again with `--summary` naming the outcome. It writes the body from the run folder and lints it; a lint `fail` refuses and names the check. The plan gate answer is the go-ahead, so it needs no confirm flag. If it fails, read the error. Fix what you can: for example, a push that needs a rebase goes back to the implementer. If it needs the human, such as a missing login for `gh` or `glab`, ask Master Chief.
+
+Run `ark merge-request open <run>` again after each post-MR round of section 10a, once `ark test <run>` passes at the new head: it pushes the new head and replaces only the text between `<!-- pr-writing:begin -->` and `<!-- pr-writing:end -->` in the body of each open MR, so the body stops listing a fixed finding. It keeps what a person wrote outside the markers, and rewrites a body that has no markers once. Do not edit an MR body by hand for this.
 
 If `ark merge-request open <run>` refuses with `changed since the last test run`, a commit followed the last test. Run `ark test <run>` and open again. This needs no gate and no escalation answer.
 

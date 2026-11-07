@@ -1,4 +1,4 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["docs/design/hub/**"]
+  "ignorePatterns": ["docs/design/hub/**", "test/fixtures/pr-writing/lint/**"]
 }

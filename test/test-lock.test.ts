@@ -248,7 +248,7 @@ async function expectCleanRunOfB(): Promise<void> {
 }
 
 describe("ark test lock", () => {
-  test("ARK-T37 ARK-343/AC1 a second ark test of another project waits for the first and starts its suites only after it ends", async () => {
+  test("ARK-T59 ARK-343/AC1 a second ark test of another project waits for the first and starts its suites only after it ends", async () => {
     const first = startTest(runA);
     await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
     const second = startTest(runB);
@@ -263,7 +263,7 @@ describe("ark test lock", () => {
     expect(existsSync(lockDirectory())).toBe(false);
   });
 
-  test("ARK-T37 ARK-343/AC1 the lock is gone right after a failing suite", async () => {
+  test("ARK-T59 ARK-343/AC1 the lock is gone right after a failing suite", async () => {
     writeFileSync(join(fixtures, `fail-${runA}`), "");
     const first = startTest(runA);
     await first.stdout;
@@ -272,7 +272,7 @@ describe("ark test lock", () => {
   });
 
   for (const signal of ["SIGINT", "SIGTERM"] as const)
-    test(`ARK-T37 ARK-343/AC1 the lock is gone right after ${signal} ends ark test`, async () => {
+    test(`ARK-T59 ARK-343/AC1 the lock is gone right after ${signal} ends ark test`, async () => {
       const first = startTest(runA);
       await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
       first.process.kill(signal);
@@ -283,7 +283,7 @@ describe("ark test lock", () => {
 
   // The suite of A needs two seconds to end after SIGTERM, as a suite with its own cleanup does.
   for (const signal of ["SIGINT", "SIGTERM"] as const)
-    test(`ARK-T37 ARK-343/AC1 ${signal} keeps the lock until the suite of the signalled ark test has ended`, async () => {
+    test(`ARK-T59 ARK-343/AC1 ${signal} keeps the lock until the suite of the signalled ark test has ended`, async () => {
       writeFileSync(join(fixtures, "hold"), "");
       writeFileSync(join(fixtures, "slowterm"), "");
       const first = startTest(runA);
@@ -300,7 +300,7 @@ describe("ark test lock", () => {
       expect(lines.indexOf(`end ${runA}`)).toBeLessThan(lines.indexOf(`start ${runB}`));
     });
 
-  test("ARK-T38 ARK-343/AC2 a lock of a dead holder is taken over at once with one message, and no lock gives no message", async () => {
+  test("ARK-T60 ARK-343/AC2 a lock of a dead holder is taken over at once with one message, and no lock gives no message", async () => {
     const dead = Bun.spawn(["true"]);
     await dead.exited;
     mkdirSync(lockDirectory(), { recursive: true });
@@ -330,7 +330,7 @@ describe("ark test lock", () => {
 
   // A reads the dead holder and stops; B takes over; A resumes while C waits. Pausing A after its filesystem calls
   // is the only fake: B and C run the real module. The old takeover moved B's live lock away and let C in beside B.
-  test("ARK-T38 ARK-343/AC2 a stale takeover that resumes late never lets a second process in beside the live holder", async () => {
+  test("ARK-T60 ARK-343/AC2 a stale takeover that resumes late never lets a second process in beside the live holder", async () => {
     const dead = Bun.spawn(["true"]);
     await dead.exited;
     mkdirSync(lockDirectory(), { recursive: true });
@@ -411,7 +411,7 @@ rmdirSync(home+'/inside');release();`,
     }
   });
 
-  test("ARK-T39 ARK-343/AC3 ark chief state lists the holder and each live waiter with waited time, and no dead waiter", async () => {
+  test("ARK-T61 ARK-343/AC3 ark chief state lists the holder and each live waiter with waited time, and no dead waiter", async () => {
     const state = () => ark("chief", "state", "--project", projectA).out;
     const heading = "## ark test lock";
     expect(state()).not.toContain(heading);

@@ -496,6 +496,7 @@ export async function testRun(runId: string, inProject?: string): Promise<void> 
       );
     appendEvent(directory, "test.completed", {
       passed,
+      ...(checks.length > 0 ? { checks } : {}),
       heads,
       suites,
       criteria: criterionStatuses,

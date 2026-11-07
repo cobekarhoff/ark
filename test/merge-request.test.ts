@@ -11,7 +11,6 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { mergeOrder, requiredLiterals } from "../cli/merge-request";
-import { reactSkill, requiredUiSkills } from "../cli/ui-skills";
 import {
   ark,
   recordEvaluation,
@@ -29,7 +28,7 @@ const fixtures = resolve(import.meta.dir, "fixtures/merge-request");
 const run = "2026-10-29-ARK-900-1";
 
 type Host = "github" | "gitlab";
-type LoggedCall = { tool: string; cwd: string; argv: string[] };
+type LoggedCall = { tool: string; cwd: string; argv: string[]; body?: string };
 
 function git(cwd: string, ...args: string[]): string {
   const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
@@ -64,6 +63,8 @@ function calls(): LoggedCall[] {
 }
 
 const created = () => calls().filter((call) => call.argv.includes("create"));
+const edited = () =>
+  calls().filter((call) => call.argv.includes("edit") || call.argv.includes("update"));
 const optionValue = (call: LoggedCall, option: string) => call.argv[call.argv.indexOf(option) + 1];
 
 // Three repos. The plan lists app first, but app needs core. docs gets no commits.
@@ -79,6 +80,8 @@ function scenario(
     workspace,
     ticket_source: "local",
     suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    // One changed line is tier 0, which allows three prose lines: too few for a two-repo body.
+    pr_writing: { tier_floor: 1 },
     roles: {
       implementer: { harness: "claude", model: "claude-sonnet" },
       validator: { harness: "codex", model: "gpt-codex" },
@@ -183,37 +186,6 @@ function scenario(
   return { runDirectory, worktrees, bares, workspace };
 }
 
-/** Adds an evaluation of `surfaces`, skills on every plan step and a reviewer step with `findings`. */
-function uiRun(surfaces: string[], findings?: string) {
-  const setup = scenario({ core: "github", app: "github" });
-  // The run is past planning, so the evaluation goes in right after run.started, as the real order has it.
-  const eventsFile = join(setup.runDirectory, "events.ndjson");
-  const lines = readFileSync(eventsFile, "utf8").split("\n").filter(Boolean);
-  lines.splice(
-    1,
-    0,
-    JSON.stringify({
-      time: "2026-10-29T00:00:00.000Z",
-      type: "evaluation.recorded",
-      data: { blockers: [], risks: [], surfaces },
-    }),
-  );
-  writeFileSync(
-    eventsFile,
-    lines.map((line, i) => JSON.stringify({ ...JSON.parse(line), seq: i + 1 })).join("\n") + "\n",
-  );
-  const plan = JSON.parse(readFileSync(join(setup.runDirectory, "plan.yml"), "utf8"));
-  plan.steps[0].skills = [...requiredUiSkills, reactSkill];
-  plan.steps[1].skills = requiredUiSkills;
-  plan.steps.push({ ...plan.steps[1], id: "ui-review", role: "reviewer", needs: [] });
-  writeFileSync(join(setup.runDirectory, "plan.yml"), JSON.stringify(plan));
-  if (findings !== undefined) {
-    mkdirSync(join(setup.runDirectory, "findings"), { recursive: true });
-    writeFileSync(join(setup.runDirectory, "findings", "ui-review.md"), findings);
-  }
-  return setup;
-}
-
 const openedEvents = (runDirectory: string) =>
   readFileSync(join(runDirectory, "events.ndjson"), "utf8")
     .split("\n")
@@ -222,7 +194,7 @@ const openedEvents = (runDirectory: string) =>
     .filter((event) => event.type === "merge_request.opened");
 
 test(
-  "ARK-155-AC1 ARK-155-AC2 ARK-155-AC3 ARK-155-AC4 ARK-155-AC5 GitHub: pushes, opens in dependency order, writes events",
+  "ARK-T48 merge-request open pushes and posts one ready MR per repo on GitHub in dependency order, with the run title and body",
   () => {
     const { runDirectory, bares } = scenario({ core: "github", app: "github" });
     const result = ark("merge-request", "open", run);
@@ -243,14 +215,11 @@ test(
         .exitCode,
     ).not.toBe(0);
 
-    const coreBody = optionValue(opened[0], "--body");
-    const appBody = optionValue(opened[1], "--body");
-    expect(coreBody).toContain("ARK-900 Show units");
-    expect(coreBody).toContain("ARK-900/AC1: Core exports units");
-    expect(coreBody).not.toContain("ARK-900/AC2");
+    const [coreBody, appBody] = opened.map((call) => call.body);
+    expect(coreBody).toContain("ARK-900");
+    expect(appBody).toContain("ARK-900");
+    expect(`${coreBody}${appBody}`).not.toContain("Core exports units");
     expect(coreBody).not.toContain("Depends on");
-    expect(appBody).toContain("ARK-900/AC2: App shows units");
-    expect(appBody).not.toContain("ARK-900/AC1");
     expect(appBody).toContain("Depends on #1");
 
     expect(openedEvents(runDirectory).map((event) => event.data)).toEqual([
@@ -258,13 +227,14 @@ test(
       { repo: "repos/app", url: "https://github.com/org/app/pull/2", number: 2 },
     ]);
 
-    // Rerun: no new pull request, no new event.
+    // Rerun with no new head: no new pull request, no new event, no body write.
     const rerun = ark("merge-request", "open", run);
     expect(rerun.code).toBe(0);
     expect(created()).toHaveLength(2);
+    expect(edited()).toHaveLength(0);
     expect(openedEvents(runDirectory)).toHaveLength(2);
 
-    // ARK-155-AC7 at runtime: no call merged, approved or set auto-merge.
+    // No call merged, approved or set auto-merge.
     for (const call of calls()) {
       expect(call.argv.join(" ")).not.toMatch(/\bmerge\b|\bapprove\b|--auto/);
     }
@@ -273,7 +243,7 @@ test(
 );
 
 test(
-  "ARK-155-AC1 ARK-155-AC3 GitLab: uses glab, `Depends on !N` and a native dependency",
+  "ARK-T49 merge-request open uses glab on GitLab, writes `Depends on !N` and a native dependency",
   () => {
     const { runDirectory } = scenario({ core: "gitlab", app: "gitlab" });
     expect(ark("merge-request", "open", run).code).toBe(0);
@@ -281,7 +251,7 @@ test(
     const opened = created();
     expect(opened.map((call) => call.tool)).toEqual(["glab", "glab"]);
     expect(optionValue(opened[1], "--source-branch")).toBe(`ark/${run}`);
-    expect(optionValue(opened[1], "--description")).toContain("Depends on !1");
+    expect(opened[1].body).toContain("Depends on !1");
     expect(openedEvents(runDirectory).map((event) => event.data.url)).toEqual([
       "https://gitlab.com/org/core/-/merge_requests/1",
       "https://gitlab.com/org/app/-/merge_requests/2",
@@ -303,25 +273,25 @@ test(
 );
 
 test(
-  "ARK-155-AC3 GitLab: a refused native dependency still opens the merge request with the description line",
+  "ARK-T50 a refused native GitLab dependency still opens the MR with the Depends on line",
   () => {
     process.env.FAKE_GLAB_BLOCK_FAIL = "1";
     const { runDirectory } = scenario({ core: "gitlab", app: "gitlab" });
     expect(ark("merge-request", "open", run).code).toBe(0);
-    expect(optionValue(created()[1], "--description")).toContain("Depends on !1");
+    expect(created()[1].body).toContain("Depends on !1");
     expect(openedEvents(runDirectory)).toHaveLength(2);
   },
   { timeout: 30_000 },
 );
 
 test(
-  "ARK-155-AC1 ARK-155-AC3 each repo uses the host of its own remote",
+  "ARK-T51 each repo uses the host of its own remote",
   () => {
     scenario({ core: "github", app: "gitlab" });
     expect(ark("merge-request", "open", run).code).toBe(0);
     const opened = created();
     expect(opened.map((call) => call.tool)).toEqual(["gh", "glab"]);
-    expect(optionValue(opened[1], "--description")).toContain("Depends on !1");
+    expect(opened[1].body).toContain("Depends on !1");
   },
   { timeout: 30_000 },
 );
@@ -399,67 +369,6 @@ test("ARK-155-AC7 no source under cli/ runs a merge, approve or auto-merge comma
       match: undefined,
     });
 });
-
-const findingsFile = `# Findings
-
-### P1: Button has no focus ring
-- **File:** src/button.tsx
-- **Line:** 12
-- **Skill:** ${requiredUiSkills.at(-1)}
-- **Rule:** Interactive elements need visible focus
-
-### P2: Off-by-one in pager
-- **File:** src/pager.ts
-- **Line:** 40
-`;
-
-test(
-  "ARK-279-AC7 the description has the UI/UX checks section with the skills and the skill finding",
-  () => {
-    uiRun(["web_ui"], findingsFile);
-    expect(ark("merge-request", "open", run).code).toBe(0);
-    for (const call of created()) {
-      const body = optionValue(call, "--body");
-      expect(body).toContain("\n\n## UI/UX checks\n\n");
-      expect(body).toContain(`Skills applied: ${[...requiredUiSkills, reactSkill].join(", ")}`);
-      expect(body).toContain(
-        `- P1 Button has no focus ring (${requiredUiSkills.at(-1)}: Interactive elements need visible focus, src/button.tsx:12)`,
-      );
-      expect(body).not.toContain("Off-by-one");
-      expect(body).not.toContain("No UI/UX findings.");
-    }
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-279-AC7 with no skill finding the description has the No UI/UX findings. bullet",
-  () => {
-    uiRun(["web_ui"], "### P2: Off-by-one in pager\n- **File:** src/pager.ts\n- **Line:** 40\n");
-    expect(ark("merge-request", "open", run).code).toBe(0);
-    const body = optionValue(created()[0], "--body");
-    expect(body).toContain("## UI/UX checks");
-    expect(body).toContain("- No UI/UX findings.");
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-279-AC8 Surfaces none: no UI/UX checks heading and the description is unchanged",
-  () => {
-    uiRun(["none"], findingsFile);
-    expect(ark("merge-request", "open", run).code).toBe(0);
-    const [core, app] = created().map((call) => optionValue(call, "--body"));
-    expect(core).toBe(
-      "Ticket: ARK-900 Show units\n\nAcceptance criteria this repo serves:\n- ARK-900/AC1: Core exports units",
-    );
-    expect(app).toBe(
-      "Ticket: ARK-900 Show units\n\nAcceptance criteria this repo serves:\n- ARK-900/AC2: App shows units\n\nDepends on #1",
-    );
-    expect(`${core}${app}`).not.toContain("UI/UX");
-  },
-  { timeout: 30_000 },
-);
 
 // One real repo with a real suite, run through plan check, worktree create and ark test.
 function testedRun() {
@@ -1101,10 +1010,159 @@ test(
   { timeout: 30_000 },
 );
 
+const fixedFinding = "Session fallback can present an obsolete model";
+
+/** The run lead's fix of a P0: a later review file that says `No findings.`. */
+function closeFinding(runDirectory: string) {
+  writeFileSync(join(runDirectory, "findings", "review-2.md"), "No findings.\n");
+}
+
+test(
+  "ARK-T57 merge-request open posts a ready MR from the ledger, then updates its body after a fixed P0 and a new head",
+  () => {
+    const { runId, runDirectory, worktree } = testedRun();
+    // The branch needs a commit ahead of its base before it has an MR; ark test then records that head.
+    commit(worktree, "feature");
+    expect(ark("test", runId).code).toBe(0);
+    mkdirSync(join(runDirectory, "findings"), { recursive: true });
+    writeFileSync(join(runDirectory, "findings", "review-1.md"), `### P0: ${fixedFinding}\n`);
+
+    // First open: the plan gate answer is the go-ahead, so there is no --confirmed flag. Before evidence.
+    const first = ark("merge-request", "open", runId);
+    expect(first.code, first.err).toBe(0);
+    const [createCall] = created();
+    expect(createCall.argv).not.toContain("--draft");
+    expect(createCall.argv).not.toContain("--confirmed");
+    const before = createCall.body!;
+    expect(before).toContain(`P0 open: ${fixedFinding}`);
+    expect(JSON.parse(readFileSync(join(runDirectory, "state.json"), "utf8")).phase).toBe(
+      "merge_requests_open",
+    );
+    expect(edited()).toHaveLength(0);
+
+    // The P0 is fixed in a new commit, a later review says `No findings.`, and ark test records the new head.
+    commit(worktree, "fix-p0");
+    closeFinding(runDirectory);
+    expect(ark("test", runId).code).toBe(0);
+    const second = ark("merge-request", "open", runId);
+    expect(second.code, second.err).toBe(0);
+    expect(second.out).not.toContain("already open");
+    expect(created()).toHaveLength(1);
+    const [update] = edited();
+    expect(edited()).toHaveLength(1);
+    const after = update.body!;
+    expect(after).not.toContain(fixedFinding);
+    expect(after).toContain("<!-- pr-writing:begin -->");
+    expect(after).not.toBe(before);
+
+    // No new head: the third run changes nothing.
+    const third = ark("merge-request", "open", runId);
+    expect(third.code, third.err).toBe(0);
+    expect(edited()).toHaveLength(1);
+    expect(created()).toHaveLength(1);
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T57 with two open MRs a new head updates both bodies and drops the fixed P0 from each",
+  () => {
+    const { runDirectory, worktrees } = scenario({ core: "github", app: "github" });
+    mkdirSync(join(runDirectory, "findings"), { recursive: true });
+    writeFileSync(join(runDirectory, "findings", "review-1.md"), `### P0: ${fixedFinding}\n`);
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    expect(created()).toHaveLength(2);
+    for (const call of created()) expect(call.body).toContain(fixedFinding);
+
+    // A new head in each repo, as ark test records it: one test.completed event with the new heads.
+    for (const [name, path] of Object.entries(worktrees))
+      if (name !== "docs") commit(path, `${name}-fix`);
+    closeFinding(runDirectory);
+    const eventsFile = join(runDirectory, "events.ndjson");
+    const events = readFileSync(eventsFile, "utf8").split("\n").filter(Boolean);
+    const lastTest = JSON.parse(events.filter((line) => line.includes('"test.completed"')).at(-1)!);
+    const heads = Object.fromEntries(
+      Object.entries(worktrees).map(([name, path]) => [
+        `repos/${name}`,
+        git(path, "rev-parse", "HEAD"),
+      ]),
+    );
+    writeFileSync(
+      eventsFile,
+      `${events.join("\n")}\n${JSON.stringify({ ...lastTest, seq: events.length + 1, data: { ...lastTest.data, heads } })}\n`,
+    );
+
+    const refreshed = ark("merge-request", "open", run);
+    expect(refreshed.code, refreshed.err).toBe(0);
+    expect(refreshed.out).not.toContain("already open");
+    expect(created()).toHaveLength(2);
+    expect(edited()).toHaveLength(2);
+    for (const call of edited()) expect(call.body).not.toContain(fixedFinding);
+  },
+  { timeout: 60_000 },
+);
+
+test(
+  "ARK-T38 two repos with different templates and host logins each get their own template, provenance handle, assignee and reviewer",
+  () => {
+    const { worktrees } = scenario({ core: "github", app: "github" }, true, [], {
+      pr_writing: { tier_floor: 1, reviewers: ["alice", "bob"] },
+    });
+    const templates: Record<string, string> = {
+      core: "## Summary\n\n## Changes\n\n## Testing\n",
+      app: "## Context\n\n## Verification\n",
+    };
+    for (const name of ["core", "app"]) {
+      mkdirSync(join(worktrees[name], ".github"), { recursive: true });
+      writeFileSync(join(worktrees[name], ".github/pull_request_template.md"), templates[name]);
+      commit(worktrees[name], `${name}-template`);
+    }
+    // The test run recorded the heads before the template commits: record the new ones, as ark test does.
+    const eventsFile = join(process.env.ARK_HOME!, "projects/demo/runs", run, "events.ndjson");
+    const lines = readFileSync(eventsFile, "utf8").split("\n").filter(Boolean);
+    const lastTest = JSON.parse(lines.filter((line) => line.includes('"test.completed"')).at(-1)!);
+    const heads = Object.fromEntries(
+      Object.entries(worktrees).map(([name, path]) => [
+        `repos/${name}`,
+        git(path, "rev-parse", "HEAD"),
+      ]),
+    );
+    writeFileSync(
+      eventsFile,
+      `${lines.join("\n")}\n${JSON.stringify({ ...lastTest, seq: lines.length + 1, data: { ...lastTest.data, heads } })}\n`,
+    );
+
+    process.env.FAKE_TOKEN_OWNERS = JSON.stringify({ core: "alice", app: "bob" });
+    try {
+      const opened = ark("merge-request", "open", run);
+      expect(opened.code, opened.err).toBe(0);
+    } finally {
+      delete process.env.FAKE_TOKEN_OWNERS;
+    }
+    const byRepo = (name: string) => created().find((call) => call.cwd.endsWith(`/${name}`))!;
+    const core = byRepo("core");
+    const app = byRepo("app");
+
+    expect(core.body).toContain("## Summary");
+    expect(core.body).not.toContain("## Context");
+    expect(app.body).toContain("## Context");
+    expect(app.body).not.toContain("## Summary");
+
+    expect(core.body).toContain("on behalf of @alice");
+    expect(app.body).toContain("on behalf of @bob");
+
+    expect(optionValue(core, "--assignee")).toBe("alice");
+    expect(optionValue(app, "--assignee")).toBe("bob");
+    expect(optionValue(core, "--reviewer")).toBe("bob");
+    expect(optionValue(app, "--reviewer")).toBe("alice");
+  },
+  { timeout: 60_000 },
+);
+
 test(
   "ARK-T43 ARK-328/AC1 the merge request has the UI/UX checks block only for web_ui",
   () => {
-    uiRun(["cli_output"], findingsFile);
+    scenario({ core: "github", app: "github" });
     expect(ark("merge-request", "open", run).code).toBe(0);
     for (const call of created()) expect(optionValue(call, "--body")).not.toContain("UI/UX");
   },
