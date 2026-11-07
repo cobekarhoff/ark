@@ -20,6 +20,7 @@ import {
   type LintInput,
   type LintResult,
 } from "../skills/pr-writing/lib/lint.ts";
+import { description } from "./fixtures/pr-writing/old-description.ts";
 import { ark, tempArkHome, tempGitRepo, writeProject } from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
@@ -991,27 +992,8 @@ for (const [path, text] of templateSources)
     expect(body.split("## Testing")[1].split("## Related")[0]).toContain("P1 open: Missing guard");
   });
 
-// The base commit whose `description()` wrote MR bodies before this change. Only that function is run, from `git show`.
-const pinnedBase = "9b85039";
-
-/** The MR body that the pinned-base `description()` writes for the criteria of a ledger. */
-async function pinnedBaseBody(ledger: Ledger): Promise<string> {
-  const source = git(root, "show", `${pinnedBase}:cli/merge-request.ts`);
-  const text = source.slice(
-    source.indexOf("function description("),
-    source.indexOf("function createMergeRequest("),
-  );
-  const js = new Bun.Transpiler({ loader: "ts" }).transformSync(text);
-  const { description } = (await import(
-    `data:text/javascript;base64,${Buffer.from(`${js}\nexport { description };`).toString("base64")}`
-  )) as {
-    description: (
-      ticket: { id: string; title: string },
-      criteriaIds: string[],
-      texts: Map<string, { text: string }>,
-      dependencyLines: string[],
-    ) => string;
-  };
+/** The MR body that the frozen pre-change `description()` (commit 9b85039) writes for the criteria of a ledger. */
+function pinnedBaseBody(ledger: Ledger): string {
   return description(
     { id: ledger.ticket!.id, title: ledger.ticket!.title },
     ledger.criteria.map((criterion) => criterion.id),
@@ -1022,7 +1004,7 @@ async function pinnedBaseBody(ledger: Ledger): Promise<string> {
 
 test("ARK-T37 the body of the same run no longer pastes the AC text that the pinned-base builder pasted", async () => {
   const ledger = gappyRun().ledger();
-  const before = await pinnedBaseBody(ledger);
+  const before = pinnedBaseBody(ledger);
   const after = buildBody(ledger);
 
   // The base builder ran on this fixture and pasted the AC text, so the absence below is not vacuous.
@@ -1040,7 +1022,7 @@ test("ARK-T37 the body of the same run no longer pastes the AC text that the pin
     writeFileSync(
       join(keep, "ARK-T37-before.md"),
       note(
-        `before, description() of commit ${pinnedBase} (git show ${pinnedBase}:cli/merge-request.ts)`,
+        "before, description() of commit 9b85039 (frozen in test/fixtures/pr-writing/old-description.ts)",
         before,
       ),
     );
