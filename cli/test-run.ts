@@ -36,16 +36,47 @@ type Status = CriterionStatus;
 /** Running child processes, so a signal can stop them: each has its own process group. */
 const children = new Set<{ pid: number }>();
 
-function stopChildren(): void {
-  for (const child of children)
-    try {
-      process.kill(-child.pid, "SIGTERM");
-    } catch {
-      // already gone
-    }
+/** Milliseconds a suite process group gets after SIGTERM before SIGKILL. */
+const terminateGraceMilliseconds = 10_000;
+const stoppingMilliseconds = 5_000;
+
+/** Set once a signal arrived: no new process starts, and the run stops where it is. */
+let stopping = false;
+
+const groupAlive = (pid: number): boolean => {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+async function waitForGroups(pids: number[], limitMilliseconds: number): Promise<void> {
+  const deadline = Date.now() + limitMilliseconds;
+  while (pids.some(groupAlive) && Date.now() < deadline) await Bun.sleep(25);
+}
+
+/** SIGTERM to every running process group, SIGKILL to those left after the grace time; resolves when all are gone. */
+async function stopChildren(): Promise<void> {
+  stopping = true;
+  const groups = [...children].map((child) => child.pid);
+  const send = (signal: "SIGTERM" | "SIGKILL", pids: number[]) => {
+    for (const pid of pids)
+      try {
+        process.kill(-pid, signal);
+      } catch {
+        // already gone
+      }
+  };
+  send("SIGTERM", groups);
+  await waitForGroups(groups, terminateGraceMilliseconds);
+  send("SIGKILL", groups.filter(groupAlive));
+  await waitForGroups(groups, stoppingMilliseconds);
 }
 
 async function run(command: string[], cwd: string, env?: Record<string, string>) {
+  if (stopping) await new Promise<never>(() => {});
   const child = Bun.spawn(command, {
     cwd,
     stdin: "ignore",
@@ -61,6 +92,8 @@ async function run(command: string[], cwd: string, env?: Record<string, string>)
       new Response(child.stderr).text(),
       child.exited,
     ]);
+    // A signal is stopping the run: never let it go on to the next process or write results.
+    if (stopping) await new Promise<never>(() => {});
     return { code, stdout, stderr };
   } finally {
     children.delete(child);

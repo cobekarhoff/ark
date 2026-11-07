@@ -62,6 +62,7 @@ function writeSuiteScript(directory: string): string {
     `#!/bin/sh
 # usage: suite.sh <run> <fixture directory> <report>
 echo "start $1" >> "$2/suite.log"
+if [ -e "$2/slowterm" ]; then trap 'sleep 2; echo "end $1" >> "$2/suite.log"; exit 143' TERM; fi
 if [ -e "$2/hold" ]; then
   i=0
   while [ ! -e "$2/release" ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
@@ -182,6 +183,7 @@ afterEach(() => {
     join(fixtures, "hold"),
     join(fixtures, "release"),
     join(fixtures, `fail-${runA}`),
+    join(fixtures, "slowterm"),
   ])
     rmSync(path, { recursive: true, force: true });
 });
@@ -279,12 +281,31 @@ describe("ark test lock", () => {
       await expectCleanRunOfB();
     });
 
+  // The suite of A needs two seconds to end after SIGTERM, as a suite with its own cleanup does.
+  for (const signal of ["SIGINT", "SIGTERM"] as const)
+    test(`ARK-T37 ARK-343/AC1 ${signal} keeps the lock until the suite of the signalled ark test has ended`, async () => {
+      writeFileSync(join(fixtures, "hold"), "");
+      writeFileSync(join(fixtures, "slowterm"), "");
+      const first = startTest(runA);
+      await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
+      const second = startTest(runB);
+      await waitFor(() => second.seen().includes("waiting for ark test"), "B to wait");
+      first.process.kill(signal);
+      await first.process.exited;
+      writeFileSync(join(fixtures, "release"), "");
+      await second.process.exited;
+
+      const lines = logLines();
+      expect(lines).toContain(`end ${runA}`);
+      expect(lines.indexOf(`end ${runA}`)).toBeLessThan(lines.indexOf(`start ${runB}`));
+    });
+
   test("ARK-T38 ARK-343/AC2 a lock of a dead holder is taken over at once with one message, and no lock gives no message", async () => {
     const dead = Bun.spawn(["true"]);
     await dead.exited;
     mkdirSync(lockDirectory(), { recursive: true });
     writeFileSync(
-      join(lockDirectory(), "holder.json"),
+      join(lockDirectory(), `holder-${dead.pid}-dead.json`),
       JSON.stringify({
         run: runB,
         pid: dead.pid,
@@ -305,6 +326,83 @@ describe("ark test lock", () => {
     const againOut = await again.stdout;
     expect(await again.process.exited).toBe(0);
     expect(againOut).not.toContain("took over");
+  });
+
+  // A reads the dead holder and stops; B takes over; A resumes while C waits. Pausing A after its filesystem calls
+  // is the only fake: B and C run the real module. The old takeover moved B's live lock away and let C in beside B.
+  test("ARK-T38 ARK-343/AC2 a stale takeover that resumes late never lets a second process in beside the live holder", async () => {
+    const dead = Bun.spawn(["true"]);
+    await dead.exited;
+    mkdirSync(lockDirectory(), { recursive: true });
+    writeFileSync(
+      join(lockDirectory(), `holder-${dead.pid}-dead.json`),
+      JSON.stringify({ run: runB, pid: dead.pid, since: new Date().toISOString() }),
+    );
+    const module = JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"));
+    const contender = (name: string, paused: boolean) => {
+      const pause = `import {mock} from 'bun:test';import * as fs from 'node:fs';const real={...fs};let paused=false;
+function wait(name){while(!real.existsSync(home+'/'+name))Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}
+mock.module('node:fs',()=>({...real,
+readFileSync(...args){const value=real.readFileSync(...args);if(!paused&&String(args[0]).startsWith(home+'/test.lock/holder-')){paused=true;real.writeFileSync(home+'/read-stale','');wait('continue-read');}return value;},
+renameSync(from,to){const result=real.renameSync(from,to);if(from===home+'/test.lock'){real.writeFileSync(home+'/moved-lock','');wait('continue-move');}return result;}}));
+const {takeTestLock}=await import(${module});`;
+      return Bun.spawn(
+        [
+          "bun",
+          "-e",
+          `const home=process.env.ARK_HOME;${paused ? pause : `const {takeTestLock}=await import(${module});`}
+import {existsSync,mkdirSync,rmdirSync,writeFileSync} from 'node:fs';
+
+const release=await takeTestLock('${name}',()=>Promise.resolve());
+if(existsSync(home+'/inside'))writeFileSync(home+'/overlap-${name}','');
+mkdirSync(home+'/inside',{recursive:true});writeFileSync(home+'/entered-${name}','');
+while(!existsSync(home+'/leave-${name}'))await Bun.sleep(10);
+rmdirSync(home+'/inside');release();`,
+        ],
+        { env: { ...process.env, ARK_HOME: arkHome }, stdout: "ignore", stderr: "ignore" },
+      );
+    };
+    const signalFile = (name: string) => join(arkHome, name);
+    const present = (name: string) => () => existsSync(signalFile(name));
+    const children = [contender("A", true)];
+    startedTests.push(...children);
+    try {
+      await waitFor(present("read-stale"), "A to read the stale holder");
+      children.push(contender("B", false));
+      startedTests.push(children[1]!);
+      await waitFor(present("entered-B"), "B to take over");
+      writeFileSync(signalFile("continue-read"), "");
+      await Bun.sleep(300); // A runs on, and moves a live lock if the takeover can
+      children.push(contender("C", false));
+      startedTests.push(children[2]!);
+      await Bun.sleep(500);
+      writeFileSync(signalFile("continue-move"), "");
+      for (const name of ["B", "A", "C"]) {
+        writeFileSync(signalFile(`leave-${name}`), "");
+        await waitFor(present(`entered-${name}`), `${name} to take the lock`);
+        await children[["A", "B", "C"].indexOf(name)]!.exited;
+      }
+      for (const name of ["A", "B", "C"])
+        expect(existsSync(signalFile(`overlap-${name}`))).toBe(false);
+    } finally {
+      for (const name of [
+        "read-stale",
+        "moved-lock",
+        "continue-read",
+        "continue-move",
+        "inside",
+        "entered-A",
+        "entered-B",
+        "entered-C",
+        "leave-A",
+        "leave-B",
+        "leave-C",
+        "overlap-A",
+        "overlap-B",
+        "overlap-C",
+      ])
+        rmSync(signalFile(name), { recursive: true, force: true });
+    }
   });
 
   test("ARK-T39 ARK-343/AC3 ark chief state lists the holder and each live waiter with waited time, and no dead waiter", async () => {

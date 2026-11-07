@@ -1,18 +1,23 @@
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
+  rmdirSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { arkHome } from "./paths.ts";
 
 /**
- * One `ark test` at a time per host: a lock directory under $ARK_HOME holds holder.json, and a waiting `ark test`
- * leaves a file in test-waiters/ so `ark chief state` can list it. The lock of an ended pid is taken over.
+ * One `ark test` at a time per host: the lock directory `test.lock` under $ARK_HOME holds one holder file
+ * `holder-<pid>-<uuid>.json`, and a waiting `ark test` leaves a file in test-waiters/ so `ark chief state` can list
+ * it. The lock of an ended pid is taken over. The holder file name is unique per acquisition, so taking over and
+ * releasing remove exactly the file that was read: a lock that someone else holds now is never touched.
  */
 export type TestLockEntry = { run: string; pid: number; since: string };
 
@@ -40,9 +45,22 @@ function readEntry(file: string): TestLockEntry | null {
   }
 }
 
+/** The holder file of the lock directory and its entry, or null when there is none. */
+function readHolder(): { file: string; entry: TestLockEntry } | null {
+  try {
+    const name = readdirSync(lockDirectory()).find((candidate) => candidate.startsWith("holder-"));
+    if (name === undefined) return null;
+    const file = join(lockDirectory(), name);
+    const entry = readEntry(file);
+    return entry && { file, entry };
+  } catch {
+    return null;
+  }
+}
+
 /** The host's lock holder and the waiters with a live pid, oldest first. Null holder: no lock, or a holder that ended. */
 export function readTestLock(): { holder: TestLockEntry | null; waiters: TestLockEntry[] } {
-  const holder = readEntry(join(lockDirectory(), "holder.json"));
+  const holder = readHolder()?.entry ?? null;
   const waiters = existsSync(waiterDirectory())
     ? readdirSync(waiterDirectory())
         .map((name) => readEntry(join(waiterDirectory(), name)))
@@ -53,48 +71,42 @@ export function readTestLock(): { holder: TestLockEntry | null; waiters: TestLoc
 }
 
 /**
- * Tries once to take the lock. The lock directory appears with its holder.json already inside (rename of a prepared
- * directory fails while the target exists), so no reader sees a lock with no holder. Returns the stale pid taken
- * over (or null) on success, `"busy"` when a live holder has it.
+ * Tries once to take the lock. The lock directory appears with its holder file already inside (a rename of a
+ * prepared directory onto the lock path fails while the target holds a file, and replaces an empty directory), so no
+ * reader sees a lock with no holder. A dead holder is taken over by deleting its own holder file, which fails when
+ * the file is already gone: a lock that was replaced meanwhile is never exposed. Returns the lock's holder file on
+ * success, null when a live holder has it.
  */
-function tryTake(runId: string): { staleOf: number | null } | "busy" {
+function tryTake(runId: string): string | null {
   const lock = lockDirectory();
   const prepared = `${lock}.${process.pid}.new`;
   rmSync(prepared, { recursive: true, force: true });
   mkdirSync(prepared, { recursive: true });
+  const name = `holder-${process.pid}-${randomUUID()}.json`;
   const entry: TestLockEntry = { run: runId, pid: process.pid, since: new Date().toISOString() };
-  writeFileSync(join(prepared, "holder.json"), JSON.stringify(entry));
-  let staleOf: number | null = null;
+  writeFileSync(join(prepared, name), JSON.stringify(entry));
   try {
     for (;;) {
       try {
         renameSync(prepared, lock);
-        return { staleOf };
+        return join(lock, name);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code !== "ENOTEMPTY" && code !== "EEXIST") throw err;
       }
-      const holder = readEntry(join(lock, "holder.json"));
-      if (holder === null || alive(holder.pid)) return "busy";
-      // Move the stale lock away, then check what we moved: another waiter may have replaced it in between.
-      const grave = `${lock}.${process.pid}.stale`;
+      const holder = readHolder();
+      if (holder === null || alive(holder.entry.pid)) return null;
       try {
-        renameSync(lock, grave);
+        unlinkSync(holder.file);
       } catch {
-        continue; // someone else took it away: try the rename again
+        continue; // someone else took it over first: try the rename again
       }
-      const moved = readEntry(join(grave, "holder.json"));
-      if (moved !== null && moved.pid !== holder.pid && alive(moved.pid)) {
-        // ponytail: we moved a live lock; put it back. If that fails too, the lock is lost until its holder exits.
-        try {
-          renameSync(grave, lock);
-        } catch {
-          rmSync(grave, { recursive: true, force: true });
-        }
-        return "busy";
+      console.log(`took over a stale ark test lock of pid ${holder.entry.pid}`);
+      try {
+        rmdirSync(lock); // fails when a new holder already replaced the emptied directory
+      } catch {
+        // in use again, or already gone
       }
-      rmSync(grave, { recursive: true, force: true });
-      staleOf = holder.pid;
     }
   } finally {
     rmSync(prepared, { recursive: true, force: true });
@@ -102,29 +114,46 @@ function tryTake(runId: string): { staleOf: number | null } | "busy" {
 }
 
 /**
- * Waits for the host-wide `ark test` lock and returns its release. SIGINT, SIGTERM and SIGHUP release the lock,
- * remove the waiter file, call `onSignal` (to stop child processes) and exit 128+signal.
+ * Waits for the host-wide `ark test` lock and returns its release. SIGINT, SIGTERM and SIGHUP call `onSignal` (it
+ * stops child processes and resolves when they have ended), then release the lock, remove the waiter file and exit
+ * 128+signal: the lock is held until the work under it has stopped.
  */
-export async function takeTestLock(runId: string, onSignal: () => void): Promise<() => void> {
+export async function takeTestLock(
+  runId: string,
+  onSignal: () => Promise<void>,
+): Promise<() => void> {
   const waiterFile = join(waiterDirectory(), `${process.pid}.json`);
-  let held = false;
+  let holderFile: string | null = null;
   const cleanup = () => {
     rmSync(waiterFile, { force: true });
-    if (held) {
-      held = false;
-      rmSync(lockDirectory(), { recursive: true, force: true });
+    if (holderFile !== null) {
+      // Only our own holder file: the directory is removed when that leaves it empty.
+      rmSync(holderFile, { force: true });
+      try {
+        rmdirSync(lockDirectory());
+      } catch {
+        // a new holder already replaced the emptied directory
+      }
+      holderFile = null;
     }
   };
   const signals = { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 } as const;
+  let shuttingDown = false;
   const handlers = Object.entries(signals).map(([name, number]) => {
-    const handler = () => {
-      onSignal();
-      cleanup();
-      process.exit(128 + number);
+    const handler = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      try {
+        await onSignal();
+      } finally {
+        cleanup();
+        process.exit(128 + number);
+      }
     };
     process.on(name as NodeJS.Signals, handler);
     return [name as NodeJS.Signals, handler] as const;
   });
+
   const release = () => {
     for (const [name, handler] of handlers) process.off(name, handler);
     process.off("exit", cleanup);
@@ -136,10 +165,8 @@ export async function takeTestLock(runId: string, onSignal: () => void): Promise
     let waiting = false;
     for (;;) {
       const taken = tryTake(runId);
-      if (taken !== "busy") {
-        held = true;
-        if (taken.staleOf !== null)
-          console.log(`took over a stale ark test lock of pid ${taken.staleOf}`);
+      if (taken !== null) {
+        holderFile = taken;
         rmSync(waiterFile, { force: true });
         return release;
       }
@@ -152,7 +179,7 @@ export async function takeTestLock(runId: string, onSignal: () => void): Promise
           since: new Date().toISOString(),
         };
         writeFileSync(waiterFile, JSON.stringify(entry));
-        const holder = readEntry(join(lockDirectory(), "holder.json"));
+        const holder = readHolder()?.entry;
         if (holder) console.log(`waiting for ark test of ${holder.run} (pid ${holder.pid})`);
       }
       await Bun.sleep(pollMilliseconds);
