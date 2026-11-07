@@ -79,6 +79,8 @@ function startBuildingRun(options: {
   suites: Suite[];
   repos: string[];
   kind?: string;
+  /** Adds the AC FAKE-1-AC2 with `method: test`, proven by a test whose name starts with its id. */
+  testCriterion?: boolean;
 }): {
   runId: string;
   runDirectory: string;
@@ -94,7 +96,12 @@ function startBuildingRun(options: {
   const ticket = writeTicket(
     "demo",
     "FAKE-1",
-    [{ id: "FAKE-1-AC1", text: "A person checks it", manual: true }],
+    [
+      { id: "FAKE-1-AC1", text: "A person checks it", manual: true },
+      ...(options.testCriterion
+        ? [{ id: "FAKE-1-AC2", text: "A test checks it", method: "test" }]
+        : []),
+    ],
     "Ticket FAKE-1",
     options.kind,
   );
@@ -111,6 +118,9 @@ function startBuildingRun(options: {
         why: "Test the run.",
         changes: [
           { criterion: "FAKE-1-AC1", where: "tests", now: "None.", fix: "A person checks." },
+          ...(options.testCriterion
+            ? [{ criterion: "FAKE-1-AC2", where: "tests", now: "None.", fix: "A test checks." }]
+            : []),
         ],
       },
       steps: options.repos.map((repo, index) => ({
@@ -122,9 +132,22 @@ function startBuildingRun(options: {
         model: "claude-sonnet",
         needs: [],
         goal: "Write results/baseline.md first and results/compare.md last.",
-        criteria: ["FAKE-1-AC1"],
+        criteria: options.testCriterion ? ["FAKE-1-AC1", "FAKE-1-AC2"] : ["FAKE-1-AC1"],
       })),
-      test_cases: [],
+      test_cases: options.testCriterion
+        ? [
+            {
+              id: "proves-AC2",
+              criterion: "FAKE-1-AC2",
+              level: "integration",
+              given: [],
+              when: ["run it"],
+              // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+              then: ["it works"],
+              expected: "it works",
+            },
+          ]
+        : [],
     }),
   );
   for (const args of [
@@ -222,24 +245,25 @@ const baseFiles = (name: string): Record<string, string> => ({
 
 type NewTest = "needs-feature" | "fails-both" | "head-marker" | "passes";
 
-function newTestContent(mode: NewTest): string {
+/** `prefix` starts each test name, so a test can carry the id of an AC. */
+function newTestContent(mode: NewTest, prefix = ""): string {
   const imports = 'import { expect, test } from "bun:test";\n';
   if (mode === "needs-feature")
-    return `${imports}import { feature } from "../src/feature.ts";\ntest("feature works", () => { expect(feature()).toBe(1); });\n`;
+    return `${imports}import { feature } from "../src/feature.ts";\ntest("${prefix}feature works", () => { expect(feature()).toBe(1); });\n`;
   if (mode === "fails-both")
-    return `${imports}import { feature } from "../src/feature.ts";\ntest("feature works", () => { expect(feature()).toBe(2); });\n`;
+    return `${imports}import { feature } from "../src/feature.ts";\ntest("${prefix}feature works", () => { expect(feature()).toBe(2); });\n`;
   if (mode === "head-marker")
-    return `${imports}import { readFileSync } from "node:fs";\ntest("production has no head marker", () => { expect(readFileSync("src/feature.ts", "utf8")).not.toContain("head-only"); });\n`;
-  return `${imports}test("passes", () => {});\n`;
+    return `${imports}import { readFileSync } from "node:fs";\ntest("${prefix}production has no head marker", () => { expect(readFileSync("src/feature.ts", "utf8")).not.toContain("head-only"); });\n`;
+  return `${imports}test("${prefix}passes", () => {});\n`;
 }
 
-function applyHeadChanges(repository: string, mode: NewTest): void {
+function applyHeadChanges(repository: string, mode: NewTest, testCriterion = false): void {
   writeFiles(repository, {
     "src/feature.ts":
       mode === "head-marker"
         ? "export const base = true;\n// head-only\n"
         : "export const base = true;\nexport function feature() { return 1; }\n",
-    "test/new.test.ts": newTestContent(mode),
+    "test/new.test.ts": newTestContent(mode, testCriterion ? "FAKE-1-AC2 " : ""),
     "tests/nested/deep/b.test.ts": "// deep\n",
     "features/y.feature": "y\n",
     "test/fixtures/data.json": "{}\n",
@@ -279,7 +303,7 @@ done
 
 const repoNames = ["repoA", "repoB"];
 
-function twoRepoRun(kind: string, mode: NewTest) {
+function twoRepoRun(kind: string, mode: NewTest, testCriterion = false) {
   const directory = fixtureDirectory();
   const workspace = join(directory, "workspace");
   mkdirSync(workspace);
@@ -304,8 +328,8 @@ function twoRepoRun(kind: string, mode: NewTest) {
       parser: "bun",
     },
   ]);
-  const run = startBuildingRun({ workspace, suites, repos: repoNames, kind });
-  for (const name of repoNames) applyHeadChanges(join(run.mirror, name), mode);
+  const run = startBuildingRun({ workspace, suites, repos: repoNames, kind, testCriterion });
+  for (const name of repoNames) applyHeadChanges(join(run.mirror, name), mode, testCriterion);
   const runsAt = (name: string, suite: string, side: "base" | "head") => {
     const file = join(counters, `${name}-${suite}`);
     return existsSync(file)
@@ -402,8 +426,8 @@ describe("ark test base run", () => {
     },
   );
 
-  test("ARK-T1 a refactor run whose suites fail at base exits non-zero, and runs the base again with changed tests", () => {
-    const run = twoRepoRun("refactor", "needs-feature");
+  test("ARK-T1 a refactor run with a method test AC whose suites fail at base exits non-zero, and runs the base again with changed tests", () => {
+    const run = twoRepoRun("refactor", "needs-feature", true);
     const first = ark("test", run.runId);
     expect(first.code).not.toBe(0);
     expect(first.err).toContain("refactor run: the suites fail at the base commit");
@@ -411,7 +435,9 @@ describe("ark test base run", () => {
     expect(run.runsAt("repoA", "s1", "base")).toBe(1);
 
     for (const name of repoNames) {
-      writeFiles(join(run.mirror, name), { "test/new.test.ts": newTestContent("passes") });
+      writeFiles(join(run.mirror, name), {
+        "test/new.test.ts": newTestContent("passes", "FAKE-1-AC2 "),
+      });
       commitAll(join(run.mirror, name), "make the new test pass");
     }
     const second = ark("test", run.runId);

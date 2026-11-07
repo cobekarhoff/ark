@@ -1440,6 +1440,92 @@ test("ARK-302-AC5 a bug run with several ACs needs one test.completed with every
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
 });
 
+/** A run of `kind` whose ticket has one criterion for each entry of `methods` (`ARK-<n>-AC1`, `AC2`, ...). */
+function startMethodRun(kind: string, ticketId: string, methods: (string | { manual: true })[]) {
+  const ticketFile = writeTicket(
+    "demo",
+    ticketId,
+    methods.map((method, i) => ({
+      id: `${ticketId}-AC${i + 1}`,
+      text: "It works",
+      ...(typeof method === "string" ? { method } : method),
+    })),
+    "Demo ticket",
+    kind,
+  );
+  const started = ark("run", "start", ticketFile, "--project", "demo");
+  const runId = started.out.trim();
+  return {
+    started,
+    runId,
+    directory: join(process.env.ARK_HOME as string, "projects", "demo", "runs", runId),
+  };
+}
+
+const redTestRefusal = "bug run: record a failing ark test of the ACs before the fix";
+
+test("ARK-T62 a bug run with no method test AC starts its implementer step with no ark test", () => {
+  const cases: [string, (string | { manual: true })[]][] = [
+    ["ARK-901", ["inspection", "inspection", "inspection"]],
+    ["ARK-902", ["analysis", "demonstration", { manual: true }]],
+  ];
+  for (const [ticketId, methods] of cases) {
+    const { runId, directory } = startMethodRun("bug", ticketId, methods);
+    approvePlan(directory);
+    const started = ark("run", "step", runId, "build", "start");
+    expect(started.code, started.err).toBe(0);
+    expect(started.err).not.toContain(redTestRefusal);
+  }
+});
+
+test("ARK-T62 a bug run with a method test AC is refused until ark test shows that AC failing, and the other ACs need not fail", () => {
+  const { runId, directory } = startMethodRun("bug", "ARK-903", ["test", "inspection"]);
+  approvePlan(directory);
+  const completed = (criteria: Record<string, string>) =>
+    appendEvent(directory, "test.completed", { passed: false, heads: {}, suites: [], criteria });
+
+  expect(ark("run", "step", runId, "build", "start").err).toContain(redTestRefusal);
+  completed({ "ARK-903-AC1": "passing", "ARK-903-AC2": "manual pending" });
+  expect(ark("run", "step", runId, "build", "start").err).toContain(redTestRefusal);
+
+  completed({ "ARK-903-AC1": "failing", "ARK-903-AC2": "manual pending" });
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+});
+
+test("ARK-T62 a bug run whose amended criteria have no method test AC starts with no ark test", () => {
+  const { runId, directory } = startMethodRun("bug", "ARK-904", ["test", "inspection"]);
+  approvePlan(directory);
+  expect(ark("run", "step", runId, "build", "start").err).toContain(redTestRefusal);
+
+  // `ark criteria amend` rewrites only the text line, so the amendment to inspection is written in ticket.md.
+  const ticket = join(directory, "ticket.md");
+  writeFileSync(ticket, readFileSync(ticket, "utf8").replace("method: test", "method: inspection"));
+  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+});
+
+test("ARK-T64 ark run start warns once on stderr for a bug or refactor ticket with no method test AC, and starts", () => {
+  const warning = (kind: string) =>
+    `warning: kind ${kind} has no method: test AC, so its red-test or base-pass rule does not apply`;
+  const cases: [string, string, (string | { manual: true })[], string | undefined][] = [
+    ["bug", "ARK-911", ["inspection", "inspection", "inspection"], warning("bug")],
+    ["refactor", "ARK-912", ["inspection", "analysis"], warning("refactor")],
+    ["feature", "ARK-913", ["inspection"], undefined],
+    ["bug", "ARK-914", ["test", "inspection"], undefined],
+    ["refactor", "ARK-915", ["test"], undefined],
+    ["bug", "ARK-916", [], warning("bug")],
+  ];
+  for (const [kind, ticketId, methods, expected] of cases) {
+    const { started, directory } = startMethodRun(kind, ticketId, methods);
+    expect(started.code, started.err).toBe(0);
+    expect(started.err.split("\n").filter((line) => line.includes("warning:"))).toEqual(
+      expected === undefined ? [] : [expected],
+    );
+    // stdout stays the run id alone, so `RUN=$(ark run start ...)` works.
+    expect(started.out.trim()).toMatch(/^\d{4}-\d{2}-\d{2}-ARK-91\d-1$/);
+    expect(existsSync(join(directory, "events.ndjson"))).toBe(true);
+  }
+});
+
 type CloseCriterion = { id: string; text: string; manual?: boolean };
 
 /** A building worktree run whose ticket holds `criteria` and whose last test passed at the current head with `statuses`. */

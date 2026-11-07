@@ -12,7 +12,7 @@ import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
-import { manualCriteria, parseCriteria } from "./criteria.ts";
+import { hasTestCriterion, manualCriteria, parseCriteria } from "./criteria.ts";
 import {
   appendEvent,
   deriveState,
@@ -145,6 +145,10 @@ export function runStart(ticketFile: string, project?: string): void {
     throw err;
   }
   warnSetTicketStatus(absoluteTicketFile, projectName, "in_progress");
+  if ((ticket.kind === "bug" || ticket.kind === "refactor") && !hasTestCriterion(directory))
+    console.warn(
+      `warning: kind ${ticket.kind} has no method: test AC, so its red-test or base-pass rule does not apply`,
+    );
   console.log(run);
 }
 
@@ -173,7 +177,7 @@ function answerEscalationByAuto(
   start: EventData,
 ): string | null {
   if (state.escalation_requested || state.implementer === "human") return null;
-  if (!refused(() => assertAllowed(state, "step.started", start))) return null;
+  if (!refused(() => assertAllowed(state, "step.started", start, directory))) return null;
   const used = events.filter(
     (event) =>
       event.type === "gate.answered" &&
@@ -198,7 +202,7 @@ function answerEscalationByAuto(
       data: answer,
     },
   ]);
-  if (refused(() => assertAllowed(answered, "step.started", start))) return null;
+  if (refused(() => assertAllowed(answered, "step.started", start, directory))) return null;
   appendEvent(directory, "gate.answered", answer);
   return `escalation one_more_round by auto (${start.merge ? "merge, not counted" : `${used + 1} of ${autoEscalationCap}`})`;
 }
@@ -246,7 +250,12 @@ export function runStep(
   }
 
   // Refuse on the phase first, so a run before plan approval names the missing gate, not an unknown step.
-  assertAllowed(state, "step.started", { step: stepId, role: "", repo: "", round: state.round });
+  assertAllowed(
+    state,
+    "step.started",
+    { step: stepId, role: "", repo: "", round: state.round },
+    directory,
+  );
   const planned = state.steps.find((step) => step.id === stepId);
   if (!planned)
     throw new ArkError(
