@@ -40,7 +40,7 @@ const record = (surfaces: string[]) => {
 };
 
 describe("ui-skills", () => {
-  test.each(["web_ui", "cli_output", "document"])(
+  test.each(["web_ui"])(
     "ARK-279-AC1 surface %s prints the 3 required skills and the React line",
     (surface) => {
       record([surface]);

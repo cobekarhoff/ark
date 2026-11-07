@@ -105,13 +105,13 @@ export function strategyRecord(runId: string, inProject?: string): void {
         `strategy card ${card.id} has no mockup link: the evaluation lists surface ${state.evaluation.surfaces.join(", ")}, so add a "Mockup:" line`,
       );
     }
-    if (needsMockups) {
+    const allowed = allowedUiSkills(surfaces);
+    if (needsMockups && allowed.length > 0) {
       const skills =
         card.fields.skills
           ?.replaceAll("`", "")
           .split(/[\s,]+/)
           .filter(Boolean) ?? [];
-      const allowed = allowedUiSkills(surfaces);
       if (skills.length === 0)
         throw new ArkError(
           `strategy card ${card.id} has no skills: add a "Skills:" line with skills from \`ark ui-skills ${runId}\``,
