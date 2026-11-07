@@ -12,6 +12,7 @@ import {
   readTerminals,
   retroUnanswered,
 } from "./orca.ts";
+import { readTestLock } from "./test-lock.ts";
 import { listProjects, runsDirectory } from "./paths.ts";
 
 /** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for a one-off command. */
@@ -49,6 +50,12 @@ function readStates(project: string): RunState[] {
     .map(({ events }) => deriveState(events));
 }
 
+function elapsed(since: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(since)) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h`;
+}
+
 /** One Markdown section per live source. A source that fails says "unavailable"; it never reads as empty. */
 export async function chiefState(inProject?: string): Promise<void> {
   const project = resolveProject(inProject);
@@ -67,6 +74,22 @@ export async function chiefState(inProject?: string): Promise<void> {
           openRuns.map((state) => [state.run, state.phase, state.current_step ?? "-"]),
         ),
   );
+
+  // The lock is host-wide: it names runs of every project.
+  const { holder, waiters } = readTestLock();
+  if (holder || waiters.length > 0)
+    sections.push(
+      "## ark test lock",
+      [
+        ...(holder
+          ? [`- holder: ${holder.run} (pid ${holder.pid}), running ${elapsed(holder.since)}`]
+          : []),
+        ...waiters.map(
+          (waiter) =>
+            `- waiting: ${waiter.run} (pid ${waiter.pid}), waited ${elapsed(waiter.since)}`,
+        ),
+      ].join("\n"),
+    );
 
   // `--full` keeps coordinator_handle, which the concise rows lack.
   const orcaRuns = await orcaPages<OrcaRunRow>(
