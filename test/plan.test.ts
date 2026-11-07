@@ -663,15 +663,8 @@ describe("plan check UI skills", () => {
       .split("\n")
       .find((line) => line.startsWith("| Step |"));
 
-  test("ARK-279-AC4 a plan with no skills list is refused when Surfaces is not none", () => {
-    surfaceRun(["cli_output"]);
-    const result = withSkills(undefined);
-    expect(result.code).toBe(1);
-    expect(result.out).toContain("skills");
-  });
-
-  test("ARK-279-AC4 a skills entry that ark ui-skills does not list is refused", () => {
-    surfaceRun(["cli_output"]);
+  test("ARK-T41 ARK-328/AC1 a skills entry that ark ui-skills does not list is refused", () => {
+    surfaceRun(["web_ui"]);
     const result = withSkills([...requiredUiSkills, "made-up-skill"]);
     expect(result.code).toBe(1);
     expect(result.out).toContain("step build");
@@ -696,8 +689,8 @@ describe("plan check UI skills", () => {
     expect(planMd()).toContain(reactSkill);
   });
 
-  test("ARK-279-AC4 a step without a list passes when another step has a valid one", () => {
-    surfaceRun(["document"]);
+  test("ARK-T41 ARK-328/AC1 a step without a list passes when another step has a valid one", () => {
+    surfaceRun(["web_ui"]);
     expect(withSkills(requiredUiSkills).code).toBe(0);
     expect(planMd()).toMatch(/\| check \|.*\| {2}\|$/m);
   });
@@ -1027,5 +1020,44 @@ describe("plan check test case entries", () => {
       "criterion ARK-900/AC1 has no integration or e2e test case",
     );
     expect(problems.join("\n")).not.toContain("ARK-900/AC2 has no");
+  });
+});
+
+describe("ARK-T41 ARK-328/AC1 ARK-328/AC2 plan check requires skills only for web_ui", () => {
+  const surfaceRun = (surfaces: string[]) =>
+    appendEvent(runDirectory, "evaluation.recorded", { blockers: [], risks: [], surfaces });
+  const check = (skills?: string[]) => {
+    const plan = validPlan();
+    if (skills) plan.steps[0].skills = skills;
+    writePlan(plan);
+    return ark("plan", "check", runId);
+  };
+  const planMd = () => readFileSync(join(runDirectory, "plan.md"), "utf8");
+
+  test.each(["cli_output", "document", "none"])(
+    "ARK-T41 ARK-328/AC1 ARK-328/AC2 surface %s accepts a plan with no skills list and plan.md has no Skills column",
+    (surface) => {
+      surfaceRun([surface]);
+      expect(check().code).toBe(0);
+      expect(planMd()).not.toContain("| Skills |");
+    },
+  );
+
+  test("ARK-T41 ARK-328/AC1 ARK-328/AC2 web_ui without skills is refused and names the skills, with them it passes", () => {
+    surfaceRun(["web_ui"]);
+    const refused = check();
+    expect(refused.code).toBe(1);
+    expect(refused.out).toContain("skills");
+    expect(check(requiredUiSkills).code).toBe(0);
+    expect(planMd()).toContain("| Skills |");
+  });
+
+  test("ARK-T43 ARK-328/AC1 plan.md shows the Skills column and names the 3 skills only for web_ui", () => {
+    surfaceRun(["cli_output"]);
+    expect(check().code).toBe(0);
+    expect(planMd()).not.toContain("Skills");
+    surfaceRun(["web_ui"]);
+    expect(check(requiredUiSkills).code).toBe(0);
+    for (const skill of requiredUiSkills) expect(planMd()).toContain(skill);
   });
 });
