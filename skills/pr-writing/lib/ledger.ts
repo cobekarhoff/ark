@@ -104,8 +104,8 @@ export type Ledger = {
   /** Findings no later review closed with `No findings.` or a `send back` decision. */
   findings: Finding[];
   hasReviewerStep: boolean;
-  /** Each `checks` entry of `ark.yml` with the outcome of the last `test.completed`; `not run` when that event has no result for it. */
-  checks: { name: string; state: "passed" | "failed" | "not run" }[];
+  /** Each `checks` entry of `ark.yml` with the outcome of the last `test.completed`; `not run` when that event has a `checks` list without it, `unknown` when the event has no `checks` list (an old run). */
+  checks: { name: string; state: "passed" | "failed" | "not run" | "unknown" }[];
   /** The block of the latest findings file; `null` when the file has none, or there is no file. */
   reviewer: ReviewerBlock | null;
   mergeOrder: string[];
@@ -684,14 +684,17 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
   const config = hasConfig ? loadConfig(state.project) : null;
   const prWriting = source.prWriting ?? config?.pr_writing ?? defaultPrWriting;
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
-  const recordedChecks = (lastTest?.data.checks ?? []) as { name: string; passed: boolean }[];
+  const recordedList = lastTest?.data.checks as { name: string; passed: boolean }[] | undefined;
+  const recordedChecks = recordedList ?? [];
   const checks = (config?.checks ?? []).map((check) => {
     const recorded = recordedChecks.find((entry) => entry.name === check.name);
     return {
       name: check.name,
       state:
         recorded === undefined
-          ? ("not run" as const)
+          ? recordedList === undefined
+            ? ("unknown" as const)
+            : ("not run" as const)
           : recorded.passed
             ? ("passed" as const)
             : ("failed" as const),

@@ -108,7 +108,7 @@ export function gapsOf(ledger: Ledger): Gap[] {
         : `${ids.join(" ")} not proven: ${status}`,
     });
   for (const check of ledger.checks) {
-    if (check.state === "passed") continue;
+    if (check.state === "passed" || check.state === "unknown") continue;
     gaps.push({
       keys: [check.name],
       text: `Check \`${check.name}\` ${check.state === "failed" ? "failed" : "did not run"} on the last head`,

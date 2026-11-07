@@ -80,16 +80,17 @@ function problemBlock(ledger: Ledger): Block {
 }
 
 function differentBlock(ledger: Ledger): Block {
-  const items = (ledger.ticket?.change ?? "")
+  // Only the list items of the Change text before its `Risks:` label, at the shallowest indent, each cut at its first sentence end.
+  const change = (ledger.ticket?.change ?? "").split(/^\s*risks?\s*:\s*$/im)[0];
+  const listed = change
     .split("\n")
-    .map((line) => line.match(/^\s*(?:\d+\.|[-*])\s+(.*)$/)?.[1])
-    .filter((item): item is string => item !== undefined)
-    .map((item) =>
-      item
-        .replace(/\s+/g, " ")
-        .match(/^.*?(?:\.(?=\s)|$)/)![0]
-        .slice(0, 180),
-    );
+    .map((line) => line.match(/^(\s*)(?:\d+\.|[-*])\s+(.*)$/))
+    .filter((match): match is RegExpMatchArray => match !== null);
+  const indent = Math.min(...listed.map((match) => match[1].length));
+  const items = listed
+    .filter((match) => match[1].length === indent)
+    .map((match) => match[2].replace(/\s+/g, " ").match(/^.*?(?:\.(?=\s)|$)/)![0])
+    .filter((item) => !item.endsWith(":")); // a lead-in to a nested list
   const subjects = ledger.repos.flatMap((repo) => repo.commits.map((commit) => commit.subject));
   const lines = (items.length > 0 ? items : subjects).slice(0, 6).map((item) => `- ${item}`);
   return {
