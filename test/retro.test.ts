@@ -1014,6 +1014,21 @@ describe("ark retro models and vendors", () => {
     expect(out).not.toContain("mixed");
   });
 
+  test("ARK-348/AC2 ARK-T66 a validator on the implementer's vendor does not set same vendor review", () => {
+    reviewOnModels("claude-opus-5-5");
+    writeEvents(
+      runDirectory,
+      scenario.map(([time, type, data]): EventRow => [
+        time,
+        type,
+        data.step === "review" ? { ...data, repo: "repos/platform", role: "validator" } : data,
+      ]),
+    );
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(out).toContain("same vendor review: false");
+  });
+
   test("ARK-T66 a review step with a codex model and an anthropic sub-session is mixed, not same vendor", () => {
     reviewOnModels("gpt-6.1-sol", "claude-opus-5-5");
     const out = runRetro();

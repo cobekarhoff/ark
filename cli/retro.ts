@@ -621,9 +621,8 @@ export function retro(runId: string, inProject?: string): void {
   )) {
     const entries = [...stepsInRepo].sort(([left], [right]) => (left < right ? -1 : 1));
     const builders = entries.filter(([, entry]) => entry.role === "implementer");
-    const checkers = entries.filter(
-      ([, entry]) => entry.role === "validator" || entry.role === "reviewer",
-    );
+    // Validators run on the implementer's vendor by design, so only reviewers set the flag.
+    const checkers = entries.filter(([, entry]) => entry.role === "reviewer");
     // A checker with two vendors is mixed: neither same vendor nor cross vendor.
     for (const [id, entry] of checkers)
       if (entry.vendors.size > 1)
