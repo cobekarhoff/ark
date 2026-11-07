@@ -6,16 +6,16 @@ technique: state transition (base failing) over two runs
 priority: high
 risk: a refactor run ships although its suites fail at the base commit, or a stale base result is reused
 status: active
-changed_by: 2026-11-06-ARK-312-1
+changed_by: 2026-11-07-ARK-351-1
 ---
 
 ## Objective
 
-Prove that for a `kind: refactor` run whose suites fail at the base commit, `ark test` exits 1, records `base_passed: false`, runs the base suites again on each invocation, and `ark merge-request open` refuses with the base commit named. This case replaces the old-id test `ARK-302-AC7 a base that fails records base_passed false once per run and merge-request open refuses`.
+Prove that for a `kind: refactor` run with at least one `method: test` AC whose suites fail at the base commit, `ark test` exits 1, records `base_passed: false`, runs the base suites again on each invocation, and `ark merge-request open` refuses with the base commit named. This case replaces the old-id test `ARK-302-AC7 a base that fails records base_passed false once per run and merge-request open refuses`.
 
 ## Preconditions
 
-- A refactor run whose e2e test fails at base and passes at head (the head commit fixes it).
+- A refactor run with a `method: test` AC (the base-pass rule applies only then; ARK-T63 covers a run with none) whose e2e test fails at base and passes at head (the head commit fixes it).
 
 ## Steps
 

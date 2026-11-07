@@ -2,7 +2,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ArkError } from "./errors";
-import { evidenceFile, manualCriteria, runCriteria, type Method } from "./criteria.ts";
+import {
+  evidenceFile,
+  hasTestCriterion,
+  manualCriteria,
+  runCriteria,
+  type Method,
+} from "./criteria.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events";
 import { loadConfig, mergeRequestsMode } from "./config.ts";
@@ -433,7 +439,7 @@ export function assertShippable(
     if (bad.length > 0)
       throw new ArkError(`perf run: missing or empty result file: ${bad.join(", ")}`);
   }
-  if (state.kind === "refactor" && state.base_passed !== true)
+  if (state.kind === "refactor" && state.base_passed !== true && hasTestCriterion(directory))
     throw new ArkError(
       `refactor run: the suites ${state.base_passed === false ? "fail" : "were not run"} at the base commit: run ark test ${runId}`,
     );
