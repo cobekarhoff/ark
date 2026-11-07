@@ -8,14 +8,7 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -48,8 +41,7 @@ let projectA: string;
 const logFile = () => join(fixtures, "suite.log");
 const lockDirectory = () => join(arkHome, "test.lock");
 const waiterDirectory = () => join(arkHome, "test-waiters");
-const readLog = () =>
-  existsSync(logFile()) ? readFileSync(logFile(), "utf8") : "";
+const readLog = () => (existsSync(logFile()) ? readFileSync(logFile(), "utf8") : "");
 
 /**
  * The suite script: logs `start <run>`, then sleeps ~1 s (or, when `hold` exists, until `release` exists), then logs
@@ -161,8 +153,7 @@ function startRun(project: string, ticketId: string, script: string): string {
     ["gate", "record", runId, "manual", `${ticketId}-AC1`, "ok"],
   ]) {
     const result = ark(...args);
-    if (result.code !== 0)
-      throw new Error(`${args.join(" ")} failed: ${result.err}`);
+    if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.err}`);
   }
   return runId;
 }
@@ -209,19 +200,14 @@ function startTest(run: string): Started {
   });
   let seen = "";
   const stdout = (async () => {
-    for await (const chunk of child.stdout)
-      seen += new TextDecoder().decode(chunk);
+    for await (const chunk of child.stdout) seen += new TextDecoder().decode(chunk);
     return seen;
   })();
   return { process: child, stdout, seen: () => seen };
 }
 
 /** Polls real child processes, so the wall clock is the only signal there is. */
-async function waitFor(
-  condition: () => boolean,
-  what: string,
-  limitMs = 30_000,
-): Promise<void> {
+async function waitFor(condition: () => boolean, what: string, limitMs = 30_000): Promise<void> {
   const deadline = Date.now() + limitMs;
   while (!condition()) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
@@ -253,12 +239,8 @@ describe("ark test lock", () => {
 
     const lines = logLines();
     expect(lines.indexOf(`end ${runA}`)).toBeGreaterThanOrEqual(0);
-    expect(lines.indexOf(`end ${runA}`)).toBeLessThan(
-      lines.indexOf(`start ${runB}`),
-    );
-    expect(secondOut).toContain(
-      `waiting for ark test of ${runA} (pid ${first.process.pid})`,
-    );
+    expect(lines.indexOf(`end ${runA}`)).toBeLessThan(lines.indexOf(`start ${runB}`));
+    expect(secondOut).toContain(`waiting for ark test of ${runA} (pid ${first.process.pid})`);
     expect(countOf(secondOut, "waiting for ark test of")).toBe(1);
     expect(existsSync(lockDirectory())).toBe(false);
   });
@@ -274,10 +256,7 @@ describe("ark test lock", () => {
   for (const signal of ["SIGINT", "SIGTERM"] as const)
     test(`ARK-T37 ARK-343/AC1 the lock is gone right after ${signal} ends ark test`, async () => {
       const first = startTest(runA);
-      await waitFor(
-        () => logLines().includes(`start ${runA}`),
-        `start ${runA}`,
-      );
+      await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
       first.process.kill(signal);
       await first.process.exited;
       await first.stdout;
@@ -303,9 +282,7 @@ describe("ark test lock", () => {
     expect(Date.now() - begun).toBeLessThan(2000);
     const out = await taken.stdout;
     expect(await taken.process.exited).toBe(0);
-    expect(
-      countOf(out, `took over a stale ark test lock of pid ${dead.pid}`),
-    ).toBe(1);
+    expect(countOf(out, `took over a stale ark test lock of pid ${dead.pid}`)).toBe(1);
     expect(out).not.toContain("waiting for");
 
     const again = startTest(runA);
@@ -330,19 +307,13 @@ describe("ark test lock", () => {
     );
 
     const listed = state();
-    const lockSection = listed
-      .split(/^## /m)
-      .find((part) => part.startsWith("ark test lock"));
+    const lockSection = listed.split(/^## /m).find((part) => part.startsWith("ark test lock"));
     expect(lockSection).toBeDefined();
     expect(lockSection).toMatch(
-      new RegExp(
-        `holder: ${runA} \\(pid ${first.process.pid}\\), running \\d+\\s?(s|m|min)`,
-      ),
+      new RegExp(`holder: ${runA} \\(pid ${first.process.pid}\\), running \\d+\\s?(s|m|min)`),
     );
     expect(lockSection).toMatch(
-      new RegExp(
-        `waiting: ${runB} \\(pid ${second.process.pid}\\), waited \\d+\\s?(s|m|min)`,
-      ),
+      new RegExp(`waiting: ${runB} \\(pid ${second.process.pid}\\), waited \\d+\\s?(s|m|min)`),
     );
 
     const dead = Bun.spawn(["true"]);
