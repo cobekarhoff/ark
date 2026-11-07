@@ -19,7 +19,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { RunDetail, RunView, Snapshot, TranscriptPage } from "../hub/types.ts";
+import type { RunDetail, RunView, Snapshot, TicketCases, TranscriptPage } from "../hub/types.ts";
+import { parseTicketDocument } from "../hub/ticket-document.ts";
 import { createSnapshotReader } from "../hub/snapshot.ts";
 import { isHubName, proxyPort } from "../cli/proxy.ts";
 import { serve } from "../hub/server.ts";
@@ -31,6 +32,7 @@ import { UsageIndex } from "../hub/usage.ts";
 import {
   appendRawEvent,
   ompSessionText,
+  commitCase,
   orcaAnswersFor,
   today,
   transcriptText,
@@ -1464,7 +1466,7 @@ test("ARK-285-AC3 after one good Orca read, a failing read keeps a stale waiting
   expect(stuck(snapshotOf(false, waiting))).toEqual(["waiting on a prompt"]);
 });
 
-test("ARK-285-AC11 ticket text arrives in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside", async () => {
+test("ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside", async () => {
   isolatedEnvironment();
   const home = process.env.ARK_HOME as string;
   writeBacklogTicket({
@@ -1491,12 +1493,220 @@ test("ARK-285-AC11 ticket text arrives in the snapshot from the ticket's own fil
   expect(documents.Readable).toEqual({
     problem: "Why it hurts",
     change: "What changes",
-    criteria: [{ id: "ARK-840-AC1", text: "It works" }],
+    criteria: [{ id: "AC1", text: "It works", method: "test", verified_by: [] }],
   });
   expect(documents.Planted?.problem).toBe("Own text");
   expect(JSON.stringify(snapshot)).not.toContain("OUTSIDE TICKET DIRECTORY");
   for (const id of ["ARK-840", "..%2F..%2F..%2Foutside"])
     expect((await fetch(`${baseUrl}/api/ticket/p/${id}`)).status).toBe(404);
+});
+
+// ---------------------------------------------------------------- ARK-314
+
+test("ARK-T23 ticket parser returns method and verified_by with legacy ids", () => {
+  isolatedEnvironment();
+  const criteria = (rows: NonNullable<Parameters<typeof writeBacklogTicket>[0]["criteria"]>) =>
+    parseTicketDocument(
+      readFileSync(
+        writeBacklogTicket({
+          project: "p",
+          id: "ARK-900",
+          title: "T",
+          status: "ready",
+          criteria: rows,
+        }),
+        "utf8",
+      ),
+    ).criteria;
+
+  const parsed = criteria([
+    { id: "ARK-900-AC1", text: "one", method: "inspection", verifiedBy: ["ARK-T1", "ARK-T2"] },
+    { id: "AC2", text: "two", manual: true, verifiedBy: [] },
+    { id: "AC3", text: "three", verifiedBy: ["ARK-T3"] },
+    { id: "ARK-243-AC4", text: "four" },
+    { id: "AC5", text: "five", manual: true, method: "analysis" },
+  ]);
+  expect(parsed.map(({ id, method, verified_by }) => [id, method, verified_by])).toEqual([
+    ["AC1", "inspection", ["ARK-T1", "ARK-T2"]],
+    ["AC2", "demonstration", []],
+    ["AC3", "test", ["ARK-T3"]],
+    ["AC4", "test", []],
+    ["AC5", "analysis", []],
+  ]);
+  expect(parsed.map(({ text }) => text)).toEqual(["one", "two", "three", "four", "five"]);
+
+  // One AC written in both forms is listed once.
+  const both = criteria([
+    { id: "ARK-900-AC1", text: "same", verifiedBy: ["ARK-T1"] },
+    { id: "AC1", text: "same", verifiedBy: ["ARK-T1"] },
+  ]);
+  expect(both.map(({ id }) => id)).toEqual(["AC1"]);
+});
+
+test("ARK-T24 hub reads local test cases and zephyr evidence without a Zephyr call", async () => {
+  isolatedEnvironment();
+  const zephyrRequests: string[] = [];
+  const zephyr = Bun.serve({
+    port: 0,
+    fetch: (request) => (zephyrRequests.push(request.url), new Response("{}")),
+  });
+  stoppers.push(() => zephyr.stop(true));
+
+  const repository = scratch("ark-cases-");
+  const front = (changedBy: string, extra: Record<string, string> = {}) => ({
+    title: "ARK-T1 first case",
+    level: "integration",
+    technique: "boundary values",
+    priority: "high",
+    risk: "the first defect",
+    status: "active",
+    changed_by: changedBy,
+    ...extra,
+  });
+  commitCase(repository, "ARK-T1", front("2026-01-01-ARK-1-1"));
+  commitCase(repository, "ARK-T1", front("2026-02-02-ARK-2-1"));
+  commitCase(
+    repository,
+    "ARK-T2",
+    front("2026-01-01-ARK-1-1", {
+      title: "ARK-T2 second case",
+      status: "retired",
+      retired_reason: "replaced by ARK-T1",
+    }),
+  );
+  writeProject("loc", { workspace: repository, ticket_source: "local", test_case_source: "local" });
+  writeProject("zep", {
+    workspace: scratch("ark-zephyr-"),
+    ticket_source: "local",
+    test_case_source: "zephyr",
+    zephyr_url: `http://127.0.0.1:${zephyr.port}`,
+  });
+  for (const project of ["loc", "zep"])
+    writeBacklogTicket({
+      project,
+      id: "ARK-900",
+      title: "Cases",
+      status: "ready",
+      criteria: [{ id: "AC1", text: "one", verifiedBy: ["ARK-T1", "ARK-T2", "ARK-T99"] }],
+    });
+  const run = `${today()}-ARK-900-1`;
+  const directory = writeRun({
+    project: "zep",
+    run,
+    ticket: { id: "ARK-900", title: "Cases" },
+    phase: "merge_requests_open",
+  });
+  const record = (id: string, extra: Record<string, unknown>) => {
+    const folder = join(directory, "results", "evidence", id, "head");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(
+      join(folder, "result.json"),
+      JSON.stringify({ id, name: `${id} first case`, status: "pass", sha: "9b85039", ...extra }),
+    );
+  };
+  record("ARK-T1", { version: 3 });
+  record("ARK-T2", {});
+  // Project `run`: main holds ARK-T1 (one version) and ARK-T5; the run checkout holds ARK-T1 changed and ARK-T4 added.
+  const main = scratch("ark-main-");
+  commitCase(main, "ARK-T1", front("main-1", { title: "ARK-T1 main title" }));
+  commitCase(main, "ARK-T5", front("main-only", { title: "ARK-T5 only in main" }));
+  writeProject("run", { workspace: main, ticket_source: "local", test_case_source: "local" });
+  writeBacklogTicket({
+    project: "run",
+    id: "ARK-900",
+    title: "Cases",
+    status: "ready",
+    criteria: [{ id: "AC1", text: "one", verifiedBy: ["ARK-T1", "ARK-T4", "ARK-T5"] }],
+  });
+  const runDirectory = writeRun({
+    project: "run",
+    run: `${today()}-ARK-900-2`,
+    ticket: { id: "ARK-900", title: "Cases" },
+    phase: "merge_requests_open",
+  });
+  const checkout = join(runDirectory, "workspace");
+  commitCase(checkout, "ARK-T1", front("2026-02-02-ARK-2-1", { title: "ARK-T1 main title" }));
+  commitCase(
+    checkout,
+    "ARK-T1",
+    front("2026-11-06-ARK-900-1", { title: "ARK-T1 changed in the run" }),
+  );
+  commitCase(
+    checkout,
+    "ARK-T4",
+    front("2026-11-06-ARK-900-1", { title: "ARK-T4 added in the run" }),
+  );
+  const { baseUrl } = await start();
+  await snapshotWhen(
+    baseUrl,
+    (current) =>
+      current.tickets !== "unknown" &&
+      current.tickets.filter((ticket) => ticket.document !== null).length === 3 &&
+      current.runs !== "unknown",
+  );
+  const casesOf = async (project: string): Promise<TicketCases> => {
+    const response = await fetch(`${baseUrl}/api/ticket/${project}/ARK-900/cases`);
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+
+  const local = await casesOf("loc");
+  expect(local.cases.map(({ id }) => id)).toEqual(["ARK-T1", "ARK-T2", "ARK-T99"]);
+  const [first, second, absent] = local.cases;
+  expect(first).toMatchObject({
+    title: "ARK-T1 first case",
+    level: "integration",
+    technique: "boundary values",
+    priority: "high",
+    risk: "the first defect",
+    status: "active",
+    changed_by: "2026-02-02-ARK-2-1",
+  });
+  expect(first.versions?.map((version) => version.changed_by)).toEqual([
+    "2026-02-02-ARK-2-1",
+    "2026-01-01-ARK-1-1",
+  ]);
+  expect(second).toMatchObject({ status: "retired", reason: "replaced by ARK-T1" });
+  expect(absent).toEqual({ id: "ARK-T99", missing: true });
+
+  const zep = await casesOf("zep");
+  expect(zep.cases[0]).toMatchObject({
+    id: "ARK-T1",
+    name: "ARK-T1 first case",
+    status: "pass",
+    sha: "9b85039",
+    version: 3,
+  });
+  expect(zep.cases[1]).toMatchObject({
+    id: "ARK-T2",
+    name: "ARK-T2 first case",
+    status: "pass",
+    sha: "9b85039",
+  });
+  expect("version" in zep.cases[1]).toBe(false);
+  expect(zep.cases[2]).toEqual({ id: "ARK-T99", missing: true });
+  expect(zephyrRequests).toEqual([]);
+
+  // A run whose checkout holds an unmerged case and a changed case: the run wins, the workspace fills the rest.
+  const changed = await casesOf("run");
+  expect(changed.cases.map(({ id }) => id)).toEqual(["ARK-T1", "ARK-T4", "ARK-T5"]);
+  const [changedCase, addedCase, mainOnlyCase] = changed.cases;
+  expect(changedCase).toMatchObject({
+    title: "ARK-T1 changed in the run",
+    changed_by: "2026-11-06-ARK-900-1",
+  });
+  expect(changedCase.versions?.map((version) => version.changed_by)).toEqual([
+    "2026-11-06-ARK-900-1",
+    "2026-02-02-ARK-2-1",
+  ]);
+  expect(addedCase).toMatchObject({
+    title: "ARK-T4 added in the run",
+    status: "active",
+    changed_by: "2026-11-06-ARK-900-1",
+  });
+  expect(addedCase.versions).toHaveLength(1);
+  expect(mainOnlyCase).toMatchObject({ title: "ARK-T5 only in main", changed_by: "main-only" });
+  expect(mainOnlyCase.versions).toHaveLength(1);
 });
 
 // ---------------------------------------------------------------- ARK-298

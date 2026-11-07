@@ -1,4 +1,5 @@
-import type { TicketDocument } from "./types.ts";
+import { canonicalCriterion } from "../cli/criterion-id.ts";
+import type { TicketCriterionView, TicketDocument } from "./types.ts";
 
 /** Text of a section of a ticket body: the lines under `## <heading>` up to the next `## `. */
 function sectionOf(body: string, heading: string): string {
@@ -41,11 +42,50 @@ export function parseTicketDocument(source: string): TicketDocument {
   return {
     problem: sectionOf(body, "problem"),
     change: sectionOf(body, "change"),
-    criteria: listed.flatMap((entry) => {
-      const criterion = entry as { id?: unknown; text?: unknown } | null;
-      return typeof criterion?.id === "string" && typeof criterion.text === "string"
-        ? [{ id: criterion.id, text: criterion.text }]
-        : [];
-    }),
+    criteria: criteriaOf(listed),
   };
+}
+
+type Listed = {
+  id?: unknown;
+  text?: unknown;
+  method?: unknown;
+  manual?: unknown;
+  verified_by?: unknown;
+};
+
+/**
+ * Criteria with their local id (`ARK-243-AC4` and `AC4` are the same AC), `method` (`manual: true`
+ * alone reads `demonstration`, none reads `test`) and `verified_by` (`[]` unless a list of strings).
+ * An AC written twice in different forms is listed once, with the case ids of both.
+ */
+function criteriaOf(listed: unknown[]): TicketCriterionView[] {
+  const found = new Map<string, TicketCriterionView>();
+  for (const entry of listed) {
+    const criterion = entry as Listed | null;
+    if (typeof criterion?.id !== "string" || typeof criterion.text !== "string") continue;
+    const id = canonicalCriterion(criterion.id).split("/").pop()!;
+    const verified =
+      Array.isArray(criterion.verified_by) &&
+      criterion.verified_by.every((item) => typeof item === "string")
+        ? (criterion.verified_by as string[])
+        : [];
+    const same = found.get(id);
+    if (same) {
+      same.verified_by = [...new Set([...same.verified_by, ...verified])];
+      continue;
+    }
+    found.set(id, {
+      id,
+      text: criterion.text,
+      method:
+        typeof criterion.method === "string"
+          ? criterion.method
+          : criterion.manual === true
+            ? "demonstration"
+            : "test",
+      verified_by: verified,
+    });
+  }
+  return [...found.values()];
 }
