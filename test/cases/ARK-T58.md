@@ -1,6 +1,6 @@
 ---
-id: ARK-T43
-title: ARK-T43 pr_writing config block is validated
+id: ARK-T58
+title: ARK-T58 pr_writing config block is validated
 level: integration
 technique: equivalence classes and boundary values on tier_floor (valid 0-3, invalid below 0, above 3, non-integer) and one wrong type for each other key
 priority: medium

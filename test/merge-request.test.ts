@@ -1018,7 +1018,7 @@ function closeFinding(runDirectory: string) {
 }
 
 test(
-  "ARK-T42 merge-request open posts a ready MR from the ledger, then updates its body after a fixed P0 and a new head",
+  "ARK-T57 merge-request open posts a ready MR from the ledger, then updates its body after a fixed P0 and a new head",
   () => {
     const { runId, runDirectory, worktree } = testedRun();
     // The branch needs a commit ahead of its base before it has an MR; ark test then records that head.
@@ -1065,7 +1065,7 @@ test(
 );
 
 test(
-  "ARK-T42 with two open MRs a new head updates both bodies and drops the fixed P0 from each",
+  "ARK-T57 with two open MRs a new head updates both bodies and drops the fixed P0 from each",
   () => {
     const { runDirectory, worktrees } = scenario({ core: "github", app: "github" });
     mkdirSync(join(runDirectory, "findings"), { recursive: true });

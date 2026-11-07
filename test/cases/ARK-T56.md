@@ -1,6 +1,6 @@
 ---
-id: ARK-T41
-title: ARK-T41 post creates and updates one MR and keeps a human edit
+id: ARK-T56
+title: ARK-T56 post creates and updates one MR and keeps a human edit
 level: integration
 technique: state transition (no MR, MR exists) plus error guessing on a failing probe and --dry-run
 priority: high

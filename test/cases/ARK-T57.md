@@ -1,6 +1,6 @@
 ---
-id: ARK-T42
-title: ARK-T42 open then update after a fixed P0 removes the P0 from the body
+id: ARK-T57
+title: ARK-T57 open then update after a fixed P0 removes the P0 from the body
 level: integration
 technique: state transition (opened, new head, updated) with before and after evidence
 priority: high

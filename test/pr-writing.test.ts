@@ -1067,7 +1067,7 @@ test("ARK-T38 on GitLab the handle is the glab token owner", () => {
   expect(firstContentLine(body)).toBe(provenanceText("cobe.k", ", following their spec."));
 });
 
-// --- lint fixtures: ARK-T39, ARK-T40 ----------------------------------------------------------
+// --- lint fixtures: ARK-T39, ARK-T55 ----------------------------------------------------------
 
 const head = "abc1234def5678abc1234def5678abc1234def56";
 const defaultTitle = "ARK-316: Fix stale MR bodies";
@@ -1403,21 +1403,21 @@ const judgment: [string, RegExp][] = [
   ["ELI01", /describes the code, not the problem/],
 ];
 
-test("ARK-T40 the good body warns on none of the eight judgment checks", () => {
+test("ARK-T55 the good body warns on none of the eight judgment checks", () => {
   const good = lintOf(loadFixture("PROV01", "control"), { diff: "+a plain line\n" });
   for (const [id] of judgment)
     expect({ id, result: result(good, id).result }).not.toEqual({ id, result: "warn" });
 });
 
 for (const [id, reason] of judgment)
-  test(`ARK-T40 ${id} warns, never fails, on its fixture and passes on its corrected control`, () => {
+  test(`ARK-T55 ${id} warns, never fails, on its fixture and passes on its corrected control`, () => {
     const warned = result(lintOf(loadFixture(id, "fail")), id);
     expect({ id, result: warned.result }).toEqual({ id, result: "warn" });
     expect(warned.reason).toMatch(reason);
     expect(result(lintOf(loadFixture(id, "control")), id)).toMatchObject({ id, result: "pass" });
   });
 
-test("ARK-T40 TITLE01-imperative warns on Fixes, VAL02 on a command with no Expect, EVID01 on perf, EVID03 on a head SHA that differs", () => {
+test("ARK-T55 TITLE01-imperative warns on Fixes, VAL02 on a command with no Expect, EVID01 on perf, EVID03 on a head SHA that differs", () => {
   const good = loadFixture("PROV01", "control");
   expect(
     result(lintOf(good, { title: "ARK-316: Fixes stale MR bodies" }), "TITLE01-imperative").result,
@@ -1462,7 +1462,7 @@ const lines = (count: number, sensitive: string[] = [], floor = 0) =>
     },
   });
 
-test("ARK-T40 the tier follows the changed lines, a sensitive path, a raise with a reason and tier_floor", () => {
+test("ARK-T55 the tier follows the changed lines, a sensitive path, a raise with a reason and tier_floor", () => {
   const boundaries: [number, 0 | 1 | 2 | 3][] = [
     [20, 0],
     [21, 1],
@@ -1489,7 +1489,7 @@ test("ARK-T40 the tier follows the changed lines, a sensitive path, a raise with
   expect(tierOfLedger(lines(400, [], 1)).tier).toBe(3);
 });
 
-// --- ARK-T41 ----------------------------------------------------------------------------------
+// --- ARK-T56 ----------------------------------------------------------------------------------
 
 const goodBody = loadFixture("PROV01", "control").body;
 const postedTitle = defaultTitle;
@@ -1555,7 +1555,7 @@ const withHumanText = (
 ) => `${before}${generated}${after}`;
 
 for (const host of ["github", "gitlab"] as HostName[]) {
-  test(`ARK-T41 post creates one MR with the body from the file on ${host}`, () => {
+  test(`ARK-T56 post creates one MR with the body from the file on ${host}`, () => {
     const { post, state } = postScenario(host);
     expect(post(goodBody).value!.action).toBe("created");
     expect(loggedCalls().filter((call) => call.argv.includes("create"))).toHaveLength(1);
@@ -1563,7 +1563,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(state()[0].body).toBe(goodBody);
   });
 
-  test(`ARK-T41 post replaces only the text between the markers and keeps a human tick on ${host}`, () => {
+  test(`ARK-T56 post replaces only the text between the markers and keeps a human tick on ${host}`, () => {
     const { post, state } = postScenario(host, withHumanText(goodBody));
     expect(post(changedBody).value!.action).toBe("updated");
     expect(state()).toHaveLength(1);
@@ -1571,14 +1571,14 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(state()[0].body).toContain("- [x] Tested locally");
   });
 
-  test(`ARK-T41 a failing host probe writes nothing and reports the failure on ${host}`, () => {
+  test(`ARK-T56 a failing host probe writes nothing and reports the failure on ${host}`, () => {
     process.env.FAKE_PROBE_FAIL = "1";
     const { post } = postScenario(host);
     expect(() => post(goodBody)).toThrow(/could not ask .* nothing was written/);
     expect(writeCalls()).toEqual([]);
   });
 
-  test(`ARK-T41 an MR that appears between the two probes turns the create into an update on ${host}`, () => {
+  test(`ARK-T56 an MR that appears between the two probes turns the create into an update on ${host}`, () => {
     const scenario = postScenario(host);
     process.env.FAKE_RACE_MR = JSON.stringify({
       ...scenario.mergeRequest,
@@ -1590,7 +1590,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(scenario.state()[0].body).toBe(withHumanText(changedBody));
   });
 
-  test(`ARK-T41 an MR whose body a person edits between the two probes keeps the edit on ${host}`, () => {
+  test(`ARK-T56 an MR whose body a person edits between the two probes keeps the edit on ${host}`, () => {
     const scenario = postScenario(host, withHumanText(goodBody));
     const edited = withHumanText(
       goodBody,
@@ -1604,7 +1604,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     );
   });
 
-  test(`ARK-T41 STALE01 refuses the post when the head changed after the ledger, and SEC01 only warns on ${host}`, () => {
+  test(`ARK-T56 STALE01 refuses the post when the head changed after the ledger, and SEC01 only warns on ${host}`, () => {
     const stale = postScenario(host);
     const head = stale.commitBranch("changed");
     const current = baseLedger({ repos: [{ head }] });
@@ -1621,7 +1621,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(posted.err.join("\n")).toMatch(/warning: SEC01/);
   });
 
-  test(`ARK-T41 a lint fail in the generated region, or in the merged body outside the markers, refuses the post on ${host}`, () => {
+  test(`ARK-T56 a lint fail in the generated region, or in the merged body outside the markers, refuses the post on ${host}`, () => {
     const leaky = goodBody.replace("Refs: ARK-316.", `Refs: ARK-316. Key ${githubToken}`);
     const create = postScenario(host);
     expect(() => create.post(leaky)).toThrow(/FMT02/);
@@ -1639,7 +1639,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(writeCalls()).toEqual([]);
   });
 
-  test(`ARK-T41 the assignee is the token owner and reviewers never include the author on ${host}`, () => {
+  test(`ARK-T56 the assignee is the token owner and reviewers never include the author on ${host}`, () => {
     const option = (call: LoggedCall, name: string) =>
       call.argv.includes(name) ? call.argv[call.argv.indexOf(name) + 1] : undefined;
     const run = (reviewers: string[]) => {
@@ -1671,7 +1671,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     });
   });
 
-  test(`ARK-T41 --dry-run prints the host call and writes nothing, for create and update on ${host}`, () => {
+  test(`ARK-T56 --dry-run prints the host call and writes nothing, for create and update on ${host}`, () => {
     const create = postScenario(host);
     const created = create.post(goodBody, { dryRun: true });
     expect(created.value!.action).toBe("dry-run");
@@ -1700,7 +1700,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(update.state()[0].body).toBe(original);
   });
 
-  test(`ARK-T41 an old body that quotes the markers inline and holds AKIA and Co-Authored-By words is replaced whole and lints clean on ${host}`, () => {
+  test(`ARK-T56 an old body that quotes the markers inline and holds AKIA and Co-Authored-By words is replaced whole and lints clean on ${host}`, () => {
     const old =
       "Wraps the text in `<!-- pr-writing:begin -->` and `<!-- pr-writing:end -->` markers.\n\n- AC1: reject AKIA keys.\n- AC2: no Co-Authored-By trailer.\n";
     const { post, state } = postScenario(host, old);
@@ -1709,7 +1709,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
   });
 }
 
-// --- ARK-T43 ----------------------------------------------------------------------------------
+// --- ARK-T58 ----------------------------------------------------------------------------------
 
 const configBase = () => ({
   workspace: tmpdir(),
@@ -1735,7 +1735,7 @@ const fullBlock = {
   title_prefix: "feat(TICKET): desc",
 };
 
-test("ARK-T43 a pr_writing block loads with its six keys, and defaults fill a partial or missing block", () => {
+test("ARK-T58 a pr_writing block loads with its six keys, and defaults fill a partial or missing block", () => {
   expect(loadWith(fullBlock)).toEqual(fullBlock);
   const defaults = {
     reviewers: [],
@@ -1750,7 +1750,7 @@ test("ARK-T43 a pr_writing block loads with its six keys, and defaults fill a pa
   expect(loadWith({ tier_floor: 3 }).tier_floor).toBe(3);
 });
 
-test("ARK-T43 a bad pr_writing value is refused with a message that names its key", () => {
+test("ARK-T58 a bad pr_writing value is refused with a message that names its key", () => {
   const bad: [string, unknown][] = [
     ["tier_floor", 5],
     ["tier_floor", -1],

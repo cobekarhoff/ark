@@ -1,6 +1,6 @@
 ---
-id: ARK-T40
-title: ARK-T40 lint warns on judgment checks and sets the tier
+id: ARK-T55
+title: ARK-T55 lint warns on judgment checks and sets the tier
 level: integration
 technique: one fixture per check id with a corrected control, and boundary values on changed lines (20, 21, 149, 150, 399, 400)
 priority: medium
