@@ -1,45 +1,39 @@
 ---
 id: ARK-T25
-title: ARK-T25 worktree sync refuses an id the target already holds
+title: ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside
 level: integration
-technique: equivalence classes (id taken with other content, also when the run reached it by renaming a case, taken with same content, untouched by the run, new) and state transition (before and after the merge)
+technique: equivalence classes of ticket id (plain, front-matter id with ../) times read path (snapshot, /api/ticket/<project>/<id>); boundary of a path that leaves the ticket folder
 priority: high
-risk: sync merges a branch whose new test case ids collide with ids another run already merged, failing with a generic add/add conflict that names no id, or refuses ids that are identical or untouched
+risk: "the snapshot drops a criterion field (id, text, method, verified_by), a ticket reads text of a file outside its own folder through a planted front-matter id, or a bare /api/ticket/<project>/<id> route answers and serves ticket text a second way"
 status: active
-changed_by: 2026-11-06-ARK-319-1
+changed_by: 2026-11-06-ARK-314-1
 ---
 
 ## Objective
 
-Prove that `ark worktree sync <run>` refuses, before it merges, a run branch that adds a `test/cases/<id>.md` whose id the target branch holds with different content, names each such id, and leaves the worktree unchanged. Serves ARK-319/AC3.
-
-Expected: When the run branch adds a test case id that the target branch holds with other content, the system shall refuse the sync and name the id.
+Prove the hub sends the text and criteria of each backlog ticket in its snapshot, read from the ticket's own file with criteria as `{id, text, method, verified_by}`, that nothing outside the ticket folder is read through a planted front-matter id, and that no ticket text route exists beside the snapshot (only `/api/ticket/<project>/<id>/cases` is read on request, proven in ARK-T24).
 
 ## Preconditions
 
-- A temporary `ARK_HOME` with project `demo` whose workspace repo has a bare origin (origin/HEAD names main). main holds `test/cases/ARK-T3.md`.
-- A run with an approved plan and a worktree created from main.
-- The main branch also holds `ARK-T1.md` (eight lines). The run branch renames `ARK-T1.md` to `ARK-T5.md` and appends "run five" (git reports a rename, not an add), and commits `ARK-T6.md` ("run six"), `ARK-T7.md` ("run seven") and `ARK-T8.md` ("same eight").
-- Another run then merged to origin/main: `ARK-T5.md` ("main five"), `ARK-T6.md` ("main six"), `ARK-T8.md` ("same eight", identical to the run's) and an edit of `ARK-T3.md`.
+- Hub started on a temp `ARK_HOME` through `start()` in `test/hub.test.ts`, project `p`, `ticket_source: local`.
+- Ticket `ARK-840` (title `Readable`, status `ready`): problem `Why it hurts`, change `What changes`, one criterion written `ARK-840-AC1` (old id form) with text `It works`, no method, no `verified_by`.
+- Ticket file `ARK-841.md` with front matter `id: ../../../outside` and title `Planted`, problem `Own text`.
+- A file `<ARK_HOME>/outside.md` with the problem text `OUTSIDE TICKET DIRECTORY`.
 
 ## Steps
 
-Command: `bun test test/test-case.test.ts`
-
-1. Record the worktree's `HEAD`.
-2. Run `ark worktree sync <run>`.
-3. Read the exit code and stderr; read the worktree's `HEAD` and `git status`.
-4. Remove `ARK-T5.md` and `ARK-T6.md` on the run branch and commit, so only the allowed classes remain (`ARK-T8` identical, `ARK-T3` untouched by the run, `ARK-T7` new).
-5. Run `ark worktree sync <run>` again and read the exit code, the merged files and `git status`.
+1. Wait for the snapshot to list two tickets.
+2. Read the `document` of `Readable`. Assert it equals problem `Why it hurts`, change `What changes` and one criterion `{id: AC1, text: It works, method: test, verified_by: []}` (the old id reads as local `AC1`, the default method is `test`).
+3. Read the `document` of `Planted`. Assert its problem is `Own text`.
+4. Assert the serialized snapshot never contains `OUTSIDE TICKET DIRECTORY`.
+5. Request `/api/ticket/p/ARK-840` and `/api/ticket/p/..%2F..%2F..%2Foutside`. Assert both answer 404.
 
 ## Expected results
 
-- The exit code is 1.
-- stderr holds `test case id taken on the target branch: ARK-T5` and `test case id taken on the target branch: ARK-T6`.
-- stderr does not name `ARK-T3` (edited on main, not touched by the run), `ARK-T7` (not on main) or `ARK-T8` (same content on both sides).
-- The worktree's `HEAD` equals the recorded one and `git status --porcelain` is empty: the refusal came before the merge.
-- The second sync exits 0. The worktree holds main's edit of `ARK-T3.md` ("three, edited on main"), main's `ARK-T5.md` ("main five") and the run's `ARK-T7.md` ("run seven"), and `git status --porcelain` is empty: identical and untouched ids do not cause a refusal.
+- When the hub reads a ticket, the system shall send its criteria with id, text, method and `verified_by` in the snapshot.
+- The system shall read the text of a ticket only from the ticket's own file, never from a path that a front-matter id names outside the ticket folder.
+- The system shall answer 404 for a ticket text request outside the snapshot.
 
 ## Screenshot checkpoints
 
-None, CLI output. The surface is the error text on stderr; no screen applies.
+none: integration case on the snapshot and the HTTP route; the page rendering of a criterion is proven in ARK-T28 and ARK-T26.

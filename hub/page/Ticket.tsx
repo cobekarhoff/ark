@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
+import { Criteria } from "./Evidence.tsx";
 import { OutsideNote, ProjectValue, Unknown, known } from "./format.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import { runHref } from "./RunDetail.tsx";
@@ -137,13 +138,11 @@ export function TicketPage({ id }: { id: string }) {
               <h2>Change</h2>
               <Prose text={ticket.document.change} testId="ticket-change" />
               <h2>Acceptance criteria · {ticket.document.criteria.length}</h2>
-              <ol className="criteria">
-                {ticket.document.criteria.map((criterion) => (
-                  <li key={criterion.id} data-testid="ticket-criterion" data-id={criterion.id}>
-                    <span className="mono mut">{criterion.id}</span> {criterion.text}
-                  </li>
-                ))}
-              </ol>
+              <Criteria
+                project={ticket.project}
+                ticket={ticket.id}
+                criteria={ticket.document.criteria}
+              />
             </>
           ) : null}
         </article>

@@ -20,6 +20,7 @@ import {
   ProjectValue,
 } from "./format.tsx";
 import type { Attention } from "./format.tsx";
+import { TestEvidence } from "./Evidence.tsx";
 import { MergeRequest } from "./Home.tsx";
 import { layout } from "./layout.ts";
 import {
@@ -440,6 +441,7 @@ function Body({
           </section>
         </div>
       </div>
+      <TestEvidence run={run.run} phase={run.phase} />
       <div className="cols">
         <div>
           <h2>Decisions · {detail ? detail.timeline.length : "…"} events</h2>

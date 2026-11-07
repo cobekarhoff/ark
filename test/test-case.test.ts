@@ -336,7 +336,7 @@ async function newCaseIds(directory: string, count: number): Promise<string[]> {
 }
 
 describe("test case ids across worktrees (ARK-319)", () => {
-  test("ARK-T23 parallel test-case new in two worktrees gives unique ids", async () => {
+  test("ARK-T33 parallel test-case new in two worktrees gives unique ids", async () => {
     const repo = repoWithOrigin();
     const first = addWorktree(repo, "run-a");
     const second = addWorktree(repo, "run-b");
@@ -358,7 +358,7 @@ describe("test case ids across worktrees (ARK-319)", () => {
     expect(await newCaseIds(second, 1)).toEqual(["ARK-T31"]);
   });
 
-  test("ARK-T24 first call without counter reads the target branch", async () => {
+  test("ARK-T34 first call without counter reads the target branch", async () => {
     const repo = repoWithOrigin();
     // The worktree starts before main gains entries up to ARK-T12, so its own test/cases/ lacks them.
     const worktree = addWorktree(repo, "run-a");
@@ -371,7 +371,7 @@ describe("test case ids across worktrees (ARK-319)", () => {
     expect(await newCaseIds(worktree, 1)).toEqual(["ARK-T13"]);
   });
 
-  test("ARK-T25 worktree sync refuses an id the target already holds", () => {
+  test("ARK-T35 worktree sync refuses an id the target already holds", () => {
     tempArkHome();
     const renamedBody = Array.from({ length: 8 }, (_, i) => `line ${i}`).join("\n");
     const workspace = repoWithOrigin({

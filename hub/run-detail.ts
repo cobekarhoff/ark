@@ -1,4 +1,13 @@
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { ArkEvent } from "../cli/events.ts";
 import { isInside } from "../cli/usage/index.ts";
@@ -100,6 +109,79 @@ export function resolveRunFile(runDirectory: string, relative: string): string |
     const real = realpathSync(join(runDirectory, relative));
     if (!isInside(real, realpathSync(runDirectory)) || !statSync(real).isFile()) return null;
     return real;
+  } catch {
+    return null;
+  }
+}
+
+/** Image types the image route serves, by file extension. Never SVG: it can carry script. */
+const imageTypes: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+const imageLimitBytes = 10 << 20;
+
+/** The image type that the first bytes of a file prove, or null. */
+function imageTypeOfBytes(head: Uint8Array): string | null {
+  const startsWith = (...bytes: number[]) => bytes.every((byte, index) => head[index] === byte);
+  if (startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (startsWith(0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (
+    startsWith(0x47, 0x49, 0x46, 0x38) &&
+    (head[4] === 0x37 || head[4] === 0x39) &&
+    head[5] === 0x61
+  )
+    return "image/gif";
+  if (
+    startsWith(0x52, 0x49, 0x46, 0x46) &&
+    head[8] === 0x57 &&
+    head[9] === 0x45 &&
+    head[10] === 0x42 &&
+    head[11] === 0x50
+  )
+    return "image/webp";
+  return null;
+}
+
+/**
+ * The real path and content type of an image under `results/evidence/` of the run, or null. The text
+ * of the path is checked first (no `..`, `.`, empty or backslash segment, no NUL), before any join.
+ * Then the extension must be an image type, the real path (symlinks resolved) must lie inside the real
+ * run folder and name a regular file, and the first bytes must prove the type the extension names:
+ * a text file called `x.png` is not served.
+ */
+export function resolveEvidenceImage(
+  runDirectory: string,
+  relative: string,
+): { real: string; type: string } | null {
+  if (relative.includes("\0") || relative.includes("\\")) return null;
+  const segments = relative.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === ".."))
+    return null;
+  if (segments.length < 3 || segments[0] !== "results" || segments[1] !== "evidence") return null;
+  const extension = segments.at(-1)!.split(".").pop()!.toLowerCase();
+  const declared = imageTypes[extension];
+  if (declared === undefined) return null;
+  try {
+    const real = realpathSync(join(runDirectory, relative));
+    const stat = statSync(real);
+    if (
+      !isInside(real, realpathSync(runDirectory)) ||
+      !stat.isFile() ||
+      stat.size > imageLimitBytes
+    )
+      return null;
+    const descriptor = openSync(real, "r");
+    const head = new Uint8Array(12);
+    try {
+      readSync(descriptor, head, 0, 12, 0);
+    } finally {
+      closeSync(descriptor);
+    }
+    return imageTypeOfBytes(head) === declared ? { real, type: declared } : null;
   } catch {
     return null;
   }

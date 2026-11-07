@@ -1,35 +1,43 @@
 ---
 id: ARK-T26
-title: ARK-T26 the five-process load test of ARK-T22 runs only with ARK_LOAD_PROOF=1
-level: integration
-technique: equivalence classes (variable unset against variable set to 1)
-priority: high
-risk: the ARK-T22 test that starts five `bun test` processes runs on every full `bun test`, so on a busy host it hits its 300 s limit and fails the suite; or it never runs, even with ARK_LOAD_PROOF=1
+title: ARK-T26 Roadmap lists the tickets by horizon, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position
+level: e2e
+technique: state transition (list, search box, ticket page, back to list) with boundaries of the first and the last selected row, a scrolled list and a ticket with escaped markup
+priority: medium
+risk: "a done or superseded ticket shows in the list, j, k or Enter act inside the search box or on a focused button, Esc loses the selected row or the scroll position, ticket text runs as markup or script, a criterion shows a list number or the long form of its id in place of its own id, or the graph and the dependency lists are wrong"
 status: active
-changed_by: 2026-11-06-ARK-319-1
+changed_by: 2026-11-06-ARK-314-1
 ---
 
 ## Objective
 
-Prove that `test/timeouts.test.ts` skips the five-process ARK-T22 test unless `ARK_LOAD_PROOF=1`, and runs it when the variable is set. Serves ARK-326/AC1 and ARK-319/AC4.
-
-Expected: While ARK_LOAD_PROOF is unset, the system shall skip the five-process test and exit 0; when ARK_LOAD_PROOF is 1, the system shall run it.
+Prove the Roadmap lists tickets under Now, Next, Later and Unranked, that keys select and open them, that a ticket opens as a full page with its escaped text, its criteria each with their own id (`AC1`, `AC2`), its dependency graph and lists, and that Esc returns to the same row and scroll position.
 
 ## Preconditions
 
-- A checkout with `bun` installed.
-- For the with-variable side, a temporary folder holds a fake `bun` script. It appends its arguments to a log file and exits 0. The folder is first on `PATH` of the child process only.
+- Playwright spec in `test/pw/hub.pw.ts` on a hub with project `p` and fake Orca tools.
+- Tickets: `ARK-701` ready with a building run; `ARK-702` in progress; `ARK-703` ready (title `The ticket page`, depends on `ARK-701`, problem with a paragraph, raw `<b>raw markup</b>` and two bullets, change with a `<script>` tag, criteria `ARK-703-AC1` `The page shows the title` and `ARK-703-AC2` `Esc returns to the list`); `ARK-704` ready depends on `ARK-703`; `ARK-705` superseded; `ARK-706` done; 40 proposed tickets `ARK-800` to `ARK-839`.
+- `ROADMAP.md`: now `ARK-701`; next `ARK-702`, `ARK-703`; later `ARK-704`, the proposed tickets, `ARK-705`, `ARK-706`.
 
 ## Steps
 
-1. Run `bun test test/timeouts.test.ts -t ARK-T22` in a child process with `ARK_LOAD_PROOF` removed from the environment. Read the exit code and the skip and pass counts from the output.
-2. Run the same command in a child process with `ARK_LOAD_PROOF=1` and the fake `bun` first on `PATH`. Read the exit code, the counts and the log file.
+1. Open `#/roadmap`. `checkpoint(page, "roadmap-list")`. Assert the sections read Now, Next, Later, Unranked and 44 rows show; `ARK-705` and `ARK-706` have no row.
+2. Assert `ARK-701` is selected; `j` selects `ARK-702`, then `ARK-703`; `k` returns to `ARK-702`.
+3. Press `/`; assert the search box has focus; type `ticket page`; assert one row; press Esc; assert the box lost focus; clear it; assert 44 rows; press Esc again.
+4. Press `j`, focus the List view button, press Enter; assert the URL stays `#/roadmap`.
+5. Press `j` 30 times, record `scrollY` (above 100) and the selected ticket. Press Enter; assert the URL is `#/ticket/<id>` and the ticket page shows.
+6. Press Esc; assert the URL is `#/roadmap`, the same row is selected and `scrollY` equals the recorded value.
+7. Open `ARK-703` from its row link. Assert the heading `The ticket page`, the problem text and its two bullets, the markup shown as written (no `<b>` element) and the `<script>` text shown as written with `window.__ran` undefined.
+8. `checkpoint(page, "ticket-criteria")`. Assert two criteria; the second contains `Esc returns to the list`; the ids in `.crit-head .mono` read `AC1` and `AC2`.
+9. Assert the graph holds nodes `ARK-701`, `ARK-703`, `ARK-704` and two edges, the depends-on list reads `ARK-701` and the unblocks list reads `ARK-704`; click the `ARK-704` link and assert its page opens with the title `Title of ARK-704`.
 
 ## Expected results
 
-- Step 1: exit code 0, `1 skip`, and no non-zero `pass` count.
-- Step 2: exit code 0, `1 pass`, no non-zero `skip` count. The log has five lines, each `test test/sync.test.ts test/merge-request.test.ts`. This proves that the test is not skipped and starts five processes of the two files. It does not prove that the real runs pass; the fake `bun` replaces the real five-process run, which takes 5+ minutes on a loaded host and is verified by running with `ARK_LOAD_PROOF=1` on a quiet host.
+- When the Roadmap opens, the system shall list each open ticket once under its horizon, and no done or superseded ticket.
+- When a ticket opens from the Roadmap, the system shall show each criterion with its id (`AC1`, `AC2`), its text escaped, and its graph and lists.
+- When Esc is pressed on the ticket page, the system shall return to the Roadmap with the same selected row and scroll position.
 
 ## Screenshot checkpoints
 
-None, CLI output.
+- `roadmap-list`: the Roadmap with all four sections and 44 rows.
+- `ticket-criteria`: the ticket page of `ARK-703` with the two criteria showing `AC1` and `AC2`.

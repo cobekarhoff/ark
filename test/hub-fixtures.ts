@@ -1,5 +1,6 @@
 // Fixtures for the hub tests, shared by test/hub.test.ts (Bun) and test/pw/hub.pw.ts (Node):
 // no bun:test, no Bun.* globals. Every time comes from `new Date()`, never from a literal.
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -148,7 +149,14 @@ export type FixtureTicket = {
   /** Text under `## Problem` and `## Change`. */
   problem?: string;
   change?: string;
-  criteria?: { id: string; text: string }[];
+  criteria?: {
+    id: string;
+    text: string;
+    method?: string;
+    manual?: boolean;
+    /** Written as `verified_by: [...]`; left out when undefined. */
+    verifiedBy?: string[];
+  }[];
 };
 
 /** A project folder with no `ark.yml` and no runs is no project: give it a minimal config unless it has one. */
@@ -158,7 +166,7 @@ export function writeMinimalConfig(projectFolder: string): void {
 }
 
 /** Writes `$ARK_HOME/projects/<project>/tickets/<id>.md` with the front matter the backlog reads. */
-export function writeBacklogTicket(ticket: FixtureTicket): void {
+export function writeBacklogTicket(ticket: FixtureTicket): string {
   const file = join(
     process.env.ARK_HOME as string,
     "projects",
@@ -180,6 +188,11 @@ export function writeBacklogTicket(ticket: FixtureTicket): void {
           "acceptance_criteria:",
           ...ticket.criteria.flatMap((criterion) => [
             `  - id: ${criterion.id}`,
+            ...(criterion.method ? [`    method: ${criterion.method}`] : []),
+            ...(criterion.manual ? ["    manual: true"] : []),
+            ...(criterion.verifiedBy
+              ? [`    verified_by: [${criterion.verifiedBy.join(", ")}]`]
+              : []),
             `    text: ${JSON.stringify(criterion.text)}`,
           ]),
         ]
@@ -188,8 +201,45 @@ export function writeBacklogTicket(ticket: FixtureTicket): void {
     "",
     ...(ticket.problem ? ["## Problem", "", ticket.problem, ""] : []),
     ...(ticket.change ? ["## Change", "", ticket.change, ""] : []),
+    ...(ticket.criteria?.length
+      ? [
+          "## Acceptance criteria",
+          "",
+          "| ID | Criterion |",
+          "| --- | --- |",
+          ...ticket.criteria.map((criterion) => `| ${criterion.id} | ${criterion.text} |`),
+          "",
+        ]
+      : []),
   ];
   writeFileSync(file, lines.join("\n"));
+  return file;
+}
+
+/**
+ * Writes `test/cases/<id>.md` in a git repo (made on first use) and commits it, so the case has one
+ * more version. `fields` are the front matter keys, each written as a JSON string.
+ */
+export function commitCase(repository: string, id: string, fields: Record<string, string>): void {
+  const git = (...args: string[]) => {
+    const result = spawnSync("git", args, { cwd: repository, encoding: "utf8" });
+    if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
+  };
+  mkdirSync(join(repository, "test", "cases"), { recursive: true });
+  if (!existsSync(join(repository, ".git"))) {
+    git("init", "-q", "-b", "main");
+    git("config", "user.name", "Ark Test");
+    git("config", "user.email", "ark@example.com");
+  }
+  const front = Object.entries({ id, ...fields }).map(
+    ([key, value]) => `${key}: ${JSON.stringify(value)}`,
+  );
+  writeFileSync(
+    join(repository, "test", "cases", `${id}.md`),
+    ["---", ...front, "---", "", "## Objective", "", "A fixture case.", ""].join("\n"),
+  );
+  git("add", "-A");
+  git("commit", "-q", "-m", `${id} ${fields.changed_by ?? ""}`);
 }
 
 /** `purpose` makes the entry an omp helper call (a `model_usage` record, as omp writes for job-caption). */

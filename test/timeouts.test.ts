@@ -23,7 +23,7 @@ function gitHeavyTests(file: string): { name: string; timeout: number }[] {
     }));
 }
 
-// The ARK-T21 check: git-heavy tests of the given files (paths relative to the repository root)
+// The ARK-T31 check: git-heavy tests of the given files (paths relative to the repository root)
 // whose timeout is below 30 seconds.
 function tooShortTests(files: string[]) {
   return files
@@ -31,14 +31,14 @@ function tooShortTests(files: string[]) {
     .filter((testCase) => testCase.timeout < minimumTimeoutMilliseconds);
 }
 
-test("ARK-T21 every sync and merge-request test that starts a run or builds a scenario has a timeout of at least 30 seconds", () => {
+test("ARK-T31 every sync and merge-request test that starts a run or builds a scenario has a timeout of at least 30 seconds", () => {
   expect(gitHeavyFiles.flatMap(gitHeavyTests).length).toBeGreaterThan(0);
   expect(tooShortTests(gitHeavyFiles)).toEqual([]);
 });
 
 // Skipped unless ARK_LOAD_PROOF=1: five parallel runs take 5+ minutes on a busy host (ARK-326).
 test.skipIf(process.env.ARK_LOAD_PROOF !== "1")(
-  "ARK-T22 five bun test processes of the sync and merge-request files at once all pass without a timeout",
+  "ARK-T32 five bun test processes of the sync and merge-request files at once all pass without a timeout",
   async () => {
     // The file list excludes test/timeouts.test.ts, so the child processes never recurse into this test.
     const processes = Array.from({ length: 5 }, () =>
@@ -196,9 +196,9 @@ test(
   { timeout: 60_000 },
 );
 
-// Runs this file in a child process, keeping only the ARK-T22 test.
+// Runs this file in a child process, keeping only the ARK-T32 test.
 async function runFiveProcessTest(env: Record<string, string | undefined>) {
-  const child = Bun.spawn([process.execPath, "test", "test/timeouts.test.ts", "-t", "ARK-T22"], {
+  const child = Bun.spawn([process.execPath, "test", "test/timeouts.test.ts", "-t", "ARK-T32"], {
     cwd: repositoryRoot,
     env,
     stdout: "pipe",
@@ -213,7 +213,7 @@ async function runFiveProcessTest(env: Record<string, string | undefined>) {
 }
 
 test(
-  "ARK-T26 the five-process load test is skipped without ARK_LOAD_PROOF and runs with ARK_LOAD_PROOF=1",
+  "ARK-T36 the five-process load test is skipped without ARK_LOAD_PROOF and runs with ARK_LOAD_PROOF=1",
   async () => {
     const withoutVariable = { ...process.env };
     delete withoutVariable.ARK_LOAD_PROOF;
@@ -245,11 +245,11 @@ test(
   { timeout: 60_000 },
 );
 
-// Runs the given file in a child process, keeping only the ARK-T21 test (the owning check).
+// Runs the given file in a child process, keeping only the ARK-T31 test (the owning check).
 async function runOwningCheck(cwd: string, file: string) {
   const env = { ...process.env };
   delete env.ARK_LOAD_PROOF;
-  const child = Bun.spawn([process.execPath, "test", file, "-t", "ARK-T21"], {
+  const child = Bun.spawn([process.execPath, "test", file, "-t", "ARK-T31"], {
     cwd,
     env,
     stdout: "pipe",
@@ -264,7 +264,7 @@ async function runOwningCheck(cwd: string, file: string) {
 }
 
 test(
-  "ARK-T20 the every-file timeout check refuses a sync-style test with a 10 second timeout",
+  "ARK-T30 the every-file timeout check refuses a sync-style test with a 10 second timeout",
   async () => {
     // Without ARK_LOAD_PROOF the owning check runs and passes on the real sync and merge-request files.
     const normal = await runOwningCheck(repositoryRoot, "test/timeouts.test.ts");

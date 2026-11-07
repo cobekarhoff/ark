@@ -2472,3 +2472,261 @@ pre.file {
   color: var(--mute);
   margin-right: 4px;
 }
+
+/* ---------- test cases and evidence (ARK-314) ---------- */
+.crit-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.crit-list > li {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.crit-list > li.flag {
+  border-color: var(--amber);
+}
+.crit-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.crit-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.case-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.case-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.case-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+  color: var(--link);
+  white-space: nowrap;
+  transition: border-color 120ms var(--ease);
+}
+.case-chip .lv {
+  color: var(--dim);
+}
+.case-chip.missing {
+  color: var(--text);
+  border-style: dashed;
+}
+a.case-chip:hover {
+  border-color: var(--link);
+  text-decoration: none;
+}
+.case-also {
+  font-size: 12px;
+  color: var(--dim);
+}
+.case-open {
+  flex-basis: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.case-open dl,
+.ev dl {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0 0 8px;
+}
+.case-open dt {
+  color: var(--dim);
+  font-size: 12px;
+}
+.case-open dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.case-version {
+  display: block;
+}
+.case-listing {
+  margin: 0;
+  padding-left: 18px;
+}
+.crit-none {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--mute);
+}
+.warn-box {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border: 1px solid var(--amber);
+  background: var(--amber-bg);
+  color: var(--amber-t);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.ev-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0;
+}
+.ev-scroll {
+  overflow-x: auto;
+}
+.ev-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ev-table th,
+.ev-table td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+.ev-table th {
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ev-table details {
+  margin-top: 6px;
+}
+.ev-table summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--dim);
+}
+.ev-run {
+  margin-top: 6px;
+}
+.ev-run .term {
+  max-height: 240px;
+  overflow: auto;
+}
+.ev-acs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.shots {
+  padding: 4px 12px 12px;
+}
+.case-h {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 4px;
+  font-size: 13px;
+}
+.pair {
+  margin: 8px 0 14px;
+}
+.pair h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+.pair-grid {
+  max-width: 760px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.pair figure,
+.ev-shot {
+  margin: 0;
+  min-width: 0;
+}
+.pair figure img,
+.ev-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+}
+.pair figure a,
+.ev-shot a {
+  display: block;
+  border-radius: 6px;
+}
+.pair figcaption {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+.noimg {
+  min-height: 140px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border-style: dashed;
+}
+.ev {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ev:last-child {
+  border-bottom: 0;
+}
+.ev-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.ev-section h4,
+.ev-section h5,
+.ev-section h6 {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.ev-section .ev-section {
+  margin-left: 12px;
+}
+.ev-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pair figure a {
+    transition: transform 160ms var(--ease);
+  }
+  .pair figure a:hover {
+    transform: scale(1.01);
+  }
+}
+@media (max-width: 720px) {
+  .pair-grid,
+  .case-open dl,
+  .ev dl {
+    grid-template-columns: 1fr;
+  }
+}

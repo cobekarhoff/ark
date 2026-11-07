@@ -1,42 +1,45 @@
 ---
 id: ARK-T23
-title: ARK-T23 parallel test-case new in two worktrees gives unique ids
+title: ARK-T23 ticket parser returns method and verified_by with legacy ids
 level: integration
-technique: concurrency (parallel callers) and state transition (counter after each call)
+technique: equivalence classes of the four reads (explicit method, manual only, plain, old id) plus boundary of empty and multi-item verified_by
 priority: high
-risk: two worktrees of one repo, each on its own branch, read only their own test/cases/ and print the same id, so two parallel runs write colliding cases and one must renumber by hand
+risk: "the parser still drops method or verified_by, reads a manual criterion as test, reads a plain criterion as demonstration, or shows an old id ARK-243-AC1 as a different AC than local AC1 so one AC appears twice"
 status: active
-changed_by: 2026-11-06-ARK-319-1
+changed_by: 2026-11-06-ARK-314-1
 ---
 
 ## Objective
 
-Prove that `ark test-case new ARK` never prints the same id twice across the worktrees of one repo, even when each worktree holds none of the other's entries. Serves ARK-319/AC1.
-
-Expected: When ark test-case new runs in several worktrees of one repo, the system shall print a different id for each call.
+Prove `parseTicketDocument` (`hub/ticket-document.ts`) returns the id, `method` and `verified_by` list of every criterion, with the `manual` and default rules and one id for an old and a local form.
 
 ## Preconditions
 
-- One git repo with a bare origin (origin/HEAD names main) and no id counter yet.
-- Two worktrees of it, `run-a` and `run-b`, on two branches created from the same commit. Neither holds entries the other writes.
+- A ticket file written to a temp folder (the way `test/hub-fixtures.ts` writes tickets) with this front matter and a matching `## Acceptance criteria` table:
+  - `ARK-900-AC1`: `method: inspection`, `verified_by: [ARK-T1, ARK-T2]`.
+  - `AC2`: `manual: true`, no `method`, `verified_by: []`.
+  - `AC3`: no `method`, no `manual`, `verified_by: [ARK-T3]`.
+  - `ARK-243-AC4`: no `method`, no `manual`, no `verified_by` key (old id form; the ticket id of the file is ARK-900).
+  - `AC5`: `manual: true` and `method: analysis` (explicit method wins over `manual`).
+- A second ticket file of the same shape whose criterion is written `ARK-900-AC1` in one place and `AC1` in another (same AC, both forms), to check one AC, not two.
+- `test/hub.test.ts` is where the case lives and `bun test test/hub.test.ts` runs it.
 
 ## Steps
 
-Command: `bun test test/test-case.test.ts`
-
-1. Run `ark test-case new ARK` four times at once in `run-a` and four times at once in `run-b`, all eight processes in parallel.
-2. Collect the eight printed ids.
-3. Run `ark test-case new ARK` once more in `run-a`, then once in `run-b`.
-4. Write `test/cases/ARK-T20.md` in `run-a` (not committed), then run `ark test-case new ARK` in `run-a`.
-5. Commit `test/cases/ARK-T30.md` to origin/main, fetch it, then run `ark test-case new ARK` in `run-b`.
+1. Parse the ticket file with `parseTicketDocument`.
+2. Read `criteria` and assert the list has five entries in file order.
+3. For each entry assert the triple (id, method, verified_by) in Expected results.
+4. Parse the second file. Assert `ARK-900-AC1` and `AC1` yield one criterion of the ticket with the display id `AC1`, never two.
+5. Assert the parse does not throw and drops no other field the page already used (`id` and `text` of each criterion are unchanged).
 
 ## Expected results
 
-- All eight commands exit 0 and print the eight ids `ARK-T1` to `ARK-T8`, each once.
-- The two later calls print `ARK-T9` in `run-a` and `ARK-T10` in `run-b`: the counter makes them new although neither worktree holds the other's entries.
-- The call after the higher local entry prints `ARK-T21` in `run-a`: one above the highest entry of the current worktree.
-- The call after the higher fetched target entry prints `ARK-T31` in `run-b`: one above the highest entry at the target head.
+- When a ticket is parsed, the system shall return `id`, `method` and `verified_by` of each criterion.
+- Exact triples: `AC1`, `inspection`, `[ARK-T1, ARK-T2]`; `AC2`, `demonstration`, `[]`; `AC3`, `test`, `[ARK-T3]`; `AC4` (from `ARK-243-AC4`), `test`, `[]`; `AC5`, `analysis`, `[]`.
+- Where a criterion has `manual: true` and no `method`, the system shall read `demonstration`.
+- Where a criterion has no `method` and no `manual`, the system shall read `test`.
+- An old id `ARK-243-AC4` and a local id `AC4` shall both show as AC4 of their ticket, and a ticket that spells one AC both ways shall list it once.
 
 ## Screenshot checkpoints
 
-None, CLI output. The surface is the id printed on stdout; no screen applies.
+none: integration case on a parser; no UI surface.
