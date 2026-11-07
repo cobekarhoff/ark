@@ -24,6 +24,8 @@ Expected: When the run branch adds a test case id that the target branch holds w
 
 ## Steps
 
+Command: `bun test test/test-case.test.ts`
+
 1. Record the worktree's `HEAD`.
 2. Run `ark worktree sync <run>`.
 3. Read the exit code and stderr; read the worktree's `HEAD` and `git status`.

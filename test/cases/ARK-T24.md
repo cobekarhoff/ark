@@ -23,6 +23,8 @@ Expected: When no counter exists, the system shall number the next case above th
 
 ## Steps
 
+Command: `bun test test/test-case.test.ts`
+
 1. Run `ark test-case new ARK` in `run-a`.
 2. Read the printed id.
 

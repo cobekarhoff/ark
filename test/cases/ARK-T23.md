@@ -22,6 +22,8 @@ Expected: When ark test-case new runs in several worktrees of one repo, the syst
 
 ## Steps
 
+Command: `bun test test/test-case.test.ts`
+
 1. Run `ark test-case new ARK` four times at once in `run-a` and four times at once in `run-b`, all eight processes in parallel.
 2. Collect the eight printed ids.
 3. Run `ark test-case new ARK` once more in `run-a`, then once in `run-b`.
