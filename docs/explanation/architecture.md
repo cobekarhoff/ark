@@ -96,7 +96,7 @@ runs/2026-10-29-CLARA-512-1/workspace/repos/
 
 Clara's `docker-compose.yml` bind-mounts `./repos/shared/packages/python/core` into the platform services. Run from the run folder, that mount and each service's build context resolve to the run's worktrees with no extra configuration.
 
-The plan has a step for `shared/packages` and a step for `platform` that needs it. The integration tests run against both worktrees together. Ark then opens a merge request for `shared/packages` first and one for `platform` second. On GitLab, Ark sets a merge request dependency where the tier allows it. Otherwise it writes `Depends on !N` in the description. On GitHub, it writes `Depends on #N`.
+The plan has a step for `shared/packages` and a step for `platform` that needs it. The integration tests run against both worktrees together. Ark then opens a merge request for `shared/packages` first and one for `platform` second. On GitLab, Ark sets a merge request dependency where the tier allows it. Otherwise it writes `Depends on !N` in the body. On GitHub, it writes `Depends on #N`.
 
 [ARK-150](../prd.md#milestones) checks that this layout works with Orca and docker compose before the rest is built.
 

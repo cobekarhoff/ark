@@ -50,7 +50,7 @@ The project filter is site-wide: the `project` query of the hash, with "All proj
 _Avoid_: Control center, dashboard
 
 **Merge request (MR)**:
-The request Ark opens for a human to review and merge one repo's changes. On GitHub it's a pull request.
+The request Ark opens for a human to review and merge one repo's changes. On GitHub it's a pull request. Its title is `<ticket id>: <summary>` and its body comes from the run (the pr-writing core); `ark merge-request open` refreshes the body after a new head.
 _Avoid_: Change request
 
 **Roadmap**:

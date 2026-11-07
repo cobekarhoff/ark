@@ -1,9 +1,37 @@
 #!/usr/bin/env bun
-// Fake `gh`: records argv as one JSON line and prints a plausible pull request URL.
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { basename } from "node:path";
+// Fake `gh`: records each call, keeps open PRs in the fake host state, and answers the calls `ark merge-request open` makes.
+import { readFileSync } from "node:fs";
+import { creates, editAfterFirstProbe, option, owner, raceAfterFirstProbe, readState, record, repo, writeState } from "./fake-host.ts";
 
-const logFile = process.env.FAKE_LOG!;
-const previous = existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter((line) => line.includes('"create"')) : [];
-appendFileSync(logFile, JSON.stringify({ tool: "gh", cwd: process.cwd(), argv: process.argv.slice(2) }) + "\n");
-console.log(`https://github.com/org/${basename(process.cwd())}/pull/${previous.length + 1}`);
+const argv = process.argv.slice(2);
+const bodyFile = option(argv, "--body-file");
+const body = bodyFile ? readFileSync(bodyFile, "utf8") : undefined;
+const previous = creates();
+record("gh", argv, body);
+const state = readState();
+
+if (argv[0] === "api" && argv[1] === "user") {
+  console.log(owner);
+} else if (argv[0] === "pr" && argv[1] === "list") {
+  if (process.env.FAKE_PROBE_FAIL) {
+    console.error("HTTP 502: bad gateway");
+    process.exit(1);
+  }
+  const head = option(argv, "--head");
+  if (raceAfterFirstProbe('"list"', state)) {
+    console.log("[]");
+    process.exit(0);
+  }
+  editAfterFirstProbe('"list"', state);
+  console.log(
+    JSON.stringify(state.filter((pr) => pr.repo === repo && pr.head === head).map(({ number, url, body }) => ({ number, url, body }))),
+  );
+} else if (argv[0] === "pr" && argv[1] === "create") {
+  const url = `https://github.com/org/${repo}/pull/${previous + 1}`;
+  writeState([...state, { number: previous + 1, url, head: option(argv, "--head"), repo, body: body! }]);
+  console.log(url);
+} else if (argv[0] === "pr" && argv[1] === "edit") {
+  writeState(state.map((pr) => (pr.number === Number(argv[2]) && pr.repo === repo ? { ...pr, body: body! } : pr)));
+} else if (argv[0] === "pr" && argv[1] === "view") {
+  console.log(JSON.stringify({ state: "OPEN", statusCheckRollup: [] }));
+}

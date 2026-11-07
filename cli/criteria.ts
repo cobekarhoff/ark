@@ -52,7 +52,7 @@ export function parseCriteria(fields: Record<string, unknown>, source: string): 
   });
 }
 
-function frontmatterOf(file: string): Record<string, unknown> {
+export function frontmatterOf(file: string): Record<string, unknown> {
   const match = readFileSync(file, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
   return match ? ((Bun.YAML.parse(match[1]) ?? {}) as Record<string, unknown>) : {};
 }
