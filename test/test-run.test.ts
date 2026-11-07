@@ -16,6 +16,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeEvidenceFile,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -50,12 +51,23 @@ function buildingRun(options: {
   roundBudget?: number;
   kind?: string;
   checks?: { name: string; repo: string; command: string }[];
+  /** Give the repo a GitHub origin whose pushes go to a local bare repo, so `merge-request open` can run against the fake `gh`. */
+  forge?: boolean;
 }): { runId: string; runDirectory: string; workspace: string; arkHome: string } {
   const arkHome = tempArkHome();
   const workspace = tempGitRepo({
     "e2e.test.ts": suiteTests(options.e2e ?? []),
     "unit.test.ts": suiteTests(options.unit ?? []),
   });
+  if (options.forge) {
+    const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
+    for (const args of [
+      ["-C", bare, "init", "--bare", "-q"],
+      ["-C", workspace, "remote", "add", "origin", "https://github.com/org/core.git"],
+      ["-C", workspace, "config", "remote.origin.pushurl", bare],
+    ])
+      Bun.spawnSync(["git", ...args]);
+  }
   writeProject("demo", {
     workspace,
     ticket_source: "local",
@@ -457,28 +469,58 @@ describe("ark test on a refactor run", () => {
   });
 
   test("ARK-T63 a refactor run with no method test AC is not refused for a failing or unrecorded base", () => {
-    const { runId, runDirectory } = buildingRun({
-      kind: "refactor",
-      criteria: ["FAKE-1-AC1"],
-      ticketCriteria: [{ id: "FAKE-1-AC1", method: "inspection" }],
-      testCases: [],
-      e2e: [failing("FAKE-1-AC1 works")],
-    });
-    fixHead(runDirectory);
-    expect(ark("gate", "record", runId, "manual", "FAKE-1-AC1", "ok").code).toBe(0);
+    // The fake `gh` records its calls here.
+    const fixtures = join(import.meta.dir, "fixtures/merge-request");
+    let log = "";
+    process.env.PATH = `${fixtures}:${(process.env.PATH ?? "")
+      .split(":")
+      .filter((entry) => entry !== fixtures)
+      .join(":")}`;
+    const created = () =>
+      existsSync(log)
+        ? readFileSync(log, "utf8")
+            .split("\n")
+            .filter(Boolean)
+            .filter((line) => JSON.parse(line).argv.includes("create")).length
+        : 0;
+    const openedCount = (runDirectory: string) =>
+      readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+        .split("\n")
+        .filter((line) => line.includes('"merge_request.opened"')).length;
 
-    // The suites fail at base and pass at head.
-    const result = ark("test", runId);
-    expect(result.code, result.err + result.out).toBe(0);
-    expect(result.out).toContain("base      failed");
-    expect(result.err).not.toContain("the suites fail at the base commit");
-    expect(testCompleted(runDirectory)[0].base_passed).toBe(false);
-    expect(ark("merge-request", "open", runId).err).not.toContain("base commit");
+    // Two states of a run with no method test AC: the base failed, and no base result was recorded.
+    for (const unrecorded of [false, true]) {
+      log = join(mkdtempSync(join(tmpdir(), "ark-fake-log-")), "calls.ndjson");
+      process.env.FAKE_LOG = log;
+      const { runId, runDirectory } = buildingRun({
+        kind: "refactor",
+        forge: true,
+        criteria: ["FAKE-1-AC1"],
+        ticketCriteria: [{ id: "FAKE-1-AC1", method: "inspection" }],
+        testCases: [],
+        e2e: [failing("FAKE-1-AC1 works")],
+      });
+      fixHead(runDirectory);
+      writeEvidenceFile(runDirectory, "FAKE-1-AC1", "inspection");
+      expect(ark("gate", "record", runId, "manual", "FAKE-1-AC1", "ok").code).toBe(0);
 
-    // No base result recorded at all.
-    const { base_passed: _recorded, ...unrecorded } = testCompleted(runDirectory)[0];
-    appendEvent(runDirectory, "test.completed", unrecorded);
-    expect(ark("merge-request", "open", runId).err).not.toContain("base commit");
+      // The suites fail at base and pass at head.
+      const result = ark("test", runId);
+      expect(result.code, result.err + result.out).toBe(0);
+      expect(result.out).toContain("base      failed");
+      expect(result.err).not.toContain("the suites fail at the base commit");
+      const [event] = testCompleted(runDirectory);
+      expect(event.base_passed).toBe(false);
+      if (unrecorded) {
+        const { base_passed: _recorded, ...rest } = event;
+        appendEvent(runDirectory, "test.completed", rest);
+      }
+
+      const opened = ark("merge-request", "open", runId);
+      expect(opened.code, opened.err + opened.out).toBe(0);
+      expect(created()).toBe(1);
+      expect(openedCount(runDirectory)).toBe(1);
+    }
   });
 
   test("ARK-302-AC7 a base that passes records base_passed true and merge-request open no longer refuses on the base", () => {
