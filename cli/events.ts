@@ -102,7 +102,7 @@ export function readEvents(runDirectory: string): ArkEvent[] {
 export function appendEvent(runDirectory: string, type: string, data: EventData): ArkEvent {
   const events = readEvents(runDirectory);
   const state = deriveState(events);
-  assertAllowed(state, type, data);
+  assertAllowed(state, type, data, runDirectory);
   if (
     type === "gate.answered" &&
     data.gate === "plan" &&

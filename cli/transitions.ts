@@ -1,3 +1,4 @@
+import { hasTestCriterion } from "./criteria.ts";
 import { ArkError } from "./errors.ts";
 import type { EventData, RunState } from "./events.ts";
 
@@ -35,7 +36,12 @@ function requirePhase(state: RunState, type: string, phases: string[]): void {
 }
 
 /** Throws an ArkError naming the missing event when `type` is not allowed in `state`. */
-export function assertAllowed(state: RunState, type: string, data: EventData): void {
+export function assertAllowed(
+  state: RunState,
+  type: string,
+  data: EventData,
+  runDirectory?: string,
+): void {
   if (type === "run.started") {
     if (state.events > 0) throw new ArkError("run.started refused: it must be the first event");
     return;
@@ -113,7 +119,12 @@ export function assertAllowed(state: RunState, type: string, data: EventData): v
       requirePhase(state, type, buildPhases);
       if (state.steps.find((step) => step.id === data.step)?.status === "running")
         throw new ArkError(`step.started refused: step ${data.step} is already running`);
-      if (state.kind === "bug" && data.role === "implementer" && !state.red_test)
+      if (
+        state.kind === "bug" &&
+        data.role === "implementer" &&
+        !state.red_test &&
+        (runDirectory === undefined || hasTestCriterion(runDirectory))
+      )
         throw new ArkError(
           "step.started refused: bug run: record a failing ark test of the ACs before the fix",
         );
