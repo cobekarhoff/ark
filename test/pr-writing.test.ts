@@ -340,7 +340,7 @@ const firstContentLine = (body: string) =>
 
 const result = (results: LintResult[], id: string) => results.find((entry) => entry.id === id)!;
 
-// --- ARK-T16 ----------------------------------------------------------------------------------
+// --- ARK-T34 ----------------------------------------------------------------------------------
 
 const modules = ["ledger", "body", "lint", "post"];
 
@@ -365,7 +365,7 @@ function sourcesUnder(folder: string): string[] {
   );
 }
 
-test("ARK-T16 both entry points import ledger, body, lint and post, and no other file builds an MR title or body", () => {
+test("ARK-T34 both entry points import ledger, body, lint and post, and no other file builds an MR title or body", () => {
   const library = join(root, "skills/pr-writing/lib");
   expect(readdirSync(library).sort()).toEqual(modules.map((name) => `${name}.ts`).sort());
 
@@ -407,9 +407,9 @@ test("ARK-T16 both entry points import ledger, body, lint and post, and no other
   }
 });
 
-// --- ARK-T17 ----------------------------------------------------------------------------------
+// --- ARK-T35 ----------------------------------------------------------------------------------
 
-test("ARK-T17 the run ledger holds the last test result, the open findings, evidence, gates and merge order", () => {
+test("ARK-T35 the run ledger holds the last test result, the open findings, evidence, gates and merge order", () => {
   const run = makeRun({
     kind: "bug",
     summary: "Short outcome",
@@ -522,7 +522,7 @@ function gitRepoOnBranch(): string {
   return repo;
 }
 
-test("ARK-T17 the git ledger picks the base by the fixed order and records a failed host probe as unknown", () => {
+test("ARK-T35 the git ledger picks the base by the fixed order and records a failed host probe as unknown", () => {
   const bin = probeHostBin();
   const repo = gitRepoOnBranch();
   const setOriginHead = (name: string | null) => {
