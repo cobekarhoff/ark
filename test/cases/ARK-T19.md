@@ -40,6 +40,8 @@ Expected: When a finding is open, the system shall list it under `Not done`.
 - Evidence by kind: bug shows the AC test failing at base and passing at head; perf names `baseline.md` and `compare.md`; refactor shows suites passing at base and at head; UI shows the ARK-312 test case results at base and head.
 - How to verify is a list of `- [ ]` items, each with a backticked command and an `Expect` clause.
 - `Not done` lists the open P1, the manual-pending AC, the unproven AC, the failed check `lint` and, as its own item, the not-run check `typecheck`. Removing `typecheck` from the not-run state (it ran and passed) removes that item and leaves the `lint` item.
+- A run whose last `test.completed` has no `checks` field gets no `did not run` item in `Not done`; a `checks` list that lacks a configured check does.
+- `What is different` holds the numbered Change items whole (never cut at a length), and holds no item of the `Risks:` list and no nested item.
 - Risk section holds the merge-risk block of AC12, then one `git revert` per MR in reverse merge order.
 - The AC checklist has ids with status only. `AC-TEXT-MARKER` is absent from the new body and present in the old body.
 - With a template (`.gitlab/merge_request_templates/Default.md`, `.github/pull_request_template.md`, or a rule file that names headings) the content fills those headings (Summary, Changes, Testing, Related) instead.

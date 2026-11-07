@@ -134,6 +134,10 @@ type RunSpec = {
   risks?: string[];
   /** Checks of `ark.yml` and the result the last test run recorded for each (absent: not run). */
   checks?: { name: string; passed?: boolean }[];
+  /** True: the last `test.completed` has no `checks` field, as in a run from before ARK-302. */
+  withoutChecksField?: boolean;
+  /** The ticket's `## Change` text (default: one numbered item). */
+  changeText?: string;
   openedMergeRequests?: { repo: string; url: string; number: number }[];
   files?: Record<string, string>;
   prWriting?: PrWriting;
@@ -183,7 +187,7 @@ function makeRun(spec: RunSpec = {}) {
   };
   writeFileSync(
     join(directory, "ticket.md"),
-    `---\n${JSON.stringify(front)}\n---\n## Problem\n\nAn MR body listed a bug that was already fixed.\n\n## Change\n\n1. The body is rebuilt from the run.\n`,
+    `---\n${JSON.stringify(front)}\n---\n## Problem\n\nAn MR body listed a bug that was already fixed.\n\n## Change\n\n${spec.changeText ?? "1. The body is rebuilt from the run."}\n`,
   );
 
   const steps = spec.steps ?? [
@@ -295,9 +299,13 @@ function makeRun(spec: RunSpec = {}) {
         passed: true,
         heads,
         criteria: Object.fromEntries(criteria.map((criterion) => [criterion.id, criterion.status])),
-        checks: (spec.checks ?? [])
-          .filter((check) => check.passed !== undefined)
-          .map(({ name, passed }) => ({ name, passed })),
+        ...(spec.withoutChecksField
+          ? {}
+          : {
+              checks: (spec.checks ?? [])
+                .filter((check) => check.passed !== undefined)
+                .map(({ name, passed }) => ({ name, passed })),
+            }),
       },
     },
   );
@@ -895,6 +903,42 @@ test("ARK-T19 a check that ran and passed leaves Not done, a failed check stays"
   const notDone = body.split("## Not done")[1].split("## ")[0];
   expect(notDone).toContain("Check `lint` failed");
   expect(notDone).not.toContain("typecheck");
+});
+
+test("ARK-T19 a last test result with no checks field is unknown, never a did-not-run claim, while a checks list without the check is", () => {
+  const notDoneOf = (spec: RunSpec) =>
+    buildBody(gappyRun(spec).ledger()).split("## Not done")[1].split("## ")[0];
+
+  expect(notDoneOf({})).toContain("Check `typecheck` did not run");
+
+  const old = notDoneOf({ withoutChecksField: true });
+  expect(old).not.toContain("did not run");
+  expect(old).not.toContain("Check `lint`");
+  expect(old).toContain("P1 open: Missing guard");
+});
+
+test("ARK-T19 what is different lists the Change items whole and leaves the Risks list and nested items out", () => {
+  const longItem = `In \`a.ts\`, ${"keep every word of this long item, ".repeat(8)}and end the sentence here.`;
+  const body = buildBody(
+    gappyRun({
+      changeText: [
+        `1. ${longItem} A second sentence stays out.`,
+        "2. Enforce each kind:",
+        "   - `bug`: a nested item stays out.",
+        "3. Update the docs.",
+        "",
+        "Risks:",
+        "",
+        "- A session file may mix models. This risk stays out.",
+        "- Another risk, which a clip would cut mid-sentence,",
+      ].join("\n"),
+    }).ledger(),
+  );
+  const different = body.split("## What is different")[1].split("## ")[0];
+  const bullets = different.split("\n").filter((line) => line.startsWith("- "));
+
+  expect(bullets).toEqual([`- ${longItem}`, "- Update the docs."]);
+  expect(longItem.length).toBeGreaterThan(180);
 });
 
 test("ARK-T19 the evidence follows the ticket kind: perf names baseline.md and compare.md, refactor shows pass at base and head", () => {
