@@ -11,7 +11,7 @@ changed_by: 2026-11-06-ARK-316-1
 
 ## Objective
 
-Prove the MR title rule: the whole title is 72 characters or less. `<ticket id>: <summary>` uses the `summary:` field, else the ticket title, each only when the whole title fits 72; else `--summary`; else a refusal before any push. A repo `title_prefix` rule wins, and its length counts. Serves ARK-316/AC3.
+Prove the MR title rule: the whole title is 72 characters or less. `<ticket id>: <summary>` uses the `summary:` field, else the ticket title, each only when the whole title fits 72; else `--summary`; else a refusal before any push. A repo `title_prefix` rule (for example `type(TICKET): desc`) wins over the default, and its length counts. Serves ARK-316/AC3.
 
 Expected: When no usable summary can be found, the system shall refuse before any push with `ticket has no summary: pass --summary`.
 
