@@ -70,6 +70,11 @@ export function manualCriteria(runDirectory: string): string[] {
     .map((criterion) => criterion.id);
 }
 
+/** True when a criterion of the run folder's ticket has method `test`: the red-test (bug) and base-pass (refactor) rules apply only then. */
+export function hasTestCriterion(runDirectory: string): boolean {
+  return runCriteria(runDirectory).some((criterion) => criterion.method === "test");
+}
+
 /** The evidence file of a criterion that no test proves: `results/evidence/AC<k>.md` in the run folder. */
 export function evidenceFile(runDirectory: string, criterionId: string): string {
   return join(runDirectory, "results", "evidence", `${criterionId.split("/").pop()}.md`);
