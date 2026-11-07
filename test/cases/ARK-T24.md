@@ -51,4 +51,4 @@ Prove the hub's on-request test case read for a ticket sends the full record of 
 
 ## Screenshot checkpoints
 
-none: integration case on a JSON read; the page rendering of `missing` is proven in ARK-T18.
+none: integration case on a JSON read; the page rendering of `missing` is proven in ARK-T28.

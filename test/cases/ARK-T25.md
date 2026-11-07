@@ -36,4 +36,4 @@ Prove the hub sends the text and criteria of each backlog ticket in its snapshot
 
 ## Screenshot checkpoints
 
-none: integration case on the snapshot and the HTTP route; the page rendering of a criterion is proven in ARK-T18 and ARK-T26.
+none: integration case on the snapshot and the HTTP route; the page rendering of a criterion is proven in ARK-T28 and ARK-T26.

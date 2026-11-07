@@ -4166,7 +4166,7 @@ function writeShots(directory: string, id: string): void {
     );
 }
 
-const planOfT19: PlanCase[] = [
+const planOfT29: PlanCase[] = [
   {
     id: "ARK-T1",
     action: "add",
@@ -4277,7 +4277,7 @@ function ticketWorld(): void {
 const criterionOf = (page: Page, id: string) =>
   page.locator(`[data-testid="ticket-criterion"][data-id="${id}"]`);
 
-test("ARK-T18 ticket page shows method, case links and the no-integration warning", async ({
+test("ARK-T28 ticket page shows method, case links and the no-integration warning", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -4368,7 +4368,7 @@ test("ARK-T18 ticket page shows method, case links and the no-integration warnin
   await expect(page.locator("main h1")).toContainText("Title of ARK-901");
 });
 
-/** A run of ARK-900 in project `p` with the T19 plan: `merge_requests_open`, evidence on disk unless told otherwise. */
+/** A run of ARK-900 in project `p` with the T29 plan: `merge_requests_open`, evidence on disk unless told otherwise. */
 function evidenceRun(number = 1, withResults = true): string {
   const run = runId("ARK-900", number);
   const directory = writeRun({
@@ -4377,11 +4377,11 @@ function evidenceRun(number = 1, withResults = true): string {
     ticket: { id: "ARK-900", title: "Evidence" },
     phase: "merge_requests_open",
   });
-  writeRunEvidence(directory, "ARK-900", planOfT19, [], withResults);
+  writeRunEvidence(directory, "ARK-900", planOfT29, [], withResults);
   return run;
 }
 
-test("ARK-T19 run page shows a test evidence panel row for each plan case", async ({ page }) => {
+test("ARK-T29 run page shows a test evidence panel row for each plan case", async ({ page }) => {
   isolate();
   installFakeTools({});
   writeProject("p", { workspace: tempDirectory("ark-ws-"), ticket_source: "local" });
@@ -4764,7 +4764,7 @@ const focusRing = (page: Page) =>
 test("ARK-T22 new page parts keep accessibility, request limits and speed", async ({ page }) => {
   test.setTimeout(240_000);
   ticketWorld();
-  // The run of the T19 to T21 fixtures, on the tickets of T18: T2 holds the three screenshot checkpoints.
+  // The run of the T29, T20 and T21 fixtures, on the tickets of T28: T2 holds the three screenshot checkpoints.
   const run = runId("ARK-900");
   const directory = writeRun({
     project: "p",
@@ -4772,7 +4772,7 @@ test("ARK-T22 new page parts keep accessibility, request limits and speed", asyn
     ticket: { id: "ARK-900", title: "Evidence" },
     phase: "merge_requests_open",
   });
-  writeRunEvidence(directory, "ARK-900", planOfT19, nonTestCriteria);
+  writeRunEvidence(directory, "ARK-900", planOfT29, nonTestCriteria);
   writeShots(directory, "ARK-T2");
   // The demonstration names its screenshots but holds no image file: the page reads 4 images, not 6.
   writeAcEvidence(directory, false);

@@ -159,6 +159,12 @@ export type FixtureTicket = {
   }[];
 };
 
+/** A project folder with no `ark.yml` and no runs is no project: give it a minimal config unless it has one. */
+export function writeMinimalConfig(projectFolder: string): void {
+  const file = join(projectFolder, "ark.yml");
+  if (!existsSync(file)) writeFileSync(file, "ticket_source: github\n");
+}
+
 /** Writes `$ARK_HOME/projects/<project>/tickets/<id>.md` with the front matter the backlog reads. */
 export function writeBacklogTicket(ticket: FixtureTicket): string {
   const file = join(
@@ -169,6 +175,7 @@ export function writeBacklogTicket(ticket: FixtureTicket): string {
     `${ticket.id}.md`,
   );
   mkdirSync(dirname(file), { recursive: true });
+  writeMinimalConfig(join(dirname(file), ".."));
   const lines = [
     "---",
     `id: ${ticket.id}`,

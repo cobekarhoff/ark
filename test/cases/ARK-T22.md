@@ -15,7 +15,7 @@ Prove the new ticket and run page parts keep the accessibility and request limit
 
 ## Preconditions
 
-- Playwright spec in `test/pw/hub.pw.ts`, using the fixtures of ARK-T18 to ARK-T21: tickets ARK-900 (four criteria of four methods, no warning; its ARK-T1 shared-case listing), ARK-901 and ARK-902 (warnings on AC1 and AC2), and the run with five panel rows, three checkpoint pairs, five evidence blocks. Run once for light and once for dark (`colorScheme` emulation).
+- Playwright spec in `test/pw/hub.pw.ts`, using the fixtures of ARK-T28, ARK-T29, ARK-T20 and ARK-T21: tickets ARK-900 (four criteria of four methods, no warning; its ARK-T1 shared-case listing), ARK-901 and ARK-902 (warnings on AC1 and AC2), and the run with five panel rows, three checkpoint pairs, five evidence blocks. Run once for light and once for dark (`colorScheme` emulation).
 - The existing helpers of ARK-285-AC10 (contrast measure) and ARK-285-AC11 (request list) are reused, not rewritten.
 
 ## Steps
