@@ -377,10 +377,16 @@ rmdirSync(home+'/inside');release();`,
       startedTests.push(children[2]!);
       await Bun.sleep(500);
       writeFileSync(signalFile("continue-move"), "");
-      for (const name of ["B", "A", "C"]) {
-        writeFileSync(signalFile(`leave-${name}`), "");
-        await waitFor(present(`entered-${name}`), `${name} to take the lock`);
-        await children[["A", "B", "C"].indexOf(name)]!.exited;
+      // B holds the lock; A and C poll independently, so release whichever enters next.
+      const names = ["A", "B", "C"];
+      const entered = (name: string) => existsSync(signalFile(`entered-${name}`));
+      const waiting = new Set(names);
+      while (waiting.size > 0) {
+        await waitFor(() => [...waiting].some(entered), "a contender to take the lock");
+        const releasing = [...waiting].find(entered)!;
+        writeFileSync(signalFile(`leave-${releasing}`), "");
+        await children[names.indexOf(releasing)]!.exited;
+        waiting.delete(releasing);
       }
       for (const name of ["A", "B", "C"])
         expect(existsSync(signalFile(`overlap-${name}`))).toBe(false);
