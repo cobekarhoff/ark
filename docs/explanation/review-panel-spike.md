@@ -2,9 +2,9 @@
 
 Run ARK-349, replays done on 2026-11-07 with omp v18.16.0, in two rounds. **Question:** Ark reviews each change with one model (`openai-codex/gpt-6.1-sol`). Five reviews let a defect reach main (`reviewer: missed` in `escaped-defects.yml`). Would a second model, on the same prompt, have caught them?
 
-Round 1 gave the models no diff, only a command to produce it (section 4). Round 2 (sections 1 to 3) gives every review the pinned diff as a read-only file. Round 2 is the measured result. Round 1 stays as a labelled baseline.
+Round 1 gave the models no diff, only a command to produce it (section 3). Round 2 (sections 1, 2 and 4) gives every review the pinned diff as a read-only file. Round 2 is the measured result. Round 1 stays as a labelled baseline.
 
-**Answer: no panel for now, but the answer is closer than round 1 suggested.** Under a strict rule (a hit names the escaped defect's own mechanism), the 24 round 2 reviews found **2 of the 5 defects**: ARK-181 (3 of 24 reviews: `gpt-6.1-sol` twice, `claude-opus-5-5` once) and ARK-310 gap 2 (1 of 24 reviews: `claude-opus-5-5` review 2, ranked P1). `gpt-6.1-sol` alone found 1 of 5 and `claude-opus-5-5` alone found 2 of 5, so the panel found nothing that `claude-opus-5-5` alone did not. On the ARK-213 control, which the real reviewer found, `claude-opus-5-5` found it in 2 of 2 reviews (ranked P3) and `gpt-6.1-sol` in 0 of 2. Three defects (ARK-217, ARK-309, ARK-310 gap 1) were found by none of the 24. A panel of the two models would cost about $2.5 to $3.6 more per run (+45% to +64% of the mean run cost). The recommendation is **no always-on panel** (section 3), with the one finding that `claude-opus-5-5` is the stronger reviewer on this sample, and a 5.6 times higher price.
+**Answer: no panel for now, but the answer is closer than round 1 suggested.** Under a strict rule (a hit names the escaped defect's own mechanism), the 24 round 2 reviews found **2 of the 5 defects**: ARK-181 (3 of 24 reviews: `gpt-6.1-sol` twice, `claude-opus-5-5` once) and ARK-310 gap 2 (1 of 24 reviews: `claude-opus-5-5` review 2, ranked P1). `gpt-6.1-sol` alone found 1 of 5 and `claude-opus-5-5` alone found 2 of 5, so the panel found nothing that `claude-opus-5-5` alone did not. On the ARK-213 control, which the real reviewer found, `claude-opus-5-5` found it in 2 of 2 reviews (ranked P3) and `gpt-6.1-sol` in 0 of 2. Three defects (ARK-217, ARK-309, ARK-310 gap 1) were found by none of the 24. A panel of the two models would cost about $2.5 to $3.6 more per run (+45% to +64% of the mean run cost). The recommendation is **no always-on panel** (section 4), with the one finding that `claude-opus-5-5` is the stronger reviewer on this sample, and a 5.6 times higher price.
 
 Three limits shape every number below: five defects, two repeats per model, and reviewers with no shell (section 1.4). Read the result as "a possible gain on 1 defect of 5", not as proof that a panel helps or cannot help.
 
@@ -300,85 +300,17 @@ The escaped defect (a structured worker whose liveness could not be checked read
 | 8   | The notifier URL is not URL-encoded, but the page decodes it                                                          | O2             | real (impact depends on the characters in an id; not checked) | `cli/hub/notify.ts:85`; `ui/app.tsx:120`                                                                                                                        |
 | 9   | The notification history is re-read and pushed every second                                                           | O2             | real                                                          | `cli/hub/state.ts:236`; `cli/ui.ts:10,43`                                                                                                                       |
 
-## 3. Decision
+## 3. Round 1 baseline: replays without the diff
 
-The panel is two reviewers whose findings are merged; a defect counts as found when either one finds it. The only pair that ran is `gpt-6.1-sol` with `claude-opus-5-5`. The decision table is at the end of this section.
+### 3.1 What round 1 was
 
-### 3.1 Cost per run
-
-The extra cost comes from the `metrics.json` of the **latest 30 runs that have one**. I took every `~/.ark/projects/ark/runs/*/metrics.json` (110 files), ordered the runs by the time of their last event, and kept the last 30: `2026-11-03-ARK-191-1` through `2026-11-06-ARK-343-1`. This run (ARK-349) has no `metrics.json` yet. The figures:
-
-- Total cost of the 30 runs $168.21, mean $5.61 per run.
-- Reviewer cost (`cost.by_role.reviewer.usd`) $19.49 (11.6% of the total), mean **$0.65 per run** (median $0.53, lowest $0.23, highest $1.52). All 30 runs have a known reviewer cost.
-- The 30 runs have 69 reviewer `step.started` events (2.3 per run, counting rework rounds) and 37 reviewer steps in their `plan.yml`; every one of the 37 uses `openai-codex/gpt-6.1-sol`. So the real reviewer cost is **$0.28 per review step start**.
-- The ticket's own figure was $15.09 of about $102 over 30 runs. The window has moved since it was written, so I use my numbers.
-
-**How the replayed cost compares** (round 2, with the diff). A replayed `gpt-6.1-sol` review cost $0.20 on average (range $0.11 to $0.33), 69% of the real $0.28 per review step. The replay is cheaper than a real step because it has no shell, runs no tests and reads no earlier findings. A replayed `claude-opus-5-5` review cost $1.09 (range $0.39 to $1.64), 3.9 times the real cost per step and 5.6 times the replayed `gpt-6.1-sol` cost on the same prompts. Time per review: `gpt-6.1-sol` 70 s on average (42 to 106 s), `claude-opus-5-5` 142 s (58 to 193 s). Tokens per review: `gpt-6.1-sol` 362,000 on average, `claude-opus-5-5` 1,335,000.
-
-**Extra cost per run of the panel** (an Opus review added to every review step; `gpt-6.1-sol` stays as today). Two estimates, because the replay and the real steps differ:
-
-- From the replayed Opus cost per review times the 2.3 review steps per run: $1.09 × 2.3 = **$2.50 per run**, +45% on the mean run cost.
-- From the real reviewer cost scaled by the replayed price ratio: $0.65 × 5.6 = **$3.61 per run**, +64%.
-
-So the extra cost is $2.5 to $3.6 per run. The ticket's estimate of about 15% assumed a second reviewer that costs what the first one does. Opus does not.
-
-### 3.2 Recommendation
-
-**No always-on panel.** Do not add a second reviewer model to every review step.
-
-Reason:
-
-- **The measured gain is one defect.** With the diff, the panel found 2 of 5 and `gpt-6.1-sol` alone found 1 of 5. The extra defect is ARK-310 gap 2, found in 1 of the 2 `claude-opus-5-5` reviews of that diff. Three of the five defects were found by none of the 24 reviews. The panel adds nothing to `claude-opus-5-5` alone.
-- **It would cost $2.5 to $3.6 more per run,** a rise of 45% to 64% in the mean run cost. Over the roughly 110 runs that have metrics, that is about $275 to $400 extra, to have avoided 1 of the 5 escaped defects (ARK-310 gap 2). The panel pays only if one escaped defect costs more than that to find and fix later [INFERENCE: the cost of an escaped defect was not measured here; this is the break-even for the human to compare with].
-- **Three defects were found by none of the 24 reviews** (ARK-217, ARK-309, ARK-310 gap 1). I did not test whether a reviewer with a shell, or a different prompt, would find them. [INFERENCE: ARK-309's AC9 scroll test depends on when each source has loaded, which is hard to see in a diff.]
-- **The models do find real problems:** 101 of the 106 other findings in round 2 were real. `gpt-6.1-sol` alone gives 23 distinct real ones, and `claude-opus-5-5` adds 30 more (53 in the union). If those matter, that is a question for the reviewer rubric, not for a panel.
-
-**What the data say about the model.** On this sample `claude-opus-5-5` was the stronger reviewer: 2 of 5 defects against 1, the control in 2 of 2 reviews against 0 of 2, and 43 distinct real findings against 23. It costs 5.6 times as much per review. If the human wants to spend more on review, replacing `gpt-6.1-sol` with `claude-opus-5-5` would add $1.85 to $2.96 per run and found everything the panel found; a panel of both is the more expensive way to get the same result. This is a hypothesis for a larger trial, not a finding.
-
-**A "panel above a risk rule"** is not supported either. Four hits in 24 reviews, on two defects, give no pattern in which kind of run a second model helps, so no rule could be tested.
-
-**Uncertainty.** This is a recommendation, not a proof:
-
-- **Five defects.** One more or fewer hit moves "2 of 5" to 1 or 3. The ARK-310 gap 2 hit is one review of four on that diff, and the gap between `gpt-6.1-sol` and `claude-opus-5-5` rests on it.
-- **Two repeats, same-model variance.** Two reviews of the same model on the same diff differ. `claude-opus-5-5` found ARK-181 in review 2 and not in review 1, and ARK-310 gap 2 in review 2 and not in review 1. Two repeats cannot show an effect smaller than that spread.
-- **Round 1 against round 2.** Without the diff (round 1) no review found any defect under the strict rule, and none found the control. With the diff, 4 of 24 found a defect and 2 of 4 found the control. The comparison also carries run-to-run variance, so I take it as a sign that the diff matters, not as a size of the effect.
-- **No-shell reviewers.** The replay could not run tests or commands. The control shows the cost: the real reviewer, with a shell, ranked ARK-213 as P1, and the two replays that named it ranked it P3. Reviewers that can run the tests may catch more than this replay did, and this spike cannot say how much.
-- **Same diff, current playbook.** The replay reads the whole diff with today's reviewer section, not the older text and the delta-only re-reviews of the real runs.
-- **One judge.** I judged the findings; another judge could move a near miss to a hit (for example the ARK-309 and ARK-310 gap 1 near misses) or the 4 unverified findings. A broader reading of "found" is in the sensitivity line below. "Real" means confirmed in the code, not confirmed by running it.
-- **Third vendor.** Not tested: no third-vendor model works on this host.
-
-**Sensitivity: a broader reading of "found".** If a related near miss counted as found, ARK-217 (both `gpt-6.1-sol` reviews flag the wrong escalation wait), ARK-309 (all 4 reviews flag the project list) and ARK-310 gap 1 (`claude-opus-5-5` flags the fake `orca` and `--full`) would join, giving `gpt-6.1-sol` 3 of 5 and `claude-opus-5-5` 4 of 5. I do not count them: none of those findings names the escaped defect's mechanism, and each fix would have left the escaped defect in place.
-
-An approved recommendation becomes a proposed ticket. This spike does not write the ticket, and it changes no product code, playbook or setting.
-
-### 3.3 Decision table
-
-How to read it (all numbers are round 2, with the diff):
-
-- "Found" is the best of the model's two reviews on each diff, under the strict rule. By review, `gpt-6.1-sol` found a defect in 2 of 12 reviews and `claude-opus-5-5` in 2 of 12 (both on different defects, plus 2 of 2 on the control).
-- The panel adds one defect to `gpt-6.1-sol` alone (ARK-310 gap 2, from `claude-opus-5-5`) and none to `claude-opus-5-5` alone.
-- "False" is a finding the code contradicts; "not verified" is a finding I could not settle from the source. Both count the findings other than the escaped defect.
-- The extra cost of `claude-opus-5-5` alone is its cost minus today's $0.65 per run: $2.50 − $0.65 = $1.85 and $3.61 − $0.65 = $2.96.
-
-| Panel (findings merged)                                        | Defects found of 5                               | ARK-213 control (the real reviewer found it) | False findings (merged) | Not verified (merged) | Extra cost per run                          |
-| -------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- | ----------------------- | --------------------- | ------------------------------------------- |
-| `gpt-6.1-sol` alone (today)                                    | 1 (ARK-181)                                      | not found (0 of 2 reviews)                   | 0 of 42                 | 1                     | $0 (this is today's reviewer)               |
-| `claude-opus-5-5` alone                                        | 2 (ARK-181, ARK-310 gap 2)                       | found, P3 (2 of 2 reviews)                   | 1 of 64                 | 3                     | +$1.9 to +$3.0 if it replaced `gpt-6.1-sol` |
-| **`gpt-6.1-sol` + `claude-opus-5-5`** (the only pair that ran) | **2** (the same two; the second comes from Opus) | found, P3 (2 of 4 reviews)                   | 1 of 106                | 4                     | **+$2.5 to +$3.6**                          |
-
-Round 1 for comparison (no diff, strict rule): 0 of 5 for every row, control not found in any of its 4 reviews, 0 false, 3 not verified (section 4).
-
-## 4. Round 1 baseline: replays without the diff
-
-### 4.1 What round 1 was
-
-Round 1 ran the same 24 reviews (6 diffs, `gpt-6.1-sol` and `claude-opus-5-5`, 2 repeats each) with the prompt of section 1.3 minus the diff file: the "Replay environment" block named the checkout and the command `git diff $(git merge-base HEAD base)..HEAD` but gave no output, and no tool could run it. Every review said so, and most read selected files at head instead of the patch. The run lead's review of the first version of this document found that this is a different experiment from the one asked (reviewers could not focus on the changed lines), so round 2 above repeats it with the diff. The data are in `results/spike/replays/`. Cost and speed were close to round 2 ($14.19 for the 24, against $15.40; mean wall time 103 s against 106 s).
+Round 1 ran the same 24 reviews (6 diffs, `gpt-6.1-sol` and `claude-opus-5-5`, 2 repeats each) with the prompt of section 1.3 minus the diff file: the "Replay environment" block named the checkout and the command `git diff $(git merge-base HEAD base)..HEAD` but gave no output, and no tool could run it. Every review said so, and most read selected files at head instead of the patch. The run lead's review of the first version of this document found that this is a different experiment from the one asked (reviewers could not focus on the changed lines), so round 2 (sections 1, 2 and 4) repeats it with the diff. The data are in `results/spike/replays/`. Cost and speed were close to round 2 ($14.19 for the 24, against $15.40; mean wall time 103 s against 106 s).
 
 **Strict counts, round 1.** Under the strict rule of 2.2, **no round 1 review found any of the 5 defects, and none found the control** (0 of 4 reviews on that diff). The one finding that round 1 first counted as a hit does not meet the rule. `gpt-6.1-sol` review 1 of run 186 (P2, `cli/retro.ts:515`) said "Actual models can include the run lead's model instead of only the worker's models" and proposed excluding orchestration sessions. That is a run lead's session attributed to a step by working folder and time window, which the code at head confirms (`cli/retro.ts:114-127,568-573,597`) and is real. But it is not the mechanism of ARK-310 gap 2, a helper or side-call model counted into a step's vendors, and the merged fixes (`a066f44` with `entry.vendors.size === 1`, `8907cb3` with the helper filter) do not implement its proposal. It is a **related near miss**. Sensitivity: read broadly, round 1 found 1 of 5 (the same near miss); I do not count it.
 
 Other round 1 near misses are as in round 2: `claude-opus-5-5` review 1 of run 179 flagged that unanswered waits stay open until the run ends (`cli/hub/detail.ts:121,183`), not the re-check; both `gpt-6.1-sol` reviews and `claude-opus-5-5` review 2 of run 178 flagged `uiUninstall` and the unchanged-plist early return, not the failed update (`cli/ui.ts:195-200`); all 4 reviews of run 291 and none of run 306 named the escaped defect.
 
-### 4.2 Results of every round 1 review
+### 3.2 Results of every round 1 review
 
 One row per review. "Other findings" counts every finding (no round 1 review found a defect under the strict rule). "Real" and "Not verified" split that count by 2.2; the rest is false (none). Tokens include cache reads.
 
@@ -446,7 +378,7 @@ Totals over the 24 round 1 reviews:
 
 Distinct real findings after removing repeats within a diff: `gpt-6.1-sol` 21, `claude-opus-5-5` 43, 12 of them in both, 52 in the union.
 
-### 4.3 The round 1 findings
+### 3.3 The round 1 findings
 
 One table per diff, as in 2.5. "Found by" uses G1, G2, O1 and O2 for the reviews. Round 1 evidence is the code at the same pinned heads.
 
@@ -506,7 +438,7 @@ One table per diff, as in 2.5. "Found by" uses G1, G2, O1 and O2 for the reviews
 | 1   | The AC3 "false" tests pass because build and review ran in different repos                                               | O1, O2, G1, G2 | real                                                      | `test/retro.test.ts:759,781` use `installAllSessions` (build in `repos/platform`, review in `repos/shared`); `cli/retro.ts:123` groups by the executed repo |
 | 2   | The docs say "each plan step ID", but the keys are the steps that started                                                | O1, O2, G1, G2 | real                                                      | `docs/reference/cli.md:164`; `cli/retro.ts:475`                                                                                                             |
 | 3   | `model changed:` fires on any spelling difference, such as a role alias                                                  | O2             | real                                                      | `cli/retro.ts:535`; the role aliases are in `docs/reference/cli.md:368`                                                                                     |
-| 4   | A run lead's session is attributed to a root-repo step by working folder and time, so `same_vendor_review` can read true | G1             | real; related near miss, not the escaped defect (see 4.1) | `cli/retro.ts:114-127,568-573,597`                                                                                                                          |
+| 4   | A run lead's session is attributed to a root-repo step by working folder and time, so `same_vendor_review` can read true | G1             | real; related near miss, not the escaped defect (see 3.1) | `cli/retro.ts:114-127,568-573,597`                                                                                                                          |
 
 #### 5. Run 306 (head `6490f58`)
 
@@ -534,3 +466,71 @@ One table per diff, as in 2.5. "Found by" uses G1, G2, O1 and O2 for the reviews
 | 12  | An unchanged plist returns early without checking the agent is loaded                                                                       | O2             | real                                                          | `cli/ui.ts:187`                                                                                                                                  |
 | 13  | A click-through consumes the hash before the Orca and Plannotator sources have loaded                                                       | G1, G2         | real                                                          | `ui/app.tsx:125-132`; `cli/ui.ts:76` sends state at connect and `:52-60` refreshes later                                                         |
 | 14  | `uiUninstall` ignores a failed `launchctl unload`, deletes the plist and reports success                                                    | G1, G2         | real                                                          | `cli/ui.ts:229-230`                                                                                                                              |
+
+## 4. Decision
+
+The panel is two reviewers whose findings are merged; a defect counts as found when either one finds it. The only pair that ran is `gpt-6.1-sol` with `claude-opus-5-5`. The decision table is at the end of this section.
+
+### 4.1 Cost per run
+
+The extra cost comes from the `metrics.json` of the **latest 30 runs that have one**. I took every `~/.ark/projects/ark/runs/*/metrics.json` (110 files), ordered the runs by the time of their last event, and kept the last 30: `2026-11-03-ARK-191-1` through `2026-11-06-ARK-343-1`. This run (ARK-349) has no `metrics.json` yet. The figures:
+
+- Total cost of the 30 runs $168.21, mean $5.61 per run.
+- Reviewer cost (`cost.by_role.reviewer.usd`) $19.49 (11.6% of the total), mean **$0.65 per run** (median $0.53, lowest $0.23, highest $1.52). All 30 runs have a known reviewer cost.
+- The 30 runs have 69 reviewer `step.started` events (2.3 per run, counting rework rounds) and 37 reviewer steps in their `plan.yml`; every one of the 37 uses `openai-codex/gpt-6.1-sol`. So the real reviewer cost is **$0.28 per review step start**.
+- The ticket's own figure was $15.09 of about $102 over 30 runs. The window has moved since it was written, so I use my numbers.
+
+**How the replayed cost compares** (round 2, with the diff). A replayed `gpt-6.1-sol` review cost $0.20 on average (range $0.11 to $0.33), 69% of the real $0.28 per review step. The replay is cheaper than a real step because it has no shell, runs no tests and reads no earlier findings. A replayed `claude-opus-5-5` review cost $1.09 (range $0.39 to $1.64), 3.9 times the real cost per step and 5.6 times the replayed `gpt-6.1-sol` cost on the same prompts. Time per review: `gpt-6.1-sol` 70 s on average (42 to 106 s), `claude-opus-5-5` 142 s (58 to 193 s). Tokens per review: `gpt-6.1-sol` 362,000 on average, `claude-opus-5-5` 1,335,000.
+
+**Extra cost per run of the panel** (an Opus review added to every review step; `gpt-6.1-sol` stays as today). Two estimates, because the replay and the real steps differ:
+
+- From the replayed Opus cost per review times the 2.3 review steps per run: $1.09 × 2.3 = **$2.50 per run**, +45% on the mean run cost.
+- From the real reviewer cost scaled by the replayed price ratio: $0.65 × 5.6 = **$3.61 per run**, +64%.
+
+So the extra cost is $2.5 to $3.6 per run. The ticket's estimate of about 15% assumed a second reviewer that costs what the first one does. Opus does not.
+
+### 4.2 Recommendation
+
+**No always-on panel.** Do not add a second reviewer model to every review step.
+
+Reason:
+
+- **The measured gain is one defect.** With the diff, the panel found 2 of 5 and `gpt-6.1-sol` alone found 1 of 5. The extra defect is ARK-310 gap 2, found in 1 of the 2 `claude-opus-5-5` reviews of that diff. Three of the five defects were found by none of the 24 reviews. The panel adds nothing to `claude-opus-5-5` alone.
+- **It would cost $2.5 to $3.6 more per run,** a rise of 45% to 64% in the mean run cost. Over the roughly 110 runs that have metrics, that is about $275 to $400 extra, to have avoided 1 of the 5 escaped defects (ARK-310 gap 2). The panel pays only if one escaped defect costs more than that to find and fix later [INFERENCE: the cost of an escaped defect was not measured here; this is the break-even for the human to compare with].
+- **Three defects were found by none of the 24 reviews** (ARK-217, ARK-309, ARK-310 gap 1). I did not test whether a reviewer with a shell, or a different prompt, would find them. [INFERENCE: ARK-309's AC9 scroll test depends on when each source has loaded, which is hard to see in a diff.]
+- **The models do find real problems:** 101 of the 106 other findings in round 2 were real. `gpt-6.1-sol` alone gives 23 distinct real ones, and `claude-opus-5-5` adds 30 more (53 in the union). If those matter, that is a question for the reviewer rubric, not for a panel.
+
+**What the data say about the model.** On this sample `claude-opus-5-5` was the stronger reviewer: 2 of 5 defects against 1, the control in 2 of 2 reviews against 0 of 2, and 43 distinct real findings against 23. It costs 5.6 times as much per review. If the human wants to spend more on review, replacing `gpt-6.1-sol` with `claude-opus-5-5` would add $1.85 to $2.96 per run and found everything the panel found; a panel of both is the more expensive way to get the same result. This is a hypothesis for a larger trial, not a finding.
+
+**A "panel above a risk rule"** is not supported either. Four hits in 24 reviews, on two defects, give no pattern in which kind of run a second model helps, so no rule could be tested.
+
+**Uncertainty.** This is a recommendation, not a proof:
+
+- **Five defects.** One more or fewer hit moves "2 of 5" to 1 or 3. The ARK-310 gap 2 hit is one review of four on that diff, and the gap between `gpt-6.1-sol` and `claude-opus-5-5` rests on it.
+- **Two repeats, same-model variance.** Two reviews of the same model on the same diff differ. `claude-opus-5-5` found ARK-181 in review 2 and not in review 1, and ARK-310 gap 2 in review 2 and not in review 1. Two repeats cannot show an effect smaller than that spread.
+- **Round 1 against round 2.** Without the diff (round 1) no review found any defect under the strict rule, and none found the control. With the diff, 4 of 24 found a defect and 2 of 4 found the control. The comparison also carries run-to-run variance, so I take it as a sign that the diff matters, not as a size of the effect.
+- **No-shell reviewers.** The replay could not run tests or commands. The control shows the cost: the real reviewer, with a shell, ranked ARK-213 as P1, and the two replays that named it ranked it P3. Reviewers that can run the tests may catch more than this replay did, and this spike cannot say how much.
+- **Same diff, current playbook.** The replay reads the whole diff with today's reviewer section, not the older text and the delta-only re-reviews of the real runs.
+- **One judge.** I judged the findings; another judge could move a near miss to a hit (for example the ARK-309 and ARK-310 gap 1 near misses) or the 4 unverified findings. A broader reading of "found" is in the sensitivity line below. "Real" means confirmed in the code, not confirmed by running it.
+- **Third vendor.** Not tested: no third-vendor model works on this host.
+
+**Sensitivity: a broader reading of "found".** If a related near miss counted as found, ARK-217 (both `gpt-6.1-sol` reviews flag the wrong escalation wait), ARK-309 (all 4 reviews flag the project list) and ARK-310 gap 1 (`claude-opus-5-5` flags the fake `orca` and `--full`) would join, giving `gpt-6.1-sol` 3 of 5 and `claude-opus-5-5` 4 of 5. I do not count them: none of those findings names the escaped defect's mechanism, and each fix would have left the escaped defect in place.
+
+An approved recommendation becomes a proposed ticket. This spike does not write the ticket, and it changes no product code, playbook or setting.
+
+### 4.3 Decision table
+
+How to read it (all numbers are round 2, with the diff):
+
+- "Found" is the best of the model's two reviews on each diff, under the strict rule. By review, `gpt-6.1-sol` found a defect in 2 of 12 reviews and `claude-opus-5-5` in 2 of 12 (both on different defects, plus 2 of 2 on the control).
+- The panel adds one defect to `gpt-6.1-sol` alone (ARK-310 gap 2, from `claude-opus-5-5`) and none to `claude-opus-5-5` alone.
+- "False" is a finding the code contradicts; "not verified" is a finding I could not settle from the source. Both count the findings other than the escaped defect.
+- The extra cost of `claude-opus-5-5` alone is its cost minus today's $0.65 per run: $2.50 − $0.65 = $1.85 and $3.61 − $0.65 = $2.96.
+
+| Panel (findings merged)                                        | Defects found of 5                               | ARK-213 control (the real reviewer found it) | False findings (merged) | Not verified (merged) | Extra cost per run                          |
+| -------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- | ----------------------- | --------------------- | ------------------------------------------- |
+| `gpt-6.1-sol` alone (today)                                    | 1 (ARK-181)                                      | not found (0 of 2 reviews)                   | 0 of 42                 | 1                     | $0 (this is today's reviewer)               |
+| `claude-opus-5-5` alone                                        | 2 (ARK-181, ARK-310 gap 2)                       | found, P3 (2 of 2 reviews)                   | 1 of 64                 | 3                     | +$1.9 to +$3.0 if it replaced `gpt-6.1-sol` |
+| **`gpt-6.1-sol` + `claude-opus-5-5`** (the only pair that ran) | **2** (the same two; the second comes from Opus) | found, P3 (2 of 4 reviews)                   | 1 of 106                | 4                     | **+$2.5 to +$3.6**                          |
+
+Round 1 for comparison (no diff, strict rule): 0 of 5 for every row, control not found in any of its 4 reviews, 0 false, 3 not verified (section 3).
