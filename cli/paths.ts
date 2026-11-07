@@ -15,14 +15,27 @@ export function runsDirectory(project: string): string {
   return join(projectDirectory(project), "runs");
 }
 
-/** Names of the projects that have a folder under `$ARK_HOME/projects`, sorted. */
+/**
+ * Names of the projects under `$ARK_HOME/projects`, sorted. A folder is a project when it has an
+ * `ark.yml` or a run folder (a directory entry under `runs/`). A missing or empty `runs/`, or one
+ * holding only files, is no run folder: such a leftover folder is skipped.
+ */
 export function listProjects(): string[] {
   const projectsDirectory = join(arkHome(), "projects");
   if (!existsSync(projectsDirectory)) return [];
   return readdirSync(projectsDirectory, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && isProject(entry.name))
     .map((entry) => entry.name)
     .sort();
+}
+
+function isProject(project: string): boolean {
+  if (existsSync(join(projectDirectory(project), "ark.yml"))) return true;
+  const runsRoot = runsDirectory(project);
+  return (
+    existsSync(runsRoot) &&
+    readdirSync(runsRoot, { withFileTypes: true }).some((entry) => entry.isDirectory())
+  );
 }
 
 /** With `project`, looks for the run in that project only and refuses an unknown project. */

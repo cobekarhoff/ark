@@ -29,7 +29,7 @@ Expected: When ARK_LOAD_PROOF is 1, the system shall run five suites at once wit
 
 - Exit code 0, `1 pass`.
 - None of the five processes exits non-zero or reports `timed out`.
-- The skip switch itself is proven by ARK-T19.
+- The skip switch itself is proven by ARK-T26.
 
 ## Screenshot checkpoints
 

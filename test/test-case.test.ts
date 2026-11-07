@@ -371,7 +371,7 @@ describe("test case ids across worktrees (ARK-319)", () => {
     expect(await newCaseIds(worktree, 1)).toEqual(["ARK-T13"]);
   });
 
-  test("ARK-T18 worktree sync refuses an id the target already holds", () => {
+  test("ARK-T25 worktree sync refuses an id the target already holds", () => {
     tempArkHome();
     const renamedBody = Array.from({ length: 8 }, (_, i) => `line ${i}`).join("\n");
     const workspace = repoWithOrigin({

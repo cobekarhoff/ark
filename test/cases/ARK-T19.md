@@ -1,35 +1,36 @@
 ---
 id: ARK-T19
-title: ARK-T19 the five-process load test of ARK-T22 runs only with ARK_LOAD_PROOF=1
+title: ARK-T19 ark status flags a project folder with runs but no ark.yml
 level: integration
-technique: equivalence classes (variable unset against variable set to 1)
+technique: equivalence classes (folder without ark.yml with a run folder, folder without ark.yml with empty runs/) and boundary on the run count (one run next to zero runs)
 priority: high
-risk: the ARK-T22 test that starts five `bun test` processes runs on every full `bun test`, so on a busy host it hits its 300 s limit and fails the suite; or it never runs, even with ARK_LOAD_PROOF=1
+risk: a project that lost its ark.yml but still holds runs is hidden from ark status, so the broken config goes unnoticed and ark status exits 0
 status: active
-changed_by: 2026-11-06-ARK-319-1
+changed_by: 2026-11-06-ARK-321-1
 ---
 
 ## Objective
 
-Prove that `test/timeouts.test.ts` skips the five-process ARK-T22 test unless `ARK_LOAD_PROOF=1`, and runs it when the variable is set. Serves ARK-326/AC1 and ARK-319/AC4.
-
-Expected: While ARK_LOAD_PROOF is unset, the system shall skip the five-process test and exit 0; when ARK_LOAD_PROOF is 1, the system shall run it.
+Prove that a folder under `$ARK_HOME/projects` with no `ark.yml` and at least one run folder under `runs/` is an invalid project. `ark status` names it, reports the invalid config count, and exits 1. A run folder is any directory entry under `runs/`. An empty sibling folder in the same `projects/` directory is not reported (see ARK-T18).
 
 ## Preconditions
 
-- A checkout with `bun` installed.
-- For the with-variable side, a temporary folder holds a fake `bun` script. It appends its arguments to a log file and exits 0. The folder is first on `PATH` of the child process only.
+- A temporary `ARK_HOME` holds `projects/orphan/` with no `ark.yml`.
+- The folder `projects/orphan/runs/` holds one directory, for example `runs/2026-01-01-X-1/`.
+- The folder `projects/empty-sibling/` has no `ark.yml` and an empty `runs/` directory.
 
 ## Steps
 
-1. Run `bun test test/timeouts.test.ts -t ARK-T22` in a child process with `ARK_LOAD_PROOF` removed from the environment. Read the exit code and the skip and pass counts from the output.
-2. Run the same command in a child process with `ARK_LOAD_PROOF=1` and the fake `bun` first on `PATH`. Read the exit code, the counts and the log file.
+1. Run `ark status` with `ARK_HOME` set to the temporary directory.
+2. Record the output and the exit code.
 
 ## Expected results
 
-- Step 1: exit code 0, `1 skip`, and no non-zero `pass` count.
-- Step 2: exit code 0, `1 pass`, no non-zero `skip` count. The log has five lines, each `test test/sync.test.ts test/merge-request.test.ts`. This proves that the test is not skipped and starts five processes of the two files. It does not prove that the real runs pass; the fake `bun` replaces the real five-process run, which takes 5+ minutes on a loaded host and is verified by running with `ARK_LOAD_PROOF=1` on a quiet host.
+- When `ark status` runs, the system shall print "project orphan has no ark.yml".
+- When `ark status` runs, the system shall print "project config(s) invalid".
+- When `ark status` runs, the system shall not print a "has no ark.yml" line naming `empty-sibling`.
+- When `ark status` finds a project folder with no `ark.yml` and a run folder, the system shall exit with code 1.
 
 ## Screenshot checkpoints
 
-None, CLI output.
+none: integration case on CLI output and exit code; no UI surface.

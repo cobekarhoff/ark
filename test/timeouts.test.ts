@@ -213,7 +213,7 @@ async function runFiveProcessTest(env: Record<string, string | undefined>) {
 }
 
 test(
-  "ARK-T19 the five-process load test is skipped without ARK_LOAD_PROOF and runs with ARK_LOAD_PROOF=1",
+  "ARK-T26 the five-process load test is skipped without ARK_LOAD_PROOF and runs with ARK_LOAD_PROOF=1",
   async () => {
     const withoutVariable = { ...process.env };
     delete withoutVariable.ARK_LOAD_PROOF;

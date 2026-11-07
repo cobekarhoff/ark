@@ -1,6 +1,6 @@
 // Fixtures for the hub tests, shared by test/hub.test.ts (Bun) and test/pw/hub.pw.ts (Node):
 // no bun:test, no Bun.* globals. Every time comes from `new Date()`, never from a literal.
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export type FixtureStep = {
@@ -151,6 +151,12 @@ export type FixtureTicket = {
   criteria?: { id: string; text: string }[];
 };
 
+/** A project folder with no `ark.yml` and no runs is no project: give it a minimal config unless it has one. */
+export function writeMinimalConfig(projectFolder: string): void {
+  const file = join(projectFolder, "ark.yml");
+  if (!existsSync(file)) writeFileSync(file, "ticket_source: github\n");
+}
+
 /** Writes `$ARK_HOME/projects/<project>/tickets/<id>.md` with the front matter the backlog reads. */
 export function writeBacklogTicket(ticket: FixtureTicket): void {
   const file = join(
@@ -161,6 +167,7 @@ export function writeBacklogTicket(ticket: FixtureTicket): void {
     `${ticket.id}.md`,
   );
   mkdirSync(dirname(file), { recursive: true });
+  writeMinimalConfig(join(dirname(file), ".."));
   const lines = [
     "---",
     `id: ${ticket.id}`,
