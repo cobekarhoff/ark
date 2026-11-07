@@ -194,7 +194,7 @@ const openedEvents = (runDirectory: string) =>
     .filter((event) => event.type === "merge_request.opened");
 
 test(
-  "ARK-T30 merge-request open pushes and posts one ready MR per repo on GitHub in dependency order, with the run title and body",
+  "ARK-T48 merge-request open pushes and posts one ready MR per repo on GitHub in dependency order, with the run title and body",
   () => {
     const { runDirectory, bares } = scenario({ core: "github", app: "github" });
     const result = ark("merge-request", "open", run);
@@ -243,7 +243,7 @@ test(
 );
 
 test(
-  "ARK-T31 merge-request open uses glab on GitLab, writes `Depends on !N` and a native dependency",
+  "ARK-T49 merge-request open uses glab on GitLab, writes `Depends on !N` and a native dependency",
   () => {
     const { runDirectory } = scenario({ core: "gitlab", app: "gitlab" });
     expect(ark("merge-request", "open", run).code).toBe(0);
@@ -273,7 +273,7 @@ test(
 );
 
 test(
-  "ARK-T32 a refused native GitLab dependency still opens the MR with the Depends on line",
+  "ARK-T50 a refused native GitLab dependency still opens the MR with the Depends on line",
   () => {
     process.env.FAKE_GLAB_BLOCK_FAIL = "1";
     const { runDirectory } = scenario({ core: "gitlab", app: "gitlab" });
@@ -285,7 +285,7 @@ test(
 );
 
 test(
-  "ARK-T33 each repo uses the host of its own remote",
+  "ARK-T51 each repo uses the host of its own remote",
   () => {
     scenario({ core: "github", app: "gitlab" });
     expect(ark("merge-request", "open", run).code).toBe(0);

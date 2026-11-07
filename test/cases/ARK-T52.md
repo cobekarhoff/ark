@@ -1,6 +1,6 @@
 ---
-id: ARK-T34
-title: ARK-T34 both entry points import each pr-writing module
+id: ARK-T52
+title: ARK-T52 both entry points import each pr-writing module
 level: integration
 technique: equivalence classes (two entry points, four modules) and a negative search
 priority: high

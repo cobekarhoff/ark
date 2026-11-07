@@ -1,6 +1,6 @@
 ---
-id: ARK-T33
-title: ARK-T33 each repo uses the host of its own remote
+id: ARK-T51
+title: ARK-T51 each repo uses the host of its own remote
 level: integration
 technique: equivalence classes (GitHub repo, GitLab repo) in one run
 priority: medium

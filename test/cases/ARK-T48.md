@@ -1,6 +1,6 @@
 ---
-id: ARK-T30
-title: ARK-T30 merge-request open pushes and posts one ready MR per repo on GitHub in dependency order, with the run title and body
+id: ARK-T48
+title: ARK-T48 merge-request open pushes and posts one ready MR per repo on GitHub in dependency order, with the run title and body
 level: integration
 technique: state transition (no MR, MR posted, rerun) over two repos on GitHub
 priority: medium

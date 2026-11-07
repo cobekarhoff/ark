@@ -1,6 +1,6 @@
 ---
-id: ARK-T31
-title: ARK-T31 merge-request open uses glab on GitLab, writes `Depends on !N` and a native dependency
+id: ARK-T49
+title: ARK-T49 merge-request open uses glab on GitLab, writes `Depends on !N` and a native dependency
 level: integration
 technique: equivalence classes (GitHub, GitLab) over the same two-repo run
 priority: medium

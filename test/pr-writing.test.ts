@@ -348,7 +348,7 @@ const firstContentLine = (body: string) =>
 
 const result = (results: LintResult[], id: string) => results.find((entry) => entry.id === id)!;
 
-// --- ARK-T34 ----------------------------------------------------------------------------------
+// --- ARK-T52 ----------------------------------------------------------------------------------
 
 const modules = ["ledger", "body", "lint", "post"];
 
@@ -373,7 +373,7 @@ function sourcesUnder(folder: string): string[] {
   );
 }
 
-test("ARK-T34 both entry points import ledger, body, lint and post, and no other file builds an MR title or body", () => {
+test("ARK-T52 both entry points import ledger, body, lint and post, and no other file builds an MR title or body", () => {
   const library = join(root, "skills/pr-writing/lib");
   expect(readdirSync(library).sort()).toEqual(modules.map((name) => `${name}.ts`).sort());
 
@@ -415,9 +415,9 @@ test("ARK-T34 both entry points import ledger, body, lint and post, and no other
   }
 });
 
-// --- ARK-T35 ----------------------------------------------------------------------------------
+// --- ARK-T53 ----------------------------------------------------------------------------------
 
-test("ARK-T35 the run ledger holds the last test result, the open findings, evidence, gates and merge order", () => {
+test("ARK-T53 the run ledger holds the last test result, the open findings, evidence, gates and merge order", () => {
   const run = makeRun({
     kind: "bug",
     summary: "Short outcome",
@@ -530,7 +530,7 @@ function gitRepoOnBranch(): string {
   return repo;
 }
 
-test("ARK-T35 the git ledger picks the base by the fixed order and records a failed host probe as unknown", () => {
+test("ARK-T53 the git ledger picks the base by the fixed order and records a failed host probe as unknown", () => {
   const bin = probeHostBin();
   const repo = gitRepoOnBranch();
   const setOriginHead = (name: string | null) => {
@@ -589,7 +589,7 @@ test("ARK-T35 the git ledger picks the base by the fixed order and records a fai
   );
 });
 
-// --- ARK-T36 ----------------------------------------------------------------------------------
+// --- ARK-T54 ----------------------------------------------------------------------------------
 
 /** One-repo run on a fake GitHub host with a bare remote that records pushes, for `ark merge-request open`. */
 function cliRun(
@@ -711,7 +711,7 @@ const words = (length: number) =>
 
 const refusal = "ticket has no summary: pass --summary";
 
-test("ARK-T36 the title is the summary, else a ticket title that fits, else --summary, else a refusal before any push", () => {
+test("ARK-T54 the title is the summary, else a ticket title that fits, else --summary, else a refusal before any push", () => {
   const cases: {
     name: string;
     ticket: { title: string; summary?: string };
@@ -782,7 +782,7 @@ test("ARK-T36 the title is the summary, else a ticket title that fits, else --su
   }
 });
 
-test("ARK-T36 a title_prefix rule wins and its length counts", () => {
+test("ARK-T54 a title_prefix rule wins and its length counts", () => {
   const prefix = { pr_writing: { title_prefix: "feat(TICKET): desc" } }; // `feat(ARK-316): ` is 15 characters
   const open = (ticket: { title: string; summary?: string }) => {
     const { runId, pushed } = cliRun(ticket, prefix);

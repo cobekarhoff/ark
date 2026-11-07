@@ -1,6 +1,6 @@
 ---
-id: ARK-T32
-title: ARK-T32 a refused native GitLab dependency still opens the MR with the Depends on line
+id: ARK-T50
+title: ARK-T50 a refused native GitLab dependency still opens the MR with the Depends on line
 level: integration
 technique: error guessing on a failing blocks call
 priority: medium
