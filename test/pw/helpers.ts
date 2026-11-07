@@ -8,7 +8,12 @@ import { appendEvent, deriveState, readEvents } from "../../cli/events.ts";
 import { caseIdsIn } from "../../cli/parsers/case.ts";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
-import { fakeToolScripts, writeFakeToolState, type FakeToolOptions } from "../hub-fixtures.ts";
+import {
+  fakeToolScripts,
+  writeFakeToolState,
+  writeMinimalConfig,
+  type FakeToolOptions,
+} from "../hub-fixtures.ts";
 
 export const repositoryRoot = join(import.meta.dirname, "..", "..");
 
@@ -47,6 +52,7 @@ export function writeTicket(
 ): string {
   const file = join(process.env.ARK_HOME as string, "projects", project, "tickets", `${id}.md`);
   mkdirSync(dirname(file), { recursive: true });
+  writeMinimalConfig(join(dirname(file), ".."));
   const frontmatter = [
     "---",
     `id: ${id}`,
