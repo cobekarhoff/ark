@@ -63,7 +63,8 @@ function writeSuiteScript(directory: string): string {
 # usage: suite.sh <run> <fixture directory> <report>
 echo "start $1" >> "$2/suite.log"
 if [ -e "$2/hold" ]; then
-  while [ ! -e "$2/release" ]; do sleep 0.1; done
+  i=0
+  while [ ! -e "$2/release" ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
 else
   sleep 1
 fi
@@ -168,10 +169,12 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  killStarted();
   rmSync(fixtures, { recursive: true, force: true });
 });
 
 afterEach(() => {
+  killStarted();
   for (const path of [
     lockDirectory(),
     waiterDirectory(),
@@ -190,6 +193,18 @@ type Started = {
   seen: () => string;
 };
 
+const startedTests: Subprocess[] = [];
+
+/**
+ * Kills every `ark test` this file started, and the suites under them. Runs after each test, so a failed assertion or
+ * a timeout leaves nothing behind. ark runs each suite in its own process group, so the suites are found by the
+ * fixture folder in their command lines.
+ */
+function killStarted(): void {
+  for (const child of startedTests.splice(0)) child.kill("SIGKILL");
+  Bun.spawnSync(["pkill", "-9", "-f", fixtures]);
+}
+
 /** Starts `ark test <run>` as a child process of the temp ARK_HOME with its stdout collected. */
 function startTest(run: string): Started {
   const child = Bun.spawn(["bun", arkEntry, "test", run], {
@@ -203,6 +218,7 @@ function startTest(run: string): Started {
     for await (const chunk of child.stdout) seen += new TextDecoder().decode(chunk);
     return seen;
   })();
+  startedTests.push(child);
   return { process: child, stdout, seen: () => seen };
 }
 
