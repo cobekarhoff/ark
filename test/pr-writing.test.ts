@@ -1717,6 +1717,14 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(writeCalls()).toEqual([]);
     expect(update.state()[0].body).toBe(original);
   });
+
+  test(`ARK-T41 an old body that quotes the markers inline and holds AKIA and Co-Authored-By words is replaced whole and lints clean on ${host}`, () => {
+    const old =
+      "Wraps the text in `<!-- pr-writing:begin -->` and `<!-- pr-writing:end -->` markers.\n\n- AC1: reject AKIA keys.\n- AC2: no Co-Authored-By trailer.\n";
+    const { post, state } = postScenario(host, old);
+    expect(post(goodBody).value!.action).toBe("updated");
+    expect(state()[0].body).toBe(goodBody);
+  });
 }
 
 // --- ARK-T43 ----------------------------------------------------------------------------------
@@ -2153,6 +2161,32 @@ test("ARK-T45 the script level is low below 1.5, medium to below 2.25, high from
 test("ARK-T45 a run with no one-way hit shows Door: two-way", () => {
   const ledger = makeRun({ evidence: withEvidence, prWriting: sensitiveConfig }).ledger();
   expect(buildBody(ledger)).toMatch(/Door: two-way/);
+});
+
+test("ARK-T45 a file merged in from the target branch is neither listed as unplanned nor counted in the shortstat", () => {
+  const run = makeRun();
+  const repo = run.paths["."];
+  const recordedBase = git(repo, "rev-parse", "HEAD~1");
+  // main moves on after the branch point; the branch merges it, as `ark worktree sync` does.
+  git(repo, "checkout", "-q", "main");
+  writeFileSync(join(repo, "cli/main-only.ts"), "from main\n");
+  git(repo, "add", ".");
+  git(repo, "commit", "-m", "main moves on");
+  git(repo, "update-ref", "refs/remotes/origin/main", "main");
+  git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  git(repo, "checkout", "-q", "ark/ARK-9-x");
+  git(repo, "merge", "--no-ff", "-m", "Merge origin/main", "main");
+  const events = join(run.directory, "events.ndjson");
+  writeFileSync(
+    events,
+    readFileSync(events, "utf8").replace('"base":"main"', `"base":"${recordedBase}"`),
+  );
+
+  const ledger = run.ledger();
+  expect(ledger.repos[0].files.map((file) => file.path)).toEqual(["cli/a.ts"]);
+  expect(ledger.repos[0].shortstat).toMatch(/^1 file changed/);
+  expect(ledger.risk.unplanned).toEqual([]);
+  expect(buildBody(ledger)).not.toContain("main-only.ts");
 });
 
 // --- ARK-T46 ----------------------------------------------------------------------------------
