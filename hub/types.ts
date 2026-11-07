@@ -209,8 +209,76 @@ export type RunView = {
 export type TicketDocument = {
   problem: string;
   change: string;
-  criteria: { id: string; text: string }[];
+  criteria: TicketCriterionView[];
 };
+
+/** `id` is the local `AC<k>` (an old `<ticket>-AC<k>` reads the same). `verified_by` is `[]` when the file does not hold a list of strings. */
+export type TicketCriterionView = {
+  id: string;
+  text: string;
+  method: string;
+  verified_by: string[];
+};
+
+/** An AC that a test case verifies: the ticket id and the local AC id. */
+export type CaseRef = { ticket: string; criterion: string };
+
+export type CaseVersion = { commit: string; time: string; changed_by: string };
+
+/**
+ * One `verified_by` id of a ticket, read on request. `{ id, missing: true }` when no case file or
+ * evidence holds it. A local case has title, level, technique, priority, risk, status, changed_by and
+ * versions (newest first), and `reason` when retired. A zephyr case has name, status and sha from
+ * `result.json`, and `version` only when that file has one.
+ */
+export type TestCaseRecord = {
+  id: string;
+  missing?: true;
+  title?: string;
+  name?: string;
+  level?: string;
+  technique?: string;
+  priority?: string;
+  risk?: string;
+  status?: string;
+  reason?: string;
+  changed_by?: string;
+  versions?: CaseVersion[];
+  sha?: string;
+  version?: string | number;
+  verifies?: CaseRef[];
+};
+
+export type TicketCases = { source: "local" | "zephyr"; cases: TestCaseRecord[] };
+
+export type CaseResult = "pass" | "fail" | "not run";
+export type CommandRun = { command: string; output: string; exit: number | null };
+export type SideEvidence = { result: CaseResult; sha: string | null; runs: CommandRun[] };
+/** A screenshot checkpoint: run-relative image paths for the base (before) and head (after) side. */
+export type Checkpoint = { name: string; before: string | null; after: string | null };
+export type PlanCaseEvidence = {
+  id: string;
+  action: string;
+  level: string;
+  base: SideEvidence;
+  head: SideEvidence;
+  verifies: CaseRef[];
+  checkpoints: Checkpoint[];
+};
+/** A section of an evidence file: its heading, its text, the images its lines name, and its sub-sections. */
+export type EvidenceSection = {
+  title: string;
+  text: string;
+  images: string[];
+  children: EvidenceSection[];
+};
+export type AcEvidence = {
+  id: string;
+  method: string;
+  /** Null when `results/evidence/<AC id>.md` is missing or has the wrong shape for its method. */
+  sections: EvidenceSection[] | null;
+};
+export type RunTestEvidence = { cases: PlanCaseEvidence[]; criteria: AcEvidence[] };
 
 export type TicketView = {
   project: string;

@@ -1048,12 +1048,12 @@ test("ARK-T37 the body of the same run no longer pastes the AC text that the pin
   }
 });
 
-// --- ARK-T20 ----------------------------------------------------------------------------------
+// --- ARK-T38 ----------------------------------------------------------------------------------
 
 const provenanceText = (handle: string, shape: string) =>
   `> Written by an AI agent on behalf of @${handle}${shape} @${handle} has not reviewed it yet.`;
 
-test("ARK-T20 the provenance line follows the gates the human answered: spec, strategy, none; the strategy answer wins", () => {
+test("ARK-T38 the provenance line follows the gates the human answered: spec, strategy, none; the strategy answer wins", () => {
   const human = (...gates: string[]) => gates.map((gate) => ({ gate, answer: "accept" }));
   const auto = (gate: string) => ({ gate, answer: "accept", by: "auto" });
   const rows: [string, { gate: string; answer: string; by?: string }[], string][] = [
@@ -1077,7 +1077,7 @@ test("ARK-T20 the provenance line follows the gates the human answered: spec, st
   }
 });
 
-test("ARK-T20 on GitLab the handle is the glab token owner", () => {
+test("ARK-T38 on GitLab the handle is the glab token owner", () => {
   process.env.FAKE_TOKEN_OWNER = "cobe.k";
   const body = buildBody(
     makeRun({ host: "gitlab", gates: [{ gate: "criteria", answer: "accept" }] }).ledger(),
@@ -1085,7 +1085,7 @@ test("ARK-T20 on GitLab the handle is the glab token owner", () => {
   expect(firstContentLine(body)).toBe(provenanceText("cobe.k", ", following their spec."));
 });
 
-// --- lint fixtures: ARK-T21, ARK-T22 ----------------------------------------------------------
+// --- lint fixtures: ARK-T39, ARK-T40 ----------------------------------------------------------
 
 const head = "abc1234def5678abc1234def5678abc1234def56";
 const defaultTitle = "ARK-316: Fix stale MR bodies";
@@ -1181,7 +1181,7 @@ function loadFixture(id: string, side: "fail" | "control"): Fixture {
 const lintOf = (fixture: Fixture, overrides: Partial<LintInput> = {}) =>
   lintBody({ ...fixture.input, ...overrides });
 
-test("ARK-T21 the good body fails no check and every result has an id, a result and a reason", () => {
+test("ARK-T39 the good body fails no check and every result has an id, a result and a reason", () => {
   const good = loadFixture("PROV01", "control");
   const results = lintOf(good, { diff: "+a plain line\n" });
   expect(results.length).toBeGreaterThan(20);
@@ -1211,14 +1211,14 @@ const decidable: [string, RegExp][] = [
 ];
 
 for (const [id, reason] of decidable)
-  test(`ARK-T21 ${id} fails on its fixture with a reason and passes on its corrected control`, () => {
+  test(`ARK-T39 ${id} fails on its fixture with a reason and passes on its corrected control`, () => {
     const failed = result(lintOf(loadFixture(id, "fail")), id);
     expect({ id, result: failed.result }).toEqual({ id, result: "fail" });
     expect(failed.reason).toMatch(reason);
     expect(result(lintOf(loadFixture(id, "control")), id)).toMatchObject({ id, result: "pass" });
   });
 
-test("ARK-T21 the variants of each decidable check fail and the near misses pass", () => {
+test("ARK-T39 the variants of each decidable check fail and the near misses pass", () => {
   const good = loadFixture("PROV01", "control");
   const control = (id: string) => loadFixture(id, "control");
   const lintLine = (
@@ -1421,21 +1421,21 @@ const judgment: [string, RegExp][] = [
   ["ELI01", /describes the code, not the problem/],
 ];
 
-test("ARK-T22 the good body warns on none of the eight judgment checks", () => {
+test("ARK-T40 the good body warns on none of the eight judgment checks", () => {
   const good = lintOf(loadFixture("PROV01", "control"), { diff: "+a plain line\n" });
   for (const [id] of judgment)
     expect({ id, result: result(good, id).result }).not.toEqual({ id, result: "warn" });
 });
 
 for (const [id, reason] of judgment)
-  test(`ARK-T22 ${id} warns, never fails, on its fixture and passes on its corrected control`, () => {
+  test(`ARK-T40 ${id} warns, never fails, on its fixture and passes on its corrected control`, () => {
     const warned = result(lintOf(loadFixture(id, "fail")), id);
     expect({ id, result: warned.result }).toEqual({ id, result: "warn" });
     expect(warned.reason).toMatch(reason);
     expect(result(lintOf(loadFixture(id, "control")), id)).toMatchObject({ id, result: "pass" });
   });
 
-test("ARK-T22 TITLE01-imperative warns on Fixes, VAL02 on a command with no Expect, EVID01 on perf, EVID03 on a head SHA that differs", () => {
+test("ARK-T40 TITLE01-imperative warns on Fixes, VAL02 on a command with no Expect, EVID01 on perf, EVID03 on a head SHA that differs", () => {
   const good = loadFixture("PROV01", "control");
   expect(
     result(lintOf(good, { title: "ARK-316: Fixes stale MR bodies" }), "TITLE01-imperative").result,
@@ -1480,7 +1480,7 @@ const lines = (count: number, sensitive: string[] = [], floor = 0) =>
     },
   });
 
-test("ARK-T22 the tier follows the changed lines, a sensitive path, a raise with a reason and tier_floor", () => {
+test("ARK-T40 the tier follows the changed lines, a sensitive path, a raise with a reason and tier_floor", () => {
   const boundaries: [number, 0 | 1 | 2 | 3][] = [
     [20, 0],
     [21, 1],
@@ -1507,7 +1507,7 @@ test("ARK-T22 the tier follows the changed lines, a sensitive path, a raise with
   expect(tierOfLedger(lines(400, [], 1)).tier).toBe(3);
 });
 
-// --- ARK-T23 ----------------------------------------------------------------------------------
+// --- ARK-T41 ----------------------------------------------------------------------------------
 
 const goodBody = loadFixture("PROV01", "control").body;
 const postedTitle = defaultTitle;
@@ -1573,7 +1573,7 @@ const withHumanText = (
 ) => `${before}${generated}${after}`;
 
 for (const host of ["github", "gitlab"] as HostName[]) {
-  test(`ARK-T23 post creates one MR with the body from the file on ${host}`, () => {
+  test(`ARK-T41 post creates one MR with the body from the file on ${host}`, () => {
     const { post, state } = postScenario(host);
     expect(post(goodBody).value!.action).toBe("created");
     expect(loggedCalls().filter((call) => call.argv.includes("create"))).toHaveLength(1);
@@ -1581,7 +1581,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(state()[0].body).toBe(goodBody);
   });
 
-  test(`ARK-T23 post replaces only the text between the markers and keeps a human tick on ${host}`, () => {
+  test(`ARK-T41 post replaces only the text between the markers and keeps a human tick on ${host}`, () => {
     const { post, state } = postScenario(host, withHumanText(goodBody));
     expect(post(changedBody).value!.action).toBe("updated");
     expect(state()).toHaveLength(1);
@@ -1589,14 +1589,14 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(state()[0].body).toContain("- [x] Tested locally");
   });
 
-  test(`ARK-T23 a failing host probe writes nothing and reports the failure on ${host}`, () => {
+  test(`ARK-T41 a failing host probe writes nothing and reports the failure on ${host}`, () => {
     process.env.FAKE_PROBE_FAIL = "1";
     const { post } = postScenario(host);
     expect(() => post(goodBody)).toThrow(/could not ask .* nothing was written/);
     expect(writeCalls()).toEqual([]);
   });
 
-  test(`ARK-T23 an MR that appears between the two probes turns the create into an update on ${host}`, () => {
+  test(`ARK-T41 an MR that appears between the two probes turns the create into an update on ${host}`, () => {
     const scenario = postScenario(host);
     process.env.FAKE_RACE_MR = JSON.stringify({
       ...scenario.mergeRequest,
@@ -1608,7 +1608,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(scenario.state()[0].body).toBe(withHumanText(changedBody));
   });
 
-  test(`ARK-T23 an MR whose body a person edits between the two probes keeps the edit on ${host}`, () => {
+  test(`ARK-T41 an MR whose body a person edits between the two probes keeps the edit on ${host}`, () => {
     const scenario = postScenario(host, withHumanText(goodBody));
     const edited = withHumanText(
       goodBody,
@@ -1622,7 +1622,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     );
   });
 
-  test(`ARK-T23 STALE01 refuses the post when the head changed after the ledger, and SEC01 only warns on ${host}`, () => {
+  test(`ARK-T41 STALE01 refuses the post when the head changed after the ledger, and SEC01 only warns on ${host}`, () => {
     const stale = postScenario(host);
     const head = stale.commitBranch("changed");
     const current = baseLedger({ repos: [{ head }] });
@@ -1639,7 +1639,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(posted.err.join("\n")).toMatch(/warning: SEC01/);
   });
 
-  test(`ARK-T23 a lint fail in the generated region, or in the merged body outside the markers, refuses the post on ${host}`, () => {
+  test(`ARK-T41 a lint fail in the generated region, or in the merged body outside the markers, refuses the post on ${host}`, () => {
     const leaky = goodBody.replace("Refs: ARK-316.", `Refs: ARK-316. Key ${githubToken}`);
     const create = postScenario(host);
     expect(() => create.post(leaky)).toThrow(/FMT02/);
@@ -1657,7 +1657,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     expect(writeCalls()).toEqual([]);
   });
 
-  test(`ARK-T23 the assignee is the token owner and reviewers never include the author on ${host}`, () => {
+  test(`ARK-T41 the assignee is the token owner and reviewers never include the author on ${host}`, () => {
     const option = (call: LoggedCall, name: string) =>
       call.argv.includes(name) ? call.argv[call.argv.indexOf(name) + 1] : undefined;
     const run = (reviewers: string[]) => {
@@ -1689,7 +1689,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
     });
   });
 
-  test(`ARK-T23 --dry-run prints the host call and writes nothing, for create and update on ${host}`, () => {
+  test(`ARK-T41 --dry-run prints the host call and writes nothing, for create and update on ${host}`, () => {
     const create = postScenario(host);
     const created = create.post(goodBody, { dryRun: true });
     expect(created.value!.action).toBe("dry-run");
@@ -1719,7 +1719,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
   });
 }
 
-// --- ARK-T25 ----------------------------------------------------------------------------------
+// --- ARK-T43 ----------------------------------------------------------------------------------
 
 const configBase = () => ({
   workspace: tmpdir(),
@@ -1745,7 +1745,7 @@ const fullBlock = {
   title_prefix: "feat(TICKET): desc",
 };
 
-test("ARK-T25 a pr_writing block loads with its six keys, and defaults fill a partial or missing block", () => {
+test("ARK-T43 a pr_writing block loads with its six keys, and defaults fill a partial or missing block", () => {
   expect(loadWith(fullBlock)).toEqual(fullBlock);
   const defaults = {
     reviewers: [],
@@ -1760,7 +1760,7 @@ test("ARK-T25 a pr_writing block loads with its six keys, and defaults fill a pa
   expect(loadWith({ tier_floor: 3 }).tier_floor).toBe(3);
 });
 
-test("ARK-T25 a bad pr_writing value is refused with a message that names its key", () => {
+test("ARK-T43 a bad pr_writing value is refused with a message that names its key", () => {
   const bad: [string, unknown][] = [
     ["tier_floor", 5],
     ["tier_floor", -1],
@@ -1793,9 +1793,9 @@ function refusedLoad(): { message: string } {
   return { message: "loaded" };
 }
 
-// --- ARK-T26 ----------------------------------------------------------------------------------
+// --- ARK-T44 ----------------------------------------------------------------------------------
 
-test("ARK-T26 docs/reference/cli.md equals the generated reference and lists --summary on merge-request open", () => {
+test("ARK-T44 docs/reference/cli.md equals the generated reference and lists --summary on merge-request open", () => {
   const reference = join(root, "docs/reference/cli.md");
   const committed = readFileSync(reference, "utf8");
   const generated = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: root });
@@ -1809,7 +1809,7 @@ test("ARK-T26 docs/reference/cli.md equals the generated reference and lists --s
   expect(entry).toContain("--summary");
 });
 
-// --- ARK-T27 ----------------------------------------------------------------------------------
+// --- ARK-T45 ----------------------------------------------------------------------------------
 
 const sensitiveConfig = {
   reviewers: [],
@@ -1960,7 +1960,7 @@ const riskRows: RiskRow[] = [
   },
 ];
 
-test("ARK-T27 each isolated input scores only its own category good 1, decent 2 or poor 3", () => {
+test("ARK-T45 each isolated input scores only its own category good 1, decent 2 or poor 3", () => {
   for (const { name, spec, scores } of riskRows) {
     const ledger = makeRun({
       evidence: withEvidence,
@@ -2002,7 +2002,7 @@ function mainRun(spec: RunSpec = {}) {
   });
 }
 
-test("ARK-T27 the risk section shows script and reviewer levels, the higher wins, and lists door, blast radius and unplanned files", () => {
+test("ARK-T45 the risk section shows script and reviewer levels, the higher wins, and lists door, blast radius and unplanned files", () => {
   const ledger = mainRun().ledger();
   expect(ledger.risk).toMatchObject({
     verification: 1,
@@ -2032,7 +2032,7 @@ test("ARK-T27 the risk section shows script and reviewer levels, the higher wins
   expect(unplanned).not.toContain("docs/y.md");
 });
 
-test("ARK-T27 the reviewer level comes from the latest findings file and wins when higher", () => {
+test("ARK-T45 the reviewer level comes from the latest findings file and wins when higher", () => {
   const swapped = mainRun({
     findings: {
       "review-1.md": reviewerBlock("low"),
@@ -2056,7 +2056,7 @@ test("ARK-T27 the reviewer level comes from the latest findings file and wins wh
   expect(equalRisk).not.toContain("The levels differ");
 });
 
-test("ARK-T27 the reviewer block comes from reviewer-step findings files only, never from a validator report or live-check file", () => {
+test("ARK-T45 the reviewer block comes from reviewer-step findings files only, never from a validator report or live-check file", () => {
   const ledger = mainRun({
     findings: {
       "review-1.md": reviewerBlock("high"),
@@ -2077,7 +2077,7 @@ test("ARK-T27 the reviewer block comes from reviewer-step findings files only, n
   ).toBe("pass");
 });
 
-test("ARK-T27 the script level is low below 1.5, medium to below 2.25, high from 2.25, at the tuples either side of each threshold", () => {
+test("ARK-T45 the script level is low below 1.5, medium to below 2.25, high from 2.25, at the tuples either side of each threshold", () => {
   const events = {
     where: "cli/a.ts, cli/events.ts, cli/old.ts",
     repos: [
@@ -2150,12 +2150,12 @@ test("ARK-T27 the script level is low below 1.5, medium to below 2.25, high from
   });
 });
 
-test("ARK-T27 a run with no one-way hit shows Door: two-way", () => {
+test("ARK-T45 a run with no one-way hit shows Door: two-way", () => {
   const ledger = makeRun({ evidence: withEvidence, prWriting: sensitiveConfig }).ledger();
   expect(buildBody(ledger)).toMatch(/Door: two-way/);
 });
 
-// --- ARK-T28 ----------------------------------------------------------------------------------
+// --- ARK-T46 ----------------------------------------------------------------------------------
 
 type ReviewRun = {
   block: boolean;
@@ -2213,13 +2213,13 @@ function reviewedBody({ block, oneWay, recovery, unplanned, reviewerStep = true 
   )!;
 }
 
-test("ARK-T28 RISK04 fails when the latest findings file of the reviewer step has no Merge risk block", () => {
+test("ARK-T46 RISK04 fails when the latest findings file of the reviewer step has no Merge risk block", () => {
   expect(
     reviewedBody({ block: false, oneWay: false, recovery: false, unplanned: "none" }),
   ).toMatchObject({ result: "fail", reason: expect.stringContaining("no ## Merge risk block") });
 });
 
-test("ARK-T28 RISK04 fails when Door: one-way names no recovery", () => {
+test("ARK-T46 RISK04 fails when Door: one-way names no recovery", () => {
   expect(
     reviewedBody({ block: true, oneWay: true, recovery: false, unplanned: "none" }),
   ).toMatchObject({
@@ -2228,7 +2228,7 @@ test("ARK-T28 RISK04 fails when Door: one-way names no recovery", () => {
   });
 });
 
-test("ARK-T28 RISK04 fails when a file under Also changed, not in plan has no reason", () => {
+test("ARK-T46 RISK04 fails when a file under Also changed, not in plan has no reason", () => {
   expect(
     reviewedBody({ block: true, oneWay: false, recovery: false, unplanned: "no reason" }),
   ).toMatchObject({
@@ -2237,7 +2237,7 @@ test("ARK-T28 RISK04 fails when a file under Also changed, not in plan has no re
   });
 });
 
-test("ARK-T28 RISK04 passes a good body and does not require the block of a run with no reviewer step", () => {
+test("ARK-T46 RISK04 passes a good body and does not require the block of a run with no reviewer step", () => {
   expect(
     reviewedBody({ block: true, oneWay: true, recovery: true, unplanned: "all reasons" }).result,
   ).toBe("pass");
@@ -2252,7 +2252,7 @@ test("ARK-T28 RISK04 passes a good body and does not require the block of a run 
   ).toBe("skip");
 });
 
-// --- ARK-T29 ----------------------------------------------------------------------------------
+// --- ARK-T47 ----------------------------------------------------------------------------------
 
 type EvidenceSpec = NonNullable<RunSpec["evidence"]>;
 
@@ -2281,7 +2281,7 @@ function evidenceBody(evidence: EvidenceSpec | null) {
   };
 }
 
-test("ARK-T29 the Evidence section has one line for each test case and one screenshot for each flow, five at most", () => {
+test("ARK-T47 the Evidence section has one line for each test case and one screenshot for each flow, five at most", () => {
   const sevenOverSix = evidenceBody(
     evidenceWith(
       ["login-1.png", "login-2.png", "search.png", "cart.png"],
@@ -2310,7 +2310,7 @@ test("ARK-T29 the Evidence section has one line for each test case and one scree
   ).toEqual(["alpha-1.png", "beta-1.png", "gamma-1.png"]);
 });
 
-test("ARK-T29 EVID04 passes the complete body, fails with no section, warns past five screenshots", () => {
+test("ARK-T47 EVID04 passes the complete body, fails with no section, warns past five screenshots", () => {
   const { body, evid04 } = evidenceBody(
     evidenceWith(
       ["login-1.png", "login-2.png", "search.png", "cart.png"],
@@ -2338,7 +2338,7 @@ test("ARK-T29 EVID04 passes the complete body, fails with no section, warns past
     expect({ count, result: evid04(naming(count)).result }).toEqual({ count, result: expected });
 });
 
-test("ARK-T29 a run with no results/evidence/ needs no Evidence section", () => {
+test("ARK-T47 a run with no results/evidence/ needs no Evidence section", () => {
   const { body, evid04 } = evidenceBody(null);
   // The input has no Evidence section at all, so the result below is the exemption and not a heading that was found.
   const withoutSection = body.replace(/^## Evidence\n[\s\S]*?(?=^## )/m, "");

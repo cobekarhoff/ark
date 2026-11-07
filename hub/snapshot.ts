@@ -39,6 +39,7 @@ import type {
 } from "./types.ts";
 import { stageTimes } from "../cli/retro.ts";
 import { roleTimesOf } from "./progress.ts";
+import { readRunEvidence, readTicketCases } from "./evidence.ts";
 import { listRunFiles, timelineOf } from "./run-detail.ts";
 import { UsageIndex, type RunCost } from "./usage.ts";
 
@@ -587,6 +588,27 @@ export function createSnapshotReader() {
         ),
         sessions_ready: slots.usage.readAt !== null,
       };
+    },
+    /** The test cases that a ticket names, read on request (see `readTicketCases`). Null for a ticket the hub does not know. */
+    ticketCases(project: string, ticket: string) {
+      const value = slots.ark.value;
+      if (!value) return Promise.resolve(null);
+      const newest = value.runs.find(
+        (candidate) => candidate.state.project === project && candidate.state.ticket.id === ticket,
+      );
+      return readTicketCases(project, ticket, value.tickets, newest?.directory ?? null);
+    },
+    /** The test evidence of a run, read on request, open or closed. Null for a run the hub does not know. */
+    runEvidence(run: string) {
+      const found = slots.ark.value?.runs.find((candidate) => candidate.state.run === run);
+      return found
+        ? readRunEvidence(
+            found.directory,
+            found.state.project,
+            found.state.ticket.id,
+            slots.ark.value!.tickets,
+          )
+        : null;
     },
     /** Terminal handles the current snapshot lists as live: the only handles `open-in-orca` accepts. */
     liveTerminals(): Set<string> {

@@ -47,7 +47,7 @@ Expected: When no usable summary can be found, the system shall refuse before an
 - Ticket 4: the 64-character `summary:` is not usable (the whole title would be 73), so the title is `ARK-316: <the 40-character ticket title>`.
 - Tickets 5 and 6 without `--summary`: the same refusal before any push. With `--summary` the title uses the flag text.
 - With the `title_prefix` rule the title follows `feat(ARK-316): <summary>`, not the default. A 57-character summary gives 72 characters and is accepted; a 58-character summary with a 120-character title is refused with `ticket has no summary: pass --summary` before any push.
-- No title posted in this case is longer than 72 characters, so TITLE01 (ARK-T21) never fails on an `ark merge-request open` title.
+- No title posted in this case is longer than 72 characters, so TITLE01 (ARK-T39) never fails on an `ark merge-request open` title.
 - `bun test test/pr-writing.test.ts` exits 0.
 
 ## Screenshot checkpoints

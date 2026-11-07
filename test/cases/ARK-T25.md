@@ -1,46 +1,39 @@
 ---
 id: ARK-T25
-title: ARK-T25 pr_writing config block is validated
+title: ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside
 level: integration
-technique: equivalence classes and boundary values on tier_floor (valid 0-3, invalid below 0, above 3, non-integer) and one wrong type for each other key
-priority: medium
-risk: a bad tier_floor loads and breaks the lint tier later, a valid key is refused, or the defaults are missing
+technique: equivalence classes of ticket id (plain, front-matter id with ../) times read path (snapshot, /api/ticket/<project>/<id>); boundary of a path that leaves the ticket folder
+priority: high
+risk: "the snapshot drops a criterion field (id, text, method, verified_by), a ticket reads text of a file outside its own folder through a planted front-matter id, or a bare /api/ticket/<project>/<id> route answers and serves ticket text a second way"
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-06-ARK-314-1
 ---
 
 ## Objective
 
-Prove that `cli/config.ts` accepts a `pr_writing:` block and validates it. Serves ARK-316/AC9.
-
-Expected: When `tier_floor` is not valid, the system shall refuse the config.
+Prove the hub sends the text and criteria of each backlog ticket in its snapshot, read from the ticket's own file with criteria as `{id, text, method, verified_by}`, that nothing outside the ticket folder is read through a planted front-matter id, and that no ticket text route exists beside the snapshot (only `/api/ticket/<project>/<id>/cases` is read on request, proven in ARK-T24).
 
 ## Preconditions
 
-- A temporary `ARK_HOME` and project folder.
-- Config A: a `pr_writing:` block with `reviewers`, `tier_floor: 1`, `sensitive_paths`, `one_way_paths`, `agent_authored: false` and `title_prefix`.
-- Config B: a `pr_writing:` block with only `reviewers`.
-- Config C: no `pr_writing:` block.
-- Configs D, E, F, G: `tier_floor` set to `5`, `-1`, `1.5` and `"high"`; configs for the boundaries `0` and `3`.
-- One config per other key, each with a wrong type and the rest valid: H `reviewers: "alice"` (a string, not a list); I `reviewers: [1, 2]` (items not strings); J `sensitive_paths: "cli/*"`; K `one_way_paths: {}`; L `agent_authored: "yes"`; M `title_prefix: 42`.
+- Hub started on a temp `ARK_HOME` through `start()` in `test/hub.test.ts`, project `p`, `ticket_source: local`.
+- Ticket `ARK-840` (title `Readable`, status `ready`): problem `Why it hurts`, change `What changes`, one criterion written `ARK-840-AC1` (old id form) with text `It works`, no method, no `verified_by`.
+- Ticket file `ARK-841.md` with front matter `id: ../../../outside` and title `Planted`, problem `Own text`.
+- A file `<ARK_HOME>/outside.md` with the problem text `OUTSIDE TICKET DIRECTORY`.
 
 ## Steps
 
-1. Load config A and read the block.
-2. Load config B and C and read the defaults.
-3. Load configs with `tier_floor` 0 and 3.
-4. Load configs D, E, F and G. Read the error.
-5. Load configs H to M. Read the error of each.
-6. Run `bun test`.
+1. Wait for the snapshot to list two tickets.
+2. Read the `document` of `Readable`. Assert it equals problem `Why it hurts`, change `What changes` and one criterion `{id: AC1, text: It works, method: test, verified_by: []}` (the old id reads as local `AC1`, the default method is `test`).
+3. Read the `document` of `Planted`. Assert its problem is `Own text`.
+4. Assert the serialized snapshot never contains `OUTSIDE TICKET DIRECTORY`.
+5. Request `/api/ticket/p/ARK-840` and `/api/ticket/p/..%2F..%2F..%2Foutside`. Assert both answer 404.
 
 ## Expected results
 
-- Config A loads; all six keys are present with the values given.
-- Config B gives `tier_floor` 0 and `agent_authored` true. Config C loads with the same defaults.
-- `tier_floor` 0 and 3 load. 5, -1, 1.5 and `"high"` are refused, and the message names the key `tier_floor`.
-- Each of H to M is refused, and the message names its key: `reviewers` (H and I), `sensitive_paths`, `one_way_paths`, `agent_authored`, `title_prefix`.
-- `bun test` exits 0.
+- When the hub reads a ticket, the system shall send its criteria with id, text, method and `verified_by` in the snapshot.
+- The system shall read the text of a ticket only from the ticket's own file, never from a path that a front-matter id names outside the ticket folder.
+- The system shall answer 404 for a ticket text request outside the snapshot.
 
 ## Screenshot checkpoints
 
-None. The surface is CLI output and Markdown text; no screenshot applies.
+none: integration case on the snapshot and the HTTP route; the page rendering of a criterion is proven in ARK-T28 and ARK-T26.

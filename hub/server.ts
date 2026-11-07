@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { exec } from "../cli/exec.ts";
 import { proxyPort } from "../cli/proxy.ts";
-import { resolveRunFile } from "./run-detail.ts";
+import { resolveEvidenceImage, resolveRunFile } from "./run-detail.ts";
 import type { SnapshotReader } from "./snapshot.ts";
 
 const heartbeatMilliseconds = 10_000;
@@ -65,7 +65,10 @@ const switchTimeoutMilliseconds = 5000;
 /**
  * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /events`
  * (Server-Sent Events), and on request `GET /api/run/<run>` (any run, open or closed),
- * `GET /api/run/<run>/transcript?file=&cursor=`, and `GET /api/run/<run>/file?path=`. The one POST
+ * `GET /api/run/<run>/transcript?file=&cursor=`, `GET /api/run/<run>/file?path=`,
+ * `GET /api/run/<run>/evidence` (plan cases with base and head results, evidence files of non-test
+ * ACs), `GET /api/run/<run>/image?path=` (an image under `results/evidence/`, ADR 0009) and
+ * `GET /api/ticket/<project>/<ticket>/cases` (the test cases of a ticket). The one POST
  * route is `POST /api/open-in-orca` (ADR 0009): it focuses a live terminal in Orca and does nothing
  * else. Any other method gets 405, any other path 404.
  *
@@ -141,6 +144,15 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
         { "content-type": "text/plain; charset=utf-8" },
       );
     }
+    if (rest === "/evidence") return json(reader.runEvidence(runName));
+    if (rest === "/image") {
+      const image = resolveEvidenceImage(directory, url.searchParams.get("path") ?? "");
+      if (image === null) return text("not found", 404);
+      // The type comes from the bytes the check read, never from the file name or Bun.file.
+      return new Response(await Bun.file(image.real).bytes(), {
+        headers: { ...headers, "content-type": image.type },
+      });
+    }
     return text("not found", 404);
   }
 
@@ -159,7 +171,20 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       if (request.method !== "GET") return text("method not allowed", 405, { allow: "GET" });
       if (!isLocalRequest(request, getAuthorities())) return text("foreign origin", 403);
 
-      const run = pathname.match(/^\/api\/run\/([^/]+)(\/transcript|\/file)?$/);
+      const cases = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)\/cases$/);
+      if (cases) {
+        try {
+          const result = await reader.ticketCases(
+            decodeURIComponent(cases[1]),
+            decodeURIComponent(cases[2]),
+          );
+          return result ? json(result) : text("no such ticket", 404);
+        } catch {
+          return text("bad request", 400);
+        }
+      }
+
+      const run = pathname.match(/^\/api\/run\/([^/]+)(\/transcript|\/file|\/evidence|\/image)?$/);
       if (run) {
         try {
           return await runRoute(url, decodeURIComponent(run[1]), run[2] ?? "");

@@ -1018,7 +1018,7 @@ function closeFinding(runDirectory: string) {
 }
 
 test(
-  "ARK-T24 merge-request open posts a ready MR from the ledger, then updates its body after a fixed P0 and a new head",
+  "ARK-T42 merge-request open posts a ready MR from the ledger, then updates its body after a fixed P0 and a new head",
   () => {
     const { runId, runDirectory, worktree } = testedRun();
     // The branch needs a commit ahead of its base before it has an MR; ark test then records that head.
@@ -1065,7 +1065,7 @@ test(
 );
 
 test(
-  "ARK-T24 with two open MRs a new head updates both bodies and drops the fixed P0 from each",
+  "ARK-T42 with two open MRs a new head updates both bodies and drops the fixed P0 from each",
   () => {
     const { runDirectory, worktrees } = scenario({ core: "github", app: "github" });
     mkdirSync(join(runDirectory, "findings"), { recursive: true });
@@ -1103,7 +1103,7 @@ test(
 );
 
 test(
-  "ARK-T20 two repos with different templates and host logins each get their own template, provenance handle, assignee and reviewer",
+  "ARK-T38 two repos with different templates and host logins each get their own template, provenance handle, assignee and reviewer",
   () => {
     const { worktrees } = scenario({ core: "github", app: "github" }, true, [], {
       pr_writing: { tier_floor: 1, reviewers: ["alice", "bob"] },

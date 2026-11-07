@@ -1,45 +1,53 @@
 ---
 id: ARK-T28
-title: ARK-T28 RISK04 fails three ways and passes a good body
-level: integration
-technique: one fixture per failure mode (equivalence classes) plus a passing control
+title: ARK-T28 ticket page shows method, case links and the no-integration warning
+level: e2e
+technique: equivalence classes of the four methods; decision table of method test times case levels (unit only / integration / empty list); shared case across two tickets
 priority: high
-risk: a body with no reviewer risk block, a one-way door with no recovery or an unplanned file with no reason passes lint, so the human reviews a risk section that does not hold
+risk: "a criterion hides its method or links, a shared case lists only one ticket, a test AC covered only by unit cases shows no warning, or a non-test AC shows a warning it should not"
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-06-ARK-314-1
 ---
 
 ## Objective
 
-Prove that lint check RISK04 fails on each of its three conditions and passes a good body. Serves ARK-316/AC13.
-
-Expected: When a reviewer step has no `## Merge risk` block, the system shall fail RISK04.
+Prove the ticket page shows id, method and one link per `verified_by` case on each criterion, lists every ticket and AC of a shared case with links to each ticket page, and warns on a `method: test` AC with no integration or E2E case.
 
 ## Preconditions
 
-- Fixture run with a reviewer step in `plan.yml`.
-- Body 1: the latest findings file of the reviewer step has no `## Merge risk` block. In the body, `Door: one-way` names its recovery and every unplanned file has a reason.
-- Body 2: the findings file has the block and every unplanned file has a reason; the body has `Door: one-way` and names no recovery.
-- Body 3: the findings file has the block and `Door: one-way` names its recovery; a file under `Also changed, not in plan:` has no reason (another file there has one).
-- Good body: a findings file with the block, `Door: one-way` with its recovery, and every unplanned file with a reason.
-- Control run: no reviewer step in the plan, so the block is not required.
+- Playwright spec in `test/pw/hub.pw.ts` on a fixture project (`test_case_source: local`) with three tickets.
+  - ARK-900, one criterion of each method:
+    - AC1 `method: test`, `verified_by: [ARK-T1]` (T1 integration, active): no warning.
+    - AC2 `method: demonstration`, `verified_by: []`: no warning.
+    - AC3 `method: inspection`, `verified_by: [ARK-T1, ARK-T3, ARK-T99]` (T3 e2e retired, T99 has no case file).
+    - AC4 `method: analysis`, `verified_by: []`: no warning.
+  - ARK-901 (its page must exist): AC1 `method: test`, `verified_by: [ARK-T1]`. ARK-T1 is shared by ARK-900 AC1, ARK-900 AC3, ARK-901 AC1 and ARK-902 AC3.
+  - ARK-902, warning fixture:
+    - AC1 `method: test`, `verified_by: [ARK-T2]` (T2 unit, active): warning.
+    - AC2 `method: test`, `verified_by: []` (empty list): warning.
+    - AC3 `method: test`, `verified_by: [ARK-T1]`: no warning.
+- Light theme, desktop viewport 1280x800.
 
 ## Steps
 
-1. Run lint on body 1. Read the RISK04 result and reason.
-2. Run lint on body 2.
-3. Run lint on body 3.
-4. Run lint on the good body.
-5. Run lint on the control run's body.
-6. Run `bun test test/pr-writing.test.ts`.
+1. Open `#/ticket/ARK-900`. `checkpoint(page, "ticket-criteria")`.
+2. For each `ticket-criterion` assert the id and method text: `AC1`/`test`, `AC2`/`demonstration`, `AC3`/`inspection`, `AC4`/`analysis`. Assert exactly four criteria.
+3. Assert AC1 holds exactly one case link whose text contains `ARK-T1`, `integration` and `active`.
+4. Assert AC3 holds three case entries in `verified_by` order, of which exactly two are links: `ARK-T1 integration active` and `ARK-T3 e2e retired`, each with a non-empty `href`. The third entry reads `ARK-T99 missing`, is plain text with no `<a>` and no `href`, and is not an empty row.
+5. Assert AC2 and AC4 hold no case entry and no link. Assert the page holds no warning element (count 0).
+6. Open `#/ticket/ARK-902`. Assert AC1 and AC2 each show one warning element, visible in the viewport, whose text names the rule (a `method: test` criterion with no integration or E2E case). Assert AC3 shows none and the warning count on the page is exactly 2.
+7. Open `#/ticket/ARK-900` again. Click the link of `ARK-T1` in AC1 and wait until the case listing is visible. `checkpoint(page, "ticket-shared-case")`.
+8. Assert the listing holds exactly the four entries `ARK-900 AC1`, `ARK-900 AC3`, `ARK-901 AC1` and `ARK-902 AC3`, and that each ticket id is a link whose `href` ends with `#/ticket/<id>` of that ticket.
+9. Click the `ARK-901` link. Assert the URL hash is `#/ticket/ARK-901` and that page shows its own criteria.
 
 ## Expected results
 
-- Bodies 1, 2 and 3 each return `fail` for RISK04, each only for its one broken condition, and the reason names the cause (no `## Merge risk` block; no recovery for `Door: one-way`; the unplanned file without a reason).
-- The good body returns `pass` for RISK04.
-- The control run, with no reviewer step, does not fail on the missing block.
-- `bun test test/pr-writing.test.ts` exits 0.
+- When the ticket page opens, the system shall show the id, the method and one link per `verified_by` case on each criterion, each link with case id, level and status.
+- Where a case verifies ACs of several tickets, the system shall list every ticket and AC it verifies, and each ticket id shall link to its page.
+- If a criterion has `method: test` and no integration or E2E case in `verified_by`, then the system shall show a visible warning on it, and on no other criterion.
+- A `verified_by` id with no case file shall show the word `missing` as a plain-text entry that is not a link.
 
 ## Screenshot checkpoints
 
-None. The surface is CLI output and Markdown text; no screenshot applies.
+- `ticket-criteria`: ticket ARK-900 with its four criteria, one of each method, no warning.
+- `ticket-shared-case`: the opened shared case ARK-T1 listing ARK-900, ARK-901 and ARK-902.
