@@ -380,16 +380,24 @@ test("ARK-T52 both entry points import ledger, body, lint and post, and no other
 
   expect(importedModules(join(root, "cli/merge-request.ts"))).toEqual([...modules].sort());
 
-  // Entry point two: a skill script next to lib/.
+  // Entry point two: the skill scripts next to lib/ use the lib modules, and together all four.
   const scripts = sourcesUnder(join(root, "skills/pr-writing")).filter(
     (file) => !file.startsWith(`${library}/`),
   );
   expect(scripts.length).toBeGreaterThan(0);
-  for (const script of scripts)
-    expect({ script: relative(root, script), imports: importedModules(script) }).toEqual({
+  const used = new Set<string>();
+  for (const script of scripts) {
+    const imports = importedModules(script);
+    expect({
       script: relative(root, script),
-      imports: [...modules].sort(),
+      unknown: imports.filter((name) => !modules.includes(name)),
+    }).toEqual({
+      script: relative(root, script),
+      unknown: [],
     });
+    for (const name of imports) used.add(name);
+  }
+  expect([...used].sort()).toEqual([...modules].sort());
 
   // Fingerprints of a body or title builder, and the host create calls, outside the module set.
   const fingerprints = [

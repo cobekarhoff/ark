@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { beginMarker, endMarker } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
-import { hashBody, lintBody } from "./lint.ts";
+import { hashBody, lintBody, type LintResult } from "./lint.ts";
 
 export const maxTitleLength = 72;
 
@@ -207,17 +207,30 @@ const git = (args: string[], directory: string) => {
 };
 
 /** The head of the repo now and its three-dot diff against the base, read at the moment of the lint. */
-function current(input: PostInput): { currentHeads?: Record<string, string>; diff?: string } {
-  const repo = input.ledger.repos[0];
-  const head = git(["rev-parse", "HEAD"], input.directory);
+export function currentState(
+  ledger: Ledger,
+  directory: string,
+  base: string,
+): { currentHeads?: Record<string, string>; diff?: string } {
+  const repo = ledger.repos[0];
+  const head = git(["rev-parse", "HEAD"], directory);
   if (repo === undefined || head === null) return {};
-  const base = git(["rev-parse", "--verify", "--quiet", `origin/${input.base}`], input.directory)
-    ? `origin/${input.base}`
-    : input.base;
+  const ref = git(["rev-parse", "--verify", "--quiet", `origin/${base}`], directory)
+    ? `origin/${base}`
+    : base;
   return {
     currentHeads: { [repo.repo]: head },
-    diff: git(["diff", `${base}...HEAD`], input.directory) ?? undefined,
+    diff: git(["diff", `${ref}...HEAD`], directory) ?? undefined,
   };
+}
+
+/** The final body failed lint: `checks` holds the failed ones. Scripts print them as JSON. */
+export class LintRefusal extends ArkError {
+  constructor(readonly checks: LintResult[]) {
+    super(
+      `lint failed, nothing was written:\n${checks.map((check) => `${check.id}: ${check.reason}`).join("\n")}`,
+    );
+  }
 }
 
 /**
@@ -232,7 +245,7 @@ function refuseOnFail(
   generated: string,
   showWarnings = true,
 ) {
-  const { currentHeads, diff } = current(input);
+  const { currentHeads, diff } = currentState(input.ledger, input.directory, input.base);
   const lint = (text: string, bodyHash = hashBody(text)) =>
     lintBody({
       body: text,
@@ -253,10 +266,7 @@ function refuseOnFail(
   const failed = checks
     .filter((check) => check.result === "fail")
     .filter((check) => existing === null || !check.id.startsWith("TITLE01"));
-  if (failed.length > 0)
-    throw new ArkError(
-      `lint failed, nothing was written:\n${failed.map((check) => `${check.id}: ${check.reason}`).join("\n")}`,
-    );
+  if (failed.length > 0) throw new LintRefusal(failed);
 }
 
 /** `gh` and `glab` flags for the assignee and the reviewers; a reviewer is never the token owner. */

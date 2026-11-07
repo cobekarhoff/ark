@@ -153,7 +153,7 @@ function capture(command: string[], cwd: string): string | null {
   }
 }
 
-function hostOf(remoteUrl: string | null): Host {
+export function hostOf(remoteUrl: string | null): Host {
   const lowered = (remoteUrl ?? "").toLowerCase();
   if (lowered.includes("github.com")) return "github";
   if (lowered.includes("gitlab")) return "gitlab";
