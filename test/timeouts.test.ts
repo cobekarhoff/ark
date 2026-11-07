@@ -1,5 +1,5 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -23,15 +23,22 @@ function gitHeavyTests(file: string): { name: string; timeout: number }[] {
     }));
 }
 
-test("ARK-237-AC1 every sync and merge-request test that starts a run or builds a scenario has a timeout of at least 30 seconds", () => {
-  const tests = gitHeavyFiles.flatMap(gitHeavyTests);
-  expect(tests.length).toBeGreaterThan(0);
-  const tooShort = tests.filter((testCase) => testCase.timeout < minimumTimeoutMilliseconds);
-  expect(tooShort).toEqual([]);
+// The ARK-T31 check: git-heavy tests of the given files (paths relative to the repository root)
+// whose timeout is below 30 seconds.
+function tooShortTests(files: string[]) {
+  return files
+    .flatMap(gitHeavyTests)
+    .filter((testCase) => testCase.timeout < minimumTimeoutMilliseconds);
+}
+
+test("ARK-T31 every sync and merge-request test that starts a run or builds a scenario has a timeout of at least 30 seconds", () => {
+  expect(gitHeavyFiles.flatMap(gitHeavyTests).length).toBeGreaterThan(0);
+  expect(tooShortTests(gitHeavyFiles)).toEqual([]);
 });
 
-test(
-  "ARK-237-AC2 five bun test processes of the sync and merge-request files at once all pass without a timeout",
+// Skipped unless ARK_LOAD_PROOF=1: five parallel runs take 5+ minutes on a busy host (ARK-326).
+test.skipIf(process.env.ARK_LOAD_PROOF !== "1")(
+  "ARK-T32 five bun test processes of the sync and merge-request files at once all pass without a timeout",
   async () => {
     // The file list excludes test/timeouts.test.ts, so the child processes never recurse into this test.
     const processes = Array.from({ length: 5 }, () =>
@@ -185,6 +192,113 @@ test(
     expect(code).toBe(0);
     expect(out + err).toMatch(/\b1 skip\b/);
     expect(out + err).not.toMatch(/\b[1-9]\d* pass\b/);
+  },
+  { timeout: 60_000 },
+);
+
+// Runs this file in a child process, keeping only the ARK-T32 test.
+async function runFiveProcessTest(env: Record<string, string | undefined>) {
+  const child = Bun.spawn([process.execPath, "test", "test/timeouts.test.ts", "-t", "ARK-T32"], {
+    cwd: repositoryRoot,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, err, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { code, output: out + err };
+}
+
+test(
+  "ARK-T36 the five-process load test is skipped without ARK_LOAD_PROOF and runs with ARK_LOAD_PROOF=1",
+  async () => {
+    const withoutVariable = { ...process.env };
+    delete withoutVariable.ARK_LOAD_PROOF;
+    const skipped = await runFiveProcessTest(withoutVariable);
+    expect(skipped.code).toBe(0);
+    expect(skipped.output).toMatch(/\b1 skip\b/);
+    expect(skipped.output).not.toMatch(/\b[1-9]\d* pass\b/);
+
+    // A fake `bun` first on PATH logs each call and exits 0, so the five "processes" cost nothing.
+    const directory = mkdtempSync(join(tmpdir(), "ark-t19-"));
+    try {
+      const logFile = join(directory, "calls.log");
+      const fakeBun = join(directory, "bun");
+      writeFileSync(fakeBun, `#!/bin/sh\necho "$@" >> "${logFile}"\n`, { mode: 0o755 });
+      const ran = await runFiveProcessTest({
+        ...process.env,
+        ARK_LOAD_PROOF: "1",
+        PATH: `${directory}:${process.env.PATH}`,
+      });
+      expect(ran.code).toBe(0);
+      expect(ran.output).toMatch(/\b1 pass\b/);
+      expect(ran.output).not.toMatch(/\b[1-9]\d* skip\b/);
+      const calls = readFileSync(logFile, "utf8").trim().split("\n");
+      expect(calls).toEqual(Array(5).fill("test test/sync.test.ts test/merge-request.test.ts"));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  { timeout: 60_000 },
+);
+
+// Runs the given file in a child process, keeping only the ARK-T31 test (the owning check).
+async function runOwningCheck(cwd: string, file: string) {
+  const env = { ...process.env };
+  delete env.ARK_LOAD_PROOF;
+  const child = Bun.spawn([process.execPath, "test", file, "-t", "ARK-T31"], {
+    cwd,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, err, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { code, output: out + err };
+}
+
+test(
+  "ARK-T30 the every-file timeout check refuses a sync-style test with a 10 second timeout",
+  async () => {
+    // Without ARK_LOAD_PROOF the owning check runs and passes on the real sync and merge-request files.
+    const normal = await runOwningCheck(repositoryRoot, "test/timeouts.test.ts");
+    expect(normal.code).toBe(0);
+    expect(normal.output).toMatch(/\b1 pass\b/);
+    expect(normal.output).not.toMatch(/\b[1-9]\d* skip\b/);
+
+    // A copy of this file in a temp repository checks a fixture instead of the real files.
+    const directory = mkdtempSync(join(tmpdir(), "ark-t20-"));
+    try {
+      mkdirSync(join(directory, "test"));
+      writeFileSync(
+        join(directory, "test", "fixture.test.ts"),
+        [
+          'test("opens a merge request", () => { startRun(); }, { timeout: 10_000 });',
+          'test("syncs a scenario", () => { scenario(); }, { timeout: 30_000 });',
+          "",
+        ].join("\n"),
+      );
+      const source = readFileSync(join(repositoryRoot, "test/timeouts.test.ts"), "utf8");
+      const copy = source.replace(
+        /^const gitHeavyFiles = \[[^\]]*\];$/m,
+        'const gitHeavyFiles = ["test/fixture.test.ts"];',
+      );
+      expect(copy).not.toBe(source);
+      writeFileSync(join(directory, "test", "timeouts.test.ts"), copy);
+      const refused = await runOwningCheck(directory, "test/timeouts.test.ts");
+      expect(refused.code).not.toBe(0);
+      expect(refused.output).toContain("opens a merge request");
+      expect(refused.output).toContain('"timeout": 10000');
+      expect(refused.output).not.toContain("syncs a scenario");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   },
   { timeout: 60_000 },
 );

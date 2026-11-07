@@ -161,7 +161,9 @@ function addRepoWorktree(
     tools: { approvalMode: "yolo" },
     // omp reads <cwd>/.claude/skills natively, so only a nested worktree needs the root's folders.
     ...(skillDirectories.length > 0 && {
-      skills: { customDirectories: skillDirectories.map((name) => join(mirror, name)) },
+      skills: {
+        customDirectories: skillDirectories.map((name) => join(mirror, name)),
+      },
     }),
   };
   writeFileSync(join(path, ".omp", "config.yml"), `${Bun.YAML.stringify(settings, null, 2)}\n`);
@@ -218,7 +220,11 @@ function checkClean(
   const nested = knownRepos.map((repo) => join(workspace, repo));
   const dirty = repos
     .filter((repo) => repo !== "." && !state.worktrees.some((worktree) => worktree.repo === repo))
-    .map((repo) => ({ repo, source: join(workspace, repo), lines: [] as string[] }))
+    .map((repo) => ({
+      repo,
+      source: join(workspace, repo),
+      lines: [] as string[],
+    }))
     .map((entry) => ({ ...entry, lines: dirtyLines(entry.source, nested) }))
     .filter(({ lines }) => lines.length > 0);
   if (dirty.length === 0) return;
@@ -296,6 +302,35 @@ export function linkUntouched(workspace: string, mirror: string, knownRepos: str
   }
 }
 
+/** Ids of test/cases entries the branch added since the merge-base that origin/<target> holds with other content. */
+function takenCaseIds(path: string, target: string): string[] {
+  const run = (...args: string[]) => Bun.spawnSync(["git", "-C", path, ...args]);
+  const base = run("merge-base", "HEAD", `origin/${target}`);
+  if (base.exitCode !== 0) return [];
+  const added = run(
+    "diff",
+    "--name-only",
+    "--no-renames",
+    "--diff-filter=A",
+    base.stdout.toString().trim(),
+    "HEAD",
+    "--",
+    "test/cases",
+  );
+  return added.stdout
+    .toString()
+    .split("\n")
+    .filter((file) => /^test\/cases\/[^/]+\.md$/.test(file))
+    .filter((file) => {
+      const theirs = run("rev-parse", "--verify", "-q", `origin/${target}:${file}`);
+      return (
+        theirs.exitCode === 0 &&
+        theirs.stdout.toString() !== run("rev-parse", `HEAD:${file}`).stdout.toString()
+      );
+    })
+    .map((file) => file.slice("test/cases/".length, -".md".length));
+}
+
 /** Merges origin/<target> into every worktree and pushes the branch of each repo with an open MR. A conflicting repo is recorded and skipped; after the last repo one error names every conflicting repo. */
 export function worktreeSync(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
@@ -303,11 +338,23 @@ export function worktreeSync(runId: string, inProject?: string): void {
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
   const config = loadConfig(project);
   const mayPush = config.merge_requests !== "none";
-  assertAllowed(state, "worktree.synced", { repo: state.worktrees[0].repo, conflict: false });
+  assertAllowed(state, "worktree.synced", {
+    repo: state.worktrees[0].repo,
+    conflict: false,
+  });
   const conflicts: string[] = [];
   for (const worktree of state.worktrees) {
     git(worktree.path, "fetch", "origin");
     const target = targetBranch(worktree.path, repoBase(config, worktree.repo));
+    const taken = takenCaseIds(worktree.path, target);
+    if (taken.length > 0) {
+      appendEvent(directory, "worktree.synced", {
+        repo: worktree.repo,
+        conflict: true,
+      });
+      conflicts.push(...taken.map((id) => `test case id taken on the target branch: ${id}`));
+      continue;
+    }
     const merged = Bun.spawnSync([
       "git",
       "-C",

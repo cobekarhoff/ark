@@ -44,7 +44,12 @@ const commands: Command[] = [
       "run step <run> <step> start|finish [--failed] [--not-started] [--merge] [--project <name>]",
     description:
       "Records that a plan step started or finished. Use --failed with finish when the step failed. Use --not-started with finish --failed when the worker never ran (worker-start exited non-zero and no worker is running): it records not_started: true on step.finished, takes back the round of that start, and the retro does not count the step. It is a usage error without --failed, and with start or --merge. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo. With `gates.escalation: auto` in ark.yml, an implementer start that is refused only because the round budget is spent, or because the MRs are open and no escalation answer exists, records gate escalation one_more_round by auto first and prints `escalation one_more_round by auto (<n> of 2)`; at most 2 such answers per run (a --merge answer prints `(merge, not counted)` and does not count), never while escalation.requested is pending, and the third refusal is the usual one. For a `bug` run it refuses an implementer start with `bug run: record a failing ark test of the ACs before the fix` until a `test.completed` has every non-manual AC `failing`.",
-    flags: { "--failed": false, "--not-started": false, "--merge": false, "--project": true },
+    flags: {
+      "--failed": false,
+      "--not-started": false,
+      "--merge": false,
+      "--project": true,
+    },
     minimum: 3,
     maximum: 3,
     run: ([runId, stepId, action], flags) =>
@@ -166,7 +171,7 @@ const commands: Command[] = [
   {
     usage: "test-case new <KEY>",
     description:
-      "Run in a git repo. It allocates the next test case ID `<KEY>-T<n>`, one above the highest `<KEY>-T*` entry in `test/cases/`, and writes `test/cases/<KEY>-T<n>.md` with status `active`. It holds a lock in the git directory while it reads the highest number and writes the file, so parallel runs get different IDs. It prints the ID alone on stdout and the path on stderr. An entry is one Markdown file with the frontmatter `id`, `title` (starts with the id), `level` (unit, integration or e2e), `technique`, `priority`, `risk` (the defect the case catches), `status` (active or retired; a retired entry also has `retired_reason`) and `changed_by`, and the sections Objective, Preconditions, Steps, Expected results and Screenshot checkpoints. `test_case_source` in ark.yml accepts `local` only. Outside a git repo it exits 1.",
+      "Run in a git repo. It allocates the next test case ID `<KEY>-T<n>`, one above the highest of a counter file per key in the git common directory, the `<KEY>-T*` entries in `test/cases/` and the entries on the last fetched origin target branch (a missing origin counts as none; it never fetches), and writes `test/cases/<KEY>-T<n>.md` with status `active`. It holds a lock in the git directory while it reads the highest number, writes the counter and then the file, so parallel runs and worktrees of one repo get different IDs. It prints the ID alone on stdout and the path on stderr. An entry is one Markdown file with the frontmatter `id`, `title` (starts with the id), `level` (unit, integration or e2e), `technique`, `priority`, `risk` (the defect the case catches), `status` (active or retired; a retired entry also has `retired_reason`) and `changed_by`, and the sections Objective, Preconditions, Steps, Expected results and Screenshot checkpoints. `test_case_source` in ark.yml accepts `local` only. Outside a git repo it exits 1.",
     flags: {},
     minimum: 1,
     maximum: 1,
@@ -230,7 +235,7 @@ const commands: Command[] = [
   {
     usage: "worktree sync <run> [--project <name>]",
     description:
-      "Fetches and merges origin's target branch (`repos.<repo>.base` when set, else the branch origin/HEAD names) into each worktree of the run, and pushes the branch of each repo that has an MR (never for a project with `merge_requests: none`). It records worktree.synced for each repo. On a conflict it records it, undoes the merge and goes on to the next repo. After the last repo it exits 1 and names every conflicting repo. A closed run gets a phase error and its worktrees stay unchanged. It never merges an MR.",
+      "Fetches and merges origin's target branch (`repos.<repo>.base` when set, else the branch origin/HEAD names) into each worktree of the run, and pushes the branch of each repo that has an MR (never for a project with `merge_requests: none`). It records worktree.synced for each repo. Before the merge it checks that no `test/cases/<id>.md` the branch added since the merge-base exists on the target with other content; if one does, it records a conflict, skips the merge and the push, and goes on to the next repo. On a merge conflict it records it, undoes the merge and goes on to the next repo. After the last repo it exits 1, printing `test case id taken on the target branch: <id>` for each taken id and naming every conflicting repo. A closed run gets a phase error and its worktrees stay unchanged. It never merges an MR.",
     flags: { "--project": true },
     minimum: 1,
     maximum: 1,
