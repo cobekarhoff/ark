@@ -297,15 +297,15 @@ function AcLinks({ refs }: { refs: CaseRef[] }) {
   );
 }
 
-function CaseRow({ entry }: { entry: PlanCaseEvidence }) {
+function CaseRow({ entry, first }: { entry: PlanCaseEvidence; first: boolean }) {
   const logs = (["base", "head"] as const).filter((side) => entry[side].runs.length > 0);
   return (
     <tr data-testid="evidence-case" data-id={entry.id}>
       <td>
         <span className="mono strong">{entry.id}</span>
-        {logs.length > 0 ? (
-          <details open data-testid="evidence-log">
-            <summary>Command, output, exit code</summary>
+        {logs.length > 0 && first ? (
+          <details data-testid="evidence-log">
+            <summary>Suite output: command, output, exit code</summary>
             {logs.map((side) => (
               <Log key={side} name={side} runs={entry[side].runs} />
             ))}
@@ -516,8 +516,18 @@ export function TestEvidence({ run, phase }: { run: string; phase: string }) {
                 </tr>
               </thead>
               <tbody>
-                {cases.map((entry) => (
-                  <CaseRow key={entry.id} entry={entry} />
+                {cases.map((entry, index) => (
+                  <CaseRow
+                    key={entry.id}
+                    entry={entry}
+                    first={
+                      cases.findIndex(
+                        (other) =>
+                          JSON.stringify([other.base.runs, other.head.runs]) ===
+                          JSON.stringify([entry.base.runs, entry.head.runs]),
+                      ) === index
+                    }
+                  />
                 ))}
               </tbody>
             </table>

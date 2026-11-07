@@ -48,21 +48,34 @@ function frontOf(source: string): Record<string, unknown> | null {
   }
 }
 
-/** `test_case_source` and the repo folders of a project's `ark.yml`; no repo folder when the file does not say. */
-function settingsOf(project: string): { source: "local" | "zephyr"; roots: string[] } {
+/**
+ * `test_case_source` and the case roots of a project's `ark.yml`: the composed checkout of the run
+ * first (`<run folder>/workspace/<repo>`, where unmerged and changed cases live), then the
+ * configured workspace. No root when the file does not say.
+ */
+function settingsOf(
+  project: string,
+  runDirectory: string | null,
+): { source: "local" | "zephyr"; roots: string[] } {
   try {
     const fields = Bun.YAML.parse(
       readFileSync(join(projectDirectory(project), "ark.yml"), "utf8"),
     ) as Record<string, unknown> | null;
     const workspace = typeof fields?.workspace === "string" ? fields.workspace : null;
-    const repos =
-      fields?.repos && typeof fields.repos === "object" ? Object.keys(fields.repos) : [];
+    const repos = [
+      ...new Set([
+        ".",
+        ...(fields?.repos && typeof fields.repos === "object" ? Object.keys(fields.repos) : []),
+      ]),
+    ];
     return {
       source: fields?.test_case_source === "zephyr" ? "zephyr" : "local",
-      roots:
-        workspace === null
+      roots: [
+        ...(runDirectory === null
           ? []
-          : [...new Set([".", ...repos])].map((repo) => join(workspace, repo)),
+          : repos.map((repo) => join(runDirectory, "workspace", repo))),
+        ...(workspace === null ? [] : repos.map((repo) => join(workspace, repo))),
+      ],
     };
   } catch {
     return { source: "local", roots: [] };
@@ -191,7 +204,7 @@ export async function readTicketCases(
   const ids = [
     ...new Set((ticket.document?.criteria ?? []).flatMap((criterion) => criterion.verified_by)),
   ];
-  const { source, roots } = settingsOf(project);
+  const { source, roots } = settingsOf(project, newestRunDirectory);
   const verifiers = verifiersOf(tickets, project);
   const verifies = (id: string) => verifiers.get(id) ?? [];
 
