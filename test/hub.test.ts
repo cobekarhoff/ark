@@ -1466,7 +1466,7 @@ test("ARK-285-AC3 after one good Orca read, a failing read keeps a stale waiting
   expect(stuck(snapshotOf(false, waiting))).toEqual(["waiting on a prompt"]);
 });
 
-test("ARK-285-AC11 ticket text arrives in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside", async () => {
+test("ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside", async () => {
   isolatedEnvironment();
   const home = process.env.ARK_HOME as string;
   writeBacklogTicket({
@@ -1606,12 +1606,42 @@ test("ARK-T24 hub reads local test cases and zephyr evidence without a Zephyr ca
   };
   record("ARK-T1", { version: 3 });
   record("ARK-T2", {});
+  // Project `run`: main holds ARK-T1 (one version) and ARK-T5; the run checkout holds ARK-T1 changed and ARK-T4 added.
+  const main = scratch("ark-main-");
+  commitCase(main, "ARK-T1", front("main-1", { title: "ARK-T1 main title" }));
+  commitCase(main, "ARK-T5", front("main-only", { title: "ARK-T5 only in main" }));
+  writeProject("run", { workspace: main, ticket_source: "local", test_case_source: "local" });
+  writeBacklogTicket({
+    project: "run",
+    id: "ARK-900",
+    title: "Cases",
+    status: "ready",
+    criteria: [{ id: "AC1", text: "one", verifiedBy: ["ARK-T1", "ARK-T4", "ARK-T5"] }],
+  });
+  const runDirectory = writeRun({
+    project: "run",
+    run: `${today()}-ARK-900-2`,
+    ticket: { id: "ARK-900", title: "Cases" },
+    phase: "merge_requests_open",
+  });
+  const checkout = join(runDirectory, "workspace");
+  commitCase(checkout, "ARK-T1", front("2026-02-02-ARK-2-1", { title: "ARK-T1 main title" }));
+  commitCase(
+    checkout,
+    "ARK-T1",
+    front("2026-11-06-ARK-900-1", { title: "ARK-T1 changed in the run" }),
+  );
+  commitCase(
+    checkout,
+    "ARK-T4",
+    front("2026-11-06-ARK-900-1", { title: "ARK-T4 added in the run" }),
+  );
   const { baseUrl } = await start();
   await snapshotWhen(
     baseUrl,
     (current) =>
       current.tickets !== "unknown" &&
-      current.tickets.filter((ticket) => ticket.document !== null).length === 2 &&
+      current.tickets.filter((ticket) => ticket.document !== null).length === 3 &&
       current.runs !== "unknown",
   );
   const casesOf = async (project: string): Promise<TicketCases> => {
@@ -1656,6 +1686,27 @@ test("ARK-T24 hub reads local test cases and zephyr evidence without a Zephyr ca
   expect("version" in zep.cases[1]).toBe(false);
   expect(zep.cases[2]).toEqual({ id: "ARK-T99", missing: true });
   expect(zephyrRequests).toEqual([]);
+
+  // A run whose checkout holds an unmerged case and a changed case: the run wins, the workspace fills the rest.
+  const changed = await casesOf("run");
+  expect(changed.cases.map(({ id }) => id)).toEqual(["ARK-T1", "ARK-T4", "ARK-T5"]);
+  const [changedCase, addedCase, mainOnlyCase] = changed.cases;
+  expect(changedCase).toMatchObject({
+    title: "ARK-T1 changed in the run",
+    changed_by: "2026-11-06-ARK-900-1",
+  });
+  expect(changedCase.versions?.map((version) => version.changed_by)).toEqual([
+    "2026-11-06-ARK-900-1",
+    "2026-02-02-ARK-2-1",
+  ]);
+  expect(addedCase).toMatchObject({
+    title: "ARK-T4 added in the run",
+    status: "active",
+    changed_by: "2026-11-06-ARK-900-1",
+  });
+  expect(addedCase.versions).toHaveLength(1);
+  expect(mainOnlyCase).toMatchObject({ title: "ARK-T5 only in main", changed_by: "main-only" });
+  expect(mainOnlyCase.versions).toHaveLength(1);
 });
 
 // ---------------------------------------------------------------- ARK-298

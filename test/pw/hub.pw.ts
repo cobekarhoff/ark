@@ -1810,7 +1810,7 @@ test("ARK-285-AC7 Runs shows every run on one board and graph with filters, ring
   await expect(page.locator("main h1")).toContainText("ARK-601");
 });
 
-test("ARK-285-AC8 Roadmap lists the tickets by horizon, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
+test("ARK-T26 Roadmap lists the tickets by horizon, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
   page,
 }) => {
   isolate();
@@ -1865,6 +1865,7 @@ test("ARK-285-AC8 Roadmap lists the tickets by horizon, keys move and open them,
   await open(page, baseUrl, "roadmap");
   const rows = page.getByTestId("ticket-row");
   await expect(rows.first()).toBeVisible();
+  await checkpoint(page, "roadmap-list");
 
   // Sections in horizon order; a done or superseded ticket is in no list, though ROADMAP.md lists it.
   expect(
@@ -1939,6 +1940,7 @@ test("ARK-285-AC8 Roadmap lists the tickets by horizon, keys move and open them,
     await page.evaluate(() => (window as unknown as { __ran?: number }).__ran),
   ).toBeUndefined();
   const criteria = page.getByTestId("ticket-criterion");
+  await checkpoint(page, "ticket-criteria");
   await expect(criteria).toHaveCount(2);
   await expect(criteria.nth(1)).toContainText("Esc returns to the list");
   // ARK-314: each criterion shows its own id (AC1, AC2) in place of a list number.
@@ -2294,7 +2296,7 @@ test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ pa
   await expect(links).toHaveText(["Home", "Runs", "Roadmap"]);
 });
 
-test("ARK-285-AC11 Home, Runs and Roadmap send no request after the first load, and a ticket page and a run page read only their own text", async ({
+test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a ticket page and a run page read only their own text", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -2336,6 +2338,7 @@ test("ARK-285-AC11 Home, Runs and Roadmap send no request after the first load, 
   // The ticket page reads its text from the snapshot and, amended AC7 of ARK-314, its test cases once.
   await open(page, baseUrl, "ticket/ARK-521");
   await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await checkpoint(page, "ticket-page-requests");
   await page.waitForTimeout(1000);
   expect(requests.filter((path) => path.startsWith("/api/ticket"))).toEqual([
     "/api/ticket/p/ARK-521/cases",
@@ -2345,6 +2348,7 @@ test("ARK-285-AC11 Home, Runs and Roadmap send no request after the first load, 
   await expect(page.getByTestId("timeline")).toBeVisible();
   await open(page, baseUrl, `run/${older.run}`);
   await expect(page.getByTestId("evidence")).toBeVisible();
+  await checkpoint(page, "run-evidence-requests");
   await page.waitForTimeout(2000);
   const extra = requests.filter(
     (path) => path !== "/" && path !== "/events" && !path.startsWith("/assets/"),
@@ -4193,8 +4197,20 @@ const planOfT19: PlanCase[] = [
     id: "ARK-T3",
     action: "reuse",
     level: "unit",
-    base: { status: "pass", sha: "9b85039" },
-    head: { status: "pass", sha: "1a2b3c4" },
+    base: {
+      status: "pass",
+      sha: "9b85039",
+      command: "bun test test/a.test.ts",
+      output: "1 fail",
+      exit: 1,
+    },
+    head: {
+      status: "pass",
+      sha: "1a2b3c4",
+      command: "bun test test/a.test.ts",
+      output: "1 pass",
+      exit: 0,
+    },
   },
   { id: "ARK-T4", action: "retire", level: "integration" },
   { id: "ARK-T5", action: "add", level: "e2e", head: { status: "fail", sha: "1a2b3c4" } },
@@ -4402,6 +4418,15 @@ test("ARK-T19 run page shows a test evidence panel row for each plan case", asyn
   await expect(side("ARK-T1", "head")).toContainText("pass");
   await expect(side("ARK-T1", "head")).toContainText("1a2b3c4");
 
+  // The suite log is one closed, labelled disclosure; T3 ran in the same suite, so its row repeats nothing.
+  const log = page.getByTestId("evidence-log");
+  await expect(log).toHaveCount(1);
+  await expect(log).not.toHaveAttribute("open", "");
+  await expect(log.locator("summary")).toContainText("Suite output");
+  await expect(t1.getByTestId("evidence-log")).toHaveCount(1);
+  await expect(rowOf("ARK-T3").getByTestId("evidence-log")).toHaveCount(0);
+  await expect(side("ARK-T3", "head")).toContainText("pass");
+  await log.locator("summary").click();
   const logs = t1.locator(".ev-run");
   await expect(logs).toHaveCount(2);
   for (const [index, output, exit] of [
