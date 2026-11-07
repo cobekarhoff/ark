@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadConfig, type ProjectConfig } from "./config.ts";
-import { runCriteria } from "./criteria.ts";
+import { hasTestCriterion, runCriteria } from "./criteria.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
 import {
@@ -448,7 +448,7 @@ export function testRun(runId: string, inProject?: string): void {
   const problems = [
     ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed`),
     ...suites.filter((suite) => !suite.passed).map((suite) => `suite ${suite.name} failed`),
-    ...(state.kind === "refactor" && !basePassed
+    ...(state.kind === "refactor" && !basePassed && hasTestCriterion(directory)
       ? ["refactor run: the suites fail at the base commit"]
       : []),
     ...Object.entries(criterionStatuses)
