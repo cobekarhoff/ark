@@ -114,10 +114,18 @@ function probe(input: PostInput): Existing | null {
     : { number: first.iid, url: first.web_url, body: first.description ?? "" };
 }
 
+/** A marker counts only alone on its line: an old body may quote the marker text inside a sentence or code span. */
+const markerLine = (marker: string) =>
+  new RegExp(`^${marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ \\t]*$`, "m");
+
 const region = (text: string): [number, number] | null => {
-  const start = text.indexOf(beginMarker);
-  const end = text.indexOf(endMarker, start + 1);
-  return start === -1 || end === -1 ? null : [start, end + endMarker.length];
+  const start = text.match(markerLine(beginMarker));
+  if (start?.index === undefined) return null;
+  const afterStart = start.index + start[0].length;
+  const end = text.slice(afterStart).match(markerLine(endMarker));
+  return end?.index === undefined
+    ? null
+    : [start.index, afterStart + end.index + end[0].trimEnd().length];
 };
 
 /** The body to write: the file when there is no MR or the old body has no markers, else the old body with its marked text replaced. */

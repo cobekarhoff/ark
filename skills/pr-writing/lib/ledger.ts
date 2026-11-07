@@ -746,12 +746,20 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
             (merge) => `Depends on ${hostOf(merge.url) === "github" ? "#" : "!"}${merge.number}`,
           ),
       );
+      // The recorded base is a commit: a file that `ark worktree sync` merged in from the target is not ours, so diff
+      // against the target branch (configured base, else origin's HEAD), and keep the commit only as the last resort.
+      const configured = config?.repos?.[worktree.repo]?.base;
+      const symbolic = capture(
+        ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        worktree.path,
+      );
+      const targetBranch = configured ?? (symbolic ? symbolic.replace(/^origin\//, "") : null);
       return existsSync(worktree.path)
         ? repoLedger(
             worktree.repo,
             worktree.path,
             worktree.branch,
-            worktree.base ?? "main",
+            targetBranch ?? worktree.base ?? "main",
             dependsOn,
           )
         : ({
