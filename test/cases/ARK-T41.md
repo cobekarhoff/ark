@@ -29,6 +29,7 @@ Prove `ark plan check` enforces the skills list only for a web_ui run. Rewrites 
 - Steps 1 and 2 exit 0 and log a valid `plan.checked`.
 - Step 3 exits non-zero and names the missing skills.
 - Step 4 exits 0.
+- `bun test test/plan.test.ts` exits 0.
 
 ## Screenshot checkpoints
 

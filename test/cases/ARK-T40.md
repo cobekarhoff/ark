@@ -29,6 +29,7 @@ Prove `ark ui-skills <run>` and `uiSkillsFor` apply the web_ui-only rule for eve
 - `web_ui` and the mix print the 3 skills plus the React line; `uiSkillsFor` returns the 3 skills.
 - `cli_output`, `document` and `none` each print `none`; `uiSkillsFor` returns `[]`.
 - Exit code 0 in every step.
+- `bun test test/ui-skills.test.ts` exits 0.
 
 ## Screenshot checkpoints
 
