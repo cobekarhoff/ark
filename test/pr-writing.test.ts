@@ -589,7 +589,7 @@ test("ARK-T35 the git ledger picks the base by the fixed order and records a fai
   );
 });
 
-// --- ARK-T18 ----------------------------------------------------------------------------------
+// --- ARK-T36 ----------------------------------------------------------------------------------
 
 /** One-repo run on a fake GitHub host with a bare remote that records pushes, for `ark merge-request open`. */
 function cliRun(
@@ -711,7 +711,7 @@ const words = (length: number) =>
 
 const refusal = "ticket has no summary: pass --summary";
 
-test("ARK-T18 the title is the summary, else a ticket title that fits, else --summary, else a refusal before any push", () => {
+test("ARK-T36 the title is the summary, else a ticket title that fits, else --summary, else a refusal before any push", () => {
   const cases: {
     name: string;
     ticket: { title: string; summary?: string };
@@ -782,7 +782,7 @@ test("ARK-T18 the title is the summary, else a ticket title that fits, else --su
   }
 });
 
-test("ARK-T18 a title_prefix rule wins and its length counts", () => {
+test("ARK-T36 a title_prefix rule wins and its length counts", () => {
   const prefix = { pr_writing: { title_prefix: "feat(TICKET): desc" } }; // `feat(ARK-316): ` is 15 characters
   const open = (ticket: { title: string; summary?: string }) => {
     const { runId, pushed } = cliRun(ticket, prefix);
@@ -804,7 +804,7 @@ test("ARK-T18 a title_prefix rule wins and its length counts", () => {
   expect(createdTitles()).toEqual([]);
 });
 
-// --- ARK-T19 ----------------------------------------------------------------------------------
+// --- ARK-T37 ----------------------------------------------------------------------------------
 
 const sectionOrder = [
   "> Written by an AI agent",
@@ -818,7 +818,7 @@ const sectionOrder = [
   "## Acceptance criteria",
 ];
 
-/** The run of T19: an open P1, a manual-pending AC, an unproven AC, lint failed, typecheck not run, two MRs. */
+/** The run of T37: an open P1, a manual-pending AC, an unproven AC, lint failed, typecheck not run, two MRs. */
 function gappyRun(spec: RunSpec = {}) {
   return makeRun({
     kind: "bug",
@@ -849,7 +849,7 @@ function gappyRun(spec: RunSpec = {}) {
   });
 }
 
-test("ARK-T19 the body has the sections in order, lists each gap under Not done and pastes no AC text", () => {
+test("ARK-T37 the body has the sections in order, lists each gap under Not done and pastes no AC text", () => {
   const body = buildBody(gappyRun().ledger());
 
   const positions = sectionOrder.map((heading) => body.indexOf(heading));
@@ -891,7 +891,7 @@ test("ARK-T19 the body has the sections in order, lists each gap under Not done 
   expect(body).not.toContain("AC-TEXT-MARKER");
 });
 
-test("ARK-T19 a check that ran and passed leaves Not done, a failed check stays", () => {
+test("ARK-T37 a check that ran and passed leaves Not done, a failed check stays", () => {
   const body = buildBody(
     gappyRun({
       checks: [
@@ -905,7 +905,7 @@ test("ARK-T19 a check that ran and passed leaves Not done, a failed check stays"
   expect(notDone).not.toContain("typecheck");
 });
 
-test("ARK-T19 a last test result with no checks field is unknown, never a did-not-run claim, while a checks list without the check is", () => {
+test("ARK-T37 a last test result with no checks field is unknown, never a did-not-run claim, while a checks list without the check is", () => {
   const notDoneOf = (spec: RunSpec) =>
     buildBody(gappyRun(spec).ledger()).split("## Not done")[1].split("## ")[0];
 
@@ -917,7 +917,7 @@ test("ARK-T19 a last test result with no checks field is unknown, never a did-no
   expect(old).toContain("P1 open: Missing guard");
 });
 
-test("ARK-T19 what is different lists the Change items whole and leaves the Risks list and nested items out", () => {
+test("ARK-T37 what is different lists the Change items whole and leaves the Risks list and nested items out", () => {
   const longItem = `In \`a.ts\`, ${"keep every word of this long item, ".repeat(8)}and end the sentence here.`;
   const body = buildBody(
     gappyRun({
@@ -941,7 +941,7 @@ test("ARK-T19 what is different lists the Change items whole and leaves the Risk
   expect(longItem.length).toBeGreaterThan(180);
 });
 
-test("ARK-T19 the evidence follows the ticket kind: perf names baseline.md and compare.md, refactor shows pass at base and head", () => {
+test("ARK-T37 the evidence follows the ticket kind: perf names baseline.md and compare.md, refactor shows pass at base and head", () => {
   const perf = buildBody(gappyRun({ kind: "perf" }).ledger());
   const perfEvidence = perf.split("## Evidence")[1].split("## ")[0];
   expect(perfEvidence).toContain("baseline.md");
@@ -966,7 +966,7 @@ const templateSources: [string, string][] = [
 ];
 
 for (const [path, text] of templateSources)
-  test(`ARK-T19 the body fills the headings of ${path}`, () => {
+  test(`ARK-T37 the body fills the headings of ${path}`, () => {
     const run = gappyRun({
       repos: [
         {
@@ -1020,7 +1020,7 @@ async function pinnedBaseBody(ledger: Ledger): Promise<string> {
   );
 }
 
-test("ARK-T19 the body of the same run no longer pastes the AC text that the pinned-base builder pasted", async () => {
+test("ARK-T37 the body of the same run no longer pastes the AC text that the pinned-base builder pasted", async () => {
   const ledger = gappyRun().ledger();
   const before = await pinnedBaseBody(ledger);
   const after = buildBody(ledger);
@@ -1031,20 +1031,20 @@ test("ARK-T19 the body of the same run no longer pastes the AC text that the pin
   expect(after).not.toContain("AC-TEXT-MARKER");
   expect(after).toContain("## Not done");
 
-  // ARK_T19_EVIDENCE_DIR (a run folder's results/evidence/) keeps both outputs with the case result.
-  const keep = process.env.ARK_T19_EVIDENCE_DIR;
+  // ARK_T37_EVIDENCE_DIR (a run folder's results/evidence/) keeps both outputs with the case result.
+  const keep = process.env.ARK_T37_EVIDENCE_DIR;
   if (keep !== undefined) {
     mkdirSync(keep, { recursive: true });
     const note = (side: string, text: string) =>
-      `<!-- ARK-T19 ${side}: same fixture (gappyRun in test/pr-writing.test.ts) -->\n\n${text}\n`;
+      `<!-- ARK-T37 ${side}: same fixture (gappyRun in test/pr-writing.test.ts) -->\n\n${text}\n`;
     writeFileSync(
-      join(keep, "ARK-T19-before.md"),
+      join(keep, "ARK-T37-before.md"),
       note(
         `before, description() of commit ${pinnedBase} (git show ${pinnedBase}:cli/merge-request.ts)`,
         before,
       ),
     );
-    writeFileSync(join(keep, "ARK-T19-after.md"), note("after, buildBody()", after));
+    writeFileSync(join(keep, "ARK-T37-after.md"), note("after, buildBody()", after));
   }
 });
 
