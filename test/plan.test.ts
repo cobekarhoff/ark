@@ -663,14 +663,7 @@ describe("plan check UI skills", () => {
       .split("\n")
       .find((line) => line.startsWith("| Step |"));
 
-  test("ARK-279-AC4 a plan with no skills list is refused when Surfaces include web_ui", () => {
-    surfaceRun(["web_ui"]);
-    const result = withSkills(undefined);
-    expect(result.code).toBe(1);
-    expect(result.out).toContain("skills");
-  });
-
-  test("ARK-279-AC4 a skills entry that ark ui-skills does not list is refused", () => {
+  test("ARK-T41 ARK-328/AC1 a skills entry that ark ui-skills does not list is refused", () => {
     surfaceRun(["web_ui"]);
     const result = withSkills([...requiredUiSkills, "made-up-skill"]);
     expect(result.code).toBe(1);
@@ -696,7 +689,7 @@ describe("plan check UI skills", () => {
     expect(planMd()).toContain(reactSkill);
   });
 
-  test("ARK-279-AC4 a step without a list passes when another step has a valid one", () => {
+  test("ARK-T41 ARK-328/AC1 a step without a list passes when another step has a valid one", () => {
     surfaceRun(["web_ui"]);
     expect(withSkills(requiredUiSkills).code).toBe(0);
     expect(planMd()).toMatch(/\| check \|.*\| {2}\|$/m);

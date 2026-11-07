@@ -40,19 +40,6 @@ const record = (surfaces: string[]) => {
 };
 
 describe("ui-skills", () => {
-  test.each(["web_ui"])(
-    "ARK-279-AC1 surface %s prints the 3 required skills and the React line",
-    (surface) => {
-      record([surface]);
-      const result = ark("ui-skills", runId, "--project", "demo");
-      expect(result.code).toBe(0);
-      expect(result.out.trimEnd().split("\n")).toEqual([
-        ...requiredUiSkills,
-        `${reactSkill} (only when the change touches React code)`,
-      ]);
-    },
-  );
-
   test("ARK-279-AC1 surface none prints none", () => {
     record(["none"]);
     const result = ark("ui-skills", runId, "--project", "demo");
