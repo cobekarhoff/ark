@@ -1,0 +1,3 @@
+# Standalone pr-writing config. Keys: reviewers, tier_floor, sensitive_paths, agent_authored, title_prefix, checks.
+# PR_WRITING_<KEY> environment variables override these values.
+checks = ["bun run format:check", "bun run typecheck", "bun run lint"]

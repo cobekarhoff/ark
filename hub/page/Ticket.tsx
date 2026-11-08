@@ -1,6 +1,6 @@
 // test ids: ticket-page, ticket-problem, ticket-change, ticket-criterion (data-id), ticket-graph,
 // depends-on (links: dep-link), unblocks-list (links: unblock-link)
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
 import { Criteria } from "./Evidence.tsx";
@@ -8,6 +8,7 @@ import { OutsideNote, ProjectValue, Unknown, known } from "./format.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { hashOf, ticketHref, useLive } from "./store.tsx";
+import type { TicketDocument, TicketView } from "../types.ts";
 
 /** Paragraphs and bullet lists of plain text: Markdown marks stay as written, nothing becomes HTML. */
 function Prose({ text, testId }: { text: string; testId: string }) {
@@ -47,6 +48,75 @@ const node = (entry: TicketEntry, base: TicketEntry["ticket"]): GraphTicket => (
     .map((id) => ticketKey(entry.ticket.project, id)),
   satisfied: entry.satisfied,
 });
+
+/** The ticket's document: null once the route answered unreadable, undefined while it loads. */
+function useDocument(ticket: TicketView): TicketDocument | null | undefined {
+  const key = `${ticket.project}/${ticket.id}`;
+  const [read, setRead] = useState<{ key: string; document: TicketDocument | null }>();
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(
+      `/api/ticket/${encodeURIComponent(ticket.project)}/${encodeURIComponent(ticket.id)}`,
+      {
+        signal: controller.signal,
+      },
+    )
+      .then(async (response) => (response.ok ? (await response.json()).document : null))
+      .catch(() => null)
+      .then((document: TicketDocument | null) => {
+        if (!controller.signal.aborted) setRead({ key, document });
+      });
+    return () => controller.abort();
+    // The signature changes with any edit of the file; an unrelated push changes neither input.
+  }, [key, ticket.signature]);
+  // A reload of the same ticket keeps the text on screen; another ticket starts loading.
+  return read?.key === key ? read.document : undefined;
+}
+
+function TicketText({ ticket }: { ticket: TicketView }) {
+  const document = useDocument(ticket);
+  if (document === undefined)
+    return (
+      <>
+        <div role="status" className="doc-status">
+          <span className="spinner" aria-hidden="true" />
+          Loading the ticket text…
+        </div>
+        <div aria-hidden="true">
+          {[
+            ["Problem", [90, 75, 60]],
+            ["Change", [90, 40]],
+            ["Acceptance criteria", [75, 60, 75]],
+          ].map(([title, widths]) => (
+            <div key={title as string}>
+              <h2>{title as string}</h2>
+              {(widths as number[]).map((width, index) => (
+                <span key={index} className="sk" style={{ width: `${width}%` }} />
+              ))}
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  if (document === null)
+    return (
+      <div role="alert" className="doc-alert">
+        <strong>The hub could not read the text of this ticket.</strong>
+        The file is missing or does not parse. This page loads it again by itself when the file
+        changes.
+      </div>
+    );
+  return (
+    <>
+      <h2>Problem</h2>
+      <Prose text={document.problem} testId="ticket-problem" />
+      <h2>Change</h2>
+      <Prose text={document.change} testId="ticket-change" />
+      <h2>Acceptance criteria · {document.criteria.length}</h2>
+      <Criteria project={ticket.project} ticket={ticket.id} criteria={document.criteria} />
+    </>
+  );
+}
 
 export function TicketPage({ id }: { id: string }) {
   const { snapshot } = useLive();
@@ -128,23 +198,7 @@ export function TicketPage({ id }: { id: string }) {
             ) : null}
             {lead ? <OpenInOrca agent={lead} /> : null}
           </div>
-          {ticket.document === null ? (
-            <p className="bad-text">The hub could not read the text of this ticket.</p>
-          ) : null}
-          {ticket.document ? (
-            <>
-              <h2>Problem</h2>
-              <Prose text={ticket.document.problem} testId="ticket-problem" />
-              <h2>Change</h2>
-              <Prose text={ticket.document.change} testId="ticket-change" />
-              <h2>Acceptance criteria · {ticket.document.criteria.length}</h2>
-              <Criteria
-                project={ticket.project}
-                ticket={ticket.id}
-                criteria={ticket.document.criteria}
-              />
-            </>
-          ) : null}
+          <TicketText ticket={ticket} />
         </article>
         <aside className="side">
           <section className="panel">

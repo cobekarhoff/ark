@@ -3,8 +3,8 @@
  * `buildLedger({ runFolder })` reads an Ark run folder; `buildLedger({ directory })` reads git and the host.
  * A host probe that fails is recorded as `unknown`, never `none`: `none` means the host answered and found nothing.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { evidenceFile, frontmatterOf, parseCriteria } from "../../../cli/criteria.ts";
 import { loadConfig, type PrWriting } from "../../../cli/config.ts";
 import { ArkError } from "../../../cli/errors.ts";
@@ -16,6 +16,7 @@ import {
 } from "../../../cli/events.ts";
 import { projectDirectory } from "../../../cli/paths.ts";
 import { loadPlan, repoGraph } from "../../../cli/plan.ts";
+import { hashBody } from "./lint.ts";
 
 export type Rating = "good" | "decent" | "poor";
 export type Level = "low" | "medium" | "high";
@@ -152,7 +153,7 @@ function capture(command: string[], cwd: string): string | null {
   }
 }
 
-function hostOf(remoteUrl: string | null): Host {
+export function hostOf(remoteUrl: string | null): Host {
   const lowered = (remoteUrl ?? "").toLowerCase();
   if (lowered.includes("github.com")) return "github";
   if (lowered.includes("gitlab")) return "gitlab";
@@ -836,4 +837,193 @@ export function buildLedger(source: LedgerSource): Ledger {
   } finally {
     printHostCalls = false;
   }
+}
+
+// --- standalone config -------------------------------------------------------------------------
+
+/**
+ * The standalone pr-writing config: `.pr-writing.toml` at the repo root, then `PR_WRITING_<KEY>` environment
+ * variables on top. Keys: reviewers, tier_floor, sensitive_paths, agent_authored, title_prefix, checks.
+ * The `ark.yml` block is read by `cli/config.ts` and keeps its own validation; `one_way_paths` lives only there.
+ * A list is comma separated in the environment, a boolean is `true` or `false`, `tier_floor` is an integer 0 to 3.
+ */
+export const configKeys = [
+  "reviewers",
+  "tier_floor",
+  "sensitive_paths",
+  "agent_authored",
+  "title_prefix",
+  "checks",
+] as const;
+type Key = (typeof configKeys)[number];
+
+/** `checks` holds shell commands, run by `runChecks`. */
+export type StandaloneConfig = PrWriting & { checks: string[] };
+
+/** The file has a key outside `configKeys`. Scripts print `key` in their JSON error. */
+export class UnknownConfigKey extends ArkError {
+  constructor(readonly key: string) {
+    super(`unknown key "${key}" in .pr-writing.toml; valid keys: ${configKeys.join(", ")}`);
+  }
+}
+
+const defaults: StandaloneConfig = {
+  reviewers: [],
+  tier_floor: 0,
+  sensitive_paths: [],
+  one_way_paths: [],
+  agent_authored: true,
+  checks: [],
+};
+
+const parsers: Record<Key, (raw: string, source: string) => unknown> = {
+  reviewers: (raw) => list(raw),
+  sensitive_paths: (raw) => list(raw),
+  checks: (raw) => list(raw),
+  title_prefix: (raw) => raw,
+  agent_authored: (raw, source) => {
+    if (raw !== "true" && raw !== "false") throw new ArkError(`${source} must be true or false`);
+    return raw === "true";
+  },
+  tier_floor: (raw, source) => {
+    if (!/^[0-3]$/.test(raw)) throw new ArkError(`${source} must be an integer from 0 to 3`);
+    return Number(raw);
+  },
+};
+
+const list = (raw: string) =>
+  raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item !== "");
+
+function checkFileValue(key: Key, value: unknown) {
+  const source = `.pr-writing.toml ${key}`;
+  const ok =
+    key === "tier_floor"
+      ? Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 3
+      : key === "agent_authored"
+        ? typeof value === "boolean"
+        : key === "title_prefix"
+          ? typeof value === "string"
+          : Array.isArray(value) && value.every((item) => typeof item === "string");
+  if (!ok)
+    throw new ArkError(
+      `${source} must be ${
+        key === "tier_floor"
+          ? "an integer from 0 to 3"
+          : key === "agent_authored"
+            ? "true or false"
+            : key === "title_prefix"
+              ? "a string"
+              : "a list of strings"
+      }`,
+    );
+}
+
+/** The effective config of the repo at `root`: defaults, then the file, then `PR_WRITING_<KEY>`. */
+export function loadStandaloneConfig(
+  root: string,
+  env: Record<string, string | undefined> = process.env,
+): StandaloneConfig {
+  const config: Record<string, unknown> = { ...defaults };
+  const file = join(root, ".pr-writing.toml");
+  if (existsSync(file)) {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = Bun.TOML.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    } catch (error) {
+      throw new ArkError(`.pr-writing.toml is not valid TOML: ${(error as Error).message}`);
+    }
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!(configKeys as readonly string[]).includes(key)) throw new UnknownConfigKey(key);
+      checkFileValue(key as Key, value);
+      config[key] = value;
+    }
+  }
+  for (const key of configKeys) {
+    const name = `PR_WRITING_${key.toUpperCase()}`;
+    const raw = env[name];
+    if (raw !== undefined) config[key] = parsers[key](raw, name);
+  }
+  return config as StandaloneConfig;
+}
+
+// --- persisted ledger --------------------------------------------------------------------------
+
+/**
+ * The persisted ledger, the one place STALE01 reads between `gather`, `lint_body` and `post_mr`:
+ * `<repo root>/.pr-writing/ledger.json`, written by `writeLedgerFile`.
+ *
+ * Format (one JSON object):
+ *   { "version": 1,
+ *     "ledger": <Ledger>,            // `buildLedger` output at gather time; its repos[].head is the head STALE01 compares
+ *     "bodyHash": <string | null> }  // `hashBody` of the generated body when `lint_body` last passed it, else null
+ * STALE01 fails when the current head differs from a ledger head, or the body hash differs from the body posted.
+ */
+export type LedgerFile = { version: 1; ledger: Ledger; bodyHash: string | null };
+
+export const ledgerPath = (root: string) => join(root, ".pr-writing", "ledger.json");
+
+export function writeLedgerFile(root: string, ledger: Ledger): void {
+  const path = ledgerPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  const file: LedgerFile = { version: 1, ledger, bodyHash: null };
+  writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+}
+
+export function readLedgerFile(root: string): LedgerFile {
+  const path = ledgerPath(root);
+  if (!existsSync(path)) throw new ArkError(`no ${path}: run gather.ts first`);
+  const file = JSON.parse(readFileSync(path, "utf8")) as LedgerFile;
+  if (file.version !== 1) throw new ArkError(`${path} has an unknown version, expected 1`);
+  return file;
+}
+
+/** Records the hash of the body that passed lint, so a later edit makes STALE01 fail. */
+export function recordBodyHash(root: string, body: string): void {
+  const file = readLedgerFile(root);
+  writeFileSync(
+    ledgerPath(root),
+    `${JSON.stringify({ ...file, bodyHash: hashBody(body) }, null, 2)}\n`,
+  );
+}
+
+// --- review checks -----------------------------------------------------------------------------
+
+/**
+ * The review checks runner: runs each configured shell command in `directory` and records the outcome.
+ * It changes no file itself. A tool that is not installed is `not_run` with a null exit code, never a failure.
+ */
+export type CheckRecord = {
+  command: string;
+  /** `null` when the command could not start. */
+  exit_code: number | null;
+  status: "pass" | "fail" | "not_run";
+  /** The last `tailLines` lines of stdout and stderr together. */
+  output_tail: string;
+};
+
+export const tailLines = 50;
+
+const tail = (text: string) => text.replace(/\n$/, "").split("\n").slice(-tailLines).join("\n");
+
+export function runChecks(commands: string[], directory: string): CheckRecord[] {
+  return commands.map((command) => {
+    const result = Bun.spawnSync(["sh", "-c", command], {
+      cwd: directory,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output = result.stdout.toString() + result.stderr.toString();
+    // `sh` answers 127 when the command is not found and 126 when it cannot be run.
+    if (result.exitCode === 127 || result.exitCode === 126)
+      return { command, exit_code: null, status: "not_run", output_tail: tail(output) };
+    return {
+      command,
+      exit_code: result.exitCode,
+      status: result.exitCode === 0 ? "pass" : "fail",
+      output_tail: tail(output),
+    };
+  });
 }
