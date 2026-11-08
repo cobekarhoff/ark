@@ -20,6 +20,7 @@ import {
   type OrcaValue,
   type PlannotatorSession,
   type PsAgent,
+  readTicketDocument,
 } from "./sources.ts";
 import type {
   Agent,
@@ -589,6 +590,13 @@ export function createSnapshotReader() {
         sessions_ready: slots.usage.readAt !== null,
       };
     },
+    /** The document of one listed ticket, read from its file on request. Null for a ticket the hub does not list. */
+    ticketDocument(project: string, id: string) {
+      const value = slots.ark.value;
+      const ticket = value?.tickets.find((entry) => entry.project === project && entry.id === id);
+      const listed = ticket && value?.ticketFiles.get(ticket);
+      return listed ? readTicketDocument(listed) : null;
+    },
     /** The test cases that a ticket names, read on request (see `readTicketCases`). Null for a ticket the hub does not know. */
     ticketCases(project: string, ticket: string) {
       const value = slots.ark.value;
@@ -596,7 +604,13 @@ export function createSnapshotReader() {
       const newest = value.runs.find(
         (candidate) => candidate.state.project === project && candidate.state.ticket.id === ticket,
       );
-      return readTicketCases(project, ticket, value.tickets, newest?.directory ?? null);
+      return readTicketCases(
+        project,
+        ticket,
+        value.tickets,
+        value.ticketFiles,
+        newest?.directory ?? null,
+      );
     },
     /** The test evidence of a run, read on request, open or closed. Null for a run the hub does not know. */
     runEvidence(run: string) {
@@ -607,6 +621,7 @@ export function createSnapshotReader() {
             found.state.project,
             found.state.ticket.id,
             slots.ark.value!.tickets,
+            slots.ark.value!.ticketFiles,
           )
         : null;
     },

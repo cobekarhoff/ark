@@ -68,6 +68,7 @@ const switchTimeoutMilliseconds = 5000;
  * `GET /api/run/<run>/transcript?file=&cursor=`, `GET /api/run/<run>/file?path=`,
  * `GET /api/run/<run>/evidence` (plan cases with base and head results, evidence files of non-test
  * ACs), `GET /api/run/<run>/image?path=` (an image under `results/evidence/`, ADR 0009) and
+ * `GET /api/ticket/<project>/<ticket>` (the document of one ticket) and
  * `GET /api/ticket/<project>/<ticket>/cases` (the test cases of a ticket). The one POST
  * route is `POST /api/open-in-orca` (ADR 0009): it focuses a live terminal in Orca and does nothing
  * else. Any other method gets 405, any other path 404.
@@ -177,6 +178,20 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
           const result = await reader.ticketCases(
             decodeURIComponent(cases[1]),
             decodeURIComponent(cases[2]),
+          );
+          return result ? json(result) : text("no such ticket", 404);
+        } catch {
+          return text("bad request", 400);
+        }
+      }
+
+      const ticket = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)$/);
+      if (ticket) {
+        try {
+          // The id only selects a listed ticket: the file is the one the hub listed, never a path built from the URL.
+          const result = reader.ticketDocument(
+            decodeURIComponent(ticket[1]),
+            decodeURIComponent(ticket[2]),
           );
           return result ? json(result) : text("no such ticket", 404);
         } catch {

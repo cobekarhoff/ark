@@ -1,5 +1,12 @@
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { request as httpRequest } from "node:http";
 import { dirname, join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
@@ -2170,7 +2177,7 @@ async function weakContrast(page: Page): Promise<{ checked: number; weak: Contra
   });
 }
 
-test("ARK-285-AC10 the theme follows the system, the nav switch sets Auto, Light or Dark and keeps it after a reload, and text keeps its contrast on Home, Runs and a ticket page in both themes", async ({
+test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or Dark and keeps it after a reload, and text keeps its contrast on Home, Runs and a ticket page in both themes", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -2240,15 +2247,16 @@ test("ARK-285-AC10 the theme follows the system, the nav switch sets Auto, Light
       expect(weak, `${name} in ${choice}`).toEqual([]);
     }
   }
-  // Switching the theme and the views sent no request at all.
-  expect(requests.slice(before)).toEqual([]);
+  // Switching the theme and the views sent no request but the document read of each ticket page opening (ARK-329).
+  expect(requests.slice(before)).toEqual(["/api/ticket/p/ARK-512", "/api/ticket/p/ARK-512"]);
 
   // In Dark, a primary button and Open in Orca keep 4.5:1 for their white 13px text while hovered.
   await theme("Dark").click();
   await open(page, baseUrl, "");
   await expect(page.getByTestId("stuck")).toHaveCount(1);
   const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
-  expect(await actions.count()).toBeGreaterThan(0);
+  // The buttons render after the stuck row once the agent probe answers: wait, don't count once.
+  await expect(actions.first()).toBeVisible({ timeout: 20_000 });
   for (let index = 0; index < (await actions.count()); index++) {
     const action = actions.nth(index);
     await action.hover();
@@ -2335,12 +2343,13 @@ test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a
   await page.waitForTimeout(2000);
   expect(requests.splice(0)).toEqual([]);
 
-  // The ticket page reads its text from the snapshot and, amended AC7 of ARK-314, its test cases once.
+  // The ticket page reads its text once (ARK-329) and, amended AC7 of ARK-314, its test cases once.
   await open(page, baseUrl, "ticket/ARK-521");
   await expect(page.getByTestId("ticket-page")).toBeVisible();
   await checkpoint(page, "ticket-page-requests");
   await page.waitForTimeout(1000);
   expect(requests.filter((path) => path.startsWith("/api/ticket"))).toEqual([
+    "/api/ticket/p/ARK-521",
     "/api/ticket/p/ARK-521/cases",
   ]);
   // The run page does read (`/api/run`, from ARK-284): the one place the page goes past AC11.
@@ -4833,7 +4842,10 @@ test("ARK-T22 new page parts keep accessibility, request limits and speed", asyn
 
     // Ticket ARK-900: case links, then the shared-case listing.
     let extra = await visit("ticket/ARK-900", criterionOf(page, "AC1").getByTestId("case-link"));
-    expect(extra, `ARK-900 in ${scheme}`).toEqual(["/api/ticket/p/ARK-900/cases"]);
+    expect(extra, `ARK-900 in ${scheme}`).toEqual([
+      "/api/ticket/p/ARK-900",
+      "/api/ticket/p/ARK-900/cases",
+    ]);
     await criterionOf(page, "AC1").getByTestId("case-link").click();
     await expect(criterionOf(page, "AC1").getByTestId("case-listing")).toBeVisible();
     for (const [selector, word] of [
@@ -4858,7 +4870,10 @@ test("ARK-T22 new page parts keep accessibility, request limits and speed", asyn
 
     // Ticket ARK-902: the warning.
     extra = await visit("ticket/ARK-902", criterionOf(page, "AC1").getByTestId("case-link"));
-    expect(extra, `ARK-902 in ${scheme}`).toEqual(["/api/ticket/p/ARK-902/cases"]);
+    expect(extra, `ARK-902 in ${scheme}`).toEqual([
+      "/api/ticket/p/ARK-902",
+      "/api/ticket/p/ARK-902/cases",
+    ]);
     for (const text of await page.getByTestId("criterion-warning").allTextContents())
       expect(text).toContain("Warning");
     await expect(page.getByTestId("criterion-warning")).toHaveCount(2);
@@ -4912,4 +4927,85 @@ test("ARK-T22 new page parts keep accessibility, request limits and speed", asyn
     }
     expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
   }
+});
+
+test("ARK-T78 ARK-329/AC3 the ticket page shows the snapshot title at once, shows a loading state until its document arrives, and shows a change to the ticket file within 5 seconds", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  isolate();
+  installFakeTools({});
+  const ticketsFolder = dirname(
+    writeBacklogTicket({
+      project: "p",
+      id: "ARK-521",
+      title: "Ticket",
+      status: "ready",
+      problem: "First text",
+      criteria: [{ id: "AC1", text: "It works" }],
+    }),
+  );
+  const file = join(ticketsFolder, "ARK-521.md");
+  const original = readFileSync(file, "utf8");
+  // Rename into place, so the hub never reads a half-written file and each change is one signature.
+  const replaceFile = (text: string) => {
+    const staged = join(ticketsFolder, "..", "staged.md");
+    writeFileSync(staged, text);
+    renameSync(staged, file);
+  };
+  const baseUrl = await launch();
+
+  const documentRequests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/ticket/p/ARK-521") documentRequests.push(path);
+  });
+  await page.route("**/api/ticket/p/ARK-521", async (route) => {
+    await new Promise((done) => setTimeout(done, 1500));
+    await route.continue();
+  });
+  const loading = page.getByRole("status").filter({ hasText: "Loading the ticket text" });
+  const problem = page.getByTestId("ticket-problem");
+
+  // The snapshot gives the title and header at once; the text waits for the delayed route.
+  await open(page, baseUrl, "ticket/ARK-521");
+  await expect(page.getByRole("heading", { level: 1, name: "Ticket" })).toBeVisible();
+  await expect(loading).toBeVisible();
+  await expect(problem).toHaveCount(0);
+  await checkpoint(page, "ticket-loading");
+  await expect(problem).toHaveText("First text", { timeout: 10_000 });
+  await expect(loading).toHaveCount(0);
+  await checkpoint(page, "ticket-loaded");
+
+  // An edit of the file shows within 5 s, with no loading flash, after one more read.
+  await page.unroute("**/api/ticket/p/ARK-521");
+  await page.evaluate(() => {
+    const flags = window as unknown as { sawLoading: boolean };
+    flags.sawLoading = false;
+    new MutationObserver(() => {
+      if (document.querySelector(".doc-status")) flags.sawLoading = true;
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  const readsBefore = documentRequests.length;
+  replaceFile(original.replace("First text", "Second text"));
+  await expect(problem).toHaveText("Second text", { timeout: 5000 });
+  await checkpoint(page, "ticket-reloaded");
+  expect(await page.evaluate(() => (window as unknown as { sawLoading: boolean }).sawLoading)).toBe(
+    false,
+  );
+  expect(documentRequests.length - readsBefore).toBe(1);
+
+  // Another ticket's file pushes a snapshot; this page reads nothing more.
+  writeBacklogTicket({ project: "p", id: "ARK-522", title: "Other", status: "ready" });
+  await page.waitForTimeout(2000);
+  expect(documentRequests.length - readsBefore).toBe(1);
+
+  // A file that does not parse shows the alert, and a repair shows the text again.
+  replaceFile("this file has no front matter\n");
+  await expect(page.getByRole("alert")).toBeVisible({ timeout: 5000 });
+  await expect(loading).toHaveCount(0);
+  await checkpoint(page, "ticket-unreadable");
+  replaceFile(original.replace("First text", "Third text"));
+  await expect(problem).toHaveText("Third text", { timeout: 5000 });
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
