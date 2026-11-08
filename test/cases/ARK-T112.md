@@ -1,20 +1,44 @@
 ---
 id: ARK-T112
-title: ARK-T112 <what the case proves>
+title: ARK-T112 create and sync check a submodule out at the run's library head, so a consumer test sees the change, and status names it
 level: integration
-technique: <for example boundary values, equivalence classes, state transition>
-priority: medium
-risk: <the defect this case catches>
+technique: state transition (library commit, sync, consumer test) plus equivalence classes (submodule whose repo the run has vs has not)
+priority: high
+risk: ark test runs the consumer against the old library and passes; sync bumps the consumer's index pointer or fails on the dirty submodule; a library worktree made after the consumer is ignored; ark status hides which submodule runs at the run head
 status: active
-changed_by: <run id or name>
+changed_by: 2026-11-08-ARK-337-1
 ---
 
 ## Objective
 
+Prove that when the run also has a worktree of the submodule's repo, `ark worktree create` and `ark worktree sync` fetch from that worktree and check the submodule out at its head, leave the index pointer alone, and `ark status` prints the `submodule` line.
+
 ## Preconditions
+
+- Real git. A temp meta-repo with a library repo, and a consumer repo that holds the library as a submodule at `vendor/lib`. The consumer has a test that reads a file of `vendor/lib`.
+- A started run with worktrees of both the library and the consumer (the consumer's made after the library's, and once with the consumer's made first).
+- A second submodule whose repo the run has no worktree of.
+- No mocks of git or of `ark worktree`.
 
 ## Steps
 
+1. Create the library worktree, commit a change to a file in it, then run `ark worktree create` for the consumer.
+2. Read `vendor/lib` HEAD and file in the consumer worktree, and `git ls-tree HEAD vendor/lib`. Run the consumer test.
+3. Commit a second change in the library worktree, leave a third change uncommitted, run `ark worktree sync`, read the same values and run the consumer test again.
+4. Run `ark status <run>`.
+5. Repeat step 1 with the consumer's worktree made first and the library's second, then run `ark worktree create` again.
+6. Read the other submodule (no run worktree of its repo) and the `ark status` output.
+
 ## Expected results
 
+- After step 1 the consumer test shall see the library change and `vendor/lib` HEAD shall equal the library worktree's head.
+- The index entry for `vendor/lib` shall be unchanged after create and after sync.
+- After step 3 the consumer test shall see the second change, shall not see the uncommitted one, and sync shall exit 0 with the dirty submodule in place.
+- `ark status` shall print `submodule <consumer>/vendor/lib at run head of <library repo> <8 characters>`, the 8 characters being the start of the library head, once for each such submodule.
+- In step 5 the second `create` shall move the submodule to the library head.
+- The submodule without a run worktree of its repo shall stay at its recorded commit and shall have no `submodule` line in `ark status`.
+- `bun test test/worktree.test.ts` shall exit 0.
+
 ## Screenshot checkpoints
+
+none: integration case on git state, a consumer test result and CLI text; no UI.
