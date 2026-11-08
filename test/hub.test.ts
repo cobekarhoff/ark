@@ -342,7 +342,7 @@ self.onmessage = async (event) => {
 // files and 101 MB in 148 ms). The sqlite clause of the AC ("if memory cannot meet the budget ...
 // delete and rebuild usage.sqlite") does not apply: the hub keeps no sqlite file, so there is
 // nothing to delete. This test holds the CPU-time and latency budgets of the memory index.
-test("ARK-277-AC6 a cold hub serves a full snapshot with under 5 s of CPU time and / answers at a p75 under 200 ms meanwhile", async () => {
+test("ARK-T127 ARK-277-AC6 a cold hub serves a full snapshot with under 5 s of CPU time and / answers at a p75 under 200 ms meanwhile", async () => {
   const { sessions } = isolatedEnvironment();
   const answersChecked = 20;
   const runCount = 5;
@@ -425,6 +425,32 @@ test("ARK-277-AC6 a cold hub serves a full snapshot with under 5 s of CPU time a
   expect(runViews).toHaveLength(runCount);
   for (const run of runViews) expect(run.cost_usd).toBeCloseTo(expectedCost, 6);
 }, 60_000);
+
+test("ARK-T127 the CPU time read from a child counts its work and not a stall", async () => {
+  const cpuSecondsOf = async (child: Bun.Subprocess) => {
+    await child.exited;
+    return Number(child.resourceUsage()?.cpuTime.total ?? 0n) / 1e6;
+  };
+  // The busy child spends 0.4 s of CPU time, whatever the wall time that takes.
+  const busy = Bun.spawn(
+    ["bun", "-e", "while (process.cpuUsage().user + process.cpuUsage().system < 400_000);"],
+    { stdio: ["ignore", "ignore", "ignore"] },
+  );
+  // The stalled child is stopped and continued, then ends on the closing of its input: no work.
+  const stalled = Bun.spawn(["bun", "-e", "for await (const chunk of Bun.stdin.stream());"], {
+    stdin: "pipe",
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  process.kill(stalled.pid, "SIGSTOP");
+  process.kill(stalled.pid, "SIGCONT");
+  void stalled.stdin.end();
+  const [busySeconds, stalledSeconds] = await Promise.all([
+    cpuSecondsOf(busy),
+    cpuSecondsOf(stalled),
+  ]);
+  expect(busySeconds).toBeGreaterThanOrEqual(0.4);
+  expect(stalledSeconds).toBeLessThan(busySeconds);
+});
 
 test("ARK-284-AC7 a transcript page holds 200 entries, a tool call at the page end gets its result, and a crashed worker fails the request", async () => {
   const directory = scratch("ark-transcript-");
@@ -911,7 +937,25 @@ const openRunOf = (snapshot: Snapshot, run: string): RunView => {
   return found;
 };
 
-test("ARK-285-AC2 omp usage is read in the background for each provider and window, and a failed read keeps the last value with its age", async () => {
+test("ARK-T125 the provider-limits interval is the value of ARK_PROVIDER_LIMITS_MS and 60 s when it is unset", async () => {
+  const intervalWith = async (value: string | undefined, tag: string) => {
+    const saved = process.env.ARK_PROVIDER_LIMITS_MS;
+    if (value === undefined) delete process.env.ARK_PROVIDER_LIMITS_MS;
+    else process.env.ARK_PROVIDER_LIMITS_MS = value;
+    try {
+      // The variable is read when the module loads: a fresh load per value is the boundary under test.
+      const loaded = await import(`../hub/snapshot.ts?interval=${tag}`);
+      return (loaded.intervalMilliseconds as Record<string, number>).providerLimits;
+    } finally {
+      if (saved === undefined) delete process.env.ARK_PROVIDER_LIMITS_MS;
+      else process.env.ARK_PROVIDER_LIMITS_MS = saved;
+    }
+  };
+  expect(await intervalWith("500", "set")).toBe(500);
+  expect(await intervalWith(undefined, "unset")).toBe(60_000);
+});
+
+test("ARK-T125 ARK-285-AC2 omp usage is read in the background at the interval of ARK_PROVIDER_LIMITS_MS for each provider and window, and a failed read keeps the last value with its age", async () => {
   isolatedEnvironment();
   const resetsAt = Date.now() + 3_600_000;
   const fetchedAt = Date.now() - 5000;
@@ -966,14 +1010,10 @@ test("ARK-285-AC2 omp usage is read in the background for each provider and wind
     },
   ]);
 
-  // The second read happens one interval (ARK_PROVIDER_LIMITS_MS) after the first, and the fake exits 1 then.
-  const countFile = join(state, "omp.count");
-  const deadline = Date.now() + 20_000;
-  while (Number(existsSync(countFile) ? readFileSync(countFile, "utf8") : 0) < 2) {
-    expect(Date.now(), "omp usage was not read a second time").toBeLessThan(deadline);
-    await Bun.sleep(500);
-  }
+  // The second read happens one interval (ARK_PROVIDER_LIMITS_MS) after the first, and the fake exits 1 then:
+  // the failed read in a snapshot is the event, so the test waits on it and on nothing else.
   const failed = await snapshotWhen(baseUrl, (snapshot) => !snapshot.sources.providerLimits.ok);
+  expect(Number(readFileSync(join(state, "omp.count"), "utf8"))).toBeGreaterThanOrEqual(2);
   expect(failed.provider_limits).toEqual(first.provider_limits);
   expect(failed.sources.providerLimits.read_at).toBe(first.sources.providerLimits.read_at);
 }, 60_000);
@@ -1589,7 +1629,8 @@ test("ARK-T25 ticket text and criteria are read from the ticket's own file and s
 
 type PushedTicket = Record<string, unknown> & { id: string; signature: string };
 
-test("ARK-T76 ARK-T130 ARK-329/AC1 snapshot and push tickets carry no document, keep the fields other pages read, and stay under 15% of the ticket text", async () => {
+/** The body of ARK-T76 and ARK-T130: `late` stops the hub while the test subscribes and while it edits, and the test releases it. */
+async function slimTicketsAreDelivered(late: boolean) {
   isolatedEnvironment();
   installFakeTools({});
   const filler = "A sentence of ticket text that only the ticket page needs to read. ".repeat(40);
@@ -1615,13 +1656,14 @@ test("ARK-T76 ARK-T130 ARK-329/AC1 snapshot and push tickets carry no document, 
   for (let index = 2; index <= 200; index++) write(index, `A reason. ${filler}`);
   expect(ticketBytes).toBeGreaterThan(200 * 2800);
 
-  // ARK-T130: the hub is stopped while the test subscribes and while the first snapshot is built, and
+  // ARK-T130 (late): the hub is stopped while the test subscribes and while the first snapshot is built, and
   // again across the body edit. The test releases it; the waits end on the pushed events.
   const hub = await start();
   const { baseUrl } = hub;
   const ticketsOf = (json: string) => (JSON.parse(json) as { tickets: PushedTicket[] }).tickets;
   let before = "";
-  const pushes = await whileHubStopped(hub, () => openPushes(baseUrl));
+  const hold = <T>(work: () => T): T => (late ? whileHubStopped(hub, work) : work());
+  const pushes = await hold(() => openPushes(baseUrl));
   try {
     for (;;) {
       const text = await pushes.next();
@@ -1653,7 +1695,7 @@ test("ARK-T76 ARK-T130 ARK-329/AC1 snapshot and push tickets carry no document, 
     // A body-only edit: the front matter stays, so only the signature tells the page.
     const file = join(process.env.ARK_HOME as string, "projects", "p", "tickets", "ARK-1.md");
     const signatureBefore = signatures.get("ARK-1");
-    whileHubStopped(hub, () =>
+    hold(() =>
       writeFileSync(
         file,
         readFileSync(file, "utf8").replace("DOC-MARKER-XYZ", "BODY-EDIT-TEXT and a little more"),
@@ -1670,7 +1712,13 @@ test("ARK-T76 ARK-T130 ARK-329/AC1 snapshot and push tickets carry no document, 
   } finally {
     pushes.close();
   }
-});
+}
+
+test("ARK-T76 snapshot and push tickets carry no document, keep the fields other pages read, and stay under 15% of the ticket text", () =>
+  slimTicketsAreDelivered(false));
+
+test("ARK-T130 ARK-T76 passes when the hub answers late: the 200-ticket snapshot and the push after a body edit end on their events", () =>
+  slimTicketsAreDelivered(true));
 
 const ticketOf = (tickets: PushedTicket[], id: string): PushedTicket => {
   const found = tickets.find((ticket) => ticket.id === id);

@@ -2329,6 +2329,68 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   await expect.poll(background).toBe(systemDark);
 });
 
+test("ARK-T123 every test runs on its own worker slot with its own ARK_HOME and its own hub port", async () => {
+  expect(test.info().config.fullyParallel).toBe(true);
+  expect(test.info().config.workers).toBeGreaterThanOrEqual(2);
+  // Two tests of one run would collide on these three if they were shared.
+  const firstHome = tempArkHome();
+  const secondHome = tempArkHome();
+  expect(firstHome).not.toBe(secondHome);
+  installFakeTools({});
+  const firstHub = await launch();
+  const secondHub = await launch();
+  expect(new URL(firstHub).port).not.toBe("0");
+  expect(new URL(firstHub).port).not.toBe(new URL(secondHub).port);
+});
+
+test("ARK-T124 the 30 s page-clock silence check sees a 25 s poll and stays empty without one", async ({
+  page,
+}) => {
+  isolate();
+  installFakeTools({});
+  const baseUrl = await launch();
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  await open(page, baseUrl, "");
+  await page.clock.install();
+
+  // No poll: 30 s of page time send nothing.
+  const quiet = requests.length;
+  await page.clock.fastForward(30_000);
+  expect(requests.slice(quiet)).toEqual([]);
+
+  // The injected fault: a poll every 25 s. fastForward fires it, so the same check now fails.
+  await page.evaluate(() => {
+    setInterval(() => void fetch("/api/snapshot"), 25_000);
+  });
+  const polled = requests.length;
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => requests.slice(polled)).toContain("/api/snapshot");
+});
+
+test("ARK-T128 the first action of Home is visible and its hover colour final after a late first snapshot", async ({
+  page,
+}) => {
+  // The fake Orca is held, so the first snapshot is late until the test releases it.
+  const { baseUrl, orcaGate } = await homeWithBlockers(Date.now(), true);
+  const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
+  await open(page, baseUrl, "");
+  await expect(actions).toHaveCount(0);
+  rmSync(orcaGate);
+  const action = actions.first();
+  await expect(action).toBeVisible();
+  await action.hover();
+  await expect.poll(() => action.evaluate((element) => element.matches(":hover"))).toBe(true);
+  await action.evaluate(async (element) => {
+    await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
+    await Promise.all(element.getAnimations().map((fade) => fade.finished.catch(() => undefined)));
+  });
+  await checkpoint(page, "hover-state-final");
+  // The transition has ended: a second read of the colour is the same as the first.
+  const colour = () => action.evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(await colour()).toBe(await colour());
+});
+
 test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ page }) => {
   isolate();
   installFakeTools({});

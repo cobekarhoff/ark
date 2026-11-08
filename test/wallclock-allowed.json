@@ -5,5 +5,5 @@
   "test/timeouts.test.ts": 1,
   "test/run.test.ts": 1,
   "test/clock.test.ts": 1,
-  "test/hub.test.ts": 14
+  "test/hub.test.ts": 13
 }
