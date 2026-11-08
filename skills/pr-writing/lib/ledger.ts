@@ -15,7 +15,7 @@ import {
   type CriterionStatus,
 } from "../../../cli/events.ts";
 import { projectDirectory } from "../../../cli/paths.ts";
-import { loadPlan } from "../../../cli/plan.ts";
+import { loadPlan, repoGraph } from "../../../cli/plan.ts";
 
 export type Rating = "good" | "decent" | "poor";
 export type Level = "low" | "medium" | "high";
@@ -639,31 +639,6 @@ function readEvidence(directory: string): EvidenceEntry[] | null {
     });
 }
 
-/** Repos in merge order: a repo comes after the repos whose steps its steps need. */
-function orderRepos(steps: { id: string; repo: string; needs: string[] }[]) {
-  const repoOfStep = new Map(steps.map((step) => [step.id, step.repo]));
-  const upstream = new Map<string, Set<string>>();
-  for (const step of steps) {
-    const dependencies = upstream.get(step.repo) ?? new Set<string>();
-    for (const needed of step.needs) {
-      const neededRepo = repoOfStep.get(needed);
-      if (neededRepo !== undefined && neededRepo !== step.repo) dependencies.add(neededRepo);
-    }
-    upstream.set(step.repo, dependencies);
-  }
-  const order: string[] = [];
-  const pending = [...upstream.keys()];
-  while (pending.length > 0) {
-    const next = pending.findIndex((repo) =>
-      [...upstream.get(repo)!].every((name) => order.includes(name)),
-    );
-    if (next === -1)
-      throw new ArkError(`the plan has a dependency cycle between repos: ${pending.join(", ")}`);
-    order.push(...pending.splice(next, 1));
-  }
-  return { order, upstream };
-}
-
 function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger {
   const directory = source.runFolder;
   const events: ArkEvent[] = readEvents(directory);
@@ -730,7 +705,9 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
     .at(-1);
   const reviewer = latest ? parseReviewerBlock(latest.text) : null;
 
-  const { order, upstream } = orderRepos(plan?.steps ?? []);
+  const { order, upstream } = plan
+    ? repoGraph(plan)
+    : { order: [], upstream: new Map<string, Set<string>>() };
   const worktrees = state.worktrees;
   const repos = [
     ...order,
