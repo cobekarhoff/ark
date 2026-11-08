@@ -17,13 +17,8 @@ import { loadConfig, type ProjectConfig } from "./config.ts";
 import { hasTestCriterion, runCriteria } from "./criteria.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
-import {
-  appendEvent,
-  deriveState,
-  readEvents,
-  type CriterionStatus,
-  type RunState,
-} from "./events.ts";
+import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
+import type { CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
 import { findRun } from "./paths.ts";

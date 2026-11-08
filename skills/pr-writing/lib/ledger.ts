@@ -8,12 +8,8 @@ import { dirname, join } from "node:path";
 import { evidenceFile, frontmatterOf, parseCriteria } from "../../../cli/criteria.ts";
 import { loadConfig, type PrWriting } from "../../../cli/config.ts";
 import { ArkError } from "../../../cli/errors.ts";
-import {
-  deriveState,
-  readEvents,
-  type ArkEvent,
-  type CriterionStatus,
-} from "../../../cli/events.ts";
+import { deriveState, readEvents, type ArkEvent } from "../../../cli/events.ts";
+import type { CriterionStatus } from "../../../cli/lifecycle.ts";
 import { projectDirectory } from "../../../cli/paths.ts";
 import { loadPlan, repoGraph } from "../../../cli/plan.ts";
 import { hashBody } from "./lint.ts";

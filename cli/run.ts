@@ -20,10 +20,9 @@ import {
   writeState,
   type ArkEvent,
   type EventData,
-  ticketKinds,
   type RunState,
-  type TicketKind,
 } from "./events.ts";
+import { ticketKinds, ticketStatusAfter, type TicketKind } from "./lifecycle.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
@@ -302,12 +301,7 @@ function warnSetTicketStatus(ticketFile: string, project: string, status: string
 
 /** Keeps a local ticket's status in step with its run. handed_off leaves the file as it is. */
 function syncClosedTicket(started: EventData | undefined, outcome: string): void {
-  const status =
-    outcome === "merged"
-      ? "done"
-      : outcome === "aborted" || outcome === "abandoned"
-        ? "ready"
-        : undefined;
+  const status = ticketStatusAfter(outcome);
   if (!status || !started?.ticket_file) return;
   warnSetTicketStatus(started.ticket_file, started.project, status);
 }

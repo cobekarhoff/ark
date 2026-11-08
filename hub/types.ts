@@ -12,6 +12,7 @@
  * or the usage index has not finished its first build). Times are ISO strings.
  */
 
+import type { Phase, StepStatus } from "../cli/lifecycle.ts";
 import type { Roadmap } from "./roadmap.ts";
 
 export type SourceName =
@@ -25,7 +26,7 @@ export type SourceName =
   | "evidence";
 export type SourceStatus = { ok: boolean; read_at: string | null };
 
-export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "stopped";
+export type { StepStatus };
 
 /** One provider and window (`5h` or `7d`) of `omp usage --json`. A field the tool did not give is null, never a guess. */
 export type ProviderWindow = {
@@ -188,7 +189,7 @@ export type RunView = {
   run: string;
   project: string;
   ticket: { id: string; title: string };
-  phase: string;
+  phase: Phase;
   round: number;
   started_at: string;
   updated_at: string;
@@ -307,13 +308,13 @@ export type TicketRunView = {
   project: string;
   ticket: string;
   run: string;
-  phase: string;
+  phase: Phase;
   /** An open run with a question or blocked report nobody has read. */
   waiting: boolean;
   /** Closed run: from `metrics.json`. Open run: from the usage index. */
   cost_usd: number | null;
   /** Every run of the ticket, newest first: names and phases only, so a long history stays small. */
-  all: { run: string; phase: string }[];
+  all: { run: string; phase: Phase }[];
 };
 
 export type Snapshot = {

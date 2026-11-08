@@ -4,6 +4,8 @@
  * in `docs/reference/roadmap.md`.
  */
 
+import { isFinishedTicket } from "../cli/lifecycle.ts";
+
 export type RoadmapTicket = {
   id: string;
   title: string | null;
@@ -59,8 +61,7 @@ export type RoadmapResult = { ok: true; roadmap: Roadmap } | { ok: false; errors
 
 const states: readonly string[] = ["done", "active", "later"];
 const horizons = ["now", "next", "later"] as const;
-const isFinished = (ticket: RoadmapTicket) =>
-  ticket.status === "done" || ticket.status === "superseded";
+const isFinished = (ticket: RoadmapTicket) => isFinishedTicket(ticket.status);
 
 const toItem = (ticket: RoadmapTicket): RoadmapItem => ({
   id: ticket.id,
