@@ -176,7 +176,7 @@ describe("playwright migration", () => {
   );
 
   test(
-    "ARK-T99 ARK-243-AC6 ARK-301-AC2 one Playwright spec run leaves nothing in the temporary folder",
+    "ARK-T99 ARK-330/AC1 one Playwright spec run leaves nothing in the temporary folder",
     () => {
       const dir = scratch();
       try {
@@ -184,6 +184,8 @@ describe("playwright migration", () => {
           env: { TMPDIR: dir },
         });
         expect(result.code, result.out + result.err).toBe(0);
+        // Only this spec ran, not the whole suite.
+        expect(result.out).toMatch(/\n\s*1 passed/);
         expect(readdirSync(dir)).toEqual([]);
       } finally {
         rmSync(dir, { recursive: true, force: true });
