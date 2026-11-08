@@ -177,6 +177,19 @@ function addRepoWorktree(
   writeFileSync(join(path, ".omp", ".gitignore"), "*\n");
   log(`setting  ${repo}: .omp/config.yml`);
   if (taken) log(`branch   ${repo}  ${branch} (${taken})`);
+  // before setup, so install and build commands find their libraries; a failure keeps the worktree, recorded
+  const recorded = { repo, path, branch, base };
+  try {
+    composeSubmodules(
+      config,
+      [...deriveState(readEvents(directory)).worktrees, recorded],
+      recorded,
+      log,
+    );
+  } catch (err) {
+    if (err instanceof ArkError) appendEvent(directory, "worktree.created", recorded);
+    throw err;
+  }
   if (setup) {
     const result = Bun.spawnSync(["sh", "-c", setup], { cwd: path });
     if (result.exitCode !== 0) {
@@ -233,7 +246,39 @@ function libraryOf(
   return others.find((worktree) => names.includes(basename(worktree.repo)));
 }
 
-/** Fills each submodule of a worktree at the commit its index records (the source clone's modules as reference), then, for a submodule whose repo the run also has a worktree of, checks it out at the committed HEAD of that worktree. Never stages: the index pointer stays. A failure names the consumer, the submodule and the git cause; the worktree stays. */
+/** Fills one submodule folder at the commit the index records. Tries each local source that exists as the clone URL (git objects stay reachable when the remote is not), then the `.gitmodules` URL; the last failure is thrown. */
+export function initSubmodule(
+  consumerPath: string,
+  submodule: { name: string; path: string },
+  sources: string[],
+): void {
+  const attempts: (string | undefined)[] = [
+    ...sources.filter((source) => existsSync(join(source, ".git"))),
+    undefined,
+  ];
+  for (const [index, source] of attempts.entries()) {
+    try {
+      git(
+        consumerPath,
+        "-c",
+        submoduleFlag,
+        ...(source ? ["-c", `submodule.${submodule.name}.url=${source}`] : []),
+        "submodule",
+        "update",
+        "--init",
+        "--",
+        submodule.path,
+      );
+      // the -c override is not stored: record the .gitmodules URL so git status still sees the submodule
+      git(consumerPath, "submodule", "init", "--", submodule.path);
+      return;
+    } catch (err) {
+      if (!(err instanceof ArkError) || index === attempts.length - 1) throw err;
+    }
+  }
+}
+
+/** Fills each submodule of a worktree at the commit its index records, cloned from the run's library worktree or the source clone's module when they exist, then, for a submodule whose repo the run also has a worktree of, checks it out at the committed HEAD of that worktree. Never stages: the index pointer stays. A failure names the consumer, the submodule and the git cause; the worktree stays. */
 function composeSubmodules(
   config: ProjectConfig,
   worktrees: RunState["worktrees"],
@@ -246,19 +291,11 @@ function composeSubmodules(
   const before = stage();
   for (const submodule of submodules) {
     try {
-      const reference = join(config.workspace, consumer.repo, submodule.path);
-      git(
-        consumer.path,
-        "-c",
-        submoduleFlag,
-        "submodule",
-        "update",
-        "--init",
-        ...(existsSync(join(reference, ".git")) ? ["--reference", reference] : []),
-        "--",
-        submodule.path,
-      );
       const library = libraryOf(config, worktrees, consumer.repo, submodule);
+      initSubmodule(consumer.path, submodule, [
+        ...(library ? [library.path] : []),
+        join(config.workspace, consumer.repo, submodule.path),
+      ]);
       if (!library) continue;
       const head = git(library.path, "rev-parse", "HEAD");
       const folder = join(consumer.path, submodule.path);
@@ -501,24 +538,51 @@ export function worktreeSync(runId: string, inProject?: string): void {
   if (conflicts.length > 0) throw new ArkError(conflicts.join("\n"));
 }
 
-/** Entries of `git status` for a worktree, minus untracked entries Ark made itself: a symlink of the mirror, and a nested worktree of the run. Any other untracked or modified entry counts. */
-function dirtyLines(path: string, worktreePaths: string[], ignoreComposed = false): string[] {
-  const records = git(path, "status", "--porcelain", "-z", "--untracked-files=all")
+/** Entries of `git status` for a worktree, minus untracked entries Ark made itself: a symlink of the mirror, and a nested worktree of the run. Any other untracked or modified entry counts. `composedHead` names the commit Ark checked a submodule folder out at: a submodule at that commit with a clean tree is not dirty. */
+function dirtyLines(
+  path: string,
+  worktreePaths: string[],
+  composedHead?: (folder: string) => string | undefined,
+): string[] {
+  // not git(): its trim would eat the leading space of the first record
+  const status = Bun.spawnSync([
+    "git",
+    "-C",
+    path,
+    "status",
+    "--porcelain",
+    "-z",
+    "--untracked-files=all",
+  ]);
+  if (status.exitCode !== 0)
+    throw new ArkError(`git status failed in ${path}: ${status.stderr.toString().trim()}`);
+  const records = status.stdout
+    .toString()
     .split("\0")
     .filter((record) => record !== "");
+  const isComposed = (record: string): boolean => {
+    if (!composedHead || !record.startsWith(" M ")) return false;
+    const folder = record.slice(3);
+    const expected = composedHead(folder);
+    if (!expected) return false;
+    try {
+      if (!git(path, "ls-files", "--stage", "--", folder).startsWith("160000")) return false;
+      const inside = join(path, folder);
+      return (
+        git(inside, "rev-parse", "HEAD") === expected &&
+        git(inside, "status", "--porcelain", "--untracked-files=all") === ""
+      );
+    } catch (err) {
+      if (err instanceof ArkError) return false; // unreadable submodule: keep the worktree
+      throw err;
+    }
+  };
   const dirty: string[] = [];
   for (let index = 0; index < records.length; index++) {
     const record = records[index];
     if (record[0] === "R" || record[0] === "C") index++; // a rename or copy carries its source path as the next record
     if (!record.startsWith("?? ")) {
-      // a composed submodule sits at the run head, not at its pointer: ` M <path>` with the index unchanged is Ark's own
-      if (
-        ignoreComposed &&
-        record.startsWith(" M ") &&
-        git(path, "ls-files", "--stage", "--", record.slice(3)).startsWith("160000")
-      )
-        continue;
-      dirty.push(record);
+      if (!isComposed(record)) dirty.push(record);
       continue;
     }
     const entry = join(path, record.slice(3).replace(/\/$/, ""));
@@ -572,11 +636,26 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
         continue;
       }
     } else {
+      const composedHead = (folder: string): string | undefined => {
+        const submodule = submodulesOf(path).find((entry) => entry.path === folder);
+        const library = submodule && libraryOf(config, state.worktrees, repo, submodule);
+        if (!library) return undefined;
+        const head = existsSync(library.path)
+          ? Bun.spawnSync(["git", "-C", library.path, "rev-parse", "HEAD"])
+          : Bun.spawnSync([
+              "git",
+              "-C",
+              join(workspace, library.repo),
+              "rev-parse",
+              library.branch,
+            ]);
+        return head.exitCode === 0 ? head.stdout.toString().trim() : undefined;
+      };
       if (
         dirtyLines(
           path,
           state.worktrees.map((other) => other.path),
-          true,
+          composedHead,
         ).length > 0
       ) {
         keep("uncommitted changes");

@@ -10,6 +10,7 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import { worktreeCleanup } from "../cli/worktree.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(60_000);
@@ -73,7 +74,10 @@ function submoduleMeta(): Meta {
 }
 
 /** A project over `workspace` whose suite runs `bun test` in repos/consumer, and a started run. */
-function startRun(workspace: string): { runId: string; runDirectory: string } {
+function startRun(
+  workspace: string,
+  extra: Record<string, unknown> = {},
+): { runId: string; runDirectory: string } {
   const arkHome = tempArkHome();
   writeProject("demo", {
     workspace,
@@ -88,6 +92,7 @@ function startRun(workspace: string): { runId: string; runDirectory: string } {
       },
     ],
     roles,
+    ...extra,
   });
   const ticket = writeTicket(
     "demo",
@@ -283,5 +288,88 @@ describe("worktree create and sync use the run's library head", () => {
     expect(ark("status", runId).out).toContain(
       `submodule repos/consumer/vendor/lib at run head of repos/lib ${libraryHead.slice(0, 8)}`,
     );
+  });
+});
+
+/** Commits a `.gitmodules` URL that no clone can reach into the consumer, so only local objects can fill vendor/lib. */
+function breakRemote(workspace: string): void {
+  const consumer = join(workspace, "repos/consumer");
+  git(consumer, "config", "-f", ".gitmodules", "submodule.vendor/lib.url", "/no/such/lib");
+  git(consumer, "commit", "-q", "-am", "unreachable library remote");
+}
+
+describe("worktree create composes before setup and without the remote", () => {
+  test("ARK-T111 setup runs after submodules are filled: it reads the recorded library", () => {
+    const { workspace } = submoduleMeta();
+    const { runId, runDirectory } = startRun(workspace, {
+      setup: "test ! -d vendor || grep -q 'lib one' vendor/lib/lib.txt",
+    });
+    const created = create(runId, "repos/consumer");
+    expect(created.err).toBe("");
+    expect(created.code).toBe(0);
+    expect(created.out).toContain("setup    repos/consumer");
+    expect(existsSync(join(mirrorOf(runDirectory, "repos/consumer"), "vendor/lib/lib.txt"))).toBe(
+      true,
+    );
+  });
+
+  test("ARK-T112 an unreachable .gitmodules URL still composes from the run library worktree, for create and the base of ark test", () => {
+    const { workspace, first } = submoduleMeta();
+    breakRemote(workspace);
+    const { runId, runDirectory } = startRun(workspace);
+    expect(create(runId, "repos/lib").code).toBe(0);
+    const libraryHead = commitFile(
+      mirrorOf(runDirectory, "repos/lib"),
+      "lib.txt",
+      "lib run change\n",
+    );
+    const created = create(runId, "repos/consumer");
+    expect(created.err).toBe("");
+    expect(created.code).toBe(0);
+
+    const consumer = mirrorOf(runDirectory, "repos/consumer");
+    expect(git(join(consumer, "vendor/lib"), "rev-parse", "HEAD")).toBe(libraryHead);
+    expect(stageOf(consumer)).toContain(first);
+    expect(git(consumer, "diff", "--cached", "--raw")).toBe("");
+    expect(ark("status", runId).out).toContain(
+      `submodule repos/consumer/vendor/lib at run head of repos/lib ${libraryHead.slice(0, 8)}`,
+    );
+
+    const headLog = consumerTestLog(runId, runDirectory);
+    expect(headLog).toContain(`library-revision ${libraryHead} text lib run change`);
+    // the base suite only ran because the base fill cloned the recorded commit from the head worktree's
+    // folder instead of /no/such/lib
+    expect(existsSync(join(runDirectory, "results/evidence/ARK-T112/base/command.log"))).toBe(true);
+  });
+});
+
+describe("worktree cleanup of composed submodules", () => {
+  /** A consumer composed at the run head of a committed library change. */
+  function composed(): { runId: string; consumer: string; folder: string } {
+    const { workspace } = submoduleMeta();
+    const { runId, runDirectory } = startRun(workspace);
+    expect(create(runId, "repos/lib").code).toBe(0);
+    commitFile(mirrorOf(runDirectory, "repos/lib"), "lib.txt", "lib run change\n");
+    expect(create(runId, "repos/consumer").code).toBe(0);
+    const consumer = mirrorOf(runDirectory, "repos/consumer");
+    expect(git(consumer, "status", "--porcelain")).toContain("vendor/lib");
+    return { runId, consumer, folder: join(consumer, "vendor/lib") };
+  }
+
+  test("ARK-T112 a clean composed worktree is removed", () => {
+    const { runId, consumer } = composed();
+    worktreeCleanup(runId, "demo");
+    expect(existsSync(consumer)).toBe(false);
+  });
+
+  test.each([
+    ["modified", "lib.txt"],
+    ["untracked", "scratch.txt"],
+  ])("ARK-T112 %s submodule files keep the composed worktree", (_label, file) => {
+    const { runId, consumer, folder } = composed();
+    writeFileSync(join(folder, file), "edited\n");
+    worktreeCleanup(runId, "demo");
+    expect(existsSync(consumer)).toBe(true);
+    expect(readFileSync(join(folder, file), "utf8")).toBe("edited\n");
   });
 });

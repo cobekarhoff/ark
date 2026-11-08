@@ -7,8 +7,8 @@ import { findRun } from "./paths.ts";
 
 const maximumDepth = 4;
 
-/** The submodules a repo declares in its `.gitmodules`: folder (relative to the repo) and URL. Empty when it has none. */
-export function submodulesOf(repoPath: string): { path: string; url: string }[] {
+/** The submodules a repo declares in its `.gitmodules`: name, folder (relative to the repo) and URL. Empty when it has none. */
+export function submodulesOf(repoPath: string): { name: string; path: string; url: string }[] {
   if (!existsSync(join(repoPath, ".gitmodules"))) return [];
   const result = Bun.spawnSync([
     "git",
@@ -28,9 +28,10 @@ export function submodulesOf(repoPath: string): { path: string; url: string }[] 
     entry[match[2] as "path" | "url"] = match[3];
     byName.set(match[1], entry);
   }
-  return [...byName.values()].filter(
-    (entry): entry is { path: string; url: string } =>
-      entry.path !== undefined && entry.url !== undefined,
+  return [...byName.entries()].flatMap(([name, entry]) =>
+    entry.path !== undefined && entry.url !== undefined
+      ? [{ name, path: entry.path, url: entry.url }]
+      : [],
   );
 }
 
