@@ -34,7 +34,15 @@ const roles = {
   reviewer: { harness: "codex", model: "gpt-codex" },
 };
 
-type Suite = { name: string; level: string; repo: string; command: string; parser: "bun" };
+type Suite = {
+  name: string;
+  level: string;
+  repo: string;
+  command: string;
+  parser: "bun";
+  base_files?: string;
+  base_command?: string;
+};
 
 function git(directory: string, ...args: string[]): string {
   const result = Bun.spawnSync(["git", "-C", directory, ...args], {
@@ -312,20 +320,40 @@ function twoRepoRun(kind: string, mode: NewTest, testCriterion = false) {
   mkdirSync(counters);
   const baseShas: Record<string, string> = {};
   for (const name of repoNames) baseShas[name] = createRepo(workspace, name, baseFiles(name));
+  const probeCommand = (name: string, suite: string) =>
+    `sh ${probe} ${name} ${suite} ${baseShas[name]} ${join(counters, `${name}-${suite}`)}`;
+  const bunTest = (files: string) =>
+    `bun test ${files} --reporter=junit --reporter-outfile={report}`;
+  // s1 and s2 each match a test file of the run's own commits. s3 matches none: only a refactor run runs it at base.
   const suites = repoNames.flatMap((name): Suite[] => [
     {
       name: `${name}-s1`,
       level: "integration",
       repo: name,
-      command: `sh ${probe} ${name} s1 ${baseShas[name]} ${join(counters, `${name}-s1`)} && bun test ./test/new.test.ts --reporter=junit --reporter-outfile={report}`,
+      command: `${probeCommand(name, "s1")} && ${bunTest("./test/new.test.ts")}`,
       parser: "bun",
+      base_files: "test/new.test.ts",
+      base_command: `${probeCommand(name, "s1")} && ${bunTest("{files}")}`,
     },
     {
       name: `${name}-s2`,
       level: "integration",
       repo: name,
-      command: `sh ${probe} ${name} s2 ${baseShas[name]} ${join(counters, `${name}-s2`)}`,
+      command: probeCommand(name, "s2"),
       parser: "bun",
+      base_files: "features/*.feature",
+      // A probe ignores the file list; `{files}` is required, so it sits in a comment.
+      base_command: `${probeCommand(name, "s2")} # {files}`,
+    },
+    {
+      name: `${name}-s3`,
+      level: "integration",
+      repo: name,
+      command: probeCommand(name, "s3"),
+      parser: "bun",
+      base_files: "nomatch/*.test.ts",
+      // A probe ignores the file list; `{files}` is required, so it sits in a comment.
+      base_command: `${probeCommand(name, "s3")} # {files}`,
     },
   ]);
   const run = startBuildingRun({ workspace, suites, repos: repoNames, kind, testCriterion });
@@ -377,7 +405,7 @@ function expectBaseRuns(run: TwoRepoRun): void {
 }
 
 describe("ark test base run", () => {
-  test("ARK-T1 a feature run runs every suite at each repo's own base with the head's test files, exits 0, and runs the base again with new head content", () => {
+  test("ARK-T1 a feature run runs at each repo's own base only the suites with a changed own test file, with the head's test files, exits 0, and runs the base again with new head content", () => {
     const run = twoRepoRun("feature", "needs-feature");
 
     // The new test fails in a plain checkout of the base: it needs `feature()`.
@@ -396,7 +424,12 @@ describe("ark test base run", () => {
     const first = ark("test", run.runId);
     expect(first.code, first.err + first.out).toBe(0);
     expectBaseRuns(run);
-    for (const name of repoNames) expect(run.runsAt(name, "s1", "base")).toBe(1);
+    for (const name of repoNames) {
+      expect(run.runsAt(name, "s1", "base")).toBe(1);
+      // s3 has no changed own test file: it ran at head only.
+      expect(run.runsAt(name, "s3", "base")).toBe(0);
+      expect(run.runsAt(name, "s3", "head")).toBe(1);
+    }
 
     // New head content: the next ark test copies it again and runs the base again.
     for (const name of repoNames) {
@@ -417,22 +450,24 @@ describe("ark test base run", () => {
   });
 
   test.each(["bug", "perf"])(
-    "ARK-T1 a %s run exits 0 and runs the suites at base like a feature run",
+    "ARK-T1 a %s run exits 0 and runs at base only the suites with a changed own test file",
     (kind) => {
       const run = twoRepoRun(kind, "needs-feature");
       const result = ark("test", run.runId);
       expect(result.code, result.err + result.out).toBe(0);
       expectBaseRuns(run);
+      for (const name of repoNames) expect(run.runsAt(name, "s3", "base")).toBe(0);
     },
   );
 
-  test("ARK-T1 a refactor run with a method test AC whose suites fail at base exits non-zero, and runs the base again with changed tests", () => {
+  test("ARK-T1 a refactor run runs every suite at base, exits non-zero with a method test AC whose suites fail there, and runs the base again with changed tests", () => {
     const run = twoRepoRun("refactor", "needs-feature", true);
     const first = ark("test", run.runId);
     expect(first.code).not.toBe(0);
     expect(first.err).toContain("refactor run: the suites fail at the base commit");
     expectBaseRuns(run);
     expect(run.runsAt("repoA", "s1", "base")).toBe(1);
+    for (const name of repoNames) expect(run.runsAt(name, "s3", "base")).toBe(1);
 
     for (const name of repoNames) {
       writeFiles(join(run.mirror, name), {
@@ -472,7 +507,7 @@ describe("ark test base run", () => {
 // --- ARK-T2: result.json of each case ----------------------------------------------------------------------------
 
 describe("ark test case evidence", () => {
-  test("ARK-T2 ark test writes base and head result.json with the SHA of the checkout that ran", () => {
+  test("ARK-T2 ark test writes base and head result.json with the SHA of the checkout that ran, not run for a suite skipped at base and failed for a crashed base suite", () => {
     const directory = fixtureDirectory();
     const workspace = join(directory, "workspace");
     mkdirSync(workspace);
@@ -508,6 +543,8 @@ test.skip("FAKE-T3 is skipped", () => {});
           repo: "touched",
           command: junit("./test/suite-a.test.ts"),
           parser: "bun",
+          base_files: "test/suite-a.test.ts",
+          base_command: junit("{files}"),
         },
         {
           name: "suite-b",
@@ -515,6 +552,8 @@ test.skip("FAKE-T3 is skipped", () => {});
           repo: "touched",
           command: junit("./test/suite-b.test.ts ./test/suite-b-sibling.test.ts"),
           parser: "bun",
+          base_files: "test/suite-b*.test.ts",
+          base_command: junit("{files}"),
         },
         {
           name: "suite-c",
@@ -522,6 +561,8 @@ test.skip("FAKE-T3 is skipped", () => {});
           repo: "touched2",
           command: junit("./test/suite-c.test.ts"),
           parser: "bun",
+          base_files: "test/suite-c.test.ts",
+          base_command: junit("{files}"),
         },
         {
           name: "suite-d",
@@ -529,6 +570,8 @@ test.skip("FAKE-T3 is skipped", () => {});
           repo: "untouched",
           command: junit("./test/suite-d.test.ts"),
           parser: "bun",
+          base_files: "test/suite-d.test.ts",
+          base_command: junit("{files}"),
         },
       ],
     });
@@ -537,6 +580,8 @@ test.skip("FAKE-T3 is skipped", () => {});
     writeFiles(touched, {
       "src/flag.txt": "on\n",
       "src/head-module.ts": "export const value = 1;\n",
+      "test/suite-a.test.ts": `${readText(touched, "test/suite-a.test.ts")}// own change\n`,
+      "test/suite-b-sibling.test.ts": `${readText(touched, "test/suite-b-sibling.test.ts")}// own change\n`,
       "test/suite-b.test.ts": `import { expect, test } from "bun:test";
 import { value } from "../src/head-module.ts";
 test("FAKE-T4 needs head module", () => { expect(value).toBe(1); });
@@ -545,7 +590,10 @@ test("FAKE-T4 needs head module", () => { expect(value).toBe(1); });
     commitAll(touched, "head");
     // touched2: the run's checkout moves on; the project's clone gets a commit that the run never sees.
     const touched2 = join(run.mirror, "touched2");
-    writeFiles(touched2, { "src/c.txt": "c\n" });
+    writeFiles(touched2, {
+      "src/c.txt": "c\n",
+      "test/suite-c.test.ts": `${readText(touched2, "test/suite-c.test.ts")}// own change\n`,
+    });
     commitAll(touched2, "head");
     git(join(workspace, "touched2"), "commit", "-q", "--allow-empty", "-m", "only in the clone");
     expect(git(join(workspace, "touched2"), "rev-parse", "HEAD")).not.toBe(
@@ -578,7 +626,8 @@ test("FAKE-T4 needs head module", () => { expect(value).toBe(1); });
         repo: "touched",
       },
       "FAKE-T5": { name: "FAKE-T5 workspace", base: "passed", head: "passed", repo: "touched2" },
-      "FAKE-T6": { name: "FAKE-T6 untouched", base: "passed", head: "passed", repo: "untouched" },
+      // suite-d has no changed test file: it is skipped at the base on purpose.
+      "FAKE-T6": { name: "FAKE-T6 untouched", base: "not run", head: "passed", repo: "untouched" },
     };
     for (const [id, entry] of Object.entries(expected)) {
       for (const side of ["base", "head"] as const) {
@@ -586,7 +635,8 @@ test("FAKE-T4 needs head module", () => { expect(value).toBe(1); });
           case: id,
           name: entry.name,
           status: entry[side],
-          sha: shas[entry.repo][side],
+          // A case that did not run on a side has no commit there.
+          sha: entry[side] === "not run" ? undefined : shas[entry.repo][side],
           repo: entry.repo,
         });
       }
@@ -597,9 +647,9 @@ test("FAKE-T4 needs head module", () => { expect(value).toBe(1); });
     const baseLog = readText(evidenceOf(run.runDirectory), "FAKE-T4", "base", "command.log").split(
       "\n",
     );
-    expect(baseLog[0]).toStartWith(
-      "bun test ./test/suite-b.test.ts ./test/suite-b-sibling.test.ts",
-    );
+    expect(baseLog[0]).toStartWith("bun test ");
+    expect(baseLog[0]).toContain("test/suite-b.test.ts");
+    expect(baseLog[0]).toContain("test/suite-b-sibling.test.ts");
     expect(baseLog.at(-2)).toBe("exit 1");
     expect(readText(evidenceOf(run.runDirectory), "FAKE-T7", "base", "command.log")).toBe(
       readText(evidenceOf(run.runDirectory), "FAKE-T4", "base", "command.log"),
@@ -627,10 +677,12 @@ test.skip("FAKE-T3 is skipped", () => {});
     files: Record<string, string>,
     suites: Record<string, string>,
     headChange: (mirror: string) => void,
+    kind?: string,
   ) {
     const bunTest = (file: string) =>
       `bun test ${file} --reporter=junit --reporter-outfile={report}`;
     const run = startBuildingRun({
+      kind,
       workspace: tempGitRepo(files),
       repos: ["."],
       suites: Object.entries(suites).map(([name, file]) => ({
@@ -656,6 +708,7 @@ test.skip("FAKE-T3 is skipped", () => {});
       (mirror) => {
         rmSync(join(mirror, "test/old.test.ts"));
       },
+      "refactor",
     );
     expect(run.result.code, run.result.err + run.result.out).toBe(0);
     const base = readResult(run.runDirectory, "FAKE-T1", "base");
