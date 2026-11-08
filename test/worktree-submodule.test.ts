@@ -1,0 +1,287 @@
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  ark,
+  recordEvaluation,
+  tempArkHome,
+  tempGitRepo,
+  writeProject,
+  writeTicket,
+} from "./helpers.ts";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(60_000);
+
+const roles = {
+  implementer: { harness: "claude", model: "claude-sonnet" },
+  validator: { harness: "codex", model: "gpt-codex" },
+  reviewer: { harness: "codex", model: "gpt-codex" },
+};
+const fileProtocol = "protocol.file.allow=always";
+
+function git(directory: string, ...args: string[]): string {
+  const result = Bun.spawnSync(["git", "-C", directory, ...args]);
+  if (result.exitCode !== 0)
+    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+  return result.stdout.toString().trim();
+}
+
+/** Writes a file and commits it; returns the new HEAD. */
+function commitFile(directory: string, name: string, content: string): string {
+  writeFileSync(join(directory, name), content);
+  git(directory, "add", "--", name); // never -A: a consumer worktree holds the library head in vendor/lib
+  git(directory, "commit", "-q", "-m", `change ${name}`);
+  return git(directory, "rev-parse", "HEAD");
+}
+
+type Meta = {
+  workspace: string;
+  /** Library repo with two commits: `first` is the one the consumers record. */
+  first: string;
+  second: string;
+  /** Recorded commit of the submodule whose repo is not a repo of the workspace. */
+  otherRecorded: string;
+};
+
+/**
+ * A meta-repo (the root is not a repo) with repos/lib (two commits), repos/consumer (submodules vendor/lib at the
+ * first library commit and vendor/other, a repository outside the workspace) and repos/plain (no submodule).
+ */
+function submoduleMeta(): Meta {
+  const workspace = mkdtempSync(join(tmpdir(), "ark-submodule-meta-"));
+  mkdirSync(join(workspace, "repos"));
+  const library = join(workspace, "repos/lib");
+  const other = tempGitRepo({ "other.txt": "other one\n" });
+  const otherRecorded = git(other, "rev-parse", "HEAD");
+  commitFile(other, "other.txt", "other two\n");
+  git(other, "reset", "-q", "--hard", otherRecorded);
+  const libraryRepo = tempGitRepo({ "lib.txt": "lib one\n" });
+  const first = git(libraryRepo, "rev-parse", "HEAD");
+  Bun.spawnSync(["mv", libraryRepo, library]);
+
+  const consumer = tempGitRepo({ "app.txt": "app\n" });
+  git(consumer, "-c", fileProtocol, "submodule", "add", "-q", library, "vendor/lib");
+  git(consumer, "-c", fileProtocol, "submodule", "add", "-q", other, "vendor/other");
+  git(consumer, "commit", "-q", "-m", "add submodules");
+  Bun.spawnSync(["mv", consumer, join(workspace, "repos/consumer")]);
+  const second = commitFile(library, "lib.txt", "lib two\n");
+  commitFile(other, "other.txt", "other two\n");
+  Bun.spawnSync(["mv", tempGitRepo({ "plain.txt": "plain\n" }), join(workspace, "repos/plain")]);
+  return { workspace, first, second, otherRecorded };
+}
+
+/** A project over `workspace` whose suite runs `bun test` in repos/consumer, and a started run. */
+function startRun(workspace: string): { runId: string; runDirectory: string } {
+  const arkHome = tempArkHome();
+  writeProject("demo", {
+    workspace,
+    ticket_source: "local",
+    suites: [
+      {
+        name: "consumer",
+        level: "integration",
+        repo: "repos/consumer",
+        command: "bun test ./library.test.ts --reporter=junit --reporter-outfile={report}",
+        parser: "bun",
+      },
+    ],
+    roles,
+  });
+  const ticket = writeTicket(
+    "demo",
+    "FAKE-1",
+    [{ id: "FAKE-1-AC1", text: "criterion" }],
+    "Ticket FAKE-1",
+  );
+  const runId = ark("run", "start", ticket, "--project", "demo").out.match(
+    /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
+  )![0];
+  const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+  recordEvaluation(runDirectory);
+  return { runId, runDirectory };
+}
+
+/** The consumer's suite: it reads the library through vendor/lib and logs the revision it saw. */
+const consumerSuite = `import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+test("ARK-T112 consumer reads vendor/lib", () => {
+  const revision = Bun.spawnSync(["git", "-C", "vendor/lib", "rev-parse", "HEAD"]).stdout.toString().trim();
+  const text = readFileSync("vendor/lib/lib.txt", "utf8").trim();
+  console.log("library-revision " + revision + " text " + text);
+  expect(text).not.toBe("");
+});
+`;
+
+const mirrorOf = (runDirectory: string, repo: string) => join(runDirectory, "workspace", repo);
+const stageOf = (directory: string) => git(directory, "ls-files", "--stage", "--", "vendor/lib");
+
+function create(runId: string, ...repos: string[]) {
+  return ark("worktree", "create", runId, ...repos);
+}
+
+/** Commits the suite file in the consumer worktree and runs `ark test`, returning the head-side log of ARK-T112. */
+function consumerTestLog(runId: string, runDirectory: string): string {
+  const consumer = mirrorOf(runDirectory, "repos/consumer");
+  if (!existsSync(join(consumer, "library.test.ts")))
+    commitFile(consumer, "library.test.ts", consumerSuite);
+  ark("test", runId); // exit code is 1: no test carries the ticket AC; the case evidence is what is read
+  return readFileSync(join(runDirectory, "results/evidence/ARK-T112/head/command.log"), "utf8");
+}
+
+describe("worktree create fills submodules", () => {
+  test("ARK-337/AC1 ARK-T111 create fills vendor/lib at the recorded commit and leaves the index pointer alone", () => {
+    const { workspace, first, second } = submoduleMeta();
+    const { runId, runDirectory } = startRun(workspace);
+    const recorded = stageOf(join(workspace, "repos/consumer"));
+    expect(recorded).toContain(first);
+
+    const created = create(runId, "repos/consumer");
+    expect(created.code).toBe(0);
+
+    const worktree = mirrorOf(runDirectory, "repos/consumer");
+    expect(readFileSync(join(worktree, "vendor/lib/lib.txt"), "utf8")).toBe("lib one\n");
+    expect(git(join(worktree, "vendor/lib"), "rev-parse", "HEAD")).toBe(first);
+    expect(git(join(worktree, "vendor/lib"), "rev-parse", "HEAD")).not.toBe(second);
+    expect(stageOf(worktree)).toBe(recorded);
+    expect(git(worktree, "diff", "--cached", "--raw")).toBe("");
+    expect(git(worktree, "status", "--porcelain")).toBe("");
+    // the second submodule is filled too
+    expect(readFileSync(join(worktree, "vendor/other/other.txt"), "utf8")).toBe("other one\n");
+  });
+
+  test("ARK-337/AC1 ARK-T111 a plain repo worktree is made with no submodule step", () => {
+    const { workspace } = submoduleMeta();
+    const { runId, runDirectory } = startRun(workspace);
+
+    const created = create(runId, "repos/plain");
+    expect(created.code).toBe(0);
+    expect(created.out).not.toContain("submodule");
+
+    const worktree = mirrorOf(runDirectory, "repos/plain");
+    expect(readFileSync(join(worktree, "plain.txt"), "utf8")).toBe("plain\n");
+    expect(existsSync(join(worktree, ".gitmodules"))).toBe(false);
+    expect(git(worktree, "status", "--porcelain")).toBe("");
+  });
+
+  test("ARK-337/AC1 ARK-T111 a failing submodule names consumer, path and cause, keeps the worktree, and a retry does not delete it", () => {
+    const { workspace } = submoduleMeta();
+    const broken = join(workspace, "repos/consumer");
+    const brokenCopy = join(workspace, "repos/broken");
+    Bun.spawnSync(["git", "clone", "-q", "--no-hardlinks", broken, brokenCopy]);
+    git(brokenCopy, "config", "user.name", "Ark Test");
+    git(brokenCopy, "config", "user.email", "ark@example.com");
+    git(brokenCopy, "config", "-f", ".gitmodules", "submodule.vendor/lib.url", "/no/such/library");
+    git(brokenCopy, "commit", "-q", "-am", "point the submodule at a missing repository");
+    // no modules in the source clone to borrow from: the commit cannot be fetched from anywhere
+    rmSync(join(brokenCopy, ".git/modules"), { recursive: true, force: true });
+    rmSync(join(brokenCopy, "vendor"), { recursive: true, force: true });
+    git(brokenCopy, "checkout", "--", "vendor"); // empty gitlink folders, a clean checkout
+    const { runId, runDirectory } = startRun(workspace);
+
+    const first = create(runId, "repos/broken");
+    expect(first.code).not.toBe(0);
+    expect(first.err).toContain("repos/broken");
+    expect(first.err).toContain("vendor/lib");
+    expect(first.err).toContain("/no/such/library");
+    const worktree = mirrorOf(runDirectory, "repos/broken");
+    expect(existsSync(join(worktree, ".git"))).toBe(true);
+    const created = () =>
+      readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((event) => event.type === "worktree.created" && event.data.repo === "repos/broken");
+    expect(created()).toHaveLength(1);
+
+    const retry = create(runId, "repos/broken");
+    expect(retry.code).not.toBe(0);
+    expect(retry.err).toContain("vendor/lib");
+    expect(existsSync(join(worktree, ".git"))).toBe(true);
+    expect(created()).toHaveLength(1);
+  });
+});
+
+describe("worktree create and sync use the run's library head", () => {
+  test("ARK-337/AC2 ARK-T112 a committed library change is seen by create, sync and ark test; the index pointer and an uncommitted change are not", () => {
+    const { workspace, first, second, otherRecorded } = submoduleMeta();
+    // sync needs origin/HEAD in each repo; the library maps to its worktree by basename, not by origin
+    for (const repo of ["lib", "consumer"]) {
+      const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
+      Bun.spawnSync(["git", "init", "-q", "--bare", "-b", "main", bare]);
+      const path = join(workspace, "repos", repo);
+      git(path, "remote", "add", "origin", bare);
+      git(path, "push", "-q", "-u", "origin", "main");
+      git(path, "remote", "set-head", "origin", "main");
+    }
+    const { runId, runDirectory } = startRun(workspace);
+    const recorded = stageOf(join(workspace, "repos/consumer"));
+    expect(recorded).toContain(first);
+
+    expect(create(runId, "repos/lib").code).toBe(0);
+    const library = mirrorOf(runDirectory, "repos/lib");
+    const libraryHead = commitFile(library, "lib.txt", "lib run change\n");
+    const created = create(runId, "repos/consumer");
+    expect(created.code).toBe(0);
+
+    const consumer = mirrorOf(runDirectory, "repos/consumer");
+    const folder = join(consumer, "vendor/lib");
+    expect(git(folder, "rev-parse", "HEAD")).toBe(libraryHead);
+    expect(readFileSync(join(folder, "lib.txt"), "utf8")).toBe("lib run change\n");
+    expect(stageOf(consumer)).toBe(recorded);
+    expect(git(consumer, "diff", "--cached", "--raw")).toBe("");
+    // a submodule whose repo the run has no worktree of stays at its recorded commit
+    expect(git(join(consumer, "vendor/other"), "rev-parse", "HEAD")).toBe(otherRecorded);
+
+    const firstLog = consumerTestLog(runId, runDirectory);
+    expect(firstLog).toContain(`library-revision ${libraryHead} text lib run change`);
+    expect(firstLog).not.toContain(first);
+    expect(firstLog).not.toContain(second);
+    expect(
+      JSON.parse(
+        readFileSync(join(runDirectory, "results/evidence/ARK-T112/head/result.json"), "utf8"),
+      ).status,
+    ).toBe("passed");
+
+    // a second committed change, a third left uncommitted, then sync
+    const secondHead = commitFile(library, "lib.txt", "lib run change two\n");
+    writeFileSync(join(library, "lib.txt"), "lib uncommitted\n");
+    const synced = ark("worktree", "sync", runId);
+    expect(synced.code).toBe(0);
+    expect(git(folder, "rev-parse", "HEAD")).toBe(secondHead);
+    expect(stageOf(consumer)).toBe(recorded);
+    expect(git(consumer, "diff", "--cached", "--raw")).toBe("");
+
+    const secondLog = consumerTestLog(runId, runDirectory);
+    expect(secondLog).toContain(`library-revision ${secondHead} text lib run change two`);
+    expect(secondLog).not.toContain("uncommitted");
+
+    const status = ark("status", runId);
+    const lines = status.out.split("\n").filter((line) => line.startsWith("submodule "));
+    expect(lines).toEqual([
+      `submodule repos/consumer/vendor/lib at run head of repos/lib ${secondHead.slice(0, 8)}`,
+    ]);
+  });
+
+  test("ARK-337/AC2 ARK-T112 a library worktree made after the consumer's is picked up by a second create", () => {
+    const { workspace, first } = submoduleMeta();
+    const { runId, runDirectory } = startRun(workspace);
+    expect(create(runId, "repos/consumer").code).toBe(0);
+    const consumer = mirrorOf(runDirectory, "repos/consumer");
+    expect(git(join(consumer, "vendor/lib"), "rev-parse", "HEAD")).toBe(first);
+    expect(ark("status", runId).out).not.toContain("submodule repos/consumer");
+
+    expect(create(runId, "repos/lib").code).toBe(0);
+    const library = mirrorOf(runDirectory, "repos/lib");
+    const libraryHead = commitFile(library, "lib.txt", "lib after the consumer\n");
+    expect(create(runId, "repos/consumer").code).toBe(0);
+
+    expect(git(join(consumer, "vendor/lib"), "rev-parse", "HEAD")).toBe(libraryHead);
+    expect(stageOf(consumer)).toContain(first);
+    expect(git(consumer, "diff", "--cached", "--raw")).toBe("");
+    expect(ark("status", runId).out).toContain(
+      `submodule repos/consumer/vendor/lib at run head of repos/lib ${libraryHead.slice(0, 8)}`,
+    );
+  });
+});
