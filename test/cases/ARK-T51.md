@@ -15,7 +15,7 @@ Prove that each repo uses the host of its own remote. This case replaces the old
 
 ## Preconditions
 
-- A fixture run with core on GitHub and app on GitLab.
+- A fixture run with core on GitHub and app on GitLab, the plan `repos` block holding the edge app to core.
 
 ## Steps
 

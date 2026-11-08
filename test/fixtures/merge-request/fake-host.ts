@@ -35,6 +35,18 @@ export function creates(): number {
     .filter((line) => line.includes('"create"')).length;
 }
 
+/**
+ * The number of the next created MR, given the `previous` creates. FAKE_NUMBERS (JSON list) sets the numbers in order;
+ * with none they count up from 1. FAKE_CREATE_FAIL_AT=<k> makes the k-th create fail before it is logged or kept.
+ */
+export function nextNumber(previous: number): number {
+  if (Number(process.env.FAKE_CREATE_FAIL_AT) === previous + 1) {
+    console.error("fake host: create failed");
+    process.exit(1);
+  }
+  return process.env.FAKE_NUMBERS ? JSON.parse(process.env.FAKE_NUMBERS)[previous] : previous + 1;
+}
+
 /** Number of logged calls whose line contains `text`. */
 export function logged(text: string): number {
   if (!existsSync(logFile)) return 0;

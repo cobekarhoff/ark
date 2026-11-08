@@ -63,7 +63,7 @@ Clara and Smart QC are the same shape: a meta-repo workspace with `repos/*` clon
 
 ```mermaid
 flowchart TB
-  subgraph plan[Plan: steps in dependency order]
+  subgraph plan[Plan: steps in needs order]
     s1[implementer<br/>repos/shared/packages] --> s2[validator<br/>repos/shared/packages]
     s1 --> s3[implementer<br/>repos/platform<br/>needs: shared]
     s3 --> s4[validator<br/>repos/platform<br/>compose runs both worktrees]
@@ -85,7 +85,7 @@ Step by step:
 4. **Worktrees.** `ark worktree create` mirrors the workspace into the run folder: the two repos the run touches become worktrees on the same branch name; everything else, including `docker-compose.yml` and `knowledge/`, is a symlink. The service builds against `../shared/packages` because the compose file's `./repos/*` paths resolve inside the run folder.
 5. **Build and prove.** The package implementer finishes first; the service implementer starts after. Validators write integration tests that run through compose against both worktrees. `ark test` runs every suite from the run folder and decides each AC from its `verified_by` cases at head. A `manual` AC waits for your `ok` from a running stack.
 6. **Review.** One reviewer step covers both repos: one diff per repo against its base, the callers read across the boundary.
-7. **Merge requests.** `ark merge-request open` pushes both branches and opens one MR per repo in dependency order, with a dependency where the GitLab tier allows it and `Depends on !N` in the description otherwise. You merge the package MR first; the service MR's pipeline runs against the merged package.
+7. **Merge requests.** `ark merge-request open` pushes both branches and opens one MR per repo in merge order (the repo edges of the plan, upstream first), with a dependency where the GitLab tier allows it and `Depends on !N` in the description otherwise. You merge the package MR first; the service MR's pipeline runs against the merged package.
 8. **While open.** A failed pipeline, a comment or a conflict in either MR starts an MR round on that repo. `ark worktree sync` merges the target branch into each worktree and pushes every open branch; a conflict goes to an implementer with `--merge`.
 
 The point of the shape: one ticket, one run, one plan, one proof across the chain, and the order of the MRs comes from the plan, not from a person remembering it.
@@ -115,10 +115,10 @@ This is the mode for a regulated product repo while its own validation and revie
 
 ## What the three have in common
 
-|                          | One repo                           | Dependency chain                                   | Hand-off                                      |
-| ------------------------ | ---------------------------------- | -------------------------------------------------- | --------------------------------------------- |
-| Where you decide         | criteria, plan, escalation, merge  | the same, plus manual ACs from a running stack     | the same, minus merge; you open the MR        |
-| Proof                    | test cases at head in one worktree | test cases at head across composed worktrees       | the same; checked at close instead of at open |
-| What Ark refuses         | an MR before every AC passes       | an MR out of dependency order; a plan with a cycle | any push                                      |
-| What lands               | one MR                             | one MR per repo, in order                          | branches in their clones                      |
-| What you read afterwards | `retro.md`, `metrics.json`         | the same, per run                                  | the same                                      |
+|                          | One repo                           | Dependency chain                               | Hand-off                                      |
+| ------------------------ | ---------------------------------- | ---------------------------------------------- | --------------------------------------------- |
+| Where you decide         | criteria, plan, escalation, merge  | the same, plus manual ACs from a running stack | the same, minus merge; you open the MR        |
+| Proof                    | test cases at head in one worktree | test cases at head across composed worktrees   | the same; checked at close instead of at open |
+| What Ark refuses         | an MR before every AC passes       | an MR out of merge order; a plan with a cycle  | any push                                      |
+| What lands               | one MR                             | one MR per repo, in order                      | branches in their clones                      |
+| What you read afterwards | `retro.md`, `metrics.json`         | the same, per run                              | the same                                      |

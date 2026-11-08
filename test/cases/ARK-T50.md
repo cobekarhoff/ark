@@ -6,7 +6,7 @@ technique: error guessing on a failing blocks call
 priority: medium
 risk: a 403 on the native dependency call stops the open or drops the `Depends on` line
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-08-ARK-336-1
 ---
 
 ## Objective
@@ -15,7 +15,7 @@ Prove that a refused native GitLab dependency still opens the MR with the Depend
 
 ## Preconditions
 
-- The same GitLab run, with the blocks call failing (403).
+- The same GitLab run (the `repos` block holds the edge app to core), with the blocks call failing (403).
 
 ## Steps
 
