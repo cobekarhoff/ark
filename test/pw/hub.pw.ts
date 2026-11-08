@@ -1,5 +1,12 @@
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { request as httpRequest } from "node:http";
 import { dirname, join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
@@ -4919,4 +4926,85 @@ test("ARK-T22 new page parts keep accessibility, request limits and speed", asyn
     }
     expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
   }
+});
+
+test("ARK-T78 ARK-329/AC3 the ticket page shows the snapshot title at once, shows a loading state until its document arrives, and shows a change to the ticket file within 5 seconds", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  isolate();
+  installFakeTools({});
+  const ticketsFolder = dirname(
+    writeBacklogTicket({
+      project: "p",
+      id: "ARK-521",
+      title: "Ticket",
+      status: "ready",
+      problem: "First text",
+      criteria: [{ id: "AC1", text: "It works" }],
+    }),
+  );
+  const file = join(ticketsFolder, "ARK-521.md");
+  const original = readFileSync(file, "utf8");
+  // Rename into place, so the hub never reads a half-written file and each change is one signature.
+  const replaceFile = (text: string) => {
+    const staged = join(ticketsFolder, "..", "staged.md");
+    writeFileSync(staged, text);
+    renameSync(staged, file);
+  };
+  const baseUrl = await launch();
+
+  const documentRequests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/ticket/p/ARK-521") documentRequests.push(path);
+  });
+  await page.route("**/api/ticket/p/ARK-521", async (route) => {
+    await new Promise((done) => setTimeout(done, 1500));
+    await route.continue();
+  });
+  const loading = page.getByRole("status").filter({ hasText: "Loading the ticket text" });
+  const problem = page.getByTestId("ticket-problem");
+
+  // The snapshot gives the title and header at once; the text waits for the delayed route.
+  await open(page, baseUrl, "ticket/ARK-521");
+  await expect(page.getByRole("heading", { level: 1, name: "Ticket" })).toBeVisible();
+  await expect(loading).toBeVisible();
+  await expect(problem).toHaveCount(0);
+  await checkpoint(page, "ticket-loading");
+  await expect(problem).toHaveText("First text", { timeout: 10_000 });
+  await expect(loading).toHaveCount(0);
+  await checkpoint(page, "ticket-loaded");
+
+  // An edit of the file shows within 5 s, with no loading flash, after one more read.
+  await page.unroute("**/api/ticket/p/ARK-521");
+  await page.evaluate(() => {
+    const flags = window as unknown as { sawLoading: boolean };
+    flags.sawLoading = false;
+    new MutationObserver(() => {
+      if (document.querySelector(".doc-status")) flags.sawLoading = true;
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  const readsBefore = documentRequests.length;
+  replaceFile(original.replace("First text", "Second text"));
+  await expect(problem).toHaveText("Second text", { timeout: 5000 });
+  await checkpoint(page, "ticket-reloaded");
+  expect(await page.evaluate(() => (window as unknown as { sawLoading: boolean }).sawLoading)).toBe(
+    false,
+  );
+  expect(documentRequests.length - readsBefore).toBe(1);
+
+  // Another ticket's file pushes a snapshot; this page reads nothing more.
+  writeBacklogTicket({ project: "p", id: "ARK-522", title: "Other", status: "ready" });
+  await page.waitForTimeout(2000);
+  expect(documentRequests.length - readsBefore).toBe(1);
+
+  // A file that does not parse shows the alert, and a repair shows the text again.
+  replaceFile("this file has no front matter\n");
+  await expect(page.getByRole("alert")).toBeVisible({ timeout: 5000 });
+  await expect(loading).toHaveCount(0);
+  await checkpoint(page, "ticket-unreadable");
+  replaceFile(original.replace("First text", "Third text"));
+  await expect(problem).toHaveText("Third text", { timeout: 5000 });
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
