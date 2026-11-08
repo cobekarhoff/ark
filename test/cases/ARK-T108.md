@@ -23,6 +23,7 @@ Prove that `ark run close <run> handed_off` and `ark status <run>` list the bran
 2. Mark `bump-reports` done and run `ark status <run>` again.
 3. Make the last repo have no commits ahead of its base and run `ark status <run>` again while its bump is pending.
 4. Use a plan with several repos and no `repos` list.
+5. Edit the plan so the `repos` graph has a cycle (core depends on reports) and run `ark status <run>`.
 
 ## Expected results
 
@@ -31,6 +32,7 @@ Prove that `ark run close <run> handed_off` and `ark status <run>` list the bran
 - When all bumps are done, no `pending bump` line shall print.
 - When a repo has no commits ahead, its `branch` line shall be missing and its pending bump shall still print after the last branch line.
 - When the plan has no `repos` list, the line `order: from step needs (no repos list)` shall print once above the branches.
+- When the plan's `repos` graph has a dependency cycle, `ark status <run>` shall exit 0 and print the run and a `branch` line for every repo with commits, without an order.
 
 ## Screenshot checkpoints
 

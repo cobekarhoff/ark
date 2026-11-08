@@ -1402,6 +1402,24 @@ test("ARK-T108 an old plan with no repos list orders the branches by step needs 
   ]);
 });
 
+test("ARK-T108 status exits 0 and still lists the run and its branches when the draft plan's repos graph has a cycle", () => {
+  const { runId, directory } = claraRun();
+  const planFile = join(directory, "plan.yml");
+  const plan = JSON.parse(readFileSync(planFile, "utf8"));
+  // core now depends on reports, which depends on core: the repos graph cannot be ordered.
+  plan.repos[0].depends_on = [
+    { repo: clara.reports, kind: "api", pin: "openapi@v3", evidence: "clients/core.ts:1" },
+  ];
+  writeFileSync(planFile, JSON.stringify(plan));
+
+  const status = ark("status", runId);
+  expect(status.code, status.err).toBe(0);
+  expect(status.out).toContain(runId);
+  const lines = handOffLines(status.out);
+  for (const repo of Object.values(clara))
+    expect(lines.some((line) => line.startsWith("branch ") && line.includes(repo))).toBe(true);
+});
+
 test("ARK-295-AC5 an open project and a project with no ark.yml print the unchanged merge requests line", () => {
   const { runId, directory, worktree } = worktreeRun({ merge_requests: "open" });
   commitIn(worktree, "one");
