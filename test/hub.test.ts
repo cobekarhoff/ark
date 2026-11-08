@@ -1489,7 +1489,7 @@ test("ARK-285-AC3 after one good Orca read, a failing read keeps a stale waiting
   expect(stuck(snapshotOf(false, waiting))).toEqual(["waiting on a prompt"]);
 });
 
-test("ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside", async () => {
+test("ARK-T25 ticket text and criteria are read from the ticket's own file and served by /api/ticket/<project>/<id>, never in the snapshot, and a front-matter id with ../ reads nothing outside", async () => {
   isolatedEnvironment();
   const home = process.env.ARK_HOME as string;
   writeBacklogTicket({
@@ -1512,16 +1512,195 @@ test("ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's 
     (current) => current.tickets !== "unknown" && current.tickets.length === 2,
   );
   if (snapshot.tickets === "unknown") throw new Error("tickets are unknown");
-  const documents = Object.fromEntries(snapshot.tickets.map((t) => [t.title, t.document]));
-  expect(documents.Readable).toEqual({
+  const documentOf = async (id: string) =>
+    ((await (await fetch(`${baseUrl}/api/ticket/p/${id}`)).json()) as { document: unknown })
+      .document;
+  expect(await documentOf("ARK-840")).toEqual({
     problem: "Why it hurts",
     change: "What changes",
     criteria: [{ id: "AC1", text: "It works", method: "test", verified_by: [] }],
   });
-  expect(documents.Planted?.problem).toBe("Own text");
+  expect(((await documentOf("..%2F..%2F..%2Foutside")) as { problem: string }).problem).toBe(
+    "Own text",
+  );
   expect(JSON.stringify(snapshot)).not.toContain("OUTSIDE TICKET DIRECTORY");
   for (const id of ["ARK-840", "..%2F..%2F..%2Foutside"])
-    expect((await fetch(`${baseUrl}/api/ticket/p/${id}`)).status).toBe(404);
+    expect(await (await fetch(`${baseUrl}/api/ticket/p/${id}`)).text()).not.toContain(
+      "OUTSIDE TICKET DIRECTORY",
+    );
+});
+
+type PushedTicket = Record<string, unknown> & { id: string; signature: string };
+
+test("ARK-T76 ARK-329/AC1 snapshot and push tickets carry no document, keep the fields other pages read, and stay under 15% of the ticket text", async () => {
+  isolatedEnvironment();
+  installFakeTools({});
+  const filler = "A sentence of ticket text that only the ticket page needs to read. ".repeat(40);
+  let ticketBytes = 0;
+  const write = (index: number, problem: string) => {
+    const id = `ARK-${index}`;
+    ticketBytes += statSync(
+      writeBacklogTicket({
+        project: "p",
+        id,
+        title: `Ticket ${index}`,
+        status: "ready",
+        kind: "feature",
+        milestone: "M4",
+        dependsOn: index > 1 ? ["ARK-1"] : [],
+        problem,
+        change: "What changes.",
+        criteria: [{ id: `${id}-AC1`, text: "It works" }],
+      }),
+    ).size;
+  };
+  write(1, `A reason. DOC-MARKER-XYZ ${filler}`);
+  for (let index = 2; index <= 200; index++) write(index, `A reason. ${filler}`);
+  expect(ticketBytes).toBeGreaterThan(200 * 2800);
+
+  const { baseUrl } = await start();
+  const snapshotText = async () => {
+    await snapshotWhen(
+      baseUrl,
+      (current) => current.tickets !== "unknown" && current.tickets.length === 200,
+    );
+    return await (await fetch(`${baseUrl}/api/snapshot`)).text();
+  };
+  const ticketsOf = (json: string) => (JSON.parse(json) as { tickets: PushedTicket[] }).tickets;
+
+  const before = await snapshotText();
+  expect(before).not.toContain("DOC-MARKER-XYZ");
+  const tickets = ticketsOf(before);
+  // Taken before the matchers below, which Bun may write into the object they match.
+  const signatures = new Map(tickets.map((ticket) => [ticket.id, ticket.signature]));
+  for (const ticket of tickets) {
+    expect("document" in ticket).toBe(false);
+    expect(ticket).toMatchObject({
+      project: "p",
+      title: expect.stringMatching(/^Ticket \d+$/),
+      status: "ready",
+      kind: "feature",
+      milestone: "M4",
+      depends_on: ticket.id === "ARK-1" ? [] : ["ARK-1"],
+      why: "A reason.",
+      signature: expect.any(String),
+    });
+  }
+  expect(before.length / ticketBytes).toBeLessThan(0.15);
+
+  const controller = new AbortController();
+  const reader = (
+    await fetch(`${baseUrl}/events`, { signal: controller.signal })
+  ).body!.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  const nextPush = async (): Promise<string> => {
+    for (;;) {
+      const end = buffered.indexOf("\n\n");
+      if (end >= 0) {
+        const message = buffered.slice(0, end);
+        buffered = buffered.slice(end + 2);
+        if (message.startsWith("data: ")) return message.slice(6);
+        continue;
+      }
+      const chunk = await Promise.race([reader.read(), Bun.sleep(10_000).then(() => null)]);
+      if (chunk === null || chunk.done) throw new Error("no push within 10 s");
+      buffered += decoder.decode(chunk.value);
+    }
+  };
+  try {
+    const first = await nextPush();
+    expect(first).not.toContain("DOC-MARKER-XYZ");
+    expect(ticketsOf(first).some((ticket) => "document" in ticket)).toBe(false);
+
+    // A body-only edit: the front matter stays, so only the signature tells the page.
+    const file = join(process.env.ARK_HOME as string, "projects", "p", "tickets", "ARK-1.md");
+    writeFileSync(
+      file,
+      readFileSync(file, "utf8").replace("DOC-MARKER-XYZ", "BODY-EDIT-TEXT and a little more"),
+    );
+    const signatureBefore = signatures.get("ARK-1");
+    let pushed = ticketsOf(await nextPush());
+    while (ticketOf(pushed, "ARK-1").signature === signatureBefore)
+      pushed = ticketsOf(await nextPush());
+    const after = JSON.stringify(pushed);
+    expect(after).not.toContain("BODY-EDIT-TEXT");
+    expect(after).not.toContain("DOC-MARKER-XYZ");
+    for (const ticket of pushed)
+      if (ticket.id !== "ARK-1") expect(ticket.signature).toEqual(signatures.get(ticket.id) ?? "");
+  } finally {
+    controller.abort();
+  }
+});
+
+const ticketOf = (tickets: PushedTicket[], id: string): PushedTicket => {
+  const found = tickets.find((ticket) => ticket.id === id);
+  if (!found) throw new Error(`no ticket ${id}`);
+  return found;
+};
+
+test("ARK-T77 ARK-329/AC2 GET /api/ticket/<project>/<id> answers one ticket document read at request time, and an unknown project, an unknown ticket or a path outside the tickets folder answers 404", async () => {
+  isolatedEnvironment();
+  const home = process.env.ARK_HOME as string;
+  const write = (problem: string) =>
+    writeBacklogTicket({
+      project: "p",
+      id: "ARK-840",
+      title: "Readable",
+      status: "ready",
+      problem,
+      change: "What changes",
+      criteria: [{ id: "ARK-840-AC1", text: "It works", verifiedBy: ["ARK-T1"] }],
+    });
+  const file = write("Why it hurts");
+  writeFileSync(join(home, "outside.md"), "## Problem\n\nOUTSIDE TICKET DIRECTORY\n");
+  writeFileSync(join(dirname(file), "ARK-842.md"), "this file has no front matter\n");
+  const { baseUrl } = await start();
+  await snapshotWhen(
+    baseUrl,
+    (current) => current.tickets !== "unknown" && current.tickets.length === 2,
+  );
+  const port = Number(new URL(baseUrl).port);
+  // `sendRequest` keeps `..` and `%2e` in the path as written; `fetch` would fold them away.
+  const get = (path: string) => sendRequest(port, { path });
+
+  const found = await get("/api/ticket/p/ARK-840");
+  expect(found.status).toBe(200);
+  expect(JSON.parse(found.text).document).toEqual({
+    problem: "Why it hurts",
+    change: "What changes",
+    criteria: [{ id: "AC1", text: "It works", method: "test", verified_by: ["ARK-T1"] }],
+  });
+
+  write("Changed text");
+  expect(JSON.parse((await get("/api/ticket/p/ARK-840")).text).document.problem).toBe(
+    "Changed text",
+  );
+
+  for (const path of ["/api/ticket/nope/ARK-840", "/api/ticket/p/ARK-999"])
+    expect((await get(path)).status).toBe(404);
+  for (const path of [
+    "/api/ticket/p/../../outside",
+    "/api/ticket/p/..%2F..%2F..%2Foutside",
+    "/api/ticket/p/%2e%2e%2f%2e%2e%2foutside",
+    "/api/ticket/p/..",
+    "/api/ticket/p/..%2F..%2F..%2Foutside.md",
+  ]) {
+    const answer = await get(path);
+    expect(answer.status, path).toBe(404);
+    expect(answer.text, path).not.toContain("OUTSIDE TICKET DIRECTORY");
+  }
+
+  const cases = await get("/api/ticket/p/ARK-840/cases");
+  expect(cases.status).toBe(200);
+  expect("document" in JSON.parse(cases.text)).toBe(false);
+
+  const unreadable = await get("/api/ticket/p/ARK-842");
+  expect(unreadable.status).toBe(200);
+  expect(JSON.parse(unreadable.text)).toEqual({ document: null });
+
+  expect((await get("/api/ticket/p/%E0%A4%A")).status).toBe(400);
+  expect((await get("/")).status).toBe(200);
 });
 
 // ---------------------------------------------------------------- ARK-314
@@ -1663,9 +1842,7 @@ test("ARK-T24 hub reads local test cases and zephyr evidence without a Zephyr ca
   await snapshotWhen(
     baseUrl,
     (current) =>
-      current.tickets !== "unknown" &&
-      current.tickets.filter((ticket) => ticket.document !== null).length === 3 &&
-      current.runs !== "unknown",
+      current.tickets !== "unknown" && current.tickets.length === 3 && current.runs !== "unknown",
   );
   const casesOf = async (project: string): Promise<TicketCases> => {
     const response = await fetch(`${baseUrl}/api/ticket/${project}/ARK-900/cases`);
