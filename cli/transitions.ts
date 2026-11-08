@@ -181,6 +181,13 @@ export function assertAllowed(
       return;
     case "merge_request.opened":
       requirePhase(state, type, ["building", "merge_requests_open"]);
+      if (data.order !== undefined && !(Number.isInteger(data.order) && data.order >= 1))
+        throw new ArkError(`${type} refused: order must be a whole number from 1`);
+      if (
+        data.waits_for !== undefined &&
+        !(Array.isArray(data.waits_for) && data.waits_for.every(Number.isInteger))
+      )
+        throw new ArkError(`${type} refused: waits_for must be a list of MR numbers`);
       return;
     case "run.closed":
       return assertCloseAllowed(state, data);
