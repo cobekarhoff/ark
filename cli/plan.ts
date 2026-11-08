@@ -9,6 +9,7 @@ import { type RunState, type TicketKind, appendEvent, deriveState, readEvents } 
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 import { readWorkspaceCases, type CaseEntry } from "./test-case.ts";
+import { discoverRepos } from "./workspace.ts";
 import { allowedUiSkills, uiSkillsFor } from "./ui-skills.ts";
 
 export type PlanStep = {
@@ -53,13 +54,25 @@ export type PlanDecision = {
   /** Empty while the human has not answered. */
   chosen: string;
 };
+/** An edge of the repo graph: the repo of the entry depends on `repo`. `evidence` is a file and line; `bump` a step id. */
+export type PlanRepoEdge = {
+  repo: string;
+  kind: string;
+  pin: string;
+  evidence: string;
+  bump: string;
+};
+export type PlanRepo = { repo: string; why: string; depends_on: PlanRepoEdge[] };
 export type Plan = {
   summary: { why: string; changes: PlanSummaryChange[] };
   design: PlanDesign;
   decisions: PlanDecision[];
+  repos: PlanRepo[];
   steps: PlanStep[];
   test_cases: PlanTestCase[];
 };
+
+const edgeKinds = ["submodule", "package", "compose", "api"];
 
 const roles = ["implementer", "validator", "reviewer"];
 const levels = ["integration", "e2e"];
@@ -95,7 +108,7 @@ export function loadPlan(runDirectory: string, ticketId?: string): Plan {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ArkError("plan.yml must be a mapping with steps and test_cases");
   }
-  const { steps, test_cases, summary, design, decisions } = raw as Record<string, unknown>;
+  const { steps, test_cases, summary, design, decisions, repos } = raw as Record<string, unknown>;
   const criterionId = (value: string) => canonicalCriterion(value.trim(), ticketId);
   const designBlock =
     design && typeof design === "object" ? (design as Record<string, unknown>) : {};
@@ -132,6 +145,17 @@ export function loadPlan(runDirectory: string, ticketId?: string): Plan {
       ),
       recommended: text(decision.recommended),
       chosen: text(decision.chosen),
+    })),
+    repos: objectList(repos).map((entry) => ({
+      repo: text(entry.repo),
+      why: text(entry.why),
+      depends_on: objectList(entry.depends_on).map((edge) => ({
+        repo: text(edge.repo),
+        kind: text(edge.kind),
+        pin: text(edge.pin),
+        evidence: text(edge.evidence),
+        bump: text(edge.bump),
+      })),
     })),
     steps: objectList(steps).map((step) => ({
       id: text(step.id),
@@ -180,9 +204,41 @@ export function loadPlan(runDirectory: string, ticketId?: string): Plan {
 
 // Stable output: nodes in file order, then edges in file order. Node names are
 // positional so step ids such as "end" or ids with punctuation cannot break the diagram.
+// A plan with steps in several repos draws one subgraph per repo, in merge order.
 export function renderMermaid(plan: Plan): string {
   const nodeName = new Map(plan.steps.map((step, i) => [step.id, `step${i + 1}`]));
   const lines = ["flowchart LR"];
+  if (multiRepo(plan)) {
+    const { order, upstream } = repoGraph(plan);
+    const quote = (value: string) => value.replaceAll('"', "#quot;");
+    const drawn = new Set(plan.steps.map((step) => step.repo));
+    order.forEach((repo, r) => {
+      if (!drawn.has(repo)) return;
+      lines.push(`  subgraph repo${r + 1}["${quote(`${r + 1} ${repo}`)}"]`);
+      plan.steps.forEach((step, i) => {
+        if (step.repo === repo)
+          lines.push(`    step${i + 1}["${quote(`${step.id}: ${step.role}`)}"]`);
+      });
+      lines.push("  end");
+    });
+    plan.steps.forEach((step) => {
+      plan.steps.forEach((target, j) => {
+        if (!target.needs.includes(step.id)) return;
+        const arrow = step.repo === target.repo ? "-->" : "==>";
+        lines.push(`  ${nodeName.get(step.id)} ${arrow} step${j + 1}`);
+      });
+    });
+    order.forEach((repo, r) => {
+      order.forEach((downstream, d) => {
+        if (!upstream.get(downstream)!.has(repo) || !drawn.has(repo) || !drawn.has(downstream))
+          return;
+        const entry = plan.repos.find((candidate) => candidate.repo === downstream);
+        for (const edge of entry?.depends_on.filter((candidate) => candidate.repo === repo) ?? [])
+          lines.push(`  repo${r + 1} -.->|"${quote(`${edge.kind} ${edge.pin}`)}"| repo${d + 1}`);
+      });
+    });
+    return `${lines.join("\n")}\n`;
+  }
   plan.steps.forEach((step, i) => {
     const label = `${step.id}: ${step.role} @ ${step.repo}`.replaceAll('"', "#quot;");
     lines.push(`  step${i + 1}["${label}"]`);
@@ -217,6 +273,158 @@ function findCycles(plan: Plan): string[][] {
   return cycles;
 }
 
+const multiRepo = (plan: Plan): boolean => new Set(plan.steps.map((step) => step.repo)).size > 1;
+
+/**
+ * The repos of a plan in merge order, and the upstream repos each one waits for. With a `repos` list the edges come
+ * from it and step `needs` make none; with no list (an old plan) they come from step `needs`.
+ * Ties go by first step of the repo in the plan, then by name, so the order does not depend on the list order.
+ */
+export function repoGraph(plan: {
+  steps: { id: string; repo: string; needs: string[] }[];
+  repos?: PlanRepo[];
+}): { order: string[]; upstream: Map<string, Set<string>> } {
+  const upstream = new Map<string, Set<string>>();
+  const stepRepos = [...new Set(plan.steps.map((step) => step.repo))];
+  for (const repo of stepRepos) upstream.set(repo, new Set());
+  if (plan.repos && plan.repos.length > 0) {
+    const extras = new Set<string>();
+    for (const entry of plan.repos) {
+      extras.add(entry.repo);
+      for (const edge of entry.depends_on) extras.add(edge.repo);
+    }
+    for (const repo of [...extras].filter((repo) => !upstream.has(repo)).sort())
+      upstream.set(repo, new Set());
+    for (const entry of plan.repos)
+      for (const edge of entry.depends_on) upstream.get(entry.repo)!.add(edge.repo);
+  } else {
+    const repoOfStep = new Map(plan.steps.map((step) => [step.id, step.repo]));
+    for (const step of plan.steps)
+      for (const needed of step.needs) {
+        const neededRepo = repoOfStep.get(needed);
+        if (neededRepo !== undefined && neededRepo !== step.repo)
+          upstream.get(step.repo)!.add(neededRepo);
+      }
+  }
+  const repos = [...upstream.keys()];
+  const order: string[] = [];
+  while (order.length < repos.length) {
+    const next = repos.find(
+      (repo) =>
+        !order.includes(repo) &&
+        [...upstream.get(repo)!].every((dependency) => order.includes(dependency)),
+    );
+    if (next === undefined) {
+      const remaining = repos.filter((repo) => !order.includes(repo));
+      throw new ArkError(`the plan has a dependency cycle between repos: ${remaining.join(", ")}`);
+    }
+    order.push(next);
+  }
+  return { order, upstream };
+}
+
+/** Problems of the `repos` block. Each names the repo and the edge as `<downstream> -> <upstream>, <kind>`. */
+function repoProblems(plan: Plan, workspaceRepos: string[]): string[] {
+  const problems: string[] = [];
+  const edgeName = (repo: string, edge: PlanRepoEdge) => `${repo} -> ${edge.repo}, ${edge.kind}`;
+  const inWorkspace = (repo: string) => workspaceRepos.includes(repo);
+  const stepById = new Map(plan.steps.map((step) => [step.id, step]));
+  const listed = new Set<string>();
+  for (const entry of plan.repos) {
+    if (listed.has(entry.repo)) problems.push(`repos: ${entry.repo} is listed twice`);
+    listed.add(entry.repo);
+    if (!inWorkspace(entry.repo))
+      problems.push(`repos: ${entry.repo} is not a repo of the workspace`);
+    for (const edge of entry.depends_on) {
+      const name = edgeName(entry.repo, edge);
+      if (!inWorkspace(edge.repo))
+        problems.push(`repos: ${edge.repo} is not a repo of the workspace (${name})`);
+      if (!edgeKinds.includes(edge.kind))
+        problems.push(`repos: kind "${edge.kind}" is not ${edgeKinds.join(", ")} (${name})`);
+      if (!edge.pin) problems.push(`repos: edge has no pin (${name})`);
+      if (!edge.evidence) problems.push(`repos: edge has no evidence (${name})`);
+      if (edge.bump) {
+        const step = stepById.get(edge.bump);
+        if (!step) problems.push(`repos: bump ${edge.bump} names no step (${name})`);
+        else if (step.repo !== entry.repo)
+          problems.push(
+            `repos: bump ${edge.bump} is a step of ${step.repo}, not of ${entry.repo} (${name})`,
+          );
+      }
+    }
+  }
+  const reported = new Set<string>();
+  for (const step of plan.steps) {
+    if (step.repo && !listed.has(step.repo) && !reported.has(step.repo)) {
+      reported.add(step.repo);
+      problems.push(`repos: step ${step.id} is in ${step.repo}, which is not in the repos list`);
+    }
+  }
+
+  const dependsOn = new Map(plan.repos.map((entry) => [entry.repo, entry.depends_on]));
+  const finished = new Set<string>();
+  const path: string[] = [];
+  const visit = (repo: string) => {
+    const start = path.indexOf(repo);
+    if (start >= 0) {
+      const cycle = [...path.slice(start), repo];
+      const from = cycle.at(-2)!;
+      const closing = dependsOn.get(from)!.find((edge) => edge.repo === repo)!;
+      problems.push(`repos: repo cycle ${cycle.join(" -> ")} (${edgeName(from, closing)})`);
+      return;
+    }
+    if (finished.has(repo) || !dependsOn.has(repo)) return;
+    path.push(repo);
+    for (const edge of dependsOn.get(repo)!) visit(edge.repo);
+    path.pop();
+    finished.add(repo);
+  };
+  for (const entry of plan.repos) visit(entry.repo);
+
+  // A step of a downstream repo must follow, through needs, an implementer step of an upstream repo.
+  // Only an implementer counts as a change: validator and reviewer steps make no demand.
+  // The bump step of an edge must follow an implementer of that edge's repo; any other step of the
+  // downstream repo must follow an implementer of one of its upstream repos.
+  const ancestors = (id: string, seen = new Set<string>()): Set<string> => {
+    for (const need of stepById.get(id)?.needs ?? [])
+      if (!seen.has(need)) {
+        seen.add(need);
+        ancestors(need, seen);
+      }
+    return seen;
+  };
+  const implementers = (repo: string) =>
+    plan.steps.filter((step) => step.repo === repo && step.role === "implementer");
+  const follows = (stepId: string, repo: string) => {
+    const before = ancestors(stepId);
+    return implementers(repo).some((upstreamStep) => before.has(upstreamStep.id));
+  };
+  for (const entry of plan.repos) {
+    const edges = entry.depends_on.filter(
+      (edge) => edge.repo !== entry.repo && implementers(edge.repo).length > 0,
+    );
+    const bumps = new Set(edges.map((edge) => edge.bump));
+    for (const edge of edges) {
+      if (
+        edge.bump &&
+        stepById.get(edge.bump)?.repo === entry.repo &&
+        !follows(edge.bump, edge.repo)
+      )
+        problems.push(
+          `repos: no needs path from an implementer of ${edge.repo} to ${entry.repo} step ${edge.bump} (${edgeName(entry.repo, edge)})`,
+        );
+    }
+    if (edges.length === 0) continue;
+    for (const step of plan.steps.filter((candidate) => candidate.repo === entry.repo)) {
+      if (bumps.has(step.id) || edges.some((edge) => follows(step.id, edge.repo))) continue;
+      problems.push(
+        `repos: no needs path from an implementer of ${edges.map((edge) => edge.repo).join(", ")} to ${entry.repo} step ${step.id} (${edgeName(entry.repo, edges[0])})`,
+      );
+    }
+  }
+  return problems;
+}
+
 export function findProblems(
   plan: Plan,
   ticketCriteria: string[],
@@ -225,6 +433,7 @@ export function findProblems(
   manual: string[] = [],
   kind: TicketKind = "feature",
   links: { criteria: TicketCriterion[]; entries: CaseEntry[] } = { criteria: [], entries: [] },
+  workspaceRepos: string[] = [],
 ): string[] {
   const allowedPairs = [
     ...new Set(Object.values(configuredRoles).map((role) => `${role.harness}/${role.model}`)),
@@ -413,6 +622,14 @@ export function findProblems(
         problems.push(`step ${step.id} skills lacks ${missing.join(", ")}`);
     }
   }
+  if (plan.repos.length > 0) problems.push(...repoProblems(plan, workspaceRepos));
+  else if (multiRepo(plan)) {
+    try {
+      repoGraph(plan);
+    } catch (err) {
+      problems.push(`repos: ${(err as Error).message}; add a repos list`);
+    }
+  }
   return problems;
 }
 
@@ -512,7 +729,12 @@ export function renderPlanMarkdown(
   lines.push("", "## Evaluation", "");
   if (risks.length === 0) lines.push("No risks.");
   else for (const risk of risks) lines.push(`- ${risk.replaceAll("\n", " ")}`);
-  lines.push("", "## Steps", "", "```mermaid", renderMermaid(plan).trimEnd(), "```", "");
+  lines.push("", "## Steps", "");
+  if (multiRepo(plan)) {
+    const { order } = repoGraph(plan);
+    lines.push(`Merge order: ${order.map((repo, i) => `${i + 1} ${repo}`).join(" → ")}`, "");
+  }
+  lines.push("```mermaid", renderMermaid(plan).trimEnd(), "```", "");
   lines.push(
     `| Step | Role | Repo | Needs | Criteria |${withSkills ? " Skills |" : ""}`,
     `| --- | --- | --- | --- | --- |${withSkills ? " --- |" : ""}`,
@@ -527,6 +749,31 @@ export function renderPlanMarkdown(
     ];
     if (withSkills) cells.push(step.skills.join(", "));
     lines.push(`| ${cells.map(tableCell).join(" | ")} |`);
+  }
+  if (multiRepo(plan)) {
+    const { order } = repoGraph(plan);
+    lines.push("", "## Repos", "");
+    lines.push(
+      "| Order | Repo | Why | Depends on | Kind | Pin | Evidence | Bump |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    );
+    order.forEach((repo, i) => {
+      const entry = plan.repos.find((candidate) => candidate.repo === repo);
+      const edges = entry?.depends_on ?? [];
+      const rows =
+        edges.length > 0
+          ? edges.map((edge, j) => [
+              j === 0 ? (entry?.why ?? "") : "",
+              edge.repo,
+              edge.kind,
+              edge.pin,
+              edge.evidence,
+              edge.bump,
+            ])
+          : [[entry?.why ?? "", "none", "", "", "", ""]];
+      for (const row of rows)
+        lines.push(`| ${[String(i + 1), repo, ...row].map(tableCell).join(" | ")} |`);
+    });
   }
   lines.push("", "## Test cases", "");
   if (plan.test_cases.some((testCase) => testCase.action !== "")) {
@@ -568,18 +815,20 @@ export function planCheck(runId: string, inProject?: string): void {
   assertAllowed(state, "plan.checked", {});
   const plan = loadPlan(directory, state.ticket.id);
   const ticketCriteria = runCriteria(directory);
-  const cases = readWorkspaceCases(loadConfig(project).workspace);
+  const config = loadConfig(project);
+  const cases = readWorkspaceCases(config.workspace);
   const surfaces = state.evaluation?.surfaces ?? ["none"];
   const problems = findProblems(
     plan,
     state.criteria.map((criterion) => criterion.id),
     surfaces,
-    loadConfig(project).roles,
+    config.roles,
     ticketCriteria
       .filter((criterion) => criterion.method !== "test")
       .map((criterion) => criterion.id),
     state.kind,
     { criteria: ticketCriteria, entries: cases.entries },
+    discoverRepos(config.workspace),
   );
   problems.unshift(...cases.problems);
   const valid = problems.length === 0;
@@ -598,10 +847,10 @@ export function planCheck(runId: string, inProject?: string): void {
     })),
   });
   if (!valid) {
-    for (const problem of problems) console.log(problem);
-    throw new ArkError(
-      `plan is invalid: ${problems.length} problem${problems.length === 1 ? "" : "s"}`,
-    );
+    console.log(`plan refused: ${problems.length} problem${problems.length === 1 ? "" : "s"}`);
+    for (const problem of problems) console.log(`  ${problem}`);
+    process.exitCode = 1;
+    return;
   }
   writeFileSync(
     join(directory, "plan.md"),
@@ -614,10 +863,22 @@ export function planCheck(runId: string, inProject?: string): void {
       ticketCriteria,
     ),
   );
+  const { order, upstream } = repoGraph(plan);
   console.log(
-    `plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`,
+    `plan ok: ${plan.steps.length} steps, ${order.length} repo${order.length === 1 ? "" : "s"}, ${plan.test_cases.length} test cases`,
   );
-  if (loadConfig(project).gates.plan === "auto" && openDecisions === 0) {
+  if (order.length > 1) {
+    const width = Math.max(...order.map((repo) => repo.length)) + 3;
+    console.log("Merge order:");
+    order.forEach((repo, i) => {
+      const waits = order.filter((other) => upstream.get(repo)!.has(other));
+      const line = `  ${i + 1}  ${repo}`;
+      console.log(
+        waits.length > 0 ? `${line.padEnd(width + 5)}waits for: ${waits.join(", ")}` : line,
+      );
+    });
+  }
+  if (config.gates.plan === "auto" && openDecisions === 0) {
     appendEvent(directory, "gate.answered", { gate: "plan", answer: "approve", by: "auto" });
     console.log("gates.plan is auto: recorded plan approve by auto");
   }
