@@ -878,7 +878,9 @@ test("ARK-285-AC2 omp usage is read in the background for each provider and wind
       ],
     },
   });
+  process.env.ARK_PROVIDER_LIMITS_MS = "500";
   const { baseUrl } = await start();
+  delete process.env.ARK_PROVIDER_LIMITS_MS; // the hub holds its own copy
 
   const first = await snapshotWhen(
     baseUrl,
@@ -909,9 +911,9 @@ test("ARK-285-AC2 omp usage is read in the background for each provider and wind
     },
   ]);
 
-  // The second read happens 60 s after the first, and the fake exits 1 then.
+  // The second read happens one interval (ARK_PROVIDER_LIMITS_MS) after the first, and the fake exits 1 then.
   const countFile = join(state, "omp.count");
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + 20_000;
   while (Number(existsSync(countFile) ? readFileSync(countFile, "utf8") : 0) < 2) {
     expect(Date.now(), "omp usage was not read a second time").toBeLessThan(deadline);
     await Bun.sleep(500);
@@ -919,7 +921,7 @@ test("ARK-285-AC2 omp usage is read in the background for each provider and wind
   const failed = await snapshotWhen(baseUrl, (snapshot) => !snapshot.sources.providerLimits.ok);
   expect(failed.provider_limits).toEqual(first.provider_limits);
   expect(failed.sources.providerLimits.read_at).toBe(first.sources.providerLimits.read_at);
-}, 150_000);
+}, 60_000);
 
 test("ARK-285-AC3 each agent is waiting on a prompt, idle N min, working or unknown from orca worktree ps, and a failed read gives unknown and then keeps the last value", async () => {
   isolatedEnvironment();

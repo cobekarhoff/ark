@@ -164,7 +164,6 @@ test("ARK-277-AC3 handlers read only memory: p95 under 200 ms on 25 runs and 300
 test("ARK-277-AC4 the page sends no request but its first load and one event stream, and an appended event shows on Home within 5 s", async ({
   page,
 }) => {
-  test.setTimeout(300_000);
   isolate();
   const run = runId("ARK-201");
   const directory = writeRun({
@@ -211,8 +210,9 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
     ["Runs", "Runs"],
     ["Roadmap", "Roadmap"],
   ] as const;
+  // The page clock runs from here; the real Date.now steps (the Home append below) are the test's own, not the page's.
+  await page.clock.install();
   for (const [name, heading] of views) {
-    const viewStartedAt = Date.now();
     await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name }).click();
     await expect(page.getByRole("heading", { name: new RegExp(heading) }).first()).toBeVisible();
     if (name === "Home") {
@@ -227,8 +227,13 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
       await expect(page.getByTestId("mr")).toContainText("!77", { timeout: 5000 });
       expect(Date.now() - appendedAt).toBeLessThan(5000);
     }
-    // The AC is about 30 s of silence on each view: a real wait, there is no event to wait for.
-    await page.waitForTimeout(Math.max(0, 30_000 - (Date.now() - viewStartedAt)));
+    // The AC is about 30 s of silence on each view: advance the page clock, no real wait.
+    const before = requests.length;
+    await page.clock.fastForward(30_000);
+    expect(
+      requests.slice(before).map((request) => request.url()),
+      `${name} after 30 s`,
+    ).toEqual([]);
   }
 
   // No view reads anything after the first load: Runs and Roadmap draw from the snapshot, and the

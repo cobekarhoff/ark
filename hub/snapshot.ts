@@ -50,7 +50,8 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   plannotator: 5000,
   github: 15_000,
   usage: 5000,
-  providerLimits: 60_000,
+  // ARK_PROVIDER_LIMITS_MS shortens the refresh for tests; unset keeps 60 s.
+  providerLimits: Number(process.env.ARK_PROVIDER_LIMITS_MS) || 60_000,
   agentWait: 3000,
   evidence: 5000,
 };

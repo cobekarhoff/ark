@@ -6,7 +6,7 @@ technique: matrix of theme (light, dark) times view (Home, Runs, ticket page), r
 priority: medium
 risk: "a theme switch or a view change sends a request the page does not need, the theme does not follow the system or does not survive a reload, text drops below the contrast limit in one theme, or the ticket page reads its document more than once for one visit"
 status: active
-changed_by: 2026-11-07-ARK-329-1
+changed_by: 2026-11-08-ARK-331-1
 ---
 
 ## Objective
@@ -24,7 +24,7 @@ Expected: When the theme or the view changes, the system shall send no request e
 1. Open Home in the light system scheme. Assert Auto is pressed, and that the background differs between the system light and dark schemes.
 2. For Light and Dark in turn: click the theme button; for Home, Runs and `#/ticket/ARK-512` open the view, wait for its content and assert no text has weak contrast.
 3. Assert the requests since step 2 began are exactly two reads of `/api/ticket/p/ARK-512` (one for each opening of the ticket page) and nothing else.
-4. Assert the Dark hover contrast of the primary button and Open in Orca, and that the theme survives a reload.
+4. Assert the Dark hover contrast of the primary button and Open in Orca, and that the theme survives a reload. Before reading each hover colour, wait for the first action to be visible and for the colour transition to end (a state wait, no fixed delay); the result must not depend on when the first snapshot arrives (late-snapshot proof: ARK-T128).
 
 ## Expected results
 
