@@ -78,7 +78,13 @@ export type RunState = {
   red_test: boolean;
   /** Suites at the base commit of a refactor run: undefined until `ark test` ran them. */
   base_passed?: boolean;
-  merge_requests: { repo: string; url: string; number: number }[];
+  merge_requests: {
+    repo: string;
+    url: string;
+    number: number;
+    order?: number;
+    waits_for?: number[];
+  }[];
   outcome: string | null;
   implementer?: "human";
   events: number;
@@ -299,7 +305,13 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "merge_request.opened":
         if (mergeRequests.length === 0) escalationAnswered = false;
-        mergeRequests.push({ repo: data.repo, url: data.url, number: data.number });
+        mergeRequests.push({
+          repo: data.repo,
+          url: data.url,
+          number: data.number,
+          ...(data.order === undefined ? {} : { order: data.order }),
+          ...(data.waits_for === undefined ? {} : { waits_for: data.waits_for }),
+        });
         break;
       case "run.closed":
         outcome = data.outcome;
