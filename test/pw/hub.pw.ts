@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -1442,7 +1443,7 @@ const usageAt = (fraction: number, baseInstant = Date.now()) => ({
 });
 
 /** Home with 1 gate, 1 stuck agent (a prompt), 2 MRs in review and the 5h window of anthropic at 82%. The usage reset is `baseInstant` + 74 min: the page compares it with its own clock, every age with the server's. */
-async function homeWithBlockers(baseInstant = Date.now()) {
+async function homeWithBlockers(baseInstant = Date.now(), holdOrca = false) {
   isolate();
   const gate = writeRun({
     project: "p",
@@ -1512,7 +1513,7 @@ async function homeWithBlockers(baseInstant = Date.now()) {
       },
     ],
   };
-  installFakeTools({
+  const tools = installFakeTools({
     orca,
     mergeRequestViews: { [older.url]: older.view, [newer.url]: newer.view },
     ompUsage: usageAt(0.82, baseInstant),
@@ -1520,7 +1521,10 @@ async function homeWithBlockers(baseInstant = Date.now()) {
       { index: 1, target: join(gate, "ticket.md"), url: "http://localhost:20000/review/gate" },
     ],
   });
-  return { baseUrl: await launch(), older, newer, stuckRun };
+  // A test-owned gate: every fake Orca call waits until the test removes this file, so the first snapshot is late.
+  const orcaGate = join(tools, "orca.gate");
+  if (holdOrca) writeFileSync(orcaGate, "");
+  return { baseUrl: await launch(), older, newer, stuckRun, orcaGate };
 }
 
 /** The fixture and the page clock share one instant in UTC, so the reset form (HH:MM or date and time) never depends on when the suite runs. */
@@ -1976,7 +1980,7 @@ test("ARK-T26 Roadmap lists the tickets by horizon, keys move and open them, a t
   await expect(page.locator("main h1")).toHaveText("Title of ARK-704");
 });
 
-test("ARK-285-AC9 the run page puts a progress strip, the vertical step plan, then agents, MR evidence and a link to the ticket in the hybrid-1 layout, and keeps the decisions, run files and Open in Orca", async ({
+test("ARK-T131 ARK-285-AC9 the run page puts a progress strip, the vertical step plan, then agents, MR evidence and a link to the ticket in the hybrid-1 layout, and keeps the decisions, run files and Open in Orca", async ({
   page,
 }) => {
   isolate();
@@ -2073,17 +2077,31 @@ test("ARK-285-AC9 the run page puts a progress strip, the vertical step plan, th
   );
   await expect(page.locator("main")).not.toContainText(/\bETA\b/);
 
+  // A test-owned late layout (nothing in product code): once released, a 400 ms transition grows the strip by 1000 px and moves the plan and the side column.
+  await page.addStyleTag({
+    content:
+      ".strip { transition: padding-bottom 400ms, margin-right 400ms; } html.late .strip { padding-bottom: 1000px; margin-right: 40px; }",
+  });
+  const stripSelector = ".strip";
+  const [stripBefore] = await settledBoxes(page, [stripSelector]);
+  await page.evaluate(() => document.documentElement.classList.add("late"));
+  await checkpoint(page, "layout-released");
+  // Read every box in one frame, after the late layout settled.
+  const [first, second, third, stripBox, agents] = await settledBoxes(page, [
+    '[data-testid="step-node"][data-step="first"]',
+    '[data-testid="step-node"][data-step="second"]',
+    '[data-testid="step-node"][data-step="third"]',
+    stripSelector,
+    '[data-testid="agents"]',
+  ]);
+  // The forced change happened: the strip grew by the 1000 px the hook adds.
+  expect(stripBox.height).toBeGreaterThanOrEqual(stripBefore.height + 999);
+  await checkpoint(page, "layout-settled");
   // The vertical plan: one step below the other, the strip above the plan, the plan left of the side column.
-  const box = async (selector: string) => (await page.locator(selector).boundingBox())!;
-  const first = await box('[data-testid="step-node"][data-step="first"]');
-  const second = await box('[data-testid="step-node"][data-step="second"]');
-  const third = await box('[data-testid="step-node"][data-step="third"]');
   expect(second.y).toBeGreaterThan(first.y + first.height);
   expect(third.y).toBeGreaterThan(second.y + second.height);
   expect(Math.abs(first.x - third.x)).toBeLessThan(2);
-  const stripBox = (await strip.boundingBox())!;
   expect(first.y).toBeGreaterThan(stripBox.y + stripBox.height);
-  const agents = await box('[data-testid="agents"]');
   expect(agents.x).toBeGreaterThan(first.x + first.width);
 
   // The side column: agents with Open in Orca, the merge request, a link to the ticket page.
@@ -2186,7 +2204,8 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   page,
 }) => {
   test.setTimeout(120_000);
-  const { baseUrl } = await homeWithBlockers();
+  // The fake Orca is held: the first snapshot is late until the test releases it.
+  const { baseUrl, orcaGate } = await homeWithBlockers(Date.now(), true);
   for (const [id, status] of [
     ["ARK-511", "ready"],
     ["ARK-512", "ready"],
@@ -2205,6 +2224,11 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   page.on("request", (request) => requests.push(new URL(request.url()).pathname));
   await page.emulateMedia({ colorScheme: "light" });
   await open(page, baseUrl, "");
+  // Held: the agent probe has not answered, so no action button exists yet.
+  const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
+  await expect(page.getByTestId("stuck")).toHaveCount(1, { timeout: 20_000 });
+  await expect(actions).toHaveCount(0);
+  rmSync(orcaGate);
   // Wait for every panel the contrast check must see.
   await expect(page.getByTestId("stuck")).toHaveCount(1, { timeout: 20_000 });
   await expect(page.getByTestId("review").first().getByTestId("tests")).toHaveText(
@@ -2259,13 +2283,20 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   await theme("Dark").click();
   await open(page, baseUrl, "");
   await expect(page.getByTestId("stuck")).toHaveCount(1);
-  const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
   // The buttons render after the stuck row once the agent probe answers: wait, don't count once.
   await expect(actions.first()).toBeVisible({ timeout: 20_000 });
   for (let index = 0; index < (await actions.count()); index++) {
     const action = actions.nth(index);
     await action.hover();
-    await page.waitForTimeout(400); // the color transition has ended
+    // Hover state reached, then the color transition (a Web Animation) finished.
+    await expect.poll(() => action.evaluate((element) => element.matches(":hover"))).toBe(true);
+    await action.evaluate(async (element) => {
+      await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
+      await Promise.all(
+        element.getAnimations().map((fade) => fade.finished.catch(() => undefined)),
+      );
+    });
+    await checkpoint(page, "hover-state-final");
     const ratio = await action.evaluate((element) => {
       const channels = (css: string) =>
         css
@@ -5014,3 +5045,30 @@ test("ARK-T78 ARK-329/AC3 the ticket page shows the snapshot title at once, show
   await expect(problem).toHaveText("Third text", { timeout: 5000 });
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
+
+type Box = { x: number; y: number; width: number; height: number };
+
+/** The boxes of the selectors in one frame, read once no animation runs and the geometry is equal across two frames. */
+async function settledBoxes(page: Page, selectors: string[]): Promise<Box[]> {
+  return page.evaluate(async (list) => {
+    const read = () =>
+      JSON.stringify(
+        list.map((selector) => {
+          const { x, y, width, height } = document.querySelector(selector)!.getBoundingClientRect();
+          return { x, y, width, height };
+        }),
+      );
+    const frame = () => new Promise((done) => requestAnimationFrame(done));
+    let last = "";
+    for (;;) {
+      await document.fonts.ready;
+      await Promise.all(
+        document.getAnimations().map((fade) => fade.finished.catch(() => undefined)),
+      );
+      await frame();
+      const now = read();
+      if (now === last && document.getAnimations().length === 0) return JSON.parse(now);
+      last = now;
+    }
+  }, selectors);
+}

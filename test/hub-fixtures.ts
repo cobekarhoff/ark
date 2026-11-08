@@ -411,6 +411,8 @@ export function fakeToolScripts(state: string): {
 } {
   return {
     orca: `echo "$*" >> '${state}/orca.log'
+# A test holds every call by creating orca.gate and releases them by removing it.
+while [ -e '${state}/orca.gate' ]; do sleep 0.05; done
 sleep "$(cat '${state}/orca.sleep')"
 cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
 ${modeGate(state, "orca", "$cmd")}
