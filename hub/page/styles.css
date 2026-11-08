@@ -2730,3 +2730,57 @@ a.case-chip:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- ticket text: loading and unreadable ---------- */
+.doc-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  color: var(--dim);
+}
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line-2);
+  border-top-color: var(--link);
+  border-radius: 50%;
+}
+.sk {
+  display: block;
+  height: 12px;
+  margin: 10px 0;
+  border-radius: 4px;
+  background: var(--panel-3);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .spinner {
+    animation: doc-spin 700ms linear infinite;
+  }
+  .sk {
+    animation: doc-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes doc-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes doc-pulse {
+    50% {
+      opacity: 0.5;
+    }
+  }
+}
+.doc-alert {
+  max-width: 72ch;
+  margin-top: 24px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--red-bg);
+  color: var(--red-t);
+}
+.doc-alert strong {
+  display: block;
+  margin-bottom: 2px;
+}

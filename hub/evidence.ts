@@ -7,6 +7,7 @@ import { evidenceProblem } from "../cli/merge-request.ts";
 import { projectDirectory } from "../cli/paths.ts";
 import { isInside } from "../cli/usage/index.ts";
 import { resolveEvidenceImage } from "./run-detail.ts";
+import type { TicketFile } from "./sources.ts";
 import type {
   CaseRef,
   CaseResult,
@@ -83,11 +84,15 @@ function settingsOf(
 }
 
 /** Every AC of the project that lists a case in `verified_by`, by case id. Memory only. */
-function verifiersOf(tickets: TicketView[], project: string): Map<string, CaseRef[]> {
+function verifiersOf(
+  tickets: TicketView[],
+  files: Map<TicketView, TicketFile>,
+  project: string,
+): Map<string, CaseRef[]> {
   const verifiers = new Map<string, CaseRef[]>();
   for (const ticket of tickets) {
     if (ticket.project !== project) continue;
-    for (const criterion of ticket.document?.criteria ?? [])
+    for (const criterion of files.get(ticket)?.document?.criteria ?? [])
       for (const id of criterion.verified_by)
         verifiers.set(id, [
           ...(verifiers.get(id) ?? []),
@@ -197,15 +202,18 @@ export async function readTicketCases(
   project: string,
   ticketId: string,
   tickets: TicketView[],
+  files: Map<TicketView, TicketFile>,
   newestRunDirectory: string | null,
 ): Promise<TicketCases | null> {
   const ticket = tickets.find((entry) => entry.project === project && entry.id === ticketId);
   if (!ticket) return null;
   const ids = [
-    ...new Set((ticket.document?.criteria ?? []).flatMap((criterion) => criterion.verified_by)),
+    ...new Set(
+      (files.get(ticket)?.document?.criteria ?? []).flatMap((criterion) => criterion.verified_by),
+    ),
   ];
   const { source, roots } = settingsOf(project, newestRunDirectory);
-  const verifiers = verifiersOf(tickets, project);
+  const verifiers = verifiersOf(tickets, files, project);
   const verifies = (id: string) => verifiers.get(id) ?? [];
 
   if (source === "zephyr") {
@@ -407,8 +415,9 @@ export function readRunEvidence(
   project: string,
   ticketId: string,
   tickets: TicketView[],
+  files: Map<TicketView, TicketFile>,
 ): RunTestEvidence {
-  const verifiers = verifiersOf(tickets, project);
+  const verifiers = verifiersOf(tickets, files, project);
   let planned: PlanCaseEvidence[] = [];
   try {
     // Read leniently, as the other hub readers do: a plan that `ark plan check` would refuse still shows its rows.

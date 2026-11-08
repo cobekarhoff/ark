@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { canonicalCriterion } from "../cli/criterion-id.ts";
 import { execJson } from "../cli/exec.ts";
 import { deriveState, type ArkEvent, type RunState } from "../cli/events.ts";
@@ -20,6 +20,7 @@ import type {
   ProofCase,
   ProjectRoadmap,
   ProviderWindow,
+  TicketDocument,
   TicketView,
   Wait,
 } from "./types.ts";
@@ -42,8 +43,11 @@ export type ArkRun = {
 export type ArkValue = {
   runs: ArkRun[];
   tickets: TicketView[];
+  /** Memory only, never serialized: each listed ticket's file and parsed document (null when unreadable). */
+  ticketFiles: Map<TicketView, TicketFile>;
   roadmap: Record<string, ProjectRoadmap>;
 };
+export type TicketFile = { file: string; document: TicketDocument | null };
 
 const ticketSources = ["local", "github", "jira"];
 
@@ -56,13 +60,75 @@ export const signatureOf = (file: string): string | null => {
   }
 };
 
+type ParsedTicket = { ticket: TicketView; document: TicketDocument | null };
+
+/** A ticket file's text as the hub shows it: a file without a readable id and title is `unreadable`, with no document. */
+export function parseTicket(
+  project: string,
+  name: string,
+  signature: string,
+  source: string,
+): ParsedTicket {
+  try {
+    const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const fields = match ? (Bun.YAML.parse(match[1]) as Record<string, unknown> | null) : null;
+    if (fields && typeof fields.id === "string" && typeof fields.title === "string") {
+      return {
+        ticket: {
+          project,
+          id: fields.id,
+          title: withoutCodeMarks(fields.title),
+          status: typeof fields.status === "string" ? fields.status : "unknown",
+          kind: typeof fields.kind === "string" ? fields.kind : null,
+          milestone: typeof fields.milestone === "string" ? fields.milestone : null,
+          depends_on: Array.isArray(fields.depends_on) ? fields.depends_on.map(String) : [],
+          why: whyOf(source),
+          signature,
+        },
+        document: parseTicketDocument(source),
+      };
+    }
+  } catch {
+    // A ticket file that does not parse shows as unreadable and hides no other ticket.
+  }
+  return {
+    ticket: {
+      project,
+      id: name.replace(/\.md$/, ""),
+      title: null,
+      status: "unreadable",
+      kind: null,
+      milestone: null,
+      depends_on: [],
+      why: null,
+      signature,
+    },
+    document: null,
+  };
+}
+
+/** The document of a listed ticket, read from its file now. Null when the file is gone; `{ document: null }` when it does not parse. */
+export function readTicketDocument(entry: TicketFile): { document: TicketDocument | null } | null {
+  try {
+    return {
+      document: parseTicket("", basename(entry.file), "", readFileSync(entry.file, "utf8"))
+        .document,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Reads Ark's files again only where a file changed (size and mtime). A run whose log is being
  * written at this moment can end on a half line: that run keeps its last good value.
  */
 export function createArkReader() {
   const runCache = new Map<string, { signature: string; run: ArkRun }>();
-  const ticketCache = new Map<string, { signature: string; ticket: TicketView | null }>();
+  const ticketCache = new Map<
+    string,
+    { signature: string; ticket: TicketView; document: TicketDocument | null }
+  >();
   const fileCache = new Map<string, { signature: string; text: string | null }>();
 
   /** A text file read again only when its size or mtime changed; null when it is missing or unreadable. */
@@ -141,44 +207,19 @@ export function createArkReader() {
     }
   }
 
-  function readTicket(project: string, file: string, name: string): TicketView | null {
+  function readTicket(project: string, file: string, name: string) {
     const signature = signatureOf(file);
     if (signature === null) return null;
     const known = ticketCache.get(file);
-    if (known?.signature === signature) return known.ticket;
-    const unreadable: TicketView = {
-      project,
-      id: name.replace(/\.md$/, ""),
-      title: null,
-      status: "unreadable",
-      milestone: null,
-      depends_on: [],
-      why: null,
-      document: null,
-    };
-    let ticket = unreadable;
+    if (known?.signature === signature) return known;
+    let parsed: ParsedTicket;
     try {
-      const source = readFileSync(file, "utf8");
-      const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-      const fields = match ? (Bun.YAML.parse(match[1]) as Record<string, unknown> | null) : null;
-      if (fields && typeof fields.id === "string" && typeof fields.title === "string") {
-        ticket = {
-          project,
-          id: fields.id,
-          title: withoutCodeMarks(fields.title),
-          status: typeof fields.status === "string" ? fields.status : "unknown",
-          milestone: typeof fields.milestone === "string" ? fields.milestone : null,
-          depends_on: Array.isArray(fields.depends_on) ? fields.depends_on.map(String) : [],
-          why: whyOf(source),
-          // From the file this reader opened, never from a path built out of the front-matter id.
-          document: parseTicketDocument(source),
-        };
-      }
+      parsed = parseTicket(project, name, signature, readFileSync(file, "utf8"));
     } catch {
-      // A ticket file that does not parse shows as unreadable and hides no other ticket.
+      parsed = parseTicket(project, name, signature, "");
     }
-    ticketCache.set(file, { signature, ticket });
-    return ticket;
+    ticketCache.set(file, { signature, ...parsed });
+    return parsed;
   }
 
   return {
@@ -186,6 +227,7 @@ export function createArkReader() {
     read(): ArkValue {
       const runs: ArkRun[] = [];
       const tickets: TicketView[] = [];
+      const ticketFiles = new Map<TicketView, TicketFile>();
       const roadmap: Record<string, ProjectRoadmap> = {};
       for (const project of listProjects()) {
         const runsRoot = runsDirectory(project);
@@ -200,8 +242,11 @@ export function createArkReader() {
         if (existsSync(ticketsRoot)) {
           for (const name of readdirSync(ticketsRoot).sort()) {
             if (!ticketFile.test(name)) continue;
-            const ticket = readTicket(project, join(ticketsRoot, name), name);
-            if (ticket) projectTickets.push(ticket);
+            const file = join(ticketsRoot, name);
+            const read = readTicket(project, file, name);
+            if (!read) continue;
+            projectTickets.push(read.ticket);
+            ticketFiles.set(read.ticket, { file, document: read.document });
           }
         }
         tickets.push(...projectTickets);
@@ -210,7 +255,7 @@ export function createArkReader() {
       runs.sort((left, right) =>
         right.state.run.localeCompare(left.state.run, undefined, { numeric: true }),
       );
-      return { runs, tickets, roadmap };
+      return { runs, tickets, ticketFiles, roadmap };
     },
     /** Folders to watch: each run folder (events.ndjson, plan.yml), the runs roots, the tickets folders and each project folder (ROADMAP.md, ark.yml). */
     watchPaths(): string[] {

@@ -144,6 +144,7 @@ export type FixtureTicket = {
   id: string;
   title: string;
   status: string;
+  kind?: string;
   milestone?: string;
   dependsOn?: string[];
   /** Text under `## Problem` and `## Change`. */
@@ -181,6 +182,7 @@ export function writeBacklogTicket(ticket: FixtureTicket): string {
     `id: ${ticket.id}`,
     `title: ${JSON.stringify(ticket.title)}`,
     `status: ${ticket.status}`,
+    ...(ticket.kind ? [`kind: ${ticket.kind}`] : []),
     ...(ticket.milestone ? [`milestone: ${ticket.milestone}`] : []),
     ...(ticket.dependsOn?.length ? [`depends_on: [${ticket.dependsOn.join(", ")}]`] : []),
     ...(ticket.criteria?.length

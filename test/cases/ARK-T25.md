@@ -1,17 +1,17 @@
 ---
 id: ARK-T25
-title: ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside
+title: ARK-T25 ticket text and criteria are read from the ticket's own file and served by /api/ticket/<project>/<id>, never in the snapshot, and a front-matter id with ../ reads nothing outside
 level: integration
-technique: equivalence classes of ticket id (plain, front-matter id with ../) times read path (snapshot, /api/ticket/<project>/<id>); boundary of a path that leaves the ticket folder
+technique: equivalence classes of ticket id (plain, front-matter id with ../) times read path (server document map, /api/ticket/<project>/<id>); boundary of a path that leaves the ticket folder
 priority: high
-risk: "the snapshot drops a criterion field (id, text, method, verified_by), a ticket reads text of a file outside its own folder through a planted front-matter id, or a bare /api/ticket/<project>/<id> route answers and serves ticket text a second way"
+risk: "the parsed document drops a criterion field (id, text, method, verified_by), or a ticket reads text of a file outside its own folder through a planted front-matter id"
 status: active
-changed_by: 2026-11-06-ARK-314-1
+changed_by: 2026-11-07-ARK-329-1
 ---
 
 ## Objective
 
-Prove the hub sends the text and criteria of each backlog ticket in its snapshot, read from the ticket's own file with criteria as `{id, text, method, verified_by}`, that nothing outside the ticket folder is read through a planted front-matter id, and that no ticket text route exists beside the snapshot (only `/api/ticket/<project>/<id>/cases` is read on request, proven in ARK-T24).
+Prove the hub reads the text and criteria of each backlog ticket from the ticket's own file with criteria as `{id, text, method, verified_by}`, serves them through `/api/ticket/<project>/<id>`, and that nothing outside the ticket folder is read through a planted front-matter id. The snapshot carries no document (ARK-T76); the route's 404 cases are proven in ARK-T77.
 
 ## Preconditions
 
@@ -23,17 +23,15 @@ Prove the hub sends the text and criteria of each backlog ticket in its snapshot
 ## Steps
 
 1. Wait for the snapshot to list two tickets.
-2. Read the `document` of `Readable`. Assert it equals problem `Why it hurts`, change `What changes` and one criterion `{id: AC1, text: It works, method: test, verified_by: []}` (the old id reads as local `AC1`, the default method is `test`).
-3. Read the `document` of `Planted`. Assert its problem is `Own text`.
-4. Assert the serialized snapshot never contains `OUTSIDE TICKET DIRECTORY`.
-5. Request `/api/ticket/p/ARK-840` and `/api/ticket/p/..%2F..%2F..%2Foutside`. Assert both answer 404.
+2. Request `/api/ticket/p/ARK-840` and read the `document`. Assert it equals problem `Why it hurts`, change `What changes` and one criterion `{id: AC1, text: It works, method: test, verified_by: []}` (the old id reads as local `AC1`, the default method is `test`).
+3. Request the route for `Planted` by its file's listed id. Assert its problem is `Own text`.
+4. Assert the serialized snapshot and every route body never contain `OUTSIDE TICKET DIRECTORY`.
 
 ## Expected results
 
-- When the hub reads a ticket, the system shall send its criteria with id, text, method and `verified_by` in the snapshot.
+- When the hub serves a ticket document, the system shall send its criteria with id, text, method and `verified_by`.
 - The system shall read the text of a ticket only from the ticket's own file, never from a path that a front-matter id names outside the ticket folder.
-- The system shall answer 404 for a ticket text request outside the snapshot.
 
 ## Screenshot checkpoints
 
-none: integration case on the snapshot and the HTTP route; the page rendering of a criterion is proven in ARK-T28 and ARK-T26.
+none: integration case on the HTTP route; the page rendering of a criterion is proven in ARK-T28 and ARK-T26.
