@@ -15,14 +15,14 @@ await runCli(
     exits: [
       "every check passed (or none is configured)",
       "a check failed, or a config key or value is bad (no check ran)",
-      "environment: every configured check is not_run (its tool is missing)",
+      "environment: no check failed and a check is not_run (its tool is missing)",
     ],
     schema: {
       title: "review output",
       type: "object",
       required: ["ok", "checks"],
       properties: {
-        ok: { type: "boolean", description: "false when any check has status fail" },
+        ok: { type: "boolean", description: "false when any check has status fail or not_run" },
         checks: {
           type: "array",
           items: {
@@ -60,13 +60,13 @@ await runCli(
         `${check.command} ... ${check.status === "not_run" ? "not run" : `exit ${check.exit_code}`}`,
       );
     const count = (status: string) => checks.filter((check) => check.status === status).length;
-    const ok = count("fail") === 0;
+    const ok = count("fail") === 0 && count("not_run") === 0;
     say(
       name,
       `${checks.length} checks: ${count("pass")} passed, ${count("fail")} failed, ${count("not_run")} not_run. No file changed.`,
     );
     emit({ ok, checks });
-    if (checks.length > 0 && count("not_run") === checks.length) return 2;
-    return ok ? 0 : 1;
+    if (count("fail") > 0) return 1;
+    return ok ? 0 : 2;
   },
 );

@@ -410,6 +410,33 @@ test("ARK-T69 ARK-317/AC3 gather --existing-only prints the open MR, or nothing,
   expect(readFileSync(fixture.ledgerFile, "utf8")).toBe(before);
 });
 
+test("ARK-T69 ARK-317/AC3 a normal gather exits 2 with a probe-failed JSON when the host refuses, and keeps the ledger", () => {
+  const fixture = gitlabRepo();
+  fixture.setState({ fail: true });
+  const result = fixture.script("gather", "--base", "main");
+  expect(result.code).toBe(2);
+  const output = parseJson(result.stdout);
+  expect(output.error).toBe("probe failed");
+  expect(output).not.toHaveProperty("existing_mr");
+  expect(result.stderr).toContain("401 Unauthorized");
+  expect(existsSync(fixture.ledgerFile)).toBe(true);
+
+  // An absent MR is still exit 0 with existing_mr null.
+  fixture.setState({});
+  const none = fixture.script("gather", "--base", "main");
+  expect(none.code).toBe(0);
+  expect(parseJson(none.stdout).existing_mr).toBeNull();
+});
+
+test("ARK-T69 ARK-317/AC3 review exits 2 with ok false when no check failed and one is not_run", () => {
+  const fixture = gitlabRepo(checksConfig("true", "no-such-tool-xyz --version"));
+  const result = fixture.script("review");
+  expect(result.code).toBe(2);
+  const output = parseJson(result.stdout) as { ok: boolean; checks: CheckRecord[] };
+  expect(output.ok).toBe(false);
+  expect(output.checks.map((check) => check.status)).toEqual(["pass", "not_run"]);
+});
+
 test("ARK-T69 ARK-317/AC3 review records pass, fail with the last 50 lines and not_run in order, and changes no file", () => {
   const fixture = gitlabRepo(
     checksConfig("true", printLines(120, 1), "no-such-tool-xyz --version"),

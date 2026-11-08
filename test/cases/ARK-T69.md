@@ -39,7 +39,9 @@ Expected: When the open-MR probe fails, `gather.ts --existing-only` shall exit 2
 - Step 1: exit 0, `.pr-writing/ledger.json` exists, its head equals `git rev-parse HEAD`, base is `main`, it lists the two commits and the changed files, and stdout is one JSON document with `ledger`, `head`, `base`, `host`, `files`, `existing_mr`.
 - Step 2: the ledger holds the Ark run data (tests, findings, evidence), not the git-only ledger.
 - Step 3: with an open MR stdout is `{"iid":412,...,"draft":true,...}` and exit 0; with none stdout is empty, stderr says `no open MR`, exit 0; with the probe failing exit 2, stdout `{"error":"probe failed",...}`, and no ledger file is written or changed.
-- Step 4: exit 1, `ok: false`, three records in order: `pass` with `exit_code` 0; `fail` with `exit_code` 1 and an `output_tail` of exactly 50 lines ending `line 120`; `not_run` with `exit_code` null and a tail naming the missing tool. Each record holds the command string. The missing tool does not make the run exit 2 by itself.
+- Step 3 (normal gather with the probe failing, no `--existing-only`): exit 2, stdout one JSON object with `"error":"probe failed"` and no `existing_mr` key, stderr holds `401 Unauthorized`, and the ledger stays written. With no open MR a normal gather still exits 0 with `existing_mr` null.
+- Step 4: exit 1, `ok: false`, three records in order: `pass` with `exit_code` 0; `fail` with `exit_code` 1 and an `output_tail` of exactly 50 lines ending `line 120`; `not_run` with `exit_code` null and a tail naming the missing tool. Each record holds the command string. The missing tool does not turn the exit 1 into 2.
+- Step 4 variant (a `pass` and a `not_run`, no `fail`): exit 2 and `ok: false`.
 - Step 5: the snapshot is identical (no file added, removed or changed, `git status --porcelain` is empty), including after the failing check.
 - Step 6: tails hold 49, 50 and 50 lines.
 - Step 7: exit 0 and `ok: true`.

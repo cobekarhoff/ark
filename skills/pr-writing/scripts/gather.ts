@@ -37,11 +37,11 @@ await runCli(
     },
     examples: ["", "--base develop", "--run-dir ~/.ark/projects/app/runs/RUN", "--existing-only"],
     stdout:
-      '{"ledger":".pr-writing/ledger.json","head":"...","base":"...","host":"...","files":6,"existing_mr":null}; with --existing-only {"iid":412,"url":"...","draft":true,"head":"..."} or nothing',
+      '{"ledger":".pr-writing/ledger.json","head":"...","base":"...","host":"...","files":6,"existing_mr":null}; on a probe failure the same without existing_mr plus {"error":"probe failed","detail":"..."}; with --existing-only {"iid":412,"url":"...","draft":true,"head":"..."} or nothing',
     exits: [
       "ledger written (or MR printed, or no MR)",
       "bad argument or config key, not on a branch, empty diff",
-      "environment: not a git repo, unknown host, auth, network, probe failed (--existing-only)",
+      "environment: not a git repo, unknown host, auth or network (probe failed; the ledger stays written)",
     ],
     schema: {
       title: "gather output",
@@ -54,7 +54,8 @@ await runCli(
         files: { type: "integer" },
         existing_mr: {
           type: ["object", "null"],
-          description: "the open MR, or null when none or the probe failed",
+          description:
+            "the open MR, or null when none; absent when the probe failed (error: probe failed)",
         },
         iid: { type: "integer", description: "--existing-only: MR number" },
         url: { type: "string" },
@@ -140,22 +141,28 @@ function run(values: { base?: string; "run-dir"?: string; "existing-only"?: bool
   say(name, `wrote ${ledgerPath(root)} (head ${repo.head.slice(0, 7)})`);
 
   let existing = null;
+  let probeFailure: string | null = null;
   if (host !== "unknown") {
     try {
       const open = probeOpenMergeRequest({ host, directory: root, branch });
       existing = open && { iid: open.number, url: open.url, draft: open.draft, head: open.head };
     } catch (error) {
       if (!(error instanceof ProbeFailure)) throw error;
-      say(name, `warning: ${error.message}`);
+      say(name, `${error.message} (the ledger is written, the MR state is unknown)`);
+      probeFailure = error.message;
     }
   }
-  emit({
+  const summary = {
     ledger: ".pr-writing/ledger.json",
     head: repo.head,
     base: repo.base,
     host: full.host,
     files: repo.files.length,
-    existing_mr: existing,
-  });
+  };
+  if (probeFailure !== null) {
+    emit({ ...summary, error: "probe failed", detail: probeFailure });
+    return 2;
+  }
+  emit({ ...summary, existing_mr: existing });
   return 0;
 }
