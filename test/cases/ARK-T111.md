@@ -21,8 +21,8 @@ Prove that `ark worktree create` initialises the submodules of the worktree it m
 
 ## Steps
 
-1. Run `ark worktree create` for the consumer repo.
-2. List `vendor/lib` in the new consumer worktree and read `git -C vendor/lib rev-parse HEAD` and `git ls-tree HEAD vendor/lib`.
+1. In the consumer's source checkout read `git ls-files --stage -- vendor/lib` (the recorded gitlink). Run `ark worktree create` for the consumer repo.
+2. In the new consumer worktree list `vendor/lib` and read `git -C vendor/lib rev-parse HEAD`, `git ls-files --stage -- vendor/lib`, `git diff --cached --raw` and `git status --porcelain`.
 3. Run `ark worktree create` for the plain repo and compare its worktree with the same command's result before the change (files, events).
 4. Make a second consumer whose recorded submodule commit does not exist in any reachable source (remove the object from the source clone's modules and point `.gitmodules` at a missing path). Run `ark worktree create` for it.
 5. Run `ark worktree create` for that repo a second time.
@@ -31,7 +31,7 @@ Prove that `ark worktree create` initialises the submodules of the worktree it m
 
 - After step 1 the command shall exit 0 and `vendor/lib` shall hold the library's files.
 - The submodule HEAD shall equal the commit recorded in the consumer's index (the first library commit), not the library's newest commit.
-- The index entry for `vendor/lib` shall be unchanged.
+- The worktree's `git ls-files --stage -- vendor/lib` shall equal the step 1 value, `git diff --cached --raw` shall be empty, and `git status --porcelain` shall show no staged `vendor/lib` change (the index, not only HEAD, is unchanged).
 - The plain repo's worktree shall be made as before: same files, no submodule step, no submodule output.
 - In step 4 the command shall exit non-zero, name the consumer, the submodule path and the git cause, and the worktree folder shall still exist with its `worktree.created` event recorded.
 - In step 5 the kept worktree shall not be removed as stale.
