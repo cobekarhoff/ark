@@ -77,13 +77,16 @@ async function stopChildren(): Promise<void> {
 
 async function run(command: string[], cwd: string, env?: Record<string, string>) {
   if (stopping) await new Promise<never>(() => {});
+  // bun test --parallel workers set JEST_WORKER_ID; Playwright refuses to start when it sees it.
+  const childEnv: Record<string, string | undefined> = { ...process.env, ...env };
+  delete childEnv.JEST_WORKER_ID;
   const child = Bun.spawn(command, {
     cwd,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
     detached: true,
-    ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
+    env: childEnv,
   });
   children.add(child);
   try {
