@@ -404,14 +404,16 @@ function repoProblems(plan: Plan, workspaceRepos: string[]): string[] {
       (edge) => edge.repo !== entry.repo && implementers(edge.repo).length > 0,
     );
     const bumps = new Set(edges.map((edge) => edge.bump));
+    const downstream = plan.steps.filter((candidate) => candidate.repo === entry.repo);
+    // Each changed upstream edge needs its own path: through its bump step, or else any step of the repo.
     for (const edge of edges) {
-      if (
-        edge.bump &&
-        stepById.get(edge.bump)?.repo === entry.repo &&
-        !follows(edge.bump, edge.repo)
-      )
+      const bump = edge.bump && stepById.get(edge.bump)?.repo === entry.repo ? edge.bump : "";
+      const reached = bump
+        ? follows(bump, edge.repo)
+        : downstream.some((step) => follows(step.id, edge.repo));
+      if (!reached)
         problems.push(
-          `repos: no needs path from an implementer of ${edge.repo} to ${entry.repo} step ${edge.bump} (${edgeName(entry.repo, edge)})`,
+          `repos: no needs path from an implementer of ${edge.repo} to ${bump ? `${entry.repo} step ${bump}` : `a step of ${entry.repo}`} (${edgeName(entry.repo, edge)})`,
         );
     }
     if (edges.length === 0) continue;
