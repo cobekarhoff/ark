@@ -435,6 +435,15 @@ function readablePlan(directory: string, ticketId: string): Plan | undefined {
   }
 }
 
+/** The plan's merge order, or none when the graph cannot be ordered (a dependency cycle): status stays readable. */
+function repoOrder(plan: Plan): string[] {
+  try {
+    return repoGraph(plan).order;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * The `none` project's merge request line, then one `branch` line for each worktree with commits beyond its base, in
  * merge order (the repos graph, else step needs), each followed by the bump steps of its repo that are not done.
@@ -443,7 +452,7 @@ function readablePlan(directory: string, ticketId: string): Plan | undefined {
 function localOnlyLines(project: string, directory: string, state: RunState): string[] {
   const workspace = loadConfig(project).workspace;
   const plan = readablePlan(directory, state.ticket.id);
-  const order = plan ? repoGraph(plan).order : [];
+  const order = plan ? repoOrder(plan) : [];
   const position = (repo: string) => {
     const index = order.indexOf(repo);
     return index < 0 ? order.length : index;
