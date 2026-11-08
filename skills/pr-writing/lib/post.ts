@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { beginMarker, endMarker } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
-import { hashBody, lintBody } from "./lint.ts";
+import { hashBody, lintBody, type LintResult } from "./lint.ts";
 
 export const maxTitleLength = 72;
 
@@ -51,20 +51,37 @@ export type PostInput = {
   ledger: Ledger;
   reviewers: string[];
   dryRun?: boolean;
+  /** Open a new MR as a Draft (`--draft`). Default off: Ark opens ready MRs. An update never changes the Draft state. */
+  draft?: boolean;
+  /** `hashBody` of the generated body when it was linted last (see `persist.ts`). A different hash makes STALE01 fail. */
+  lintedBodyHash?: string;
 };
 
 export type Posted = {
   action: "created" | "updated" | "unchanged" | "dry-run";
   url: string;
   number: number;
+  /** Whether the MR is a Draft after the post. */
+  draft: boolean;
   /** Set when the post did something the person should know, such as a whole rewrite. */
   note?: string;
 };
 
-type Existing = { number: number; url: string; body: string };
+/** An open MR: its number (`iid` on GitLab), URL, description, Draft state and head SHA (`""` when the host omits it). */
+export type OpenMergeRequest = {
+  number: number;
+  url: string;
+  body: string;
+  draft: boolean;
+  head: string;
+};
+type Existing = OpenMergeRequest;
+
+/** The open-MR probe failed: the host did not answer or answered nonsense. Scripts map it to exit 2. */
+export class ProbeFailure extends ArkError {}
 
 /** The one place a host command runs. In a dry run it prints each call, and a write is not run. */
-function host(command: string[], directory: string, input: PostInput, write = false) {
+function host(command: string[], directory: string, input: { dryRun?: boolean }, write = false) {
   if (input.dryRun) {
     console.log(`dry-run: ${command.join(" ")}`);
     if (write) return { ok: true, output: "", error: "" };
@@ -77,17 +94,35 @@ function host(command: string[], directory: string, input: PostInput, write = fa
   };
 }
 
-/** The open MR on the source branch, or `null` when the host answered and found none. A failed probe throws. */
-function probe(input: PostInput): Existing | null {
+/**
+ * The open MR on the source branch, or `null` when the host answered and found none.
+ * A failed probe throws `ProbeFailure`, never `null`.
+ */
+export function probeOpenMergeRequest(target: {
+  host: "github" | "gitlab";
+  directory: string;
+  branch: string;
+  dryRun?: boolean;
+}): OpenMergeRequest | null {
   const command =
-    input.host === "github"
-      ? ["gh", "pr", "list", "--head", input.branch, "--state", "open", "--json", "number,url,body"]
+    target.host === "github"
+      ? [
+          "gh",
+          "pr",
+          "list",
+          "--head",
+          target.branch,
+          "--state",
+          "open",
+          "--json",
+          "number,url,body,isDraft,headRefOid",
+        ]
       : [
           "glab",
           "api",
-          `projects/:fullpath/merge_requests?state=opened&source_branch=${encodeURIComponent(input.branch)}`,
+          `projects/:fullpath/merge_requests?state=opened&source_branch=${encodeURIComponent(target.branch)}`,
         ];
-  const result = host(command, input.directory, input);
+  const result = host(command, target.directory, target);
   let list: unknown;
   try {
     list = result.ok ? JSON.parse(result.output) : undefined;
@@ -95,23 +130,39 @@ function probe(input: PostInput): Existing | null {
     list = undefined;
   }
   if (!Array.isArray(list))
-    throw new ArkError(
-      `could not ask ${input.host} for an MR on ${input.branch}, so nothing was written: ${result.error || result.output || "unreadable answer"}`,
+    throw new ProbeFailure(
+      `could not ask ${target.host} for an MR on ${target.branch}, so nothing was written: ${result.error || result.output || "unreadable answer"}`,
     );
   const first = list[0] as
     | {
         number: number;
         url: string;
         body?: string;
+        isDraft?: boolean;
+        headRefOid?: string;
         iid: number;
         web_url: string;
         description?: string;
+        draft?: boolean;
+        sha?: string;
       }
     | undefined;
   if (first === undefined) return null;
-  return input.host === "github"
-    ? { number: first.number, url: first.url, body: first.body ?? "" }
-    : { number: first.iid, url: first.web_url, body: first.description ?? "" };
+  return target.host === "github"
+    ? {
+        number: first.number,
+        url: first.url,
+        body: first.body ?? "",
+        draft: first.isDraft === true,
+        head: first.headRefOid ?? "",
+      }
+    : {
+        number: first.iid,
+        url: first.web_url,
+        body: first.description ?? "",
+        draft: first.draft === true,
+        head: first.sha ?? "",
+      };
 }
 
 /** A marker counts only alone on its line: an old body may quote the marker text inside a sentence or code span. */
@@ -156,17 +207,30 @@ const git = (args: string[], directory: string) => {
 };
 
 /** The head of the repo now and its three-dot diff against the base, read at the moment of the lint. */
-function current(input: PostInput): { currentHeads?: Record<string, string>; diff?: string } {
-  const repo = input.ledger.repos[0];
-  const head = git(["rev-parse", "HEAD"], input.directory);
+export function currentState(
+  ledger: Ledger,
+  directory: string,
+  base: string,
+): { currentHeads?: Record<string, string>; diff?: string } {
+  const repo = ledger.repos[0];
+  const head = git(["rev-parse", "HEAD"], directory);
   if (repo === undefined || head === null) return {};
-  const base = git(["rev-parse", "--verify", "--quiet", `origin/${input.base}`], input.directory)
-    ? `origin/${input.base}`
-    : input.base;
+  const ref = git(["rev-parse", "--verify", "--quiet", `origin/${base}`], directory)
+    ? `origin/${base}`
+    : base;
   return {
     currentHeads: { [repo.repo]: head },
-    diff: git(["diff", `${base}...HEAD`], input.directory) ?? undefined,
+    diff: git(["diff", `${ref}...HEAD`], directory) ?? undefined,
   };
+}
+
+/** The final body failed lint: `checks` holds the failed ones. Scripts print them as JSON. */
+export class LintRefusal extends ArkError {
+  constructor(readonly checks: LintResult[]) {
+    super(
+      `lint failed, nothing was written:\n${checks.map((check) => `${check.id}: ${check.reason}`).join("\n")}`,
+    );
+  }
 }
 
 /**
@@ -181,27 +245,28 @@ function refuseOnFail(
   generated: string,
   showWarnings = true,
 ) {
-  const { currentHeads, diff } = current(input);
-  const lint = (text: string) =>
+  const { currentHeads, diff } = currentState(input.ledger, input.directory, input.base);
+  const lint = (text: string, bodyHash = hashBody(text)) =>
     lintBody({
       body: text,
       title: input.title,
       ledger: input.ledger,
       currentHeads,
       diff,
-      bodyHash: hashBody(text),
+      bodyHash,
     });
-  const own = lint(generated).find((check) => check.id === "PROV01")!;
-  const checks = lint(body).map((check) => (check.id === "PROV01" ? own : check));
+  // The linted hash belongs to the generated text, not to the merged body.
+  const own = lint(generated, input.lintedBodyHash);
+  const ownCheck = (id: string) => own.find((check) => check.id === id)!;
+  const checks = lint(body).map((check) =>
+    check.id === "PROV01" || check.id === "STALE01" ? ownCheck(check.id) : check,
+  );
   for (const check of showWarnings ? checks.filter((entry) => entry.result === "warn") : [])
     console.error(`warning: ${check.id}: ${check.reason}`);
   const failed = checks
     .filter((check) => check.result === "fail")
     .filter((check) => existing === null || !check.id.startsWith("TITLE01"));
-  if (failed.length > 0)
-    throw new ArkError(
-      `lint failed, nothing was written:\n${failed.map((check) => `${check.id}: ${check.reason}`).join("\n")}`,
-    );
+  if (failed.length > 0) throw new LintRefusal(failed);
 }
 
 /** `gh` and `glab` flags for the assignee and the reviewers; a reviewer is never the token owner. */
@@ -235,6 +300,7 @@ function writeCommand(input: PostInput, existing: Existing | null, bodyFile: str
           bodyFile,
           ...(assignee.length > 0 ? ["--assignee", assignee[0]] : []),
           ...(reviewers.length > 0 ? ["--reviewer", reviewers.join(",")] : []),
+          ...(input.draft ? ["--draft"] : []),
         ]
       : [
           "glab",
@@ -251,6 +317,7 @@ function writeCommand(input: PostInput, existing: Existing | null, bodyFile: str
           "--yes",
           ...(assignee.length > 0 ? ["--assignee", assignee[0]] : []),
           ...(reviewers.length > 0 ? ["--reviewer", reviewers.join(",")] : []),
+          ...(input.draft ? ["--draft"] : []),
         ];
   return github
     ? [
@@ -278,13 +345,18 @@ function writeCommand(input: PostInput, existing: Existing | null, bodyFile: str
 export function postMergeRequest(input: PostInput): Posted {
   const generated = readFileSync(input.bodyFile, "utf8");
   // First look: refuse early. Second look, just before the write: the host may have changed in between.
-  const first = probe(input);
+  const first = probeOpenMergeRequest(input);
   refuseOnFail(input, first, finalBodyOf(generated, first).body, generated, false);
-  const existing = probe(input);
+  const existing = probeOpenMergeRequest(input);
   const { body, note } = finalBodyOf(generated, existing);
   refuseOnFail(input, existing, body, generated);
   if (existing !== null && body === existing.body)
-    return { action: "unchanged", url: existing.url, number: existing.number };
+    return {
+      action: "unchanged",
+      url: existing.url,
+      number: existing.number,
+      draft: existing.draft,
+    };
 
   const directory = mkdtempSync(join(tmpdir(), "ark-pr-writing-"));
   try {
@@ -293,18 +365,30 @@ export function postMergeRequest(input: PostInput): Posted {
     const command = writeCommand(input, existing, bodyFile, body);
     const result = host(command, input.directory, input, true);
     if (input.dryRun)
-      return { action: "dry-run", url: existing?.url ?? "", number: existing?.number ?? 0, note };
+      return {
+        action: "dry-run",
+        url: existing?.url ?? "",
+        number: existing?.number ?? 0,
+        draft: existing?.draft ?? input.draft === true,
+        note,
+      };
     if (!result.ok)
       throw new ArkError(
         `\`${command.slice(0, 3).join(" ")}\` failed: ${result.error || result.output}`,
       );
     if (existing !== null)
-      return { action: "updated", url: existing.url, number: existing.number, note };
+      return {
+        action: "updated",
+        url: existing.url,
+        number: existing.number,
+        draft: existing.draft,
+        note,
+      };
     const url = result.output.match(/https?:\/\/\S+/)?.[0];
     const number = Number(url?.match(/\/(\d+)\/?$/)?.[1]);
     if (url === undefined || !Number.isInteger(number))
       throw new ArkError(`could not read the MR URL for ${input.branch} from: ${result.output}`);
-    return { action: "created", url, number, note };
+    return { action: "created", url, number, draft: input.draft === true, note };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
