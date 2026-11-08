@@ -7,11 +7,14 @@ import { readCaseEntries } from "../cli/test-case.ts";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
 import {
   ark,
+  clara,
+  claraPlan,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
   writeProject,
   writeTicket,
+  workspaceWithRepos,
 } from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
@@ -1051,6 +1054,331 @@ describe("ARK-T41 ARK-328/AC1 ARK-328/AC2 plan check requires skills only for we
     surfaceRun(["web_ui"]);
     expect(check(requiredUiSkills).code).toBe(0);
     for (const skill of requiredUiSkills) expect(planMd()).toContain(skill);
+  });
+});
+
+describe("plan check repos block", () => {
+  const acs = ["ARK-900-AC1", "ARK-900-AC2"];
+  type ClaraParts = ReturnType<typeof claraPlan>;
+
+  /** Points the project at a workspace with real git repos at `repos`; the suite repo is the first of them. */
+  const useWorkspace = (repos: string[]) =>
+    writeProject("demo", {
+      workspace: workspaceWithRepos(repos),
+      ticket_source: "local",
+      suites: [{ name: "e2e", level: "e2e", repo: repos[0], command: "true", parser: "bun" }],
+      roles: {
+        implementer: { harness: "claude", model: "claude-sonnet" },
+        validator: { harness: "codex", model: "gpt-codex" },
+        reviewer: { harness: "codex", model: "gpt-codex" },
+      },
+    });
+  const checkPlan = (parts: Partial<PlanDocument> & Record<string, unknown>) => {
+    writePlan({ ...validPlan(), ...parts });
+    const result = ark("plan", "check", runId);
+    return { ...result, lines: result.out.trim().split("\n") };
+  };
+  const checkClara = (mutate: (parts: ClaraParts) => void = () => {}) => {
+    useWorkspace([clara.platform, clara.core, clara.reports]);
+    const parts = claraPlan(acs);
+    mutate(parts);
+    return checkPlan(parts);
+  };
+  /** The merge order lines with their padding collapsed. */
+  const orderLines = (lines: string[]) =>
+    lines
+      .slice(lines.indexOf("Merge order:") + 1)
+      .map((line) => line.trim().replaceAll(/\s+/g, " "));
+
+  test.each([
+    [
+      "an edge to a repo that is not in the workspace",
+      (parts: ClaraParts) =>
+        parts.repos[1].depends_on.push({
+          repo: "repos/payments",
+          kind: "api",
+          pin: "v1",
+          evidence: "client.ts:1",
+        } as never),
+      "repos: repos/payments is not a repo of the workspace (repos/platform -> repos/payments, api)",
+    ],
+    [
+      "a step in a repo that is not in repos",
+      (parts: ClaraParts) => parts.repos.splice(0, 1),
+      `repos: step impl-core is in ${clara.core}, which is not in the repos list`,
+    ],
+    [
+      "a repo cycle",
+      (parts: ClaraParts) =>
+        parts.repos[1].depends_on.push({
+          repo: clara.reports,
+          kind: "api",
+          pin: "v1",
+          evidence: "client.ts:1",
+        } as never),
+      `repos: repo cycle ${clara.platform} -> ${clara.reports} -> ${clara.platform} (${clara.reports} -> ${clara.platform}, api)`,
+    ],
+    [
+      "a bump that names no step",
+      (parts: ClaraParts) => (parts.repos[1].depends_on[0].bump = "bump-core"),
+      `repos: bump bump-core names no step (${clara.platform} -> ${clara.core}, package)`,
+    ],
+    [
+      "a bump that names a step of another repo",
+      (parts: ClaraParts) => (parts.repos[2].depends_on[0].bump = "bump-platform"),
+      `repos: bump bump-platform is a step of ${clara.platform}, not of ${clara.reports} (${clara.reports} -> ${clara.core}, package)`,
+    ],
+    [
+      "a downstream step with no needs path from the upstream implementer",
+      (parts: ClaraParts) => {
+        // The reports -> platform api edge would be refused too, so drop it to leave the core edge alone.
+        parts.repos[2].depends_on.pop();
+        parts.steps[2].needs = [];
+      },
+      `repos: no needs path from an implementer of ${clara.core} to ${clara.reports} step bump-reports (${clara.reports} -> ${clara.core}, package)`,
+    ],
+  ])("ARK-T104 refuses %s with one line that names the repo and the edge", (_, defect, line) => {
+    const result = checkClara(defect);
+    expect(result.code).toBe(1);
+    expect(result.lines).toEqual(["plan refused: 1 problem", `  ${line}`]);
+  });
+
+  test("ARK-T104 prints every problem when several occur", () => {
+    const result = checkClara((parts) => {
+      parts.repos[1].depends_on.push({
+        repo: "repos/payments",
+        kind: "api",
+        pin: "v1",
+        evidence: "client.ts:1",
+      } as never);
+      parts.repos[1].depends_on[0].bump = "bump-core";
+      parts.repos.splice(0, 1);
+    });
+    expect(result.code).toBe(1);
+    expect(result.lines[0]).toBe("plan refused: 3 problems");
+    expect(result.lines.slice(1).toSorted()).toEqual(
+      [
+        `  repos: bump bump-core names no step (${clara.platform} -> ${clara.core}, package)`,
+        `  repos: repos/payments is not a repo of the workspace (repos/platform -> repos/payments, api)`,
+        `  repos: step impl-core is in ${clara.core}, which is not in the repos list`,
+      ].toSorted(),
+    );
+  });
+
+  test("ARK-T104 passes a one-repo plan with no repos list and prints no order", () => {
+    useWorkspace(["."]);
+    const result = checkPlan({});
+    expect(result.code).toBe(0);
+    expect(result.lines).toEqual(["plan ok: 2 steps, 1 repo, 2 test cases"]);
+  });
+
+  test("ARK-T104 does not demand a needs path from an upstream repo that has no implementer step", () => {
+    useWorkspace([clara.platform, clara.core]);
+    const parts = claraPlan(acs);
+    const result = checkPlan({
+      steps: [
+        { ...parts.steps[4], needs: [] },
+        { ...parts.steps[1], needs: [] },
+        { ...parts.steps[3], needs: ["bump-platform"] },
+      ],
+      repos: parts.repos.slice(0, 2),
+    });
+    expect(result.code).toBe(0);
+    expect(result.lines[0]).toBe("plan ok: 3 steps, 2 repos, 2 test cases");
+  });
+
+  test("ARK-T104 refuses a downstream step that needs only one of two upstream repos and names the missing edge", () => {
+    const [upstreamA, upstreamB, downstream] = ["a", "b", "c"].map((name) => `repos/${name}`);
+    useWorkspace([upstreamA, upstreamB, downstream]);
+    const planStep = (id: string, role: string, repo: string, needs: string[]) =>
+      step(id, {
+        role,
+        repo,
+        needs,
+        criteria: acs,
+        ...(role === "implementer" ? {} : { harness: "codex", model: "gpt-codex" }),
+      });
+    const edge = (repo: string) => ({ repo, kind: "api", pin: "v1", evidence: "client.ts:1" });
+    const result = checkPlan({
+      steps: [
+        planStep("impl-a", "implementer", upstreamA, []),
+        planStep("impl-b", "implementer", upstreamB, []),
+        planStep("impl-c", "implementer", downstream, ["impl-a"]),
+        planStep("validate", "validator", upstreamA, ["impl-a", "impl-b", "impl-c"]),
+      ],
+      repos: [
+        { repo: upstreamA, why: "first upstream", depends_on: [] },
+        { repo: upstreamB, why: "second upstream", depends_on: [] },
+        { repo: downstream, why: "needs both", depends_on: [edge(upstreamA), edge(upstreamB)] },
+      ],
+    });
+    expect(result.code).toBe(1);
+    expect(result.lines).toEqual([
+      "plan refused: 1 problem",
+      `  repos: no needs path from an implementer of ${upstreamB} to a step of ${downstream} (${downstream} -> ${upstreamB}, api)`,
+    ]);
+  });
+
+  test("ARK-T105 passes a 4-repo plan with all four edge kinds and prints the merge order from the edges", () => {
+    const [lib, service, deploy, web] = ["lib", "service", "deploy", "web"].map(
+      (name) => `repos/${name}`,
+    );
+    useWorkspace([lib, service, deploy, web]);
+    const planStep = (id: string, role: string, repo: string, needs: string[]) =>
+      step(id, {
+        role,
+        repo,
+        needs,
+        criteria: acs,
+        ...(role === "implementer" ? {} : { harness: "codex", model: "gpt-codex" }),
+      });
+    const edge = (repo: string, kind: string, bump?: string) => ({
+      repo,
+      kind,
+      pin: `${kind}-pin`,
+      evidence: `${kind}.txt:1`,
+      ...(bump ? { bump } : {}),
+    });
+    const parts = {
+      steps: [
+        planStep("impl-lib", "implementer", lib, []),
+        planStep("validate", "validator", lib, ["impl-lib"]),
+        planStep("bump-service", "implementer", service, ["impl-lib"]),
+        planStep("impl-service", "implementer", service, ["bump-service"]),
+        planStep("deploy-service", "implementer", deploy, ["impl-service"]),
+        planStep("bump-web", "implementer", web, ["impl-lib", "impl-service"]),
+      ],
+      repos: [
+        { repo: lib, why: "library", depends_on: [] },
+        { repo: service, why: "service", depends_on: [edge(lib, "submodule", "bump-service")] },
+        { repo: deploy, why: "compose file", depends_on: [edge(service, "compose")] },
+        {
+          repo: web,
+          why: "web app",
+          depends_on: [edge(service, "api"), edge(lib, "package", "bump-web")],
+        },
+      ],
+    };
+    const first = checkPlan(parts);
+    expect(first.code, first.out).toBe(0);
+    expect(first.lines[0]).toBe("plan ok: 6 steps, 4 repos, 2 test cases");
+    expect(first.lines[1]).toBe("Merge order:");
+    expect(orderLines(first.lines)).toEqual([
+      `1 ${lib}`,
+      `2 ${service} waits for: ${lib}`,
+      `3 ${deploy} waits for: ${service}`,
+      `4 ${web} waits for: ${lib}, ${service}`,
+    ]);
+
+    const reordered = checkPlan({ ...parts, repos: parts.repos.toReversed() });
+    expect(reordered.code, reordered.out).toBe(0);
+    expect(reordered.out).toBe(first.out);
+  });
+
+  test("ARK-T106 a reviewer that needs a validator in another repo makes no repo edge", () => {
+    const packages = "repos/shared/packages";
+    useWorkspace([clara.platform, packages, "."]);
+    const planStep = (id: string, role: string, repo: string, needs: string[]) =>
+      step(id, {
+        role,
+        repo,
+        needs,
+        criteria: acs,
+        ...(role === "implementer" ? {} : { harness: "codex", model: "gpt-codex" }),
+      });
+    const result = checkPlan({
+      steps: [
+        planStep("impl-packages", "implementer", packages, []),
+        planStep("bump-platform", "implementer", clara.platform, ["impl-packages"]),
+        planStep("impl-root", "implementer", ".", []),
+        planStep("validate", "validator", clara.platform, ["bump-platform", "impl-root"]),
+        planStep("review-packages", "reviewer", packages, ["impl-packages", "validate"]),
+        planStep("review-platform", "reviewer", clara.platform, ["bump-platform", "validate"]),
+        planStep("review-root", "reviewer", ".", ["impl-root", "validate"]),
+      ],
+      repos: [
+        { repo: packages, why: "shared packages", depends_on: [] },
+        {
+          repo: clara.platform,
+          why: "uses the packages",
+          depends_on: [
+            {
+              repo: packages,
+              kind: "package",
+              pin: "packages>=1",
+              evidence: "pyproject.toml:3",
+              bump: "bump-platform",
+            },
+          ],
+        },
+        { repo: ".", why: "root", depends_on: [] },
+      ],
+    });
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).not.toContain("dependency cycle between repos");
+    const order = orderLines(result.lines).map((line) => line.split(" ")[1]);
+    expect(order.indexOf(packages)).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf(packages)).toBeLessThan(order.indexOf(clara.platform));
+  });
+
+  const planMarkdown = () => readFileSync(join(runDirectory, "plan.md"), "utf8");
+  const mermaidOf = (markdown: string) => markdown.split("```mermaid\n")[1].split("\n```")[0];
+
+  test("ARK-T109 plan.md draws a 3-repo plan as repo subgraphs with the merge order and the repos table", () => {
+    expect(checkClara().code).toBe(0);
+    const markdown = planMarkdown();
+    expect(markdown).toContain(
+      `Merge order: 1 ${clara.core} → 2 ${clara.platform} → 3 ${clara.reports}\n`,
+    );
+    expect(mermaidOf(markdown)).toBe(
+      [
+        "flowchart LR",
+        `  subgraph repo1["1 ${clara.core}"]`,
+        '    step1["impl-core: implementer"]',
+        '    step5["review-core: reviewer"]',
+        "  end",
+        `  subgraph repo2["2 ${clara.platform}"]`,
+        '    step2["bump-platform: implementer"]',
+        '    step4["validate: validator"]',
+        "  end",
+        `  subgraph repo3["3 ${clara.reports}"]`,
+        '    step3["bump-reports: implementer"]',
+        "  end",
+        "  step1 ==> step2",
+        "  step1 ==> step3",
+        "  step1 --> step5",
+        "  step2 ==> step3",
+        "  step2 --> step4",
+        "  step3 ==> step4",
+        "  step4 ==> step5",
+        '  repo1 -.->|"package clara-core>=0.0.6rc1"| repo2',
+        '  repo1 -.->|"package clara-core>=0.0.6rc1"| repo3',
+        '  repo2 -.->|"api openapi@v3"| repo3',
+      ].join("\n"),
+    );
+    expect(markdown).toContain("## Repos");
+    expect(markdown).toContain(
+      `| 2 | ${clara.platform} | calls clara-core | ${clara.core} | package | clara-core>=0.0.6rc1 | services/tenant-manifest-service/pyproject.toml:11 | bump-platform |`,
+    );
+    expect(markdown).toContain(
+      `| 3 | ${clara.reports} |  | ${clara.platform} | api | openapi@v3 | clients/platform.ts:3 |  |`,
+    );
+  });
+
+  test("ARK-T109 plan.md draws a one-repo plan as a flat graph with repo labels", () => {
+    useWorkspace(["."]);
+    expect(checkPlan({}).code).toBe(0);
+    const markdown = planMarkdown();
+    expect(mermaidOf(markdown)).toBe(
+      [
+        "flowchart LR",
+        '  step1["build: implementer @ ."]',
+        '  step2["check: validator @ ."]',
+        "  step1 --> step2",
+      ].join("\n"),
+    );
+    expect(markdown).not.toContain("Merge order:");
+    expect(markdown).not.toContain("## Repos");
   });
 });
 
