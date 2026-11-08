@@ -2,7 +2,7 @@
 id: ARK-T122
 title: ARK-T122 a refactor run still runs the whole suite at the base, and a case that does not run at base is not run, not failed
 level: integration
-technique: decision table (kind refactor vs feature) x (base result: passed, failed, case absent)
+technique: "decision table (kind refactor vs feature) x (base result: passed, failed, case absent)"
 priority: high
 risk: a refactor run is gated on a partial base run (behavior-preserving proof is lost); or base_passed is recorded from a partial run for another kind; or a failing base case is hidden as not run
 status: active
