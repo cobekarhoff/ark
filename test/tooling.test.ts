@@ -35,7 +35,7 @@ const expectedCiCommands = [
   "bun run typecheck",
   "bun run lint",
   "bun run format:check",
-  "bun test",
+  "bun test --parallel",
 ];
 const fixtureFiles = {
   "src/nested/valid.ts": "export const answer: number = 42;\n",
@@ -202,7 +202,7 @@ test("ARK-175-AC4 CI command sequence blocks each failed check", () => {
       filePath: "test/smoke.test.ts",
       contents:
         'import { expect, test } from "bun:test";\ntest("failure", () => expect(1).toBe(2));\n',
-      failingCheck: "bun test",
+      failingCheck: "bun test --parallel",
     },
   ];
   for (const defectCase of defectCases) {
