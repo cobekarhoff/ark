@@ -467,7 +467,7 @@ A findings file never forbids an implementer commit. The implementer commits its
 
 ## 9. Escalate when the round budget is spent
 
-Each return to the implementer after the first build is a round. A `human_decision_needed` verdict returns nothing to the implementer and counts no round. `ark run step <run> <implementer step> start` refuses once the next round would pass the round budget. The message is `round budget spent: record gate escalation (one_more_round, take_over or abort)`. The same applies when `ark status <run>` shows the phase `escalation`.
+Each return to the implementer after the first build is a round. A `human_decision_needed` verdict returns nothing to the implementer and counts no round. `ark run step <run> <implementer step> start` refuses once the next round would pass the round budget. In phase `building` the message starts `round budget spent` and says to run `ark escalate <run> --reason <text>` first, then ask the human, then record the escalation gate. In phase `escalation` it names `ark gate record`. The same applies when `ark status <run>` shows the phase `escalation`.
 
 With `gates.escalation: auto` in `ark.yml`, Ark answers the first 2 of these refusals itself. `start` records `gate: escalation`, `answer: one_more_round`, `by: auto`, prints `escalation one_more_round by auto (<n> of 2)` and then starts the step. Do not record the answer and do not `ask`. Send Master Chief a `status` instead, and go on with section 7:
 
