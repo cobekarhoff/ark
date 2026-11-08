@@ -329,7 +329,7 @@ test("ARK-173-AC9 a visible surface requires every strategy card to link a mocku
   expect(ark("strategy", "record", runId).code).toBe(0);
 });
 
-test("ARK-173-AC10 old config loads but visible work requires a configured Designer", () => {
+test("ARK-T91 old config loads but visible work requires a configured Designer", () => {
   const oldConfig = JSON.parse(readFileSync(join(projectDirectory, "ark.yml"), "utf8"));
   delete oldConfig.roles.designer;
   writeProject("demo", oldConfig);
@@ -386,7 +386,7 @@ test("ARK-238-AC2 a two-card document strategy still requires a Mockup line", ()
   expect(result.err).toContain("S1");
 });
 
-test("ARK-173-AC13 mockups remain outside actual worktrees and use one human review loop", () => {
+test("ARK-T92 mockups remain outside actual worktrees and use one human review loop", () => {
   evaluation(["web_ui"]);
   mkdirSync(join(runDirectory, "mockups"), { recursive: true });
   writeFileSync(join(runDirectory, "mockups", "s1.html"), "<h1>mockup</h1>");

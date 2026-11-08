@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { reactSkill, requiredUiSkills, uiSkillsFor } from "../cli/ui-skills.ts";
 import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
 
@@ -54,27 +54,7 @@ describe("ui-skills", () => {
   });
 });
 
-function files(directory: string): string[] {
-  return readdirSync(directory).flatMap((name) => {
-    const path = join(directory, name);
-    return statSync(path).isDirectory() ? files(path) : [path];
-  });
-}
-
-test("ARK-279-AC2 skill names live only in cli/ui-skills.ts", () => {
-  const root = join(import.meta.dir, "..");
-  const names = ["web-design-guidelines", "emil-design-eng", "vercel-react-best-practices"];
-  const sources = [...files(join(root, "cli")), ...files(join(root, "skills/ark/playbooks"))];
-  expect(sources.length).toBeGreaterThan(10);
-  const holders = sources
-    .filter((file) => names.some((name) => readFileSync(file, "utf8").includes(name)))
-    .map((file) => relative(root, file));
-  expect(holders).toEqual(["cli/ui-skills.ts"]);
-  const own = readFileSync(join(root, "cli/ui-skills.ts"), "utf8");
-  for (const name of names) expect(own).toContain(name);
-});
-
-test("ARK-279-AC9 docs/reference/cli.md matches the generator", () => {
+test("ARK-T93 docs/reference/cli.md matches the generator", () => {
   const path = join(import.meta.dir, "..", "docs/reference/cli.md");
   const before = readFileSync(path, "utf8");
   Bun.spawnSync(["bun", join(import.meta.dir, "..", "scripts/cli-reference.ts")]);

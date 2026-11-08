@@ -1286,7 +1286,7 @@ describe("ARK-296 repos.<repo>.base is the target of worktree cleanup and worksp
   });
 });
 
-test("ARK-296-AC5 cli.md matches the generator", () => {
+test("ARK-T94 cli.md matches the generator", () => {
   const root = join(import.meta.dir, "..");
   const path = join(root, "docs/reference/cli.md");
   const before = readFileSync(path, "utf8");
@@ -1338,7 +1338,7 @@ describe("ARK-308 aborted run keeps branches with commits", () => {
     expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
   });
 
-  test("ARK-308-AC5 cli.md matches the generator", () => {
+  test("ARK-T95 cli.md matches the generator", () => {
     const root = join(import.meta.dir, "..");
     const text = (path: string) => readFileSync(join(root, path), "utf8");
     const reference = text("docs/reference/cli.md");

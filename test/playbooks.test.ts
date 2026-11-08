@@ -42,7 +42,7 @@ test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
   expect(result.exitCode).toBe(0);
 });
 
-test("ARK-283-AC5 cli.md equals the generator output", () => {
+test("ARK-T83 cli.md equals the generator output", () => {
   const root = join(import.meta.dir, "..");
   const path = join(root, "docs/reference/cli.md");
   const before = readFileSync(path, "utf8");
@@ -128,7 +128,7 @@ test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead
   ).toBeGreaterThanOrEqual(1);
 });
 
-test("ARK-295-AC7 the generated CLI reference equals the file", () => {
+test("ARK-T84 the generated CLI reference equals the file", () => {
   const root = join(import.meta.dir, "..");
   const path = join(root, "docs/reference/cli.md");
   const before = readFileSync(path, "utf8");
@@ -138,7 +138,7 @@ test("ARK-295-AC7 the generated CLI reference equals the file", () => {
   expect(readFileSync(path, "utf8")).toBe(before);
 });
 
-test("ARK-303-AC5 every link in principles.md points to a file and heading that exist", () => {
+test("ARK-T85 every link in principles.md points to a file and heading that exist", () => {
   const skillDirectory = join(import.meta.dir, "../skills/ark");
   const slug = (heading: string) =>
     heading

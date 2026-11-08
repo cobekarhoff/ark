@@ -25,7 +25,7 @@ function projectConfigFor(workspace: string): Record<string, unknown> {
   };
 }
 
-test("ARK-177-AC5 loads old and chief-role configs", () => {
+test("ARK-T79 loads old and chief-role configs", () => {
   tempArkHome();
   const configWithChief = projectConfigFor(tempGitRepo());
   configWithChief.roles = {

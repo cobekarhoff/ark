@@ -439,7 +439,7 @@ for (const [label, gates] of [
   });
 }
 
-test("ARK-288-AC8 docs/reference/cli.md equals the generator output", () => {
+test("ARK-T80 docs/reference/cli.md equals the generator output", () => {
   const root = join(import.meta.dir, "..");
   const path = join(root, "docs/reference/cli.md");
   const committed = readFileSync(path, "utf8");

@@ -99,7 +99,7 @@ test("ARK-209-AC1 --project with an unknown project or a project without the run
   }
 });
 
-test("ARK-209-AC3 --help lists --project for each run-id command, and docs/reference/cli.md matches the generator", () => {
+test("ARK-T86 --help lists --project for each run-id command, and docs/reference/cli.md matches the generator", () => {
   const help = ark("--help").out.split("\n");
   for (const command of runIdCommands) {
     const prefix = command.slice(0, command.indexOf("RUN")).join(" ");
@@ -114,14 +114,14 @@ test("ARK-209-AC3 --help lists --project for each run-id command, and docs/refer
   expect(readFileSync(join(repositoryRoot, "docs/reference/cli.md"), "utf8")).toBe(before);
 });
 
-test("ARK-276-AC8 docs/reference/cli.md matches the generator", () => {
+test("ARK-T87 docs/reference/cli.md matches the generator", () => {
   const path = join(repositoryRoot, "docs/reference/cli.md");
   const before = readFileSync(path, "utf8");
   Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
   expect(readFileSync(path, "utf8")).toBe(before);
 });
 
-test("ARK-282-AC6 ark run step --help names --not-started and not_started, and docs/reference/cli.md matches the generator", () => {
+test("ARK-T88 ark run step --help names --not-started and not_started, and docs/reference/cli.md matches the generator", () => {
   const path = join(repositoryRoot, "docs/reference/cli.md");
   const help = Bun.spawnSync(["bun", join(repositoryRoot, "cli/ark.ts"), "run", "step", "--help"], {
     cwd: repositoryRoot,
@@ -133,7 +133,7 @@ test("ARK-282-AC6 ark run step --help names --not-started and not_started, and d
   expect(readFileSync(path, "utf8")).toBe(before);
 });
 
-test("ARK-287-AC6 status and merge-request open help describe the test head line and the refusal, and docs/reference/cli.md matches the generator", () => {
+test("ARK-T89 status and merge-request open help describe the test head line and the refusal, and docs/reference/cli.md matches the generator", () => {
   const path = join(repositoryRoot, "docs/reference/cli.md");
   const committed = readFileSync(path, "utf8");
   const help = (...args: string[]) =>

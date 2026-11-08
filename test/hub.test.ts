@@ -1320,7 +1320,7 @@ test("ARK-285-AC2 an omp that never answers leaves usage unknown, not a guess, a
   expect((await fetch(`${baseUrl}/`)).status).toBe(200);
 }, 60_000);
 
-test("ARK-285-AC1 Map.tsx is gone", () => {
+test("ARK-T81 Map.tsx is gone", () => {
   expect(existsSync(join(root, "hub/page/Map.tsx"))).toBe(false);
 });
 
@@ -2180,7 +2180,7 @@ test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of
   });
 }, 60_000);
 
-test("ARK-293-AC4 the recorded real prompt wait gives waiting, by agentWait alone too", () => {
+test("ARK-T82 the recorded real prompt wait gives waiting, by agentWait alone too", () => {
   const raw = readDoc("test/fixtures/orca-agent-wait.json");
   const entry = JSON.parse(raw);
   expect(entry.agentWait).toMatchObject({ source: "hook" });
