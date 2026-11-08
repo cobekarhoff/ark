@@ -472,7 +472,7 @@ describe("criteria gate on every run", () => {
   });
 });
 
-test("ARK-T102 a spent round budget names ark escalate in building and ark gate record in escalation", () => {
+test("ARK-T102 ARK-334/AC2 a spent round budget names ark escalate in building and ark gate record in escalation", () => {
   const { runId, directory } = startRun(criteria);
   writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
   expect(ark("plan", "check", runId).code).toBe(0);
@@ -487,7 +487,8 @@ test("ARK-T102 a spent round budget names ark escalate in building and ark gate 
   const building = build("start");
   expect(building.code).toBe(1);
   expect(building.err).toContain("round budget spent");
-  expect(building.err).toContain("ark escalate");
+  expect(building.err).toMatch(/ark escalate .*--reason.*ask.*escalation gate/);
+  expect(building.err).toContain(runId);
   expect(building.err).not.toContain("ark gate record");
 
   expect(ark("escalate", runId, "--reason", "budget spent").code).toBe(0);
