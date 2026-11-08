@@ -1933,6 +1933,14 @@ test("ARK-T118 The hub header has the same height with 4 or more stale source la
     expect(inner.y).toBeGreaterThanOrEqual(box.y);
     expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
   }
+  // Narrow window: overflowing labels start at the scroll origin, so every one is reachable.
+  const wideViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 320, height: 800 });
+  const row = page.locator(".asof-list");
+  const rowLeft = (await row.boundingBox())!.x;
+  const firstLabel = (await labels.first().boundingBox())!;
+  expect(firstLabel.x).toBeGreaterThanOrEqual(rowLeft);
+  await page.setViewportSize(wideViewport);
   release();
   await expect(labels).toHaveCount(0);
   await checkpoint(page, "header-without-labels");
