@@ -6,6 +6,8 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -555,3 +557,86 @@ test("ARK-306-AC5 the ARK-244 chief tests and the releaseSettledWorkers tests ar
   expect(chief).toMatch(/^test\("ARK-244-AC2 /m);
   expect(run).toMatch(/^test\("ARK-278-AC1 run close releases/m);
 });
+
+const day = 86_400_000;
+const baseTime = Date.parse("2026-10-01T00:00:00Z");
+
+/** Closes a fresh run at `baseTime + days` (the event time is set by the fixture clock, not by the code under test). */
+function closeRunAt(runsRoot: string, name: string, days: number) {
+  const directory = join(runsRoot, name);
+  mkdirSync(directory, { recursive: true });
+  process.env.ARK_NOW = new Date(baseTime + days * day).toISOString();
+  try {
+    appendEvent(directory, "run.started", {
+      run: name,
+      project,
+      round_budget: 2,
+      ticket: { id: name.slice(11, -2), title: `Ticket of ${name}` },
+      criteria: [],
+    });
+    appendEvent(directory, "run.closed", { outcome: "aborted" });
+  } finally {
+    delete process.env.ARK_NOW;
+  }
+  writeFileSync(join(directory, "retro.md"), "# Retro\n\n## Close check\n\n- Biggest pain:\n");
+}
+
+function range(length: number, start: number): number[] {
+  return Array.from({ length }, (_, index) => start + index);
+}
+
+// Days after baseTime. An interview file is stamped half a day after its day, so a run closed on that day is before it.
+const interviewCases: {
+  id: string;
+  files: number[] | null;
+  closedDays: number[];
+  count: number;
+  due: boolean;
+}[] = [
+  { id: "D1", files: null, closedDays: range(10, 1), count: 10, due: true },
+  { id: "D2", files: null, closedDays: range(9, 1), count: 9, due: false },
+  { id: "D3", files: [], closedDays: range(10, 1), count: 10, due: true },
+  { id: "D4", files: [20], closedDays: [...range(4, 1), ...range(10, 21)], count: 10, due: true },
+  { id: "D5", files: [20], closedDays: [...range(10, 1), ...range(9, 21)], count: 9, due: false },
+  {
+    id: "D6",
+    files: [10, 20],
+    closedDays: [...range(10, 11), ...range(3, 21)],
+    count: 3,
+    due: false,
+  },
+];
+
+for (const { id, files, closedDays, count, due } of interviewCases) {
+  test(`ARK-T110 ${id} ark chief state has no close-check section and flags an interview due at 10 closed runs since the newest interview file`, () => {
+    const projectRoot = join(process.env.ARK_HOME as string, "projects", project);
+    const runsRoot = join(projectRoot, "runs");
+    rmSync(join(runsRoot, closedRun), { recursive: true });
+    closedDays.forEach((days, index) =>
+      closeRunAt(runsRoot, `2026-10-01-ARK-${100 + index}-1`, days),
+    );
+    if (files !== null) {
+      const interviews = join(projectRoot, "interviews");
+      mkdirSync(interviews);
+      files.forEach((days, index) => {
+        const file = join(interviews, `interview-${index}.md`);
+        writeFileSync(file, "# Interview\n");
+        const seconds = (baseTime + days * day + day / 2) / 1000;
+        utimesSync(file, seconds, seconds);
+      });
+    }
+    setScenario({});
+
+    const result = ark("chief", "state", "--project", project);
+    expect(result.err).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.out).not.toContain("Close check");
+
+    const openRuns = section(result.out, "Open runs");
+    expect(openRuns).toContain(openRun);
+    expect(openRuns).not.toContain("ARK-10");
+    expect(section(result.out, "Interview")).toMatch(
+      new RegExp(`interview: ${count}${due ? " \\(due\\)" : ""}\\s*$`),
+    );
+  });
+}
