@@ -2177,7 +2177,7 @@ async function weakContrast(page: Page): Promise<{ checked: number; weak: Contra
   });
 }
 
-test("ARK-285-AC10 the theme follows the system, the nav switch sets Auto, Light or Dark and keeps it after a reload, and text keeps its contrast on Home, Runs and a ticket page in both themes", async ({
+test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or Dark and keeps it after a reload, and text keeps its contrast on Home, Runs and a ticket page in both themes", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -2247,8 +2247,8 @@ test("ARK-285-AC10 the theme follows the system, the nav switch sets Auto, Light
       expect(weak, `${name} in ${choice}`).toEqual([]);
     }
   }
-  // Switching the theme and the views sent no request at all.
-  expect(requests.slice(before)).toEqual([]);
+  // Switching the theme and the views sent no request but the document read of each ticket page opening (ARK-329).
+  expect(requests.slice(before)).toEqual(["/api/ticket/p/ARK-512", "/api/ticket/p/ARK-512"]);
 
   // In Dark, a primary button and Open in Orca keep 4.5:1 for their white 13px text while hovered.
   await theme("Dark").click();
