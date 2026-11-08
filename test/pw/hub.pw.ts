@@ -2287,9 +2287,11 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   await expect(actions.first()).toBeVisible({ timeout: 20_000 });
   for (let index = 0; index < (await actions.count()); index++) {
     const action = actions.nth(index);
-    await action.hover();
-    // Hover state reached, then the color transition (a Web Animation) finished.
-    await expect.poll(() => action.evaluate((element) => element.matches(":hover"))).toBe(true);
+    // Hover state reached (a snapshot push may re-render the button and drop it: hover again), then the color transition (a Web Animation) finished.
+    await expect(async () => {
+      await action.hover();
+      expect(await action.evaluate((element) => element.matches(":hover"))).toBe(true);
+    }).toPass();
     await action.evaluate(async (element) => {
       await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
       await Promise.all(
@@ -2379,8 +2381,10 @@ test("ARK-T128 the first action of Home is visible and its hover colour final af
   rmSync(orcaGate);
   const action = actions.first();
   await expect(action).toBeVisible();
-  await action.hover();
-  await expect.poll(() => action.evaluate((element) => element.matches(":hover"))).toBe(true);
+  await expect(async () => {
+    await action.hover();
+    expect(await action.evaluate((element) => element.matches(":hover"))).toBe(true);
+  }).toPass();
   await action.evaluate(async (element) => {
     await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
     await Promise.all(element.getAnimations().map((fade) => fade.finished.catch(() => undefined)));
