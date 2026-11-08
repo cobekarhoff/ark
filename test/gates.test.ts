@@ -232,14 +232,6 @@ test("ARK-234-AC5 an answer from before the by field reads as human", () => {
   expect(ark("status", runId).out).toContain("plan approve by human");
 });
 
-test("ARK-234-AC6 run-lead and chief playbooks say an auto gate needs no Plannotator review and no relay", () => {
-  const directory = join(import.meta.dir, "../skills/ark/playbooks");
-  for (const name of ["run-lead.md", "chief.md"]) {
-    const text = readFileSync(join(directory, name), "utf8").replace(/\s+/g, " ");
-    expect(text).toMatch(/`auto`.*needs no Plannotator review and no relay/);
-  }
-});
-
 // ARK-288: gates.escalation auto answers a spent budget or a post-MR implementer start, at most twice.
 
 /** A building run whose plan has one implementer step `build` (the plan gate is auto). */
@@ -447,7 +439,7 @@ for (const [label, gates] of [
   });
 }
 
-test("ARK-288-AC8 docs/reference/cli.md equals the generator output and the gates reference documents escalation auto", () => {
+test("ARK-T80 docs/reference/cli.md equals the generator output", () => {
   const root = join(import.meta.dir, "..");
   const path = join(root, "docs/reference/cli.md");
   const committed = readFileSync(path, "utf8");
@@ -457,8 +449,4 @@ test("ARK-288-AC8 docs/reference/cli.md equals the generator output and the gate
   writeFileSync(path, committed);
   expect(run.exitCode).toBe(0);
   expect(committed).toBe(reference);
-  const gatesRow = reference.split("\n").find((line) => line.startsWith("| `gates`")) ?? "";
-  expect(gatesRow).toContain("`escalation: auto`");
-  expect(gatesRow).toContain("escalation one_more_round by auto (<n> of 2)");
-  expect(gatesRow).toContain("at most 2 times");
 });

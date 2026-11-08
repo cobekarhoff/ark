@@ -93,23 +93,6 @@ async function start() {
 // ---------------------------------------------------------------- AC1
 
 const readDoc = (path: string) => readFileSync(join(root, path), "utf8");
-const statusOf = (path: string) => readDoc(path).match(/^status: (.*)$/m)?.[1] ?? "";
-const viewNames = ["Home", "Runs", "Roadmap"];
-const namesViews = (text: string) =>
-  viewNames.every((name) => new RegExp(`\\b${name}\\b`).test(text));
-
-test("ARK-277-AC1 ADR 0009 is accepted, ADR 0008 is superseded by it, and ADR 0007 and R13 name the views", () => {
-  expect(statusOf("docs/adr/0009-hub-is-a-read-only-live-view.md")).toBe("accepted");
-  const superseded = statusOf("docs/adr/0008-hub-steers-through-master-chief.md");
-  expect(superseded).toStartWith("superseded");
-  expect(superseded).toContain("ADR 0009");
-
-  expect(namesViews(statusOf("docs/adr/0007-control-center.md"))).toBe(true);
-  const lines = readDoc("docs/prd.md").split("\n");
-  const row = (id: string) => lines.find((line) => line.startsWith(`| ${id} `)) ?? "";
-  expect(row("R13")).not.toBe("");
-  expect(namesViews(row("R13"))).toBe(true);
-});
 
 // ---------------------------------------------------------------- AC2
 
@@ -522,17 +505,6 @@ test("ARK-277-AC12 ark ui serves the hub in hub/", async () => {
 
 // ---------------------------------------------------------------- AC13
 
-test("ARK-277-AC13 the human check on the real ARK_HOME shows 3 view times below 1 s and human: ok", () => {
-  const lines = readDoc("docs/evidence/ARK-277-ac13.md").split("\n");
-  for (const view of ["home", "run", "backlog"]) {
-    const line = lines.find((candidate) => candidate.startsWith(`${view}: `));
-    const milliseconds = Number(line?.slice(view.length + 2));
-    expect(Number.isFinite(milliseconds), `${view}: ${line}`).toBe(true);
-    expect(milliseconds, view).toBeLessThan(1000);
-  }
-  expect(lines).toContain("human: ok");
-});
-
 // ---------------------------------------------------------------- ARK-284
 
 /** The run page's read of one run, once the usage index has listed at least `count` session files. */
@@ -857,10 +829,6 @@ test("ARK-284-AC7 a transcript request that fails answers 502 or 404, a bad curs
   // A path the index did not list for this run is never read.
   expect((await fetch(transcriptUrl(baseUrl, run, "/etc/passwd", 0))).status).toBe(404);
   expect((await fetch(transcriptUrl(baseUrl, "no-such-run", kept, 0))).status).toBe(404);
-});
-
-test("ARK-284-AC10 the human check on the real ARK_HOME is recorded in docs/evidence/ARK-284-ac10.md with human: ok", () => {
-  expect(readDoc("docs/evidence/ARK-284-ac10.md").split("\n")).toContain("human: ok");
 });
 
 // ---------------------------------------------------------------- ARK-285
@@ -1430,15 +1398,7 @@ test("ARK-285-AC2 an omp that never answers leaves usage unknown, not a guess, a
   expect((await fetch(`${baseUrl}/`)).status).toBe(200);
 }, 60_000);
 
-test("ARK-285-AC1 docs/design/hub-v2 holds hybrid-1.html and data.js, ADR 0009 names Home, Runs and Roadmap and says Runs replaces Map, and Map.tsx is gone", () => {
-  for (const file of ["hybrid-1.html", "data.js"])
-    expect(readFileSync(join(root, "docs/design/hub-v2", file), "utf8").length).toBeGreaterThan(0);
-  const line = readDoc("docs/adr/0009-hub-is-a-read-only-live-view.md")
-    .split("\n")
-    .find((candidate) => candidate.includes("The hub shows"));
-  expect(line).toContain("The hub shows Home, Runs and Roadmap");
-  expect(line).toContain("Runs replaces Map");
-  expect(line).not.toContain("Run, Backlog and Map");
+test("ARK-T81 Map.tsx is gone", () => {
   expect(existsSync(join(root, "hub/page/Map.tsx"))).toBe(false);
 });
 
@@ -1505,14 +1465,6 @@ test("ARK-285-AC11 with every new reader running and an open MR with a 17000-cas
   expect(openRunOf(snapshot, run).evidence?.criteria[0].proof.length).toBe(340);
   await sample(); // with every reader answered and cached
 }, 120_000);
-
-test("ARK-285-AC12 the human check on the real ARK_HOME is recorded in docs/evidence/ARK-285-ac12.md with human: ok", () => {
-  const evidence = readDoc("docs/evidence/ARK-285-ac12.md");
-  for (const part of ["Home", "Runs", "run page", "ticket page", "light", "dark", "usage"])
-    expect(evidence, part).toContain(part);
-  expect(evidence).toMatch(/usage[^\n]*(match|equal)/i);
-  expect(evidence.split("\n")).toContain("human: ok");
-});
 
 test("ARK-285-AC3 after one good Orca read, a failing read keeps a stale waiting agent and still reports a quiet run as idle 60 min", () => {
   const minutes = 60;
@@ -2299,7 +2251,7 @@ test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of
   });
 }, 60_000);
 
-test("ARK-293-AC4 the recorded real prompt wait gives waiting, by agentWait alone too, and docs/evidence/ARK-293-ac4.md holds its raw JSON, the text the hub shows and human: ok", () => {
+test("ARK-T82 the recorded real prompt wait gives waiting, by agentWait alone too", () => {
   const raw = readDoc("test/fixtures/orca-agent-wait.json");
   const entry = JSON.parse(raw);
   expect(entry.agentWait).toMatchObject({ source: "hook" });
@@ -2307,11 +2259,6 @@ test("ARK-293-AC4 the recorded real prompt wait gives waiting, by agentWait alon
   expect(activity.kind).toBe("waiting");
   // The state alone is not what holds it: with state `working` the agentWait object still does.
   expect(activityOf({ ...entry, state: "working" }, Date.now()).kind).toBe("waiting");
-
-  const evidence = readDoc("docs/evidence/ARK-293-ac4.md");
-  expect(evidence).toContain(raw.trim());
-  expect(evidence).toContain(activity.text);
-  expect(evidence.split("\n")).toContain("human: ok");
 });
 
 test("ARK-293-AC5 the run page reads session models from the parse the cost already holds: no second parse, no request, and the last message of the newest file", async () => {

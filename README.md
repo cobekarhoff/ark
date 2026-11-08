@@ -1,47 +1,57 @@
 # Ark
 
-Ark takes a ticket to merge-ready changes in one repo or across several dependent repos. You talk to one agent session, Master Chief. Master Chief starts a run lead for each ticket, and the run lead plans the work and starts workers to build, test, and review it.
+Ark takes a ticket to merge-ready changes in one repo or across several dependent repos. You talk to one agent session, Master Chief. It starts a run lead for each ticket; the run lead plans the work and starts workers to build, test and review it. You decide at the gates and you merge.
 
-A small `ark` command handles the mechanical parts: run state, worktrees, tests, merge requests, and metrics. Skills hold the judgment. Only you merge.
+A small `ark` command does every step that must be repeatable: run state, worktrees, tests, merge requests, metrics. Skills hold the judgment. Nothing merges without you.
 
-## Status
+**107 runs on this repo as of 2026-11-06.** Ark builds itself.
 
-The redesign is being built. The commands are listed in the [command reference](docs/reference/cli.md), and the [product requirements](docs/prd.md) track which tickets are done.
+## Start here
+
+| If you want to…                                             | Read                                                                                                        |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Decide whether your team should use Ark                     | [Why Ark](docs/why-ark.md), five minutes                                                                    |
+| See a run move, state by state, without installing anything | [The interactive tour](docs/tour.html), open it in a browser                                                |
+| Understand the roles, the gates and the run folder          | [Architecture](docs/explanation/architecture.md)                                                            |
+| Follow a ticket through, step by step                       | [Scenarios](docs/explanation/scenarios.md): one repo, a dependency chain, a hand-off                        |
+| Know what Ark promises, with the tickets that prove it      | [Requirements](docs/prd.md), in EARS form                                                                   |
+| Know where Ark is going                                     | [Vision](docs/explanation/vision.md): the closed loop from ticket to telemetry                              |
+| Run your first ticket                                       | [Run a ticket](docs/how-to/run-a-ticket.md), then [Bootstrap a project](docs/how-to/bootstrap-a-project.md) |
+| Look up a command or a file format                          | [Command reference](docs/reference/cli.md)                                                                  |
+| Know what every word means                                  | [CONTEXT.md](CONTEXT.md), the glossary agents and people share                                              |
 
 ## How it works
 
 ```mermaid
-flowchart TD
-  human([You]) --> chief[Master Chief]
-  chief --> lead1[Run lead, ticket A]
-  chief --> lead2[Run lead, ticket B]
-  lead1 --> worker1[Workers: implementer, validator, reviewer]
-  lead2 --> worker2[Workers: implementer, validator, reviewer]
-  orca[Orca: agents, messages, queue] -.hosts.-> chief
-  orca -.hosts.-> lead1
-  orca -.hosts.-> worker1
-  plannotator[Plannotator: plan and merge request review] -.shows.-> human
-  lead1 --> ark[ark command]
-  worker1 --> ark
+flowchart LR
+  you([You]) -->|ticket, gate answers, merge| chief[Master Chief]
+  chief -->|one per ticket| lead[Run lead]
+  lead -->|one per step| impl[Implementer]
+  lead --> val[Validator]
+  lead --> rev[Reviewer]
+  lead -.->|before planning| evl[Evaluator]
+  lead -.->|when a person will see it| des[Designer]
+  lead & impl & val & rev -->|every repeatable step| ark[[ark command]]
   ark --> folder[(Run folder)]
+  folder --> mr[Merge request per repo]
+  mr -->|only you| you
 ```
 
 - You talk only to Master Chief.
 - Each run lead owns one ticket and every repo the ticket touches.
-- Each worker does one step. Workers never start agents, so the depth is 2.
-- You approve the plan before any code is written.
-- Ark opens one merge request per repo, and you merge.
-
-[docs/explanation/architecture.md](docs/explanation/architecture.md) explains the roles, the run lifecycle, and the run folder.
+- Each worker does one step and never starts another agent. The depth is two.
+- No code is written before you approve the plan.
+- Each acceptance criterion is proven by test cases that pass at head, or by your own `manual` answer.
+- Ark opens one merge request per repo, in dependency order. You merge.
 
 ## Requirements
 
 - [Bun](https://bun.sh)
-- [OMP](https://omp.sh)
-- Orca
-- Plannotator
+- [OMP](https://omp.sh), and any other harness a plan step names: Claude Code, Codex, pi
+- Orca, with nested worker depth set to 2
+- Plannotator, for plan review in a browser (optional; the chat works without it)
 - `gh` for GitHub projects or `glab` for GitLab projects
-- docker, with docker compose, for multi-repo projects
+- docker with docker compose, for multi-repo projects
 
 ## Developer setup
 
@@ -49,48 +59,9 @@ flowchart TD
 bun install         # install dependencies
 bun link            # put `ark` on your PATH
 omp plugin link .   # install this repo as an OMP plugin
-bun test            # run the tests
+bun test --parallel # run the tests
 ```
 
-The hub is a view with one action: "Open in Orca" focuses a live agent's terminal (`orca terminal switch`; a running agent session that Orca lists no terminal for shows "running in Orca, open it from its chat tab" instead); it sends no text and changes no run state. When Orca or Plannotator does not answer, its views keep
-the last good value and show how old it is; `GET /api/snapshot` returns the
-same snapshot the page gets.
+`ark ui` serves the hub on port 4317. It is a view: its one action is "Open in Orca", which focuses a live agent's terminal. It sends no text and changes no run state. To reach it as `http://ark.localhost` and start it at login, see [Reach the hub by a local name](docs/how-to/local-names.md).
 
 To undo the setup, run `bun unlink` and `omp plugin uninstall ark`.
-
-### Quality checks
-
-Run `bun run typecheck` (TypeScript 7), `bun run lint` (type-aware oxlint),
-`bun run format:check` (oxfmt), and `bun test --parallel` before submitting changes.
-CI runs these commands in that order and blocks on any failure.
-Use `bun run format` to format supported repository files in place.
-
-The optional pre-commit hook runs the same checks without rewriting files:
-
-```sh
-git config --local core.hooksPath .githooks  # enable for this checkout
-git config --local --unset core.hooksPath   # disable
-```
-
-The hook checks the working tree, not an isolated copy of the index; stage all
-intended changes before committing. It does not replace CI. Enabling it replaces
-any existing local hooks path, so preserve that setting if you already use hooks.
-
-## Project layout
-
-| Path       | Contents                                                 |
-| ---------- | -------------------------------------------------------- |
-| `cli/`     | The `ark` command.                                       |
-| `skills/`  | The router skill, its playbooks and the reviewer rubric. |
-| `scripts/` | The generator for the command reference.                 |
-| `rules/`   | The naming and test-authoring rules.                     |
-| `test/`    | Tests.                                                   |
-| `docs/`    | Requirements, architecture, reference, and decisions.    |
-
-## Documentation
-
-- [Product requirements](docs/prd.md)
-- [Architecture](docs/explanation/architecture.md)
-- [Command reference](docs/reference/cli.md)
-- [Glossary](CONTEXT.md)
-- [Decisions](docs/adr/)

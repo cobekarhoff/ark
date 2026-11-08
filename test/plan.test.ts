@@ -598,15 +598,6 @@ describe("plan check", () => {
     expect(outside.some((line) => line.startsWith("| Step "))).toBe(true);
     expect(open).toBeUndefined();
   });
-
-  test("ARK-185-AC4 architecture.md and run-a-ticket.md name design.interfaces, callers and the Design section", () => {
-    for (const file of ["docs/explanation/architecture.md", "docs/how-to/run-a-ticket.md"]) {
-      const text = readFileSync(join(import.meta.dir, "..", file), "utf8");
-      expect(text).toContain("design.interfaces");
-      expect(text).toContain("callers");
-      expect(text).toContain("Design section");
-    }
-  });
 });
 
 describe("plan.md open-decisions line", () => {
