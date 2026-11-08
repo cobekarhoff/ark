@@ -6,7 +6,7 @@ technique: equivalence classes (GitHub, GitLab) over the same two-repo run
 priority: medium
 risk: a GitLab run calls gh, loses the dependency line, or misses the native blocks call
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-08-ARK-336-1
 ---
 
 ## Objective
@@ -15,7 +15,7 @@ Prove that merge-request open uses glab on GitLab, writes `Depends on !N` and a 
 
 ## Preconditions
 
-- A fixture run with repos core and app on GitLab, and a fake `glab` that records calls and keeps open MRs.
+- A fixture run with repos core and app on GitLab (the plan `repos` block holds the edge app to core), and a fake `glab` that records calls and keeps open MRs.
 
 ## Steps
 

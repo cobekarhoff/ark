@@ -1,6 +1,6 @@
 import { afterAll, beforeAll } from "bun:test";
 import type { Subprocess } from "bun";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
@@ -222,4 +222,84 @@ export function writeEvidenceFile(
     join(directory, `${id.match(/AC\d+$/)![0]}.md`),
     `${evidenceBodies[method].join("\n\n")}\n`,
   );
+}
+
+/** A workspace folder with an empty git repo at each of `repos`. A "." entry makes the workspace itself a repo. */
+export function workspaceWithRepos(repos: string[]): string {
+  const workspace = repos.includes(".")
+    ? tempGitRepo()
+    : mkdtempSync(join(tmpdir(), "ark-workspace-"));
+  for (const repo of repos.filter((name) => name !== ".")) {
+    mkdirSync(dirname(join(workspace, repo)), { recursive: true });
+    renameSync(tempGitRepo(), join(workspace, repo));
+  }
+  return workspace;
+}
+
+export const clara = {
+  core: "repos/shared/clara-core",
+  platform: "repos/platform",
+  reports: "repos/domains/reports",
+};
+
+/**
+ * The 3-repo plan of ARK-336: `impl-core` in core, a bump step in platform and in reports, `validate` in platform
+ * (the suite repo), and `review-core` in core. It needs `validate`, a step of another repo, but makes no repo edge.
+ * Every step serves `criteria`.
+ */
+export function claraPlan(criteria: string[]) {
+  const step = (id: string, role: string, repo: string, needs: string[]) => ({
+    id,
+    role,
+    repo,
+    harness: role === "implementer" ? "claude" : "codex",
+    model: role === "implementer" ? "claude-sonnet" : "gpt-codex",
+    needs,
+    criteria,
+  });
+  const pin = "clara-core>=0.0.6rc1";
+  return {
+    steps: [
+      step("impl-core", "implementer", clara.core, []),
+      step("bump-platform", "implementer", clara.platform, ["impl-core"]),
+      step("bump-reports", "implementer", clara.reports, ["impl-core", "bump-platform"]),
+      step("validate", "validator", clara.platform, ["bump-platform", "bump-reports"]),
+      step("review-core", "reviewer", clara.core, ["impl-core", "validate"]),
+    ],
+    repos: [
+      { repo: clara.core, why: "holds the changed client", depends_on: [] },
+      {
+        repo: clara.platform,
+        why: "calls clara-core",
+        depends_on: [
+          {
+            repo: clara.core,
+            kind: "package",
+            pin,
+            evidence: "services/tenant-manifest-service/pyproject.toml:11",
+            bump: "bump-platform",
+          },
+        ],
+      },
+      {
+        repo: clara.reports,
+        why: "calls clara-core and the platform API",
+        depends_on: [
+          {
+            repo: clara.core,
+            kind: "package",
+            pin,
+            evidence: "pyproject.toml:14",
+            bump: "bump-reports",
+          },
+          {
+            repo: clara.platform,
+            kind: "api",
+            pin: "openapi@v3",
+            evidence: "clients/platform.ts:3",
+          },
+        ],
+      },
+    ],
+  };
 }
