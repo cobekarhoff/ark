@@ -499,19 +499,41 @@ rmdirSync(home+'/inside');release();`,
   });
 
   test("ARK-T114 a waiter file of an ended pid blocks nobody", async () => {
+    // The ended file has the earliest since. A live older waiter sits between it and the newer test.
     const ended = Bun.spawn(["true"]);
     await ended.exited;
+    const live = Bun.spawn(["sleep", "300"]);
+    startedTests.push(live);
     mkdirSync(waiterDirectory(), { recursive: true });
     writeFileSync(
       join(waiterDirectory(), `${ended.pid}.json`),
-      JSON.stringify({ run: runA, pid: ended.pid, since: "2020-01-01T00:00:00.000Z" }),
+      JSON.stringify({ run: "2019-01-01-GHOST-1", pid: ended.pid, since: "2019-01-01T00:00:00.000Z" }),
+    );
+    writeFileSync(
+      join(waiterDirectory(), `${live.pid}.json`),
+      JSON.stringify({ run: runA, pid: live.pid, since: "2020-01-01T00:00:00.000Z" }),
     );
 
     const newer = startTest(runB);
-    const out = await newer.stdout;
-    expect(await newer.process.exited).toBe(0);
+    const newerFile = join(waiterDirectory(), `${newer.process.pid}.json`);
+    // At the base commit the newer test takes the free lock at once and ends without registering.
+    await waitFor(
+      () => existsSync(newerFile) || newer.process.exitCode !== null,
+      "the newer ark test to register as a waiter",
+      10_000,
+    );
+    expect(existsSync(newerFile)).toBe(true);
+    expect(newer.process.exitCode).toBeNull();
+    expect(existsSync(lockDirectory())).toBe(false);
+    expect(logLines()).not.toContain(`start ${runB}`);
+
+    live.kill("SIGKILL");
+    await live.exited;
+    const [out, exitCode] = await Promise.all([newer.stdout, newer.process.exited]);
+    expect(exitCode).toBe(0);
     expect(logLines()).toContain(`start ${runB}`);
-    expect(out).not.toContain("waiting for");
+    expect(out).toContain(`waiting for ark test of ${runA}`);
+    expect(out).not.toContain("GHOST-1");
     expect(existsSync(lockDirectory())).toBe(false);
   });
 });
