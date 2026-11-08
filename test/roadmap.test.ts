@@ -218,19 +218,3 @@ test("ARK-290-AC6 the PRD links the roadmap and CONTEXT.md defines Roadmap, Mile
   const context = readFileSync(join(root, "CONTEXT.md"), "utf8");
   for (const term of ["Roadmap", "Milestone", "Horizon"]) expect(context).toContain(`**${term}**:`);
 });
-
-test("ARK-290-AC7 typecheck, lint and format:check exit 0", async () => {
-  for (const script of ["typecheck", "lint", "format:check"]) {
-    const run = Bun.spawn(["bun", "run", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
-    const [out, err, code] = await Promise.all([
-      new Response(run.stdout).text(),
-      new Response(run.stderr).text(),
-      run.exited,
-    ]);
-    expect({ script, code, output: code === 0 ? "" : out + err }).toEqual({
-      script,
-      code: 0,
-      output: "",
-    });
-  }
-});

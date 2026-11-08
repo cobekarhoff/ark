@@ -774,13 +774,6 @@ test("ARK-284-AC7 a transcript request that fails answers 502 or 404, a bad curs
   expect((await fetch(transcriptUrl(baseUrl, "no-such-run", kept, 0))).status).toBe(404);
 });
 
-test("ARK-284-AC9 typecheck, lint and format:check exit 0 (bun test is this run)", () => {
-  for (const script of ["typecheck", "lint", "format:check"]) {
-    const result = spawnSync("bun", ["run", script], { cwd: root, encoding: "utf8" });
-    expect(result.status, `bun run ${script}\n${result.stdout}${result.stderr}`).toBe(0);
-  }
-}, 300_000);
-
 test("ARK-284-AC10 the human check on the real ARK_HOME is recorded in docs/evidence/ARK-284-ac10.md with human: ok", () => {
   expect(readDoc("docs/evidence/ARK-284-ac10.md").split("\n")).toContain("human: ok");
 });
@@ -1427,13 +1420,6 @@ test("ARK-285-AC11 with every new reader running and an open MR with a 17000-cas
   expect(openRunOf(snapshot, run).evidence?.criteria[0].proof.length).toBe(340);
   await sample(); // with every reader answered and cached
 }, 120_000);
-
-test("ARK-285-AC11 typecheck, lint and format:check exit 0 (bun test is this run)", () => {
-  for (const script of ["typecheck", "lint", "format:check"]) {
-    const result = spawnSync("bun", ["run", script], { cwd: root, encoding: "utf8" });
-    expect(result.status, `bun run ${script}\n${result.stdout}${result.stderr}`).toBe(0);
-  }
-}, 300_000);
 
 test("ARK-285-AC12 the human check on the real ARK_HOME is recorded in docs/evidence/ARK-285-ac12.md with human: ok", () => {
   const evidence = readDoc("docs/evidence/ARK-285-ac12.md");

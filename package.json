@@ -7,7 +7,7 @@
   },
   "type": "module",
   "scripts": {
-    "test": "bun test",
+    "test": "bun test --parallel",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --type-aware --deny-warnings .",
     "format": "oxfmt --write .",

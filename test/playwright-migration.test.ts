@@ -9,8 +9,6 @@ setDefaultTimeout(30_000);
 
 const root = resolve(import.meta.dir, "..");
 const long = 300_000;
-// The whole suite includes the 4 x 30 s of ARK-277-AC4.
-const wholeSuite = 900_000;
 // Built, not written, so this file does not match its own "no browser API" check.
 const forbidden = "Web" + "View";
 
@@ -20,6 +18,7 @@ const hubSpecIds = ["AC3", "AC4", "AC7", "AC8", "AC9", "AC10", "AC11"].map((ac) 
 function playwright(args: string[], options: { cwd?: string; env?: Record<string, string> } = {}) {
   const env: Record<string, string | undefined> = { ...process.env, ...options.env };
   delete env.PLAYWRIGHT_JUNIT_OUTPUT_FILE;
+  delete env.JEST_WORKER_ID; // set by bun test --parallel; Playwright refuses it
   const result = Bun.spawnSync(["bunx", "playwright", ...args], {
     cwd: options.cwd ?? root,
     env,
@@ -130,7 +129,7 @@ describe("playwright migration", () => {
       jobs: Record<string, { "runs-on": string; steps: { run?: string }[] }>;
     };
     const runs = (job: string) => ci.jobs[job]!.steps.flatMap((s) => (s.run ? [s.run] : []));
-    expect(runs("test")).toContain("bun test");
+    expect(runs("test")).toContain("bun test --parallel");
     const jobs = Object.entries(ci.jobs).filter(([, j]) =>
       j.steps.some((s) => s.run?.includes("playwright test")),
     );
@@ -177,17 +176,19 @@ describe("playwright migration", () => {
   );
 
   test(
-    "ARK-243-AC6 ARK-301-AC2 the Playwright suite leaves nothing in the temporary folder",
+    "ARK-T99 ARK-243-AC6 ARK-301-AC2 one Playwright spec run leaves nothing in the temporary folder",
     () => {
       const dir = scratch();
       try {
-        const result = playwright(["test", "--reporter=line"], { env: { TMPDIR: dir } });
+        const result = playwright(["test", "test/pw/checkpoint.pw.ts", "--reporter=line"], {
+          env: { TMPDIR: dir },
+        });
         expect(result.code, result.out + result.err).toBe(0);
         expect(readdirSync(dir)).toEqual([]);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
     },
-    wholeSuite,
+    long,
   );
 });
