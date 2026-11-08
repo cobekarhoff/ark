@@ -1052,3 +1052,14 @@ describe("ARK-T41 ARK-328/AC1 ARK-328/AC2 plan check requires skills only for we
     for (const skill of requiredUiSkills) expect(planMd()).toContain(skill);
   });
 });
+
+test("ARK-T101 plan check names plan.yml and the quoting hint for an unquoted ': ' value", () => {
+  writeFileSync(join(runDirectory, "plan.yml"), "key: a: b\n");
+  const before = events().length;
+  const result = ark("plan", "check", runId);
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("plan.yml is not valid YAML");
+  expect(result.err).toContain("backtick");
+  expect(result.err).toContain("quotes");
+  expect(events().length).toBe(before);
+});
