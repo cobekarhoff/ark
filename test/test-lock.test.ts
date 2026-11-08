@@ -458,4 +458,60 @@ rmdirSync(home+'/inside');release();`,
     expect(secondOut).toContain(`waiting for ark test of ${runA}`);
     expect(state()).not.toContain(heading);
   });
+
+  // ARK-396: the waiter files are the queue. The older waiter is a live `sleep`, never the test process.
+  test("ARK-T113 a newer ark test does not take a free lock while an older live waiter exists", async () => {
+    const older = Bun.spawn(["sleep", "300"]);
+    startedTests.push(older);
+    mkdirSync(waiterDirectory(), { recursive: true });
+    const olderFile = join(waiterDirectory(), `${older.pid}.json`);
+    writeFileSync(
+      olderFile,
+      JSON.stringify({ run: runA, pid: older.pid, since: "2020-01-01T00:00:00.000Z" }),
+    );
+
+    const newer = startTest(runB);
+    const newerFile = join(waiterDirectory(), `${newer.process.pid}.json`);
+    // The newer ark test registers and waits. At the base commit it takes the lock and ends without registering.
+    await waitFor(
+      () => existsSync(newerFile) || newer.process.exitCode !== null,
+      "the newer ark test to register as a waiter",
+      10_000,
+    );
+    expect(existsSync(newerFile)).toBe(true);
+
+    // A negative claim ("does not take") can only be shown by watching for a bounded time: about seven poll
+    // periods of the lock, with the older waiter alive. A fake clock cannot drive a real child process.
+    const until = Date.now() + 700;
+    while (Date.now() < until) {
+      expect(existsSync(lockDirectory())).toBe(false);
+      expect(logLines()).not.toContain(`start ${runB}`);
+      expect(newer.process.exitCode).toBeNull();
+      await Bun.sleep(20);
+    }
+
+    older.kill("SIGKILL");
+    await older.exited;
+    rmSync(olderFile, { force: true });
+    expect(await newer.process.exited).toBe(0);
+    expect(logLines()).toContain(`start ${runB}`);
+    expect(existsSync(lockDirectory())).toBe(false);
+  });
+
+  test("ARK-T114 a waiter file of an ended pid blocks nobody", async () => {
+    const ended = Bun.spawn(["true"]);
+    await ended.exited;
+    mkdirSync(waiterDirectory(), { recursive: true });
+    writeFileSync(
+      join(waiterDirectory(), `${ended.pid}.json`),
+      JSON.stringify({ run: runA, pid: ended.pid, since: "2020-01-01T00:00:00.000Z" }),
+    );
+
+    const newer = startTest(runB);
+    const out = await newer.stdout;
+    expect(await newer.process.exited).toBe(0);
+    expect(logLines()).toContain(`start ${runB}`);
+    expect(out).not.toContain("waiting for");
+    expect(existsSync(lockDirectory())).toBe(false);
+  });
 });
