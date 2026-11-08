@@ -61,7 +61,7 @@ To undo the setup, run `bun unlink` and `omp plugin uninstall ark`.
 ### Quality checks
 
 Run `bun run typecheck` (TypeScript 7), `bun run lint` (type-aware oxlint),
-`bun run format:check` (oxfmt), and `bun test` before submitting changes.
+`bun run format:check` (oxfmt), and `bun test --parallel` before submitting changes.
 CI runs these commands in that order and blocks on any failure.
 Use `bun run format` to format supported repository files in place.
 

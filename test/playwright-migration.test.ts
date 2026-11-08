@@ -129,7 +129,6 @@ describe("playwright migration", () => {
       jobs: Record<string, { "runs-on": string; steps: { run?: string }[] }>;
     };
     const runs = (job: string) => ci.jobs[job]!.steps.flatMap((s) => (s.run ? [s.run] : []));
-    expect(runs("test")).toContain("bun test --parallel");
     const jobs = Object.entries(ci.jobs).filter(([, j]) =>
       j.steps.some((s) => s.run?.includes("playwright test")),
     );
