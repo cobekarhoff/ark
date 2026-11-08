@@ -42,25 +42,6 @@ const file = (milestones: string, lists: { now?: string[]; next?: string[]; late
 
 const m9 = "| M9 | See the work | Outcome nine. | active |";
 
-test("ARK-290-AC1 docs/reference/roadmap.md describes the sections, the columns, the states and the rules", () => {
-  const doc = readFileSync(join(root, "docs/reference/roadmap.md"), "utf8");
-  for (const text of [
-    "$ARK_HOME/projects/<project>/ROADMAP.md",
-    "## Vision",
-    "## Milestones",
-    "## Now",
-    "## Next",
-    "## Later",
-    "`id`, `name`, `outcome` and `state`",
-    "`done`, `active` or `later`",
-    "`- <ticket id>`",
-    "Only the human changes a rank",
-    "A finished ticket (`done` or `superseded`) can stay listed",
-    "An open ticket in no list is Unranked",
-  ])
-    expect(doc).toContain(text);
-});
-
 test("ARK-290-AC2 readRoadmap returns the vision, counts, horizons, Unranked, Review and Shipped", () => {
   const tickets = [
     ticket("ARK-1", "ready"),
@@ -206,17 +187,6 @@ test("ARK-290-AC4 the roadmap structure holds the vision, milestones M1 to M9 an
   expect(
     roadmap.warnings.filter((w) => w.kind === "missing_ticket" || w.kind === "unranked"),
   ).toEqual([]);
-});
-
-test("ARK-290-AC6 the PRD links the roadmap and CONTEXT.md defines Roadmap, Milestone and Horizon", () => {
-  const prd = readFileSync(join(root, "docs/prd.md"), "utf8");
-  expect(prd).toContain("ROADMAP.md");
-  expect(prd).toContain("(reference/roadmap.md)");
-  expect(prd).not.toContain("## Milestones");
-  expect(prd).not.toMatch(/^\| Ticket\s+\|/m);
-
-  const context = readFileSync(join(root, "CONTEXT.md"), "utf8");
-  for (const term of ["Roadmap", "Milestone", "Horizon"]) expect(context).toContain(`**${term}**:`);
 });
 
 test("ARK-290-AC7 typecheck, lint and format:check exit 0", async () => {

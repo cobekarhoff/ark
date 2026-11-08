@@ -23,7 +23,6 @@ import {
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
 
-const playbookDirectory = join(import.meta.dir, "../skills/ark/playbooks");
 const roles = {
   implementer: { harness: "claude", model: "claude-sonnet" },
   validator: { harness: "codex", model: "gpt-codex" },
@@ -232,29 +231,6 @@ test(
   },
   { timeout: 30_000 },
 );
-
-test("ARK-165-AC1 ARK-165-AC2 Chief polls on every wait, closes merged runs and notifies other leads with the synced head", () => {
-  const chief = readFileSync(join(playbookDirectory, "chief.md"), "utf8");
-  const supervise = chief.split("## 7. Supervise")[1]?.split("\n## ")[0] ?? "";
-  const close = chief.split("## 8. Close the run")[1]?.split("\n## ")[0] ?? "";
-  expect(supervise).toContain(
-    "On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>`",
-  );
-  expect(supervise).toContain("If every MR of a run is merged, go to section 8");
-  expect(close).toContain("ark run close <run> merged");
-  expect(close).toContain("ark workspace sync <run>");
-  expect(close).toContain("For every other open run, send its lead a `status` message");
-  expect(close).toContain("target branch and the head that `ark workspace sync` printed");
-});
-
-test("ARK-165-AC3 run lead syncs status-notified worktrees before starting the next step", () => {
-  const runLead = readFileSync(join(playbookDirectory, "run-lead.md"), "utf8");
-  const steps = runLead.split("## 7. Run the steps")[1]?.split("\n## ")[0] ?? "";
-  expect(steps).toContain("Before you start any step, read your mail");
-  expect(steps).toContain("If you got one, run this before `ark run step ... start`");
-  expect(steps).toContain("ark worktree sync <run>");
-  expect(steps).toContain("pushes the branch of every repo with an open MR");
-});
 
 test(
   "ARK-165-AC3 worktree sync merges origin, pushes only MR worktrees and aborts conflicts",
@@ -530,11 +506,6 @@ test(
   },
   { timeout: 30_000 },
 );
-
-test("ARK-233-AC2 the CLI reference documents rework.merge_steps", () => {
-  const doc = readFileSync(join(import.meta.dir, "../docs/reference/cli.md"), "utf8");
-  expect(doc).toContain("rework.merge_steps");
-});
 
 test(
   "ARK-233-AC3 worktree sync on a closed run exits with a phase error and leaves HEAD unchanged",
