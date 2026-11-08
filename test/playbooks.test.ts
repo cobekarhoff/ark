@@ -2,7 +2,7 @@ import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isHubName } from "../cli/proxy.ts";
-import { outcomes } from "../cli/lifecycle.ts";
+import { outcomes, phases } from "../cli/lifecycle.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -22,6 +22,30 @@ test("ARK-187-AC3 every literal `ark run close <run> <outcome>` in the playbooks
   for (const { file, outcome } of closes) {
     expect({ file, known: outcomes.includes(outcome) }).toEqual({ file, known: true });
   }
+});
+
+test("ARK-T86 every phase the docs and playbooks name is one the reducer emits", () => {
+  const root = join(import.meta.dir, "..");
+  const files = [
+    "CONTEXT.md",
+    "README.md",
+    "docs/explanation/architecture.md",
+    "docs/reference/cli.md",
+    ...readdirSync(playbookDirectory).map((name) => `skills/ark/playbooks/${name}`),
+  ].filter((file) => file.endsWith(".md") && existsSync(join(root, file)));
+  const named: { file: string; phase: string }[] = [];
+  for (const file of files) {
+    const text = readFileSync(join(root, file), "utf8");
+    for (const [, phase] of text.matchAll(/\bphases? (?:is |are |in |of |to )?`([a-z_]+)`/g))
+      named.push({ file, phase });
+    const diagram = text.match(/```mermaid\nstateDiagram-v2\n([\s\S]*?)```/)?.[1] ?? "";
+    for (const [, from, to] of diagram.matchAll(/^\s+([a-z_]+) --> ([a-z_]+)/gm))
+      named.push({ file, phase: from }, { file, phase: to });
+  }
+  expect(named.filter(({ file }) => file.endsWith("architecture.md")).length).toBeGreaterThan(0);
+  const known: readonly string[] = phases;
+  for (const { file, phase } of named)
+    expect({ file, phase, known: known.includes(phase) }).toEqual({ file, phase, known: true });
 });
 
 test("ARK-286-AC6 package.json defines the typecheck, lint and format:check scripts", () => {
