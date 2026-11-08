@@ -622,6 +622,91 @@ test("ARK-284-AC5 each session file maps whole to its step, the run lead or unas
   );
 });
 
+test("ARK-T75 sessionsOf and modelsOf give the run lead, steps, rework rounds, gaps and stage sessions the same owners", async () => {
+  const { sessions } = isolatedEnvironment();
+  const directory = writeRun({
+    project: "p",
+    run: `${today()}-ARK-809-1`,
+    ticket: { id: "ARK-809", title: "Owners of session files" },
+    phase: "building",
+  });
+  const worktree = join(directory, "workspace");
+  const started = Date.now() - 3_600_000;
+  const at = (seconds: number) => new Date(started + seconds * 1000);
+  // step-a runs twice (a rework round); step-b between the rounds.
+  const windows = [
+    {
+      id: "step-a",
+      role: "implementer",
+      repo: ".",
+      start: at(100).getTime(),
+      end: at(600).getTime(),
+    },
+    {
+      id: "step-b",
+      role: "reviewer",
+      repo: ".",
+      start: at(700).getTime(),
+      end: at(1200).getTime(),
+    },
+    {
+      id: "step-a",
+      role: "implementer",
+      repo: ".",
+      start: at(1300).getTime(),
+      end: at(1800).getTime(),
+    },
+  ];
+  // The evaluator ends at 50 s; the Designer works from 50 s to 90 s.
+  const stages = {
+    evaluationEnd: at(50).getTime(),
+    designStart: at(50).getTime(),
+    designEnd: at(90).getTime(),
+  };
+  const put = (name: string, startSeconds: number, replySeconds: number) =>
+    writeOmpSession(
+      sessions,
+      name,
+      worktree,
+      [{ time: at(replySeconds), costUsd: 0.01, model: `model-${name}` }],
+      at(startSeconds),
+    );
+  put("evaluator", 10, 20); // starts first, before the first step: never the run lead
+  put("designer", 60, 70);
+  put("lead", 30, 1500);
+  put("worker-a1", 150, 200);
+  put("gap-1", 650, 660);
+  put("worker-b", 750, 800);
+  put("gap-2", 1250, 1260);
+  put("worker-a2", 1350, 1400);
+
+  const index = new UsageIndex();
+  indexes.push(index);
+  await index.refresh([directory]);
+  const ownerOf = Object.fromEntries(
+    index
+      .sessionsOf(directory, windows, started, stages)
+      .map((session) => [session.file.split("/").at(-1)!.replace(".jsonl", ""), session.owner]),
+  );
+  expect(ownerOf).toEqual({
+    evaluator: { kind: "unassigned" },
+    designer: { kind: "unassigned" },
+    lead: { kind: "lead" },
+    "worker-a1": { kind: "step", step: "step-a" },
+    "gap-1": { kind: "unassigned" },
+    "worker-b": { kind: "step", step: "step-b" },
+    "gap-2": { kind: "unassigned" },
+    "worker-a2": { kind: "step", step: "step-a" },
+  });
+  expect(Object.fromEntries(index.modelsOf(directory, windows, started, stages))).toEqual({
+    evaluator: "model-evaluator",
+    designer: "model-designer",
+    lead: "model-lead",
+    "step-a": "model-worker-a2",
+    "step-b": "model-worker-b",
+  });
+});
+
 /** Writes a session file of about `bytes` bytes: records no transcript shows, then `tail` messages. */
 function writeBigSession(file: string, cwd: string, start: Date, bytes: number, tail: number) {
   const descriptor = openSync(file, "w");
