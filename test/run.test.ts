@@ -17,12 +17,15 @@ import { planHash } from "../cli/plan.ts";
 import { timelineOf } from "../hub/run-detail.ts";
 import {
   ark,
+  clara,
+  claraPlan,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
   writeProject,
   writeEvidenceFile,
   writeTicket,
+  workspaceWithRepos,
 } from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
@@ -1249,7 +1252,7 @@ test("ARK-295-AC5 a none project lists each branch with commits beyond its base,
 
   commitIn(worktree, "one");
   commitIn(worktree, "two");
-  const line = `branch   .  ${created.branch}  2 commit(s) ahead of ${created.base.slice(0, 8)}`;
+  const line = `branch   1  .   ${created.branch}   2 commit(s) ahead of ${created.base.slice(0, 8)}`;
   expect(created.base).toHaveLength(40);
   expect(localBranchLines(runId)).toEqual([line]);
   expect(ark("status", runId).out).toContain(`merge requests: none (local only)\n${line}\n`);
@@ -1262,6 +1265,136 @@ test("ARK-295-AC5 a none project lists each branch with commits beyond its base,
   const after = ark("status", runId);
   expect(after.code).toBe(0);
   expect(after.out).toContain(`merge requests: none (local only)\n${line}\n`);
+});
+
+/**
+ * A `merge_requests: none` run in the Clara shape with real worktrees: core 1 commit, platform 2, reports 3 (none for
+ * a repo in `unchanged`), the tests passed at the heads, and impl-core and bump-platform done. `repos: false` gives the
+ * old plan with no repos block and no reviewer step.
+ */
+function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
+  writeProject(
+    "demo",
+    validConfig({
+      workspace: workspaceWithRepos(Object.values(clara)),
+      merge_requests: "none",
+      suites: [{ name: "e2e", level: "e2e", repo: clara.platform, command: "true", parser: "bun" }],
+    }),
+  );
+  const { runId, directory } = startRun();
+  recordEvaluation(directory);
+  const parts = claraPlan(["ARK-900-AC1"]);
+  const withRepos = options.repos !== false;
+  writeFileSync(
+    join(directory, "plan.yml"),
+    JSON.stringify({
+      design: { interfaces: [{ name: "fixture plan", callers: ["ark status"] }] },
+      summary: {
+        why: "Fixture.",
+        changes: [{ criterion: "ARK-900-AC1", where: "tests", now: "None.", fix: "A test." }],
+      },
+      steps: withRepos ? parts.steps : parts.steps.filter((step) => step.id !== "review-core"),
+      ...(withRepos ? { repos: parts.repos } : {}),
+      test_cases: [
+        {
+          id: "proves-ARK-900-AC1",
+          criterion: "ARK-900-AC1",
+          level: "e2e",
+          given: [],
+          when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+          then: ["it works"],
+          expected: "it works",
+        },
+      ],
+    }),
+  );
+  const run = (...args: string[]) => {
+    const result = ark(...args);
+    if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.out}${result.err}`);
+  };
+  run("plan", "check", runId);
+  run("gate", "record", runId, "plan", "approve");
+  for (const repo of Object.values(clara)) run("worktree", "create", runId, repo);
+  const created = eventLines(directory)
+    .filter((line) => line.includes('"worktree.created"'))
+    .map(
+      (line) =>
+        JSON.parse(line).data as { repo: string; path: string; branch: string; base: string },
+    );
+  const commits = { [clara.core]: 1, [clara.platform]: 2, [clara.reports]: 3 };
+  for (const { repo, path } of created)
+    if (!options.unchanged?.includes(repo))
+      for (let i = 0; i < commits[repo]; i++) commitIn(path, `change-${i}`);
+  for (const step of ["impl-core", "bump-platform"])
+    for (const action of ["start", "finish"]) run("run", "step", runId, step, action);
+  appendEvent(directory, "test.completed", {
+    passed: true,
+    heads: Object.fromEntries(
+      created.map(({ repo, path }) => [
+        repo,
+        Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: path }).stdout.toString().trim(),
+      ]),
+    ),
+    suites: [{ name: "e2e", level: "e2e", passed: true }],
+    criteria: { "ARK-900-AC1": "passing" },
+  });
+  /** The expected `branch` line of `repo` at place `order` of the merge order (default: the repos block order). */
+  const branchLine = (repo: string, order = Object.values(clara).indexOf(repo) + 1) => {
+    const { branch, base } = created.find((worktree) => worktree.repo === repo)!;
+    return `branch   ${order}  ${repo.padEnd(26)}${branch}   ${commits[repo]} commit(s) ahead of ${base.slice(0, 8)}`;
+  };
+  return { runId, directory, branchLine, run };
+}
+
+const pendingBump = `           pending bump: bump-reports (package ${clara.core}, clara-core>=0.0.6rc1)`;
+const handOffLines = (out: string) =>
+  out.split("\n").filter((line) => /^branch |pending bump|^order:/.test(line));
+
+test("ARK-T108 hand-off and status list the branches in repo order and the pending bump under its repo", () => {
+  const { runId, branchLine } = claraRun();
+  const expected = [
+    branchLine(clara.core),
+    branchLine(clara.platform),
+    branchLine(clara.reports),
+    pendingBump,
+  ];
+  expect(handOffLines(ark("status", runId).out)).toEqual(expected);
+
+  const closed = ark("run", "close", runId, "handed_off");
+  expect(closed.code, closed.err).toBe(0);
+  expect(handOffLines(closed.out)).toEqual(expected);
+  expect(handOffLines(ark("status", runId).out)).toEqual(expected);
+});
+
+test("ARK-T108 status prints no pending bump once every bump step is done", () => {
+  const { runId, branchLine, run } = claraRun();
+  for (const action of ["start", "finish"]) run("run", "step", runId, "bump-reports", action);
+  expect(handOffLines(ark("status", runId).out)).toEqual([
+    branchLine(clara.core),
+    branchLine(clara.platform),
+    branchLine(clara.reports),
+  ]);
+});
+
+test("ARK-T108 status lists the pending bump of a repo with no commits after the last branch line", () => {
+  const { runId, branchLine } = claraRun({ unchanged: [clara.reports] });
+  expect(handOffLines(ark("status", runId).out)).toEqual([
+    branchLine(clara.core),
+    branchLine(clara.platform),
+    pendingBump,
+  ]);
+});
+
+test("ARK-T108 an old plan with no repos list orders the branches by step needs and says so once", () => {
+  const { runId, branchLine } = claraRun({ repos: false });
+  // validate (platform) needs bump-reports, so by step needs platform comes after reports.
+  expect(handOffLines(ark("status", runId).out)).toEqual([
+    "order: from step needs (no repos list)",
+    branchLine(clara.core, 1),
+    branchLine(clara.reports, 2),
+    branchLine(clara.platform, 3),
+  ]);
 });
 
 test("ARK-295-AC5 an open project and a project with no ark.yml print the unchanged merge requests line", () => {

@@ -6,7 +6,7 @@ technique: state transition (no MR, MR posted, rerun) over two repos on GitHub
 priority: medium
 risk: a repo opens no MR, opens in the wrong order, takes the ticket title or the AC text as title or body, or a rerun creates a second MR
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-08-ARK-336-1
 ---
 
 ## Objective
@@ -15,7 +15,7 @@ Prove that merge-request open pushes and posts one ready MR per repo on GitHub i
 
 ## Preconditions
 
-- A fixture run with repos core and app (app needs core) and docs with no commits, remotes on GitHub, and a fake `gh` that records calls and keeps open PRs.
+- A fixture run with repos core and app (the plan `repos` block holds the edge app to core; app-impl lists core-impl in `needs` only as a decoy) and docs with no commits, remotes on GitHub, and a fake `gh` that records calls and keeps open PRs.
 
 ## Steps
 
