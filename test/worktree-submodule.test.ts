@@ -131,7 +131,7 @@ function consumerTestLog(runId: string, runDirectory: string): string {
 }
 
 describe("worktree create fills submodules", () => {
-  test("ARK-337/AC1 ARK-T111 create fills vendor/lib at the recorded commit and leaves the index pointer alone", () => {
+  test("ARK-T111 create fills vendor/lib at the recorded commit and leaves the index pointer alone", () => {
     const { workspace, first, second } = submoduleMeta();
     const { runId, runDirectory } = startRun(workspace);
     const recorded = stageOf(join(workspace, "repos/consumer"));
@@ -151,7 +151,7 @@ describe("worktree create fills submodules", () => {
     expect(readFileSync(join(worktree, "vendor/other/other.txt"), "utf8")).toBe("other one\n");
   });
 
-  test("ARK-337/AC1 ARK-T111 a plain repo worktree is made with no submodule step", () => {
+  test("ARK-T111 a plain repo worktree is made with no submodule step", () => {
     const { workspace } = submoduleMeta();
     const { runId, runDirectory } = startRun(workspace);
 
@@ -165,7 +165,7 @@ describe("worktree create fills submodules", () => {
     expect(git(worktree, "status", "--porcelain")).toBe("");
   });
 
-  test("ARK-337/AC1 ARK-T111 a failing submodule names consumer, path and cause, keeps the worktree, and a retry does not delete it", () => {
+  test("ARK-T111 a failing submodule names consumer, path and cause, keeps the worktree, and a retry does not delete it", () => {
     const { workspace } = submoduleMeta();
     const broken = join(workspace, "repos/consumer");
     const brokenCopy = join(workspace, "repos/broken");
@@ -204,7 +204,7 @@ describe("worktree create fills submodules", () => {
 });
 
 describe("worktree create and sync use the run's library head", () => {
-  test("ARK-337/AC2 ARK-T112 a committed library change is seen by create, sync and ark test; the index pointer and an uncommitted change are not", () => {
+  test("ARK-T112 a committed library change is seen by create, sync and ark test; the index pointer and an uncommitted change are not", () => {
     const { workspace, first, second, otherRecorded } = submoduleMeta();
     // sync needs origin/HEAD in each repo; the library maps to its worktree by basename, not by origin
     for (const repo of ["lib", "consumer"]) {
@@ -264,7 +264,7 @@ describe("worktree create and sync use the run's library head", () => {
     ]);
   });
 
-  test("ARK-337/AC2 ARK-T112 a library worktree made after the consumer's is picked up by a second create", () => {
+  test("ARK-T112 a library worktree made after the consumer's is picked up by a second create", () => {
     const { workspace, first } = submoduleMeta();
     const { runId, runDirectory } = startRun(workspace);
     expect(create(runId, "repos/consumer").code).toBe(0);
