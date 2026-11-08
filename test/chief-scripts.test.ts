@@ -155,7 +155,7 @@ test("ARK-281-AC6 auto-merger with retro.md and a ready ticket file merges the C
   expect(result.err).not.toContain("HELD:");
 });
 
-test("ARK-244-AC3 temp-cleaner removes only old ark-* directories", () => {
+test("ARK-244-AC3 temp-cleaner removes only old ark-* directories and prunes the worktree one held", () => {
   const workspace = tempGitRepo();
   const scratch = mkdtempSync(join(tmpdir(), "ark-scratch-tmp-"));
   const old = new Date(Date.now() - 30 * 60_000);
@@ -165,6 +165,9 @@ test("ARK-244-AC3 temp-cleaner removes only old ark-* directories", () => {
     if (when) utimesSync(directory, when, when);
     return directory;
   };
+  const oldWorktree = join(scratch, "ark-base-old");
+  Bun.spawnSync(["git", "-C", workspace, "worktree", "add", "-q", "--detach", oldWorktree]);
+  utimesSync(oldWorktree, old, old);
   const oldArk = made("ark-old", old);
   const newArk = made("ark-new");
   const oldOther = made("unrelated-old", old);
@@ -175,6 +178,9 @@ test("ARK-244-AC3 temp-cleaner removes only old ark-* directories", () => {
   expect(existsSync(oldArk)).toBe(false);
   expect(existsSync(newArk)).toBe(true);
   expect(existsSync(oldOther)).toBe(true);
+  expect(existsSync(oldWorktree)).toBe(false);
+  const worktrees = Bun.spawnSync(["git", "-C", workspace, "worktree", "list", "--porcelain"]);
+  expect(worktrees.stdout.toString()).not.toContain("ark-base-old");
 });
 
 // --- ARK-281: the auto-merger waits for retro.md and skips a PR whose ticket is not live ---

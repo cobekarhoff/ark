@@ -285,6 +285,35 @@ describe("ark test", () => {
       expect.stringMatching(new RegExp(`ark-base-\\w+ -p ${runId.toLowerCase()}-base down$`)),
     ]);
   });
+
+  // Real processes: the base suite holds until SIGTERM, and the wall clock is the only signal to poll.
+  test("an ark test killed during the base run leaves no worktree in the source repo", async () => {
+    const marker = join(mkdtempSync(join(tmpdir(), "ark-marker-")), "at-base");
+    const { runId, workspace } = buildingRun({
+      criteria: ["FAKE-1-AC1"],
+      e2e: [
+        `test("FAKE-1-AC1 holds at base", async () => {
+          if (!process.cwd().includes("/ark-base-")) return;
+          require("node:fs").writeFileSync(${JSON.stringify(marker)}, "");
+          await Bun.sleep(60_000);
+        }, 120_000);`,
+      ],
+    });
+    const child = Bun.spawn(["bun", join(import.meta.dir, "..", "cli", "ark.ts"), "test", runId], {
+      env: process.env,
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    for (let waited = 0; !existsSync(marker); waited += 50) {
+      if (waited > 25_000) throw new Error("the base run never started");
+      await Bun.sleep(50);
+    }
+    child.kill("SIGTERM");
+    expect(await child.exited).toBe(143);
+
+    const worktrees = Bun.spawnSync(["git", "-C", workspace, "worktree", "list", "--porcelain"]);
+    expect(worktrees.stdout.toString()).not.toContain("ark-base-");
+  });
 });
 
 describe("ark test with manual criteria", () => {
