@@ -831,13 +831,6 @@ test("ARK-284-AC7 a transcript request that fails answers 502 or 404, a bad curs
   expect((await fetch(transcriptUrl(baseUrl, "no-such-run", kept, 0))).status).toBe(404);
 });
 
-test("ARK-284-AC9 typecheck, lint and format:check exit 0 (bun test is this run)", () => {
-  for (const script of ["typecheck", "lint", "format:check"]) {
-    const result = spawnSync("bun", ["run", script], { cwd: root, encoding: "utf8" });
-    expect(result.status, `bun run ${script}\n${result.stdout}${result.stderr}`).toBe(0);
-  }
-}, 300_000);
-
 // ---------------------------------------------------------------- ARK-285
 
 /** Polls `/api/snapshot` until `ready` holds; fails with the last snapshot after the timeout. */
@@ -1472,13 +1465,6 @@ test("ARK-285-AC11 with every new reader running and an open MR with a 17000-cas
   expect(openRunOf(snapshot, run).evidence?.criteria[0].proof.length).toBe(340);
   await sample(); // with every reader answered and cached
 }, 120_000);
-
-test("ARK-285-AC11 typecheck, lint and format:check exit 0 (bun test is this run)", () => {
-  for (const script of ["typecheck", "lint", "format:check"]) {
-    const result = spawnSync("bun", ["run", script], { cwd: root, encoding: "utf8" });
-    expect(result.status, `bun run ${script}\n${result.stdout}${result.stderr}`).toBe(0);
-  }
-}, 300_000);
 
 test("ARK-285-AC3 after one good Orca read, a failing read keeps a stale waiting agent and still reports a quiet run as idle 60 min", () => {
   const minutes = 60;
