@@ -4,7 +4,7 @@ title: ARK-T108 a 3-repo hand-off lists the branches in repo order with each pen
 level: integration
 technique: state transition (bump pending to done), boundary on empty repo
 priority: medium
-risk: a `merge_requests: none` project hands off branches in an arbitrary order, or hides a bump that is not done, so the human merges a downstream repo before its upstream or ships a stale pin
+risk: "a `merge_requests: none` project hands off branches in an arbitrary order, or hides a bump that is not done, so the human merges a downstream repo before its upstream or ships a stale pin"
 status: active
 changed_by: 2026-11-08-ARK-336-1
 ---
