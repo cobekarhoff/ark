@@ -246,10 +246,17 @@ a.chip[aria-current] {
 .dot.live {
   --c: var(--green);
 }
+/* Own full-width header row: reserved height, so labels appearing or vanishing never move the page. */
 .asof-list {
+  flex: 0 0 100%;
   display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  flex-wrap: wrap;
+  min-height: 22px;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 .asof {
   color: var(--amber-t);
