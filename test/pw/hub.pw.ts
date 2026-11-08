@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import {
   appendRawEvent,
+  fakeGateEnvironment,
   commitCase,
   ompMessagesText,
   orcaAnswersFor,
@@ -47,9 +48,21 @@ test.beforeAll(() => {
 });
 
 const started: StartedHub[] = [];
+const gates: string[] = [];
 test.afterEach(async () => {
+  // Release held fake tools, so a failing case leaves no waiting process behind.
+  for (const gate of gates.splice(0)) writeFileSync(gate, "");
+  delete process.env[fakeGateEnvironment];
   await Promise.all(started.splice(0).map((hub) => stopHub(hub.process)));
 });
+
+/** Holds every fake tool until the returned function runs. Call it before `launch`, so the hub inherits the gate. */
+function holdFakeTools(): () => void {
+  const gate = join(tempDirectory("ark-gate-"), "release");
+  process.env[fakeGateEnvironment] = gate;
+  gates.push(gate);
+  return () => writeFileSync(gate, "");
+}
 
 async function launch(): Promise<string> {
   const hub = await startHub();
@@ -1815,6 +1828,115 @@ test("ARK-285-AC7 Runs shows every run on one board and graph with filters, ring
   await lane("Building").locator('[data-ticket="ARK-601"]').click();
   await expect(page).toHaveURL(new RegExp(`#/run/${runId("ARK-601")}$`));
   await expect(page.locator("main h1")).toContainText("ARK-601");
+});
+
+/** The Roadmap of ARK-T26: 44 open tickets, so the page scrolls. */
+function roadmapOf44(): void {
+  const ticket = (
+    id: string,
+    status: string,
+    extra: Partial<Parameters<typeof writeBacklogTicket>[0]> = {},
+  ) =>
+    writeBacklogTicket({
+      project: "p",
+      id,
+      title: `Title of ${id}`,
+      status,
+      milestone: "M4",
+      ...extra,
+    });
+  ticket("ARK-701", "ready");
+  writeRun({
+    project: "p",
+    run: runId("ARK-701"),
+    ticket: { id: "ARK-701", title: "Title of ARK-701" },
+    phase: "building",
+  });
+  ticket("ARK-702", "in_progress");
+  ticket("ARK-703", "ready", {
+    dependsOn: ["ARK-701"],
+    title: "The ticket page",
+    problem:
+      "The first line.\n\nSecond paragraph with <b>raw markup</b> in it.\n\n- one bullet\n- another bullet",
+    change: "Change the page <script>window.__ran = 1</script>.",
+    criteria: [
+      { id: "ARK-703-AC1", text: "The page shows the title" },
+      { id: "ARK-703-AC2", text: "Esc returns to the list" },
+    ],
+  });
+  ticket("ARK-704", "ready", { dependsOn: ["ARK-703"] });
+  ticket("ARK-705", "superseded");
+  ticket("ARK-706", "done");
+  const proposed = Array.from(
+    { length: 40 },
+    (_, number) => `ARK-8${String(number).padStart(2, "0")}`,
+  );
+  for (const id of proposed) ticket(id, "proposed");
+  writeRoadmap("p", {
+    now: ["ARK-701"],
+    next: ["ARK-702", "ARK-703"],
+    later: ["ARK-704", ...proposed, "ARK-705", "ARK-706"],
+  });
+}
+
+test("ARK-T117 Esc from a ticket page returns the Roadmap to the scroll position read while the nav source labels showed, after the labels vanish", async ({
+  page,
+}) => {
+  isolate();
+  roadmapOf44();
+  const release = holdFakeTools();
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "roadmap");
+  const labels = page.getByTestId("stale-label");
+  await expect.poll(() => labels.count()).toBeGreaterThanOrEqual(4);
+  const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
+  await expect(selected).toHaveAttribute("data-ticket", "ARK-701");
+  for (let press = 0; press < 30; press++) await page.keyboard.press("j");
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(100);
+  // The read above had 4 or more labels; they vanish now, before Enter and Esc.
+  expect(await labels.count()).toBeGreaterThanOrEqual(4);
+  const target = (await selected.getAttribute("data-ticket"))!;
+  release();
+  await expect(labels).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`#/ticket/${target}$`));
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/roadmap$/);
+  await expect(selected).toHaveAttribute("data-ticket", target);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+});
+
+test("ARK-T118 The hub header has the same height with 4 or more stale source labels in the nav as with none", async ({
+  page,
+}) => {
+  isolate();
+  roadmapOf44();
+  const release = holdFakeTools();
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "roadmap");
+  const labels = page.getByTestId("stale-label");
+  await expect.poll(() => labels.count()).toBeGreaterThanOrEqual(4);
+  const header = page.locator("header.top");
+  const heightOf = async () => (await header.boundingBox())!.height;
+  await checkpoint(page, "header-with-labels");
+  const withLabels = await heightOf();
+  // Every label and every chip of the nav lies inside the header box.
+  const box = (await header.boundingBox())!;
+  const parts = page.locator(".nav-right > *, [data-testid=stale-label]");
+  for (const part of await parts.all()) {
+    const inner = await part.boundingBox();
+    if (!inner) continue; // an empty wrapper has no box
+    expect(inner.y).toBeGreaterThanOrEqual(box.y);
+    expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+  }
+  release();
+  await expect(labels).toHaveCount(0);
+  await checkpoint(page, "header-without-labels");
+  expect(await heightOf()).toBe(withLabels);
 });
 
 test("ARK-T26 Roadmap lists the tickets by horizon, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
