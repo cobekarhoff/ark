@@ -13,7 +13,7 @@ import { canonicalCriterion } from "./criterion-id.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events";
 import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths";
-import { loadPlan } from "./plan";
+import { loadPlan, repoGraph } from "./plan";
 import { discoverRepos, repoBase } from "./workspace.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import {
@@ -25,8 +25,6 @@ import {
 import { lintBody } from "../skills/pr-writing/lib/lint.ts";
 import { buildTitle, postMergeRequest } from "../skills/pr-writing/lib/post.ts";
 
-type PlanStep = { id: string; repo: string; needs: string[]; criteria: string[] };
-type PlanSteps = { steps: PlanStep[] };
 type Worktree = { repo: string; path: string; branch: string; base: string };
 type OpenedMergeRequest = { repo: string; url: string; number: number };
 type Host = "github" | "gitlab";
@@ -49,38 +47,8 @@ function run(command: string[], cwd: string): string {
   return result.stdout;
 }
 
-// For each repo, the other repos whose steps it needs.
-function upstreamRepos(plan: PlanSteps): Map<string, Set<string>> {
-  const repoOfStep = new Map(plan.steps.map((step) => [step.id, step.repo]));
-  const upstream = new Map<string, Set<string>>();
-  for (const step of plan.steps) {
-    const dependencies = upstream.get(step.repo) ?? new Set<string>();
-    for (const needed of step.needs) {
-      const neededRepo = repoOfStep.get(needed);
-      if (neededRepo !== undefined && neededRepo !== step.repo) dependencies.add(neededRepo);
-    }
-    upstream.set(step.repo, dependencies);
-  }
-  return upstream;
-}
-
-export function mergeOrder(plan: PlanSteps): string[] {
-  const upstream = upstreamRepos(plan);
-  const repos = [...upstream.keys()]; // first appearance in the plan file
-  const ordered: string[] = [];
-  while (ordered.length < repos.length) {
-    const next = repos.find(
-      (repo) =>
-        !ordered.includes(repo) &&
-        [...upstream.get(repo)!].every((dependency) => ordered.includes(dependency)),
-    );
-    if (next === undefined) {
-      const remaining = repos.filter((repo) => !ordered.includes(repo));
-      throw new ArkError(`the plan has a dependency cycle between repos: ${remaining.join(", ")}`);
-    }
-    ordered.push(next);
-  }
-  return ordered;
+export function mergeOrder(plan: Parameters<typeof repoGraph>[0]): string[] {
+  return repoGraph(plan).order;
 }
 
 function detectHost(remoteUrl: string): Host {
@@ -475,9 +443,11 @@ export function mergeRequestOpen(
   const ledger = buildLedger({ runFolder: directory });
   const worktrees = worktreeMap(events);
   const plan = loadPlan(directory);
-  const upstream = upstreamRepos(plan);
-  const order = mergeOrder(plan);
-  const repos = [...order, ...[...worktrees.keys()].filter((repo) => !order.includes(repo))];
+  const { order: graphOrder, upstream } = repoGraph(plan);
+  const repos = [
+    ...graphOrder,
+    ...[...worktrees.keys()].filter((repo) => !graphOrder.includes(repo)),
+  ];
   const opened = new Map<string, OpenedMergeRequest>();
   for (const event of events)
     if (event.type === "merge_request.opened")
@@ -507,12 +477,11 @@ export function mergeRequestOpen(
       } else if (!needsMergeRequest(repo)) continue;
 
       const host = detectHost(run(["git", "remote", "get-url", "origin"], worktree.path));
-      const upstreamOpened = [...(upstream.get(repo) ?? [])].flatMap(
-        (name) => opened.get(name) ?? [],
-      );
-      const dependsOn = upstreamOpened.map(
-        (merge) => `Depends on ${host === "github" ? "#" : "!"}${merge.number}`,
-      );
+      const upstreamOpened = [...(upstream.get(repo) ?? [])]
+        .sort((left, right) => repos.indexOf(left) - repos.indexOf(right))
+        .flatMap((name) => opened.get(name) ?? []);
+      const marker = host === "github" ? "#" : "!";
+      const dependsOn = upstreamOpened.map((merge) => `Depends on ${marker}${merge.number}`);
       // Evidence and risk are run-wide; host, token owner and template are this repo's own.
       const repoLedger: Ledger = {
         ...ledger,
@@ -520,7 +489,7 @@ export function mergeRequestOpen(
         tokenOwner: tokenOwner(host, worktree.path),
         template: findTemplate(worktree.path),
         // A repo with no commits opens no MR, so the merge order leaves it out.
-        mergeOrder: ledger.mergeOrder.filter((name) =>
+        mergeOrder: graphOrder.filter((name) =>
           ledger.repos.some((entry) => entry.repo === name && entry.commits.length > 0),
         ),
         repos: ledger.repos
@@ -557,14 +526,21 @@ export function mergeRequestOpen(
         console.log(`${repo}  ${posted.action}  ${posted.url}`);
         continue;
       }
-      const created = { repo, url: posted.url, number: posted.number };
+      const order = repos.indexOf(repo) + 1;
+      const waitsFor = upstreamOpened.map((merge) => merge.number);
+      const created = { repo, url: posted.url, number: posted.number, order, waits_for: waitsFor };
       if (host === "gitlab") {
         for (const merge of upstreamOpened)
           blockOnGitLab(created, merge, worktree.path, worktrees.get(merge.repo)!.path);
       }
       appendEvent(directory, "merge_request.opened", created);
       opened.set(repo, created);
-      console.log(`${repo}  ${created.url}`);
+      console.log(
+        `${order}  ${repo}  ${marker}${created.number}  ${created.url}` +
+          (waitsFor.length > 0
+            ? `  waits for ${waitsFor.map((number) => marker + number).join(", ")}`
+            : ""),
+      );
     }
   } finally {
     rmSync(folder, { recursive: true, force: true });

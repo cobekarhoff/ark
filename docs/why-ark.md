@@ -44,7 +44,7 @@ The yellow diamonds are the only places a run waits for you. Everything between 
 
 **Many tickets at once, none of them blocking the others.** Each run has its own worktrees and its own agents. A question in one run waits for you; the others keep going.
 
-**Multi-repo by default.** A ticket that changes a shared package and the service that uses it gets one run, worktrees composed so the service builds against the package change, tests across both, and merge requests in dependency order.
+**Multi-repo by default.** A ticket that changes a shared package and the service that uses it gets one run, worktrees composed so the service builds against the package change, tests across both, and merge requests in merge order (the repo edges of the plan, upstream first).
 
 **It gets better with use.** Every run ends in a retro with numbers: cost, time, rounds, how often you had to step in. Recurring problems become checks the `ark` command enforces, so the same mistake is not made twice. Nothing changes without your approval.
 
