@@ -2255,7 +2255,8 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   await open(page, baseUrl, "");
   await expect(page.getByTestId("stuck")).toHaveCount(1);
   const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
-  expect(await actions.count()).toBeGreaterThan(0);
+  // The buttons render after the stuck row once the agent probe answers: wait, don't count once.
+  await expect(actions.first()).toBeVisible({ timeout: 20_000 });
   for (let index = 0; index < (await actions.count()); index++) {
     const action = actions.nth(index);
     await action.hover();
