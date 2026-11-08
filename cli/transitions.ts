@@ -153,8 +153,11 @@ export function assertAllowed(
         data.round > state.round_budget &&
         state.implementer !== "human"
       ) {
+        const choice = "one_more_round, take_over or abort";
         throw new ArkError(
-          "round budget spent: record gate escalation (one_more_round, take_over or abort)",
+          state.phase === "building"
+            ? `round budget spent: run ark escalate ${state.run} --reason <text> first, then ask the human, then record the escalation gate (${choice})`
+            : `round budget spent: record gate escalation with ark gate record (${choice})`,
         );
       }
       return;

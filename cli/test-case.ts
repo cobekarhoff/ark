@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { ArkError } from "./errors.ts";
+import { ArkError, yamlQuoteHint } from "./errors.ts";
 import { discoverRepos } from "./workspace.ts";
 
 export const caseLevels = ["unit", "integration", "e2e"];
@@ -46,7 +46,9 @@ export function readCaseEntries(
     try {
       front = match ? ((Bun.YAML.parse(match[1]) ?? {}) as Record<string, unknown>) : {};
     } catch (err) {
-      problems.push(`${shown} has frontmatter that is not valid YAML: ${(err as Error).message}`);
+      problems.push(
+        `${shown} has frontmatter that is not valid YAML: ${(err as Error).message} (${yamlQuoteHint})`,
+      );
       continue;
     }
     if (!match) {

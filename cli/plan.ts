@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ProjectConfig, loadConfig } from "./config.ts";
-import { ArkError } from "./errors.ts";
+import { ArkError, yamlQuoteHint } from "./errors.ts";
 import { runCriteria, type TicketCriterion } from "./criteria.ts";
 import { canonicalCriterion, isCaseId } from "./criterion-id.ts";
 import { type RunState, type TicketKind, appendEvent, deriveState, readEvents } from "./events.ts";
@@ -103,7 +103,7 @@ export function loadPlan(runDirectory: string, ticketId?: string): Plan {
   try {
     raw = Bun.YAML.parse(readFileSync(file, "utf8"));
   } catch (err) {
-    throw new ArkError(`plan.yml is not valid YAML: ${(err as Error).message}`);
+    throw new ArkError(`plan.yml is not valid YAML: ${(err as Error).message} (${yamlQuoteHint})`);
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ArkError("plan.yml must be a mapping with steps and test_cases");
