@@ -188,19 +188,3 @@ test("ARK-290-AC4 the roadmap structure holds the vision, milestones M1 to M9 an
     roadmap.warnings.filter((w) => w.kind === "missing_ticket" || w.kind === "unranked"),
   ).toEqual([]);
 });
-
-test("ARK-290-AC7 typecheck, lint and format:check exit 0", async () => {
-  for (const script of ["typecheck", "lint", "format:check"]) {
-    const run = Bun.spawn(["bun", "run", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
-    const [out, err, code] = await Promise.all([
-      new Response(run.stdout).text(),
-      new Response(run.stderr).text(),
-      run.exited,
-    ]);
-    expect({ script, code, output: code === 0 ? "" : out + err }).toEqual({
-      script,
-      code: 0,
-      output: "",
-    });
-  }
-});

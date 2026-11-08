@@ -59,7 +59,7 @@ flowchart LR
 bun install         # install dependencies
 bun link            # put `ark` on your PATH
 omp plugin link .   # install this repo as an OMP plugin
-bun test            # run the tests
+bun test --parallel # run the tests
 ```
 
 `ark ui` serves the hub on port 4317. It is a view: its one action is "Open in Orca", which focuses a live agent's terminal. It sends no text and changes no run state. To reach it as `http://ark.localhost` and start it at login, see [Reach the hub by a local name](docs/how-to/local-names.md).

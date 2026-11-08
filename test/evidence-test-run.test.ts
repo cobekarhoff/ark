@@ -779,6 +779,7 @@ afterAll(() => { if (side === "head" && ${headExitCode ?? 0} !== 0) process.exit
 function playwrightRun(arkEvidenceDirectory: string | undefined, output: string) {
   const environment: Record<string, string | undefined> = { ...process.env };
   delete environment.ARK_EVIDENCE_DIR;
+  delete environment.JEST_WORKER_ID; // set by bun test --parallel; Playwright refuses it
   if (arkEvidenceDirectory !== undefined) environment.ARK_EVIDENCE_DIR = arkEvidenceDirectory;
   const result = Bun.spawnSync(
     [
