@@ -30,6 +30,7 @@ Prove that `ark plan check` exits 1 for each of six defects in the `repos` block
 2. Apply defects a, b and d together and run the check once.
 3. Boundary: a plan with steps in one repo and no `repos` list, run the check.
 4. Boundary: the upstream repo has only a reviewer step (no implementer), the downstream step has no `needs` path.
+5. Two upstreams: repos `a` and `b` both have implementer steps, and the downstream repo `c` depends on both in `repos`. The steps of `c` need only a step of `a`. Run the check.
 
 ## Expected results
 
@@ -37,6 +38,7 @@ Prove that `ark plan check` exits 1 for each of six defects in the `repos` block
 - When defects a, b and d occur together, the output shall say `plan refused: 3 problems` and list all three.
 - When the plan has one repo and no `repos` list, the check shall pass and print no order.
 - When the upstream repo has no implementer step, the check shall not refuse the downstream step for a missing `needs` path.
+- When `c` needs only `a`, the exit code shall be 1 and exactly one problem line shall print, naming the `c -> b` edge as `<downstream> -> <upstream> (<kind>)` and not the `c -> a` edge, which has its `needs` path.
 
 ## Screenshot checkpoints
 
