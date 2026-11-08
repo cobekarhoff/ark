@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import { loadConfig } from "../cli/config.ts";
 import { appendEvent } from "../cli/events.ts";
+import { readCaseEntries } from "../cli/test-case.ts";
 import { reactSkill, requiredUiSkills } from "../cli/ui-skills.ts";
 import {
   ark,
@@ -1051,4 +1052,32 @@ describe("ARK-T41 ARK-328/AC1 ARK-328/AC2 plan check requires skills only for we
     expect(check(requiredUiSkills).code).toBe(0);
     for (const skill of requiredUiSkills) expect(planMd()).toContain(skill);
   });
+});
+
+test("ARK-T101 ARK-334/AC1 plan check names plan.yml and the quoting hint for an unquoted ': ' value", () => {
+  writeFileSync(join(runDirectory, "plan.yml"), "key: a: b\n");
+  const before = events().length;
+  const result = ark("plan", "check", runId);
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("plan.yml is not valid YAML");
+  expect(result.err).toContain("backtick");
+  expect(result.err).toContain("quotes");
+  expect(events().length).toBe(before);
+});
+
+test("ARK-T101 ARK-334/AC1 loadConfig names ark.yml and the quoting hint for an unquoted ': ' value", () => {
+  const directory = writeProject("bad-yaml", {});
+  writeFileSync(join(directory, "ark.yml"), "command: bun test: all\n");
+  expect(() => loadConfig("bad-yaml")).toThrow(/ark\.yml: not valid YAML.*backtick.*quotes/);
+  writeFileSync(join(directory, "ark.yml"), 'command: "bun test: all"\n');
+  expect(() => loadConfig("bad-yaml")).not.toThrow(/not valid YAML/);
+});
+
+test("ARK-T101 ARK-334/AC1 readCaseEntries names the case file and the quoting hint for an unquoted ': ' value", () => {
+  const root = tempGitRepo();
+  mkdirSync(join(root, "test", "cases"), { recursive: true });
+  writeFileSync(join(root, "test", "cases", "ARK-T1.md"), "---\nid: ARK-T1\nrisk: a: b\n---\n");
+  const { entries, problems } = readCaseEntries(root);
+  expect(entries).toEqual([]);
+  expect(problems.join("\n")).toMatch(/test\/cases\/ARK-T1\.md.*not valid YAML.*backtick.*quotes/);
 });
