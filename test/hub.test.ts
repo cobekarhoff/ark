@@ -1466,7 +1466,7 @@ test("ARK-285-AC3 after one good Orca read, a failing read keeps a stale waiting
   expect(stuck(snapshotOf(false, waiting))).toEqual(["waiting on a prompt"]);
 });
 
-test("ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's own file, there is no /api/ticket route, and a front-matter id with ../ reads nothing outside", async () => {
+test("ARK-T25 ticket text and criteria are read from the ticket's own file and served by /api/ticket/<project>/<id>, never in the snapshot, and a front-matter id with ../ reads nothing outside", async () => {
   isolatedEnvironment();
   const home = process.env.ARK_HOME as string;
   writeBacklogTicket({
@@ -1489,16 +1489,18 @@ test("ARK-T25 ticket text and criteria arrive in the snapshot from the ticket's 
     (current) => current.tickets !== "unknown" && current.tickets.length === 2,
   );
   if (snapshot.tickets === "unknown") throw new Error("tickets are unknown");
-  const documents = Object.fromEntries(snapshot.tickets.map((t) => [t.title, t.document]));
-  expect(documents.Readable).toEqual({
+  const documentOf = async (id: string) =>
+    ((await (await fetch(`${baseUrl}/api/ticket/p/${id}`)).json()) as { document: unknown })
+      .document;
+  expect(await documentOf("ARK-840")).toEqual({
     problem: "Why it hurts",
     change: "What changes",
     criteria: [{ id: "AC1", text: "It works", method: "test", verified_by: [] }],
   });
-  expect(documents.Planted?.problem).toBe("Own text");
+  expect(((await documentOf("..%2F..%2F..%2Foutside")) as { problem: string }).problem).toBe(
+    "Own text",
+  );
   expect(JSON.stringify(snapshot)).not.toContain("OUTSIDE TICKET DIRECTORY");
-  for (const id of ["ARK-840", "..%2F..%2F..%2Foutside"])
-    expect((await fetch(`${baseUrl}/api/ticket/p/${id}`)).status).toBe(404);
 });
 
 // ---------------------------------------------------------------- ARK-314
@@ -1640,9 +1642,7 @@ test("ARK-T24 hub reads local test cases and zephyr evidence without a Zephyr ca
   await snapshotWhen(
     baseUrl,
     (current) =>
-      current.tickets !== "unknown" &&
-      current.tickets.filter((ticket) => ticket.document !== null).length === 3 &&
-      current.runs !== "unknown",
+      current.tickets !== "unknown" && current.tickets.length === 3 && current.runs !== "unknown",
   );
   const casesOf = async (project: string): Promise<TicketCases> => {
     const response = await fetch(`${baseUrl}/api/ticket/${project}/ARK-900/cases`);

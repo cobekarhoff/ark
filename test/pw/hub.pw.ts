@@ -2335,12 +2335,13 @@ test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a
   await page.waitForTimeout(2000);
   expect(requests.splice(0)).toEqual([]);
 
-  // The ticket page reads its text from the snapshot and, amended AC7 of ARK-314, its test cases once.
+  // The ticket page reads its text once (ARK-329) and, amended AC7 of ARK-314, its test cases once.
   await open(page, baseUrl, "ticket/ARK-521");
   await expect(page.getByTestId("ticket-page")).toBeVisible();
   await checkpoint(page, "ticket-page-requests");
   await page.waitForTimeout(1000);
   expect(requests.filter((path) => path.startsWith("/api/ticket"))).toEqual([
+    "/api/ticket/p/ARK-521",
     "/api/ticket/p/ARK-521/cases",
   ]);
   // The run page does read (`/api/run`, from ARK-284): the one place the page goes past AC11.
@@ -4833,7 +4834,10 @@ test("ARK-T22 new page parts keep accessibility, request limits and speed", asyn
 
     // Ticket ARK-900: case links, then the shared-case listing.
     let extra = await visit("ticket/ARK-900", criterionOf(page, "AC1").getByTestId("case-link"));
-    expect(extra, `ARK-900 in ${scheme}`).toEqual(["/api/ticket/p/ARK-900/cases"]);
+    expect(extra, `ARK-900 in ${scheme}`).toEqual([
+      "/api/ticket/p/ARK-900",
+      "/api/ticket/p/ARK-900/cases",
+    ]);
     await criterionOf(page, "AC1").getByTestId("case-link").click();
     await expect(criterionOf(page, "AC1").getByTestId("case-listing")).toBeVisible();
     for (const [selector, word] of [
@@ -4858,7 +4862,10 @@ test("ARK-T22 new page parts keep accessibility, request limits and speed", asyn
 
     // Ticket ARK-902: the warning.
     extra = await visit("ticket/ARK-902", criterionOf(page, "AC1").getByTestId("case-link"));
-    expect(extra, `ARK-902 in ${scheme}`).toEqual(["/api/ticket/p/ARK-902/cases"]);
+    expect(extra, `ARK-902 in ${scheme}`).toEqual([
+      "/api/ticket/p/ARK-902",
+      "/api/ticket/p/ARK-902/cases",
+    ]);
     for (const text of await page.getByTestId("criterion-warning").allTextContents())
       expect(text).toContain("Warning");
     await expect(page.getByTestId("criterion-warning")).toHaveCount(2);

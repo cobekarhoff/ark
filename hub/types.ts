@@ -285,12 +285,14 @@ export type TicketView = {
   id: string;
   title: string | null;
   status: string;
+  /** `kind` of the front matter; null when it names none. */
+  kind: string | null;
   milestone: string | null;
   depends_on: string[];
   /** First sentence of the `## Problem` or `## Why` section; null when there is none. */
   why: string | null;
-  /** Null for an unreadable ticket. */
-  document: TicketDocument | null;
+  /** Size and mtime of the ticket file: any edit changes it, so the open ticket page reads its document again. */
+  signature: string;
 };
 
 /**
