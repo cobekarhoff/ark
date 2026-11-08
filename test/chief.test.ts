@@ -194,7 +194,7 @@ const taskRow = (id: string, status: string, title: string) => ({
   assignee: null,
 });
 
-test("ARK-244-AC1 chief state prints each live source in one Markdown snapshot", () => {
+test("ARK-T115 chief state prints each live source in one Markdown snapshot", () => {
   setScenario({
     runs: [
       chiefOrcaRun,

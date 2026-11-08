@@ -39,7 +39,7 @@ Ask the run lead to write it:
 orca orchestration send --to <run-lead-handle> --subject "Write retro.md for <run>" --type handoff --body "Read metrics.json and events.ndjson in <run-folder>. Write retro.md as the retro playbook describes." --json
 ```
 
-If the send answers `already processing`, follow the rule "A busy agent" in `playbooks/chief.md` section 7.
+If the send answers `already processing`, the agent is in the middle of a turn: wait 30 seconds, then send again with the request UUID that Orca printed, up to 5 times. Never treat the message as delivered until a send succeeds.
 
 If the run lead has stopped, start a new run lead with the run folder. The event log is the record, so a fresh run lead can write the retro from `events.ndjson`, `state.json` and `metrics.json`.
 
