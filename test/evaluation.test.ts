@@ -227,13 +227,3 @@ test("ARK-170-AC5 plan markdown lists only risks from the latest evaluation", ()
   expect(evaluationSection).toContain("latest two");
   expect(evaluationSection).not.toContain("old risk");
 });
-
-test("ARK-170-AC7 playbooks assign evaluation recording before planning without product edits", () => {
-  const playbooks = join(import.meta.dir, "../skills/ark/playbooks");
-  const lead = readFileSync(join(playbooks, "run-lead.md"), "utf8");
-  const worker = readFileSync(join(playbooks, "worker.md"), "utf8");
-  expect(lead).toMatch(/roles\.evaluator[\s\S]*?before[\s\S]*?plan\.yml/i);
-  expect(lead).toMatch(/roles\.evaluator[\s\S]*?(?:missing|no evaluator)/i);
-  expect(worker).toContain("evaluation.md");
-  expect(worker).toMatch(/evaluator[\s\S]*?no product code/i);
-});

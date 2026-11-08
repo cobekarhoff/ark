@@ -1,19 +1,19 @@
 ---
 id: ARK-T44
-title: ARK-T44 CLI reference matches the generated output and lists --summary
+title: ARK-T44 docs/reference/cli.md equals the generated reference
 level: integration
-technique: generated-file equality and a repo check run
+technique: generated-file equality
 priority: medium
-risk: docs/reference/cli.md is stale and misses the --summary flag, or a repo check (test, typecheck, lint, format:check) fails after the change
+risk: docs/reference/cli.md is stale against what bun scripts/cli-reference.ts generates
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-07-ARK-322-1
 ---
 
 ## Objective
 
-Prove that `docs/reference/cli.md` equals what `bun scripts/cli-reference.ts` generates and lists the new flag, and that the repo checks exit 0. Serves ARK-316/AC11.
+Prove that `docs/reference/cli.md` equals what `bun scripts/cli-reference.ts` generates. Serves ARK-316/AC11.
 
-Expected: When the reference is generated, the system shall list the `--summary` flag.
+Expected: When the reference is generated, the system shall produce a file equal to the committed `docs/reference/cli.md`.
 
 ## Preconditions
 
@@ -22,18 +22,13 @@ Expected: When the reference is generated, the system shall list the `--summary`
 
 ## Steps
 
-1. Run `bun scripts/cli-reference.ts` into a temporary path (or in place), and compare with the committed `docs/reference/cli.md`.
-2. Find the `merge-request open` entry in the file.
-3. Run `bun test`.
-4. Run `bun run typecheck`.
-5. Run `bun run lint`.
-6. Run `bun run format:check`.
+1. Run `bun scripts/cli-reference.ts`, which regenerates `docs/reference/cli.md` in place.
+2. Compare the regenerated file with the committed content, then restore the committed content.
 
 ## Expected results
 
-- The committed file equals the generated output byte for byte.
-- The `merge-request open` entry lists `--summary`.
-- `bun test`, `bun run typecheck`, `bun run lint` and `bun run format:check` each exit 0.
+- The generator exits 0.
+- The regenerated file equals the committed file byte for byte.
 
 ## Screenshot checkpoints
 

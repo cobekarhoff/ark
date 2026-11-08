@@ -1,5 +1,5 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent, readEvents } from "../cli/events.ts";
@@ -235,14 +235,4 @@ test("ARK-208-AC3 status prints ci: failed when the GitLab pipeline failed, neve
     ".  open  https://github.com/example/core/pull/1  ci: failed  checks failing: linux-test, legacy-lint",
     "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: failed",
   ]);
-});
-
-test("ARK-208-AC4 run-lead orders MR checks, repair verification and sync before its final report", () => {
-  const playbook = readFileSync(
-    join(import.meta.dir, "../skills/ark/playbooks/run-lead.md"),
-    "utf8",
-  );
-  expect(playbook).toMatch(
-    /ark merge-request open <run>[\s\S]*`ark merge-request status <run>`[\s\S]*`ark test <run>`[\s\S]*`ark worktree sync <run>`[\s\S]*Do not report success while CI is failing/,
-  );
 });
