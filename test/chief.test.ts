@@ -161,10 +161,6 @@ beforeEach(() => {
     });
   }
   appendEvent(join(runsRoot, closedRun), "run.closed", { outcome: "aborted" });
-  writeFileSync(
-    join(runsRoot, closedRun, "retro.md"),
-    "# Retro\n\n## Close check\n\n- Biggest pain:\n- Change now:\n- Surprise:\n",
-  );
 });
 
 afterEach(() => {
@@ -235,7 +231,7 @@ test("ARK-244-AC1 chief state prints each live source in one Markdown snapshot",
   expect(out).toMatch(/plan\W+auto/);
   expect(out).toMatch(/strategy\W+auto/);
   expect(out).toMatch(/concurrency\W+3/);
-  expect(section(out, "Closed runs with an empty Close check")).toContain(closedRun);
+  expect(section(out, "Interview")).toMatch(/last interview: 1\s*$/);
   expect(section(out, "Disk")).toMatch(/\d+ GiB/);
 });
 
