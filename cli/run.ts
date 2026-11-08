@@ -496,7 +496,7 @@ function printRun(runId: string, inProject?: string): void {
     ...(manualPending.length > 0 ? [`manual pending: ${manualPending.join(", ")}`] : []),
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     ...amendedLines(state),
-    `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
+    `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") + (state.last_test.mode === "quick" ? " (quick, not a gate)" : "") : "none"}`,
     ...testHeadLines(directory),
     ...(statusMergeRequestsMode(project) === "none"
       ? localOnlyLines(project, state)

@@ -514,6 +514,7 @@ export async function testRun(runId: string, inProject?: string, quick = false):
 
   // One ark test at a time per host: the checks, compose and suites all load the machine.
   const releaseLock = await takeTestLock(runId, stopChildren);
+  const started = Date.now();
   try {
     const composeBase = composeFor(config, mirror, runId);
     const checks: { name: string; passed: boolean }[] = [];
@@ -547,12 +548,27 @@ export async function testRun(runId: string, inProject?: string, quick = false):
           console.log(`suite      ${suite.name} head  skipped  (${skip})`);
           continue;
         }
+        // A quick run runs the own-commit files of a suite with base_files, and the whole suite of one without.
+        let template: string | undefined;
+        let files: string[] | undefined;
+        if (quick && suite.base_files !== undefined) {
+          const base = state.worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+          files = base === undefined ? [] : await ownTestFiles(suite, base, mirror);
+          if (files.length === 0) {
+            headRun.skipped.set(suite.name, "no changed test file");
+            console.log(`suite      ${suite.name} head  skipped  (no changed test file)`);
+            continue;
+          }
+          template = suite.base_command!.replaceAll("{files}", files.map(shellQuote).join(" "));
+        }
         const { results, passed } = await runSuite(
           suite,
           join(mirror, suite.repo),
           resultsDirectory,
           headRun,
           await headOf(suite.repo, config.workspace, mirror),
+          template,
+          files,
         );
         allResults.push(...results);
         if (suite.level !== "unit") provingResults.push(...results);
@@ -580,9 +596,14 @@ export async function testRun(runId: string, inProject?: string, quick = false):
           status: caseStatus(id, allResults, headRun.skipped.size > 0),
         }));
         criterionStatuses[criterion] = verifiedByStatus(cases);
+        // A quick run covers the changed files only: a pass proves no AC.
+        if (quick && criterionStatuses[criterion] === "passing")
+          criterionStatuses[criterion] = "not run";
         via[criterion] = `via ${cases.map((entry) => `${entry.id} ${entry.status}`).join(", ")}`;
       } else {
         criterionStatuses[criterion] = criterionStatus(criterion, provingResults);
+        if (quick && criterionStatuses[criterion] === "passing")
+          criterionStatuses[criterion] = "not run";
         via[criterion] = "via tag";
       }
     }
@@ -596,20 +617,25 @@ export async function testRun(runId: string, inProject?: string, quick = false):
     );
     // Every run also runs the suites at the base commit, on each `ark test`: the new tests change from round to round.
     // A base failure is data, except that a refactor run must keep its behavior.
-    const basePassed = await baseSuitesPassed(
-      config,
-      runId,
-      resultsDirectory,
-      mirror,
-      // An old worktree.created event may hold no base: only a refactor run, which needs the base, refuses it.
-      state.kind === "refactor"
-        ? state.worktrees
-        : state.worktrees.filter((worktree) => worktree.base !== undefined),
-      baseRun,
-      state.kind === "refactor",
-    );
-    addMissing(baseRun, headRun, evidenceDirectory);
-    addMissing(headRun, baseRun, evidenceDirectory);
+    // A quick run has no base run.
+    const basePassed =
+      quick ||
+      (await baseSuitesPassed(
+        config,
+        runId,
+        resultsDirectory,
+        mirror,
+        // An old worktree.created event may hold no base: only a refactor run, which needs the base, refuses it.
+        state.kind === "refactor"
+          ? state.worktrees
+          : state.worktrees.filter((worktree) => worktree.base !== undefined),
+        baseRun,
+        state.kind === "refactor",
+      ));
+    if (!quick) {
+      addMissing(baseRun, headRun, evidenceDirectory);
+      addMissing(headRun, baseRun, evidenceDirectory);
+    }
     writeResults(headRun, evidenceDirectory);
     writeResults(baseRun, evidenceDirectory);
     const passed =
@@ -625,10 +651,12 @@ export async function testRun(runId: string, inProject?: string, quick = false):
       heads,
       suites,
       criteria: criterionStatuses,
-      ...(state.kind === "refactor" ? { base_passed: basePassed } : {}),
+      ...(state.kind === "refactor" && !quick ? { base_passed: basePassed } : {}),
+      mode: quick ? "quick" : "full",
+      duration: Math.round((Date.now() - started) / 1000),
     });
 
-    console.log(`base      ${basePassed ? "passed" : "failed"}`);
+    if (!quick) console.log(`base      ${basePassed ? "passed" : "failed"}`);
     for (const suite of suites)
       console.log(
         `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}`,
@@ -638,10 +666,11 @@ export async function testRun(runId: string, inProject?: string, quick = false):
     for (const id of [...new Set([...headRun.cases.keys(), ...baseRun.cases.keys()])].sort())
       console.log(`evidence   results/evidence/${id}/{base,head}`);
 
+    if (quick) console.log(`mode: quick (not a gate: run ark test ${runId} before the MR)`);
     const problems = [
       ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed`),
       ...suites.filter((suite) => !suite.passed).map((suite) => `suite ${suite.name} failed`),
-      ...(state.kind === "refactor" && !basePassed && hasTestCriterion(directory)
+      ...(state.kind === "refactor" && !quick && !basePassed && hasTestCriterion(directory)
         ? ["refactor run: the suites fail at the base commit"]
         : []),
       ...Object.entries(criterionStatuses)

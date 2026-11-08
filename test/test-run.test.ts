@@ -224,6 +224,8 @@ describe("ark test", () => {
         { name: "e2e", level: "e2e", passed: true },
       ],
       criteria: { "FAKE-1/AC1": "passing", "FAKE-1/AC2": "passing" },
+      mode: "full",
+      duration: expect.any(Number),
     });
     expect(event.heads["."]).not.toBe(head(workspace));
     expect(readFileSync(join(runDirectory, "results/e2e.report"), "utf8")).toContain(

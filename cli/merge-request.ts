@@ -394,6 +394,10 @@ export function assertShippable(
 ): void {
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
+  if (lastTest.data.mode === "quick")
+    throw new ArkError(
+      `the last test at this head is quick, not a gate: run \`ark test ${runId}\``,
+    );
   const unproven = manualCriteria(directory).filter((id) => state.gates[`manual:${id}`] !== "ok");
   if (unproven.length > 0)
     throw new ArkError(
