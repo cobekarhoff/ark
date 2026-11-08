@@ -38,6 +38,12 @@ export type ProjectConfig = {
     repo: string;
     command: string;
     parser: string;
+    /** Glob of the repo's test files that `base_command` runs at the base (own-commit files only). */
+    base_files?: string;
+    /** The command for a list of files at the base: `{files}` is the shell-quoted list, `{report}` as in `command`. */
+    base_command?: string;
+    /** Repo paths the suite covers: a folder ends with `/`, else a file. A quick run skips the suite when the diff touches none. */
+    paths?: string[];
   }[];
   /** Commands `ark test` runs in the repo's worktree before the suites. They must not write files. */
   checks: { name: string; repo: string; command: string }[];
@@ -136,6 +142,26 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     const name = text(suite, "name", `suites[${i}].name`);
     if (names.has(name)) fail(`suites[${i}].name duplicates another suite: ${name}`);
     names.add(name);
+    const baseFiles =
+      suite.base_files === undefined
+        ? undefined
+        : text(suite, "base_files", `suites[${i}].base_files`);
+    const baseCommand =
+      suite.base_command === undefined
+        ? undefined
+        : text(suite, "base_command", `suites[${i}].base_command`);
+    if ((baseFiles === undefined) !== (baseCommand === undefined))
+      fail(`suites[${i}] needs base_files and base_command together`);
+    if (baseCommand !== undefined && !baseCommand.includes("{files}"))
+      fail(`suites[${i}].base_command must contain {files}`);
+    const paths = suite.paths;
+    if (
+      paths !== undefined &&
+      (!Array.isArray(paths) ||
+        paths.length === 0 ||
+        paths.some((entry) => typeof entry !== "string" || entry.trim() === ""))
+    )
+      fail(`suites[${i}].paths must be a non-empty list of non-empty strings`);
     return {
       name,
       level: oneOf(
@@ -147,6 +173,8 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       repo: text(suite, "repo", `suites[${i}].repo`),
       command: text(suite, "command", `suites[${i}].command`),
       parser: oneOf(suite, "parser", `suites[${i}].parser`, parserNames),
+      ...(baseFiles !== undefined ? { base_files: baseFiles, base_command: baseCommand } : {}),
+      ...(paths !== undefined ? { paths: paths as string[] } : {}),
     };
   });
 

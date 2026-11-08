@@ -126,17 +126,24 @@ function criterionStatus(criterion: string, proofResults: TestResult[]): Status 
 }
 
 /** The `verified_by` join over the results of every level. A failing result of a case wins; a case with no passing result is missing. */
-function caseStatus(id: string, allResults: TestResult[]): "passed" | "failed" | "missing" {
+function caseStatus(
+  id: string,
+  allResults: TestResult[],
+  suiteSkipped: boolean,
+): "passed" | "failed" | "missing" | "not run" {
   const carrying = allResults.filter((result) => result.cases.includes(id));
   if (carrying.some((result) => result.status === "failed")) return "failed";
-  return carrying.some((result) => result.status === "passed") ? "passed" : "missing";
+  if (carrying.some((result) => result.status === "passed")) return "passed";
+  // ponytail: a case with no result is "not run" when any suite was skipped, since no result names its suite; refine when a quick run gates something
+  return suiteSkipped ? "not run" : "missing";
 }
 
 function verifiedByStatus(
-  cases: { id: string; status: "passed" | "failed" | "missing" }[],
+  cases: { id: string; status: "passed" | "failed" | "missing" | "not run" }[],
 ): Status {
   if (cases.some((entry) => entry.status === "failed")) return "failing";
-  return cases.some((entry) => entry.status === "missing") ? "missing" : "passing";
+  if (cases.some((entry) => entry.status === "missing")) return "missing";
+  return cases.some((entry) => entry.status === "not run") ? "not run" : "passing";
 }
 
 function manualStatus(answer: string | undefined): Status {
@@ -149,20 +156,31 @@ type Side = "base" | "head";
 /** What one side knows of a case: the winning result of every suite that carries it, and the suites that did. */
 type CaseEntry = {
   name: string;
-  status: TestResult["status"];
+  status: TestResult["status"] | "not run";
   repo: string;
-  sha: string;
+  /** Absent for a case that did not run on this side. */
+  sha?: string;
+  /** The test file that carried the case, when the report names it. */
+  file?: string;
   suites: string[];
 };
 /** One side of a run: the evidence of each case and, for each suite, the repo, SHA and command log that ran. */
 type SideRun = {
   side: Side;
   cases: Map<string, CaseEntry>;
-  suites: Map<string, { repo: string; sha: string; log: string }>;
+  /** `selected` is the file list a suite ran with, when the run chose files (base of a feature, bug or perf run). */
+  suites: Map<string, { repo: string; sha: string; log: string; selected?: string[] }>;
+  /** Suites skipped on purpose, with the reason. */
+  skipped: Map<string, string>;
 };
-const statusRank = { skipped: 0, passed: 1, failed: 2 };
+const statusRank = { "not run": -1, skipped: 0, passed: 1, failed: 2 };
 
-const newSide = (side: Side): SideRun => ({ side, cases: new Map(), suites: new Map() });
+const newSide = (side: Side): SideRun => ({
+  side,
+  cases: new Map(),
+  suites: new Map(),
+  skipped: new Map(),
+});
 
 /** Merges the results of one suite into the side. A failed test wins over a passed one, a passed over a skipped one, across suites too. */
 function addSuite(
@@ -173,8 +191,9 @@ function addSuite(
   results: TestResult[],
   scratch: string,
   evidenceDirectory: string,
+  selected?: string[],
 ): void {
-  run.suites.set(suite.name, { repo: suite.repo, sha, log });
+  run.suites.set(suite.name, { repo: suite.repo, sha, log, selected });
   for (const result of results) {
     for (const id of result.cases) {
       const entry = run.cases.get(id);
@@ -186,11 +205,18 @@ function addSuite(
           repo: suite.repo,
           sha,
           suites: [suite.name],
+          ...(result.file ? { file: result.file } : {}),
         });
       else {
         if (!entry.suites.includes(suite.name)) entry.suites.push(suite.name);
         if (statusRank[result.status] > statusRank[entry.status])
-          Object.assign(entry, { name: result.name, status: result.status, repo: suite.repo, sha });
+          Object.assign(entry, {
+            name: result.name,
+            status: result.status,
+            repo: suite.repo,
+            sha,
+            ...(result.file ? { file: result.file } : {}),
+          });
       }
     }
   }
@@ -208,11 +234,27 @@ function addSuite(
 /**
  * A case that one side found and the other did not (a base crash, or a test file the run deleted) gets a failed
  * result and the command log of the suite that carried it on the side that found it, run on this side.
+ * A case whose suite was skipped here, or whose file was not in the file list this side ran, never ran: `not run`.
  */
 function addMissing(run: SideRun, other: SideRun, evidenceDirectory: string): void {
   for (const [id, found] of other.cases) {
     if (run.cases.has(id)) continue;
     const suite = run.suites.get(found.suites[0]!);
+    const notRun =
+      run.skipped.has(found.suites[0]!) ||
+      (suite?.selected !== undefined &&
+        found.file !== undefined &&
+        !suite.selected.includes(found.file));
+    if (notRun) {
+      run.cases.set(id, {
+        name: found.name,
+        status: "not run",
+        repo: found.repo,
+        suites: [found.suites[0]!],
+      });
+      mkdirSync(join(evidenceDirectory, id, run.side), { recursive: true });
+      continue;
+    }
     if (suite === undefined) continue;
     run.cases.set(id, {
       name: found.name,
@@ -246,10 +288,13 @@ async function runSuite(
   resultsDirectory: string,
   sideRun: SideRun,
   sha: string,
+  /** The suite command, or `base_command` with `{files}` already replaced. */
+  template: string = suite.command,
+  selected?: string[],
 ) {
   const prefix = sideRun.side === "base" ? "base-" : "";
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
-  const command = suite.command.replaceAll("{report}", reportPath);
+  const command = template.replaceAll("{report}", reportPath);
   const scratch = mkdtempSync(join(tmpdir(), "ark-evidence-"));
   try {
     const outcome = await run(["sh", "-c", command], cwd, { ARK_EVIDENCE_DIR: scratch });
@@ -266,6 +311,7 @@ async function runSuite(
       results,
       scratch,
       join(resultsDirectory, "evidence"),
+      selected,
     );
     return {
       results,
@@ -293,6 +339,46 @@ async function copyHeadTests(headPath: string, basePath: string, base: string): 
   }
 }
 
+const shellQuote = (text: string): string => `'${text.replaceAll("'", `'\\''`)}'`;
+
+async function gitPaths(args: string[], cwd: string): Promise<string[]> {
+  const result = await run(["git", ...args], cwd);
+  if (result.code !== 0)
+    throw new ArkError(`git ${args[0]} failed in ${cwd}: ${result.stderr.trim()}`);
+  return result.stdout.split("\0").filter((path) => path !== "");
+}
+
+/** Why a suite is skipped in this run, or null. Only a quick run honors `paths`, matched against `git diff --name-only <base>..HEAD` (merge-in files count). A folder entry ends with `/`. */
+export async function pathsSkipReason(
+  suite: Suite,
+  quick: boolean,
+  worktrees: RunState["worktrees"],
+  mirror: string,
+): Promise<string | null> {
+  if (!quick || suite.paths === undefined) return null;
+  const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+  const changed =
+    base === undefined
+      ? []
+      : await gitPaths(["diff", "--name-only", "-z", `${base}..HEAD`], join(mirror, suite.repo));
+  const covered = (path: string) =>
+    suite.paths!.some(
+      (entry) => path === entry || path.startsWith(entry.endsWith("/") ? entry : `${entry}/`),
+    );
+  return changed.some(covered) ? null : `diff touches none of: ${suite.paths.join(", ")}`;
+}
+
+/** The test files of the run's own commits (no merge-in files) that still exist at head and match `base_files`. */
+async function ownTestFiles(suite: Suite, base: string, mirror: string): Promise<string[]> {
+  const glob = new Bun.Glob(suite.base_files!);
+  const cwd = join(mirror, suite.repo);
+  const logged = await gitPaths(
+    ["log", "--first-parent", "--no-merges", "--name-only", "--format=", "-z", `${base}..HEAD`],
+    cwd,
+  );
+  return [...new Set(logged)].filter((path) => glob.match(path) && existsSync(join(cwd, path)));
+}
+
 function composeFor(config: ProjectConfig, root: string, runId: string): string[] | null {
   return config.compose
     ? [
@@ -306,9 +392,12 @@ function composeFor(config: ProjectConfig, root: string, runId: string): string[
 }
 
 /**
- * Runs every suite on a throwaway checkout of each touched repo at its worktree.created base, after the head's
+ * Runs suites on a throwaway checkout of each touched repo at its worktree.created base, after the head's
  * test files are copied in, so a new test meets the base build. Untouched repos run on the workspace checkout,
- * as in the head run. Returns whether all passed; a failure here is data except for `kind: refactor`.
+ * as in the head run. A refactor run, and a suite with no `base_files`, run the whole suite; any other run
+ * runs `base_command` on the test files of its own commits and skips a suite with none, and with every
+ * suite skipped there is no checkout, setup or compose. Returns whether all that ran passed; a failure here is
+ * data except for `kind: refactor`.
  */
 async function baseSuitesPassed(
   config: ProjectConfig,
@@ -317,7 +406,27 @@ async function baseSuitesPassed(
   mirror: string,
   worktrees: RunState["worktrees"],
   baseRun: SideRun,
+  refactor: boolean,
 ): Promise<boolean> {
+  const plan: { suite: Suite; command: string; files?: string[] }[] = [];
+  for (const suite of config.suites) {
+    if (refactor || suite.base_files === undefined) {
+      plan.push({ suite, command: suite.command });
+      continue;
+    }
+    const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+    const files = base === undefined ? [] : await ownTestFiles(suite, base, mirror);
+    if (files.length === 0) {
+      baseRun.skipped.set(suite.name, "no changed test file");
+      console.log(`suite      ${suite.name} base  skipped  (no changed test file)`);
+    } else
+      plan.push({
+        suite,
+        command: suite.base_command!.replaceAll("{files}", files.map(shellQuote).join(" ")),
+        files,
+      });
+  }
+  if (plan.length === 0) return true;
   const root = mkdtempSync(join(tmpdir(), "ark-base-"));
   const added: { source: string; path: string }[] = [];
   const compose = composeFor(config, root, `${runId}-base`);
@@ -351,13 +460,15 @@ async function baseSuitesPassed(
     }
     // Every suite runs, also after a failed one.
     let allPassed = true;
-    for (const suite of config.suites) {
+    for (const { suite, command, files } of plan) {
       const { passed } = await runSuite(
         suite,
         join(root, suite.repo),
         resultsDirectory,
         baseRun,
         await headOf(suite.repo, root, root),
+        command,
+        files,
       );
       allPassed &&= passed;
     }
@@ -370,7 +481,7 @@ async function baseSuitesPassed(
   }
 }
 
-export async function testRun(runId: string, inProject?: string): Promise<void> {
+export async function testRun(runId: string, inProject?: string, quick = false): Promise<void> {
   const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
   const mirror = mirrorRoot(directory);
@@ -430,6 +541,12 @@ export async function testRun(runId: string, inProject?: string): Promise<void> 
           throw new ArkError(`compose up failed: ${(up.stderr || up.stdout).trim()}`);
       }
       for (const suite of config.suites) {
+        const skip = await pathsSkipReason(suite, quick, state.worktrees, mirror);
+        if (skip !== null) {
+          headRun.skipped.set(suite.name, skip);
+          console.log(`suite      ${suite.name} head  skipped  (${skip})`);
+          continue;
+        }
         const { results, passed } = await runSuite(
           suite,
           join(mirror, suite.repo),
@@ -458,7 +575,10 @@ export async function testRun(runId: string, inProject?: string): Promise<void> 
         criterionStatuses[criterion] = manualStatus(state.gates[`manual:${criterion}`]);
         via[criterion] = `method ${ticketCriteria.get(criterion)?.method}`;
       } else if (verifiedBy.length > 0) {
-        const cases = verifiedBy.map((id) => ({ id, status: caseStatus(id, allResults) }));
+        const cases = verifiedBy.map((id) => ({
+          id,
+          status: caseStatus(id, allResults, headRun.skipped.size > 0),
+        }));
         criterionStatuses[criterion] = verifiedByStatus(cases);
         via[criterion] = `via ${cases.map((entry) => `${entry.id} ${entry.status}`).join(", ")}`;
       } else {
@@ -486,6 +606,7 @@ export async function testRun(runId: string, inProject?: string): Promise<void> 
         ? state.worktrees
         : state.worktrees.filter((worktree) => worktree.base !== undefined),
       baseRun,
+      state.kind === "refactor",
     );
     addMissing(baseRun, headRun, evidenceDirectory);
     addMissing(headRun, baseRun, evidenceDirectory);
@@ -495,7 +616,8 @@ export async function testRun(runId: string, inProject?: string): Promise<void> 
       checks.every((check) => check.passed) &&
       suites.every((suite) => suite.passed) &&
       Object.entries(criterionStatuses).every(
-        ([criterion, status]) => manual.has(criterion) || status === "passing",
+        ([criterion, status]) =>
+          manual.has(criterion) || status === "passing" || status === "not run",
       );
     appendEvent(directory, "test.completed", {
       passed,
@@ -524,7 +646,8 @@ export async function testRun(runId: string, inProject?: string): Promise<void> 
         : []),
       ...Object.entries(criterionStatuses)
         .filter(
-          ([criterion, status]) => status !== (manual.has(criterion) ? "manual ok" : "passing"),
+          ([criterion, status]) =>
+            status !== "not run" && status !== (manual.has(criterion) ? "manual ok" : "passing"),
         )
         .map(([criterion, status]) => `${criterion} is ${status}`),
     ];

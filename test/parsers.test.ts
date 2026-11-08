@@ -68,16 +68,35 @@ test("ARK-158-AC5 an empty report is an error, not zero results", () => {
 //   behave --format json -o behave-cases-report.json
 test("ARK-311-AC1 bun reads case ids and old AC ids from the JUnit title into cases and criteria", () => {
   expect(parseBun({ report: fixture("bun-report.xml"), stdout: "" })).toEqual([
-    { name: "ARK-T12 case only", criteria: [], cases: ["ARK-T12"], status: "passed" },
-    { name: "CLARA-12-AC1 old only", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
+    {
+      name: "ARK-T12 case only",
+      criteria: [],
+      cases: ["ARK-T12"],
+      status: "passed",
+      file: "a.test.ts",
+    },
+    {
+      name: "CLARA-12-AC1 old only",
+      criteria: ["CLARA-12-AC1"],
+      cases: [],
+      status: "passed",
+      file: "a.test.ts",
+    },
     {
       name: "ARK-T13 CLARA-12-AC2 both",
       criteria: ["CLARA-12-AC2"],
       cases: ["ARK-T13"],
       status: "passed",
+      file: "a.test.ts",
     },
-    { name: "neither", criteria: [], cases: [], status: "passed" },
-    { name: "ARK-9/AC1 slash", criteria: ["ARK-9/AC1"], cases: [], status: "passed" },
+    { name: "neither", criteria: [], cases: [], status: "passed", file: "a.test.ts" },
+    {
+      name: "ARK-9/AC1 slash",
+      criteria: ["ARK-9/AC1"],
+      cases: [],
+      status: "passed",
+      file: "a.test.ts",
+    },
   ]);
 });
 
