@@ -420,6 +420,15 @@ function statusMergeRequestsMode(project: string): ProjectConfig["merge_requests
   }
 }
 
+/** Submodule lines need the config's workspace; without a valid ark.yml, status prints none. */
+function statusSubmoduleLines(project: string, worktrees: RunState["worktrees"]): string[] {
+  try {
+    return submoduleLines(loadConfig(project), worktrees);
+  } catch {
+    return [];
+  }
+}
+
 /** The `none` project's merge request line and one `branch` line for each worktree with commits beyond its base. */
 function localOnlyLines(project: string, state: RunState): string[] {
   const workspace = loadConfig(project).workspace;
@@ -496,7 +505,7 @@ function printRun(runId: string, inProject?: string): void {
     ...(manualPending.length > 0 ? [`manual pending: ${manualPending.join(", ")}`] : []),
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     ...amendedLines(state),
-    ...submoduleLines(loadConfig(project), state.worktrees),
+    ...statusSubmoduleLines(project, state.worktrees),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
     ...testHeadLines(directory),
     ...(statusMergeRequestsMode(project) === "none"
