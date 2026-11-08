@@ -22,6 +22,7 @@ import { Unknown, UnknownProject, known } from "./format.tsx";
 import { ticketHref, useLive, useProject, withProject } from "./store.tsx";
 import type { Roadmap as RoadmapModel, RoadmapItem } from "../roadmap.ts";
 import type { Snapshot, TicketView } from "../types.ts";
+import { isFinishedTicket as isFinished } from "../../cli/lifecycle.ts";
 
 /**
  * Selected IDs in dependency order: a ticket comes after every selected ticket it depends on,
@@ -64,8 +65,6 @@ const horizons = [
   ["later", "Later", "Not started on purpose"],
   ["unranked", "Unranked", "Open and approved, but in no list in ROADMAP.md"],
 ] as const;
-
-const isFinished = (status: string) => status === "done" || status === "superseded";
 
 /** One section's state, kept while a ticket page is open so Esc lands on the same rows. */
 type Remembered = {

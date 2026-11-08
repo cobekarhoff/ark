@@ -2,7 +2,7 @@ import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isHubName } from "../cli/proxy.ts";
-import { outcomes } from "../cli/transitions.ts";
+import { outcomes } from "../cli/lifecycle.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
