@@ -1,0 +1,1462 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ark tour</title>
+    <style>
+      :root {
+        --paper: #eef2f5;
+        --panel: #ffffff;
+        --ink: #16222b;
+        --muted: #5b6b75;
+        --line: #cbd5dc;
+        --agent: #0e6b72;
+        --agent-soft: #dceef0;
+        --gate: #b8860b;
+        --gate-soft: #fff3cd;
+        --refuse: #a3412b;
+        --refuse-soft: #f8e3de;
+        --ok: #2e7d4f;
+        --ok-soft: #ddf0e4;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --sans: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #121a20;
+          --panel: #1a242c;
+          --ink: #e6edf2;
+          --muted: #9aaab5;
+          --line: #2e3b45;
+          --agent-soft: #0f3a3e;
+          --gate-soft: #3a2e08;
+          --refuse-soft: #3e1c15;
+          --ok-soft: #143524;
+          --gate: #e0b23a;
+          --agent: #4fb3bb;
+          --refuse: #e07a60;
+          --ok: #5dbf86;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        font-size: 16px;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+        line-height: 1.5;
+      }
+      a {
+        color: var(--agent);
+      }
+      code,
+      pre {
+        font-family: var(--mono);
+        font-size: 0.9em;
+      }
+      pre {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 12px 14px;
+        overflow: auto;
+        margin: 0;
+        white-space: pre;
+      }
+      .wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 0 16px;
+      }
+      header {
+        padding: 40px 0 8px;
+      }
+      header h1 {
+        font-size: 2rem;
+        margin: 0 0 6px;
+        letter-spacing: -0.01em;
+      }
+      header p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 70ch;
+      }
+      nav.jump {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        margin: 18px 0 8px;
+        font-size: 0.95rem;
+      }
+      nav.jump a {
+        text-decoration: none;
+        border-bottom: 1px solid transparent;
+      }
+      nav.jump a:hover,
+      nav.jump a:focus-visible {
+        border-bottom-color: var(--agent);
+      }
+      section {
+        padding: 32px 0 8px;
+        border-top: 1px solid var(--line);
+        margin-top: 24px;
+      }
+      section h2 {
+        font-size: 1.35rem;
+        margin: 0 0 4px;
+      }
+      section > p.lead {
+        color: var(--muted);
+        margin: 0 0 18px;
+        max-width: 70ch;
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+      }
+      :focus-visible {
+        outline: 2px solid var(--agent);
+        outline-offset: 2px;
+      }
+
+      /* lifecycle rail */
+      .rail {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        padding: 6px 0 14px;
+        scrollbar-width: thin;
+      }
+      .rail button {
+        flex: 0 0 auto;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--ink);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .rail button .n {
+        color: var(--muted);
+        font-size: 0.7rem;
+      }
+      .rail button.gate {
+        border-color: var(--gate);
+      }
+      .rail button.active {
+        background: var(--ink);
+        color: var(--paper);
+        border-color: var(--ink);
+      }
+      .rail button.active .n {
+        color: var(--paper);
+        opacity: 0.7;
+      }
+      .state {
+        display: grid;
+        grid-template-columns: 1.3fr 1fr;
+        gap: 20px;
+      }
+      @media (max-width: 760px) {
+        .state {
+          grid-template-columns: 1fr;
+        }
+      }
+      .card {
+        min-width: 0;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .card h3 {
+        margin: 0 0 4px;
+        font-size: 1.05rem;
+      }
+      .big {
+        font-family: var(--mono);
+        font-size: 1.9rem;
+        margin: 0 0 2px;
+        letter-spacing: -0.01em;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 0.75rem;
+        padding: 2px 8px;
+        border-radius: 999px;
+        margin-right: 6px;
+      }
+      .badge.gate {
+        background: var(--gate-soft);
+        color: var(--gate);
+      }
+      .badge.agent {
+        background: var(--agent-soft);
+        color: var(--agent);
+      }
+      .badge.refuse {
+        background: var(--refuse-soft);
+        color: var(--refuse);
+      }
+      .badge.ok {
+        background: var(--ok-soft);
+        color: var(--ok);
+      }
+      dl {
+        margin: 12px 0 0;
+        display: grid;
+        grid-template-columns: 9.5em 1fr;
+        gap: 6px 12px;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+      }
+      .prompt {
+        border-left: 3px solid var(--gate);
+        background: var(--gate-soft);
+        padding: 10px 14px;
+        border-radius: 0 6px 6px 0;
+        margin-top: 10px;
+      }
+      .prompt b {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .next {
+        margin-top: 14px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .next button {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--ink);
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 0.9rem;
+      }
+      .next button:hover {
+        border-color: var(--agent);
+      }
+
+      /* scenario */
+      .tabs {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+      }
+      .tabs button {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--ink);
+        border-radius: 6px;
+        padding: 7px 12px;
+      }
+      .tabs button.active {
+        background: var(--agent);
+        border-color: var(--agent);
+        color: #fff;
+      }
+      .scene {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+      @media (max-width: 760px) {
+        .scene {
+          grid-template-columns: 1fr;
+        }
+      }
+      svg text {
+        font-family: var(--sans);
+        font-size: 12px;
+        fill: var(--ink);
+      }
+      svg text.mono {
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      svg text.muted {
+        fill: var(--muted);
+      }
+      svg .box {
+        fill: var(--panel);
+        stroke: var(--line);
+      }
+      svg .wt {
+        fill: var(--agent-soft);
+        stroke: var(--agent);
+      }
+      svg .link {
+        fill: none;
+        stroke: var(--line);
+        stroke-dasharray: 4 3;
+      }
+      svg .mr {
+        fill: var(--gate-soft);
+        stroke: var(--gate);
+      }
+      svg .edge {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1.2;
+        marker-end: url(#arr);
+      }
+      svg .refuse {
+        fill: var(--refuse-soft);
+        stroke: var(--refuse);
+      }
+      .scene ol {
+        margin: 0;
+        padding-left: 1.2em;
+      }
+      .scene li {
+        margin: 6px 0;
+      }
+
+      /* run folder */
+      .tree {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        gap: 20px;
+      }
+      @media (max-width: 760px) {
+        .tree {
+          grid-template-columns: 1fr;
+        }
+      }
+      .files {
+        font-family: var(--mono);
+        font-size: 0.85rem;
+      }
+      .files button {
+        display: block;
+        width: 100%;
+        text-align: left;
+        border: 0;
+        background: none;
+        color: var(--ink);
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: inherit;
+      }
+      .files button:hover {
+        background: var(--agent-soft);
+      }
+      .files button.active {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      .files .dir {
+        color: var(--muted);
+        padding: 6px 8px 2px;
+      }
+      .files .in1 {
+        padding-left: 22px;
+      }
+      .files .in2 {
+        padding-left: 36px;
+      }
+      .view h3 {
+        margin: 0 0 8px;
+        font-family: var(--mono);
+        font-size: 0.95rem;
+      }
+      .view p {
+        margin: 0 0 10px;
+        color: var(--muted);
+        max-width: 70ch;
+      }
+
+      /* simulator */
+      .sim {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+      @media (max-width: 760px) {
+        .sim {
+          grid-template-columns: 1fr;
+        }
+      }
+      .meter {
+        display: flex;
+        gap: 4px;
+        margin: 8px 0 14px;
+        flex-wrap: wrap;
+      }
+      .meter span {
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        padding: 3px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .meter span.on {
+        background: var(--ink);
+        color: var(--paper);
+        border-color: var(--ink);
+      }
+      .meter span.done {
+        background: var(--ok-soft);
+        color: var(--ok);
+        border-color: var(--ok-soft);
+      }
+      .answers {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+      .answers button {
+        border: 1px solid var(--gate);
+        background: var(--gate-soft);
+        color: var(--ink);
+        border-radius: 6px;
+        padding: 7px 12px;
+      }
+      .answers button.quiet {
+        border-color: var(--line);
+        background: var(--panel);
+      }
+      .log {
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        max-height: 340px;
+        overflow: auto;
+      }
+      .log li {
+        padding: 5px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .log li .who {
+        color: var(--muted);
+        margin-right: 8px;
+      }
+      .log li.gate .who {
+        color: var(--gate);
+      }
+      .log li.refuse .who {
+        color: var(--refuse);
+      }
+      .log li.ok .who {
+        color: var(--ok);
+      }
+      footer {
+        padding: 32px 0 48px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .rail button,
+        .tabs button,
+        .files button {
+          transition:
+            background 0.12s,
+            border-color 0.12s;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Ark, state by state</h1>
+        <p>
+          A run takes a ticket to merge requests that carry their own proof. Click a state to see
+          who acts, which command runs, and what you are asked. Nothing here is live; every example
+          comes from real runs on the Ark repo.
+        </p>
+        <nav class="jump" aria-label="Sections">
+          <a href="#lifecycle">Lifecycle</a>
+          <a href="#scenarios">Three shapes of a run</a>
+          <a href="#folder">The run folder</a>
+          <a href="#needs-you">What needs you</a>
+        </nav>
+      </header>
+
+      <section id="lifecycle">
+        <h2>Lifecycle</h2>
+        <p class="lead">
+          Amber states wait for you. Every other state runs by itself, under a round budget. The
+          <code>ark</code> command keeps the transition table, so a run cannot reach
+          <code>building</code> before you approve the plan.
+        </p>
+        <div class="rail" id="rail" role="tablist" aria-label="Run states"></div>
+        <div class="state">
+          <div class="card" id="statePanel" role="tabpanel"></div>
+          <div class="card" id="stateSide"></div>
+        </div>
+      </section>
+
+      <section id="scenarios">
+        <h2>Three shapes of a run</h2>
+        <p class="lead">
+          Same lifecycle, three workspaces. The diagram shows what Ark builds in the run folder and
+          what lands at the end.
+        </p>
+        <div class="tabs" id="scenarioTabs" role="tablist"></div>
+        <div class="scene">
+          <div class="card">
+            <svg
+              id="scenarioSvg"
+              viewBox="0 0 480 300"
+              width="100%"
+              role="img"
+              aria-labelledby="scenarioTitle"
+            >
+              <title id="scenarioTitle">Scenario diagram</title>
+            </svg>
+          </div>
+          <div class="card" id="scenarioText"></div>
+        </div>
+      </section>
+
+      <section id="folder">
+        <h2>The run folder</h2>
+        <p class="lead">
+          Everything a run did is a file under
+          <code>~/.ark/projects/&lt;project&gt;/runs/&lt;run&gt;/</code>. The event log is the
+          record; the rest is derived or written by an agent. These are from run
+          <code>2026-11-05-ARK-311-1</code>, shortened.
+        </p>
+        <div class="tree">
+          <div class="card files" id="fileTree" role="tablist" aria-label="Run files"></div>
+          <div class="card view" id="fileView" role="tabpanel"></div>
+        </div>
+      </section>
+
+      <section id="needs-you">
+        <h2>What needs you</h2>
+        <p class="lead">
+          Play a run from the human's side. Each gate shows the question Master Chief relays and
+          what each answer does. The log on the right is what the run records.
+        </p>
+        <div class="sim">
+          <div class="card">
+            <div class="meter" id="meter"></div>
+            <div id="simQuestion"></div>
+            <div class="answers" id="simAnswers"></div>
+          </div>
+          <div class="card">
+            <h3 style="margin: 0 0 8px">events.ndjson, in words</h3>
+            <ul class="log" id="simLog"></ul>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        This page is <code>docs/tour.html</code> in the Ark repo and works offline. The words it
+        uses are defined in <code>CONTEXT.md</code>. For the full lifecycle and the gates, read
+        <code>docs/explanation/architecture.md</code>.
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        // ---------- Lifecycle ----------
+        const STATES = [
+          {
+            id: "intake",
+            who: "Master Chief",
+            cmd: "ark run start ARK-311",
+            you: "You named the ticket. Master Chief saved it and started a run lead in Orca.",
+            detail:
+              "The run folder is created with a snapshot of the ticket, an empty event log and derived state.",
+            next: ["evaluating"],
+          },
+          {
+            id: "evaluating",
+            who: "Evaluator",
+            cmd: "ark evaluation record <run>",
+            you: "Nothing yet. The evaluator reads the ticket and the code and runs read-only probes.",
+            detail:
+              "It writes evaluation.md: blockers (an AC that cannot be proven) and risks the plan must handle. ARK-311: 0 blockers, 8 risks.",
+            next: ["awaiting_criteria"],
+          },
+          {
+            id: "awaiting_criteria",
+            gate: true,
+            who: "You",
+            cmd: "ark gate record <run> criteria accept",
+            you: "Accept each acceptance criterion with its method and the test cases that prove it. Amend, or abort.",
+            prompt:
+              "Criteria for ARK-311: 9 ACs. AC1 to AC7 method test, verified_by ARK-T12 to ARK-T20. AC8 and AC9 method inspection. Accept?",
+            detail:
+              "Opens on every run. A blocker from the evaluator shows here. Nothing is planned until you answer.",
+            next: ["planning"],
+          },
+          {
+            id: "planning",
+            who: "Run lead, Designer",
+            cmd: "ark strategy record <run>  ·  ark plan check <run>",
+            you: "Nothing yet, unless there are two or more strategy cards.",
+            detail:
+              "The run lead writes strategies.md (one card per way to do it, with mockups when a person will see the change) and plan.yml: steps per role per repo, test cases, a design block with every interface and its callers, decisions. ark plan check refuses cycles, unknown needs, an AC with no integration or E2E case, an interface with no callers, an open decision. A valid plan renders plan.md.",
+            next: ["awaiting_strategy", "plan_gate"],
+          },
+          {
+            id: "awaiting_strategy",
+            gate: true,
+            who: "You",
+            cmd: "ark gate record <run> strategy <card>",
+            you: "Pick a card, or annotate the cards and mockups for a design round.",
+            prompt:
+              "Two strategies for CLARA-512: A one-pass core (recommended, medium risk) or B staged behind a flag (lower risk, two MRs more). Mockups attached. Which?",
+            detail: "Only with two or more cards. Design rounds have no budget and never escalate.",
+            next: ["planning"],
+          },
+          {
+            id: "plan_gate",
+            gate: true,
+            who: "You",
+            cmd: "ark gate record <run> plan approve",
+            you: "Read plan.md in Plannotator or in the chat. Approve, ask for changes, answer an open decision, or abort.",
+            prompt:
+              "plan.md for ARK-311: 5 steps (cli-core → docs-rules; ac-tests, doc-tests; repo-review on Codex). 11 test cases. 0 open decisions. Approve?",
+            detail:
+              "No code is written before this answer. plan approve is refused while a decision is open.",
+            next: ["building"],
+          },
+          {
+            id: "building",
+            who: "Implementer, Validator",
+            cmd: "ark run step <run> <step> start",
+            you: "Nothing. Workers run in their own worktrees.",
+            detail:
+              "The implementer writes product code in one repo and runs the project checks (format, typecheck, lint) before every commit. The validator turns the plan’s test cases into tagged integration and E2E tests and makes them pass. A worker never starts an agent.",
+            next: ["testing"],
+          },
+          {
+            id: "testing",
+            who: "ark command",
+            cmd: "ark test <run>",
+            you: "Nothing, unless an AC is manual: then you check it and answer ok or problem.",
+            detail:
+              "Runs every suite and check at head from the run folder (docker compose for multi-repo). Decides each AC from its verified_by test cases. Output: ARK-311/AC1 passing, verified_by ARK-T12, ARK-T13 … Exit 0 only when every AC passes.",
+            next: ["reviewing", "building", "escalation"],
+          },
+          {
+            id: "reviewing",
+            who: "Reviewer (other vendor), Run lead",
+            cmd: "ark run step <run> repo-review start",
+            you: "Nothing. The run lead judges each finding.",
+            detail:
+              "A fresh-context reviewer reads the diff and its callers against the ACs. Findings P0 to P3; a P0 or P1 needs a Repro command and quoted output or it is written as P2. The run lead re-runs each repro and writes send back or leave with a reason. ARK-311 round 1: 3 P0 and 1 P1; three sent back, one left.",
+            next: ["merge_requests_open", "building", "escalation"],
+          },
+          {
+            id: "escalation",
+            gate: true,
+            who: "You (or auto, twice)",
+            cmd: "ark gate record <run> escalation one_more_round",
+            you: "Grant one more round, take over as the implementer, or abort.",
+            prompt:
+              "ARK-311 spent its budget of 2 rounds. Round 2 fixed two of three findings; architecture.md still states the old rule. One more round, take over, or abort?",
+            detail:
+              "With gates.escalation: auto, Ark answers one_more_round for the first two spent budgets and asks you after that.",
+            next: ["building", "closed"],
+          },
+          {
+            id: "merge_requests_open",
+            who: "ark command, Master Chief",
+            cmd: "ark merge-request open <run>  ·  ark merge-request status <run>",
+            you: "Review the MR on the host. Resolve threads. Merge.",
+            detail:
+              "Refuses unless the last test passed at the latest commit, every manual AC is ok, every AC literal is in a tracked file. Opens one MR per repo in dependency order. Master Chief polls; a failed check, a comment or a conflict starts an MR round that pushes to the same branch.",
+            next: ["closed"],
+          },
+          {
+            id: "closed",
+            who: "Run lead, Master Chief",
+            cmd: "ark run close <run> merged  ·  ark retro <run>",
+            you: "Answer three questions. Approve or reject each improvement proposal.",
+            detail:
+              "Outcome: merged, abandoned, aborted or handed_off. ark retro writes metrics.json; the run lead writes retro.md. ARK-311: $8.48, 33.6 M tokens, 3 rounds, 1 escalation. One learning approved, enforced by an ark merge-request open refusal.",
+            next: [],
+          },
+        ];
+        const rail = document.getElementById("rail");
+        const panel = document.getElementById("statePanel");
+        const side = document.getElementById("stateSide");
+        let current = "intake";
+        STATES.forEach((s, i) => {
+          const b = document.createElement("button");
+          b.setAttribute("role", "tab");
+          b.dataset.id = s.id;
+          b.className = s.gate ? "gate" : "";
+          b.innerHTML = `<span class="n">${i + 1}</span>${s.id}`;
+          b.addEventListener("click", () => showState(s.id));
+          rail.appendChild(b);
+        });
+        function showState(id) {
+          current = id;
+          const s = STATES.find((x) => x.id === id);
+          rail.querySelectorAll("button").forEach((b) => {
+            const on = b.dataset.id === id;
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-selected", on);
+          });
+          panel.innerHTML = `
+      <p class="big">${s.id}</p>
+      <div>${s.gate ? '<span class="badge gate">waits for you</span>' : '<span class="badge agent">runs by itself</span>'}</div>
+      <dl>
+        <dt>Who acts</dt><dd>${s.who}</dd>
+        <dt>Command</dt><dd><code>${s.cmd}</code></dd>
+        <dt>What you do</dt><dd>${s.you}</dd>
+      </dl>
+      ${s.prompt ? `<div class="prompt"><b>Master Chief asks</b>${s.prompt}</div>` : ""}
+      <div class="next">${s.next.map((n) => `<button data-go="${n}">${n} →</button>`).join("")}</div>`;
+          panel
+            .querySelectorAll("[data-go]")
+            .forEach((b) => b.addEventListener("click", () => showState(b.dataset.go)));
+          side.innerHTML = `<h3>What happens here</h3><p style="margin:0">${s.detail}</p>`;
+        }
+        showState(current);
+
+        // ---------- Scenarios ----------
+        const SCEN = {
+          single: {
+            name: "One repo",
+            title: "One repo: the run folder is the worktree",
+            text: `<h3>Ark on itself</h3><ol>
+        <li>The workspace is one GitHub repo. <code>&lt;run&gt;/workspace</code> is a worktree on branch <code>ark/ARK-311-…</code>.</li>
+        <li>Steps run in one place; <code>ark test</code> runs <code>bun test</code> and Playwright at head.</li>
+        <li><code>ark merge-request open</code> pushes the branch and opens one pull request.</li>
+        <li>You merge. The retro adds a learning and, where a command can check it, a refusal.</li></ol>
+        <p style="color:var(--muted);margin:10px 0 0">Real run: 2026-11-05-ARK-311-1, three rounds, PR #123.</p>`,
+          },
+          chain: {
+            name: "Dependency chain",
+            title: "Dependency chain: worktrees composed, MRs in order",
+            text: `<h3>Clara or Smart QC</h3><ol>
+        <li>The workspace is a meta-repo with <code>repos/*</code>, <code>knowledge/</code> and a compose file.</li>
+        <li>The run folder mirrors it: the two repos the ticket touches become worktrees on the same branch; everything else is a symlink.</li>
+        <li>The plan has a step per repo in dependency order; the service builds against <code>../shared/packages</code> because compose runs from the run folder.</li>
+        <li>One reviewer covers both diffs. <code>ark test</code> runs through compose against both worktrees.</li>
+        <li>One MR per repo, in order, with <code>Depends on !1</code>. You merge 1, then 2.</li></ol>`,
+          },
+          handoff: {
+            name: "Hand-off",
+            title: "Hand-off: proven, reviewed, never pushed",
+            text: `<h3>A repo Ark may not push to</h3><ol>
+        <li><code>ark.yml</code> says <code>merge_requests: none</code>; every clone has its push URL disabled.</li>
+        <li>The run evaluates, plans, builds, proves and reviews as usual.</li>
+        <li><code>ark merge-request open</code> refuses. The run lead runs <code>ark worktree sync</code> and closes the run <code>handed_off</code> after the same proof checks an MR would need.</li>
+        <li>Branches stay in their clones under <code>review/&lt;ticket&gt;</code>; worktrees are removed. You review and open the MR yourself.</li></ol>
+        <p style="color:var(--muted);margin:10px 0 0">Smart QC runs this way today. When the host gate can verify the evidence, the project switches to open MRs with no other change.</p>`,
+          },
+        };
+        const tabs = document.getElementById("scenarioTabs");
+        const svg = document.getElementById("scenarioSvg");
+        const stext = document.getElementById("scenarioText");
+        Object.entries(SCEN).forEach(([k, v]) => {
+          const b = document.createElement("button");
+          b.textContent = v.name;
+          b.dataset.k = k;
+          b.setAttribute("role", "tab");
+          b.addEventListener("click", () => showScen(k));
+          tabs.appendChild(b);
+        });
+        const NS = "http://www.w3.org/2000/svg";
+        function el(tag, attrs, text) {
+          const e = document.createElementNS(NS, tag);
+          for (const a in attrs) e.setAttribute(a, attrs[a]);
+          if (text != null) e.textContent = text;
+          return e;
+        }
+        function box(x, y, w, h, cls, label, sub) {
+          const g = el("g", {});
+          g.appendChild(el("rect", { x, y, width: w, height: h, rx: 6, class: cls }));
+          g.appendChild(el("text", { x: x + 10, y: y + 18, class: "mono" }, label));
+          if (sub) g.appendChild(el("text", { x: x + 10, y: y + 34, class: "muted" }, sub));
+          return g;
+        }
+        function arrow(x1, y1, x2, y2) {
+          return el("path", { d: `M${x1} ${y1} L${x2} ${y2}`, class: "edge" });
+        }
+        function showScen(k) {
+          tabs.querySelectorAll("button").forEach((b) => {
+            const on = b.dataset.k === k;
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-selected", on);
+          });
+          stext.innerHTML = SCEN[k].text;
+          while (svg.lastChild) svg.removeChild(svg.lastChild);
+          svg.appendChild(el("title", { id: "scenarioTitle" }, SCEN[k].title));
+          const defs = el("defs", {});
+          const m = el("marker", {
+            id: "arr",
+            viewBox: "0 0 10 10",
+            refX: 9,
+            refY: 5,
+            markerWidth: 6,
+            markerHeight: 6,
+            orient: "auto-start-reverse",
+          });
+          m.appendChild(
+            el("path", { d: "M0 0L10 5L0 10z", fill: "currentColor", style: "fill:var(--muted)" }),
+          );
+          defs.appendChild(m);
+          svg.appendChild(defs);
+          svg.appendChild(
+            el("text", { x: 12, y: 22, style: "font-weight:600;font-size:13px" }, SCEN[k].title),
+          );
+          if (k === "single") {
+            svg.appendChild(box(12, 48, 200, 46, "box", "workspace: ark/", "one GitHub repo"));
+            svg.appendChild(
+              box(268, 48, 200, 46, "wt", "run/workspace", "worktree, branch ARK-311"),
+            );
+            svg.appendChild(arrow(212, 71, 266, 71));
+            svg.appendChild(box(268, 128, 200, 46, "box", "ark test", "bun + playwright at head"));
+            svg.appendChild(arrow(368, 94, 368, 126));
+            svg.appendChild(box(268, 208, 200, 46, "mr", "PR #123", "you merge"));
+            svg.appendChild(arrow(368, 174, 368, 206));
+            svg.appendChild(el("text", { x: 12, y: 150, class: "muted" }, "one MR, one worktree,"));
+            svg.appendChild(
+              el("text", { x: 12, y: 166, class: "muted" }, "the folder is the checkout"),
+            );
+          } else if (k === "chain") {
+            svg.appendChild(box(12, 48, 150, 46, "box", "workspace/", "meta-repo"));
+            svg.appendChild(box(12, 106, 150, 42, "box", "repos/shared", ""));
+            svg.appendChild(box(12, 154, 150, 42, "box", "repos/platform", ""));
+            svg.appendChild(box(12, 202, 150, 42, "box", "repos/other", ""));
+            svg.appendChild(box(12, 250, 150, 42, "box", "knowledge/ compose", ""));
+            svg.appendChild(box(210, 48, 150, 46, "wt", "run/workspace", "mirror"));
+            svg.appendChild(box(210, 106, 150, 42, "wt", "repos/shared", "worktree"));
+            svg.appendChild(box(210, 154, 150, 42, "wt", "repos/platform", "worktree → ../shared"));
+            svg.appendChild(box(210, 202, 150, 42, "box", "repos/other", "symlink"));
+            svg.appendChild(box(210, 250, 150, 42, "box", "knowledge/ compose", "symlink"));
+            [223, 271].forEach((y) =>
+              svg.appendChild(el("path", { d: `M162 ${y} L208 ${y}`, class: "link" })),
+            );
+            svg.appendChild(arrow(162, 127, 208, 127));
+            svg.appendChild(arrow(162, 175, 208, 175));
+            svg.appendChild(box(392, 106, 80, 42, "mr", "MR 1", "shared"));
+            svg.appendChild(box(392, 154, 80, 42, "mr", "MR 2", "needs 1"));
+            svg.appendChild(arrow(360, 127, 390, 127));
+            svg.appendChild(arrow(360, 175, 390, 175));
+            svg.appendChild(el("path", { d: "M432 148 L432 152", class: "edge" }));
+          } else {
+            svg.appendChild(
+              box(12, 48, 200, 46, "box", "workspace: smart-qc", "push URL DISABLED"),
+            );
+            svg.appendChild(box(268, 48, 200, 46, "wt", "run/workspace", "worktrees as usual"));
+            svg.appendChild(arrow(212, 71, 266, 71));
+            svg.appendChild(box(268, 128, 200, 46, "box", "ark test · review", "every AC at head"));
+            svg.appendChild(arrow(368, 94, 368, 126));
+            svg.appendChild(
+              box(
+                268,
+                208,
+                200,
+                46,
+                "refuse",
+                "ark merge-request open",
+                "refused: merge_requests none",
+              ),
+            );
+            svg.appendChild(arrow(368, 174, 368, 206));
+            svg.appendChild(
+              box(12, 208, 200, 46, "mr", "review/SQC-1", "branch stays; you open the MR"),
+            );
+            svg.appendChild(arrow(266, 231, 214, 231));
+            svg.appendChild(el("text", { x: 12, y: 150, class: "muted" }, "closed handed_off,"));
+            svg.appendChild(
+              el("text", { x: 12, y: 166, class: "muted" }, "same proof checks as an MR"),
+            );
+          }
+        }
+        showScen("single");
+
+        // ---------- Run folder ----------
+        const FILES = [
+          { dir: "runs/2026-11-05-ARK-311-1/" },
+          {
+            id: "ticket",
+            name: "ticket.md",
+            in: 1,
+            why: "Snapshot of the ticket with its ACs. Each AC has a method and a verified_by list you accepted at the criteria gate.",
+            body: `# ARK-311: An AC belongs to its ticket and test cases describe the product
+
+| AC | method | verified_by |
+|---|---|---|
+| AC1 parsers return case ids | test | ARK-T12, ARK-T13 |
+| AC2 verified_by join decides an AC | test | ARK-T14 |
+| AC6 ark test-case new allocates under a lock | test | ARK-T19 |
+| AC8 rubric states conversion on touch | inspection | ARK-T21 |`,
+          },
+          {
+            id: "evaluation",
+            name: "evaluation.md",
+            in: 1,
+            why: "Written by the evaluator before planning. Blockers open the criteria gate; risks go into the implementer spec word for word.",
+            body: `blockers: []
+risks:
+  - Always-open criteria gate (AC5): every existing fixture that starts a run with ACs
+    and skips criteria accept will stall in awaiting_criteria. The plan must update them.
+  - acceptCriteria emits criteria.updated with bare ids. Id normalisation must reach
+    events, state, plan.yml, results and the manual:<id> gate keys.
+surfaces: [cli_output]`,
+          },
+          {
+            id: "plan",
+            name: "plan.yml",
+            in: 1,
+            why: "Steps per role per repo with needs, criteria and model; test cases; a design block with every interface and its callers; decisions. ark plan check refuses anything it cannot prove.",
+            body: `steps:
+  - id: cli-core
+    role: implementer
+    model: anthropic/claude-sonnet-5-5
+    needs: []
+    criteria: [ARK-311/AC1 … ARK-311/AC7]
+  - id: ac-tests
+    role: validator
+    needs: [cli-core]
+  - id: repo-review
+    role: reviewer
+    model: openai-codex/gpt-6.1-sol
+    needs: [cli-core, docs-rules, ac-tests, doc-tests]
+design:
+  interfaces:
+    - name: TestResult.cases (cli/parsers/index.ts)
+      callers: [runSuite in cli/test-run.ts, results files, test/parsers.test.ts]`,
+          },
+          {
+            id: "events",
+            name: "events.ndjson",
+            in: 1,
+            why: "The record. Append-only. state.json is derived from it, so a new run lead can take over a stopped run and resume at the first unfinished step.",
+            body: `{"type":"run.started","ticket":"ARK-311","criteria":true}
+{"type":"evaluation.recorded","blockers":0,"risks":8}
+{"type":"gate.answered","gate":"plan","answer":"approve","by":"human"}
+{"type":"step.started","step":"cli-core","role":"implementer"}
+{"type":"test.completed","passed":true,"heads":{".":"3f0c…"}}
+{"type":"findings.sent_back","round":1,"count":3}
+{"type":"gate.answered","gate":"escalation","answer":"one_more_round","by":"human"}
+{"type":"merge_request.opened","repo":".","number":123}
+{"type":"run.closed","outcome":"merged"}`,
+          },
+          {
+            id: "state",
+            name: "state.json",
+            in: 1,
+            why: "Derived from the log. What ark status prints: phase, round, criteria status, gates, MRs, outcome.",
+            body: `{
+  "phase": "closed",
+  "round": 3, "round_budget": 4,
+  "criteria": [{ "id": "ARK-311/AC1", "status": "passing" }, … 9 passing ],
+  "gates": { "plan": "approve", "escalation": "one_more_round" },
+  "last_test": { "passed": true, "heads": { ".": "bdcee939…" } },
+  "merge_requests": [{ "url": "https://github.com/cobekarhoff/ark/pull/123" }],
+  "outcome": "merged"
+}`,
+          },
+          { dir: "results/" },
+          {
+            id: "results",
+            name: "cli.report",
+            in: 2,
+            why: "One JUnit report per suite, at head. ark test maps each test title to its test case and each test case to the ACs it proves.",
+            body: `<testsuite name="cli" tests="214" failures="0">
+  <testcase name="ARK-T12 parser returns case ids from a bun report" time="0.41"/>
+  <testcase name="ARK-T14 verified_by join decides an AC at every level" time="0.88"/>
+  <testcase name="ARK-T19 test-case new allocates under a lock, 8 processes" time="2.10"/>
+  …
+</testsuite>`,
+          },
+          { dir: "findings/" },
+          {
+            id: "findings",
+            name: "repo-review.md",
+            in: 2,
+            why: "The reviewer’s findings and, under Run lead decision, what was sent back and why. A P0 or P1 without a Repro is written as P2.",
+            body: `### P1: Canonical slash-form AC tags are discarded before the alias join
+- File: cli/parsers/bun.ts
+- Line: 4
+- Area: correctness
+- Repro: bun -e 'import {parseBun} from "./cli/parsers/bun.ts"; …'
+- Evidence: ARK-9/AC1 results in criteria: [] for bun, pytest and behave
+- Fix: Accept both forms at each parser boundary
+
+P0: 3, P1: 1, P2: 0, P3: 0
+
+## Run lead decision
+- P0 touched old-id tests not converted: leave. Fixture-only edits; the ticket says
+  do not migrate in bulk. The human gets this as an open decision.
+- P1 slash-form tag dropped: send back. Repro confirmed: ARK-9/AC1 gives criteria: [].`,
+          },
+          {
+            id: "retro",
+            name: "retro.md",
+            in: 1,
+            why: "Written by the run lead on top of metrics.json. What went wrong, with the run that proves it, and proposals you approve or reject.",
+            body: `## Numbers
+Cost $8.48, 33 567 395 tokens. Wall 26 329 s. Rework: 3 rounds, 1 escalation,
+3 findings sent back. Gate answers: 1 auto, 1 human.
+
+## What went wrong
+- Round 1 review sent back 3 findings. One docs file was still wrong after round 2:
+  the lifecycle diagram used other words than the grep. A third round was needed.
+- The first ark merge-request open refused: the AC literal \`ark test-case new ARK\`
+  was in no tracked file. Cost one validator restart.
+
+## Improvement proposals
+- Project: a validator spec lists the ACs' backticked literals. Evidence: this run.
+  Enforced by: ark merge-request open AC literal refusal.`,
+          },
+          {
+            id: "metrics",
+            name: "metrics.json",
+            in: 1,
+            why: "Numbers from ark retro: cost per step, role and model; wall and gate wait; rounds; orchestration health; comparison with earlier runs.",
+            body: `{
+  "cost_usd": 8.48, "tokens": 33567395, "wall_s": 26329, "gate_wait_s": 0,
+  "rework": { "rounds": 3, "escalations": 1, "findings_sent_back": 3 },
+  "orchestration": { "restarts": 12, "tool_errors": 9, "idle_gaps": 14 },
+  "same_vendor_review": true,
+  "compared_to": { "median_cost_usd": 4.10, "median_rounds": 1 }
+}`,
+          },
+        ];
+        const tree = document.getElementById("fileTree");
+        const view = document.getElementById("fileView");
+        FILES.forEach((f) => {
+          if (f.dir) {
+            const d = document.createElement("div");
+            d.className = "dir";
+            d.textContent = f.dir;
+            tree.appendChild(d);
+            return;
+          }
+          const b = document.createElement("button");
+          b.textContent = f.name;
+          b.className = "in" + f.in;
+          b.dataset.id = f.id;
+          b.setAttribute("role", "tab");
+          b.addEventListener("click", () => showFile(f.id));
+          tree.appendChild(b);
+        });
+        function showFile(id) {
+          const f = FILES.find((x) => x.id === id);
+          tree.querySelectorAll("button").forEach((b) => {
+            const on = b.dataset.id === id;
+            b.classList.toggle("active", on);
+            b.setAttribute("aria-selected", on);
+          });
+          view.innerHTML = `<h3>${f.name}</h3><p>${f.why}</p><pre></pre>`;
+          view.querySelector("pre").textContent = f.body;
+        }
+        showFile("plan");
+
+        // ---------- Simulator ----------
+        const PHASES = ["criteria", "plan", "build", "test", "review", "escalation", "mr", "retro"];
+        const meter = document.getElementById("meter");
+        const q = document.getElementById("simQuestion");
+        const ans = document.getElementById("simAnswers");
+        const log = document.getElementById("simLog");
+        let sim;
+        function reset() {
+          sim = { phase: "criteria", round: 0, budget: 2, manualAC: false, mrOpen: false };
+          log.innerHTML = "";
+          step();
+        }
+        function say(who, text, cls) {
+          const li = document.createElement("li");
+          if (cls) li.className = cls;
+          li.innerHTML = `<span class="who">${who}</span>${text}`;
+          log.appendChild(li);
+          log.scrollTop = log.scrollHeight;
+        }
+        function drawMeter() {
+          meter.innerHTML = PHASES.map(
+            (p) =>
+              `<span class="${p === sim.phase ? "on" : PHASES.indexOf(p) < PHASES.indexOf(sim.phase) ? "done" : ""}">${p}</span>`,
+          ).join("");
+        }
+        function ask(title, text, options) {
+          drawMeter();
+          q.innerHTML = `<div class="prompt"><b>${title}</b>${text}</div>`;
+          ans.innerHTML = "";
+          options.forEach((o) => {
+            const b = document.createElement("button");
+            b.textContent = o.label;
+            if (o.quiet) b.className = "quiet";
+            b.addEventListener("click", () => {
+              say("you", o.label, "gate");
+              o.go();
+            });
+            ans.appendChild(b);
+          });
+        }
+        function auto(lines) {
+          lines.forEach(([who, text, cls]) => say(who, text, cls));
+        }
+        function step() {
+          switch (sim.phase) {
+            case "criteria":
+              say("evaluator", "evaluation.md: 0 blockers, 3 risks");
+              ask(
+                "Criteria gate",
+                'CLARA-512: 4 ACs. AC1 to AC3 method test with integration cases. AC4 "export opens in the vendor tool" has no automatable check. Accept with AC4 as method demonstration, manual: true?',
+                [
+                  {
+                    label: "Accept",
+                    go: () => {
+                      sim.manualAC = true;
+                      sim.phase = "plan";
+                      auto([
+                        ["run lead", "ark gate record criteria accept"],
+                        [
+                          "run lead",
+                          "plan.yml: 5 steps across repos/shared and repos/platform; ark plan check exit 0",
+                        ],
+                      ]);
+                      step();
+                    },
+                  },
+                  {
+                    label: "Amend AC4 to method test",
+                    go: () => {
+                      auto([
+                        ["run lead", "ark criteria amend AC4; evaluator re-checks"],
+                        [
+                          "evaluator",
+                          "blocker: no integration case can open the vendor tool; AC4 cannot be method test",
+                          "refuse",
+                        ],
+                      ]);
+                      step();
+                    },
+                  },
+                  {
+                    label: "Abort",
+                    quiet: true,
+                    go: () => {
+                      auto([["run lead", "ark run close aborted", "refuse"]]);
+                      done("aborted before any code was written");
+                    },
+                  },
+                ],
+              );
+              break;
+            case "plan":
+              ask(
+                "Plan gate",
+                "plan.md: shared step, then platform step needing it; 7 test cases; design block lists ExportWriter and its 3 callers in platform. 1 open decision: keep the old export path for one release, or remove it now? Recommended: keep.",
+                [
+                  {
+                    label: "Keep the old path, approve",
+                    go: () => {
+                      sim.phase = "build";
+                      auto([
+                        ["run lead", "ark gate record plan approve (decision: keep)"],
+                        [
+                          "ark",
+                          "ark worktree create: repos/shared and repos/platform as worktrees, rest symlinked",
+                        ],
+                      ]);
+                      build();
+                    },
+                  },
+                  {
+                    label: "Remove it now, approve",
+                    go: () => {
+                      sim.phase = "build";
+                      auto([
+                        ["run lead", "ark gate record plan approve (decision: remove)"],
+                        ["ark", "ark worktree create"],
+                      ]);
+                      build();
+                    },
+                  },
+                  {
+                    label: "Ask for changes",
+                    quiet: true,
+                    go: () => {
+                      auto([
+                        ["run lead", "plan sent back; evaluator risk added to the platform spec"],
+                        ["run lead", "ark plan check exit 0"],
+                      ]);
+                      step();
+                    },
+                  },
+                ],
+              );
+              break;
+            case "test":
+              if (sim.manualAC) {
+                ask(
+                  "Manual check",
+                  "AC4 is method demonstration. Master Chief ran the stack from the run folder: http://localhost:4399/export. Open it and check the export opens in the vendor tool. ok or problem?",
+                  [
+                    {
+                      label: "ok",
+                      go: () => {
+                        sim.manualAC = false;
+                        auto([["run lead", "ark gate record manual CLARA-512/AC4 ok"]]);
+                        test();
+                      },
+                    },
+                    {
+                      label: "problem: file is empty",
+                      go: () => {
+                        auto([
+                          [
+                            "run lead",
+                            'ark gate record manual AC4 problem --note "file is empty"; written to findings/round-' +
+                              (sim.round + 1) +
+                              ".md",
+                            "refuse",
+                          ],
+                        ]);
+                        round("manual problem on AC4");
+                      },
+                    },
+                  ],
+                );
+              } else test();
+              break;
+            case "escalation":
+              ask(
+                "Escalation gate",
+                `Round budget of ${sim.budget} spent after round ${sim.round}. Last review: 1 P1 open (export writer drops rows after page 1; repro confirmed). One more round, take over, or abort?`,
+                [
+                  {
+                    label: "One more round",
+                    go: () => {
+                      sim.budget++;
+                      sim.phase = "build";
+                      auto([["run lead", "ark gate record escalation one_more_round"]]);
+                      build();
+                    },
+                  },
+                  {
+                    label: "Take over",
+                    go: () => {
+                      sim.budget++;
+                      sim.phase = "build";
+                      auto([
+                        [
+                          "run lead",
+                          "ark gate record escalation take_over; you are the implementer for this round",
+                        ],
+                      ]);
+                      build(true);
+                    },
+                  },
+                  {
+                    label: "Abort",
+                    quiet: true,
+                    go: () => {
+                      auto([["run lead", "ark run close aborted", "refuse"]]);
+                      done("aborted; branches kept in the run folder");
+                    },
+                  },
+                ],
+              );
+              break;
+            case "mr":
+              ask(
+                "Merge requests open",
+                'MR !41 repos/shared and MR !42 repos/platform (Depends on !41). Pipelines green. A reviewer commented on !42: "why keep the old export path?"',
+                [
+                  {
+                    label: "Reply in the thread",
+                    go: () => {
+                      auto([
+                        ["master chief", "comment is a question: run lead replies, no round"],
+                        [
+                          "run lead",
+                          "reply: kept for one release per plan decision; removal ticket CLARA-519",
+                        ],
+                      ]);
+                      mr2();
+                    },
+                  },
+                  {
+                    label: "Request a change: remove it now",
+                    go: () => {
+                      auto([
+                        ["master chief", "change request: MR round"],
+                        [
+                          "run lead",
+                          "implementer removes the old path; ark test; ark worktree sync pushes !42",
+                        ],
+                        ["ark", "ark merge-request status: ci passed, no conflict", "ok"],
+                      ]);
+                      mr2();
+                    },
+                  },
+                ],
+              );
+              break;
+            case "retro":
+              ask("Retro", "Three questions. What caused the most pain this run?", [
+                {
+                  label: "The manual AC waited on me",
+                  go: () => {
+                    auto([
+                      [
+                        "master chief",
+                        "proposal (project): run the stack and post the URL at the start of testing, not after. Approve?",
+                      ],
+                    ]);
+                    ask(
+                      "Proposal",
+                      "Scope: project. Change learnings.md so the run lead starts the stack before the validator finishes and posts the URL with the manual question.",
+                      [
+                        {
+                          label: "Approve",
+                          go: () => {
+                            auto([
+                              [
+                                "master chief",
+                                "learnings.md updated; enforced by: none yet, a command cannot check it",
+                                "ok",
+                              ],
+                            ]);
+                            done("merged; one learning approved");
+                          },
+                        },
+                        {
+                          label: "Reject",
+                          quiet: true,
+                          go: () => {
+                            auto([
+                              ["master chief", "proposal recorded as rejected with your reason"],
+                            ]);
+                            done("merged; no change");
+                          },
+                        },
+                      ],
+                    );
+                  },
+                },
+                {
+                  label: "Nothing much",
+                  quiet: true,
+                  go: () => {
+                    done("merged");
+                  },
+                },
+              ]);
+              break;
+          }
+        }
+        function build(human) {
+          sim.phase = "build";
+          drawMeter();
+          auto(
+            human
+              ? [["you", "commit on repos/platform"]]
+              : [
+                  ["implementer", "repos/shared: ExportWriter; format, typecheck, lint; commit"],
+                  ["implementer", "repos/platform: callers updated; commit"],
+                  ["validator", "CLARA-T31 to T37 written; integration tests through compose pass"],
+                ],
+          );
+          sim.phase = "test";
+          step();
+        }
+        function test() {
+          sim.phase = "test";
+          drawMeter();
+          const fail = sim.round === 0 && !sim.testedOnce;
+          sim.testedOnce = true;
+          if (fail) {
+            auto([
+              [
+                "ark",
+                "ark test: CLARA-512/AC2 failing, CLARA-T33 failed (rows after page 1 missing)",
+                "refuse",
+              ],
+            ]);
+            round("AC2 failing");
+            return;
+          }
+          auto([["ark", "ark test: 4/4 ACs passing at head", "ok"]]);
+          sim.phase = "review";
+          drawMeter();
+          if (sim.round === 1) {
+            auto([
+              [
+                "reviewer",
+                "P1 correctness platform/export.ts:102 filter applied after pagination; Repro: bun test --grep filter",
+              ],
+              ["run lead", "repro confirmed; send back", "refuse"],
+            ]);
+            round("P1 sent back");
+            return;
+          }
+          auto([
+            [
+              "reviewer",
+              "No findings. Areas checked: correctness, proof, security, complexity, naming",
+            ],
+            ["run lead", "ark worktree sync exit 0"],
+            [
+              "ark",
+              "ark merge-request open: !41 repos/shared, !42 repos/platform (Depends on !41)",
+              "ok",
+            ],
+          ]);
+          sim.phase = "mr";
+          step();
+        }
+        function round(why) {
+          sim.round++;
+          if (sim.round > sim.budget) {
+            sim.phase = "escalation";
+            say("ark", `round budget spent (${why})`, "refuse");
+            step();
+            return;
+          }
+          say("run lead", `round ${sim.round}: ${why}; implementer restarted`);
+          build();
+        }
+        function mr2() {
+          auto([
+            ["you", "merge !41, then !42", "gate"],
+            ["run lead", "ark run close merged; ark retro → metrics.json; retro.md written"],
+          ]);
+          sim.phase = "retro";
+          step();
+        }
+        function done(outcome) {
+          sim.phase = "retro";
+          drawMeter();
+          meter.querySelectorAll("span").forEach((s) => (s.className = "done"));
+          q.innerHTML = `<div class="prompt" style="border-color:var(--ok);background:var(--ok-soft)"><b>Run closed</b>Outcome: ${outcome}. Rounds used: ${sim.round}. Gate answers: yours only; an agent's answer is never a gate answer.</div>`;
+          ans.innerHTML = "";
+          const b = document.createElement("button");
+          b.className = "quiet";
+          b.textContent = "Play again";
+          b.addEventListener("click", reset);
+          ans.appendChild(b);
+        }
+        reset();
+      })();
+    </script>
+  </body>
+</html>

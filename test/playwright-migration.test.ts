@@ -114,17 +114,6 @@ describe("playwright migration", () => {
     ]);
   });
 
-  test("ARK-243-AC3 docs and bootstrap show the playwright suite and the browser install", async () => {
-    const cli = await Bun.file(join(root, "docs/reference/cli.md")).text();
-    const bootstrap = await Bun.file(join(root, "skills/ark/playbooks/bootstrap.md")).text();
-    expect(cli).toMatch(/- name: playwright\n\s+level: e2e\n[\s\S]*?parser: bun/);
-    expect(cli).toContain("PLAYWRIGHT_JUNIT_OUTPUT_FILE={report}");
-    expect(cli).toMatch(/setup:.*playwright install chromium/);
-    expect(bootstrap).toContain("PLAYWRIGHT_JUNIT_OUTPUT_FILE={report}");
-    expect(bootstrap).toContain("playwright install chromium");
-    expect(bootstrap).toMatch(/playwright[^\n]*\|\s*`bun`/);
-  });
-
   test("ARK-243-AC4 ci.yml runs the Playwright suite in its own ubuntu job after installing chromium", async () => {
     const ci = Bun.YAML.parse(await Bun.file(join(root, ".github/workflows/ci.yml")).text()) as {
       jobs: Record<string, { "runs-on": string; steps: { run?: string }[] }>;

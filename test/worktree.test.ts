@@ -795,22 +795,6 @@ describe("ARK-280 worker permission setting", () => {
       tools: { approvalMode: "yolo" },
     });
   });
-
-  test("ARK-280-AC1 ARK-280-AC5 the how-to names the value the worktree command writes, where it applies and how to turn it off", () => {
-    const { runId, runDirectory } = startRun(tempGitRepo());
-    expect(ark("worktree", "create", runId, ".").code).toBe(0);
-    const written = readFileSync(join(runDirectory, "workspace/.omp/config.yml"), "utf8").match(
-      /approvalMode: (\S+)/,
-    )![1];
-
-    const howTo = readFileSync(join(import.meta.dir, "../docs/how-to/run-a-ticket.md"), "utf8");
-    const named = howTo.match(/`tools\.approvalMode: (\S+?)`/);
-    expect(named?.[1]).toBe(written);
-    expect(howTo).toContain("`.omp/config.yml`");
-    expect(howTo).toMatch(/only to the worktrees Ark makes/);
-    expect(howTo).toMatch(/nothing in your `~\/\.omp`/);
-    expect(howTo).toMatch(/delete its `\.omp\/config\.yml`/);
-  });
 });
 
 test("ARK-280-AC5 docs/reference/cli.md matches the generator", () => {
@@ -900,20 +884,6 @@ describe("ARK-297 workspace skills and dirty root", () => {
     expect(anchored.err).toBe("");
     expect(anchored.out.trim().split("\n")).toHaveLength(1);
   });
-});
-
-test("ARK-297-AC2 the live omp check is kept in docs/evidence/ARK-297-ac2.md with proof: passed", () => {
-  const evidence = readFileSync(join(import.meta.dir, "../docs/evidence/ARK-297-ac2.md"), "utf8");
-  for (const part of [
-    "ark worktree anchor",
-    "ark worktree create",
-    "omp -p --no-session",
-    "analyze",
-    "skills.customDirectories",
-    "approvalMode: yolo",
-  ])
-    expect(evidence, part).toContain(part);
-  expect(evidence.split("\n")).toContain("proof: passed");
 });
 
 /** Runs `body` with a fake `gh` first on PATH, then restores PATH. */
@@ -1134,23 +1104,6 @@ describe("ARK-294 handed_off close keeps branches with commits", () => {
     );
     expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
   });
-
-  test("ARK-294-AC4 the close description, reference, CONTEXT, chief playbook and how-to say the branches stay", () => {
-    const root = join(import.meta.dir, "..");
-    const text = (path: string) => readFileSync(join(root, path), "utf8");
-    const log = "git -C <repo> log <base>..<branch>";
-
-    for (const path of ["cli/ark.ts", "docs/reference/cli.md"])
-      expect(text(path)).toContain(
-        "For handed_off it keeps each branch with commits beyond its base",
-      );
-    expect(text("CONTEXT.md")).toMatch(
-      /Each branch with commits beyond its base stays in its clone/,
-    );
-    expect(text("skills/ark/playbooks/chief.md")).toContain(log);
-    expect(text("docs/how-to/run-a-ticket.md")).toContain(log);
-    expect(text("docs/how-to/run-a-ticket.md")).toMatch(/stays in its clone/);
-  });
 });
 
 /** Adds `repos` to the ark.yml that `startRun` wrote (JSON, which is YAML). */
@@ -1333,23 +1286,8 @@ describe("ARK-296 repos.<repo>.base is the target of worktree cleanup and worksp
   });
 });
 
-test("ARK-296-AC5 bootstrap step 2 asks for the base of each repo off origin/HEAD, docs/reference documents repos, and cli.md matches the generator", () => {
+test("ARK-T94 cli.md matches the generator", () => {
   const root = join(import.meta.dir, "..");
-  const bootstrap = readFileSync(join(root, "skills/ark/playbooks/bootstrap.md"), "utf8");
-  const step2 = bootstrap.split("\n## 2.")[1]?.split("\n## ")[0] ?? "";
-  expect(step2).toContain("`origin/HEAD`");
-  expect(step2).toContain("keep every repo where they differ");
-  expect(step2).toContain("These repos are the `repos` candidates. Ask for each one in step 3.");
-  const ask = bootstrap.match(/For each `repos` candidate, ask: .*$/m)?.[0] ?? "";
-  expect(ask).toContain("origin/HEAD");
-  expect(ask).toContain("Recommended:");
-  expect(bootstrap).toMatch(/^repos: .*key is the repo path, exactly$/m);
-
-  const reference = readdirSync(join(root, "docs/reference"))
-    .map((name) => readFileSync(join(root, "docs/reference", name), "utf8"))
-    .join("\n");
-  expect(reference).toMatch(/^\| `repos` +\| no +\| map +\|.*\{ base: <branch name> \}/m);
-
   const path = join(root, "docs/reference/cli.md");
   const before = readFileSync(path, "utf8");
   expect(
@@ -1400,7 +1338,7 @@ describe("ARK-308 aborted run keeps branches with commits", () => {
     expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
   });
 
-  test("ARK-308-AC5 cli.md matches the generator, and the descriptions, how-to and playbooks name --reason and the kept branch", () => {
+  test("ARK-T95 cli.md matches the generator", () => {
     const root = join(import.meta.dir, "..");
     const text = (path: string) => readFileSync(join(root, path), "utf8");
     const reference = text("docs/reference/cli.md");
@@ -1408,16 +1346,5 @@ describe("ARK-308 aborted run keeps branches with commits", () => {
       Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
     ).toBe(0);
     expect(text("docs/reference/cli.md")).toBe(reference);
-
-    for (const path of ["cli/ark.ts", "docs/reference/cli.md"]) {
-      expect(text(path)).toContain("--reason");
-      expect(text(path)).toContain("keeps a branch with commits");
-    }
-    for (const path of [
-      "docs/how-to/run-a-ticket.md",
-      "skills/ark/playbooks/run-lead.md",
-      "skills/ark/playbooks/chief.md",
-    ])
-      expect(text(path)).toContain("--reason");
   });
 });

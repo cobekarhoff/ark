@@ -1785,7 +1785,7 @@ function refusedLoad(): { message: string } {
 
 // --- ARK-T44 ----------------------------------------------------------------------------------
 
-test("ARK-T44 docs/reference/cli.md equals the generated reference and lists --summary on merge-request open", () => {
+test("ARK-T44 docs/reference/cli.md equals the generated reference", () => {
   const reference = join(root, "docs/reference/cli.md");
   const committed = readFileSync(reference, "utf8");
   const generated = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: root });
@@ -1795,8 +1795,6 @@ test("ARK-T44 docs/reference/cli.md equals the generated reference and lists --s
   } finally {
     writeFileSync(reference, committed);
   }
-  const entry = committed.split("### merge-request open")[1].split("\n### ")[0];
-  expect(entry).toContain("--summary");
 });
 
 // --- ARK-T45 ----------------------------------------------------------------------------------

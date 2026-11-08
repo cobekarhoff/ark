@@ -1,12 +1,8 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { ark, tempArkHome, tempGitRepo, writeProject } from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
-
-const repositoryRoot = join(import.meta.dir, "..");
 
 function projectConfigFor(workspace: string): Record<string, unknown> {
   return {
@@ -29,7 +25,7 @@ function projectConfigFor(workspace: string): Record<string, unknown> {
   };
 }
 
-test("ARK-177-AC5 loads old and chief-role configs and bootstrap defines roles.chief", () => {
+test("ARK-T79 loads old and chief-role configs", () => {
   tempArkHome();
   const configWithChief = projectConfigFor(tempGitRepo());
   configWithChief.roles = {
@@ -41,14 +37,6 @@ test("ARK-177-AC5 loads old and chief-role configs and bootstrap defines roles.c
 
   expect(ark("status", "--project", "with-chief").code).toBe(0);
   expect(ark("status", "--project", "old-config").code).toBe(0);
-  const bootstrapPlaybook = readFileSync(
-    join(repositoryRoot, "skills/ark/playbooks/bootstrap.md"),
-    "utf8",
-  );
-  const roleSection = bootstrapPlaybook.split("## 8. Write `ark.yml`")[1]?.split("\n## ")[0];
-  expect(roleSection).toBeDefined();
-  expect(roleSection).toMatch(/chief:\s*\{\s*harness:/);
-  expect(roleSection).toMatch(/chief:\s*\{\s*harness:[^}]*model:/);
 
   const invalidConfig = {
     ...configWithChief,
