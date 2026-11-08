@@ -332,6 +332,15 @@ async function baseSuitesPassed(
       if (created.code !== 0)
         throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
       added.push({ source, path });
+      if (existsSync(join(path, ".gitmodules"))) {
+        // base runs use the pointer the base commit records, never the run's library head
+        const filled = await run(
+          ["git", "-c", "protocol.file.allow=always", "submodule", "update", "--init"],
+          path,
+        );
+        if (filled.code !== 0)
+          throw new ArkError(`base submodules of ${repo} failed: ${filled.stderr.trim()}`);
+      }
       await copyHeadTests(join(mirror, repo), path, base);
     }
     linkUntouched(config.workspace, root, discoverRepos(config.workspace));

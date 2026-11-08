@@ -8,13 +8,20 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { loadConfig, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
-import { discoverRepos, git, mirrorRoot, repoBase, targetBranch } from "./workspace.ts";
+import {
+  discoverRepos,
+  git,
+  mirrorRoot,
+  repoBase,
+  submodulesOf,
+  targetBranch,
+} from "./workspace.ts";
 import { mergeRequestState } from "./merge-request.ts";
 
 const skippedRootEntries = new Set([".git", ".DS_Store", "repos"]);
@@ -132,7 +139,7 @@ function addRepoWorktree(
   if (!isSymlink && existsSync(join(path, ".git"))) {
     if (state.worktrees.some((worktree) => worktree.repo === repo)) {
       log(`exists   ${repo}`);
-      return;
+      return; // create still runs the submodule step on it
     }
     // no worktree.created event: an earlier create failed and its cleanup failed too.
     // Its branch is the one checked out there; a new name search would not find it.
@@ -196,6 +203,96 @@ function addRepoWorktree(
   }
 }
 
+const submoduleFlag = "protocol.file.allow=always";
+
+/** The line `ark status` and create print for a submodule checked out at the head of the run's library worktree. */
+function submoduleLine(consumer: string, path: string, library: string, head: string): string {
+  return `submodule ${consumer}/${path} at run head of ${library} ${head.slice(0, 8)}`;
+}
+
+const withoutGit = (url: string): string => url.replace(/\/+$/, "").replace(/\.git$/, "");
+
+/** The run worktree a submodule is checked out from: the repo whose origin URL equals the .gitmodules URL, else the repo with the same basename as the URL (or the submodule folder). A consumer is never its own library. */
+function libraryOf(
+  config: ProjectConfig,
+  worktrees: RunState["worktrees"],
+  consumer: string,
+  submodule: { path: string; url: string },
+): RunState["worktrees"][number] | undefined {
+  const others = worktrees.filter((worktree) => worktree.repo !== consumer);
+  const originOf = (repo: string) =>
+    Bun.spawnSync(["git", "-C", join(config.workspace, repo), "config", "remote.origin.url"])
+      .stdout.toString()
+      .trim();
+  const byUrl = others.find((worktree) => {
+    const origin = originOf(worktree.repo);
+    return origin !== "" && withoutGit(origin) === withoutGit(submodule.url);
+  });
+  if (byUrl) return byUrl;
+  const names = [basename(withoutGit(submodule.url)), basename(submodule.path)];
+  return others.find((worktree) => names.includes(basename(worktree.repo)));
+}
+
+/** Fills each submodule of a worktree at the commit its index records (the source clone's modules as reference), then, for a submodule whose repo the run also has a worktree of, checks it out at the committed HEAD of that worktree. Never stages: the index pointer stays. A failure names the consumer, the submodule and the git cause; the worktree stays. */
+function composeSubmodules(
+  config: ProjectConfig,
+  worktrees: RunState["worktrees"],
+  consumer: { repo: string; path: string },
+  log: (line: string) => void,
+): void {
+  const submodules = submodulesOf(consumer.path);
+  if (submodules.length === 0) return;
+  const stage = () => git(consumer.path, "ls-files", "--stage");
+  const before = stage();
+  for (const submodule of submodules) {
+    try {
+      const reference = join(config.workspace, consumer.repo, submodule.path);
+      git(
+        consumer.path,
+        "-c",
+        submoduleFlag,
+        "submodule",
+        "update",
+        "--init",
+        ...(existsSync(join(reference, ".git")) ? ["--reference", reference] : []),
+        "--",
+        submodule.path,
+      );
+      const library = libraryOf(config, worktrees, consumer.repo, submodule);
+      if (!library) continue;
+      const head = git(library.path, "rev-parse", "HEAD");
+      const folder = join(consumer.path, submodule.path);
+      git(folder, "-c", submoduleFlag, "fetch", library.path, "HEAD");
+      git(folder, "checkout", "--detach", head);
+      log(submoduleLine(consumer.repo, submodule.path, library.repo, head));
+    } catch (err) {
+      if (!(err instanceof ArkError)) throw err;
+      throw new ArkError(`submodule ${consumer.repo}/${submodule.path} failed: ${err.message}`);
+    }
+  }
+  if (stage() !== before)
+    throw new ArkError(`submodule step changed the index of ${consumer.repo}: pointers must stay`);
+}
+
+/** One status line per submodule that sits at the head of the run's library worktree, recomputed from git now. A submodule at another commit prints nothing. */
+export function submoduleLines(config: ProjectConfig, worktrees: RunState["worktrees"]): string[] {
+  const lines: string[] = [];
+  for (const consumer of worktrees) {
+    try {
+      for (const submodule of submodulesOf(consumer.path)) {
+        const library = libraryOf(config, worktrees, consumer.repo, submodule);
+        if (!library) continue;
+        const head = git(library.path, "rev-parse", "HEAD");
+        if (git(join(consumer.path, submodule.path), "rev-parse", "HEAD") === head)
+          lines.push(submoduleLine(consumer.repo, submodule.path, library.repo, head));
+      }
+    } catch (err) {
+      if (!(err instanceof ArkError)) throw err; // an unreadable worktree prints no line
+    }
+  }
+  return lines;
+}
+
 /** Early worktree of the first repo of the workspace, so the run lead and its first workers have their own folder. Prints `path:<absolute path>`; a second call prints the same line and records nothing. */
 export function worktreeAnchor(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
@@ -205,6 +302,9 @@ export function worktreeAnchor(runId: string, inProject?: string): void {
   const state = deriveState(readEvents(directory));
   assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
   addRepoWorktree(directory, config, state, repo, () => {});
+  const created = deriveState(readEvents(directory)).worktrees;
+  const anchor = created.find((entry) => entry.repo === repo);
+  if (anchor) composeSubmodules(config, created, anchor, () => {});
   const mirror = mirrorRoot(directory);
   console.log(`path:${repo === "." ? mirror : join(mirror, repo)}`);
 }
@@ -284,6 +384,12 @@ export function worktreeCreate(
     addRepoWorktree(directory, config, state, repo, console.log, bases.get(repo));
 
   linkUntouched(workspace, mirrorRoot(directory), knownRepos);
+  // after every worktree exists, so a library created later than its consumer is found
+  const { worktrees } = deriveState(readEvents(directory));
+  for (const repo of touched) {
+    const worktree = worktrees.find((entry) => entry.repo === repo);
+    if (worktree) composeSubmodules(config, worktrees, worktree, console.log);
+  }
 }
 
 /** Links every root entry and repo of the workspace that the mirror does not hold yet. A single-repo workspace needs none: the worktree is the mirror. */
@@ -355,6 +461,9 @@ export function worktreeSync(runId: string, inProject?: string): void {
       conflicts.push(...taken.map((id) => `test case id taken on the target branch: ${id}`));
       continue;
     }
+    // a library head left in a submodule makes the merge see a changed pointer: put the recorded commit back first
+    if (submodulesOf(worktree.path).length > 0)
+      git(worktree.path, "-c", submoduleFlag, "submodule", "update", "--init");
     const merged = Bun.spawnSync([
       "git",
       "-C",
@@ -380,11 +489,20 @@ export function worktreeSync(runId: string, inProject?: string): void {
       `${worktree.repo}  ${target}  ${git(worktree.path, "rev-parse", "HEAD")}${pushed ? "  pushed" : ""}`,
     );
   }
+  // after every merge, so a library merged later in the loop is the head the consumer gets
+  for (const worktree of state.worktrees) {
+    try {
+      composeSubmodules(config, state.worktrees, worktree, console.log);
+    } catch (err) {
+      if (!(err instanceof ArkError)) throw err;
+      conflicts.push(err.message);
+    }
+  }
   if (conflicts.length > 0) throw new ArkError(conflicts.join("\n"));
 }
 
 /** Entries of `git status` for a worktree, minus untracked entries Ark made itself: a symlink of the mirror, and a nested worktree of the run. Any other untracked or modified entry counts. */
-function dirtyLines(path: string, worktreePaths: string[]): string[] {
+function dirtyLines(path: string, worktreePaths: string[], ignoreComposed = false): string[] {
   const records = git(path, "status", "--porcelain", "-z", "--untracked-files=all")
     .split("\0")
     .filter((record) => record !== "");
@@ -393,6 +511,13 @@ function dirtyLines(path: string, worktreePaths: string[]): string[] {
     const record = records[index];
     if (record[0] === "R" || record[0] === "C") index++; // a rename or copy carries its source path as the next record
     if (!record.startsWith("?? ")) {
+      // a composed submodule sits at the run head, not at its pointer: ` M <path>` with the index unchanged is Ark's own
+      if (
+        ignoreComposed &&
+        record.startsWith(" M ") &&
+        git(path, "ls-files", "--stage", "--", record.slice(3)).startsWith("160000")
+      )
+        continue;
       dirty.push(record);
       continue;
     }
@@ -451,6 +576,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
         dirtyLines(
           path,
           state.worktrees.map((other) => other.path),
+          true,
         ).length > 0
       ) {
         keep("uncommitted changes");

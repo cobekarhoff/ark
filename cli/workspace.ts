@@ -7,15 +7,52 @@ import { findRun } from "./paths.ts";
 
 const maximumDepth = 4;
 
-/** Repo paths relative to the workspace: "." when the root is a repo, plus every nested repo, sorted. */
+/** The submodules a repo declares in its `.gitmodules`: folder (relative to the repo) and URL. Empty when it has none. */
+export function submodulesOf(repoPath: string): { path: string; url: string }[] {
+  if (!existsSync(join(repoPath, ".gitmodules"))) return [];
+  const result = Bun.spawnSync([
+    "git",
+    "-C",
+    repoPath,
+    "config",
+    "-f",
+    ".gitmodules",
+    "--get-regexp",
+    "^submodule\\..*\\.(path|url)$",
+  ]);
+  const byName = new Map<string, { path?: string; url?: string }>();
+  for (const line of result.stdout.toString().split("\n")) {
+    const match = /^submodule\.(.+)\.(path|url) (.*)$/.exec(line);
+    if (!match) continue;
+    const entry = byName.get(match[1]) ?? {};
+    entry[match[2] as "path" | "url"] = match[3];
+    byName.set(match[1], entry);
+  }
+  return [...byName.values()].filter(
+    (entry): entry is { path: string; url: string } =>
+      entry.path !== undefined && entry.url !== undefined,
+  );
+}
+
+/** Repo paths relative to the workspace: "." when the root is a repo, plus every nested repo, sorted. A submodule is part of its consumer, not a repo of its own, so it is skipped. */
 export function discoverRepos(workspace: string): string[] {
   const repos: string[] = [];
+  const submodulePaths = new Set<string>();
   const visit = (relative: string, depth: number) => {
     const directory = join(workspace, relative);
-    if (existsSync(join(directory, ".git"))) repos.push(relative === "" ? "." : relative);
+    if (existsSync(join(directory, ".git"))) {
+      repos.push(relative === "" ? "." : relative);
+      for (const submodule of submodulesOf(directory))
+        submodulePaths.add(join(directory, submodule.path));
+    }
     if (depth === maximumDepth) return;
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (entry.isDirectory() && entry.name !== "node_modules" && entry.name !== ".git") {
+      if (
+        entry.isDirectory() &&
+        entry.name !== "node_modules" &&
+        entry.name !== ".git" &&
+        !submodulePaths.has(join(directory, entry.name))
+      ) {
         visit(join(relative, entry.name), depth + 1);
       }
     }

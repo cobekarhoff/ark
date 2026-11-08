@@ -28,7 +28,7 @@ import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
 import { assertAllowed } from "./transitions.ts";
-import { commitsAhead, worktreeCleanup } from "./worktree.ts";
+import { commitsAhead, submoduleLines, worktreeCleanup } from "./worktree.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
 
@@ -496,6 +496,7 @@ function printRun(runId: string, inProject?: string): void {
     ...(manualPending.length > 0 ? [`manual pending: ${manualPending.join(", ")}`] : []),
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     ...amendedLines(state),
+    ...submoduleLines(loadConfig(project), state.worktrees),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
     ...testHeadLines(directory),
     ...(statusMergeRequestsMode(project) === "none"
