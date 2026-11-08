@@ -1,6 +1,6 @@
 ---
 id: ARK-T130
-title: ARK-T130 ARK-T76 passes when the hub answers late: the 200-ticket snapshot wait and the push wait end on their event with no 10-second deadline deciding
+title: "ARK-T130 ARK-T76 passes when the hub answers late: the 200-ticket snapshot wait and the push wait end on their event with no 10-second deadline deciding"
 level: integration
 technique: fault injection (delayed first snapshot and delayed push after the body edit); event wait instead of deadline
 priority: high
