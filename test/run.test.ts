@@ -1237,7 +1237,7 @@ const localBranchLines = (runId: string) =>
     .out.split("\n")
     .filter((line) => line.startsWith("branch"));
 
-test("ARK-295-AC5 a none project lists each branch with commits beyond its base, before and after handed_off", () => {
+test("ARK-T116 a none project lists each branch with commits beyond its base, before and after handed_off", () => {
   const { runId, directory, worktree } = worktreeRun({ merge_requests: "none" });
   const created = JSON.parse(
     eventLines(directory).find((line) => line.includes('"worktree.created"')) as string,
@@ -1293,7 +1293,12 @@ function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
         why: "Fixture.",
         changes: [{ criterion: "ARK-900-AC1", where: "tests", now: "None.", fix: "A test." }],
       },
-      steps: withRepos ? parts.steps : parts.steps.filter((step) => step.id !== "review-core"),
+      // Without a repos list the step needs alone make the repo edges, so bump-reports must not need bump-platform.
+      steps: withRepos
+        ? parts.steps
+        : parts.steps
+            .filter((step) => step.id !== "review-core")
+            .map((step) => (step.id === "bump-reports" ? { ...step, needs: ["impl-core"] } : step)),
       ...(withRepos ? { repos: parts.repos } : {}),
       test_cases: [
         {

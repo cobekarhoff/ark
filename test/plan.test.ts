@@ -1129,7 +1129,11 @@ describe("plan check repos block", () => {
     ],
     [
       "a downstream step with no needs path from the upstream implementer",
-      (parts: ClaraParts) => (parts.steps[2].needs = []),
+      (parts: ClaraParts) => {
+        // The reports -> platform api edge would be refused too, so drop it to leave the core edge alone.
+        parts.repos[2].depends_on.pop();
+        parts.steps[2].needs = [];
+      },
       `repos: no needs path from an implementer of ${clara.core} to ${clara.reports} step bump-reports (${clara.reports} -> ${clara.core}, package)`,
     ],
   ])("ARK-T104 refuses %s with one line that names the repo and the edge", (_, defect, line) => {
@@ -1180,6 +1184,38 @@ describe("plan check repos block", () => {
     });
     expect(result.code).toBe(0);
     expect(result.lines[0]).toBe("plan ok: 3 steps, 2 repos, 2 test cases");
+  });
+
+  test("ARK-T104 refuses a downstream step that needs only one of two upstream repos and names the missing edge", () => {
+    const [upstreamA, upstreamB, downstream] = ["a", "b", "c"].map((name) => `repos/${name}`);
+    useWorkspace([upstreamA, upstreamB, downstream]);
+    const planStep = (id: string, role: string, repo: string, needs: string[]) =>
+      step(id, {
+        role,
+        repo,
+        needs,
+        criteria: acs,
+        ...(role === "implementer" ? {} : { harness: "codex", model: "gpt-codex" }),
+      });
+    const edge = (repo: string) => ({ repo, kind: "api", pin: "v1", evidence: "client.ts:1" });
+    const result = checkPlan({
+      steps: [
+        planStep("impl-a", "implementer", upstreamA, []),
+        planStep("impl-b", "implementer", upstreamB, []),
+        planStep("impl-c", "implementer", downstream, ["impl-a"]),
+        planStep("validate", "validator", upstreamA, ["impl-a", "impl-b", "impl-c"]),
+      ],
+      repos: [
+        { repo: upstreamA, why: "first upstream", depends_on: [] },
+        { repo: upstreamB, why: "second upstream", depends_on: [] },
+        { repo: downstream, why: "needs both", depends_on: [edge(upstreamA), edge(upstreamB)] },
+      ],
+    });
+    expect(result.code).toBe(1);
+    expect(result.lines).toEqual([
+      "plan refused: 1 problem",
+      `  repos: no needs path from an implementer of ${upstreamB} to a step of ${downstream} (${downstream} -> ${upstreamB}, api)`,
+    ]);
   });
 
   test("ARK-T105 passes a 4-repo plan with all four edge kinds and prints the merge order from the edges", () => {
@@ -1310,6 +1346,7 @@ describe("plan check repos block", () => {
         "  step1 ==> step2",
         "  step1 ==> step3",
         "  step1 --> step5",
+        "  step2 ==> step3",
         "  step2 --> step4",
         "  step3 ==> step4",
         "  step4 ==> step5",

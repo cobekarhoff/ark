@@ -262,7 +262,7 @@ export function claraPlan(criteria: string[]) {
     steps: [
       step("impl-core", "implementer", clara.core, []),
       step("bump-platform", "implementer", clara.platform, ["impl-core"]),
-      step("bump-reports", "implementer", clara.reports, ["impl-core"]),
+      step("bump-reports", "implementer", clara.reports, ["impl-core", "bump-platform"]),
       step("validate", "validator", clara.platform, ["bump-platform", "bump-reports"]),
       step("review-core", "reviewer", clara.core, ["impl-core", "validate"]),
     ],
