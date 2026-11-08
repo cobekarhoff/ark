@@ -42,7 +42,7 @@ flowchart LR
 - Each worker does one step and never starts another agent. The depth is two.
 - No code is written before you approve the plan.
 - Each acceptance criterion is proven by test cases that pass at head, or by your own `manual` answer.
-- Ark opens one merge request per repo, in dependency order. You merge.
+- Ark opens one merge request per repo, in merge order (the repo edges of the plan, upstream first). You merge.
 
 ## Requirements
 
