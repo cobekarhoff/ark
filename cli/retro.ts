@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { ArkError } from "./errors.ts";
 import { type ArkEvent, readEvents } from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
 import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
-import { type SessionWithKey, type UsageMessage, isInside, readUsage } from "./usage/index.ts";
+import { type SessionWithKey, type UsageMessage, readUsage } from "./usage/index.ts";
+import { type Owner, type StageTimes, type StepWindow, ownersOf, stageOf } from "./usage/owners.ts";
 
 const IDLE_GAP_SECONDS = 600;
 const MERGE_REQUEST_QUERY_TIMEOUT_MILLISECONDS = 10_000;
@@ -12,14 +13,6 @@ const MERGE_REQUEST_QUERY_TIMEOUT_MILLISECONDS = 10_000;
 export type CostGroup = { usd: number | "unknown"; tokens: number; includes_unknown: boolean };
 type Unknowable = number | "unknown";
 export type Message = UsageMessage & { sessionKey: string; cwd: string };
-export type StepWindow = {
-  id: string;
-  role: string;
-  repo: string;
-  start: number;
-  end: number | null;
-};
-
 const toMilliseconds = (time: string): number => Date.parse(time);
 const secondsBetween = (from: number, to: number): number => (to - from) / 1000;
 
@@ -88,8 +81,6 @@ export function runningCost(runDirectory: string): { usd: number | "unknown"; to
   return { usd: group.includes_unknown ? "unknown" : group.usd, tokens: group.tokens };
 }
 
-export type StageTimes = { evaluationEnd?: number; designStart?: number; designEnd?: number };
-
 /**
  * When the evaluator and the Designer sessions ran, in milliseconds. The evaluator session ends at
  * the last evaluation.recorded (the run lead session outlasts it). The Designer session runs after
@@ -110,22 +101,24 @@ export function stageTimes(events: ArkEvent[]): StageTimes {
   };
 }
 
-/** The evaluator reports to the run lead after the lead recorded the evaluation: allow that closing message. */
-export const evaluatorGraceMilliseconds = 60_000;
+type HelperModel = { model: string; purpose: string; usd: number | "unknown"; tokens: number };
 
-/** An evaluator session starts at or before the evaluation boundary; only its closing message may follow. */
-export const isEvaluatorSession = (times: number[], evaluationEnd: number | undefined): boolean =>
-  evaluationEnd !== undefined &&
-  times.length > 0 &&
-  Math.min(...times) <= evaluationEnd &&
-  Math.max(...times) <= evaluationEnd + evaluatorGraceMilliseconds;
+/** Where a session file's messages belong: its owner, with an unassigned file told apart as a stage session. */
+type Placement =
+  | { kind: "step"; window: StepWindow }
+  | { kind: "lead" | "evaluator" | "designer" | "unassigned" };
 
-export const isDesignerTime = (
-  time: number,
-  designStart: number | undefined,
-  designEnd: number | undefined,
-): boolean =>
-  designStart !== undefined && designEnd !== undefined && time >= designStart && time <= designEnd;
+function placementOf(owner: Owner, messages: UsageMessage[], stages: StageTimes): Placement {
+  if (owner.kind === "step") return { kind: "step", window: owner.window };
+  if (owner.kind === "lead") return { kind: "lead" };
+  return {
+    kind:
+      stageOf(
+        messages.map((message) => toMilliseconds(message.time)),
+        stages,
+      ) ?? "unassigned",
+  };
+}
 
 export function stepWindows(events: ArkEvent[]): StepWindow[] {
   const windows: StepWindow[] = [];
@@ -147,37 +140,6 @@ export function stepWindows(events: ArkEvent[]): StepWindow[] {
     }
   }
   return windows;
-}
-
-/** A message belongs to a step when its session ran in the step's worktree during the step's window. */
-function windowOf(
-  message: Message,
-  windows: StepWindow[],
-  runDirectory: string,
-  runEnd: number,
-): StepWindow | undefined {
-  const time = toMilliseconds(message.time);
-  return windows.find(
-    (window) =>
-      isInside(message.cwd, join(runDirectory, "workspace", window.repo)) &&
-      time >= window.start &&
-      time <= (window.end ?? runEnd),
-  );
-}
-
-/** The step window of each message that ran in a step's worktree during the step. */
-export function assignSteps(
-  messages: Message[],
-  windows: StepWindow[],
-  runDirectory: string,
-  runEnd: number,
-): Map<Message, StepWindow> {
-  const stepOf = new Map<Message, StepWindow>();
-  for (const message of messages) {
-    const window = windowOf(message, windows, runDirectory, runEnd);
-    if (window) stepOf.set(message, window);
-  }
-  return stepOf;
 }
 
 /** Strategy records after the first one and before the strategy answer. */
@@ -493,55 +455,60 @@ export function retro(runId: string, inProject?: string): void {
   const windows = stepWindows(events);
   const { messages, sessions } = collectMessages(runDirectory);
 
-  const stepOf = assignSteps(messages, windows, runDirectory, runEnd);
-  const { evaluationEnd, designStart, designEnd } = stageTimes(events);
-  const evaluatorSessions = new Set(
-    messages
-      .filter((message) => !stepOf.has(message))
-      .map((message) => message.sessionKey)
-      .filter((key) => {
-        const own = messages.filter((message) => message.sessionKey === key);
-        return (
-          own.every((message) => !stepOf.has(message)) &&
-          isEvaluatorSession(
-            own.map((message) => toMilliseconds(message.time)),
-            evaluationEnd,
-          )
-        );
-      }),
+  // Each session file goes whole to one owner (the same rule as the hub); its messages follow it.
+  const stages = stageTimes(events);
+  const owners = ownersOf(
+    sessions.map((session) => ({
+      cwd: session.cwd,
+      start: session.start,
+      mtime: session.mtime,
+      times: session.messages.map((message) => toMilliseconds(message.time)),
+    })),
+    [resolve(runDirectory), realpathSync(runDirectory)],
+    windows,
+    firstTime,
+    stages,
   );
-  const designerKeys = new Set(
-    messages
-      .filter((message) => !stepOf.has(message) && !evaluatorSessions.has(message.sessionKey))
-      .map((message) => message.sessionKey)
-      .filter((key) =>
-        messages
-          .filter((message) => message.sessionKey === key)
-          .every(
-            (message) =>
-              !stepOf.has(message) &&
-              isDesignerTime(toMilliseconds(message.time), designStart, designEnd),
-          ),
-      ),
+  const placements = new Map<string, Placement>(
+    sessions.map((session, index) => [
+      session.file,
+      placementOf(owners[index], session.messages, stages),
+    ]),
   );
+  const placementOfMessage = (message: Message): Placement =>
+    placements.get(message.sessionFile) ?? { kind: "unassigned" };
+  const stepOf = new Map<Message, StepWindow>();
+  for (const message of messages) {
+    const placement = placementOfMessage(message);
+    if (placement.kind === "step") stepOf.set(message, placement.window);
+  }
   const designRounds = designRoundCount(events);
-  const roleOf = (message: Message): string =>
-    stepOf.get(message)?.role ??
-    (evaluatorSessions.has(message.sessionKey)
-      ? "evaluator"
-      : designerKeys.has(message.sessionKey)
-        ? "designer"
-        : "orchestration");
-  const orchestrationMessages = messages.filter((message) => roleOf(message) === "orchestration");
+  const roleOf = (message: Message): string => {
+    const placement = placementOfMessage(message);
+    return placement.kind === "step"
+      ? placement.window.role
+      : placement.kind === "evaluator" || placement.kind === "designer"
+        ? placement.kind
+        : "orchestration";
+  };
+  const orchestrationMessages = messages.filter(
+    (message) => placementOfMessage(message).kind === "lead",
+  );
+  const unassignedMessages = messages.filter(
+    (message) => placementOfMessage(message).kind === "unassigned",
+  );
   const stepIds = [...new Set(windows.map((window) => window.id))];
   const roleOfStep = new Map(windows.map((window) => [window.id, window.role]));
 
-  const byStep = groupBy(messages, (message) => stepOf.get(message)?.id ?? "orchestration");
+  const byStep = groupBy(messages, (message) =>
+    placementOfMessage(message).kind === "unassigned"
+      ? "unassigned"
+      : (stepOf.get(message)?.id ?? "orchestration"),
+  );
   const byRole = groupBy(messages, roleOf);
   for (const id of stepIds) byStep[id] ??= summarize([]); // a step that ran with no session found has unknown cost
   for (const role of roleOfStep.values()) byRole[role] ??= summarize([]);
   const total = summarize(messages);
-  if (designerKeys.size > 0) byRole.designer ??= summarize([]);
   const reviewer = byRole.reviewer;
   const implementer = byRole.implementer;
   const ratioKnown =
@@ -580,6 +547,33 @@ export function retro(runId: string, inProject?: string): void {
       ].sort(),
     ]),
   );
+  // Helper calls (a `purpose`) of the files a step owns: one entry per model and purpose, cost included.
+  const helperModels = sortedObject(
+    stepIds.flatMap((id): [string, HelperModel[]][] => {
+      const own = [...stepOf].filter(([message, window]) => window.id === id && message.helper);
+      const groups = new Map<string, Message[]>();
+      for (const [message] of own) {
+        const key = JSON.stringify([message.model, message.purpose]);
+        groups.set(key, [...(groups.get(key) ?? []), message]);
+      }
+      const entries = [...groups.values()]
+        .map((members) => ({
+          model: members[0].model,
+          purpose: members[0].purpose ?? "",
+          usd: summarize(members).usd,
+          tokens: summarize(members).tokens,
+        }))
+        .sort(
+          (left, right) =>
+            (left.model < right.model ? -1 : left.model > right.model ? 1 : 0) ||
+            (left.purpose < right.purpose ? -1 : left.purpose > right.purpose ? 1 : 0),
+        );
+      return entries.length > 0 ? [[id, entries]] : [];
+    }),
+  );
+  const unassignedFiles = sessions
+    .filter((session) => placements.get(session.file)?.kind === "unassigned")
+    .map((session) => session.file.slice(session.file.lastIndexOf("/") + 1));
   let planSteps: PlanStep[] = [];
   try {
     planSteps = loadPlan(runDirectory).steps;
@@ -627,9 +621,8 @@ export function retro(runId: string, inProject?: string): void {
   )) {
     const entries = [...stepsInRepo].sort(([left], [right]) => (left < right ? -1 : 1));
     const builders = entries.filter(([, entry]) => entry.role === "implementer");
-    const checkers = entries.filter(
-      ([, entry]) => entry.role === "validator" || entry.role === "reviewer",
-    );
+    // Validators run on the implementer's vendor by design, so only reviewers set the flag.
+    const checkers = entries.filter(([, entry]) => entry.role === "reviewer");
     // A checker with two vendors is mixed: neither same vendor nor cross vendor.
     for (const [id, entry] of checkers)
       if (entry.vendors.size > 1)
@@ -666,10 +659,12 @@ export function retro(runId: string, inProject?: string): void {
       if (secondsBetween(times[i - 1], times[i]) > IDLE_GAP_SECONDS) idleGaps += 1;
   }
 
+  const unassignedGroup = summarize(unassignedMessages);
   const gateAnswers = events.filter((event) => event.type === "gate.answered");
   const metrics = {
     run: runId,
     actual_models: actualModels,
+    ...(Object.keys(helperModels).length > 0 ? { helper_models: helperModels } : {}),
     same_vendor_review: sameVendorGroups.length > 0,
     cost: {
       total_usd: total.usd,
@@ -753,6 +748,19 @@ export function retro(runId: string, inProject?: string): void {
         ),
       ...modelChangedLines,
       `same vendor review: ${sameVendorGroups.length > 0 ? `true (${sameVendorGroups.join("; ")})` : "false"}`,
+      ...Object.entries(helperModels).map(([id, entries]) => {
+        const group = summarize(
+          [...stepOf]
+            .filter(([message, window]) => window.id === id && message.helper)
+            .map(([m]) => m),
+        );
+        return `helper models: ${id} ${formatUsd(group.usd, group.includes_unknown)} (${[...new Set(entries.map((entry) => entry.purpose))].join(", ")})`;
+      }),
+      ...(unassignedFiles.length > 0
+        ? [
+            `unassigned: ${unassignedFiles.length} ${unassignedFiles.length === 1 ? "file" : "files"}, ${formatUsd(unassignedGroup.usd, unassignedGroup.includes_unknown)}, ${unassignedGroup.tokens} tokens (${[...unassignedFiles.slice(0, 3), ...(unassignedFiles.length > 3 ? [`+${unassignedFiles.length - 3} more`] : [])].join(", ")}; no step window held the file start)`,
+          ]
+        : []),
       ...(mixedSteps.length > 0 ? [`mixed review steps: ${mixedSteps.join("; ")}`] : []),
       `compared with ${comparison.runs_compared} earlier closed runs`,
       `wrote ${metricsFile}`,
