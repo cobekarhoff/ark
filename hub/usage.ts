@@ -2,12 +2,7 @@ import { existsSync, readFileSync, realpathSync, statSync, type Stats } from "no
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { isInside } from "../cli/usage/index.ts";
-import {
-  isDesignerTime,
-  isEvaluatorSession,
-  type StageTimes,
-  type StepWindow,
-} from "../cli/retro.ts";
+import { ownersOf, stageOf, type StageTimes, type StepWindow } from "../cli/usage/owners.ts";
 import type { SessionFile, TranscriptPage } from "./types.ts";
 
 export type Harness = "omp" | "claude" | "codex";
@@ -210,7 +205,8 @@ export class UsageIndex {
   /**
    * Cost of one run. A closed run reads `metrics.json` and touches no session. An open run sums the
    * messages of the sessions that ran inside its folder; a message belongs to a step when its session
-   * ran in the step's worktree during the step's window (the rule of `ark retro`). A number is
+   * ran in the step's worktree during the step's window (an estimate while the run is open;
+   * `ark retro` gives whole files to owners). A number is
    * never made up: no session, one unpriced message or one unreadable file gives null.
    */
   runCost(directory: string, closed: boolean, windows: StepWindow[]): RunCost {
@@ -247,15 +243,9 @@ export class UsageIndex {
   }
 
   /**
-   * Every session file whose cwd is inside the run folder, each mapped whole to one owner, by these
-   * rules in this order (never message by message, unlike `runCost`):
-   * 1. a step, when the file starts inside that step's window and its cwd is in that step's worktree
-   *    (of two overlapping windows, the later one);
-   * 2. the run lead: the one file that starts before the first step and was last written at or
-   *    after it (the earliest-starting if several do). While no step has started there is no first
-   *    step: the lead is then the earliest-starting file last written at or after the run's first event;
-   * 3. otherwise unassigned.
-   * A file with no timestamp in its head cannot start inside a window: it is unassigned.
+   * Every session file whose cwd is inside the run folder, each mapped whole to one owner by
+   * `ownersOf` (the rule `ark retro` uses too; never message by message, unlike `runCost`).
+   * Stage files stay unassigned here; `modelsOf` attributes them.
    */
   sessionsOf(
     directory: string,
@@ -264,60 +254,35 @@ export class UsageIndex {
     stages: StageTimes = {},
   ): SessionFile[] {
     const parents = parentsOf(directory);
-    const firstStep = Math.min(...windows.map((window) => window.start));
-    const sessions: SessionFile[] = [];
-    for (const [file, entry] of this.#entries) {
-      const cwd = entry.cwd;
-      if (cwd === null || !parents.some((parent) => isInside(cwd, parent))) continue;
-      const start = entry.start;
-      const window =
-        start === null
-          ? undefined
-          : windows.findLast(
-              (candidate) =>
-                start >= candidate.start &&
-                start <= (candidate.end ?? Infinity) &&
-                parents.some((parent) => isInside(cwd, join(parent, "workspace", candidate.repo))),
-            );
-      sessions.push({
-        file,
-        harness: entry.harness,
-        start: start === null ? null : new Date(start).toISOString(),
-        end: new Date(entry.mtime).toISOString(),
-        size: entry.size,
-        cwd,
-        owner: window ? { kind: "step", step: window.id } : { kind: "unassigned" },
-      });
-    }
-    const leadFrom = windows.length > 0 ? firstStep : runStarted;
-    const lead = sessions
-      .filter(
-        (session) =>
-          session.owner.kind === "unassigned" &&
-          this.#stageOf(session.file, stages) === null &&
-          session.start !== null &&
-          (windows.length === 0 || Date.parse(session.start) < firstStep) &&
-          Date.parse(session.end) >= leadFrom,
-      )
-      .sort((left, right) => left.start!.localeCompare(right.start!))[0];
-    if (lead) lead.owner = { kind: "lead" };
-    return sessions.sort((left, right) =>
-      (left.start ?? "9999").localeCompare(right.start ?? "9999"),
+    const inside = [...this.#entries].filter(
+      ([, entry]) => entry.cwd !== null && parents.some((parent) => isInside(entry.cwd!, parent)),
     );
-  }
-
-  /**
-   * Which stage an unassigned parsed session file is, by the time attribution of `ark retro`: the
-   * evaluator when every message is at or before the last evaluation, else the Designer when every
-   * message is between the first evaluation and the last strategy record or answer.
-   */
-  #stageOf(file: string, stages: StageTimes): "evaluator" | "designer" | null {
-    const times = this.#entries.get(file)?.messages?.map((message) => message.time) ?? [];
-    if (times.length === 0) return null;
-    if (isEvaluatorSession(times, stages.evaluationEnd)) return "evaluator";
-    if (times.every((time) => isDesignerTime(time, stages.designStart, stages.designEnd)))
-      return "designer";
-    return null;
+    const owners = ownersOf(
+      inside.map(([, entry]) => ({
+        cwd: entry.cwd!,
+        start: entry.start,
+        mtime: entry.mtime,
+        times: entry.messages?.map((message) => message.time) ?? [],
+      })),
+      parents,
+      windows,
+      runStarted,
+      stages,
+    );
+    return inside
+      .map(([file, entry], index): SessionFile => {
+        const owner = owners[index];
+        return {
+          file,
+          harness: entry.harness,
+          start: entry.start === null ? null : new Date(entry.start).toISOString(),
+          end: new Date(entry.mtime).toISOString(),
+          size: entry.size,
+          cwd: entry.cwd!,
+          owner: owner.kind === "step" ? { kind: "step", step: owner.step } : owner,
+        };
+      })
+      .sort((left, right) => (left.start ?? "9999").localeCompare(right.start ?? "9999"));
   }
 
   /**
@@ -337,7 +302,10 @@ export class UsageIndex {
     for (const session of this.sessionsOf(directory, windows, runStarted, stages)) {
       const owner =
         session.owner.kind === "unassigned"
-          ? this.#stageOf(session.file, stages)
+          ? stageOf(
+              this.#entries.get(session.file)?.messages?.map((message) => message.time) ?? [],
+              stages,
+            )
           : session.owner.kind === "lead"
             ? "lead"
             : session.owner.step;

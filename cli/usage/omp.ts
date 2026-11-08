@@ -101,7 +101,7 @@ export function parseOmpSession(file: string): SessionUsage {
       cacheWrite: numberOrZero(usage.cacheWrite),
       costUsd: typeof usage.cost?.total === "number" ? usage.cost.total : "unknown",
       toolError: false,
-      ...(record.purpose === undefined ? {} : { helper: true }),
+      ...(record.purpose === undefined ? {} : { helper: true, purpose: record.purpose }),
       sessionFile: file,
     });
   }

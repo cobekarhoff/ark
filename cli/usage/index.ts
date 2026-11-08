@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readSync, realpathSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { ArkError } from "../errors.ts";
@@ -18,6 +18,8 @@ export type UsageMessage = {
   toolError: boolean;
   /** An omp helper call (`purpose` field: job-caption, job-widget): costs count, its model is not the agent's. */
   helper?: boolean;
+  /** The `purpose` of an omp helper call (job-caption, find ...); set exactly when `helper` is. */
+  purpose?: string;
   sessionFile: string;
 };
 
@@ -35,6 +37,10 @@ export type SessionWithKey = SessionUsage & {
   sessionKey: string;
   /** The harness whose reader parsed the file. Orca names the same harnesses in `agentIdentity`. */
   harness: "omp" | "claude" | "codex";
+  /** First timestamp in the head of the file (ms), or null when it holds none. */
+  start: number | null;
+  /** Last write of the file (ms). */
+  mtime: number;
 };
 
 type Source = {
@@ -78,19 +84,21 @@ function sessionKeyFor(relativeFile: string): string {
     : `${segments[0]}/${segments[1].replace(/\.jsonl$/, "")}`;
 }
 
-function findCwd(head: string): string | null {
-  const match = head.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
-  return match ? JSON.parse(`"${match[1]}"`) : null;
+function findHead(head: string): { cwd: string | null; start: number | null } {
+  const cwd = head.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+  const time = head.match(/"timestamp":"([^"]+)"/);
+  const start = time ? Date.parse(time[1]) : Number.NaN;
+  return { cwd: cwd ? JSON.parse(`"${cwd[1]}"`) : null, start: Number.isNaN(start) ? null : start };
 }
 
-/** First `cwd` in the first 64 KiB of a session file; every format writes it near the top. */
-function readCwd(file: string): string | null {
-  if (file.endsWith(".zst")) return findCwd(readCodexText(file).slice(0, 65536));
+/** First `cwd` and first timestamp in the first 64 KiB of a session file; every format writes both near the top. */
+export function readHead(file: string): { cwd: string | null; start: number | null } {
+  if (file.endsWith(".zst")) return findHead(readCodexText(file).slice(0, 65536));
   const descriptor = openSync(file, "r");
   try {
     const buffer = Buffer.alloc(65536);
     const length = readSync(descriptor, buffer, 0, buffer.length, 0);
-    return findCwd(buffer.toString("utf8", 0, length));
+    return findHead(buffer.toString("utf8", 0, length));
   } finally {
     closeSync(descriptor);
   }
@@ -119,12 +127,13 @@ export function readUsageIn(directories: string[]): Map<string, SessionWithKey[]
     ].sort();
     for (const relativeFile of relativeFiles) {
       const file = join(source.root, relativeFile);
-      let cwd: string | null;
+      let head: ReturnType<typeof readHead>;
       try {
-        cwd = readCwd(file);
+        head = readHead(file);
       } catch {
         throw new ArkError(`cannot read session file ${file}`);
       }
+      const cwd = head.cwd;
       if (cwd === null) continue;
       const matching = directories.filter((directory) =>
         [...parents.get(directory)!].some((parent) => isInside(cwd, parent)),
@@ -134,6 +143,8 @@ export function readUsageIn(directories: string[]): Map<string, SessionWithKey[]
         ...source.parse(file),
         sessionKey: (source.keyFor ?? sessionKeyFor)(relativeFile),
         harness: source.harness,
+        start: head.start,
+        mtime: statSync(file).mtimeMs,
       };
       for (const directory of matching) result.get(directory)!.push(session);
     }

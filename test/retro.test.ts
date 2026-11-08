@@ -971,7 +971,11 @@ describe("ark retro models and vendors", () => {
     expect(readMetrics().same_vendor_review).toBe(false);
   });
 
-  /** The review step runs in repos/platform. Its main session ran `main`; `sub` adds a sub-session on another model. */
+  /**
+   * The review step runs in repos/platform. One file per step (ARK-348): the build session and the
+   * review session each start inside their own step window. `main` is the review's own session model,
+   * `sub` adds a second review file on another model, `helperModel` adds a helper call (purpose) to it.
+   */
   function reviewOnModels(main: string, sub?: string, helperModel?: string): void {
     reviewInPlatform();
     const text = (model: string) =>
@@ -994,7 +998,7 @@ describe("ark retro models and vendors", () => {
     ]);
   }
 
-  test("ARK-310-AC3 same vendor review is true when every model of the review step shares the implementer vendor", () => {
+  test("ARK-T66 same vendor review is true when every model of the review step shares the implementer vendor", () => {
     reviewOnModels("claude-opus-5-5", "claude-sonnet-5");
     const out = runRetro();
     expect(readMetrics().same_vendor_review).toBe(true);
@@ -1002,7 +1006,7 @@ describe("ark retro models and vendors", () => {
     expect(out).not.toContain("mixed");
   });
 
-  test("ARK-310-AC3 same vendor review is false and nothing is mixed when the review step ran on another vendor", () => {
+  test("ARK-T66 same vendor review is false and nothing is mixed when the review step ran on another vendor", () => {
     reviewOnModels("gpt-6.1-sol");
     const out = runRetro();
     expect(readMetrics().same_vendor_review).toBe(false);
@@ -1010,7 +1014,22 @@ describe("ark retro models and vendors", () => {
     expect(out).not.toContain("mixed");
   });
 
-  test("ARK-310-AC3 a review step with a codex model and an anthropic sub-session is mixed, not same vendor", () => {
+  test("ARK-348/AC2 ARK-T66 a validator on the implementer's vendor does not set same vendor review", () => {
+    reviewOnModels("claude-opus-5-5");
+    writeEvents(
+      runDirectory,
+      scenario.map(([time, type, data]): EventRow => [
+        time,
+        type,
+        data.step === "review" ? { ...data, repo: "repos/platform", role: "validator" } : data,
+      ]),
+    );
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(out).toContain("same vendor review: false");
+  });
+
+  test("ARK-T66 a review step with a codex model and an anthropic sub-session is mixed, not same vendor", () => {
     reviewOnModels("gpt-6.1-sol", "claude-opus-5-5");
     const out = runRetro();
     expect(readMetrics().same_vendor_review).toBe(false);
@@ -1020,12 +1039,190 @@ describe("ark retro models and vendors", () => {
     expect(mixedLine).toContain("review");
   });
 
-  test("ARK-310-AC3 a helper call with a purpose field and another vendor does not make the review step mixed or changed", () => {
+  test("ARK-T66 a helper call with a purpose field and another vendor does not make the review step mixed or changed", () => {
     reviewOnModels("claude-opus-5-5", undefined, "gpt-6-luna");
     const out = runRetro();
     expect(readMetrics().same_vendor_review).toBe(true);
     expect(out).toContain("same vendor review: true");
     expect(out).not.toContain("mixed");
     expect(out).not.toContain("gpt-6-luna");
+  });
+
+  // ARK-348: session files go whole to one owner. Every step and the run lead share the worktree "workspace".
+  const sharedScenario: EventRow[] = scenario.map(([time, type, data]): EventRow => [
+    time,
+    type,
+    data.repo ? { ...data, repo: "." } : data,
+  ]);
+
+  type SessionReply = {
+    time: string;
+    provider: string;
+    model: string;
+    costUsd: number;
+    purpose?: string;
+  };
+
+  /** One omp session file in the run's worktree: a session head at `start`, then one record per reply. */
+  function writeOwnedSession(name: string, start: string, replies: SessionReply[]): void {
+    const head = {
+      type: "session",
+      version: 3,
+      id: name,
+      timestamp: day(start),
+      cwd: join(runDirectory, "workspace"),
+    };
+    const records = replies.map((reply) => {
+      const usage = {
+        input: 10,
+        output: 10,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { total: reply.costUsd },
+      };
+      return reply.purpose === undefined
+        ? {
+            type: "message",
+            timestamp: day(reply.time),
+            message: {
+              role: "assistant",
+              provider: reply.provider,
+              model: reply.model,
+              content: [],
+              usage,
+            },
+          }
+        : {
+            type: "model_usage",
+            timestamp: day(reply.time),
+            purpose: reply.purpose,
+            provider: reply.provider,
+            model: reply.model,
+            usage,
+          };
+    });
+    mkdirSync(join(ompRoot, "workspace"), { recursive: true });
+    writeFileSync(
+      join(ompRoot, "workspace", `${name}.jsonl`),
+      `${[head, ...records].map((record) => JSON.stringify(record)).join("\n")}\n`,
+    );
+  }
+
+  const anthropicReply = (
+    time: string,
+    costUsd: number,
+    model = "claude-sonnet-5-5",
+  ): SessionReply => ({
+    time,
+    provider: "anthropic",
+    model,
+    costUsd,
+  });
+  const openAiReply = (time: string, costUsd: number): SessionReply => ({
+    time,
+    provider: "openai-codex",
+    model: "gpt-6.1-sol",
+    costUsd,
+  });
+
+  /** The run lead starts before the first step and replies inside both step windows. */
+  const writeRunLead = () =>
+    writeOwnedSession("lead", "14:21:00.000", [
+      anthropicReply("14:24:30.000", 0.5),
+      anthropicReply("14:30:00.000", 0.5),
+      anthropicReply("14:40:00.000", 0.5),
+    ]);
+  const writeImplementer = () =>
+    writeOwnedSession("implementer", "14:24:10.000", [
+      anthropicReply("14:24:20.000", 0.02, "claude-haiku-4-5"),
+    ]);
+
+  test("ARK-348/AC1 ARK-T65 a run lead that overlaps the reviewer window stays out of the reviewer, and an unassigned file is its own cost line", () => {
+    writeEvents(runDirectory, sharedScenario);
+    writeRunLead();
+    writeImplementer();
+    writeOwnedSession("reviewer", "14:28:30.000", [
+      openAiReply("14:29:00.000", 0.05),
+      openAiReply("14:35:00.000", 0.05),
+    ]);
+    // Starts in the gap between the build and review windows: no step owns it.
+    writeOwnedSession("unassigned", "14:27:00.000", [openAiReply("14:27:30.000", 0.09)]);
+
+    const out = runRetro();
+    const metrics = readMetrics();
+    expect(metrics.actual_models.review).toEqual(["gpt-6.1-sol"]);
+    expect(metrics.actual_models.build).toEqual(["claude-haiku-4-5"]);
+    expect(metrics.cost.by_step.review.usd).toBeCloseTo(0.1, 6);
+    expect(metrics.cost.by_step.build.usd).toBeCloseTo(0.02, 6);
+    expect(metrics.cost.by_step.unassigned.usd).toBeCloseTo(0.09, 6);
+    expect(metrics.cost.by_step.orchestration.usd).toBeCloseTo(1.5, 6);
+    expect(metrics.cost.total_usd).toBeCloseTo(1.71, 6);
+    expect(Object.keys(metrics.cost.by_role).sort()).toEqual([
+      "implementer",
+      "orchestration",
+      "reviewer",
+    ]);
+    expect(out).toContain("unassigned: 1 file, $0.09");
+    expect(out).toContain("unassigned.jsonl");
+  });
+
+  test("ARK-348/AC2 ARK-T66 a cross-vendor reviewer with an overlapping Anthropic run lead and an Anthropic unassigned file is not same vendor and not mixed", () => {
+    writeEvents(runDirectory, sharedScenario);
+    writeRunLead();
+    writeImplementer();
+    writeOwnedSession("reviewer", "14:28:30.000", [openAiReply("14:29:00.000", 0.05)]);
+    writeOwnedSession("unassigned", "14:27:00.000", [anthropicReply("14:27:30.000", 0.09)]);
+
+    const out = runRetro();
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(readMetrics().actual_models.review).toEqual(["gpt-6.1-sol"]);
+    expect(out).toContain("same vendor review: false");
+    expect(out).not.toContain("mixed");
+  });
+
+  test("ARK-348/AC2 ARK-T66 a reviewer step with no session of its own is not same vendor because of an Anthropic run lead", () => {
+    writeEvents(runDirectory, sharedScenario);
+    writeRunLead();
+    writeImplementer();
+
+    expect(runRetro()).toContain("same vendor review: false");
+    expect(readMetrics().same_vendor_review).toBe(false);
+    expect(readMetrics().actual_models.review).toEqual([]);
+  });
+
+  test("ARK-348/AC2 ARK-T66 helper calls are listed in helper_models with their cost, stay in the step cost, and older metrics.json without helper_models still load", () => {
+    writeEvents(runDirectory, sharedScenario);
+    writeRunLead();
+    writeImplementer();
+    writeOwnedSession("reviewer", "14:28:30.000", [
+      openAiReply("14:29:00.000", 0.1),
+      { ...openAiReply("14:30:00.000", 0.001), model: "gpt-6-luna", purpose: "job-widget" },
+      { ...openAiReply("14:31:00.000", 0.002), model: "typesafe/jev-1.14", purpose: "find" },
+      { ...anthropicReply("14:32:00.000", 0.003, "claude-haiku-4-5"), purpose: "job-caption" },
+    ]);
+    // An earlier closed run from before the change: its metrics.json has no helper_models.
+    const earlier = join(arkHome, "projects", "demo", "runs", "2026-10-28-ARK-900-1");
+    writeEvents(earlier, [["14:00:00.000", "run.closed", { outcome: "merged" }]]);
+    writeFileSync(
+      join(earlier, "metrics.json"),
+      JSON.stringify({
+        run: "2026-10-28-ARK-900-1",
+        cost: { total_usd: 2 },
+        time: { wall_seconds: 60 },
+      }),
+    );
+
+    const out = runRetro();
+    const metrics = readMetrics();
+    expect(metrics.same_vendor_review).toBe(false);
+    expect(metrics.actual_models.review).toEqual(["gpt-6.1-sol"]);
+    expect(metrics.helper_models.review).toMatchObject([
+      { model: "claude-haiku-4-5", purpose: "job-caption", usd: 0.003 },
+      { model: "gpt-6-luna", purpose: "job-widget", usd: 0.001 },
+      { model: "typesafe/jev-1.14", purpose: "find", usd: 0.002 },
+    ]);
+    expect(metrics.cost.by_step.review.usd).toBeCloseTo(0.106, 6);
+    expect(out).toContain("helper models: review");
+    expect(metrics.comparison.runs_compared).toBe(1);
   });
 });
