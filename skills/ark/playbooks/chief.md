@@ -49,6 +49,7 @@ The human names a ticket or several. For each one:
    - Which repos it likely touches. Read the workspace to check.
    - What it depends on, and what is unclear or risky.
 3. Run `ark status` and check that no open run already exists for the ticket. Only one run per ticket can be open.
+4. Run `ark chief state --project <project>`. When its `## Interview` line says `(due)`, offer `retro interview` first (`playbooks/retro.md`, Part 2).
 
 ## 4. Suggest related tickets
 
@@ -142,13 +143,13 @@ Never start more run leads than `concurrency` allows. Start the next ready ticke
 Wait for messages from every run lead:
 
 ```sh
-orca orchestration check --wait --types "worker_done,escalation,question,status" --timeout-ms 900000 --json
+orca orchestration check --wait --types "worker_done,escalation,question,status" --timeout-ms 900000 --json 2>/dev/null
 ```
 
 Handle every message in the batch before you acknowledge it:
 
 ```sh
-orca orchestration check --ack <delivery id> --wait --types "worker_done,escalation,question,status" --timeout-ms 900000 --json
+orca orchestration check --ack <delivery id> --wait --types "worker_done,escalation,question,status" --timeout-ms 900000 --json 2>/dev/null
 ```
 
 An empty wait or a timeout is a checkpoint. Wait again. After three empty waits, run `orca orchestration worker-list --include-remote --json` and read each row's `projection.nextAction`. Do not stop, release or restart a run lead unless a row shows it has exited.
@@ -171,7 +172,7 @@ A `status` message from a run lead is a notice, not a question. Pass it to the h
 
 ### A busy agent
 
-A send can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn and refused the message. Pick a retry id once for the message, unique for each message and each target, such as `<run>-<subject slug>-<target dispatch id>`, and use that same `--retry-request <id>` for every try. Wait 30 seconds, then send the same message again with `orca orchestration send --retry-request <id>`, up to 5 times. The same id keeps Orca from delivering the message twice when a try landed and its answer was lost; `orca orchestration request-show` tells whether a request took effect.
+A send can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn and refused the message. Wait 30 seconds, then send again with the request UUID that Orca printed, up to 5 times.
 
 When the agent is still busy after 5 times, tell the human the target, the subject and that the message is not delivered. Send the message again on your next wait. Never treat the message as delivered until a send succeeds.
 
@@ -195,7 +196,7 @@ The strategy gate is one of these questions. Its options are the card IDs of `<r
 
 ### An `escalation` from a run lead
 
-A run lead is blocked. Read the message, tell the human, and decide the next step with them. Use `orca orchestration send --retry-request <id> --to dispatch:<dispatch id> --subject "<subject>" --body "<guidance>" --json` to steer the run lead.
+A run lead is blocked. Read the message, tell the human, and decide the next step with them. Use `orca orchestration send --to dispatch:<dispatch id> --subject "<subject>" --body "<guidance>" --json` to steer the run lead.
 
 ### An amendment of a criterion
 
@@ -239,7 +240,7 @@ If some MRs are merged and others are still open, tell the human and wait. Do no
 
 Abort row: when the human aborts through the run lead, the run lead runs `ark run close <run> aborted` itself. Run it yourself only when `ark status <run>` shows a phase other than `closed` and no run lead is alive; a second close is refused.
 
-Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.md` exists. The run lead writes it. If it does not exist, the run is not ready to close: message the run lead with `orca orchestration send --retry-request <id>`, or ask the human what to do.
+Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.md` exists. The run lead writes it. If it does not exist, the run is not ready to close: message the run lead with `orca orchestration send`, or ask the human what to do.
 
 A `HELD: <run> #<number> ticket superseded` line from the auto-merger (section 12) means nobody wants the PR. Tell the human. With the human, close the run `aborted` or `abandoned` (table above) and close the PR with `gh pr close <url>`. Never merge it. `no final report` needs nothing: the PR merges when `retro.md` exists. `ticket done`: check the run and the PR with the human.
 
@@ -253,9 +254,9 @@ After `ark run close`:
    2. For every other open run, send its lead a `status` message with the target branch and the head that `ark workspace sync` printed:
 
       ```sh
-      orca orchestration send --retry-request <id> --to dispatch:<run lead dispatch id> --type status --subject "<repo>: <branch> moved" --body "Run <closed run> merged. <repo> <branch> is now at <head>. Run \`ark worktree sync <run>\` before your next step." --json
+      orca orchestration send --to dispatch:<run lead dispatch id> --type status --subject "<repo>: <branch> moved" --body "Run <closed run> merged. <repo> <branch> is now at <head>. Run \`ark worktree sync <run>\` before your next step." --json
       ```
-3. Run the close check with the human: read `playbooks/retro.md` and follow "Part 1: Close check", steps 3 and 4, which are the Master Chief steps. Steps 1 and 2 are done: `ark run close` ran, and `retro.md` exists.
+3. Run `ark chief state --project <project>`. When its `## Interview` line says `(due)` (10 or more closed runs since the last interview), read `playbooks/retro.md` and follow "Part 2: Deep interview" (`retro interview`).
 4. Start the next ready ticket, if `concurrency` allows.
 
 ## 9. Link an escaped defect
@@ -279,7 +280,7 @@ When the human gives you a bug ticket and it traces back to an earlier run, or y
 
 ## 10. Take over from live state
 
-When you take over a Master Chief Run (section 2, step 5) or start as a replacement from `ark chief handover`, run `ark chief state --project <project>` and work from its output. It reads the open runs, run leads, queued Orca Tasks, the main head, gates, concurrency, closed runs with an empty Close check and free disk live. A section that says `unavailable` is unknown, not empty: check it yourself before you act.
+When you take over a Master Chief Run (section 2, step 5) or start as a replacement from `ark chief handover`, run `ark chief state --project <project>` and work from its output. It reads the open runs, run leads, queued Orca Tasks, the main head, gates, concurrency, the closed runs since the last interview and free disk live. A section that says `unavailable` is unknown, not empty: check it yourself before you act.
 
 `handoff.md` keeps only standing rules: decisions of the human that stay true, and how the human wants Master Chief to work. Do not write a State section in it. State goes stale in minutes, and `ark chief state` replaces it.
 
@@ -306,7 +307,7 @@ The reply has three parts, in this order:
 
 1. **Merged:** each run that merged since the human last heard from you, with its ticket ID and title.
 2. **Failed or aborted:** each run that failed, aborted or was abandoned, with the reason in one line.
-3. **Waiting on the human:** each item that waits on the human, one block for each: the run or ticket, what is asked (a gate, a `manual` check, an escalation, a question, a retro close check), and the options with your recommended one. Write it so that the human can decide from the reply alone, with no need to open the run.
+3. **Waiting on the human:** each item that waits on the human, one block for each: the run or ticket, what is asked (a gate, a `manual` check, an escalation, a question), and the options with your recommended one. Write it so that the human can decide from the reply alone, with no need to open the run.
 
 Leave out a part that has no items and say "Nothing waiting" when all three are empty. End the reply after the last item. Do not ask "anything else", do not wait for an answer in that turn, and do not answer a gate yourself: the human's answer comes in the next message, and then you handle it as in section 7.
 
