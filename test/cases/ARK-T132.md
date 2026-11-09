@@ -18,18 +18,22 @@ Expected: When a close with a 300 ms reader timeout has ended, the next close sh
 ## Preconditions
 
 - `test/run.test.ts` runs the hanging close helper, then a fake orca that holds its first call until the test releases it and logs the `ARK_ORCA_TIMEOUT_MS` it started with.
+- The variable holds an outer value (or none) before the hanging close runs.
 
 ## Steps
 
-1. Run the hanging close; it sets the 300 ms timeout and cleans it up.
-2. Start a second close while the fake orca holds its first call.
-3. Release the fake orca once the close is waiting.
-4. Read the close output and the timeout variable the fake orca logged.
+1. Run the hanging close; it sets the 300 ms timeout and restores the outer value when it ends.
+2. Check that `ARK_ORCA_TIMEOUT_MS` equals the outer value again.
+3. Start a second close while the fake orca holds its first call; the test sets `ARK_ORCA_TIMEOUT_MS=600000` for this later gated child only.
+4. Release the fake orca once the close is waiting.
+5. Read the close output, the timeout variable the fake orca logged, and the variable in the test process.
 
 ## Expected results
 
+- After step 2, the variable equals the outer value: the 300 ms override did not leak.
 - The output contains `ctx_slow released (succeeded)` and no `orca:` line.
-- The logged `ARK_ORCA_TIMEOUT_MS` of the second close is empty.
+- The gated child ran with `ARK_ORCA_TIMEOUT_MS=600000`, far above any host stall, so only the release decides; it is not the 300 ms.
+- After step 5, the variable in the test process equals the outer value again (the 600000 is restored).
 - A host stall before the release does not fail the test.
 
 ## Screenshot checkpoints

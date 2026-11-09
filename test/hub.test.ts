@@ -31,6 +31,7 @@ import { readTranscriptPage } from "../hub/transcript.ts";
 import { UsageIndex } from "../hub/usage.ts";
 import {
   appendRawEvent,
+  fakeGateEnvironment,
   ompSessionText,
   commitCase,
   orcaAnswersFor,
@@ -409,36 +410,46 @@ test("ARK-T127 ARK-277-AC6 a cold hub serves a full snapshot with under 5 s of C
   expect(totalBytes).toBeGreaterThanOrEqual(100 * 1024 * 1024);
   const expectedCost = filesPerRun * messagesPerFile * costPerMessage;
 
-  const hub = await start();
+  // The fake orca holds every call until the test releases it, so the snapshot cannot be full while the
+  // answers of `/` are sampled: the samples do not depend on how fast the host schedules this process.
+  const gate = join(scratch("ark-gate-"), "release");
+  process.env[fakeGateEnvironment] = gate;
+  process.env.ARK_ORCA_TIMEOUT_MS = "600000"; // far above any host stall: only the release decides
+  let hub: StartedHub;
+  try {
+    hub = await start();
+  } finally {
+    delete process.env[fakeGateEnvironment];
+    delete process.env.ARK_ORCA_TIMEOUT_MS;
+  }
   const { baseUrl } = hub;
   const pushes = await openPushes(baseUrl);
   const latencies: number[] = [];
   let snapshot: Snapshot;
-  // The loop ends on the event: the push that carries the full snapshot. No wall-clock budget decides.
   try {
-    // The answers of `/` are sampled while the snapshot builds (cap 20); the loop ends on the event, not on a time.
-    let built = false;
-    const full = (async (): Promise<Snapshot> => {
-      for (;;) {
-        const candidate = JSON.parse(await pushes.next()) as Snapshot;
-        if (
-          Object.values(candidate.sources).every((source) => source.ok) &&
-          Array.isArray(candidate.runs) &&
-          candidate.runs.every((run: RunView) => run.cost_usd !== null)
-        )
-          return candidate;
-      }
-    })().finally(() => (built = true));
-    while (!built && latencies.length < answersChecked) {
+    for (let sample = 0; sample < answersChecked; sample++) {
       const requestedAt = performance.now();
       await (await fetch(`${baseUrl}/`)).arrayBuffer();
       latencies.push(performance.now() - requestedAt);
     }
-    snapshot = await full;
+    writeFileSync(gate, ""); // release: the hub builds the full snapshot now
+    // The wait ends on the event: the push that carries the full snapshot.
+    for (;;) {
+      const candidate = JSON.parse(await pushes.next()) as Snapshot;
+      if (
+        Object.values(candidate.sources).every((source) => source.ok) &&
+        Array.isArray(candidate.runs) &&
+        candidate.runs.every((run: RunView) => run.cost_usd !== null)
+      ) {
+        snapshot = candidate;
+        break;
+      }
+    }
   } finally {
+    writeFileSync(gate, "");
     pushes.close();
   }
-  expect(latencies.length).toBeGreaterThanOrEqual(15);
+  expect(latencies).toHaveLength(answersChecked);
 
   // CPU time of the hub (the usage Workers run in its process) from the OS accounting of the child,
   // read after it exited: the same source on macOS and Linux, and a host stall does not move it.
