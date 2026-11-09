@@ -18,7 +18,7 @@ import { hasTestCriterion, runCriteria } from "./criteria.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
-import type { CriterionStatus } from "./lifecycle.ts";
+import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
 import { findRun } from "./paths.ts";
@@ -132,10 +132,6 @@ function verifiedByStatus(
 ): Status {
   if (cases.some((entry) => entry.status === "failed")) return "failing";
   return cases.some((entry) => entry.status === "missing") ? "missing" : "passing";
-}
-
-function manualStatus(answer: string | undefined): Status {
-  return answer === "ok" ? "manual ok" : answer === "problem" ? "manual problem" : "manual pending";
 }
 
 type Suite = ProjectConfig["suites"][number];
