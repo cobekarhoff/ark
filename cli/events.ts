@@ -142,8 +142,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   let kind: TicketKind = "feature";
   const testRuns: Record<string, string>[] = [];
   let basePassed: boolean | undefined;
-  let escalationAnswered = false;
-  let escalationRequested = false;
+  let escalation: "none" | "requested" | "answered" = "none";
   const mergeRequests: RunState["merge_requests"] = [];
   let outcome: string | null = null;
   let human = false;
@@ -224,8 +223,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         if (data.gate === "plan" && data.answer === "change") plan = null;
         if (data.answer === "abort") outcome = "aborted";
         if (data.gate === "escalation") {
-          escalationAnswered = true;
-          escalationRequested = false;
+          escalation = "answered";
           if (data.answer === "one_more_round") roundBudget += 1;
           if (data.answer === "take_over") human = true;
         }
@@ -247,7 +245,8 @@ export function deriveState(events: ArkEvent[]): RunState {
         round = Math.max(round, data.round);
         if (!startedSteps.some((step) => step.id === data.step))
           startedSteps.push({ id: data.step, role: data.role, repo: data.repo });
-        if (mergeRequests.length > 0 && data.role === "implementer") escalationAnswered = false;
+        if (mergeRequests.length > 0 && data.role === "implementer" && escalation === "answered")
+          escalation = "none";
         break;
       case "step.finished": {
         stepStatus.set(data.step, data.outcome);
@@ -276,14 +275,13 @@ export function deriveState(events: ArkEvent[]): RunState {
         };
         basePassed = data.base_passed ?? basePassed;
         testRuns.push(criteriaStatus);
-        if (mergeRequests.length === 0) escalationAnswered = false;
+        if (mergeRequests.length === 0 && escalation === "answered") escalation = "none";
         break;
       case "escalation.requested":
-        escalationRequested = true;
-        escalationAnswered = false;
+        escalation = "requested";
         break;
       case "merge_request.opened":
-        if (mergeRequests.length === 0) escalationAnswered = false;
+        if (mergeRequests.length === 0 && escalation === "answered") escalation = "none";
         mergeRequests.push({
           repo: data.repo,
           url: data.url,
@@ -321,8 +319,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   else if (!planApproved) phase = "planning";
   else if (
     round >= roundBudget &&
-    (escalationRequested || (lastTest && !lastTest.passed)) &&
-    !escalationAnswered &&
+    (escalation === "requested" || (escalation === "none" && lastTest && !lastTest.passed)) &&
     !human
   )
     phase = "escalation";
@@ -354,8 +351,8 @@ export function deriveState(events: ArkEvent[]): RunState {
       ...(gates.escalation === undefined ? {} : { escalation: gates.escalation }),
       ...Object.fromEntries(Object.entries(gates).filter(([key]) => key.startsWith("manual:"))),
     },
-    post_mr_escalation_answered: escalationAnswered && mergeRequests.length > 0,
-    escalation_requested: escalationRequested,
+    post_mr_escalation_answered: escalation === "answered" && mergeRequests.length > 0,
+    escalation_requested: escalation === "requested",
     evaluation,
     strategy,
     plan,

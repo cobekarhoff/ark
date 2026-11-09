@@ -150,7 +150,7 @@ export function OutsideNote({ project }: { project: string }) {
 }
 
 /** Colour group of a run phase: the legend of the Map. */
-function phaseClass(phase: RunPhase | null): string {
+export function phaseClass(phase: RunPhase | null): string {
   switch (phase) {
     case null:
       return "p-none";

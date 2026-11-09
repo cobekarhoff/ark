@@ -164,12 +164,12 @@ function Shell() {
             </span>
           )}
           <ThemeSwitch />
-          <span className="asof-list">
-            {sourceNames.map((name) => (
-              <Stale key={name} name={name} />
-            ))}
-          </span>
         </div>
+        <span className="asof-list" role="status" aria-label="Stale sources">
+          {sourceNames.map((name) => (
+            <Stale key={name} name={name} />
+          ))}
+        </span>
       </header>
       <main id="main" tabIndex={-1}>
         {route.view === "home" ? <Home /> : null}
