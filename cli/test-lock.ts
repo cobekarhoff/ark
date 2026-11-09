@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -30,38 +31,66 @@ const ticketDirectory = () => join(arkHome(), "test-budget");
 const mutexStaleMilliseconds = 5_000;
 
 /**
- * Runs `action` while holding the host-wide mutex: an exclusive-create file with the owner pid. It is held for one
- * short synchronous step only. A mutex of an ended pid (or an unreadable one older than a few seconds) is taken over.
- * ponytail: two takers of one stale mutex can race on the unlink; the window needs a crashed owner, add a rename
- * protocol if it ever shows.
+ * Runs `action` while holding the host-wide mutex: an exclusive-create file with the owner pid and a unique token. It
+ * is held for one short synchronous step only. A mutex of an ended pid (or an unreadable one older than a few
+ * seconds) is taken over by `reclaim`; release removes the file only while it still holds this owner's token.
  */
 function withMutex<T>(action: () => T): T {
   mkdirSync(ticketDirectory(), { recursive: true });
   const file = join(ticketDirectory(), "mutex.lock");
+  const token = `${process.pid}:${randomUUID()}`;
   for (;;) {
     try {
-      writeFileSync(file, String(process.pid), { flag: "wx" });
+      writeFileSync(file, token, { flag: "wx" });
       break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      let stale = false;
+      let observed: string | undefined;
       try {
-        const owner = Number.parseInt(readFileSync(file, "utf8"), 10);
-        stale = Number.isInteger(owner)
+        const content = readFileSync(file, "utf8");
+        const owner = Number.parseInt(content, 10);
+        const stale = Number.isInteger(owner)
           ? !alive(owner)
           : Date.now() - statSync(file).mtimeMs > mutexStaleMilliseconds;
+        if (stale) observed = content;
       } catch {
         // released between the two calls: try to create it again
       }
-      if (stale) rmSync(file, { force: true });
+      if (observed !== undefined) reclaim(file, observed);
       else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
     }
   }
   try {
     return action();
   } finally {
-    rmSync(file, { force: true });
+    try {
+      if (readFileSync(file, "utf8") === token) rmSync(file, { force: true });
+    } catch {
+      // already gone
+    }
   }
+}
+
+/**
+ * Removes the stale mutex whose content was `observed`. The file is first renamed to a name of its own, which only
+ * one contender can win, and deleted only when it still holds the observed content. When a replacement owner took the
+ * pathname after the observation, the rename caught that live file: it is linked back, never deleted.
+ * ponytail: another contender can create the mutex in the instant between that rename and the link back; it needs a
+ * crashed owner and three contenders, use a per-owner lock directory if it ever shows.
+ */
+function reclaim(file: string, observed: string): void {
+  const moved = `${file}.stale.${randomUUID()}`;
+  try {
+    renameSync(file, moved);
+  } catch {
+    return; // another contender took it first
+  }
+  try {
+    if (readFileSync(moved, "utf8") !== observed) linkSync(moved, file);
+  } catch {
+    // the replacement is already back or gone
+  }
+  rmSync(moved, { force: true });
 }
 
 /** A pid is alive when signal 0 reaches it; EPERM means it exists under another user. */

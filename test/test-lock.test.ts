@@ -596,6 +596,80 @@ budget.close();`;
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  test("ARK-T155 a contender that observed a stale mutex never removes the live mutex of the contender that replaced it", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ark-stale-mutex-"));
+    const children: Subprocess[] = [];
+    const mark = (name: string) => writeFileSync(join(home, name), "");
+    // `first` pauses right before it removes the mutex it observed as stale; `second` pauses inside its critical section.
+    const stale = (name: string) => `
+import { mock } from "bun:test";
+import * as real from "node:fs";
+const fs = { ...real };
+const home = ${JSON.stringify(home)}, name = ${JSON.stringify(name)};
+const mark = (file) => fs.writeFileSync(home + "/" + file, "");
+const until = (file) => { while (!fs.existsSync(home + "/" + file)) Bun.sleepSync(5); };
+let paused = false;
+const pauseOnMutex = (path) => {
+  if (name === "first" && !paused && String(path).endsWith("mutex.lock")) { paused = true; mark("first-observed"); until("second-ready"); }
+};
+mock.module("node:fs", () => ({
+  ...fs,
+  rmSync: (path, ...rest) => { pauseOnMutex(path); const done = fs.rmSync(path, ...rest); if (name === "first" && String(path).endsWith("mutex.lock")) mark("first-removed"); return done; },
+  renameSync: (from, to) => { pauseOnMutex(from); const done = fs.renameSync(from, to); if (name === "first" && String(from).endsWith("mutex.lock")) mark("first-removed"); return done; },
+  writeFileSync: (path, ...rest) => {
+    if (name === "second" && String(path).endsWith(".json.tmp")) { mark("second-publishing"); until("release-second"); }
+    return fs.writeFileSync(path, ...rest);
+  },
+}));
+const { openTestBudget } = await import(${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))});
+const budget = openTestBudget(name, 6, async () => {}, { print: () => {} });
+await budget.take(6);
+await new Promise((done) => process.stdin.once("data", done));
+budget.close();`;
+    const spawn = (name: "first" | "second") => {
+      children.push(
+        Bun.spawn(["bun", "-e", stale(name)], {
+          env: { ...Bun.env, ARK_HOME: home },
+          stdin: "pipe",
+          stdout: "ignore",
+          stderr: "inherit",
+        }),
+      );
+    };
+    const waitFor = async (name: string) => {
+      while (!existsSync(join(home, name))) await Bun.sleep(10);
+    };
+    try {
+      mkdirSync(join(home, "test-budget"));
+      const dead = Bun.spawn(["true"]);
+      await dead.exited;
+      writeFileSync(join(home, "test-budget", "mutex.lock"), String(dead.pid));
+      spawn("first");
+      await waitFor("first-observed");
+      spawn("second");
+      await waitFor("second-publishing");
+      mark("second-ready");
+      await waitFor("first-removed");
+      const mutex = join(home, "test-budget", "mutex.lock");
+      while (!existsSync(mutex)) await Bun.sleep(10);
+      expect(readFileSync(mutex, "utf8").startsWith(`${children[1]!.pid}:`)).toBe(true);
+      const tickets = readdirSync(join(home, "test-budget")).filter((name) =>
+        name.endsWith(".json"),
+      );
+      expect(
+        tickets.map(
+          (name) => JSON.parse(readFileSync(join(home, "test-budget", name), "utf8")).run,
+        ),
+      ).not.toContain("first");
+    } finally {
+      for (const process of children) {
+        process.kill("SIGKILL");
+        await process.exited;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("ark test suite TMPDIR and cores", () => {
