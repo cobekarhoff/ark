@@ -10,25 +10,7 @@ import { assertAllowed } from "./transitions.ts";
 export type EventData = Record<string, any>;
 export type ArkEvent = { seq: number; time: string; type: string; data: EventData };
 
-export type Phase =
-  | "awaiting_criteria"
-  | "awaiting_strategy"
-  | "planning"
-  | "building"
-  | "escalation"
-  | "merge_requests_open"
-  | "closed";
-export type CriterionStatus =
-  | "pending"
-  | "passing"
-  | "failing"
-  | "missing"
-  | "manual pending"
-  | "manual ok"
-  | "manual problem";
-export const ticketKinds = ["bug", "perf", "refactor", "feature"] as const;
-export type TicketKind = (typeof ticketKinds)[number];
-export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "stopped";
+import type { CriterionStatus, Phase, StepStatus, TicketKind } from "./lifecycle.ts";
 
 export type RunState = {
   run: string;

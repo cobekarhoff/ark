@@ -1,5 +1,6 @@
 // What several pages compute from one snapshot. Pure: no hook, no clock but the `age` the caller passes.
 import { attentionOf, known } from "./format.tsx";
+import { gatePhases, isFinishedTicket } from "../../cli/lifecycle.ts";
 import type {
   Agent,
   ProviderWindow,
@@ -63,7 +64,7 @@ export function stuckAgents(snapshot: Snapshot, age: (time: string) => number): 
 /** Pages that ask the human: a run is in the Needs me lane while a gate or an unread question holds it. */
 export function needsHuman(snapshot: Snapshot, run: RunView): boolean {
   const gated = known(snapshot.gates) && snapshot.gates.some((gate) => gate.run === run.run);
-  return gated || run.waiting.length > 0 || /^(awaiting_|escalation)/.test(run.phase);
+  return gated || run.waiting.length > 0 || gatePhases.includes(run.phase);
 }
 
 /** The window with the highest used fraction, or null when no provider answered. */
@@ -116,7 +117,7 @@ export function closedRuns(
 
 /** The ticket is no longer a blocker once it is done or replaced. */
 export const isSatisfied = (ticket: TicketView | undefined) =>
-  ticket !== undefined && (ticket.status === "done" || ticket.status === "superseded");
+  ticket !== undefined && isFinishedTicket(ticket.status);
 
 /** `merge order`: the oldest MR waits longest and goes first. */
 export function reviewQueue(runs: RunView[]): RunView[] {

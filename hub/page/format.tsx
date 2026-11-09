@@ -2,6 +2,7 @@ import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { stepTimeText } from "../progress.ts";
 import { currentProject, withProject } from "./store.tsx";
 import type { PlanStepView, RunProgress, RunView, Snapshot } from "../types.ts";
+import type { Phase as RunPhase } from "../../cli/lifecycle.ts";
 
 const dollars = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -143,7 +144,7 @@ export function OutsideNote({ project }: { project: string }) {
 }
 
 /** Colour group of a run phase: the legend of the Map. */
-export function phaseClass(phase: string | null): string {
+export function phaseClass(phase: RunPhase | null): string {
   switch (phase) {
     case null:
       return "p-none";
@@ -155,12 +156,14 @@ export function phaseClass(phase: string | null): string {
       return "p-review";
     case "closed":
       return "p-done";
-    default:
-      return "p-gate"; // awaiting_criteria, awaiting_strategy, escalation: the run waits for the human
+    case "awaiting_criteria":
+    case "awaiting_strategy":
+    case "escalation":
+      return "p-gate"; // the run waits for the human
   }
 }
 
-export function Phase({ phase }: { phase: string }) {
+export function Phase({ phase }: { phase: RunPhase }) {
   return (
     <span className={phaseClass(phase)} data-phase={phase}>
       <span className="dot" />

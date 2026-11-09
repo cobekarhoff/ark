@@ -51,10 +51,10 @@ Use this order, under the repo template's headings when it has them:
 3. What is different: behavior, not a list of files. No restating the diff.
 4. Evidence (section 5).
 5. How to verify: `- [ ]` items, each a command plus `Expect: ...`.
-6. Not done: every gap, named. Nothing here means write `None`.
+6. Not done: every gap, named. Nothing here means write `- Nothing open.`, the line `gather.ts` writes.
 7. Risk and revert: what breaks, who sees it, and the exact `git revert` or rollback step.
 
-Lint fails on a hard-wrapped paragraph (FMT01) or a token-like string (FMT02), and warns on a problem text that describes code instead of the problem (ELI01).
+Write about the system. The subject of a sentence is the code, the command, the document or the data: "The hub typed phase as a string", "`ark run start` warns on an unknown status". The roles of the process (run lead, agent, implementer, the human) and first person appear only in the provenance line (lint VOICE01). Lint fails on a hard-wrapped paragraph (FMT01) or a token-like string (FMT02), and warns on a problem text that describes code instead of the problem (ELI01).
 
 ## 5 Evidence
 
@@ -63,7 +63,7 @@ Lint fails on a hard-wrapped paragraph (FMT01) or a token-like string (FMT02), a
 - Name at most 5 screenshots (EVID04 warns). Captures and structure diagrams are not built yet: attach screenshots by hand.
 - The full list of lint checks and what each wants: `references/evidence.md`.
 
-## 7 Keep it honest
+## 6 Keep it honest
 
 - Name what you did not run, and why. Write `Not run: <what>, <reason>`.
 - Do not paste an acceptance criterion or issue text as if it were a result.
@@ -71,7 +71,7 @@ Lint fails on a hard-wrapped paragraph (FMT01) or a token-like string (FMT02), a
 - A one-way door (migration, data delete, published API) names its recovery. A CI file change is named in the body.
 - Do not hide a failing check: a `fail` from `review.ts` goes in the body as it is.
 
-## 8 Lint and hand over
+## 7 Lint and hand over
 
 1. Write the final title and body to `.pr-writing/body.md` (or `--body <file>`).
 2. `lint_body.ts [--title <text>]` lints against the ledger and records the body hash. Exit 1 means at least one `fail`: fix the body and run it again. A `warn` is allowed, but say why you kept it.
@@ -79,7 +79,7 @@ Lint fails on a hard-wrapped paragraph (FMT01) or a token-like string (FMT02), a
 4. Never pass `--confirmed` in the turn that drafted the body unless the human said go in this conversation. A go from an earlier task or another conversation does not count.
 5. Any edit after lint, or a new commit, makes STALE01 fail: run `gather.ts`, `lint_body.ts`, show the human again.
 
-## 9 Post
+## 8 Post
 
 `post_mr.ts --confirmed [--ready] [--title <text>] [--body <file>]`
 
