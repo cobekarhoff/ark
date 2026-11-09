@@ -63,14 +63,14 @@ test("ARK-158-AC5 an empty report is an error, not zero results", () => {
   expect(() => parseBehave({ report: "", stdout: "" })).toThrow("behave report is empty");
 });
 
-// ARK-311-AC1: all three reports are real, one per runner, captured from the same five cases: case id,
+// ARK-T134: all three reports are real, one per runner, captured from the same five cases: case id,
 // old AC id, both, neither, and the slash form `ARK-9/AC1`. Bun source (`a.test.ts`, run with
 // `bun test --reporter=junit --reporter-outfile=bun-report.xml`): five `test("<title>", () => {})` calls titled
 // `ARK-T12 case only`, `CLARA-12-AC1 old only`, `ARK-T13 CLARA-12-AC2 both`, `neither`, `ARK-9/AC1 slash`.
 // pytest and behave sources are in fixtures/parsers/suites/, run through `uv run --with pytest --with behave`:
 //   pytest -o junit_family=xunit1 --junitxml=pytest-cases-report.xml
 //   behave --format json -o behave-cases-report.json
-test("ARK-311-AC1 bun reads case ids and old AC ids from the JUnit title into cases and criteria", () => {
+test("ARK-T134 bun reads case ids and old AC ids from the JUnit title into cases and criteria", () => {
   expect(parseBun({ report: fixture("bun-report.xml"), stdout: "" })).toEqual([
     {
       name: "ARK-T12 case only",
@@ -104,7 +104,7 @@ test("ARK-311-AC1 bun reads case ids and old AC ids from the JUnit title into ca
   ]);
 });
 
-test("ARK-311-AC1 pytest reads case properties into cases and ac properties into criteria", () => {
+test("ARK-T134 pytest reads case properties into cases and ac properties into criteria", () => {
   expect(bare(parsePytest({ report: fixture("pytest-cases-report.xml"), stdout: "" }))).toEqual([
     { name: "test_cases::test_case_only", criteria: [], cases: ["ARK-T12"], status: "passed" },
     {
@@ -124,7 +124,7 @@ test("ARK-311-AC1 pytest reads case properties into cases and ac properties into
   ]);
 });
 
-test("ARK-311-AC1 behave reads @ARK-T12 and @case:ARK-T12 tags into cases and AC tags into criteria", () => {
+test("ARK-T134 behave reads @ARK-T12 and @case:ARK-T12 tags into cases and AC tags into criteria", () => {
   expect(bare(parseBehave({ report: fixture("behave-cases-report.json"), stdout: "" }))).toEqual([
     { name: "Cases: Case only", criteria: [], cases: ["ARK-T12"], status: "passed" },
     { name: "Cases: Case with prefix", criteria: [], cases: ["ARK-T15"], status: "passed" },
@@ -140,7 +140,7 @@ test("ARK-311-AC1 behave reads @ARK-T12 and @case:ARK-T12 tags into cases and AC
   ]);
 });
 
-test("pytest and behave results carry the repo-relative file of each test", () => {
+test("ARK-T134 pytest and behave results carry the repo-relative file of each test", () => {
   const files = (results: TestResult[]) => [...new Set(results.map((result) => result.file))];
   expect(files(parsePytest({ report: fixture("pytest-cases-report.xml"), stdout: "" }))).toEqual([
     "test_cases.py",

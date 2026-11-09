@@ -210,7 +210,7 @@ describe("ark test", () => {
     expect(event.passed).toBe(false);
   });
 
-  test("ARK-154-AC6 records suites and the head of each worktree, and exits 0 when every AC passes", () => {
+  test("ARK-T135 records suites and the head of each worktree, and exits 0 when every AC passes", () => {
     const { runId, runDirectory, workspace } = buildingRun({
       criteria: ["FAKE-1-AC1", "FAKE-1-AC2"],
       e2e: [passing("FAKE-1-AC1 works"), passing("FAKE-1-AC2 works")],
