@@ -1,4 +1,3 @@
-// test ids: open-in-orca (data-terminal), orca-ended, orca-status
 import { useState } from "react";
 import type { Agent } from "../types.ts";
 
@@ -18,7 +17,7 @@ function reasonFor(status: number): string {
  */
 export function OpenInOrca({ agent }: { agent: Agent }) {
   const [state, setState] = useState<State>({ kind: "idle" });
-  if (agent.running)
+  if (agent.presence === "running")
     return (
       <span
         className="mut ended"
@@ -28,7 +27,7 @@ export function OpenInOrca({ agent }: { agent: Agent }) {
         running in Orca, open it from its chat tab
       </span>
     );
-  if (!agent.live || agent.terminal === null)
+  if (agent.presence === "ended" || agent.terminal === null)
     return (
       <span
         className="mut ended"

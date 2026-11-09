@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../cli/config.ts";
-import { waitingGate } from "../cli/run.ts";
+import { waitingGate } from "../cli/events.ts";
 import {
   createArkReader,
   createEvidenceReader,
@@ -38,7 +38,7 @@ import type {
   TicketRunView,
   TranscriptPage,
 } from "./types.ts";
-import { stageTimes } from "../cli/retro.ts";
+import { stageTimes } from "../cli/events.ts";
 import { roleTimesOf } from "./progress.ts";
 import { readRunEvidence, readTicketCases } from "./evidence.ts";
 import { listRunFiles, timelineOf } from "./run-detail.ts";
@@ -161,8 +161,7 @@ export function createSnapshotReader() {
         step,
         planned: null,
         terminal: null,
-        live: false,
-        running: true,
+        presence: "running",
         activity: listed.activity,
       });
     }
@@ -634,7 +633,7 @@ export function createSnapshotReader() {
         for (const run of current.runs)
           if (run.agents !== "unknown")
             for (const agent of run.agents)
-              if (agent.live && agent.terminal) handles.add(agent.terminal);
+              if (agent.presence === "live" && agent.terminal) handles.add(agent.terminal);
       return handles;
     },
     /**

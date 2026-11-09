@@ -1,11 +1,20 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ArkError } from "./errors.ts";
-import { type ArkEvent, readEvents } from "./events.ts";
+import {
+  type ArkEvent,
+  type StageTimes,
+  type StepWindow,
+  deriveState,
+  readEvents,
+  stageTimes,
+  stepWindows,
+  waitingGate,
+} from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
 import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
 import { type SessionWithKey, type UsageMessage, readUsage } from "./usage/index.ts";
-import { type Owner, type StageTimes, type StepWindow, ownersOf, stageOf } from "./usage/owners.ts";
+import { type Owner, ownersOf, stageOf } from "./usage/owners.ts";
 
 const IDLE_GAP_SECONDS = 600;
 const MERGE_REQUEST_QUERY_TIMEOUT_MILLISECONDS = 10_000;
@@ -81,26 +90,6 @@ export function runningCost(runDirectory: string): { usd: number | "unknown"; to
   return { usd: group.includes_unknown ? "unknown" : group.usd, tokens: group.tokens };
 }
 
-/**
- * When the evaluator and the Designer sessions ran, in milliseconds. The evaluator session ends at
- * the last evaluation.recorded (the run lead session outlasts it). The Designer session runs after
- * the first evaluation and ends by the last strategy record or strategy answer.
- */
-export function stageTimes(events: ArkEvent[]): StageTimes {
-  const time = (event: ArkEvent | undefined) => (event ? Date.parse(event.time) : undefined);
-  return {
-    evaluationEnd: time(events.findLast((event) => event.type === "evaluation.recorded")),
-    designStart: time(events.find((event) => event.type === "evaluation.recorded")),
-    designEnd: time(
-      events.findLast(
-        (event) =>
-          event.type === "strategy.recorded" ||
-          (event.type === "gate.answered" && event.data.gate === "strategy"),
-      ),
-    ),
-  };
-}
-
 type HelperModel = { model: string; purpose: string; usd: number | "unknown"; tokens: number };
 
 /** Where a session file's messages belong: its owner, with an unassigned file told apart as a stage session. */
@@ -118,28 +107,6 @@ function placementOf(owner: Owner, messages: UsageMessage[], stages: StageTimes)
         stages,
       ) ?? "unassigned",
   };
-}
-
-export function stepWindows(events: ArkEvent[]): StepWindow[] {
-  const windows: StepWindow[] = [];
-  for (const event of events) {
-    if (event.type === "step.started") {
-      windows.push({
-        id: event.data.step,
-        role: event.data.role,
-        repo: event.data.repo,
-        start: toMilliseconds(event.time),
-        end: null,
-      });
-    }
-    if (event.type === "step.finished") {
-      const open = windows.findLast(
-        (window) => window.id === event.data.step && window.end === null,
-      );
-      if (open) open.end = toMilliseconds(event.time);
-    }
-  }
-  return windows;
 }
 
 /** Strategy records after the first one and before the strategy answer. */
@@ -193,7 +160,7 @@ function decisionCounts(
   return { total, overridden };
 }
 
-/** Each gate wait of the run, in order; `answered` is null while the gate is open. A gate that is asked again before its answer keeps its first wait for the criteria, plan and strategy gates, and replaces it for the escalation gate. */
+/** Each gate wait of the run, in order; `answered` is null while the gate is open. */
 export type GateWait = {
   gate: string;
   asked: string;
@@ -206,30 +173,13 @@ export type GateWait = {
 export function gateWaits(events: ArkEvent[]): GateWait[] {
   const waits: GateWait[] = [];
   const waiting = new Map<string, GateWait>();
-  const ask = (gate: string, time: string, keepFirst = false) => {
-    const open = waiting.get(gate);
-    if (open && keepFirst) return;
-    if (open) waits.splice(waits.indexOf(open), 1);
+  const ask = (gate: string, time: string) => {
+    if (waiting.has(gate)) return;
     const wait = { gate, asked: time, answered: null, answer: null, by: null };
     waiting.set(gate, wait);
     waits.push(wait);
   };
-  for (const event of events) {
-    if (
-      event.type === "run.started" &&
-      (event.data.criteria.length === 0 || event.data.criteria_gate === true)
-    )
-      ask("criteria", event.time);
-    if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
-      ask("criteria", event.time, true);
-    if (event.type === "plan.checked" && event.data.valid) ask("plan", event.time, true);
-    if (event.type === "strategy.recorded" && event.data.count >= 2)
-      ask("strategy", event.time, true);
-    if (event.type === "step.finished" && event.data.outcome === "failed")
-      ask("escalation", event.time);
-    if (event.type === "test.completed")
-      for (const [criterion, status] of Object.entries(event.data.criteria ?? {}))
-        if (status === "manual pending") ask(`manual:${criterion}`, event.time, true);
+  events.forEach((event, index) => {
     if (event.type === "gate.answered") {
       const key = event.data.gate === "manual" ? `manual:${event.data.criterion}` : event.data.gate;
       const wait = waiting.get(key);
@@ -240,7 +190,20 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
       }
       waiting.delete(key);
     }
-  }
+    if (event.type === "test.completed")
+      for (const [criterion, status] of Object.entries(event.data.criteria ?? {}))
+        if (status === "manual pending") ask(`manual:${criterion}`, event.time);
+    // ponytail: O(n²) replay; fold with a step function if logs reach thousands of events
+    const state = deriveState(events.slice(0, index + 1));
+    const gate = waitingGate(state);
+    if (gate !== "none") ask(gate, event.time);
+    if (
+      state.phase === "merge_requests_open" &&
+      event.type === "step.finished" &&
+      event.data.outcome === "failed"
+    )
+      ask("escalation", event.time);
+  });
   return waits;
 }
 
@@ -248,7 +211,8 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
  * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
  * run start (it opens on every run since ARK-311; an older log opens it only without ACs or with blockers), the strategy gate at a
  * strategy record of 2 or more cards, the plan gate at the first valid plan check after its last answer, the escalation gate
- * at the failed step that spent the round budget. An unanswered gate adds nothing.
+ * when the run enters phase `escalation` (a spent budget with a failed test or `ark escalate`), or at a failed step once
+ * merge requests are open. An unanswered gate adds nothing.
  */
 function gateWaitSeconds(events: ArkEvent[]): number {
   const intervals = gateWaits(events)

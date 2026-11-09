@@ -1,6 +1,3 @@
-// test ids: see RoadmapParts.tsx and RoadmapGraph.tsx; here: roadmap-page, roadmap-vision, view-list,
-// view-graph, filter-text, milestone-filter, notes-link, roadmap-error (the message and line),
-// roadmap-none (the line). No control here changes a ticket or a rank.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RoadmapGraph } from "./RoadmapGraph.tsx";
 import {
@@ -22,7 +19,7 @@ import { Unknown, UnknownProject, known } from "./format.tsx";
 import { ticketHref, useLive, useProject, withProject } from "./store.tsx";
 import type { Roadmap as RoadmapModel, RoadmapItem } from "../roadmap.ts";
 import type { Snapshot, TicketView } from "../types.ts";
-import { isFinishedTicket as isFinished } from "../../cli/lifecycle.ts";
+import { isFinishedTicket } from "../../cli/lifecycle.ts";
 
 /**
  * Selected IDs in dependency order: a ticket comes after every selected ticket it depends on,
@@ -95,7 +92,7 @@ function build(snapshot: Snapshot, project: string, needle: string, milestone: s
   if (!known(snapshot.tickets) || snapshot.roadmap === "unknown") return null;
   const tickets = snapshot.tickets.filter((ticket) => ticket.project === project);
   const entries = ticketEntries(snapshot);
-  const open = tickets.filter((ticket) => !isFinished(ticket.status));
+  const open = tickets.filter((ticket) => !isFinishedTicket(ticket.status));
   const data: RoadmapData = {
     project,
     byId: new Map(tickets.map((ticket) => [ticket.id, ticket])),
@@ -122,7 +119,7 @@ function build(snapshot: Snapshot, project: string, needle: string, milestone: s
         name,
         hint,
         picks: ok[key]
-          .filter((item) => !isFinished(item.status))
+          .filter((item) => !isFinishedTicket(item.status))
           .map((item): Pick => ({
             rank: key === "unranked" ? null : ++rank,
             item,

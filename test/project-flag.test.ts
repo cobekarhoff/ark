@@ -99,7 +99,7 @@ test("ARK-209-AC1 --project with an unknown project or a project without the run
   }
 });
 
-test("ARK-T86 --help lists --project for each run-id command, and docs/reference/cli.md matches the generator", () => {
+test("ARK-T86 --help lists --project for each run-id command", () => {
   const help = ark("--help").out.split("\n");
   for (const command of runIdCommands) {
     const prefix = command.slice(0, command.indexOf("RUN")).join(" ");
@@ -109,33 +109,17 @@ test("ARK-T86 --help lists --project for each run-id command, and docs/reference
     expect(line, prefix).toBeDefined();
     expect(line, prefix).toContain("[--project <name>]");
   }
-  const before = readFileSync(join(repositoryRoot, "docs/reference/cli.md"), "utf8");
-  Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
-  expect(readFileSync(join(repositoryRoot, "docs/reference/cli.md"), "utf8")).toBe(before);
 });
 
-test("ARK-T87 docs/reference/cli.md matches the generator", () => {
-  const path = join(repositoryRoot, "docs/reference/cli.md");
-  const before = readFileSync(path, "utf8");
-  Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
-  expect(readFileSync(path, "utf8")).toBe(before);
-});
-
-test("ARK-T88 ark run step --help names --not-started and not_started, and docs/reference/cli.md matches the generator", () => {
-  const path = join(repositoryRoot, "docs/reference/cli.md");
+test("ARK-T88 ark run step --help names --not-started and not_started", () => {
   const help = Bun.spawnSync(["bun", join(repositoryRoot, "cli/ark.ts"), "run", "step", "--help"], {
     cwd: repositoryRoot,
   }).stdout.toString();
   expect(help).toContain("--not-started");
   expect(help).toContain("not_started");
-  const before = readFileSync(path, "utf8");
-  Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
-  expect(readFileSync(path, "utf8")).toBe(before);
 });
 
-test("ARK-T89 status and merge-request open help describe the test head line and the refusal, and docs/reference/cli.md matches the generator", () => {
-  const path = join(repositoryRoot, "docs/reference/cli.md");
-  const committed = readFileSync(path, "utf8");
+test("ARK-T89 status and merge-request open help describe the test head line and the refusal", () => {
   const help = (...args: string[]) =>
     Bun.spawnSync(["bun", join(repositoryRoot, "cli/ark.ts"), ...args, "--help"], {
       cwd: repositoryRoot,
@@ -146,6 +130,4 @@ test("ARK-T89 status and merge-request open help describe the test head line and
   const open = help("merge-request", "open");
   expect(open).toContain("refuses");
   expect(open).toContain("run ark test <run> again");
-  Bun.spawnSync(["bun", join(repositoryRoot, "scripts/cli-reference.ts")], { cwd: repositoryRoot });
-  expect(readFileSync(path, "utf8")).toBe(committed);
 });

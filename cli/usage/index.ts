@@ -2,6 +2,7 @@ import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } fro
 import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { ArkError } from "../errors.ts";
+import { isInside } from "../paths.ts";
 import { parseClaudeSession } from "./claude.ts";
 import { parseCodexSession, readCodexText } from "./codex.ts";
 import { parseOmpSession } from "./omp.ts";
@@ -36,44 +37,52 @@ export type SessionWithKey = SessionUsage & {
   /** Identifies the top-level session; subagent transcripts share their parent's key. */
   sessionKey: string;
   /** The harness whose reader parsed the file. Orca names the same harnesses in `agentIdentity`. */
-  harness: "omp" | "claude" | "codex";
+  harness: Harness;
   /** First timestamp in the head of the file (ms), or null when it holds none. */
   start: number | null;
   /** Last write of the file (ms). */
   mtime: number;
 };
 
-type Source = {
-  harness: SessionWithKey["harness"];
-  root: string;
-  pattern: string;
-  parse: (file: string) => SessionUsage;
-  /** Codex rollouts sit in date folders, so the top-level session is the file itself. */
-  keyFor?: (relativeFile: string) => string;
+export type Harness = "omp" | "claude" | "codex";
+
+export const parsers: Record<Harness, (file: string) => SessionUsage> = {
+  omp: parseOmpSession,
+  claude: parseClaudeSession,
+  codex: parseCodexSession,
 };
 
-function sources(): Source[] {
+export function sessionRoots(): { harness: Harness; root: string; pattern: string }[] {
   return [
     {
       harness: "omp",
       root: process.env.ARK_OMP_SESSIONS ?? join(homedir(), ".omp", "agent", "sessions"),
       pattern: "**/*.jsonl",
-      parse: parseOmpSession,
     },
     {
       harness: "claude",
       root: process.env.ARK_CLAUDE_SESSIONS ?? join(homedir(), ".claude", "projects"),
       pattern: "**/*.jsonl",
-      parse: parseClaudeSession,
     },
     {
       harness: "codex",
       root: process.env.ARK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions"),
       pattern: "**/*.jsonl{,.zst}",
-      parse: parseCodexSession,
-      keyFor: (relativeFile) => `codex/${basename(relativeFile).replace(/\.jsonl(\.zst)?$/, "")}`,
     },
   ];
+}
+
+function sources() {
+  return sessionRoots().map((source) => ({
+    ...source,
+    parse: parsers[source.harness],
+    /** Codex rollouts sit in date folders, so the top-level session is the file itself. */
+    keyFor:
+      source.harness === "codex"
+        ? (relativeFile: string) =>
+            `codex/${basename(relativeFile).replace(/\.jsonl(\.zst)?$/, "")}`
+        : sessionKeyFor,
+  }));
 }
 
 /** `<project dir>/<session id>.jsonl` and `<project dir>/<session id>/**\/*.jsonl` share one key. */
@@ -102,10 +111,6 @@ export function readHead(file: string): { cwd: string | null; start: number | nu
   } finally {
     closeSync(descriptor);
   }
-}
-
-export function isInside(directory: string, parent: string): boolean {
-  return directory === parent || directory.startsWith(parent + sep);
 }
 
 /**
@@ -141,7 +146,7 @@ export function readUsageIn(directories: string[]): Map<string, SessionWithKey[]
       if (matching.length === 0) continue;
       const session = {
         ...source.parse(file),
-        sessionKey: (source.keyFor ?? sessionKeyFor)(relativeFile),
+        sessionKey: source.keyFor(relativeFile),
         harness: source.harness,
         start: head.start,
         mtime: statSync(file).mtimeMs,

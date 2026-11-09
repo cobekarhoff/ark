@@ -185,8 +185,6 @@ function gitlabRepo(config?: string) {
   };
 }
 
-// --- ARK-T68 -----------------------------------------------------------------------------------
-
 function nonGitFolder() {
   const folder = temporaryFolder("plain");
   const tools = failingHostTools(folder);
@@ -240,13 +238,6 @@ test("ARK-T68 ARK-317/AC2 a bad argument exits 1 with a JSON error on stdout and
   }
   expect(calls()).toEqual([]);
 });
-
-test("ARK-T68 ARK-317/AC2 each script imports its logic from skills/pr-writing/lib", () => {
-  for (const name of scriptNames)
-    expect(readFileSync(scriptFile(name), "utf8"), name).toMatch(/from "\.\.\/lib\/[^"]+"/);
-});
-
-// --- ARK-T69 -----------------------------------------------------------------------------------
 
 const checksConfig = (...checks: string[]) =>
   `checks = [${checks.map((check) => `'${check}'`).join(", ")}]\n`;

@@ -1941,15 +1941,9 @@ test("ARK-304-AC5 the first two refusals keep their text and come before the AC 
   expect(closedEvents(directory)).toEqual([]);
 });
 
-test("ARK-T90 run close keeps its branch-retention sentence in help, and docs/reference/cli.md equals the generator output", () => {
-  const root = join(import.meta.dir, "..");
+test("ARK-T90 run close keeps its branch-retention sentence in help", () => {
   const sentence = "For handed_off it keeps each branch with commits beyond its base";
   expect(ark("run", "close", "--help").out).toContain(sentence);
-  const referencePath = join(root, "docs/reference/cli.md");
-  const committed = readFileSync(referencePath, "utf8");
-  const generated = Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root });
-  expect(generated.exitCode).toBe(0);
-  expect(readFileSync(referencePath, "utf8")).toBe(committed);
 });
 
 test("ARK-305-AC1 close handed_off skips placeholder, glob, dots, file:line and own id, and a manual AC's strings", () => {

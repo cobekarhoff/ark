@@ -3,12 +3,17 @@ import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { canonicalCriterion } from "../cli/criterion-id.ts";
 import { execJson } from "../cli/exec.ts";
-import { deriveState, type ArkEvent, type RunState } from "../cli/events.ts";
+import {
+  deriveState,
+  stepWindows,
+  type ArkEvent,
+  type RunState,
+  type StepWindow,
+} from "../cli/events.ts";
 import { orcaOrchestration, orcaPages, type OrcaRun, type OrcaTerminal } from "../cli/orca.ts";
 import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
 import { loadPlan, type PlanStep } from "../cli/plan.ts";
-import { stepWindows } from "../cli/retro.ts";
-import type { StepWindow } from "../cli/usage/owners.ts";
+import { frontmatter } from "../cli/ticket.ts";
 import { readEventsLeniently } from "./run-detail.ts";
 import { readRoadmap, type RoadmapTicket } from "./roadmap.ts";
 import { parseTicketDocument, whyOf, withoutCodeMarks } from "./ticket-document.ts";
@@ -70,8 +75,7 @@ export function parseTicket(
   source: string,
 ): ParsedTicket {
   try {
-    const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    const fields = match ? (Bun.YAML.parse(match[1]) as Record<string, unknown> | null) : null;
+    const fields = frontmatter(source).fields;
     if (fields && typeof fields.id === "string" && typeof fields.title === "string") {
       return {
         ticket: {
@@ -190,9 +194,7 @@ export function createArkReader() {
       let plan: PlanStep[] | null = null;
       try {
         plan = loadPlan(directory).steps;
-      } catch {
-        // No plan yet, or one that does not parse: the run has no plan to draw.
-      }
+      } catch {}
       const run = {
         directory,
         state: deriveState(events),
@@ -398,8 +400,7 @@ export async function readOrca(
           step: null,
           planned: null,
           terminal: chief!.coordinator_handle ?? null,
-          live: true,
-          running: false,
+          presence: "live",
           activity: unknownActivity,
         });
       const leadHandle = orcaRun.coordinator_handle;
@@ -421,17 +422,21 @@ export async function readOrca(
           step: null,
           planned: null,
           terminal: leadHandle ?? null,
-          live: leadConnected && leadHandle !== undefined,
-          running: leadRunning,
+          presence: leadConnected ? "live" : "running",
           activity: unknownActivity,
         });
-      // A released or disconnected worker stays in the list with `live: false`: the page says
+      // A released or disconnected worker stays in the list as `ended`: the page says
       // "ended, not in Orca" instead of hiding it.
       for (const worker of workers.value) {
         const handle = worker.agentTerminalHandle ?? worker.terminal ?? null;
         const terminal = byHandle.get(handle ?? "");
         const title = titles.get(worker.taskId ?? "") ?? worker.taskId ?? "worker";
-        const live = handle !== null && isLive(worker) && terminal?.connected === true;
+        const presence =
+          handle !== null && isLive(worker) && terminal?.connected === true
+            ? "live"
+            : isLive(worker)
+              ? "running"
+              : "ended";
         list.push({
           role: roleOfTask(title),
           harness: terminal?.agentIdentity ?? null,
@@ -440,8 +445,7 @@ export async function readOrca(
           step: title.match(stepTask)?.[1] ?? null,
           planned: null,
           terminal: handle,
-          live,
-          running: !live && isLive(worker),
+          presence,
           activity: unknownActivity,
         });
       }

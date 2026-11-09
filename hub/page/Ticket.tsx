@@ -1,5 +1,3 @@
-// test ids: ticket-page, ticket-problem, ticket-change, ticket-criterion (data-id), ticket-graph,
-// depends-on (links: dep-link), unblocks-list (links: unblock-link)
 import { useEffect, useState } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";

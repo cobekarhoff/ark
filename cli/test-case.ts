@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { ArkError, yamlQuoteHint } from "./errors.ts";
+import { frontmatter } from "./ticket.ts";
 import { discoverRepos } from "./workspace.ts";
 
 export const caseLevels = ["unit", "integration", "e2e"];
@@ -41,17 +42,17 @@ export function readCaseEntries(
     .sort()) {
     const shown = `${label}/${name}`;
     const text = readFileSync(join(directory, name), "utf8");
-    const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-    let front: Record<string, unknown> = {};
+    let front: Record<string, unknown> | undefined;
+    let body = "";
     try {
-      front = match ? ((Bun.YAML.parse(match[1]) ?? {}) as Record<string, unknown>) : {};
+      ({ fields: front, body } = frontmatter(text));
     } catch (err) {
       problems.push(
         `${shown} has frontmatter that is not valid YAML: ${(err as Error).message} (${yamlQuoteHint})`,
       );
       continue;
     }
-    if (!match) {
+    if (!front) {
       problems.push(`${shown} has no frontmatter between --- lines`);
       continue;
     }
@@ -62,7 +63,7 @@ export function readCaseEntries(
     for (const field of fields)
       if (!value(field)) problems.push(`${shown} lacks the field "${field}"`);
     for (const section of sections)
-      if (!new RegExp(`^##\\s+${section}\\s*$`, "m").test(match[2]))
+      if (!new RegExp(`^##\\s+${section}\\s*$`, "m").test(body))
         problems.push(`${shown} lacks the section "${section}"`);
     if (value("level") && !caseLevels.includes(value("level")))
       problems.push(`${shown} has level "${value("level")}": use unit, integration or e2e`);

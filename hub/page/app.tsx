@@ -22,12 +22,23 @@ import {
   retiredTarget,
   withProject,
   savedTheme,
-  sourceNames,
   useHash,
   useLive,
   type ThemeChoice,
 } from "./store.tsx";
 import { TicketPage } from "./Ticket.tsx";
+import type { SourceName } from "../types.ts";
+
+const sourceNames: SourceName[] = [
+  "ark",
+  "orca",
+  "plannotator",
+  "github",
+  "usage",
+  "providerLimits",
+  "agentWait",
+  "evidence",
+];
 
 const views = [
   ["home", "#/", "Home"],
@@ -153,12 +164,12 @@ function Shell() {
             </span>
           )}
           <ThemeSwitch />
-          <span className="asof-list">
-            {sourceNames.map((name) => (
-              <Stale key={name} name={name} />
-            ))}
-          </span>
         </div>
+        <span className="asof-list" role="status" aria-label="Stale sources">
+          {sourceNames.map((name) => (
+            <Stale key={name} name={name} />
+          ))}
+        </span>
       </header>
       <main id="main" tabIndex={-1}>
         {route.view === "home" ? <Home /> : null}

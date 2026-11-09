@@ -1,4 +1,3 @@
-// test ids: agent (data-role, data-live)
 import { Unknown, known } from "./format.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import type { Agent } from "../types.ts";
@@ -36,7 +35,7 @@ export function Agents({ agents }: { agents: Agent[] | "unknown" }) {
       className="agentrow"
       data-testid="agent"
       data-role={agent.role}
-      data-live={agent.live}
+      data-presence={agent.presence}
     >
       <div className="agent-main">
         <span className="pill">{agent.role}</span>

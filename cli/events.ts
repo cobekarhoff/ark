@@ -2,15 +2,12 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
-import { planHash } from "./plan.ts";
 import { now } from "./clock.ts";
+import type { CriterionStatus, Phase, StepStatus, TicketKind } from "./lifecycle.ts";
 import { assertAllowed } from "./transitions.ts";
 
-// Event payloads differ per type (see the contract), so `data` stays loosely typed.
 export type EventData = Record<string, any>;
 export type ArkEvent = { seq: number; time: string; type: string; data: EventData };
-
-import type { CriterionStatus, Phase, StepStatus, TicketKind } from "./lifecycle.ts";
 
 export type RunState = {
   run: string;
@@ -89,18 +86,7 @@ export function readEvents(runDirectory: string): ArkEvent[] {
 
 export function appendEvent(runDirectory: string, type: string, data: EventData): ArkEvent {
   const events = readEvents(runDirectory);
-  const state = deriveState(events);
-  assertAllowed(state, type, data, runDirectory);
-  if (
-    type === "gate.answered" &&
-    data.gate === "plan" &&
-    data.answer === "approve" &&
-    planHash(runDirectory) !== state.plan?.plan_hash
-  ) {
-    throw new ArkError(
-      "plan.yml changed after plan.checked: run ark plan check again before gate.answered plan approve",
-    );
-  }
+  assertAllowed(deriveState(events), type, data, runDirectory);
   const event: ArkEvent = {
     seq: (events.at(-1)?.seq ?? 0) + 1,
     time: new Date(now()).toISOString(),
@@ -150,8 +136,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   let kind: TicketKind = "feature";
   const testRuns: Record<string, string>[] = [];
   let basePassed: boolean | undefined;
-  let escalationAnswered = false;
-  let escalationRequested = false;
+  let escalation: "none" | "requested" | "answered" = "none";
   const mergeRequests: RunState["merge_requests"] = [];
   let outcome: string | null = null;
   let human = false;
@@ -232,8 +217,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         if (data.gate === "plan" && data.answer === "change") plan = null;
         if (data.answer === "abort") outcome = "aborted";
         if (data.gate === "escalation") {
-          escalationAnswered = true;
-          escalationRequested = false;
+          escalation = "answered";
           if (data.answer === "one_more_round") roundBudget += 1;
           if (data.answer === "take_over") human = true;
         }
@@ -255,7 +239,8 @@ export function deriveState(events: ArkEvent[]): RunState {
         round = Math.max(round, data.round);
         if (!startedSteps.some((step) => step.id === data.step))
           startedSteps.push({ id: data.step, role: data.role, repo: data.repo });
-        if (mergeRequests.length > 0 && data.role === "implementer") escalationAnswered = false;
+        if (mergeRequests.length > 0 && data.role === "implementer" && escalation === "answered")
+          escalation = "none";
         break;
       case "step.finished": {
         stepStatus.set(data.step, data.outcome);
@@ -279,14 +264,13 @@ export function deriveState(events: ArkEvent[]): RunState {
         lastTest = { passed: data.passed, heads: data.heads };
         basePassed = data.base_passed ?? basePassed;
         testRuns.push(criteriaStatus);
-        if (mergeRequests.length === 0) escalationAnswered = false;
+        if (mergeRequests.length === 0 && escalation === "answered") escalation = "none";
         break;
       case "escalation.requested":
-        escalationRequested = true;
-        escalationAnswered = false;
+        escalation = "requested";
         break;
       case "merge_request.opened":
-        if (mergeRequests.length === 0) escalationAnswered = false;
+        if (mergeRequests.length === 0 && escalation === "answered") escalation = "none";
         mergeRequests.push({
           repo: data.repo,
           url: data.url,
@@ -324,8 +308,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   else if (!planApproved) phase = "planning";
   else if (
     round >= roundBudget &&
-    (escalationRequested || (lastTest && !lastTest.passed)) &&
-    !escalationAnswered &&
+    (escalation === "requested" || (escalation === "none" && lastTest && !lastTest.passed)) &&
     !human
   )
     phase = "escalation";
@@ -357,8 +340,8 @@ export function deriveState(events: ArkEvent[]): RunState {
       ...(gates.escalation === undefined ? {} : { escalation: gates.escalation }),
       ...Object.fromEntries(Object.entries(gates).filter(([key]) => key.startsWith("manual:"))),
     },
-    post_mr_escalation_answered: escalationAnswered && mergeRequests.length > 0,
-    escalation_requested: escalationRequested,
+    post_mr_escalation_answered: escalation === "answered" && mergeRequests.length > 0,
+    escalation_requested: escalation === "requested",
     evaluation,
     strategy,
     plan,
@@ -373,5 +356,67 @@ export function deriveState(events: ArkEvent[]): RunState {
     outcome,
     ...(human ? { implementer: "human" as const } : {}),
     events: events.length,
+  };
+}
+
+/** The gate a run waits on, or `none`. */
+export function waitingGate(state: RunState): string {
+  if (state.phase === "awaiting_criteria") return "criteria";
+  if (state.phase === "awaiting_strategy") return "strategy";
+  if (state.phase === "planning" && state.plan?.valid) return "plan";
+  if (state.phase === "escalation") return "escalation";
+  return "none";
+}
+
+export type StepWindow = {
+  id: string;
+  role: string;
+  repo: string;
+  start: number;
+  end: number | null;
+};
+
+export type StageTimes = { evaluationEnd?: number; designStart?: number; designEnd?: number };
+
+/** When each step ran, in milliseconds: one window per step.started, closed by its step.finished. */
+export function stepWindows(events: ArkEvent[]): StepWindow[] {
+  const windows: StepWindow[] = [];
+  for (const event of events) {
+    if (event.type === "step.started") {
+      windows.push({
+        id: event.data.step,
+        role: event.data.role,
+        repo: event.data.repo,
+        start: Date.parse(event.time),
+        end: null,
+      });
+    }
+    if (event.type === "step.finished") {
+      const open = windows.findLast(
+        (window) => window.id === event.data.step && window.end === null,
+      );
+      if (open) open.end = Date.parse(event.time);
+    }
+  }
+  return windows;
+}
+
+/**
+ * When the evaluator and the Designer sessions ran, in milliseconds. The evaluator session ends at
+ * the last evaluation.recorded (the run lead session outlasts it). The Designer session runs after
+ * the first evaluation and ends by the last strategy record or strategy answer.
+ */
+export function stageTimes(events: ArkEvent[]): StageTimes {
+  const time = (event: ArkEvent | undefined) => (event ? Date.parse(event.time) : undefined);
+  return {
+    evaluationEnd: time(events.findLast((event) => event.type === "evaluation.recorded")),
+    designStart: time(events.find((event) => event.type === "evaluation.recorded")),
+    designEnd: time(
+      events.findLast(
+        (event) =>
+          event.type === "strategy.recorded" ||
+          (event.type === "gate.answered" && event.data.gate === "strategy"),
+      ),
+    ),
   };
 }

@@ -207,7 +207,7 @@ The chain is Master Chief, run lead, worker. That is depth 2. Orca's default all
    These workers run in the main workspace, where Ark writes no `.omp/config.yml`, so the depth check follows the global `tools.approvalMode`. A worker that stops at a permission prompt here is not a depth failure: tell the human.
 3. Wait for the report, then read it:
    ```sh
-   orca orchestration check --wait --timeout-ms 180000 --json
+   orca orchestration check --wait --timeout-ms 180000 --json 2>/dev/null
    orca orchestration worker-read --dispatch <dispatch-id> --source transcript --json
    ```
 4. Read the depth-1 worker's report.
@@ -330,5 +330,5 @@ The first ticket, `/skill:ark chief` with a ticket ID, is the E2E check of the w
   2. **Reach:** the URL or the command that reaches it (a web app at `http://<project>.localhost`, a CLI as `<command> --help`), and the command that proves it is up, such as `curl -sf <url>/<health path>`.
   3. **Feature map:** a table with one row for each feature: the feature, the command or page that exercises it, and what a working result shows (a value, a text, an exit code). Name what you would see, not "it works".
 - Run the start and reach commands once. A part that fails is not written as fact: fix it or mark it `unverified` in the file.
-- For the `ark` project, the hub and the CLI are detectable. The hub starts with `ark ui` (port 4317 unless `--port` says otherwise, see `cli/ui.ts`) and is reached at `http://127.0.0.1:4317`, or at `http://ark.localhost` once `ark ui install` ran (`docs/how-to/local-names.md`). The CLI runs as `ark <command>`, or `bun cli/ark.ts <command>` from a worktree. Write the file `~/.ark/projects/ark/verify.md` with a feature map row for each hub view and each CLI command family.
+- For the `ark` project, the hub and the CLI are detectable. The hub starts with `ark ui` (see `cli/ui.ts`) and is reached at `http://127.0.0.1:4317`, or at `http://ark.localhost` once `ark ui install` ran (`docs/how-to/local-names.md`). The CLI runs as `ark <command>`, or `bun cli/ark.ts <command>` from a worktree. Write the file `~/.ark/projects/ark/verify.md` with a feature map row for each hub view and each CLI command family.
 - Never put a secret in the file. It is not committed: it lives in `$ARK_HOME`, so a run's worktree does not hold it.
