@@ -52,6 +52,8 @@ export type RunState = {
   current_step: string | null;
   worktrees: { repo: string; path: string; branch: string; base?: string }[];
   sync_conflicts: string[];
+  /** Value of the last `bump.refreshed` of each bump step. */
+  bump_refreshed: Record<string, string>;
   /** `mode` is `full` for an old event with none; a `quick` result is never a gate. `duration` is seconds. */
   last_test: {
     passed: boolean;
@@ -138,6 +140,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   const startedSteps: { id: string; role: string; repo: string }[] = [];
   const worktrees: RunState["worktrees"] = [];
   const syncConflicts = new Set<string>();
+  const bumpRefreshed: Record<string, string> = {};
   let lastTest: RunState["last_test"] = null;
   let kind: TicketKind = "feature";
   const testRuns: Record<string, string>[] = [];
@@ -235,6 +238,9 @@ export function deriveState(events: ArkEvent[]): RunState {
         else worktrees[known] = worktree;
         break;
       }
+      case "bump.refreshed":
+        bumpRefreshed[data.step] = data.value;
+        break;
       case "worktree.synced":
         if (data.conflict) syncConflicts.add(data.repo);
         else syncConflicts.delete(data.repo);
@@ -360,6 +366,7 @@ export function deriveState(events: ArkEvent[]): RunState {
     current_step: steps.find((step) => step.status !== "succeeded")?.id ?? null,
     worktrees,
     sync_conflicts: [...syncConflicts],
+    bump_refreshed: bumpRefreshed,
     last_test: lastTest,
     red_test: redTest,
     ...(basePassed === undefined ? {} : { base_passed: basePassed }),
