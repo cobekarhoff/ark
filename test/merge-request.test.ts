@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
@@ -1407,6 +1408,57 @@ test(
     scenario({ core: "github", app: "github" });
     expect(ark("merge-request", "open", run).code).toBe(0);
     for (const call of created()) expect(optionValue(call, "--body")).not.toContain("UI/UX");
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-T160 ark merge-request open on a run with 3 repos runs rev-parse HEAD at most once for each repo and each ledger git query once for each repo",
+  () => {
+    process.env.FAKE_NUMBERS = "[412, 88, 31]";
+    const { runDirectory, worktrees } = scenario(
+      claraHosts,
+      true,
+      [],
+      { pr_writing: { tier_floor: 2 } },
+      claraShape,
+    );
+    // A shim in front of git logs `<cwd>\t<args>` and runs the real git.
+    const shim = mkdtempSync(join(tmpdir(), "ark-git-shim-"));
+    const gitLog = join(shim, "git.log");
+    writeFileSync(
+      join(shim, "git"),
+      `#!/bin/sh\nprintf '%s\\t%s\\n' "$PWD" "$*" >> "${gitLog}"\nexec /usr/bin/git "$@"\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${shim}:${process.env.PATH}`;
+    const result = ark("merge-request", "open", run);
+    expect(result.code, result.err).toBe(0);
+    expect(created()).toHaveLength(3);
+
+    const gitCalls = readFileSync(gitLog, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t") as [string, string]);
+    for (const [name, worktree] of Object.entries(worktrees)) {
+      const own = gitCalls.filter(([cwd]) => realpathSync(cwd) === realpathSync(worktree));
+      const count = (args: string) => own.filter(([, argv]) => argv === args).length;
+      expect(count("rev-parse HEAD"), `${name} rev-parse HEAD`).toBe(1);
+      expect(count("remote get-url origin"), `${name} remote get-url origin`).toBeLessThanOrEqual(
+        1,
+      );
+      expect(
+        own.filter(([, argv]) => argv.startsWith("merge-base")).length,
+        `${name} merge-base`,
+      ).toBeLessThanOrEqual(1);
+    }
+
+    // Each repo's single head read is its real head: the ledger of each MR body names it, and the heads differ.
+    const heads = Object.values(worktrees).map((path) => git(path, "rev-parse", "HEAD"));
+    expect(new Set(heads).size).toBe(3);
+    expect(
+      openedEvents(runDirectory).filter((e) => e.type === "merge_request.opened"),
+    ).toHaveLength(3);
   },
   { timeout: 30_000 },
 );
