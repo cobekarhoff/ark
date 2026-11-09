@@ -216,16 +216,12 @@ export function currentState(
   const repo = ledger.repos[0];
   const head = knownHead ?? git(["rev-parse", "HEAD"], directory);
   if (repo === undefined || head === null) return {};
-  // The ledger's merge base makes `<baseSha>...HEAD` the same diff without asking git for the base ref again.
-  const ref =
-    repo.baseSha !== "unknown"
-      ? repo.baseSha
-      : git(["rev-parse", "--verify", "--quiet", `origin/${base}`], directory)
-        ? `origin/${base}`
-        : base;
+  const baseRef = git(["rev-parse", "--verify", "--quiet", `origin/${base}`], directory)
+    ? `origin/${base}`
+    : base;
   return {
     currentHeads: { [repo.repo]: head },
-    diff: git(["diff", `${ref}...HEAD`], directory) ?? undefined,
+    diff: git(["diff", `${baseRef}...HEAD`], directory) ?? undefined,
   };
 }
 
