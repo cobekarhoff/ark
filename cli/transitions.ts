@@ -265,5 +265,9 @@ function assertCloseAllowed(state: RunState, data: EventData): void {
       throw new ArkError("run.closed handed_off refused: the run has merge requests");
     if (!state.last_test?.passed)
       throw new ArkError("run.closed handed_off refused: missing test.completed with passed true");
+    if (state.last_test.mode !== "full")
+      throw new ArkError(
+        `run.closed handed_off refused: the last test is quick, not a gate: run \`ark test ${state.run}\``,
+      );
   }
 }

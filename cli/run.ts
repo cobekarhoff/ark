@@ -495,7 +495,7 @@ function printRun(runId: string, inProject?: string): void {
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     ...amendedLines(state),
     ...statusSubmoduleLines(project, state.worktrees),
-    `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
+    `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") + (state.last_test.mode === "quick" ? " (quick, not a gate)" : "") : "none"}`,
     ...testHeadLines(directory),
     ...(statusMergeRequestsMode(project) === "none"
       ? localOnlyLines(project, directory, state)
