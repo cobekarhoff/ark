@@ -253,7 +253,7 @@ describe("plan approval survives only an unchanged valid recheck", () => {
     expect(eventsOf(directory).length).toBe(before);
   });
 
-  test("ARK-187-AC2 an invalid recheck with the same plan hash clears approval", () => {
+  test("ARK-T169 an invalid recheck with the same plan hash clears approval", () => {
     const { runId, directory } = approvedRun();
     // Same plan.yml bytes, but the role's model no longer exists in the project config.
     writeProject("demo", {

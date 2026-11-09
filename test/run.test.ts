@@ -349,7 +349,7 @@ test("ARK-152-AC5 a failed step stays the current step", () => {
   expect(ark("status", runId).out).toContain("current step: build (failed)");
 });
 
-test("ARK-152-AC6 status without a run lists every open run with phase and current step, across projects", () => {
+test("ARK-T165 status without a run lists every open run with phase and current step, across projects", () => {
   withControlledPath(
     "ok",
     () => {
@@ -372,7 +372,7 @@ test("ARK-152-AC6 status without a run lists every open run with phase and curre
   );
 });
 
-test("ARK-152-AC2 status passes when every project config is valid", () => {
+test("ARK-T166 status passes when every project config is valid", () => {
   withControlledPath(
     "ok",
     () => {
@@ -394,7 +394,7 @@ test("ARK-152-AC2 status exits 1 and names the bad field and project of an inval
   expect(result.err).toContain("1 project config(s) invalid");
 });
 
-test("ARK-152-AC2 ARK_PROJECT limits the status config check to one project", () => {
+test("ARK-T167 ARK_PROJECT limits the status config check to one project", () => {
   withControlledPath(
     "ok",
     () => {
@@ -450,7 +450,7 @@ test("ARK-T19 ARK-321/AC2 ark status reports a folder with a run and no ark.yml"
   expect(result.out + result.err).not.toContain("empty-sibling");
   expect(result.err).toContain("project config(s) invalid");
 });
-test("ARK-164-AC2 status accepts --project for config checks and run state", () => {
+test("ARK-T167 status accepts --project for config checks and run state", () => {
   withControlledPath(
     "ok",
     () => {

@@ -108,7 +108,7 @@ test("ARK-234-AC1 an unknown gates key exits 1 and names the field", () => {
   expect(result.out).toContain("gates.setup");
 });
 
-test("ARK-234-AC1 a gates map with only plan set loads, and the other keys stay human", () => {
+test("ARK-T168 a gates map with only plan set loads, and the other keys stay human", () => {
   const { runId, directory } = startRun({ plan: "auto" });
   withFakeHarnesses(["pi/task", "pi/validate", "pi/design"], () =>
     expect(ark("status").code).toBe(0),
