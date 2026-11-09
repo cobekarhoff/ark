@@ -22,7 +22,7 @@ import {
   type EventData,
   type RunState,
 } from "./events.ts";
-import { ticketKinds, ticketStatusAfter, type TicketKind } from "./lifecycle.ts";
+import { ticketKinds, ticketStatuses, ticketStatusAfter, type TicketKind } from "./lifecycle.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
@@ -54,6 +54,13 @@ function readTicket(ticketFile: string): {
   if (!(ticketKinds as readonly unknown[]).includes(kind))
     throw new ArkError(
       `${ticketFile}: kind must be one of ${ticketKinds.join(", ")}, not ${JSON.stringify(kind)}`,
+    );
+  if (
+    fields.status !== undefined &&
+    !(ticketStatuses as readonly unknown[]).includes(fields.status)
+  )
+    console.warn(
+      `warning: ${ticketFile}: status ${JSON.stringify(fields.status)} is not one of ${ticketStatuses.join(", ")}; the hub shows it as written`,
     );
   const ids = parseCriteria(fields, ticketFile).map((criterion) => criterion.id);
   return {

@@ -12,6 +12,7 @@ import {
 import { canonicalCriterion } from "./criterion-id.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events";
 import { loadConfig, mergeRequestsMode } from "./config.ts";
+import { manualStatus } from "./lifecycle.ts";
 import { findRun } from "./paths";
 import { loadPlan, repoGraph } from "./plan";
 import { discoverRepos, repoBase } from "./workspace.ts";
@@ -362,7 +363,9 @@ export function assertShippable(
 ): void {
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
-  const unproven = manualCriteria(directory).filter((id) => state.gates[`manual:${id}`] !== "ok");
+  const unproven = manualCriteria(directory).filter(
+    (id) => manualStatus(state.gates[`manual:${id}`]) !== "manual ok",
+  );
   if (unproven.length > 0)
     throw new ArkError(
       unproven.length === 1

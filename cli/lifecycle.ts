@@ -36,6 +36,11 @@ export type CriterionStatus =
   | "manual ok"
   | "manual problem";
 
+/** The criterion status a manual gate answer shows in `ark test`; no answer yet is `manual pending`. */
+export function manualStatus(answer: string | undefined): CriterionStatus {
+  return answer === "ok" ? "manual ok" : answer === "problem" ? "manual problem" : "manual pending";
+}
+
 export const ticketKinds = ["bug", "perf", "refactor", "feature"] as const;
 export type TicketKind = (typeof ticketKinds)[number];
 
