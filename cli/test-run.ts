@@ -290,8 +290,13 @@ async function runSuite(
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
   const command = template.replaceAll("{report}", reportPath);
   const scratch = mkdtempSync(join(tmpdir(), "ark-evidence-"));
+  // ARK-390: a private TMPDIR per suite, so two suites or two runs never share temp files.
+  const suiteTmpdir = mkdtempSync(join(tmpdir(), "ark-suite-"));
   try {
-    const outcome = await run(["sh", "-c", command], cwd, { ARK_EVIDENCE_DIR: scratch });
+    const outcome = await run(["sh", "-c", command], cwd, {
+      ARK_EVIDENCE_DIR: scratch,
+      TMPDIR: suiteTmpdir,
+    });
     const output = outcome.stdout + outcome.stderr;
     writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
     const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
@@ -313,6 +318,7 @@ async function runSuite(
     };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
+    rmSync(suiteTmpdir, { recursive: true, force: true });
   }
 }
 
