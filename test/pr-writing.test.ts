@@ -2410,7 +2410,12 @@ test("ARK-T150 gather.ts in each repo of a 2-repo run writes that repo's own hos
   const title = "ARK-9: Show units";
 
   // The second repo first: the result must not depend on the order.
-  for (const repo of [b, a]) expect(runScript("gather", repo, "--run-dir", directory).code).toBe(0);
+  const emittedHosts: Record<string, string> = {};
+  for (const repo of [b, a]) {
+    const gathered = runScript("gather", repo, "--run-dir", directory);
+    expect(gathered.code).toBe(0);
+    emittedHosts[repo] = JSON.parse(gathered.stdout.trim().split("\n").pop() ?? "").host;
+  }
 
   const expected = {
     [a]: {
@@ -2428,14 +2433,15 @@ test("ARK-T150 gather.ts in each repo of a 2-repo run writes that repo's own hos
   };
   for (const [repo, want] of Object.entries(expected)) {
     const ledger = readLedger(repo);
-    const mine = ledger.repos.find((entry: { path?: string }) => entry.path === repo);
-    expect(mine).toBeDefined();
-    expect(mine.files.map((file: { path: string }) => file.path)).toEqual(want.files);
-    expect({ host: mine.host, tokenOwner: mine.tokenOwner }).toEqual({
+    expect(emittedHosts[repo]).toBe(want.host);
+    expect(ledger.repos).toHaveLength(1);
+    expect(ledger.repos[0].path).toBe(repo);
+    expect(ledger.repos[0].files.map((file: { path: string }) => file.path)).toEqual(want.files);
+    expect({ host: ledger.host, tokenOwner: ledger.tokenOwner }).toEqual({
       host: want.host,
       tokenOwner: want.owner,
     });
-    expect(mine.template.text).toContain(want.heading);
+    expect(ledger.template.text).toContain(want.heading);
     // The generated body follows this repo's template only.
     const body = readFileSync(join(repo, ".pr-writing", "body.md"), "utf8");
     expect(body).toContain(want.heading);

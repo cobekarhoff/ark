@@ -138,7 +138,7 @@ function run(values: { base?: string; "run-dir"?: string; "existing-only"?: bool
     name,
     `branch ${branch} vs ${repo.base}, ${repo.commits.length} commits, ${repo.files.length} files, host ${ledger.host}`,
   );
-  writeLedgerFile(root, full);
+  writeLedgerFile(root, ledger);
   // The folder keeps ledger.json, body.md and nothing of it in `git status`.
   writeFileSync(join(root, ".pr-writing", ".gitignore"), "*\n");
   const bodyFile = join(root, ".pr-writing", "body.md");
@@ -161,7 +161,7 @@ function run(values: { base?: string; "run-dir"?: string; "existing-only"?: bool
     ledger: ".pr-writing/ledger.json",
     head: repo.head,
     base: repo.base,
-    host: full.host,
+    host: ledger.host,
     files: repo.files.length,
   };
   if (probeFailure !== null) {
