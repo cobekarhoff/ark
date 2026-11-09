@@ -5,7 +5,7 @@ import { ArkError } from "../../../cli/errors.ts";
 import { ledgerPath, readLedgerFile, recordBodyHash } from "../lib/ledger.ts";
 import { hashBody, lintBody } from "../lib/lint.ts";
 import { currentState } from "../lib/post.ts";
-import { currentBranch, emit, ledgerForBranch, repoRoot, runCli, say, titleOf } from "./cli.ts";
+import { emit, ledgerForRepo, repoRoot, runCli, say, titleOf } from "./cli.ts";
 
 const name = "lint_body";
 
@@ -79,9 +79,13 @@ await runCli(
       return 1;
     }
     const body = readFileSync(bodyFile, "utf8");
-    const ledger = ledgerForBranch(file.ledger, currentBranch(root));
-    const repo = ledger.repos[0];
-    const { currentHeads, diff } = currentState(ledger, root, repo?.base ?? "");
+    const ledger = ledgerForRepo(file.ledger, root);
+    if (ledger === null) {
+      say(name, `${root} is not a repo of the ledger: run gather.ts here first.`);
+      emit({ error: "ledger missing", path: ledgerPath(root) });
+      return 2;
+    }
+    const { currentHeads, diff } = currentState(ledger, root, ledger.repos[0].base);
     const results = lintBody({
       body,
       title: titleOf(ledger, values.title),
@@ -105,7 +109,7 @@ await runCli(
     emit({
       ok,
       bodyHash: hashBody(body),
-      head: currentHeads?.[repo?.repo ?? ""] ?? "",
+      head: currentHeads?.[ledger.repos[0].repo] ?? "",
       checks: results,
     });
     return ok ? 0 : 1;

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,6 +37,7 @@ const hostVariables = [
   "FAKE_PROBE_FAIL",
   "FAKE_RACE_MR",
   "FAKE_EDIT_BODY",
+  "FAKE_TOKEN_OWNERS",
 ];
 
 // A token made at run time, so no file of the repo holds a string a secret scanner would flag.
@@ -2351,4 +2353,139 @@ test("ARK-T47 a run with no results/evidence/ needs no Evidence section", () => 
   expect(
     result(lintBody({ body: withoutSection, title: defaultTitle, ledger }), "EVID04").result,
   ).toBe("fail");
+});
+
+// --- ARK-T150, ARK-T151: one run, two repos, one branch name ----------------------------------
+
+const scriptFile = (name: string) => join(root, "skills/pr-writing/scripts", `${name}.ts`);
+
+function runScript(name: string, cwd: string, ...args: string[]) {
+  const spawned = Bun.spawnSync(["bun", scriptFile(name), ...args], {
+    cwd,
+    env: process.env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    code: spawned.exitCode,
+    stdout: spawned.stdout.toString(),
+    stderr: spawned.stderr.toString(),
+  };
+}
+
+const readLedger = (directory: string) =>
+  JSON.parse(readFileSync(join(directory, ".pr-writing", "ledger.json"), "utf8")).ledger;
+
+/** Repo `a` on GitHub and repo `b` on GitLab, both on `ark/ARK-9-x`, each with its own MR template and token owner. */
+function twoRepoRun() {
+  const run = makeRun({
+    summary: "Show units",
+    repos: [
+      { name: "repos/a", changes: { "cli/a.ts": "from a\n" } },
+      { name: "repos/b", changes: { "cli/b.ts": "from b\n" } },
+    ],
+  });
+  const a = realpathSync(run.paths["repos/a"]);
+  const b = realpathSync(run.paths["repos/b"]);
+  git(b, "remote", "set-url", "origin", "https://gitlab.com/org/b.git");
+  mkdirSync(join(a, ".github"), { recursive: true });
+  writeFileSync(
+    join(a, ".github", "pull_request_template.md"),
+    "## Summary\n\n## Alpha verification\n",
+  );
+  mkdirSync(join(b, ".gitlab", "merge_request_templates"), { recursive: true });
+  writeFileSync(
+    join(b, ".gitlab", "merge_request_templates", "b.md"),
+    "## Description\n\n## Bravo verification\n",
+  );
+  process.env.FAKE_TOKEN_OWNERS = JSON.stringify({
+    a: "owner-a",
+    b: "owner-b",
+  });
+  return { ...run, a, b };
+}
+
+test("ARK-T150 gather.ts in each repo of a 2-repo run writes that repo's own host, token owner and template, and lint_body and post_mr use them", () => {
+  const { directory, a, b } = twoRepoRun();
+  const title = "ARK-9: Show units";
+
+  // The second repo first: the result must not depend on the order.
+  const emittedHosts: Record<string, string> = {};
+  for (const repo of [b, a]) {
+    const gathered = runScript("gather", repo, "--run-dir", directory);
+    expect(gathered.code).toBe(0);
+    emittedHosts[repo] = JSON.parse(gathered.stdout.trim().split("\n").pop() ?? "").host;
+  }
+
+  const expected = {
+    [a]: {
+      files: ["repos/a/cli/a.ts"],
+      host: "github",
+      owner: "owner-a",
+      heading: "Alpha verification",
+    },
+    [b]: {
+      files: ["repos/b/cli/b.ts"],
+      host: "gitlab",
+      owner: "owner-b",
+      heading: "Bravo verification",
+    },
+  };
+  for (const [repo, want] of Object.entries(expected)) {
+    const ledger = readLedger(repo);
+    expect(emittedHosts[repo]).toBe(want.host);
+    expect(ledger.repos).toHaveLength(1);
+    expect(ledger.repos[0].path).toBe(repo);
+    expect(ledger.repos[0].files.map((file: { path: string }) => file.path)).toEqual(want.files);
+    expect({ host: ledger.host, tokenOwner: ledger.tokenOwner }).toEqual({
+      host: want.host,
+      tokenOwner: want.owner,
+    });
+    expect(ledger.template.text).toContain(want.heading);
+    // The generated body follows this repo's template only.
+    const body = readFileSync(join(repo, ".pr-writing", "body.md"), "utf8");
+    expect(body).toContain(want.heading);
+    const other = repo === a ? expected[b].heading : expected[a].heading;
+    expect(body).not.toContain(other);
+  }
+
+  for (const repo of [a, b]) {
+    const linted = runScript("lint_body", repo, "--title", title);
+    expect({ repo, code: linted.code, out: linted.stdout }).toMatchObject({
+      repo,
+      code: 0,
+    });
+    const posted = runScript("post_mr", repo, "--confirmed", "--title", title);
+    expect({ repo, code: posted.code, err: posted.stderr }).toMatchObject({
+      repo,
+      code: 0,
+    });
+  }
+
+  const created = writeCalls();
+  expect(created.map((call) => [call.cwd, call.tool])).toEqual([
+    [a, "gh"],
+    [b, "glab"],
+  ]);
+});
+
+test("ARK-T151 gather.ts refuses a directory that is not a worktree of the run and names it", () => {
+  const { directory } = twoRepoRun();
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "pr-writing-outside-")));
+  git(outside, "init", "-b", "main");
+  writeFileSync(join(outside, "x.ts"), "x\n");
+  git(outside, "add", ".");
+  git(outside, "commit", "-m", "base");
+  git(outside, "checkout", "-b", "ark/ARK-9-x");
+  writeFileSync(join(outside, "x.ts"), "y\n");
+  git(outside, "commit", "-am", "ARK-9: change");
+  git(outside, "remote", "add", "origin", "https://github.com/org/outside.git");
+  const plain = realpathSync(mkdtempSync(join(tmpdir(), "pr-writing-plain-")));
+
+  for (const folder of [outside, plain]) {
+    const refused = runScript("gather", folder, "--run-dir", directory);
+    expect({ folder, code: refused.code }).not.toEqual({ folder, code: 0 });
+    expect(refused.stderr + refused.stdout).toContain(folder);
+    expect(existsSync(join(folder, ".pr-writing", "ledger.json"))).toBe(false);
+  }
 });

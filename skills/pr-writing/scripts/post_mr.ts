@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { readLedgerFile } from "../lib/ledger.ts";
 import { LintRefusal, postMergeRequest, ProbeFailure } from "../lib/post.ts";
-import { currentBranch, emit, ledgerForBranch, repoRoot, runCli, say, titleOf } from "./cli.ts";
+import { currentBranch, emit, ledgerForRepo, repoRoot, runCli, say, titleOf } from "./cli.ts";
 
 const name = "post_mr";
 
@@ -78,10 +78,10 @@ await runCli(
       return 2;
     }
     const branch = currentBranch(root);
-    const ledger = ledgerForBranch(file.ledger, branch);
-    const repo = ledger.repos[0];
-    if (repo === undefined || ledger.host === "unknown") {
-      say(name, `no repo on branch ${branch} with a known host in the ledger. Not posted.`);
+    const ledger = ledgerForRepo(file.ledger, root);
+    const repo = ledger?.repos[0];
+    if (ledger === null || repo === undefined || ledger.host === "unknown") {
+      say(name, `no repo at ${root} with a known host in the ledger. Not posted.`);
       emit({ error: "unknown host", posted: false });
       return 2;
     }

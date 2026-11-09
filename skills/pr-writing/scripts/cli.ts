@@ -3,6 +3,7 @@
  * JSON on stdout, prose on stderr, exit 0 success, 1 violation or refusal, 2 environment problem.
  * A bad argument exits 1 with `{"error": ...}` on stdout and a hint to `--help` on stderr.
  */
+import { realpathSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { ArkError } from "../../../cli/errors.ts";
 import type { Ledger } from "../lib/ledger.ts";
@@ -128,10 +129,30 @@ export function currentBranch(root: string): string {
   return result.exitCode === 0 ? result.stdout.toString().trim() : "";
 }
 
-/** A run ledger holds every repo of the run: this MR is the one for the repo on the current branch. */
-export function ledgerForBranch(ledger: Ledger, branch: string): Ledger {
-  const repos = ledger.repos.filter((repo) => repo.branch === branch);
-  return { ...ledger, repos: repos.length > 0 ? repos : ledger.repos.slice(0, 1) };
+/**
+ * A run ledger holds every repo of the run: this MR is the one for the repo at `root`. The returned ledger carries
+ * that repo's host, token owner and template; a ledger written before per-repo fields keeps its run-level values.
+ * Returns `null` when no repo of the ledger is at `root`.
+ */
+export function ledgerForRepo(ledger: Ledger, root: string): Ledger | null {
+  const real = (path: string) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  };
+  const repo = ledger.repos.find(
+    (entry) => entry.path === undefined || real(entry.path) === real(root),
+  );
+  if (repo === undefined) return null;
+  return {
+    ...ledger,
+    repos: [repo],
+    host: repo.host ?? ledger.host,
+    tokenOwner: repo.tokenOwner ?? ledger.tokenOwner,
+    template: repo.template === undefined ? ledger.template : repo.template,
+  };
 }
 
 /** `--title`, else the title built from the config rule and the ledger summary. Throws `ArkError` when neither exists. */
