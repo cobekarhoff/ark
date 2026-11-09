@@ -32,3 +32,13 @@ const cleanupTimeoutMilliseconds = 60_000;
 afterAll(() => {
   rmSync(tempRoot, { recursive: true, force: true });
 }, cleanupTimeoutMilliseconds);
+
+// Bun resolves a bare command of a spawn with no `env` against the PATH of process start, so the shims and a test's own
+// fake would be skipped. Default `env` to the live process.env.
+for (const name of ["spawn", "spawnSync"] as const) {
+  const original = Bun[name] as (...args: unknown[]) => unknown;
+  (Bun as Record<string, unknown>)[name] = (first: unknown, second?: Record<string, unknown>) => {
+    if (Array.isArray(first)) return original(first, { env: process.env, ...second });
+    return original({ env: process.env, ...(first as Record<string, unknown>) });
+  };
+}

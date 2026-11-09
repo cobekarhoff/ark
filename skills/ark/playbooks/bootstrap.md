@@ -245,12 +245,14 @@ repos: # only for repos where step 3 got a base; key is the repo path, exactly
   repos/app: { base: release/9.1.0 }
 merge_requests: none # only when the human says the project must not push; omit otherwise
 compose: <compose command> # omit when the project has no compose file
+test_budget_cores: <cores all ark test runs of the host share; omit for floor(0.6 x cores)>
 suites:
   - name: <unique name>
     level: <integration | e2e>
     repo: <repo path, or .>
     command: <command with {report}>
     parser: <bun | pytest | behave>
+    cores: <cores the suite takes, and the value of <cores> in its command; omit for the whole budget; for example cli 3, playwright 2, each check 1>
 roles:
   implementer: { harness: <harness>, model: <model> }
   validator: { harness: <harness>, model: <model> }

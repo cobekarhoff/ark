@@ -72,18 +72,19 @@ export async function chiefState(inProject?: string): Promise<void> {
         ),
   );
 
-  // The lock is host-wide: it names runs of every project.
-  const { holder, waiters } = readTestLock();
-  if (holder || waiters.length > 0)
+  // The budget is host-wide: it names runs of every project.
+  const { running, waiting } = readTestLock();
+  if (running.length > 0 || waiting.length > 0)
     sections.push(
-      "## ark test lock",
+      "## ark test budget",
       [
-        ...(holder
-          ? [`- holder: ${holder.run} (pid ${holder.pid}), running ${elapsed(holder.since)}`]
-          : []),
-        ...waiters.map(
-          (waiter) =>
-            `- waiting: ${waiter.run} (pid ${waiter.pid}), waited ${elapsed(waiter.since)}`,
+        ...running.map(
+          (ticket) =>
+            `- running: ${ticket.run} (pid ${ticket.pid}), ${ticket.cores} cores, running ${elapsed(ticket.started!)}`,
+        ),
+        ...waiting.map(
+          (ticket) =>
+            `- waiting: ${ticket.run} (pid ${ticket.pid}), ${ticket.cores} cores, waited ${elapsed(ticket.arrival)}`,
         ),
       ].join("\n"),
     );

@@ -4,35 +4,34 @@ title: ARK-T59 two ark test processes of two runs never run their suites at the 
 level: integration
 technique: state transition (free, held, released), plus signal and failure exits
 priority: high
-risk: two `ark test` runs on one host run their suites together, so the load average rises and timing-sensitive tests fail at random; or the lock stays after a failed suite, SIGINT or SIGTERM and blocks every later run until the stale-pid check clears it
+risk: two `ark test` runs on one host run their suites together, so the load average rises and timing-sensitive tests fail at random; or the budget tickets stay after a failed suite, SIGINT or SIGTERM and hold cores until the stale-pid check clears them; or a signal frees the cores while the suite still runs
 status: active
-changed_by: 2026-11-06-ARK-343-1
+changed_by: 2026-11-09-ARK-390-1
 ---
 
 ## Objective
 
-Prove that `ark test` takes one host-wide lock under `$ARK_HOME` before its first suite, makes a second `ark test` of another run wait with one message, and releases the lock on every exit. Serves ARK-343/AC1.
+Prove that two `ark test` processes whose suites each ask for the whole budget run them one at a time, print their place while they wait, and remove every ticket on every exit. Serves ARK-390/AC1.
 
-Expected: While one `ark test` holds the host lock, the system shall make a second `ark test` of another run print `waiting for ark test of <run> (pid <pid>)` once and start its suites only after the first has exited; the system shall release the lock when `ark test` ends by pass, suite failure, SIGINT or SIGTERM.
+Expected: When two suites each take the whole budget, the system shall run them one at a time; the waiting `ark test` shall print `waiting: place <n> of <m>; running: <run> <cores> cores`; the system shall remove the tickets of `ark test` when it ends by pass, suite failure, SIGINT or SIGTERM, and shall keep the cores until the suite of a signalled `ark test` has ended.
 
 ## Preconditions
 
-- A temporary `ARK_HOME` with two different fixture projects, run A in project 1 and run B in project 2 (a per-project lock would let them overlap), in the style of `test/evidence-test-run.test.ts`.
-- Each run's suite command is a script that appends `start <run> <ms>` to a shared log, sleeps about 1 s, then appends `end <run> <ms>`. A variant script exits 1 after the sleep.
+- A temporary `ARK_HOME` with two fixture projects, run A in project 1 and run B in project 2, a budget of 6 cores, and suites whose command appends `start <run>` to a shared log and `end <run>` after a short sleep. A variant exits 1; a variant holds until a `release` file appears and, after a signal, needs two seconds to end.
 
 ## Steps
 
-1. Start `ark test A` as a child process. Wait until the log holds `start A`.
-2. Start `ark test B` as a child process. Collect its stdout. Wait for both to exit.
-3. Read the log and the stdout of B. Check that `$ARK_HOME` holds no lock after both exit.
-4. Failing suite: run `ark test A` with the failing script to the end. Straight after A exits, before starting B, check that `$ARK_HOME` holds no lock. Then run `ark test B` and collect its stdout.
-5. Signals, for SIGINT and again for SIGTERM: start `ark test A` with the sleeping script, wait for `start A`, send the signal to its pid, wait for exit. Straight after A exits, check that `$ARK_HOME` holds no lock. Then run `ark test B` and collect its stdout.
+1. Start `ark test A`. Wait until the log holds `start A`. Start `ark test B` and collect its stdout. Wait for both to exit.
+2. Read the log, the stdout of B and the `test-budget` folder.
+3. Failing suite: run `ark test A` with the failing script to the end. Straight after A exits, check the `test-budget` folder. Then run `ark test B` and collect its stdout.
+4. Signals, for SIGINT and again for SIGTERM: start `ark test A`, wait for `start A`, send the signal to its pid, wait for exit. Straight after, check the `test-budget` folder, then run `ark test B`.
+5. Slow end: with the holding and slow-ending suite, start A, then B until B prints `waiting:`. Signal A and wait for it to exit. Create the `release` file and wait for B.
 
 ## Expected results
 
-- Step 3: the span `start A`..`end A` and the span `start B`..`end B` do not overlap; `end A` comes before `start B`. B's stdout holds `waiting for ark test of A (pid <pid of A>)` exactly once. The two runs are in different projects, so overlap is prevented only by a host-wide lock. No lock remains.
-- Step 4: no lock exists right after A exits; B starts its suites with no `waiting for` line and no `took over a stale` line.
-- Step 5: for each signal, no lock exists right after A exits, and B starts its suites with no `waiting for` line and no `took over a stale` line, which proves A released the lock itself instead of leaving it for the stale-pid check.
+- Step 2: each `start` is followed at once by the `end` of the same run, and both runs ran. B's stdout holds `waiting: place 1 of 1; running: A 6 cores`. No ticket remains.
+- Step 3 and 4: no ticket exists right after A exits, and B starts with no `waiting` line and no `took over a stale` line, which proves A removed its tickets itself.
+- Step 5: `end A` comes before `start B` in the log.
 
 ## Screenshot checkpoints
 

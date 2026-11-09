@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
-  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
-  rmdirSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -14,17 +12,18 @@ import { join } from "node:path";
 import { arkHome } from "./paths.ts";
 
 /**
- * One `ark test` at a time per host: the lock directory `test.lock` under $ARK_HOME holds one holder file
- * `holder-<pid>-<uuid>.json`, and a waiting `ark test` leaves a file in test-waiters/ so `ark chief state` can list
- * it. The lock of an ended pid is taken over. The holder file name is unique per acquisition, so taking over and
- * releasing remove exactly the file that was read: a lock that someone else holds now is never touched.
+ * A CPU budget per host instead of one `ark test` at a time. The folder `test-budget` under $ARK_HOME holds one
+ * ticket file per suite (or check) of every `ark test`: run, pid, cores and arrival, plus `started` once admitted.
+ * A ticket is admitted in arrival order, with no overtaking, when the cores of the running tickets plus its own fit
+ * the budget. Admission needs no mutex: only a ticket whose every older ticket already runs may start, so two
+ * waiters never pass at once. A ticket of an ended pid is deleted by whoever sees it.
  */
-export type TestLockEntry = { run: string; pid: number; since: string };
+export type Ticket = { run: string; pid: number; cores: number; arrival: string; started?: string };
 
 const pollMilliseconds = 100;
+const lineWindowMilliseconds = 30_000;
 
-const lockDirectory = () => join(arkHome(), "test.lock");
-const waiterDirectory = () => join(arkHome(), "test-waiters");
+const ticketDirectory = () => join(arkHome(), "test-budget");
 
 /** A pid is alive when signal 0 reaches it; EPERM means it exists under another user. */
 function alive(pid: number): boolean {
@@ -36,106 +35,112 @@ function alive(pid: number): boolean {
   }
 }
 
-function readEntry(file: string): TestLockEntry | null {
+function readTicket(file: string): Ticket | null {
   try {
-    const entry = JSON.parse(readFileSync(file, "utf8")) as TestLockEntry;
-    return Number.isInteger(entry.pid) && typeof entry.run === "string" ? entry : null;
+    const entry = JSON.parse(readFileSync(file, "utf8")) as Ticket;
+    return Number.isInteger(entry.pid) &&
+      Number.isInteger(entry.cores) &&
+      typeof entry.run === "string" &&
+      typeof entry.arrival === "string"
+      ? entry
+      : null;
   } catch {
     return null;
   }
 }
 
-/** The holder file of the lock directory and its entry, or null when there is none. */
-function readHolder(): { file: string; entry: TestLockEntry } | null {
+/** Every ticket in arrival order with its file. Tickets of ended pids are deleted and reported once each. */
+function readTickets(): { file: string; ticket: Ticket }[] {
+  let names: string[];
   try {
-    const name = readdirSync(lockDirectory()).find((candidate) => candidate.startsWith("holder-"));
-    if (name === undefined) return null;
-    const file = join(lockDirectory(), name);
-    const entry = readEntry(file);
-    return entry && { file, entry };
+    names = readdirSync(ticketDirectory()).filter((name) => name.endsWith(".json"));
   } catch {
-    return null;
+    return [];
   }
-}
-
-/** The host's lock holder and the waiters with a live pid, oldest first. Null holder: no lock, or a holder that ended. */
-export function readTestLock(): { holder: TestLockEntry | null; waiters: TestLockEntry[] } {
-  const holder = readHolder()?.entry ?? null;
-  const waiters = existsSync(waiterDirectory())
-    ? readdirSync(waiterDirectory())
-        .map((name) => readEntry(join(waiterDirectory(), name)))
-        .filter((entry): entry is TestLockEntry => entry !== null && alive(entry.pid))
-        .sort((a, b) => a.since.localeCompare(b.since) || a.pid - b.pid)
-    : [];
-  return { holder: holder && alive(holder.pid) ? holder : null, waiters };
-}
-
-/**
- * Tries once to take the lock. The lock directory appears with its holder file already inside (a rename of a
- * prepared directory onto the lock path fails while the target holds a file, and replaces an empty directory), so no
- * reader sees a lock with no holder. A dead holder is taken over by deleting its own holder file, which fails when
- * the file is already gone: a lock that was replaced meanwhile is never exposed. Returns the lock's holder file on
- * success, null when a live holder has it.
- */
-function tryTake(runId: string): string | null {
-  const lock = lockDirectory();
-  const prepared = `${lock}.${process.pid}.new`;
-  rmSync(prepared, { recursive: true, force: true });
-  mkdirSync(prepared, { recursive: true });
-  const name = `holder-${process.pid}-${randomUUID()}.json`;
-  const entry: TestLockEntry = { run: runId, pid: process.pid, since: new Date().toISOString() };
-  writeFileSync(join(prepared, name), JSON.stringify(entry));
-  try {
-    for (;;) {
+  const tickets: { file: string; ticket: Ticket }[] = [];
+  for (const name of names) {
+    const file = join(ticketDirectory(), name);
+    const ticket = readTicket(file);
+    if (ticket === null) continue;
+    if (alive(ticket.pid)) tickets.push({ file, ticket });
+    else {
       try {
-        renameSync(prepared, lock);
-        return join(lock, name);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== "ENOTEMPTY" && code !== "EEXIST") throw err;
-      }
-      const holder = readHolder();
-      if (holder === null || alive(holder.entry.pid)) return null;
-      try {
-        unlinkSync(holder.file);
+        unlinkSync(file);
+        console.log(`took over a stale ark test lock of pid ${ticket.pid}`);
       } catch {
-        continue; // someone else took it over first: try the rename again
-      }
-      console.log(`took over a stale ark test lock of pid ${holder.entry.pid}`);
-      try {
-        rmdirSync(lock); // fails when a new holder already replaced the emptied directory
-      } catch {
-        // in use again, or already gone
+        // another process deleted it first
       }
     }
-  } finally {
-    rmSync(prepared, { recursive: true, force: true });
   }
+  return tickets.sort(
+    (a, b) =>
+      a.ticket.arrival.localeCompare(b.ticket.arrival) ||
+      a.ticket.pid - b.ticket.pid ||
+      a.file.localeCompare(b.file),
+  );
 }
 
+/** The running and the waiting suites of the host, waiting ones in arrival order. Tickets of ended pids are left out. */
+export function readTestLock(): { running: Ticket[]; waiting: Ticket[] } {
+  const tickets = readTickets().map(({ ticket }) => ticket);
+  return {
+    running: tickets.filter((ticket) => ticket.started !== undefined),
+    waiting: tickets.filter((ticket) => ticket.started === undefined),
+  };
+}
+
+function writeTicket(file: string, ticket: Ticket): void {
+  writeFileSync(`${file}.tmp`, JSON.stringify(ticket));
+  renameSync(`${file}.tmp`, file);
+}
+
+function minutes(started: string, now: number): string {
+  const whole = Math.floor((now - Date.parse(started)) / 60_000);
+  return whole < 1 ? "<1" : String(whole);
+}
+
+/** `waiting: place 3 of 3; running: <run> 3 cores 12 min, ...` */
+function waitingLine(place: number, total: number, running: Ticket[], now: number): string {
+  const holders =
+    running.length === 0
+      ? "none"
+      : running
+          .map(
+            (ticket) => `${ticket.run} ${ticket.cores} cores ${minutes(ticket.started!, now)} min`,
+          )
+          .join(", ");
+  return `waiting: place ${place} of ${total}; running: ${holders}`;
+}
+
+export type TestBudget = {
+  /** Waits for admission of one suite and returns its release. Cores above the budget, or none, take the whole budget. */
+  take(cores: number | undefined): Promise<{ cores: number; release: () => void }>;
+  /** Removes the signal handlers and every ticket of this process. */
+  close(): void;
+};
+
+type Options = {
+  /** The clock, in milliseconds. */
+  now?: () => number;
+  /** Where waiting lines go. */
+  print?: (line: string) => void;
+};
+
 /**
- * Waits for the host-wide `ark test` lock and returns its release. SIGINT, SIGTERM and SIGHUP call `onSignal` (it
- * stops child processes and resolves when they have ended), then release the lock, remove the waiter file and exit
- * 128+signal: the lock is held until the work under it has stopped.
+ * Opens the budget for one `ark test`. SIGINT, SIGTERM and SIGHUP call `onSignal` (it stops child processes and
+ * resolves when they have ended), then remove every ticket of this process and exit 128+signal: cores stay taken
+ * until the work under them has stopped.
  */
-export async function takeTestLock(
+export function openTestBudget(
   runId: string,
+  budget: number,
   onSignal: () => Promise<void>,
-): Promise<() => void> {
-  const waiterFile = join(waiterDirectory(), `${process.pid}.json`);
-  let holderFile: string | null = null;
+  { now = Date.now, print = console.log }: Options = {},
+): TestBudget {
+  const files = new Set<string>();
   const cleanup = () => {
-    rmSync(waiterFile, { force: true });
-    if (holderFile !== null) {
-      // Only our own holder file: the directory is removed when that leaves it empty.
-      rmSync(holderFile, { force: true });
-      try {
-        rmdirSync(lockDirectory());
-      } catch {
-        // a new holder already replaced the emptied directory
-      }
-      holderFile = null;
-    }
+    for (const file of files) rmSync(file, { force: true });
+    files.clear();
   };
   const signals = { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 } as const;
   let shuttingDown = false;
@@ -153,47 +158,70 @@ export async function takeTestLock(
     process.on(name as NodeJS.Signals, handler);
     return [name as NodeJS.Signals, handler] as const;
   });
-
-  const release = () => {
-    for (const [name, handler] of handlers) process.off(name, handler);
-    process.off("exit", cleanup);
-    cleanup();
-  };
   process.on("exit", cleanup);
 
-  try {
-    let waiting = false;
-    const since = new Date().toISOString();
-    for (;;) {
-      // ponytail: a live waiter that never takes the lock blocks newer ones; ARK-390 replaces this lock.
-      const olderWaiter = readTestLock().waiters.find(
-        (other) =>
-          other.pid !== process.pid &&
-          (other.since < since || (other.since === since && other.pid < process.pid)),
-      );
-      const blocked = olderWaiter !== undefined;
-      const taken = blocked ? null : tryTake(runId);
-      if (taken !== null) {
-        holderFile = taken;
-        rmSync(waiterFile, { force: true });
-        return release;
+  return {
+    close() {
+      for (const [name, handler] of handlers) process.off(name, handler);
+      process.off("exit", cleanup);
+      cleanup();
+    },
+    async take(requested) {
+      const cores = requested === undefined || requested > budget ? budget : Math.max(1, requested);
+      mkdirSync(ticketDirectory(), { recursive: true });
+      const file = join(ticketDirectory(), `${process.pid}-${randomUUID()}.json`);
+      const ticket: Ticket = {
+        run: runId,
+        pid: process.pid,
+        cores,
+        arrival: new Date().toISOString(),
+      };
+      writeTicket(file, ticket);
+      files.add(file);
+      let printedKey: string | null = null;
+      let printedAt = 0;
+      try {
+        for (;;) {
+          const tickets = readTickets();
+          const mine = tickets.findIndex((entry) => entry.file === file);
+          const running = tickets.filter((entry) => entry.ticket.started !== undefined);
+          const used = running.reduce((sum, entry) => sum + entry.ticket.cores, 0);
+          const older = tickets.slice(0, mine);
+          if (
+            mine >= 0 &&
+            older.every((entry) => entry.ticket.started !== undefined) &&
+            used + cores <= budget
+          ) {
+            writeTicket(file, { ...ticket, started: new Date().toISOString() });
+            return {
+              cores,
+              release: () => {
+                files.delete(file);
+                rmSync(file, { force: true });
+              },
+            };
+          }
+          const waiting = tickets.filter((entry) => entry.ticket.started === undefined);
+          const place = waiting.findIndex((entry) => entry.file === file) + 1;
+          const holders = running.map((entry) => entry.ticket);
+          // Minutes ticking over never count as a change.
+          const key = `${place}/${waiting.length}|${holders.map((holder) => `${holder.run}:${holder.cores}`).join(",")}`;
+          const time = now();
+          if (
+            printedKey === null ||
+            (key !== printedKey && time - printedAt >= lineWindowMilliseconds)
+          ) {
+            print(waitingLine(place, waiting.length, holders, time));
+            printedKey = key;
+            printedAt = time;
+          }
+          await Bun.sleep(pollMilliseconds);
+        }
+      } catch (err) {
+        files.delete(file);
+        rmSync(file, { force: true });
+        throw err;
       }
-      if (!waiting) {
-        waiting = true;
-        mkdirSync(waiterDirectory(), { recursive: true });
-        const entry: TestLockEntry = {
-          run: runId,
-          pid: process.pid,
-          since,
-        };
-        writeFileSync(waiterFile, JSON.stringify(entry));
-        const blocker = readHolder()?.entry ?? olderWaiter;
-        if (blocker) console.log(`waiting for ark test of ${blocker.run} (pid ${blocker.pid})`);
-      }
-      await Bun.sleep(pollMilliseconds);
-    }
-  } catch (err) {
-    release();
-    throw err;
-  }
+    },
+  };
 }
