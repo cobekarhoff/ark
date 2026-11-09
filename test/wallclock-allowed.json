@@ -1,5 +1,5 @@
 {
-  "test/test-lock.test.ts": 5,
+  "test/test-lock.test.ts": 6,
   "test/pw/hub.pw.ts": 26,
   "test/tmpdir-preload.test.ts": 2,
   "test/timeouts.test.ts": 1,
