@@ -813,6 +813,7 @@ exit 1
     expect(result.code).toBe(1);
     expect(lines(join(fixture.directory, "starts"))).toEqual(["start"]);
     expect(result.err).toContain("suite nofile failed");
+    expect(result.out).toContain("not retried  (a failed test names no file)");
   });
 
   test("ARK-T164 the same file name in two suites: a pass on retry in one never hides the second failure in the other", async () => {

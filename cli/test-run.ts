@@ -297,7 +297,10 @@ async function retryFailedFiles(
 ): Promise<{ results: TestResult[]; flaky: string[]; allPassed: boolean; log: string } | null> {
   const failed = results.filter((result) => result.status === "failed");
   if (failed.length === 0 || suite.base_command === undefined) return null;
-  if (failed.some((result) => result.file === undefined)) return null;
+  if (failed.some((result) => result.file === undefined)) {
+    console.log(`suite      ${suite.name} head  not retried  (a failed test names no file)`);
+    return null;
+  }
   const failedFiles = [...new Set(failed.map((result) => result.file!))];
   let kept = results;
   let log = "";

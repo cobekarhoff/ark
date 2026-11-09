@@ -261,10 +261,7 @@ async function startAndFollow(
 
 async function stopRunner(runId: string, resultsDirectory: string): Promise<void> {
   const record = readRecord(resultsDirectory);
-  if (!isLive(record)) {
-    console.log(`no ark test is running for ${runId}`);
-    return;
-  }
+  if (!isLive(record)) throw new ArkError(`no ark test is running for ${runId}`);
   process.kill(record.pid, "SIGTERM");
   const deadline = Date.now() + stopLimitMilliseconds;
   while (identityLive(record) && Date.now() < deadline) await Bun.sleep(pollMilliseconds);
