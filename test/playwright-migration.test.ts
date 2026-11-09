@@ -13,7 +13,10 @@ const long = 300_000;
 const forbidden = "Web" + "View";
 
 // The hub specs of ARK-277: the whole Playwright suite, in test/pw/hub.pw.ts.
-const hubSpecIds = ["AC3", "AC4", "AC7", "AC8", "AC9", "AC10", "AC11"].map((ac) => `ARK-277-${ac}`);
+const hubSpecIds = [
+  "ARK-T133",
+  ...["AC3", "AC7", "AC8", "AC9", "AC10", "AC11"].map((ac) => `ARK-277-${ac}`),
+];
 
 function playwright(args: string[], options: { cwd?: string; env?: Record<string, string> } = {}) {
   const env: Record<string, string | undefined> = { ...process.env, ...options.env };
