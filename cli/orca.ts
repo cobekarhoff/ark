@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { execJson, execResult, failureReason, readerTimeoutMilliseconds } from "./exec.ts";
 
 // Only the fields the hub reads. Orca output is local and trusted, so it is cast, not parsed.
@@ -112,18 +111,3 @@ export const orcaOrchestration = async <T>(...args: string[]): Promise<T | null>
   const answer = await orcaRead<T>(args);
   return answer.ok ? answer.value : null;
 };
-
-/** A closed run whose `retro.md` Close check lacks a non-empty answer to any of the three questions. */
-export function retroUnanswered(directory: string): boolean {
-  try {
-    const closeCheck = readFileSync(join(directory, "retro.md"), "utf8").split(
-      /^## Close check\s*$/m,
-    )[1];
-    if (closeCheck === undefined) return false;
-    return !["Biggest pain", "Change now", "Surprise"].every((label) =>
-      new RegExp(`^- ${label}:[ \\t]*\\S`, "m").test(closeCheck),
-    );
-  } catch {
-    return false;
-  }
-}

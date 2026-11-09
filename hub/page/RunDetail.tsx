@@ -63,7 +63,8 @@ export function Timeline({ entries }: { entries: TimelineEntry[] }) {
               <span data-testid="timeline-counts">
                 <span className="pill bad">{entry.counts.fail} fail</span>{" "}
                 <span className="pill ok">{entry.counts.pass} pass</span>
-                {entry.counts.missing > 0 && <> {entry.counts.missing} missing</>}{" "}
+                {entry.counts.missing > 0 && <> {entry.counts.missing} missing</>}
+                {entry.counts.notRun > 0 && <> {entry.counts.notRun} not run</>}{" "}
               </span>
             )}
             {entry.url ? <ExternalLink url={entry.url}>{entry.why}</ExternalLink> : entry.why}

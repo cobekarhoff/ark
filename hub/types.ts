@@ -337,7 +337,7 @@ export type TimelineEntry = {
   type: string;
   why: string;
   /** Test counts of `test.completed`; null for every other type. */
-  counts: { pass: number; fail: number; missing: number } | null;
+  counts: { pass: number; fail: number; missing: number; notRun: number } | null;
   /** The merge request of `merge_request.opened`; null for every other type. */
   url: string | null;
 };
