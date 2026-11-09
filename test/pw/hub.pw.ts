@@ -1684,7 +1684,7 @@ test("ARK-285-AC5 a javascript: URL in a gate or an MR shows as text, never a li
   await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
 });
 
-test("ARK-285-AC7 Runs shows every run on one board and graph with filters, rings of steps done, dashed edges to open tickets and what each run unblocks", async ({
+test("ARK-T152 Runs shows every run on one board and graph with filters, rings of steps done, dashed edges to open tickets and what each run unblocks", async ({
   page,
 }) => {
   isolate();
