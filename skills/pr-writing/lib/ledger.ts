@@ -129,7 +129,7 @@ export type Ledger = {
 };
 
 export type LedgerSource =
-  | { runFolder: string; prWriting?: PrWriting; dryRun?: boolean }
+  | { runFolder: string; prWriting?: PrWriting; dryRun?: boolean; heads?: Record<string, string> }
   | { directory: string; base?: string; prWriting?: PrWriting; dryRun?: boolean };
 
 const defaultPrWriting: PrWriting = {
@@ -440,8 +440,11 @@ export function findTemplate(root: string): Ledger["template"] {
 /** The host, token owner and template of the repo at `directory`. */
 function repoIdentity(
   directory: string,
+  remote?: string | null,
 ): Pick<RepoLedger, "path" | "host" | "tokenOwner" | "template"> {
-  const host = hostOf(capture(["git", "remote", "get-url", "origin"], directory));
+  const host = hostOf(
+    remote === undefined ? capture(["git", "remote", "get-url", "origin"], directory) : remote,
+  );
   return {
     path: directory,
     host,
@@ -456,13 +459,14 @@ function repoLedger(
   branch: string,
   base: string,
   dependsOn: string[],
+  knownHead?: string,
 ): Omit<RepoLedger, keyof ReturnType<typeof repoIdentity>> {
   const remoteBase = capture(
     ["git", "rev-parse", "--verify", "--quiet", `origin/${base}`],
     directory,
   );
   const baseRef = remoteBase ? `origin/${base}` : base;
-  const head = capture(["git", "rev-parse", "HEAD"], directory) ?? "unknown";
+  const head = knownHead ?? capture(["git", "rev-parse", "HEAD"], directory) ?? "unknown";
   const baseSha = capture(["git", "merge-base", baseRef, "HEAD"], directory);
   if (baseSha === null)
     return {
@@ -654,7 +658,11 @@ function readEvidence(directory: string): EvidenceEntry[] | null {
     });
 }
 
-function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger {
+function runLedger(source: {
+  runFolder: string;
+  prWriting?: PrWriting;
+  heads?: Record<string, string>;
+}): Ledger {
   const directory = source.runFolder;
   const events: ArkEvent[] = readEvents(directory);
   const state = deriveState(events);
@@ -725,6 +733,7 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
     ? repoGraph(plan)
     : { order: [], upstream: new Map<string, Set<string>>() };
   const worktrees = state.worktrees;
+  const remotes = new Map<string, string | null>();
   const repos = [
     ...order,
     ...worktrees.map((worktree) => worktree.repo).filter((repo) => !order.includes(repo)),
@@ -747,6 +756,10 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
         worktree.path,
       );
       const targetBranch = configured ?? (symbolic ? symbolic.replace(/^origin\//, "") : null);
+      const remote = existsSync(worktree.path)
+        ? capture(["git", "remote", "get-url", "origin"], worktree.path)
+        : null;
+      remotes.set(worktree.path, remote);
       return existsSync(worktree.path)
         ? {
             ...repoLedger(
@@ -755,8 +768,9 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
               worktree.branch,
               targetBranch ?? worktree.base ?? "main",
               dependsOn,
+              source.heads?.[worktree.repo],
             ),
-            ...repoIdentity(worktree.path),
+            ...repoIdentity(worktree.path, remote),
           }
         : ({
             repo: worktree.repo,
@@ -789,10 +803,9 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
         where: plan.summary.changes.flatMap((change) => whereEntries(change.where)),
       }
     : null;
-  const firstRemote =
-    repos[0] && existsSync(worktrees[0]?.path ?? "")
-      ? capture(["git", "remote", "get-url", "origin"], worktrees[0].path)
-      : null;
+  const firstRemote = existsSync(worktrees[0]?.path ?? "")
+    ? (remotes.get(worktrees[0].path) ?? null)
+    : null;
   const host = hostOf(firstRemote);
   const gateNames = events
     .filter((event) => event.type === "gate.answered" && event.data.by !== "auto")

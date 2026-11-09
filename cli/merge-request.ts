@@ -185,16 +185,26 @@ function blockOnGitLab(
 
 export type StaleHead = { repo: string; tested: string | undefined; current: string };
 
+/** The current head of each repo's worktree, one `rev-parse HEAD` per repo. The latest `worktree.created` of a repo wins. */
+function currentHeads(events: ArkEvent[]): Map<string, string> {
+  const heads = new Map<string, string>();
+  for (const event of events)
+    if (event.type === "worktree.created" && existsSync(event.data.path))
+      heads.set(event.data.repo, run(["git", "rev-parse", "HEAD"], event.data.path));
+  return heads;
+}
+
 /** Repos whose worktree head differs from the head the last test.completed event recorded. */
-export function staleHeads(events: ArkEvent[]): StaleHead[] {
+export function staleHeads(
+  events: ArkEvent[],
+  heads: Map<string, string> = currentHeads(events),
+): StaleHead[] {
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) return [];
   const stale: StaleHead[] = [];
-  for (const event of events) {
-    if (event.type !== "worktree.created" || !existsSync(event.data.path)) continue;
-    const current = run(["git", "rev-parse", "HEAD"], event.data.path);
-    const tested: string | undefined = lastTest.data.heads?.[event.data.repo];
-    if (tested !== current) stale.push({ repo: event.data.repo, tested, current });
+  for (const [repo, current] of heads) {
+    const tested: string | undefined = lastTest.data.heads?.[repo];
+    if (tested !== current) stale.push({ repo, tested, current });
   }
   return stale;
 }
@@ -214,7 +224,11 @@ const localId = (criterionId: string): string => criterionId.split("/").pop()!;
  * `verified_by` of a `test` AC needs `base/` and `head/` folders, and the head SHA must be the current head of the repo that ran the case.
  * One line for each missing or bad item, so the refusal names every AC.
  */
-function evidenceProblems(directory: string, events: ArkEvent[], lastTest: ArkEvent): string[] {
+function evidenceProblems(
+  directory: string,
+  lastTest: ArkEvent,
+  currentHeadOf: Map<string, string>,
+): string[] {
   const lines: string[] = [];
   const criteria = runCriteria(directory);
   for (const { id, method } of criteria) {
@@ -228,12 +242,10 @@ function evidenceProblems(directory: string, events: ArkEvent[], lastTest: ArkEv
     if (problem !== undefined) lines.push(`evidence malformed: ${localId(id)}: ${problem}`);
   }
   // Each result.json names the repo that ran its case: its SHA must be that repo's current head.
-  const heads = new Map<string, string>(
-    Object.entries((lastTest.data.heads ?? {}) as Record<string, string>),
-  );
-  for (const event of events)
-    if (event.type === "worktree.created" && existsSync(event.data.path))
-      heads.set(event.data.repo, run(["git", "rev-parse", "HEAD"], event.data.path));
+  const heads = new Map<string, string>([
+    ...Object.entries((lastTest.data.heads ?? {}) as Record<string, string>),
+    ...currentHeadOf,
+  ]);
   for (const { id, method, verified_by } of criteria) {
     if (method !== "test") continue;
     for (const testCase of verified_by) {
@@ -268,7 +280,7 @@ export function assertShippable(
   directory: string,
   events: ArkEvent[],
   state: RunState,
-): void {
+): Map<string, string> {
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
   if (lastTest.data.mode === "quick")
@@ -299,7 +311,8 @@ export function assertShippable(
     );
   if (!lastTest.data.passed)
     throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
-  const [first] = staleHeads(events);
+  const heads = currentHeads(events);
+  const [first] = staleHeads(events, heads);
   if (first !== undefined) {
     throw new ArkError(
       `repo ${first.repo} changed since the last test run (tested ${first.tested?.slice(0, 8) ?? "nothing"}, now ${first.current.slice(0, 8)}): run ark test ${runId} again`,
@@ -327,9 +340,10 @@ export function assertShippable(
       `refactor run: the suites ${state.base_passed === false ? "fail" : "were not run"} at the base commit: run ark test ${runId}`,
     );
 
-  const evidence = evidenceProblems(directory, events, lastTest);
+  const evidence = evidenceProblems(directory, lastTest, heads);
   if (evidence.length > 0)
     throw new ArkError(`refused: evidence is not complete\n${evidence.join("\n")}`);
+  return heads;
 }
 
 /**
@@ -353,9 +367,9 @@ export function mergeRequestOpen(
     throw new ArkError(`cannot open merge requests while the run is in phase ${state.phase}`);
   }
 
-  assertShippable(runId, project, directory, events, state);
+  const heads = assertShippable(runId, project, directory, events, state);
 
-  const ledger = buildLedger({ runFolder: directory });
+  const ledger = buildLedger({ runFolder: directory, heads: Object.fromEntries(heads) });
   const worktrees = worktreeMap(events);
   const plan = loadPlan(directory);
   const { order: graphOrder, upstream } = repoGraph(plan);
@@ -391,7 +405,12 @@ export function mergeRequestOpen(
         }
       } else if (!needsMergeRequest(repo)) continue;
 
-      const host = detectHost(run(["git", "remote", "get-url", "origin"], worktree.path));
+      // The ledger already read this repo's remote; only an unknown host re-reads it, to name the URL in the refusal.
+      const ledgerHost = ledger.repos.find((entry) => entry.repo === repo)?.host;
+      const host =
+        ledgerHost === "github" || ledgerHost === "gitlab"
+          ? ledgerHost
+          : detectHost(run(["git", "remote", "get-url", "origin"], worktree.path));
       const upstreamOpened = [...(upstream.get(repo) ?? [])]
         .sort((left, right) => repos.indexOf(left) - repos.indexOf(right))
         .flatMap((name) => opened.get(name) ?? []);

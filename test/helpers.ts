@@ -1,6 +1,6 @@
 import { afterAll, beforeAll } from "bun:test";
 import type { Subprocess } from "bun";
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
@@ -66,17 +66,27 @@ function git(directory: string, ...args: string[]): void {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
 }
 
+/** One built repo for each distinct file set in this process: repos with the same files share commit ids. */
+const repoTemplates = new Map<string, string>();
+
 export function tempGitRepo(files: Record<string, string> = { "README.md": "# test\n" }): string {
-  const directory = mkdtempSync(join(tmpdir(), "ark-repo-"));
-  git(directory, "init", "-q", "-b", "main");
-  git(directory, "config", "user.name", "Ark Test");
-  git(directory, "config", "user.email", "ark@example.com");
-  for (const [name, content] of Object.entries(files)) {
-    mkdirSync(dirname(join(directory, name)), { recursive: true });
-    writeFileSync(join(directory, name), content);
+  const key = JSON.stringify(Object.entries(files));
+  let template = repoTemplates.get(key);
+  if (template === undefined) {
+    template = mkdtempSync(join(tmpdir(), "ark-repo-template-"));
+    git(template, "init", "-q", "-b", "main");
+    git(template, "config", "user.name", "Ark Test");
+    git(template, "config", "user.email", "ark@example.com");
+    for (const [name, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(template, name)), { recursive: true });
+      writeFileSync(join(template, name), content);
+    }
+    git(template, "add", "-A");
+    git(template, "commit", "-q", "-m", "initial");
+    repoTemplates.set(key, template);
   }
-  git(directory, "add", "-A");
-  git(directory, "commit", "-q", "-m", "initial");
+  const directory = mkdtempSync(join(tmpdir(), "ark-repo-"));
+  cpSync(template, directory, { recursive: true });
   return directory;
 }
 
