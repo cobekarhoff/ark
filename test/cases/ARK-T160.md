@@ -2,7 +2,7 @@
 id: ARK-T160
 title: ARK-T160 ark merge-request open on a run with 3 repos runs rev-parse HEAD at most once for each repo and each ledger git query once for each repo
 level: integration
-technique: process counting through a git shim on PATH, grouped by repo and by git query (boundary: 3 repos, upper bound 3)
+technique: "process counting through a git shim on PATH, grouped by repo and by git query (boundary: 3 repos, upper bound 3)"
 priority: high
 risk: "open asks each repo for rev-parse HEAD in staleHeads, evidenceProblems and the ledger separately, or the ledger repeats remote get-url or symbolic-ref for one repo, so each open starts about 20 git processes more than it needs; or the single head read is taken before a step that moves HEAD and the stale check or the ledger uses an old head"
 status: active
