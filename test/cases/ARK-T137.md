@@ -19,6 +19,8 @@ A run has two GitLab MRs: the downstream !1 lists !2 in waits_for, and !2 is the
 
 ## Steps
 
+Run the case with `bun test test/merge-request-status.test.ts`.
+
 1. Make the host answer `merged` for !2 and run `ark merge-request status <run>`.
 2. Make the host fail for !2 (exit 1) and run the status again.
 3. Add a second repo whose MR is also !2 (on GitHub) but is not an upstream of the downstream repo in the plan, and run the status.

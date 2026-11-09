@@ -19,6 +19,8 @@ Repo lib and repo app (holds lib as the submodule libs/lib) each have a bare rem
 
 ## Steps
 
+Run the case with `bun test test/post-mr.test.ts`.
+
 1. Make the host fail and run `ark bump refresh <run> bump-lib`.
 2. Make the host answer and run `ark merge-request status <run>`.
 3. Run `ark bump refresh <run> bump-lib`, then `ark merge-request status <run>`.
