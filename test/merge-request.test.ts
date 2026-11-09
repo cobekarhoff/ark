@@ -1,6 +1,8 @@
 import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  appendFileSync,
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -36,6 +38,19 @@ function git(cwd: string, ...args: string[]): string {
   const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr.toString()}`);
   return result.stdout.toString().trim();
+}
+
+let bareTemplate: string | undefined;
+
+/** A fresh empty bare repo, copied from one `git init --bare` made per process. */
+function bareRepo(): string {
+  if (bareTemplate === undefined) {
+    bareTemplate = mkdtempSync(join(tmpdir(), "ark-bare-template-"));
+    git(bareTemplate, "init", "--bare");
+  }
+  const directory = mkdtempSync(join(tmpdir(), "ark-bare-"));
+  cpSync(bareTemplate, directory, { recursive: true });
+  return directory;
 }
 
 function commit(worktree: string, name: string) {
@@ -236,19 +251,14 @@ function scenario(
     const source = join(workspace, "repos", name);
     mkdirSync(join(workspace, "repos"), { recursive: true });
     renameSync(tempGitRepo(), source);
-    const base = git(source, "branch", "--show-current");
-    const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
-    git(bare, "init", "--bare");
+    const base = "main"; // tempGitRepo inits on main
+    const bare = bareRepo();
     const host: Host = name === "app" ? hosts.app : hosts.core;
     // `remote get-url` reports the host URL; pushes go to the local bare repo.
-    git(
-      source,
-      "remote",
-      "add",
-      "origin",
-      `https://${host === "github" ? "github.com" : "gitlab.com"}/org/${name}.git`,
+    appendFileSync(
+      join(source, ".git", "config"),
+      `[remote "origin"]\n\turl = https://${host === "github" ? "github.com" : "gitlab.com"}/org/${name}.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tpushurl = ${bare}\n`,
     );
-    git(source, "config", "remote.origin.pushurl", bare);
     const worktree = join(mkdtempSync(join(tmpdir(), "ark-worktree-")), name);
     git(source, "worktree", "add", "-b", `ark/${run}`, worktree, base);
     if (!shape.noCommits.includes(name)) commit(worktree, name);
@@ -635,8 +645,7 @@ function testedRun() {
   const workspace = tempGitRepo({
     "ac.test.ts": `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
   });
-  const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
-  git(bare, "init", "--bare");
+  const bare = bareRepo();
   git(workspace, "remote", "add", "origin", "https://github.com/org/core.git");
   git(workspace, "config", "remote.origin.pushurl", bare);
   writeProject("demo", {
