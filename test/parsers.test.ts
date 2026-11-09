@@ -17,7 +17,7 @@ const fixture = (name: string) =>
 // The file of each result is asserted in its own test below.
 const bare = (results: TestResult[]) => results.map(({ file: _file, ...rest }) => rest);
 
-test("ARK-158-AC5 pytest maps ac markers to per-test results", () => {
+test("ARK-T134 pytest maps ac markers to per-test results", () => {
   const results = parsePytest({ report: fixture("pytest-report.xml"), stdout: "" });
   expect(bare(results)).toEqual([
     { name: "test_sample::test_passes", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
@@ -32,7 +32,7 @@ test("ARK-158-AC5 pytest maps ac markers to per-test results", () => {
   ]);
 });
 
-test("ARK-158-AC5 behave maps feature and scenario tags to per-scenario results", () => {
+test("ARK-T134 behave maps feature and scenario tags to per-scenario results", () => {
   const results = parseBehave({ report: fixture("behave-report.json"), stdout: "" });
   expect(bare(results)).toEqual([
     { name: "Other: Untagged", criteria: [], cases: [], status: "passed" },

@@ -316,6 +316,27 @@ describe("ark test base selection", () => {
     expect(readResult(run.runDirectory, "FAKE-T1", "base").status).toBe("passed");
     expect(readResult(run.runDirectory, "FAKE-T2", "base").status).toBe("failed");
   });
+
+  test("ARK-T122 ARK-389/AC1 a refactor run copies an added test outside test/ to the base, where it runs with the whole suite", () => {
+    const fixture = markerFixture();
+    const workspace = repoWith(fixture, { "e2e/old.test.ts": ["FAKE-T2 old"] });
+    const run = startRun({
+      workspace,
+      suites: [suiteOf("pw", "e2e")],
+      cases: ["FAKE-T1"],
+      kind: "refactor",
+    });
+    commit(run.mirror, "add e2e test", { "e2e/new.test.ts": fixture.testFile(["FAKE-T1 new"]) });
+    fixture.clear();
+
+    const result = ark("test", run.runId);
+    expect(result.code, result.err + result.out).toBe(0);
+    expect(fixture.ran().filter((line) => line.startsWith("base "))).toEqual([
+      "base e2e/new.test.ts",
+      "base e2e/old.test.ts",
+    ]);
+    expect(readResult(run.runDirectory, "FAKE-T1", "base").status).toBe("passed");
+  });
 });
 
 describe("ark test suite paths and quick mode", () => {

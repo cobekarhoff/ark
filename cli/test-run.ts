@@ -416,7 +416,13 @@ async function baseSuitesPassed(
   const plan: { suite: Suite; command: string; files?: string[] }[] = [];
   for (const suite of config.suites) {
     if (refactor || suite.base_files === undefined) {
-      plan.push({ suite, command: suite.command });
+      // A refactor runs whole, but its added test files still need to reach base.
+      const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+      const files =
+        suite.base_files === undefined || base === undefined
+          ? undefined
+          : await ownTestFiles(suite, base, mirror);
+      plan.push({ suite, command: suite.command, files });
       continue;
     }
     const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
