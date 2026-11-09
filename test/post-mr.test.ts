@@ -445,6 +445,43 @@ test("ARK-T142 after the upstream MR squash merges, the refresh moves the submod
   expect(git(appRemote, "ls-tree", appTree.branch, "libs/lib")).toContain(merged);
 });
 
+test("ARK-T142 refreshing a fast-forward merge records the event and makes no commit", () => {
+  const { runId, directory, appTree, submodule, branchHead } = submoduleRun();
+  // a fast-forward merge: the merged commit is the branch head, already pinned
+  fakeHosts({
+    "glab mr view 41 --output json": { state: "merged", merge_commit_sha: branchHead },
+  });
+  const head = git(appTree.path, "rev-parse", "HEAD");
+  const refreshed = ark("bump", "refresh", runId, "bump-lib");
+  expect(refreshed.code, refreshed.err).toBe(0);
+  expect(refreshed.out).toContain(`refreshed bump-lib to ${branchHead.slice(0, 8)}`);
+  expect(git(appTree.path, "rev-parse", "HEAD")).toBe(head);
+  expect(git(submodule, "rev-parse", "HEAD")).toBe(branchHead);
+  const events = readEvents(directory).filter((event) => event.type === "bump.refreshed");
+  expect(events.map((event) => event.data)).toEqual([{ step: "bump-lib", value: branchHead }]);
+});
+
+test("ARK-T142 the refresh commit holds only the gitlink, and unrelated staged work stays staged", () => {
+  const { runId, root, libRemote, libTree, appTree, branchHead } = submoduleRun();
+  const host = join(root, "host");
+  git(root, "clone", "-q", libRemote, host);
+  git(host, "merge", "--squash", `origin/${libTree.branch}`);
+  git(host, "commit", "-q", "-m", "the change (squashed)");
+  const merged = git(host, "rev-parse", "HEAD");
+  git(host, "push", "-q", "origin", "main");
+  expect(merged).not.toBe(branchHead);
+  fakeHosts({
+    "glab mr view 41 --output json": { state: "merged", squash_commit_sha: merged },
+  });
+  writeFileSync(join(appTree.path, "unrelated.txt"), "work in progress\n");
+  git(appTree.path, "add", "unrelated.txt");
+
+  const refreshed = ark("bump", "refresh", runId, "bump-lib");
+  expect(refreshed.code, refreshed.err).toBe(0);
+  expect(git(appTree.path, "show", "--name-only", "--format=", "HEAD")).toBe("libs/lib");
+  expect(git(appTree.path, "diff", "--cached", "--name-only")).toBe("unrelated.txt");
+});
+
 test("ARK-T142 bump refresh refuses a step that is not a bump step and records nothing", () => {
   const { runId, directory } = openRun();
   const refused = ark("bump", "refresh", runId, "implementer", "--to", "1.0.0");

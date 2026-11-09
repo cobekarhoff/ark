@@ -21,11 +21,15 @@ A run has two GitLab MRs: the downstream !1 lists !2 in waits_for, and !2 is the
 
 1. Make the host answer `merged` for !2 and run `ark merge-request status <run>`.
 2. Make the host fail for !2 (exit 1) and run the status again.
+3. Add a second repo whose MR is also !2 (on GitHub) but is not an upstream of the downstream repo in the plan, and run the status.
+4. Run the status of a run whose MRs are all on GitHub.
 
 ## Expected results
 
 - The status exits 0 and prints `  waits for !2 (merged)` under the downstream MR.
 - With the failing host call the status exits 0 and prints `  waits for !2 (unknown)`.
+- With equal MR numbers in two repos the status prints exactly one waits line, `  waits for !2 (merged)`, for the repo that the plan edge names.
+- On GitHub the status prints `  waits for !2 (merged)` with a literal `!`, never `#2`.
 
 Proof: `test/merge-request-status.test.ts`.
 

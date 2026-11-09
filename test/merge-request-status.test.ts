@@ -429,6 +429,45 @@ test("ARK-T137 status prints unknown for an upstream MR when the host call fails
   expect(statusLines(runId)).toContain("  waits for !2 (unknown)");
 });
 
+test("ARK-T137 equal MR numbers in two repos print one wait line, for the upstream of the plan edge", () => {
+  const other = "https://github.com/example/other/pull/2";
+  const runId = openRun([UPSTREAM, merge("other", other, 2)], {
+    downstream: { repo: ".", url: `${GL}/1`, number: 1, waits_for: [2] },
+    plan: {
+      repos: [
+        { repo: "core", why: "the library", depends_on: [] },
+        { repo: "other", why: "unrelated", depends_on: [] },
+        { repo: ".", why: "the consumer", depends_on: [bumpEdge("package", PACKAGE_PIN)] },
+      ],
+    },
+  });
+  fakeHosts({
+    ...glView(1, { state: "opened", has_conflicts: false }),
+    ...glView(2, { state: "merged" }),
+    ...ghView(other, { state: "OPEN", mergeable: "MERGEABLE", statusCheckRollup: [] }),
+  });
+  const waits = statusLines(runId).filter((line) => line.includes("waits for !"));
+  expect(waits).toEqual(["  waits for !2 (merged)"]);
+});
+
+test("ARK-T137 a GitHub MR prints the wait with a literal ! and the upstream state", () => {
+  const upstream = "https://github.com/example/core/pull/2";
+  const runId = openRun([merge("core", upstream, 2)], {
+    downstream: { repo: ".", url: `${GH_CORE}/1`, number: 1, waits_for: [2] },
+    plan: {
+      repos: [
+        { repo: "core", why: "the library", depends_on: [] },
+        { repo: ".", why: "the consumer", depends_on: [bumpEdge("package", PACKAGE_PIN)] },
+      ],
+    },
+  });
+  fakeHosts({
+    ...ghView(`${GH_CORE}/1`, { ...open, statusCheckRollup: [] }),
+    ...ghView(upstream, { state: "MERGED", mergeable: "UNKNOWN", statusCheckRollup: [] }),
+  });
+  expect(statusLines(runId)).toContain("  waits for !2 (merged)");
+});
+
 test("ARK-T138 status shows a submodule bump that points at the upstream branch head", () => {
   const runId = bumpRun("submodule", "libs/lib", { state: "opened" });
   const directory = join(process.env.ARK_HOME!, "projects", "demo", "runs", runId);
