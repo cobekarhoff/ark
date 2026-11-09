@@ -1409,9 +1409,10 @@ const judgment: [string, RegExp][] = [
   ["RISK01", /too vague/],
   ["SEC01", /no Security note/],
   ["ELI01", /describes the code, not the problem/],
+  ["VOICE01", /names who did the work \(run lead, the human\)/],
 ];
 
-test("ARK-T55 the good body warns on none of the eight judgment checks", () => {
+test("ARK-T55 the good body warns on none of the nine judgment checks", () => {
   const good = lintOf(loadFixture("PROV01", "control"), { diff: "+a plain line\n" });
   for (const [id] of judgment)
     expect({ id, result: result(good, id).result }).not.toEqual({ id, result: "warn" });

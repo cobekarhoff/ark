@@ -50,34 +50,27 @@ The rule: if a step must be repeatable, it goes in the `ark` command. If it need
 
 ## Run lifecycle
 
-A run moves through the states below. The `ark` command keeps the transition table, so a run cannot reach `building` before you approve the plan, and cannot open an MR before every criterion passes at head.
+A run moves through the seven phases below; `cli/lifecycle.ts` lists them and `cli/transitions.ts` keeps the transition table, so a run cannot reach `building` before you approve the plan, and cannot open an MR before every criterion passes at head. `ark status <run>` prints the phase.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> intake
-  intake --> evaluating: run lead starts
-  evaluating --> awaiting_criteria: evaluation.md written
+  [*] --> awaiting_criteria: run lead starts, evaluator writes evaluation.md
   awaiting_criteria --> planning: you accept each AC's method and verified_by
   planning --> awaiting_strategy: 2 or more strategy cards
-  planning --> plan_gate: 1 card
   awaiting_strategy --> planning: you pick a card, or ask for a design round
-  plan_gate --> planning: you ask for changes, or a decision is open
-  plan_gate --> building: you approve
-  building --> testing: implementer and validator finish
-  testing --> reviewing: every AC passing at head
-  testing --> building: a test case fails, rounds left
-  reviewing --> building: a finding sent back, rounds left
-  reviewing --> merge_requests_open: nothing sent back
-  testing --> escalation: round budget spent
-  reviewing --> escalation: round budget spent
+  planning --> planning: plan check valid, you ask for changes or a decision is open
+  planning --> building: you approve the plan
+  building --> building: a test case fails or a finding is sent back, rounds left
+  building --> escalation: round budget spent
   escalation --> building: one more round (you, or auto twice), or you take over
   escalation --> closed: you abort
+  building --> merge_requests_open: every AC passing at head, nothing sent back
   merge_requests_open --> merge_requests_open: CI fails, a comment, or a conflict starts an MR round
   merge_requests_open --> closed: merged · abandoned · handed off
   closed --> [*]
 ```
 
-`building`, `testing` and `reviewing` form a loop. Each return to `building` after the first build is a round. The round budget defaults to two. When it is spent, the run opens an escalation gate. With `gates.escalation: auto`, Ark grants the first two extra rounds itself and asks you after that. If you take over, you are the implementer and the run continues through testing and review.
+Testing and review happen inside `building`: the implementer and validator finish, `ark test` runs, the reviewer reports. Each return to implementation after the first build is a round. The round budget defaults to two. When it is spent, the run opens an escalation gate. With `gates.escalation: auto`, Ark grants the first two extra rounds itself and asks you after that. If you take over, you are the implementer and the run continues through testing and review. The plan gate is `planning` with a valid `plan.yml`; `ark status` names it as the waiting gate.
 
 A run closes with one outcome: `merged`, `abandoned`, `aborted` or `handed_off`. A project with `merge_requests: none` ends every run `handed_off`: the branches stay in their clones for a person to review and nothing is pushed.
 
