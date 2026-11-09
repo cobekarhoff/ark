@@ -1,20 +1,21 @@
-// test ids: lane (data-lane), run-card (data-lane, data-run, data-ticket), older-runs, graph-filter
-// (data-filter, aria-pressed), graph-node, graph-edge (data-blocking), unblocks (data-ticket),
-// ring (data-steps-done, data-steps-total)
 import { useState } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
-import {
-  closedRuns,
-  isUnknownProject,
-  scoped,
-  ticketEntries,
-  ticketKey,
-  type TicketEntry,
-} from "./derive.ts";
+import { isUnknownProject, scoped, ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
 import { Ring, Unknown, UnknownProject, known } from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { ticketHref, useLive, useProject } from "./store.tsx";
-import type { RunView, Snapshot } from "../types.ts";
+import type { RunView, Snapshot, TicketRunView } from "../types.ts";
+
+/** Newest-first closed runs of every ticket: names and phases of `ticket_runs[].all`, with the ticket. */
+function closedRuns(entries: TicketRunView[]): { run: string; ticket: string; project: string }[] {
+  return entries
+    .flatMap((entry) =>
+      entry.all
+        .filter((candidate) => candidate.phase === "closed")
+        .map((candidate) => ({ run: candidate.run, ticket: entry.ticket, project: entry.project })),
+    )
+    .toSorted((left, right) => right.run.localeCompare(left.run));
+}
 
 const lanes = [
   ["Queued", "waiting for a slot", "p-none"],

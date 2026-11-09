@@ -1398,10 +1398,6 @@ test("ARK-285-AC2 an omp that never answers leaves usage unknown, not a guess, a
   expect((await fetch(`${baseUrl}/`)).status).toBe(200);
 }, 60_000);
 
-test("ARK-T81 Map.tsx is gone", () => {
-  expect(existsSync(join(root, "hub/page/Map.tsx"))).toBe(false);
-});
-
 test("ARK-285-AC11 with every new reader running and an open MR with a 17000-case report, / and /nope answer with a p95 below 200 ms", async () => {
   isolatedEnvironment();
   const mergeRequest = "https://github.com/example/repo/pull/85";

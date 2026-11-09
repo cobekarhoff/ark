@@ -1,4 +1,3 @@
-// test ids: graph-node (data-ticket, data-state), graph-edge (data-from, data-to, data-blocking)
 import { ArrowMarker, Ring } from "./format.tsx";
 import { edgePath, layout } from "./layout.ts";
 

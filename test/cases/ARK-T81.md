@@ -5,7 +5,8 @@ level: unit
 technique: file absence
 priority: medium
 risk: The retired Map page returns to the hub source
-status: active
+status: retired
+retired_reason: asserted a file layout (Map.tsx absent), not behavior
 changed_by: 2026-11-07-ARK-322-1
 ---
 

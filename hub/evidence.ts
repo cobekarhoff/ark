@@ -1,11 +1,9 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { evidenceFile, runCriteria } from "../cli/criteria.ts";
+import { evidenceFile, evidenceProblem, frontmatter, runCriteria } from "../cli/ticket.ts";
 import { isCaseId } from "../cli/criterion-id.ts";
 import { exec } from "../cli/exec.ts";
-import { evidenceProblem } from "../cli/merge-request.ts";
-import { projectDirectory } from "../cli/paths.ts";
-import { isInside } from "../cli/usage/index.ts";
+import { isInside, projectDirectory } from "../cli/paths.ts";
 import { resolveEvidenceImage } from "./run-detail.ts";
 import type { TicketFile } from "./sources.ts";
 import type {
@@ -32,18 +30,14 @@ const evidenceFileLimitBytes = 256 << 10;
 const outputLimitChars = 20_000;
 const imageName = /^(.+)\.(png|jpe?g|gif|webp)$/i;
 const imageInText = /[^\s`'"()<>[\]]+\.(?:png|jpe?g|gif|webp)\b/gi;
-const frontMatter = /^---\r?\n([\s\S]*?)\r?\n---/;
 
 /** A front-matter value as text; "" when the key is missing or not text or a number. */
 const field = (front: Record<string, unknown>, key: string): string =>
   typeof front[key] === "string" || typeof front[key] === "number" ? String(front[key]).trim() : "";
 
 function frontOf(source: string): Record<string, unknown> | null {
-  const match = source.match(frontMatter);
-  if (!match) return null;
   try {
-    const front = Bun.YAML.parse(match[1]);
-    return front && typeof front === "object" ? (front as Record<string, unknown>) : null;
+    return frontmatter(source).fields ?? null;
   } catch {
     return null;
   }
