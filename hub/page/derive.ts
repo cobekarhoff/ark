@@ -1,5 +1,5 @@
 // What several pages compute from one snapshot. Pure: no hook, no clock but the `age` the caller passes.
-import { attentionOf, known } from "./format.tsx";
+import { attentionOf, known, phaseClass } from "./format.tsx";
 import { gatePhases, isFinishedTicket } from "../../cli/lifecycle.ts";
 import type {
   Agent,
@@ -160,11 +160,11 @@ export function ticketEntries(snapshot: Snapshot): Map<string, TicketEntry> {
     if (run && needsHuman(snapshot, run))
       entry = { state: "needs me", tone: "p-gate", lane: "Needs me" };
     else if (run?.phase === "merge_requests_open")
-      entry = { state: "awaiting merge", tone: "p-review", lane: "Awaiting merge" };
+      entry = { state: "awaiting merge", tone: phaseClass(run.phase), lane: "Awaiting merge" };
     else if (run)
       entry = {
         state: run.phase === "planning" ? "planning" : "building",
-        tone: run.phase === "planning" ? "p-plan" : "p-build",
+        tone: phaseClass(run.phase),
         lane: "Building",
       };
     else if (last?.phase === "closed") entry = { state: "closed", tone: "p-done", lane: "Closed" };

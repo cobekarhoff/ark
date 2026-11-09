@@ -160,8 +160,7 @@ export function createSnapshotReader() {
         step,
         planned: null,
         terminal: null,
-        live: false,
-        running: true,
+        presence: "running",
         activity: listed.activity,
       });
     }
@@ -633,7 +632,7 @@ export function createSnapshotReader() {
         for (const run of current.runs)
           if (run.agents !== "unknown")
             for (const agent of run.agents)
-              if (agent.live && agent.terminal) handles.add(agent.terminal);
+              if (agent.presence === "live" && agent.terminal) handles.add(agent.terminal);
       return handles;
     },
     /**

@@ -2,19 +2,19 @@
 
 Ark improves only if each run teaches something and the human controls what changes. This playbook has two parts:
 
-- **Close check** (`retro <run>`): runs after every run closes. Master Chief and the run lead produce `retro.md`, and Master Chief asks the human three questions.
-- **Deep interview** (`retro interview`): runs across several retros, on request or every N runs. Master Chief interviews the human and brings improvement proposals for approval.
+- **Write retro.md** (`retro <run>`): runs after every run closes. Master Chief closes the run and computes the numbers, and the run lead writes `retro.md`. It asks the human nothing.
+- **Deep interview** (`retro interview`): runs after every 10 closed runs, or on request. Master Chief interviews the human and brings the open improvement proposals for approval.
 
-Master Chief runs both parts. The run lead helps only in the close check. Neither role writes product code.
+Master Chief runs the interview. The run lead writes `retro.md`. Neither role writes product code.
 
 ## Rules
 
 - An improvement proposal changes nothing until the human approves it. A decision made by an agent is never approval.
 - Every proposal has evidence and a scope. A proposal without both is not shown to the human.
-- Ask one question at a time. Give a recommended answer with each question, except the third close question, and wait for the human before the next question.
-- Never ask the human to score Ark, the run or the agents. Report numbers and ask the three questions.
+- Ask one question at a time. Give a recommended answer with each question, and wait for the human before the next question.
+- Never ask the human to score Ark, the run or the agents. Report numbers and ask about patterns.
 
-## Part 1: Close check
+## Part 1: Write retro.md
 
 ### 1. Compute the numbers
 
@@ -31,15 +31,15 @@ ark retro <run>
 
 ### 2. The run lead writes `retro.md`
 
-A run is not closed until `retro.md` exists. `ark run close` records the outcome, but Master Chief does not tell the human that the run is done until `retro.md` is in the run folder and holds the close check.
+A run is not closed until `retro.md` exists. `ark run close` records the outcome, but Master Chief does not tell the human that the run is done until `retro.md` is in the run folder.
 
 Ask the run lead to write it:
 
 ```sh
-orca orchestration send --retry-request <id> --to <run-lead-handle> --subject "Write retro.md for <run>" --type handoff --body "Read metrics.json and events.ndjson in <run-folder>. Write retro.md as the retro playbook describes." --json
+orca orchestration send --to <run-lead-handle> --subject "Write retro.md for <run>" --type handoff --body "Read metrics.json and events.ndjson in <run-folder>. Write retro.md as the retro playbook describes." --json
 ```
 
-If the send answers `already processing`, follow the rule "A busy agent" in `playbooks/chief.md` section 7: the same `--retry-request <id>` for every try, 30 seconds between tries, up to 5 times.
+If the send answers `already processing`, the agent is in the middle of a turn: wait 30 seconds, then send again with the request UUID that Orca printed, up to 5 times. Never treat the message as delivered until a send succeeds.
 
 If the run lead has stopped, start a new run lead with the run folder. The event log is the record, so a fresh run lead can write the retro from `events.ndjson`, `state.json` and `metrics.json`.
 
@@ -49,34 +49,11 @@ The run lead writes `<run-folder>/retro.md` with these sections, in this order:
 2. **Numbers.** Copy them from `metrics.json`; do not recompute them. Cost in USD and tokens per run, role and model (including `cost.by_role.designer`), the ratio of review cost to build cost, wall time with gate wait separate (including the strategy gate wait), rework (rounds, escalations, findings sent back), design rounds (`design_rounds`; they never count as rework and never open the escalation gate), decisions (`decisions.total` and `decisions.overridden`), human intervention (plan-gate changes, MR comments and commits after it opened), the comparison with earlier runs, the models each step really ran (`actual_models`, from the session files the step owns; `helper_models` lists helper calls apart; `cost.by_step.unassigned` is the cost no step owned, plus every `model changed:` line of `ark retro` output, which means the harness failed over from the plan model), and `same_vendor_review` (true means every model of a reviewer step ran on the implementer's vendor, so the review was not cross-vendor; the line `same vendor review:` names the steps; a step that ran two vendors is `mixed`, named in the line `mixed review steps:` of `ark retro` output, and counts as neither; it is a report, not a block). A value that is `unknown` stays `unknown`.
 3. **What went wrong.** Each problem once: what happened, which step or event, what it cost (rounds, tokens, time). Cite the event sequence number from `events.ndjson` or the finding. Include escaped defects linked to this run.
 4. **Orchestration.** From the orchestration section of `metrics.json`: agent crashes and restarts, stalled workers, dead dispatches, tool errors, context overflows, idle gaps, and the cost of Master Chief and the run lead. For each problem, name the owner of the fix: Ark, Orca, Plannotator or the harness.
-5. **Improvement proposals.** Zero or more. Each has the shape in "Proposal format" below. For each overridden choice (a strategy answer or a plan decision where the human did not take the recommended option), write one proposal of scope `project`. Its change is one `learnings.md` entry that says what the human chose over what, and why if the human said so. Name the strategy or decision ID and its event as the evidence. Master Chief shows each one at the close check. It changes nothing until the human approves it.
-6. **Close check.** Master Chief fills this in (step 3). The run lead leaves the heading and writes nothing under it.
+5. **Improvement proposals.** Zero or more. Each has the shape in "Proposal format" below. For each overridden choice (a strategy answer or a plan decision where the human did not take the recommended option), write one proposal of scope `project`. Its change is one `learnings.md` entry that says what the human chose over what, and why if the human said so. Name the strategy or decision ID and its event as the evidence. The deep interview raises it. It changes nothing until the human approves it.
 
 The run lead reads `learnings.md` as a source of what it already knew: a problem that a learning already covers is evidence that the learning did not work, and the proposal says so.
 
-### 3. Master Chief asks the three close questions
-
-When `retro.md` exists, give the human the summary and the numbers in a few lines. Then ask these three questions, one at a time, and wait for each answer. Do not offer a score, a rating or a "how did Ark do" question. Let the human pick more than one option for the first two questions: several problems can share the pain, and several changes can land at once.
-
-1. **What caused the most pain in this run?** Recommended answer: the biggest item under "What went wrong", named with its cost.
-2. **What should change now?** Recommended answer: the proposal with the strongest evidence, named.
-3. **What surprised you?** No recommended answer is needed: this one asks for the human's own observation. Offer none and say so ("no recommendation: this is your observation").
-
-Master Chief writes the answers under the "Close check" heading of `retro.md`, in the human's words, as three bullets:
-
-```markdown
-- Biggest pain: <answer>
-- Change now: <answer>
-- Surprise: <answer>
-```
-
-Master Chief does not rewrite or grade the answers. If the human names a change, add it to "Improvement proposals" with the human's answer as its evidence.
-
-### 4. Show the proposals
-
-Show each proposal and ask: "Approve, change or reject?" Recommended: approve for a proposal with two or more pieces of evidence, otherwise change it. Apply an approved proposal as in "Apply an approved proposal" below. Rejected proposals stay in `retro.md` with the word `rejected` and the reason, so the deep interview does not raise them again without new evidence.
-
-The run is closed when `retro.md` has its close check, and every proposal has an answer. Tell the human the run is closed.
+The run is closed when `retro.md` exists. Master Chief tells the human the run is closed.
 
 ## Proposal format
 
@@ -133,19 +110,15 @@ A skill change is a diff to the skill wherever it lives.
 Master Chief runs a deep interview in two cases:
 
 - **On request.** The human says so, for example `/skill:ark retro interview`.
-- **Every N runs.** N is 5 unless the human asked for another number (then record it in `learnings.md`). At the start of a ticket, count closed runs with `retro.md`:
-  ```sh
-  find ~/.ark/projects/<project>/runs -name retro.md -newer <latest-interview-file> | wc -l
-  ```
-  Use the newest file in `~/.ark/projects/<project>/interviews/` as `<latest-interview-file>`. When that folder is empty, count every `retro.md` (drop `-newer`). If the count is N or more, offer one: "You have closed <count> runs since the last deep interview. Do one now? Recommended: yes." Do not start it until the human says yes.
+- **Every 10 closed runs.** `ark chief state` prints `## Interview` with `Closed runs since the last interview: <n>`, and ` (due)` when n is 10 or more. Master Chief reads it at the start and at each ticket. When it says due, offer one: "You have closed <n> runs since the last deep interview. Do one now? Recommended: yes." Do not start it until the human says yes. The count is of runs closed after the newest file in `~/.ark/projects/<project>/interviews/`, so the interview file written in step 3 restarts it.
 
 ### 1. Read across the retros
 
-Read every `retro.md` and `metrics.json` of the project, newest first, and the project's `learnings.md`. Build a short list of patterns that repeat in at least two retros. Examples: the same problem under "What went wrong" in several runs, the same step that cost the most, the same escalation reason, the same human change at the plan gate. Each pattern needs its evidence: run ids and the lines or numbers.
+Read every `retro.md` and `metrics.json` of the closed runs counted by `ark chief state`, newest first, and the project's `learnings.md`. List the open improvement proposals (`Status: proposed`) of those runs, grouped by symptom and sorted by the number of runs that show it. Each group needs its evidence: run ids and the lines or numbers. Also note patterns that repeat in at least two retros without a proposal. Examples: the same problem under "What went wrong" in several runs, the same step that cost the most, the same escalation reason, the same human change at the plan gate. Each pattern needs its evidence: run ids and the lines or numbers.
 
 ### 2. Ask one question at a time
 
-Ask about one pattern at a time. Each question names the pattern, shows its evidence in one or two lines, and gives a recommended answer:
+Ask about one group or pattern at a time, the group with most runs first. Each question names it, shows its evidence in one or two lines, and gives a recommended answer:
 
 > In runs `<run A>` and `<run B>`, the validator missed the same setup step and cost one round each time (`metrics.json` rework). Should `learnings.md` say so? Recommended: yes, add "Run the seed script before the E2E suite", because it fixes both cases.
 

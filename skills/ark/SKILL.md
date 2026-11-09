@@ -11,15 +11,15 @@ This skill is the only entry to Ark. It picks one playbook, loads it, and follow
 
 Read the first word of the arguments. It is the playbook name.
 
-| Name              | Arguments      | Playbook file                                | Who runs it                                                                       |
-| ----------------- | -------------- | -------------------------------------------- | --------------------------------------------------------------------------------- |
-| `chief`           | none           | `playbooks/chief.md`                         | The human opens it in an Orca terminal. It is Master Chief.                       |
-| `run-lead`        | `<run>`        | `playbooks/run-lead.md`                      | Master Chief starts it, one per run.                                              |
-| `worker`          | `<run> <step>` | `playbooks/worker.md`                        | A run lead starts it, one per step.                                               |
-| `bootstrap`       | none           | `playbooks/bootstrap.md`                     | The human, once per project.                                                      |
-| `brainstorm`      | none           | `playbooks/brainstorm.md`                    | The human opens it. It is the brainstorm partner and writes proposed tickets.     |
-| `retro <run>`     | `<run>`        | `playbooks/retro.md`, Part 1: Close check    | The run lead writes `retro.md`, then Master Chief asks the human three questions. |
-| `retro interview` | `interview`    | `playbooks/retro.md`, Part 2: Deep interview | Master Chief, on request or every few runs.                                       |
+| Name              | Arguments      | Playbook file                                | Who runs it                                                                   |
+| ----------------- | -------------- | -------------------------------------------- | ----------------------------------------------------------------------------- |
+| `chief`           | none           | `playbooks/chief.md`                         | The human opens it in an Orca terminal. It is Master Chief.                   |
+| `run-lead`        | `<run>`        | `playbooks/run-lead.md`                      | Master Chief starts it, one per run.                                          |
+| `worker`          | `<run> <step>` | `playbooks/worker.md`                        | A run lead starts it, one per step.                                           |
+| `bootstrap`       | none           | `playbooks/bootstrap.md`                     | The human, once per project.                                                  |
+| `brainstorm`      | none           | `playbooks/brainstorm.md`                    | The human opens it. It is the brainstorm partner and writes proposed tickets. |
+| `retro <run>`     | `<run>`        | `playbooks/retro.md`, Part 1: Write retro.md | The run lead writes `retro.md`.                                               |
+| `retro interview` | `interview`    | `playbooks/retro.md`, Part 2: Deep interview | Master Chief, on request or every 10 closed runs.                             |
 
 ## Steps
 
@@ -33,7 +33,7 @@ Read the first word of the arguments. It is the playbook name.
      worker <run> <step>      Worker: do one step of a run
      bootstrap                Teach Ark a new project
      brainstorm               Brainstorm partner: write proposed tickets with the human
-     retro <run>              Close check for one run
+     retro <run>              Write retro.md for one run
      retro interview          Deep interview across several runs
    ```
 

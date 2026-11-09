@@ -1036,7 +1036,7 @@ test("ARK-285-AC3 each agent is waiting on a prompt, idle N min, working or unkn
   const agents = openRunOf(answered, run).agents;
   if (agents === "unknown") throw new Error("agents are unknown");
   const extra = agents.find((agent) => agent.step === "extra");
-  expect(extra).toMatchObject({ live: false, running: true, terminal: null });
+  expect(extra).toMatchObject({ presence: "running", terminal: null });
   expect(agents.find((agent) => agent.step === "prompt")?.activity.last_line).toBe(
     "bun test test/hub.test.ts",
   );
@@ -2503,6 +2503,6 @@ test("ARK-293-AC3 Master Chief listed by Orca and by worktree ps is one agent of
   if (agents === "unknown") throw new Error("agents are unknown");
   const chiefs = agents.filter((agent) => agent.role === "Master Chief");
   expect(chiefs).toHaveLength(1);
-  expect(chiefs[0]).toMatchObject({ model: "chief-model", live: true });
+  expect(chiefs[0]).toMatchObject({ model: "chief-model", presence: "live" });
   expect(chiefs[0].activity.kind).toBe("working");
 }, 60_000);
