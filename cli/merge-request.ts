@@ -116,14 +116,33 @@ function absentLiterals(
   present: { criterion: string; literal: string }[];
 } {
   // A path string is present when it names a tracked file or folder at HEAD. A lone `/` strips to "" (the root
-  // tree), so an empty path never counts.
+  // tree), so an empty path never counts. One `ls-tree` for each repo answers every path check.
+  const trees = new Map<number, Set<string>>();
+  const tree = (i: number) => {
+    let paths = trees.get(i);
+    if (paths === undefined) {
+      const listing = spawn(
+        ["git", "ls-tree", "-r", "-t", "-z", "--name-only", "HEAD"],
+        repoPaths[i]!,
+      );
+      paths = new Set(listing.ok ? listing.stdout.split("\0") : []);
+      trees.set(i, paths);
+    }
+    return paths;
+  };
+  const memo = new Map<string, boolean>();
   const found = (literal: string) => {
-    const treePath = literal.replace(/\/$/, "");
-    return repoPaths.some(
-      (repoPath) =>
-        spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], repoPath).ok ||
-        (treePath !== "" && spawn(["git", "cat-file", "-e", `HEAD:${treePath}`], repoPath).ok),
-    );
+    let result = memo.get(literal);
+    if (result === undefined) {
+      const treePath = literal.replace(/\/$/, "");
+      result = repoPaths.some(
+        (repoPath, i) =>
+          (treePath !== "" && tree(i).has(treePath)) ||
+          spawn(["git", "grep", "-F", "-q", "-e", literal, "HEAD"], repoPath).ok,
+      );
+      memo.set(literal, result);
+    }
+    return result;
   };
   const absent: { criterion: string; literal: string }[] = [];
   const present: { criterion: string; literal: string }[] = [];
