@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Agents } from "./Agents.tsx";
+import { ClosedBand } from "./ClosedBand.tsx";
 import {
   ArrowMarker,
   Cost,
@@ -314,10 +315,18 @@ function Body({
     <>
       {closed ? (
         <div className="closed-banner" data-testid="closed-banner">
-          <span className="pill">closed</span> {run.run}
-          {detail?.outcome ? ` · ${detail.outcome}` : ""}{" "}
+          <span className="pill">closed</span> {run.run}{" "}
           <span className="mut ended">no agents in Orca</span>
         </div>
+      ) : null}
+      {closed && detail?.band ? (
+        <ClosedBand
+          run={run.run}
+          outcome={detail.outcome}
+          closedAt={detail.closed_at}
+          band={detail.band}
+          files={detail.files}
+        />
       ) : null}
       <Strip run={run} />
       <div className="runcols">

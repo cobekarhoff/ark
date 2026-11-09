@@ -38,6 +38,8 @@ const count = (value: unknown): number => (Array.isArray(value) ? value.length :
 const plural = (amount: number, word: string) => `${amount} ${word}${amount === 1 ? "" : "s"}`;
 
 type Describe = (data: Record<string, any>) => Pick<TimelineEntry, "why" | "counts" | "url">;
+/** One rule for "criterion passes", for the timeline counts and the closed band: passing, or a manual criterion answered ok. */
+export const isProved = (status: string) => status === "passing" || status === "manual ok";
 const plain = (why: string) => ({ why, counts: null, url: null });
 
 /** The events that are decisions, and the sentence for each: the payload fields are those the `cli/` writers record. */
@@ -63,7 +65,7 @@ const describers: Record<string, Describe> = {
     const statuses = Object.values<string>(data.criteria ?? {});
     const counts = {
       // A manual criterion counts as proved at `manual ok`, as failing at `manual problem`, else as missing.
-      pass: statuses.filter((status) => status === "passing" || status === "manual ok").length,
+      pass: statuses.filter(isProved).length,
       fail: statuses.filter((status) => status === "failing" || status === "manual problem").length,
       missing: statuses.filter((status) => status === "missing" || status === "manual pending")
         .length,

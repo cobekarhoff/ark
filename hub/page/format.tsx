@@ -4,7 +4,7 @@ import { currentProject, withProject } from "./store.tsx";
 import type { PlanStepView, RunProgress, RunView, Snapshot } from "../types.ts";
 import type { Phase as RunPhase } from "../../cli/lifecycle.ts";
 
-const dollars = new Intl.NumberFormat("en-US", {
+export const dollars = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 2,

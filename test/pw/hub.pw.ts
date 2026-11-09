@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -1683,7 +1684,7 @@ test("ARK-285-AC5 a javascript: URL in a gate or an MR shows as text, never a li
   await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
 });
 
-test("ARK-285-AC7 Runs shows every run on one board and graph with filters, rings of steps done, dashed edges to open tickets and what each run unblocks", async ({
+test("ARK-T152 Runs shows every run on one board and graph with filters, rings of steps done, dashed edges to open tickets and what each run unblocks", async ({
   page,
 }) => {
   isolate();
@@ -1765,9 +1766,9 @@ test("ARK-285-AC7 Runs shows every run on one board and graph with filters, ring
   await expect(lane("Building").getByTestId("run-card")).toHaveCount(2);
   await expect(lane("Needs me").getByTestId("run-card")).toHaveCount(0);
   await expect(lane("Awaiting merge").getByTestId("run-card")).toHaveCount(1);
-  // Closed: the last 5, and a count of the older run.
-  await expect(lane("Closed").getByTestId("run-card")).toHaveCount(5);
-  await expect(lane("Closed").getByTestId("older-runs")).toHaveText("1 older run in graph");
+  // Closed: all 6 show (the lane pages by 20), with no older-runs control.
+  await expect(lane("Closed").getByTestId("run-card")).toHaveCount(6);
+  await expect(lane("Closed").getByTestId("older-runs")).toHaveCount(0);
 
   // A ring of steps done, from plan.yml: 1 of 3 for ARK-601. A title wraps to 2 lines.
   const ring = lane("Building").locator('[data-ticket="ARK-601"] [data-testid="ring"]');
@@ -1825,10 +1826,6 @@ test("ARK-285-AC7 Runs shows every run on one board and graph with filters, ring
   expect(
     await page.getByTestId("graph-edge").evaluate((path) => getComputedStyle(path).strokeDasharray),
   ).toBe("none");
-  // The older-runs button opens the Old filter too.
-  await filter("Active").click();
-  await lane("Closed").getByTestId("older-runs").click();
-  await expect(filter("Old")).toHaveAttribute("aria-pressed", "true");
 
   // A click on a run opens its run page.
   await lane("Building").locator('[data-ticket="ARK-601"]').click();
@@ -5249,6 +5246,345 @@ test("ARK-T78 ARK-329/AC3 the ticket page shows the snapshot title at once, show
   replaceFile(original.replace("First text", "Third text"));
   await expect(problem).toHaveText("Third text", { timeout: 5000 });
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------- ARK-353 closed runs
+
+const closedRunId = (ticket: string) => runId(ticket);
+const closedTicket = (id: string) => ({ id, title: `Title of ${id}` });
+const bandOf = (page: Page) => page.getByTestId("closed-band");
+
+test("ARK-T144 the page of a merged closed run opens with a summary band of outcome, wall time, ACs and metrics", async ({
+  page,
+}) => {
+  isolate();
+  const run = closedRunId("ARK-801");
+  writeRun({
+    project: "p",
+    run,
+    ticket: closedTicket("ARK-801"),
+    phase: "closed",
+    outcome: "merged",
+    closedAfter: 4320,
+    criteria: ["A1", "A2", "A3", "A4"],
+    statuses: { A1: "passing", A2: "passing", A3: "passing", A4: "failing" },
+    metricsText: JSON.stringify({
+      cost: { total_usd: 4.2 },
+      rework: { rounds: 2 },
+      time: { wall_seconds: 60 },
+    }),
+  });
+  installFakeTools({});
+  await open(page, await launch(), `run/${run}`);
+
+  const band = bandOf(page);
+  await expect(band).toBeVisible();
+  await expect(band.getByTestId("band-outcome")).toHaveText("merged");
+  await expect(band.getByTestId("band-wall")).toHaveText("1h 12m");
+  await expect(band.getByTestId("band-acs")).toHaveText("3 of 4");
+  await expect(band.getByTestId("band-cost")).toHaveText("$4.20");
+  await expect(band.getByTestId("band-rounds")).toHaveText("2");
+  // Above the plan, and the outcome shows once.
+  const bandTop = (await band.boundingBox())!;
+  const planTop = (await page.locator(".plan-panel").boundingBox())!;
+  expect(bandTop.y + bandTop.height).toBeLessThanOrEqual(planTop.y);
+  await expect(page.getByTestId("band-outcome")).toHaveCount(1);
+  await expect(page.getByTestId("closed-banner")).not.toContainText("merged");
+  await checkpoint(page, "closed-band-merged");
+});
+
+test("ARK-T145 a closed run with no or damaged metrics.json shows not recorded for cost and rounds and keeps the other values", async ({
+  page,
+}) => {
+  isolate();
+  const make = (ticket: string, extra: Partial<FixtureRun>) => {
+    writeRun({
+      project: "p",
+      run: closedRunId(ticket),
+      ticket: closedTicket(ticket),
+      phase: "closed",
+      outcome: "merged",
+      closedAfter: 2700,
+      criteria: ["A1", "A2", "A3"],
+      statuses: { A1: "passing", A2: "passing", A3: "failing" },
+      ...extra,
+    });
+    return closedRunId(ticket);
+  };
+  const runA = make("ARK-811", {});
+  const runB = make("ARK-812", { metricsText: "{ not json" });
+  const runC = make("ARK-813", {
+    outcome: "aborted",
+    criteria: [],
+    statuses: undefined,
+    closedAfter: 600,
+  });
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  for (const run of [runA, runB]) {
+    await open(page, baseUrl, `run/${run}`);
+    const band = bandOf(page);
+    await expect(band.getByTestId("band-cost")).toHaveText("not recorded");
+    await expect(band.getByTestId("band-rounds")).toHaveText("not recorded");
+    await expect(band.getByTestId("band-outcome")).toHaveText("merged");
+    await expect(band.getByTestId("band-wall")).toHaveText("45m");
+    await expect(band.getByTestId("band-acs")).toHaveText("2 of 3");
+    if (run === runA) await checkpoint(page, "closed-band-not-recorded");
+  }
+  await open(page, baseUrl, `run/${runC}`);
+  const band = bandOf(page);
+  await expect(band.getByTestId("band-outcome")).toHaveText("aborted");
+  await expect(band.getByTestId("band-wall")).toHaveText("10m");
+  await expect(band.getByTestId("band-acs")).toHaveText(/^(0 of 0|–)$/);
+  await expect(band.getByTestId("band-cost")).toHaveText("not recorded");
+  await expect(band).not.toContainText("NaN");
+  await expect(band).not.toContainText("$0");
+});
+
+test("ARK-T146 the MR card of a closed run takes its state from the run outcome and gh is never asked about a closed run", async ({
+  page,
+}) => {
+  isolate();
+  const url = (number: number) => `https://github.com/example/repo/pull/${number}`;
+  const outcomes = ["merged", "aborted", "abandoned", "handed_off"] as const;
+  const runs = outcomes.map((outcome, index) => {
+    const ticket = `ARK-82${index}`;
+    writeRun({
+      project: "p",
+      run: closedRunId(ticket),
+      ticket: closedTicket(ticket),
+      phase: "closed",
+      outcome,
+      mergeRequests: [{ repo: ".", url: url(index + 1), number: index + 1 }],
+    });
+    return closedRunId(ticket);
+  });
+  const openRun = closedRunId("ARK-829");
+  writeRun({
+    project: "p",
+    run: openRun,
+    ticket: closedTicket("ARK-829"),
+    phase: "merge_requests_open",
+    mergeRequests: [{ repo: ".", url: url(9), number: 9 }],
+  });
+  const state = installFakeTools({});
+  const baseUrl = await launch();
+
+  // One refresh finished: gh was asked about the open run.
+  const log = () =>
+    existsSync(join(state, "gh.log")) ? readFileSync(join(state, "gh.log"), "utf8") : "";
+  await expect.poll(log).toContain(url(9));
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("mr")).toHaveAttribute("data-state", "open");
+
+  const expected = ["merged", "closed", "closed", null];
+  for (const [index, run] of runs.entries()) {
+    await open(page, baseUrl, `run/${run}`);
+    await expect(bandOf(page)).toBeVisible();
+    if (expected[index] === null) await expect(page.getByTestId("mr")).toHaveCount(0);
+    else await expect(page.getByTestId("mr-state")).toHaveText(expected[index]);
+    await checkpoint(page, `closed-mr-${outcomes[index]}`);
+  }
+  // Let another refresh run, then read the log.
+  await expect.poll(() => log().split(url(9)).length - 1).toBeGreaterThan(1);
+  const asked = log();
+  expect(asked).toContain(url(9));
+  for (const number of [1, 2, 3, 4]) expect(asked).not.toContain(url(number));
+});
+
+test("ARK-T147 the band links retro.md and each findings file that exists and no link for an absent file", async ({
+  page,
+}) => {
+  isolate();
+  const runA = closedRunId("ARK-831");
+  const runB = closedRunId("ARK-832");
+  const directoryA = writeRun({
+    project: "p",
+    run: runA,
+    ticket: closedTicket("ARK-831"),
+    phase: "closed",
+    outcome: "merged",
+  });
+  writeRun({
+    project: "p",
+    run: runB,
+    ticket: closedTicket("ARK-832"),
+    phase: "closed",
+    outcome: "merged",
+  });
+  mkdirSync(join(directoryA, "findings"), { recursive: true });
+  writeFileSync(join(directoryA, "retro.md"), "# Retro text\n");
+  writeFileSync(join(directoryA, "findings", "review round 1.md"), "round one text\n");
+  writeFileSync(join(directoryA, "findings", "qe.md"), "qe text\n");
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, `run/${runA}`);
+  const links = bandOf(page).getByTestId("band-link");
+  await expect(links).toHaveCount(3);
+  expect(
+    await links.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-path"))),
+  ).toEqual(["retro.md", "findings/qe.md", "findings/review round 1.md"]);
+  const texts: Record<string, string> = {
+    "retro.md": "# Retro text",
+    "findings/qe.md": "qe text",
+    "findings/review round 1.md": "round one text",
+  };
+  for (const [path, text] of Object.entries(texts)) {
+    const response = await page.request.get(
+      `${baseUrl}/api/run/${runA}/file?path=${encodeURIComponent(path)}`,
+    );
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toContain(text);
+  }
+  // A click opens the file in the page, also for the name with a space.
+  await links.filter({ hasText: "review round 1.md" }).click();
+  await expect(page.getByText("round one text")).toBeVisible();
+  await checkpoint(page, "closed-band-links");
+
+  // Without the files: no link, no placeholder.
+  await open(page, baseUrl, `run/${runB}`);
+  await expect(bandOf(page)).toBeVisible();
+  await expect(page.getByTestId("band-link")).toHaveCount(0);
+  await checkpoint(page, "closed-band-no-links");
+
+  // Delete retro.md and reload: its link goes.
+  rmSync(join(directoryA, "retro.md"));
+  await open(page, baseUrl, `run/${runA}`);
+  await expect(page.getByTestId("band-link")).toHaveCount(2);
+  await expect(page.locator('[data-testid="band-link"][data-path="retro.md"]')).toHaveCount(0);
+});
+
+test("ARK-T148 the band lists the escaped defects of this run from escaped-defects.yml and nothing for a run with none", async ({
+  page,
+}) => {
+  isolate();
+  const make = (ticket: string) => {
+    writeRun({
+      project: "p",
+      run: closedRunId(ticket),
+      ticket: closedTicket(ticket),
+      phase: "closed",
+      outcome: "merged",
+      metricsText: JSON.stringify({
+        cost: { total_usd: 1 },
+        rework: { rounds: 0 },
+        escaped_defects: 0,
+      }),
+    });
+    return closedRunId(ticket);
+  };
+  const runA = make("ARK-841");
+  const runB = make("ARK-842");
+  const runC = make("ARK-843");
+  const file = join(process.env.ARK_HOME as string, "projects", "p", "escaped-defects.yml");
+  writeFileSync(
+    file,
+    [
+      { ticket: "ARK-901", run: runA, note: "first <b>x</b> note", fix: "fix one", reviewer: "r" },
+      { ticket: "ARK-902", run: runA, note: "second note", fix: "fix two", reviewer: "r" },
+      { ticket: "ARK-903", run: runB, note: "other run note", fix: "other fix", reviewer: "r" },
+    ]
+      .map(
+        (entry) =>
+          `- ticket: ${entry.ticket}\n  run: ${entry.run}\n  note: ${JSON.stringify(entry.note)}\n  fix: ${JSON.stringify(entry.fix)}\n  reviewer: ${entry.reviewer}\n`,
+      )
+      .join(""),
+  );
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, `run/${runA}`);
+  const defects = page.getByTestId("band-defect");
+  await expect(defects).toHaveCount(2);
+  await expect(defects.nth(0)).toContainText("ARK-901");
+  await expect(defects.nth(0)).toContainText("first <b>x</b> note");
+  await expect(defects.nth(0)).toContainText("fix one");
+  await expect(defects.nth(1)).toContainText("ARK-902");
+  await expect(defects.nth(1)).toContainText("fix two");
+  await expect(bandOf(page)).not.toContainText("other run note");
+  await expect(bandOf(page).locator("b")).toHaveCount(2); // the two ticket ids, no <b> from the note
+  await checkpoint(page, "closed-band-defects");
+
+  await open(page, baseUrl, `run/${runC}`);
+  await expect(bandOf(page)).toBeVisible();
+  await expect(page.getByTestId("band-defect")).toHaveCount(0);
+  await expect(bandOf(page).getByRole("heading")).toHaveCount(0);
+  await checkpoint(page, "closed-band-no-defects");
+
+  writeFileSync(file, "- ticket: [unclosed\n  run: {\n");
+  await open(page, baseUrl, `run/${runA}`);
+  await expect(bandOf(page)).toBeVisible();
+  await expect(page.getByTestId("band-defect")).toHaveCount(0);
+  rmSync(file);
+  await open(page, baseUrl, `run/${runA}`);
+  await expect(bandOf(page)).toBeVisible();
+  await expect(page.getByTestId("band-defect")).toHaveCount(0);
+});
+
+test("ARK-T149 the Closed lane shows 20 closed runs with outcome and cost and Show more adds 20 until all 45 show", async ({
+  page,
+}) => {
+  isolate();
+  const ids = Array.from({ length: 45 }, (_, index) => `ARK-${900 + index}`);
+  const withoutMetrics = new Set(["ARK-901", "ARK-920", "ARK-944"]);
+  for (const [index, id] of ids.entries()) {
+    writeBacklogTicket({ project: "p", id, title: `Title of ${id}`, status: "done" });
+    writeRun({
+      project: "p",
+      run: closedRunId(id),
+      ticket: closedTicket(id),
+      phase: "closed",
+      outcome: index % 9 === 4 ? "aborted" : "merged",
+      startedAt: ago(200_000 - index * 3000),
+      ...(withoutMetrics.has(id) ? {} : { metricsCostUsd: 1 + index }),
+    });
+  }
+  for (const id of ["ARK-950", "ARK-951"]) {
+    writeBacklogTicket({ project: "p", id, title: `Title of ${id}`, status: "ready" });
+    writeRun({
+      project: "p",
+      run: closedRunId(id),
+      ticket: closedTicket(id),
+      phase: "building",
+      steps: [{ id: "only", role: "implementer", harness: "omp", model: "m", needs: [] }],
+    });
+  }
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "runs");
+  const closed = page.locator('[data-testid="lane"][data-lane="Closed"]');
+  const cards = closed.getByTestId("run-card");
+  const runsOf = () =>
+    cards.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-run")));
+  const newestFirst = ids.map(closedRunId).toSorted().reverse();
+
+  await expect(cards).toHaveCount(20);
+  expect(await runsOf()).toEqual(newestFirst.slice(0, 20));
+  const card = (id: string) => closed.locator(`[data-run="${closedRunId(id)}"]`);
+  await expect(card("ARK-944").getByTestId("card-outcome")).toHaveText("merged");
+  await expect(card("ARK-944").getByTestId("card-cost")).toHaveText("not recorded");
+  await expect(card("ARK-943").getByTestId("card-cost")).toHaveText("$44.00");
+  await expect(cards.first().getByTestId("card-outcome")).toBeVisible();
+  await checkpoint(page, "closed-lane-20");
+
+  await closed.getByTestId("show-more").click();
+  await expect(cards).toHaveCount(40);
+  expect(await runsOf()).toEqual(newestFirst.slice(0, 40));
+  await closed.getByTestId("show-more").click();
+  await expect(cards).toHaveCount(45);
+  expect(await runsOf()).toEqual(newestFirst);
+  await expect(closed.getByTestId("show-more")).toHaveCount(0);
+  await expect(closed.getByTestId("older-runs")).toHaveCount(0);
+  await expect(card("ARK-901").getByTestId("card-cost")).toHaveText("not recorded");
+  await expect(card("ARK-920").getByTestId("card-cost")).toHaveText("not recorded");
+  await expect(card("ARK-904").getByTestId("card-outcome")).toHaveText("aborted");
+  await expect(page.getByText("last 5")).toHaveCount(0);
+  await expect(
+    page.locator('[data-testid="lane"][data-lane="Building"]').getByTestId("run-card"),
+  ).toHaveCount(2);
+  await checkpoint(page, "closed-lane-45");
 });
 
 type Box = { x: number; y: number; width: number; height: number };

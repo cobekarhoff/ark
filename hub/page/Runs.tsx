@@ -1,18 +1,30 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import { isUnknownProject, scoped, ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
-import { Ring, Unknown, UnknownProject, known } from "./format.tsx";
+import { Ring, Unknown, UnknownProject, dollars, known } from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { ticketHref, useLive, useProject } from "./store.tsx";
 import type { RunView, Snapshot, TicketRunView } from "../types.ts";
 
 /** Newest-first closed runs of every ticket: names and phases of `ticket_runs[].all`, with the ticket. */
-function closedRuns(entries: TicketRunView[]): { run: string; ticket: string; project: string }[] {
+function closedRuns(entries: TicketRunView[]): {
+  run: string;
+  ticket: string;
+  project: string;
+  outcome: string | null;
+  cost_usd: number | null;
+}[] {
   return entries
     .flatMap((entry) =>
       entry.all
         .filter((candidate) => candidate.phase === "closed")
-        .map((candidate) => ({ run: candidate.run, ticket: entry.ticket, project: entry.project })),
+        .map((candidate) => ({
+          run: candidate.run,
+          ticket: entry.ticket,
+          project: entry.project,
+          outcome: candidate.outcome,
+          cost_usd: candidate.cost_usd,
+        })),
     )
     .toSorted((left, right) => right.run.localeCompare(left.run));
 }
@@ -22,10 +34,10 @@ const lanes = [
   ["Building", "agents working", "p-build"],
   ["Needs me", "gate or escalation", "p-gate"],
   ["Awaiting merge", "MR in the review queue", "p-review"],
-  ["Closed", "last 5", "p-done"],
+  ["Closed", "newest first", "p-done"],
 ] as const;
 
-const closedShown = 5;
+const closedPage = 20;
 const filters = ["Active", "Queued", "Old"] as const;
 type Filter = (typeof filters)[number];
 
@@ -72,7 +84,7 @@ function Card({
   ring: GraphTicket["ring"];
   tone: string;
   href: string;
-  note: string;
+  note: ReactNode;
 }) {
   return (
     <a
@@ -105,15 +117,8 @@ function noteOf(run: RunView): string {
   return parts.join(" · ");
 }
 
-function Board({
-  snapshot,
-  entries,
-  showOld,
-}: {
-  snapshot: Snapshot;
-  entries: Map<string, TicketEntry>;
-  showOld: () => void;
-}) {
+function Board({ snapshot, entries }: { snapshot: Snapshot; entries: Map<string, TicketEntry> }) {
+  const [closedShown, setClosedShown] = useState(closedPage);
   const closed = known(snapshot.ticket_runs) ? closedRuns(snapshot.ticket_runs) : [];
   const byTicket = new Map([...entries.values()].map((entry) => [entry.ticket.id, entry]));
   const titleOf = (id: string) => byTicket.get(id)?.ticket.title ?? id;
@@ -165,14 +170,29 @@ function Board({
                   ring={{ done: 1, total: 1, label: "✓" }}
                   tone={tone}
                   href={runHref(run.run)}
-                  note="closed"
+                  note={
+                    <>
+                      <span data-testid="card-outcome">{run.outcome ?? "unknown"}</span>
+                      {" · "}
+                      <span
+                        data-testid="card-cost"
+                        className={run.cost_usd === null ? "nr" : undefined}
+                      >
+                        {run.cost_usd === null ? "not recorded" : dollars.format(run.cost_usd)}
+                      </span>
+                    </>
+                  }
                 />
               ))}
               {count === 0 ? <p className="mut empty">None.</p> : null}
               {lane === "Closed" && closed.length > closedShown ? (
-                <button type="button" className="btn" data-testid="older-runs" onClick={showOld}>
-                  {closed.length - closedShown} older{" "}
-                  {closed.length - closedShown === 1 ? "run" : "runs"} in graph
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="show-more"
+                  onClick={() => setClosedShown(closedShown + closedPage)}
+                >
+                  Show more
                 </button>
               ) : null}
             </div>
@@ -268,7 +288,7 @@ export function Runs() {
           {open} open · {counts.Queued} queued · {counts.Old} closed. Click a run for its plan.
         </span>
       </h1>
-      <Board snapshot={snapshot} entries={entries} showOld={() => setFilter("Old")} />
+      <Board snapshot={snapshot} entries={entries} />
       <section className="panel graph-panel">
         <header>
           <h2>Cross-run dependency graph</h2>
