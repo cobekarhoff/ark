@@ -811,7 +811,7 @@ test("ARK-278-AC2 run close keeps an active dispatch and says so", () => {
   ]);
 });
 
-test("ARK-278-AC3 ARK-T129 an Orca failure prints one orca line and the close still records and exits 0", async () => {
+test("ARK-T129 ARK-278-AC3 an Orca failure prints one orca line and the close still records and exits 0", async () => {
   // The reader timeout is far above any host stall: only the hang case below lets it decide.
   process.env.ARK_ORCA_TIMEOUT_MS = "600000";
   const closedEvent = (directory: string) =>
@@ -863,7 +863,7 @@ test("ARK-278-AC3 ARK-T129 an Orca failure prints one orca line and the close st
   expect(nothing.out).toBe(`${none.runId} closed: aborted\n`);
 });
 
-test("ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later close against a slow orca", async () => {
+test("ARK-T132 ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later close against a slow orca", async () => {
   runHangingClose();
 
   // The slow orca answers when the test releases it, and logs the timeout variable it was started with.

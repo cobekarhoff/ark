@@ -60,7 +60,7 @@ function currentCounts(): Record<string, number> {
   return uses;
 }
 
-test("ARK-331-AC3 no test file gains a wall-clock wait or millisecond budget", () => {
+test("ARK-T126 ARK-331-AC3 no test file gains a wall-clock wait or millisecond budget", () => {
   const uses = currentCounts();
   if (process.env.ARK_WALLCLOCK_PRINT) console.log(JSON.stringify(uses, null, 2));
   expect(
