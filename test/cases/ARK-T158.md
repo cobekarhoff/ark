@@ -23,35 +23,25 @@ Prove that `ark status` with no run name reports each role that cannot run, once
 - Project `a-codex` (unchecked-only): every role on omp `anthropic/claude-sonnet-5-5` except `validator` on harness `claude`, with a `claude` executable on PATH.
 - Project `nocfg`: no `ark.yml`, one run folder under `runs/`. Project `badcfg`: invalid `ark.yml` (as in ARK-T19).
 
-## Steps and expected results
+## Steps
 
-Scenario S1 (failing roles, OK omp): `ark status` with projects `a` and `b`.
+- S1 (failing roles, OK omp): `ark status` with projects `a` and `b`.
+- S2 (all passing): `ark status` with projects `a-ok` and `b`.
+- S3 (omp list fails, no other failure): FAIL omp, `ark status` with project `a-codex`.
+- S4 (omp list fails plus a real failure): FAIL omp, `ark status` with project `a`.
+- S5 (no config): `ark status` with projects `a-ok` and `nocfg`.
+- S6 (invalid config): `ark status` with projects `a-ok` and `badcfg`.
+- S7 (scope): with project `a` failing, run `ark status <run>` for an open run and one other command (for example `ark runs`).
 
-- Exit 1. One line names role `reviewer`, model `openai-codex/gpt-6.1-solx`, cause model not found by omp; one line names role `validator`, harness `codex`, cause not installed. Project `b` prints no role line. Counter file has exactly one `models` call although two projects use omp.
+## Expected results
 
-Scenario S2 (all passing): `ark status` with projects `a-ok` and `b`.
-
-- Exit 0, no role line, counter file has one call.
-
-Scenario S3 (omp list fails, no other failure): FAIL omp, `ark status` with project `a-codex`.
-
-- stdout has `role models: unchecked (` followed by the reason; no role failure line; exit 0 (unchecked alone does not fail).
-
-Scenario S4 (omp list fails plus a real failure): FAIL omp, `ark status` with project `a`.
-
-- stdout has `role models: unchecked (` followed by the reason and the `codex` validator line; no reviewer model line; exit 1 because of the validator.
-
-Scenario S5 (no config): `ark status` with projects `a-ok` and `nocfg`.
-
-- `nocfg` is reported as in ARK-T19 ("project nocfg has no ark.yml", "project config(s) invalid") and exit is 1 from that, not from a role check; `nocfg` gets no role line; `a-ok` gets none either. Repeat with `nocfg` holding no run folder (ARK-T18): not reported, exit 0.
-
-Scenario S6 (invalid config): `ark status` with projects `a-ok` and `badcfg`.
-
-- Prints the existing config error for `badcfg` and no role line for it; exit 1 from the config error; no crash.
-
-Scenario S7 (scope): with project `a` failing, run `ark status <run>` for an open run and one other command (for example `ark runs`).
-
-- No role line; the fake omp is not called (counter file unchanged).
+- S1: Exit 1. One line names role `reviewer`, model `openai-codex/gpt-6.1-solx`, cause model not found by omp; one line names role `validator`, harness `codex`, cause not installed. Project `b` prints no role line. Counter file has exactly one `models` call although two projects use omp.
+- S2: Exit 0, no role line, counter file has one call.
+- S3: stdout has `role models: unchecked (` followed by the reason; no role failure line; exit 0 (unchecked alone does not fail).
+- S4: stdout has `role models: unchecked (` followed by the reason and the `codex` validator line; no reviewer model line; exit 1 because of the validator.
+- S5: `nocfg` is reported as in ARK-T19 ("project nocfg has no ark.yml", "project config(s) invalid") and exit is 1 from that, not from a role check; `nocfg` gets no role line; `a-ok` gets none either. Repeat with `nocfg` holding no run folder (ARK-T18): not reported, exit 0.
+- S6: Prints the existing config error for `badcfg` and no role line for it; exit 1 from the config error; no crash.
+- S7: No role line; the fake omp is not called (counter file unchanged).
 
 ## Screenshot checkpoints
 
