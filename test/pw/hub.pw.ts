@@ -2246,7 +2246,10 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   await page.emulateMedia({ colorScheme: "light" });
   await open(page, baseUrl, "");
   // Held: the agent probe has not answered, so no action button exists yet.
-  const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
+  // The gate link is not an agent action: the held gate's own snapshot already draws it.
+  const actions = page.locator(
+    '.btn.primary:not(:disabled):not([data-testid="gate-link"]), .btn-orca:not(:disabled)',
+  );
   await expect(page.getByTestId("stuck")).toHaveCount(1, { timeout: 20_000 });
   await expect(actions).toHaveCount(0);
   rmSync(orcaGate);
@@ -2380,7 +2383,10 @@ test("ARK-T128 the first action of Home is visible and its hover colour final af
 }) => {
   // The fake Orca is held, so the first snapshot is late until the test releases it.
   const { baseUrl, orcaGate } = await homeWithBlockers(Date.now(), true);
-  const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
+  // The gate link is not an agent action: the held gate's own snapshot already draws it.
+  const actions = page.locator(
+    '.btn.primary:not(:disabled):not([data-testid="gate-link"]), .btn-orca:not(:disabled)',
+  );
   await open(page, baseUrl, "");
   await expect(actions).toHaveCount(0);
   rmSync(orcaGate);
@@ -3736,6 +3742,8 @@ test("ARK-309-AC5 a ticket and a run of another project open by direct link with
   await expect(page.getByTestId("stale-label")).toHaveCount(0); // the layout settles once every source has answered
   const item = page.locator('[data-testid="review-item"][data-ticket="ARK-939"]');
   await item.evaluate((node) => node.scrollIntoView({ block: "center" }));
+  // Click only on the final geometry: no animation runs and the box is equal across two frames.
+  await settledBoxes(page, ['[data-testid="review-item"][data-ticket="ARK-939"]']);
   const before = await page.evaluate(() => window.scrollY);
   expect(before).toBeGreaterThan(100);
   await item.click();
