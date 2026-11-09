@@ -814,13 +814,17 @@ function dependencyLines(
   reports: MergeRequestReport[],
   plan: Plan | undefined,
 ): string[] {
-  const marker = detectHost(merge.url) === "github" ? "#" : "!";
   const upstreamState = (repo: string) =>
     reports[state.merge_requests.findIndex((candidate) => candidate.repo === repo)]?.state;
+  const edges = plan?.repos.find((entry) => entry.repo === merge.repo)?.depends_on ?? [];
   const waits = state.merge_requests
-    .filter((candidate) => merge.waits_for?.includes(candidate.number))
-    .map((upstream) => `  waits for ${marker}${upstream.number} (${upstreamState(upstream.repo)})`);
-  const bumps = (plan?.repos.find((entry) => entry.repo === merge.repo)?.depends_on ?? [])
+    .filter(
+      (candidate) =>
+        merge.waits_for?.includes(candidate.number) &&
+        edges.some((edge) => edge.repo === candidate.repo),
+    )
+    .map((upstream) => `  waits for !${upstream.number} (${upstreamState(upstream.repo)})`);
+  const bumps = edges
     .filter((edge) => edge.bump)
     .map((edge) => {
       const worktree = state.worktrees.find((candidate) => candidate.repo === merge.repo);
@@ -889,7 +893,12 @@ export function bumpRefresh(
     run(["git", "checkout", "--detach", value], submodule);
     value = run(["git", "rev-parse", "HEAD"], submodule);
     run(["git", "add", edge.pin], worktree.path);
-    run(["git", "commit", "-m", `Bump ${edge.pin} to ${value.slice(0, 8)}`], worktree.path);
+    // only the gitlink: unrelated staged work stays out; an already-pinned commit makes no commit
+    if (!spawn(["git", "diff", "--cached", "--quiet", "--", edge.pin], worktree.path).ok)
+      run(
+        ["git", "commit", "-m", `Bump ${edge.pin} to ${value.slice(0, 8)}`, "--", edge.pin],
+        worktree.path,
+      );
   }
   appendEvent(directory, "bump.refreshed", { step: stepId, value });
   console.log(`refreshed ${stepId} to ${edge.kind === "submodule" ? value.slice(0, 8) : value}`);
