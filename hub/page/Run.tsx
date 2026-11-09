@@ -1,6 +1,3 @@
-// test ids: step-node (data-step, data-status), step-cost, step-edge (data-from, data-to),
-// step-row, run-waiting, run-age, closed-banner, session-link (data-step), agents, evidence,
-// evidence-criterion (data-id, data-status), step-time, ticket-link
 import { useEffect, useRef } from "react";
 import { Agents } from "./Agents.tsx";
 import {
@@ -40,14 +37,6 @@ const nodeHeight = 92;
 const gapX = 24;
 const gapY = 36;
 const pad = 10;
-
-const statusLabel: Record<PlanStepView["status"], string> = {
-  pending: "pending",
-  running: "running",
-  succeeded: "done",
-  failed: "failed",
-  stopped: "stopped",
-};
 
 /**
  * The plan from top to bottom: a step is a row of the layout, steps that can run together sit side
@@ -122,7 +111,7 @@ function Dag({
         })}
         {plan.map((step) => {
           const { x, y } = at.get(step.id)!;
-          const state = stepStatus(step, attention, age, statusLabel);
+          const state = stepStatus(step, attention, age);
           return (
             <g
               key={step.id}
@@ -360,7 +349,7 @@ function Body({
                 <tbody>
                   {run.plan.map((step) => {
                     const sessions = stepSessions(detail, step.id);
-                    const state = stepStatus(step, attention, age, statusLabel);
+                    const state = stepStatus(step, attention, age);
                     return (
                       <tr key={step.id} data-testid="step-row" data-step={step.id}>
                         <td className="id nw">{step.id}</td>

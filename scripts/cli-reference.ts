@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-// Regenerates the command section of docs/reference/cli.md from `ark --help`
-// and `ark <command> --help`. Run it again after any change to the help text.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 

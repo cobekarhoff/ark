@@ -1,5 +1,3 @@
-// test ids: transcript, transcript-entry (data-kind), transcript-tool (data-status), tool-result,
-// thinking, load-more, transcript-file (data-file), run-file-text
 import { useEffect, useState } from "react";
 import { Clock, runHref, sessionName } from "./RunDetail.tsx";
 import type { SessionFile, TranscriptEntry, TranscriptPage } from "../types.ts";

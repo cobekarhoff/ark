@@ -1,11 +1,18 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ArkError } from "./errors.ts";
-import { type ArkEvent, readEvents } from "./events.ts";
+import {
+  type ArkEvent,
+  type StageTimes,
+  type StepWindow,
+  readEvents,
+  stageTimes,
+  stepWindows,
+} from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
 import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
 import { type SessionWithKey, type UsageMessage, readUsage } from "./usage/index.ts";
-import { type Owner, type StageTimes, type StepWindow, ownersOf, stageOf } from "./usage/owners.ts";
+import { type Owner, ownersOf, stageOf } from "./usage/owners.ts";
 
 const IDLE_GAP_SECONDS = 600;
 const MERGE_REQUEST_QUERY_TIMEOUT_MILLISECONDS = 10_000;
@@ -81,26 +88,6 @@ export function runningCost(runDirectory: string): { usd: number | "unknown"; to
   return { usd: group.includes_unknown ? "unknown" : group.usd, tokens: group.tokens };
 }
 
-/**
- * When the evaluator and the Designer sessions ran, in milliseconds. The evaluator session ends at
- * the last evaluation.recorded (the run lead session outlasts it). The Designer session runs after
- * the first evaluation and ends by the last strategy record or strategy answer.
- */
-export function stageTimes(events: ArkEvent[]): StageTimes {
-  const time = (event: ArkEvent | undefined) => (event ? Date.parse(event.time) : undefined);
-  return {
-    evaluationEnd: time(events.findLast((event) => event.type === "evaluation.recorded")),
-    designStart: time(events.find((event) => event.type === "evaluation.recorded")),
-    designEnd: time(
-      events.findLast(
-        (event) =>
-          event.type === "strategy.recorded" ||
-          (event.type === "gate.answered" && event.data.gate === "strategy"),
-      ),
-    ),
-  };
-}
-
 type HelperModel = { model: string; purpose: string; usd: number | "unknown"; tokens: number };
 
 /** Where a session file's messages belong: its owner, with an unassigned file told apart as a stage session. */
@@ -118,28 +105,6 @@ function placementOf(owner: Owner, messages: UsageMessage[], stages: StageTimes)
         stages,
       ) ?? "unassigned",
   };
-}
-
-export function stepWindows(events: ArkEvent[]): StepWindow[] {
-  const windows: StepWindow[] = [];
-  for (const event of events) {
-    if (event.type === "step.started") {
-      windows.push({
-        id: event.data.step,
-        role: event.data.role,
-        repo: event.data.repo,
-        start: toMilliseconds(event.time),
-        end: null,
-      });
-    }
-    if (event.type === "step.finished") {
-      const open = windows.findLast(
-        (window) => window.id === event.data.step && window.end === null,
-      );
-      if (open) open.end = toMilliseconds(event.time);
-    }
-  }
-  return windows;
 }
 
 /** Strategy records after the first one and before the strategy answer. */

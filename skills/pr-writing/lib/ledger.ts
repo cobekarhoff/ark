@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { evidenceFile, frontmatterOf, parseCriteria } from "../../../cli/criteria.ts";
+import { evidenceFile, frontmatter, parseCriteria } from "../../../cli/ticket.ts";
 import { loadConfig, type PrWriting } from "../../../cli/config.ts";
 import { ArkError } from "../../../cli/errors.ts";
 import { deriveState, readEvents, type ArkEvent } from "../../../cli/events.ts";
@@ -641,10 +641,11 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
   const events: ArkEvent[] = readEvents(directory);
   const state = deriveState(events);
   const ticketFile = join(directory, "ticket.md");
-  const fields = existsSync(ticketFile) ? frontmatterOf(ticketFile) : {};
-  const body = existsSync(ticketFile)
-    ? readFileSync(ticketFile, "utf8").replace(/^---[\s\S]*?\n---\r?\n/, "")
-    : "";
+  const ticket = existsSync(ticketFile)
+    ? frontmatter(readFileSync(ticketFile, "utf8"))
+    : { fields: undefined, body: "" };
+  const fields = ticket.fields ?? {};
+  const body = ticket.body;
   const criteria = parseCriteria(fields, ticketFile);
   const texts = new Map(
     ((fields.acceptance_criteria ?? []) as { id: string; text: string }[]).map((entry, i) => [

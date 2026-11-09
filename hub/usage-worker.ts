@@ -1,16 +1,7 @@
 /// <reference lib="webworker" />
-import { parseClaudeSession } from "../cli/usage/claude.ts";
-import { parseCodexSession } from "../cli/usage/codex.ts";
-import { parseOmpSession } from "../cli/usage/omp.ts";
-import { readHead, type SessionUsage } from "../cli/usage/index.ts";
+import { parsers, readHead } from "../cli/usage/index.ts";
 import { readTranscriptPage } from "./transcript.ts";
-import type { Harness, WorkerReply, WorkerRequest } from "./usage.ts";
-
-const parsers = {
-  omp: parseOmpSession,
-  claude: parseClaudeSession,
-  codex: parseCodexSession,
-} satisfies Record<Harness, (file: string) => SessionUsage>;
+import type { WorkerReply, WorkerRequest } from "./usage.ts";
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;

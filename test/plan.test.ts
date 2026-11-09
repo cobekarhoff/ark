@@ -167,7 +167,6 @@ describe("plan check", () => {
     expect(result.code).toBe(1);
   });
 
-  // Each row is one refusal class: the plan edit, and the text the message must contain.
   const refusals: [string, (plan: PlanDocument) => void, string][] = [
     [
       "a cycle in needs, naming the steps",

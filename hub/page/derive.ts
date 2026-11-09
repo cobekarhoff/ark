@@ -102,23 +102,6 @@ export function costByDay(snapshot: Snapshot): Map<string, number> {
   return days;
 }
 
-/** Newest-first closed runs of every ticket: names and phases of `ticket_runs[].all`, with the ticket. */
-export function closedRuns(
-  entries: TicketRunView[],
-): { run: string; ticket: string; project: string }[] {
-  return entries
-    .flatMap((entry) =>
-      entry.all
-        .filter((candidate) => candidate.phase === "closed")
-        .map((candidate) => ({ run: candidate.run, ticket: entry.ticket, project: entry.project })),
-    )
-    .toSorted((left, right) => right.run.localeCompare(left.run));
-}
-
-/** The ticket is no longer a blocker once it is done or replaced. */
-export const isSatisfied = (ticket: TicketView | undefined) =>
-  ticket !== undefined && isFinishedTicket(ticket.status);
-
 /** `merge order`: the oldest MR waits longest and goes first. */
 export function reviewQueue(runs: RunView[]): RunView[] {
   const waited = (run: RunView): number =>
@@ -134,9 +117,7 @@ export function reviewQueue(runs: RunView[]): RunView[] {
 export type TicketEntry = {
   ticket: TicketView;
   key: string;
-  /** The open run of the ticket, if any. */
   open: RunView | null;
-  /** The newest run, open or closed. */
   newest: TicketRunView | null;
   /** One word: `needs me`, `building`, `planning`, `awaiting merge`, `closed`, `queued`, `blocked`, or the ticket status. */
   state: string;
@@ -173,7 +154,7 @@ export function ticketEntries(snapshot: Snapshot): Map<string, TicketEntry> {
     const run = open.get(key) ?? null;
     const last = newest.get(key) ?? null;
     const blocked = ticket.depends_on.some(
-      (id) => !isSatisfied(byKey.get(ticketKey(ticket.project, id))),
+      (id) => !isFinishedTicket(byKey.get(ticketKey(ticket.project, id))?.status),
     );
     let entry: Pick<TicketEntry, "state" | "tone" | "lane">;
     if (run && needsHuman(snapshot, run))
@@ -196,7 +177,7 @@ export function ticketEntries(snapshot: Snapshot): Map<string, TicketEntry> {
       open: run,
       newest: last,
       ...entry,
-      satisfied: isSatisfied(ticket),
+      satisfied: isFinishedTicket(ticket.status),
     });
   }
   return entries;

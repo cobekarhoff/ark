@@ -1,9 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, type ProjectConfig } from "./config.ts";
+import type { ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
-import { deriveState, readEvents } from "./events.ts";
-import { findRun } from "./paths.ts";
 
 const maximumDepth = 4;
 
@@ -49,25 +47,4 @@ export function targetBranch(repoPath: string, base?: string): string {
     /^origin\//,
     "",
   );
-}
-
-/** Fast-forwards the workspace checkout's target branch of each repo the run touched to origin. */
-export function workspaceSync(runId: string, inProject?: string): void {
-  const { project, directory } = findRun(runId, inProject);
-  const config = loadConfig(project);
-  const workspace = config.workspace;
-  for (const { repo } of deriveState(readEvents(directory)).worktrees) {
-    const path = join(workspace, repo);
-    try {
-      git(path, "fetch", "origin");
-      const target = targetBranch(path, repoBase(config, repo));
-      if (git(path, "branch", "--show-current") === target)
-        git(path, "merge", "--ff-only", `origin/${target}`);
-      else git(path, "fetch", "origin", `${target}:${target}`); // not checked out: git moves the ref only if it fast-forwards
-      console.log(`${repo}  ${target}  ${git(path, "rev-parse", target)}`);
-    } catch (err) {
-      if (err instanceof ArkError) throw new ArkError(`repo ${repo}: ${err.message}`);
-      throw err;
-    }
-  }
 }

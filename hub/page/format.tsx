@@ -31,7 +31,7 @@ export function duration(milliseconds: number): string {
 }
 
 /** A running step with no event for this long is shown as idle: Orca does not say a worker is paused. */
-export const idleMinutes = 30;
+const idleMinutes = 30;
 
 export type Attention = {
   kind: "waiting" | "idle";
@@ -65,12 +65,19 @@ export function attentionOf(run: RunView, age: (time: string) => number): Attent
   return waits;
 }
 
+const stepLabel: Record<PlanStepView["status"], string> = {
+  pending: "pending",
+  running: "running",
+  succeeded: "done",
+  failed: "failed",
+  stopped: "stopped",
+};
+
 /** The status text of a step: a running step carries its duration, a waiting or idle one says so. */
 export function stepStatus(
   step: PlanStepView,
   attention: Attention[],
   age: (time: string) => number,
-  statusLabel: Record<PlanStepView["status"], string>,
 ): { label: string; tone: string } {
   const flagged = attention.find((item) => item.step === step.id);
   if (flagged)
@@ -80,7 +87,7 @@ export function stepStatus(
     };
   const running = step.status === "running" && step.started_at;
   return {
-    label: running ? `running ${duration(age(step.started_at!))}` : statusLabel[step.status],
+    label: running ? `running ${duration(age(step.started_at!))}` : stepLabel[step.status],
     tone: step.status,
   };
 }
@@ -105,7 +112,6 @@ export function ArrowMarker({ id }: { id: string }) {
   );
 }
 
-/** `merge_requests_open` reads as `merge requests open`. */
 export const phaseLabel = (phase: string) => phase.replaceAll("_", " ");
 
 export const Unknown = () => <span className="pill unk">unknown</span>;
@@ -144,7 +150,7 @@ export function OutsideNote({ project }: { project: string }) {
 }
 
 /** Colour group of a run phase: the legend of the Map. */
-export function phaseClass(phase: RunPhase | null): string {
+function phaseClass(phase: RunPhase | null): string {
   switch (phase) {
     case null:
       return "p-none";

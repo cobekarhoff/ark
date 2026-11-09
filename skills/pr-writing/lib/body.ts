@@ -1,6 +1,5 @@
 /**
- * `buildBody(ledger)` writes the MR body from the ledger. Section order: provenance and dependency lines,
- * problem, what is different, evidence, how to verify, Not done, risk and revert, acceptance criteria.
+ * `buildBody(ledger)` writes the MR body from the ledger.
  * It never pastes an AC text. All generated text sits between the two markers; `post.ts` replaces only that.
  */
 import type { Ledger, Rating } from "./ledger.ts";

@@ -6,80 +6,6 @@ import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 
-export const methods = ["test", "demonstration", "inspection", "analysis"] as const;
-export type Method = (typeof methods)[number];
-
-export type TicketCriterion = {
-  /** `<ticket id>/AC<k>`. */
-  id: string;
-  method: Method;
-  verified_by: string[];
-  /** The ticket gives `verified_by` or writes a local id (`AC1`): the human approves its test cases at the criteria gate. */
-  newScheme: boolean;
-};
-
-/**
- * Reads `acceptance_criteria` from the parsed ticket frontmatter. `source` names the file in refusals.
- * A missing `method` is `test`, and `manual: true` reads as `demonstration`. Ids come back as `<ticket id>/AC<k>`.
- */
-export function parseCriteria(fields: Record<string, unknown>, source: string): TicketCriterion[] {
-  const list = fields.acceptance_criteria ?? [];
-  if (!Array.isArray(list)) throw new ArkError(`${source}: acceptance_criteria must be a list`);
-  const seen = new Set<string>();
-  return list.map((entry, i) => {
-    if (typeof entry?.id !== "string" || typeof entry?.text !== "string")
-      throw new ArkError(`${source}: acceptance_criteria[${i}] needs id and text`);
-    const id = canonicalCriterion(entry.id, typeof fields.id === "string" ? fields.id : "");
-    if (seen.has(id)) throw new ArkError(`${source}: duplicate criterion id ${id}`);
-    seen.add(id);
-    const method = entry.method ?? (entry.manual === true ? "demonstration" : "test");
-    if (!(methods as readonly unknown[]).includes(method))
-      throw new ArkError(
-        `${source}: criterion ${id} has method ${JSON.stringify(method)}: use ${methods.join(", ")}`,
-      );
-    const verified = entry.verified_by;
-    if (
-      verified !== undefined &&
-      (!Array.isArray(verified) || !verified.every((item) => typeof item === "string"))
-    )
-      throw new ArkError(`${source}: criterion ${id} verified_by must be a list of strings`);
-    return {
-      id,
-      method,
-      verified_by: verified ?? [],
-      newScheme: verified !== undefined || /^AC\d+$|\/AC\d+$/.test(entry.id),
-    };
-  });
-}
-
-export function frontmatterOf(file: string): Record<string, unknown> {
-  const match = readFileSync(file, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  return match ? ((Bun.YAML.parse(match[1]) ?? {}) as Record<string, unknown>) : {};
-}
-
-/** The criteria of the run folder's ticket.md, with method and verified_by. */
-export function runCriteria(runDirectory: string): TicketCriterion[] {
-  const file = join(runDirectory, "ticket.md");
-  return existsSync(file) ? parseCriteria(frontmatterOf(file), file) : [];
-}
-
-/** Ids of the criteria whose method is not `test` (`manual: true` included). A person proves them with the `manual` gate. */
-export function manualCriteria(runDirectory: string): string[] {
-  return runCriteria(runDirectory)
-    .filter((criterion) => criterion.method !== "test")
-    .map((criterion) => criterion.id);
-}
-
-/** True when a criterion of the run folder's ticket has method `test`: the red-test (bug) and base-pass (refactor) rules apply only then. */
-export function hasTestCriterion(runDirectory: string): boolean {
-  return runCriteria(runDirectory).some((criterion) => criterion.method === "test");
-}
-
-/** The evidence file of a criterion that no test proves: `results/evidence/AC<k>.md` in the run folder. */
-export function evidenceFile(runDirectory: string, criterionId: string): string {
-  return join(runDirectory, "results", "evidence", `${criterionId.split("/").pop()}.md`);
-}
-
 /** Replaces the `text:` line of one criterion in the frontmatter and its `| ID | ... |` table row.
  * YAML has no round trip in Bun, so only that one line and that one row change; a ticket with no
  * table row keeps only the frontmatter change. Returns the new ticket and the old frontmatter text.
@@ -136,13 +62,11 @@ export function criteriaAmend(
   inProject?: string,
 ): void {
   const { directory } = findRun(runId, inProject);
-  const ticketId = deriveState(readEvents(directory)).ticket.id;
+  const state = deriveState(readEvents(directory));
+  const ticketId = state.ticket.id;
   const criterionId = canonicalCriterion(criterionArgument, ticketId);
   // Refuse a wrong phase or an unknown criterion before reading the file.
-  assertAllowed(deriveState(readEvents(directory)), "criteria.amended", {
-    criterion: criterionId,
-    reason,
-  });
+  assertAllowed(state, "criteria.amended", { criterion: criterionId, reason }, directory);
   if (!existsSync(file)) throw new ArkError(`criteria.amended refused: ${file} not found`);
   const newText = readFileSync(file, "utf8")
     .trim()
@@ -172,8 +96,7 @@ export function criteriaAmend(
   );
   console.log(`  old: ${oldText}`);
   console.log(`  new: ${newText}`);
-  const phase = deriveState(readEvents(directory)).phase;
-  if (phase === "planning" || phase === "awaiting_strategy") {
+  if (state.phase === "planning" || state.phase === "awaiting_strategy") {
     if (existsSync(join(directory, "plan.md")))
       console.log(
         `plan.md may be stale: run \`ark plan check ${runId}\` again to list this amendment`,
