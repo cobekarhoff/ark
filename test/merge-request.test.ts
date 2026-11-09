@@ -1460,6 +1460,12 @@ test(
         own.filter(([, argv]) => argv.startsWith("merge-base")).length,
         `${name} merge-base`,
       ).toBeLessThanOrEqual(1);
+      // Every ledger query, the base-ref probe included, runs once for each repo.
+      for (const query of [
+        "rev-parse --verify --quiet origin/main",
+        "diff --shortstat origin/main...HEAD",
+      ])
+        expect(count(query), `${name} ${query}`).toBeLessThanOrEqual(1);
     }
 
     // Each repo's single head read is its real head: the ledger of each MR body names it, and the heads differ.

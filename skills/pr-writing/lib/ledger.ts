@@ -44,6 +44,8 @@ export type RepoLedger = {
   branch: string;
   base: string;
   baseSha: string;
+  /** The ref the diff was read against (`origin/<base>` or `<base>`), so the lint does not probe it again. */
+  baseRef?: string;
   head: string;
   /** `git diff --shortstat` text, or `unknown` when the base cannot be read. */
   shortstat: string;
@@ -474,6 +476,7 @@ function repoLedger(
       branch,
       base,
       baseSha: "unknown",
+      baseRef,
       head,
       shortstat: "unknown",
       commits: [],
@@ -502,6 +505,7 @@ function repoLedger(
     branch,
     base,
     baseSha,
+    baseRef,
     head,
     shortstat: capture(["git", "diff", "--shortstat", `${baseRef}...HEAD`], directory) ?? "unknown",
     commits,
