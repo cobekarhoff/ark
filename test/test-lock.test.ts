@@ -8,7 +8,17 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import type { FSWatcher } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  watch,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -30,8 +40,17 @@ const roles = {
   reviewer: { harness: "codex", model: "gpt-codex" },
 };
 
-// Every test shares one temp ARK_HOME (never the real one) holding two projects, so a per-project lock would not
-// serialize the two runs.
+type Suite = {
+  name: string;
+  level: string;
+  repo: string;
+  command: string;
+  parser: string;
+  cores?: number;
+};
+
+// Every test shares one temp ARK_HOME (never the real one) holding two projects, so a per-project budget would not
+// serialize the two runs. The budget is 6 cores; a suite with no `cores` takes all of it.
 let arkHome: string;
 let fixtures: string;
 let runA: string;
@@ -39,8 +58,11 @@ let runB: string;
 let projectA: string;
 
 const logFile = () => join(fixtures, "suite.log");
-const lockDirectory = () => join(arkHome, "test.lock");
-const waiterDirectory = () => join(arkHome, "test-waiters");
+const budgetDirectory = () => join(arkHome, "test-budget");
+const tickets = () =>
+  existsSync(budgetDirectory())
+    ? readdirSync(budgetDirectory()).filter((name) => name.endsWith(".json"))
+    : [];
 const readLog = () => (existsSync(logFile()) ? readFileSync(logFile(), "utf8") : "");
 
 /**
@@ -79,44 +101,67 @@ exit $status
   return file;
 }
 
-/** Starts a run of `ticketId` at the building phase in its own project of the shared ARK_HOME. */
-function startRun(project: string, ticketId: string, script: string): string {
+/**
+ * The recorder script: appends `<suite> <TMPDIR> <cores> <files in TMPDIR>` to `record` after it wrote a marker file
+ * into its own TMPDIR, exits 1 when `fail-<suite>` exists, and writes the junit report of a passing bun test file.
+ */
+function writeRecorderScript(directory: string): string {
+  const file = join(directory, "recorder.sh");
+  writeFileSync(
+    file,
+    `#!/bin/sh
+# usage: recorder.sh <fixture directory> <report> <suite> <cores>
+touch "$TMPDIR/marker-$3"
+echo "$3 $TMPDIR $4 $(ls "$TMPDIR" | tr '\\n' ',')" >> "$1/record"
+bun test "$1/passing.test.ts" --reporter=junit --reporter-outfile="$2"
+if [ -e "$1/fail-$3" ]; then exit 1; fi
+`,
+  );
+  return file;
+}
+
+/**
+ * Starts a run of `ticketId` at the building phase in its own project of the shared ARK_HOME. `suitesOf` names the
+ * suites of the run; the default is one `sleeper` suite that asks for the whole budget.
+ */
+function startRun(
+  project: string,
+  ticketId: string,
+  script: string,
+  suitesOf?: (runId: string) => Suite[],
+): string {
   const workspace = tempGitRepo();
-  writeProject(project, {
+  const config = (suites: Suite[]) => ({
     workspace,
     ticket_source: "local",
-    // replaced below once the run id is known
-    suites: [
-      {
-        name: "sleeper",
-        level: "integration",
-        repo: ".",
-        command: "true",
-        parser: "bun",
-      },
-    ],
+    test_budget_cores: 6,
+    suites,
     roles,
   });
+  writeProject(
+    project,
+    config([{ name: "sleeper", level: "integration", repo: ".", command: "true", parser: "bun" }]),
+  );
   const ticket = writeTicket(project, ticketId, [
     { id: `${ticketId}-AC1`, text: "A person checks it", manual: true },
   ]);
   const runId = ark("run", "start", ticket, "--project", project).out.match(
     new RegExp(`\\d{4}-\\d{2}-\\d{2}-${ticketId}-\\d+`),
   )![0];
-  writeProject(project, {
-    workspace,
-    ticket_source: "local",
-    suites: [
-      {
-        name: "sleeper",
-        level: "integration",
-        repo: ".",
-        command: `sh ${script} ${runId} ${fixtures} {report}`,
-        parser: "bun",
-      },
-    ],
-    roles,
-  });
+  writeProject(
+    project,
+    config(
+      suitesOf?.(runId) ?? [
+        {
+          name: "sleeper",
+          level: "integration",
+          repo: ".",
+          command: `sh ${script} ${runId} ${fixtures} {report}`,
+          parser: "bun",
+        },
+      ],
+    ),
+  );
   const runDirectory = join(arkHome, "projects", project, "runs", runId);
   recordEvaluation(runDirectory);
   writeFileSync(
@@ -124,7 +169,7 @@ function startRun(project: string, ticketId: string, script: string): string {
     JSON.stringify({
       design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
       summary: {
-        why: "Test the lock.",
+        why: "Test the budget.",
         changes: [
           {
             criterion: `${ticketId}-AC1`,
@@ -164,6 +209,8 @@ beforeAll(() => {
   arkHome = tempArkHome();
   fixtures = mkdtempSync(join(tmpdir(), "ark-test-lock-"));
   const script = writeSuiteScript(fixtures);
+  writeRecorderScript(fixtures);
+  mkdirSync(budgetDirectory(), { recursive: true }); // waitFor watches it
   projectA = "lock-one";
   runA = startRun(projectA, "LOCKA-1", script);
   runB = startRun("lock-two", "LOCKB-1", script);
@@ -177,15 +224,17 @@ afterAll(() => {
 afterEach(() => {
   killStarted();
   for (const path of [
-    lockDirectory(),
-    waiterDirectory(),
+    budgetDirectory(),
     logFile(),
+    join(fixtures, "record"),
     join(fixtures, "hold"),
     join(fixtures, "release"),
     join(fixtures, `fail-${runA}`),
+    join(fixtures, "fail-cli"),
     join(fixtures, "slowterm"),
   ])
     rmSync(path, { recursive: true, force: true });
+  mkdirSync(budgetDirectory(), { recursive: true }); // waitFor watches it
 });
 
 type Started = {
@@ -193,6 +242,8 @@ type Started = {
   stdout: Promise<string>;
   /** The stdout read so far. */
   seen: () => string;
+  /** Resolves when the stdout holds `text`. */
+  until: (text: string) => Promise<void>;
 };
 
 const startedTests: Subprocess[] = [];
@@ -208,62 +259,97 @@ function killStarted(): void {
 }
 
 /** Starts `ark test <run>` as a child process of the temp ARK_HOME with its stdout collected. */
-function startTest(run: string): Started {
+function startTest(run: string, extraEnvironment: Record<string, string> = {}): Started {
   const child = Bun.spawn(["bun", arkEntry, "test", run], {
-    env: { ...process.env, ARK_HOME: arkHome },
+    env: { ...process.env, ARK_HOME: arkHome, ...extraEnvironment },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
   });
   let seen = "";
+  const listeners = new Set<() => void>();
   const stdout = (async () => {
-    for await (const chunk of child.stdout) seen += new TextDecoder().decode(chunk);
+    for await (const chunk of child.stdout) {
+      seen += new TextDecoder().decode(chunk);
+      for (const listener of listeners) listener();
+    }
     return seen;
   })();
+  const until = (text: string) =>
+    new Promise<void>((done) => {
+      const check = () => {
+        if (!seen.includes(text)) return;
+        listeners.delete(check);
+        done();
+      };
+      listeners.add(check);
+      check();
+    });
   startedTests.push(child);
-  return { process: child, stdout, seen: () => seen };
+  return { process: child, stdout, seen: () => seen, until };
 }
 
-/** Polls real child processes, so the wall clock is the only signal there is. */
-async function waitFor(condition: () => boolean, what: string, limitMs = 30_000): Promise<void> {
-  const deadline = Date.now() + limitMs;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await Bun.sleep(20);
-  }
+/** Resolves when `condition` holds, checked at every change in the fixture folder and the ticket folder. */
+function waitFor(condition: () => boolean): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const watchers: FSWatcher[] = [];
+  const check = () => {
+    if (!condition()) return;
+    for (const watcher of watchers) watcher.close();
+    resolve();
+  };
+  for (const directory of [fixtures, budgetDirectory()]) watchers.push(watch(directory, check));
+  check();
+  return promise;
 }
 
 const logLines = () => readLog().split("\n").filter(Boolean);
 const countOf = (text: string, needle: string) => text.split(needle).length - 1;
+const started = (run: string) => () => logLines().includes(`start ${run}`);
 
-/** After B starts its suites with no lock to wait for: no `waiting for` and no stale takeover line. */
+/** After B starts its suites with no ticket to wait for: no `waiting:` line and no stale takeover line. */
 async function expectCleanRunOfB(): Promise<void> {
-  expect(existsSync(lockDirectory())).toBe(false);
+  expect(tickets()).toEqual([]);
   const second = startTest(runB);
   const out = await second.stdout;
   await second.process.exited;
   expect(logLines()).toContain(`start ${runB}`);
-  expect(out).not.toContain("waiting for");
+  expect(out).not.toContain("waiting:");
   expect(out).not.toContain("took over a stale");
 }
 
-describe("ark test lock", () => {
-  test("ARK-T59 ARK-343/AC1 a second ark test of another project waits for the first and starts its suites only after it ends", async () => {
+/** A ticket file as `ark test` writes it. */
+function writeTicketFile(
+  name: string,
+  ticket: { run: string; pid: number; cores: number; arrival: string; started?: string },
+): string {
+  mkdirSync(budgetDirectory(), { recursive: true });
+  const file = join(budgetDirectory(), `${name}.json`);
+  writeFileSync(file, JSON.stringify(ticket));
+  return file;
+}
+
+describe("ark test budget", () => {
+  test("ARK-T59 two ark test processes of two runs never run their suites at the same time", async () => {
     const first = startTest(runA);
-    await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
+    await waitFor(started(runA));
     const second = startTest(runB);
     const secondOut = await second.stdout;
     await Promise.all([first.process.exited, second.process.exited]);
 
+    // A and B each run a base and a head suite. Whole-budget suites never overlap: each `start` is followed at once
+    // by the `end` of the same run, and both runs ran.
     const lines = logLines();
-    expect(lines.indexOf(`end ${runA}`)).toBeGreaterThanOrEqual(0);
-    expect(lines.indexOf(`end ${runA}`)).toBeLessThan(lines.indexOf(`start ${runB}`));
-    expect(secondOut).toContain(`waiting for ark test of ${runA} (pid ${first.process.pid})`);
-    expect(countOf(secondOut, "waiting for ark test of")).toBe(1);
-    expect(existsSync(lockDirectory())).toBe(false);
+    expect(new Set(lines)).toEqual(
+      new Set([`start ${runA}`, `end ${runA}`, `start ${runB}`, `end ${runB}`]),
+    );
+    for (let i = 0; i < lines.length; i += 2)
+      expect(lines[i + 1]).toBe(lines[i]!.replace("start", "end"));
+    expect(secondOut).toContain(`waiting: place 1 of 1; running: ${runA} 6 cores`);
+    expect(tickets()).toEqual([]);
   });
 
-  test("ARK-T59 ARK-343/AC1 the lock is gone right after a failing suite", async () => {
+  test("ARK-T59 the tickets are gone right after a failing suite", async () => {
     writeFileSync(join(fixtures, `fail-${runA}`), "");
     const first = startTest(runA);
     await first.stdout;
@@ -272,24 +358,24 @@ describe("ark test lock", () => {
   });
 
   for (const signal of ["SIGINT", "SIGTERM"] as const)
-    test(`ARK-T59 ARK-343/AC1 the lock is gone right after ${signal} ends ark test`, async () => {
+    test(`ARK-T59 the tickets are gone right after ${signal} ends ark test`, async () => {
       const first = startTest(runA);
-      await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
+      await waitFor(started(runA));
       first.process.kill(signal);
       await first.process.exited;
       await first.stdout;
       await expectCleanRunOfB();
     });
 
-  // The suite of A needs two seconds to end after SIGTERM, as a suite with its own cleanup does.
+  // The suite of A needs two seconds to end after the signal, as a suite with its own cleanup does.
   for (const signal of ["SIGINT", "SIGTERM"] as const)
-    test(`ARK-T59 ARK-343/AC1 ${signal} keeps the lock until the suite of the signalled ark test has ended`, async () => {
+    test(`ARK-T59 ${signal} keeps the cores until the suite of the signalled ark test has ended`, async () => {
       writeFileSync(join(fixtures, "hold"), "");
       writeFileSync(join(fixtures, "slowterm"), "");
       const first = startTest(runA);
-      await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
+      await waitFor(started(runA));
       const second = startTest(runB);
-      await waitFor(() => second.seen().includes("waiting for ark test"), "B to wait");
+      await second.until("waiting:");
       first.process.kill(signal);
       await first.process.exited;
       writeFileSync(join(fixtures, "release"), "");
@@ -300,27 +386,24 @@ describe("ark test lock", () => {
       expect(lines.indexOf(`end ${runA}`)).toBeLessThan(lines.indexOf(`start ${runB}`));
     });
 
-  test("ARK-T60 ARK-343/AC2 a lock of a dead holder is taken over at once with one message, and no lock gives no message", async () => {
+  test("ARK-T60 a ticket of an ended pid frees its cores at once with one message, and no ticket gives no message", async () => {
     const dead = Bun.spawn(["true"]);
     await dead.exited;
-    mkdirSync(lockDirectory(), { recursive: true });
-    writeFileSync(
-      join(lockDirectory(), `holder-${dead.pid}-dead.json`),
-      JSON.stringify({
-        run: runB,
-        pid: dead.pid,
-        since: new Date().toISOString(),
-      }),
-    );
+    const arrival = new Date().toISOString();
+    writeTicketFile(`${dead.pid}-dead`, {
+      run: runB,
+      pid: dead.pid,
+      cores: 6,
+      arrival,
+      started: arrival,
+    });
 
-    const begun = Date.now();
     const taken = startTest(runA);
-    await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
-    expect(Date.now() - begun).toBeLessThan(2000);
     const out = await taken.stdout;
     expect(await taken.process.exited).toBe(0);
+    expect(logLines()).toContain(`start ${runA}`);
     expect(countOf(out, `took over a stale ark test lock of pid ${dead.pid}`)).toBe(1);
-    expect(out).not.toContain("waiting for");
+    expect(out).not.toContain("waiting:"); // it started on its first look, with no wait
 
     const again = startTest(runA);
     const againOut = await again.stdout;
@@ -328,216 +411,205 @@ describe("ark test lock", () => {
     expect(againOut).not.toContain("took over");
   });
 
-  // A reads the dead holder and stops; B takes over; A resumes while C waits. Pausing A after its filesystem calls
-  // is the only fake: B and C run the real module. The old takeover moved B's live lock away and let C in beside B.
-  test("ARK-T60 ARK-343/AC2 a stale takeover that resumes late never lets a second process in beside the live holder", async () => {
-    const dead = Bun.spawn(["true"]);
-    await dead.exited;
-    mkdirSync(lockDirectory(), { recursive: true });
-    writeFileSync(
-      join(lockDirectory(), `holder-${dead.pid}-dead.json`),
-      JSON.stringify({ run: runB, pid: dead.pid, since: new Date().toISOString() }),
-    );
-    const module = JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"));
-    const contender = (name: string, paused: boolean) => {
-      const pause = `import {mock} from 'bun:test';import * as fs from 'node:fs';const real={...fs};let paused=false;
-function wait(name){while(!real.existsSync(home+'/'+name))Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);}
-mock.module('node:fs',()=>({...real,
-readFileSync(...args){const value=real.readFileSync(...args);if(!paused&&String(args[0]).startsWith(home+'/test.lock/holder-')){paused=true;real.writeFileSync(home+'/read-stale','');wait('continue-read');}return value;},
-renameSync(from,to){const result=real.renameSync(from,to);if(from===home+'/test.lock'){real.writeFileSync(home+'/moved-lock','');wait('continue-move');}return result;}}));
-const {takeTestLock}=await import(${module});`;
-      return Bun.spawn(
-        [
-          "bun",
-          "-e",
-          `const home=process.env.ARK_HOME;${paused ? pause : `const {takeTestLock}=await import(${module});`}
-import {existsSync,mkdirSync,rmdirSync,writeFileSync} from 'node:fs';
-
-const release=await takeTestLock('${name}',()=>Promise.resolve());
-if(existsSync(home+'/inside'))writeFileSync(home+'/overlap-${name}','');
-mkdirSync(home+'/inside',{recursive:true});writeFileSync(home+'/entered-${name}','');
-while(!existsSync(home+'/leave-${name}'))await Bun.sleep(10);
-rmdirSync(home+'/inside');release();`,
-        ],
-        { env: { ...process.env, ARK_HOME: arkHome }, stdout: "ignore", stderr: "ignore" },
-      );
-    };
-    const signalFile = (name: string) => join(arkHome, name);
-    const present = (name: string) => () => existsSync(signalFile(name));
-    const children = [contender("A", true)];
-    startedTests.push(...children);
-    try {
-      await waitFor(present("read-stale"), "A to read the stale holder");
-      children.push(contender("B", false));
-      startedTests.push(children[1]!);
-      await waitFor(present("entered-B"), "B to take over");
-      writeFileSync(signalFile("continue-read"), "");
-      await Bun.sleep(300); // A runs on, and moves a live lock if the takeover can
-      children.push(contender("C", false));
-      startedTests.push(children[2]!);
-      await Bun.sleep(500);
-      writeFileSync(signalFile("continue-move"), "");
-      // B holds the lock; A and C poll independently, so release whichever enters next.
-      const names = ["A", "B", "C"];
-      const entered = (name: string) => existsSync(signalFile(`entered-${name}`));
-      const waiting = new Set(names);
-      while (waiting.size > 0) {
-        await waitFor(() => [...waiting].some(entered), "a contender to take the lock");
-        const releasing = [...waiting].find(entered)!;
-        writeFileSync(signalFile(`leave-${releasing}`), "");
-        await children[names.indexOf(releasing)]!.exited;
-        waiting.delete(releasing);
-      }
-      for (const name of ["A", "B", "C"])
-        expect(existsSync(signalFile(`overlap-${name}`))).toBe(false);
-    } finally {
-      for (const name of [
-        "read-stale",
-        "moved-lock",
-        "continue-read",
-        "continue-move",
-        "inside",
-        "entered-A",
-        "entered-B",
-        "entered-C",
-        "leave-A",
-        "leave-B",
-        "leave-C",
-        "overlap-A",
-        "overlap-B",
-        "overlap-C",
-      ])
-        rmSync(signalFile(name), { recursive: true, force: true });
-    }
-  });
-
-  test("ARK-T61 ARK-343/AC3 ark chief state lists the holder and each live waiter with waited time, and no dead waiter", async () => {
+  test("ARK-T61 ark chief state lists the running and the waiting run with cores and time, and no ended pid", async () => {
     const state = () => ark("chief", "state", "--project", projectA).out;
-    const heading = "## ark test lock";
+    const heading = "## ark test budget";
     expect(state()).not.toContain(heading);
     expect(state()).toContain("## Open runs");
 
     writeFileSync(join(fixtures, "hold"), "");
     const first = startTest(runA);
-    await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
+    await waitFor(started(runA));
     const second = startTest(runB);
-    await waitFor(
-      () => second.seen().includes(`waiting for ark test of ${runA}`),
-      "B to print its waiting line",
-    );
+    await second.until("waiting:");
 
-    const listed = state();
-    const lockSection = listed.split(/^## /m).find((part) => part.startsWith("ark test lock"));
-    expect(lockSection).toBeDefined();
-    expect(lockSection).toMatch(
-      new RegExp(`holder: ${runA} \\(pid ${first.process.pid}\\), running \\d+\\s?(s|m|min)`),
+    const section = state()
+      .split(/^## /m)
+      .find((part) => part.startsWith("ark test budget"));
+    expect(section).toBeDefined();
+    expect(section).toMatch(
+      new RegExp(`running: ${runA} \\(pid ${first.process.pid}\\), 6 cores, running \\d+(s|m)`),
     );
-    expect(lockSection).toMatch(
-      new RegExp(`waiting: ${runB} \\(pid ${second.process.pid}\\), waited \\d+\\s?(s|m|min)`),
+    expect(section).toMatch(
+      new RegExp(`waiting: ${runB} \\(pid ${second.process.pid}\\), 6 cores, waited \\d+(s|m)`),
     );
 
     const dead = Bun.spawn(["true"]);
     await dead.exited;
-    mkdirSync(waiterDirectory(), { recursive: true });
-    writeFileSync(
-      join(waiterDirectory(), `${dead.pid}.json`),
-      JSON.stringify({
-        run: "2026-01-01-GHOST-1",
-        pid: dead.pid,
-        since: new Date().toISOString(),
-      }),
-    );
-    expect(state()).not.toContain("GHOST-1");
+    const arrival = new Date().toISOString();
+    writeTicketFile(`${dead.pid}-ghost-running`, {
+      run: "2026-01-01-GHOST-1",
+      pid: dead.pid,
+      cores: 3,
+      arrival,
+      started: arrival,
+    });
+    writeTicketFile(`${dead.pid}-ghost-waiting`, {
+      run: "2026-01-01-GHOST-2",
+      pid: dead.pid,
+      cores: 3,
+      arrival,
+    });
+    expect(state()).not.toContain("GHOST");
 
     writeFileSync(join(fixtures, "release"), "");
-    const [, , secondOut] = await Promise.all([
-      first.process.exited,
-      second.process.exited,
-      second.stdout,
-    ]);
-    expect(secondOut).toContain(`waiting for ark test of ${runA}`);
+    await Promise.all([first.process.exited, second.process.exited, second.stdout]);
     expect(state()).not.toContain(heading);
   });
 
-  // ARK-396: the waiter files are the queue. The older waiter is a live `sleep`, never the test process.
-  test("ARK-T113 a newer ark test does not take a free lock while an older live waiter exists", async () => {
+  // ARK-396: the tickets are the queue. The older waiter is a live `sleep`, never the test process.
+  test("ARK-T113 a newer ark test does not take a free budget while an older live waiter of the same size exists", async () => {
     const older = Bun.spawn(["sleep", "300"]);
     startedTests.push(older);
-    mkdirSync(waiterDirectory(), { recursive: true });
-    const olderFile = join(waiterDirectory(), `${older.pid}.json`);
-    writeFileSync(
-      olderFile,
-      JSON.stringify({ run: runA, pid: older.pid, since: "2020-01-01T00:00:00.000Z" }),
-    );
+    writeTicketFile(`${older.pid}-older`, {
+      run: runA,
+      pid: older.pid,
+      cores: 6,
+      arrival: "2020-01-01T00:00:00.000Z",
+    });
 
+    // The newer ark test prints its place and waits. At the base commit it takes the free lock and never prints.
     const newer = startTest(runB);
-    const newerFile = join(waiterDirectory(), `${newer.process.pid}.json`);
-    // The newer ark test registers and waits. At the base commit it takes the lock and ends without registering.
-    await waitFor(
-      () => existsSync(newerFile) || newer.process.exitCode !== null,
-      "the newer ark test to register as a waiter",
-      10_000,
-    );
-    expect(existsSync(newerFile)).toBe(true);
-
-    // A negative claim ("does not take") can only be shown by watching for a bounded time: about seven poll
-    // periods of the lock, with the older waiter alive. A fake clock cannot drive a real child process.
-    const until = Date.now() + 700;
-    while (Date.now() < until) {
-      expect(existsSync(lockDirectory())).toBe(false);
-      expect(logLines()).not.toContain(`start ${runB}`);
-      expect(newer.process.exitCode).toBeNull();
-      await Bun.sleep(20);
-    }
+    await Promise.race([newer.until("waiting: place 2 of 2; running: none"), newer.process.exited]);
+    expect(newer.seen()).toContain("waiting: place 2 of 2; running: none");
+    expect(newer.process.exitCode).toBeNull();
+    expect(logLines()).not.toContain(`start ${runB}`);
 
     older.kill("SIGKILL");
     await older.exited;
-    rmSync(olderFile, { force: true });
     expect(await newer.process.exited).toBe(0);
     expect(logLines()).toContain(`start ${runB}`);
-    expect(existsSync(lockDirectory())).toBe(false);
+    expect(tickets()).toEqual([]);
   });
 
-  test("ARK-T114 a waiter file of an ended pid blocks nobody", async () => {
-    // The ended file has the earliest since. A live older waiter sits between it and the newer test.
+  test("ARK-T114 a waiting ticket of an ended pid blocks nobody", async () => {
+    // The ended ticket has the earliest arrival. A live older waiter sits between it and the newer test.
     const ended = Bun.spawn(["true"]);
     await ended.exited;
     const live = Bun.spawn(["sleep", "300"]);
     startedTests.push(live);
-    mkdirSync(waiterDirectory(), { recursive: true });
-    writeFileSync(
-      join(waiterDirectory(), `${ended.pid}.json`),
-      JSON.stringify({
-        run: "2019-01-01-GHOST-1",
-        pid: ended.pid,
-        since: "2019-01-01T00:00:00.000Z",
-      }),
-    );
-    writeFileSync(
-      join(waiterDirectory(), `${live.pid}.json`),
-      JSON.stringify({ run: runA, pid: live.pid, since: "2020-01-01T00:00:00.000Z" }),
-    );
+    const endedFile = writeTicketFile(`${ended.pid}-ended`, {
+      run: "2019-01-01-GHOST-1",
+      pid: ended.pid,
+      cores: 6,
+      arrival: "2019-01-01T00:00:00.000Z",
+    });
+    writeTicketFile(`${live.pid}-live`, {
+      run: runA,
+      pid: live.pid,
+      cores: 6,
+      arrival: "2020-01-01T00:00:00.000Z",
+    });
 
     const newer = startTest(runB);
-    const newerFile = join(waiterDirectory(), `${newer.process.pid}.json`);
-    // At the base commit the newer test takes the free lock at once and ends without registering.
-    await waitFor(
-      () => existsSync(newerFile) || newer.process.exitCode !== null,
-      "the newer ark test to register as a waiter",
-      10_000,
-    );
-    expect(existsSync(newerFile)).toBe(true);
+    // Place 2 of 2: the ended ticket does not count.
+    await Promise.race([newer.until("waiting: place 2 of 2; running: none"), newer.process.exited]);
+    expect(newer.seen()).toContain("waiting: place 2 of 2; running: none");
     expect(newer.process.exitCode).toBeNull();
-    expect(existsSync(lockDirectory())).toBe(false);
+    expect(existsSync(endedFile)).toBe(false);
     expect(logLines()).not.toContain(`start ${runB}`);
 
     live.kill("SIGKILL");
     await live.exited;
-    const [out, exitCode] = await Promise.all([newer.stdout, newer.process.exited]);
-    expect(exitCode).toBe(0);
+    expect(await newer.process.exited).toBe(0);
     expect(logLines()).toContain(`start ${runB}`);
-    expect(out).toContain(`waiting for ark test of ${runA}`);
-    expect(out).not.toContain("GHOST-1");
-    expect(existsSync(lockDirectory())).toBe(false);
+    expect(tickets()).toEqual([]);
+  });
+});
+
+describe("ark test suite TMPDIR and cores", () => {
+  const recordFile = () => join(fixtures, "record");
+  const recorded = () =>
+    readFileSync(recordFile(), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [suite, directory, cores, files] = line.split(" ");
+        return { suite, directory: directory!, cores, files };
+      });
+  const recorderCommand = (suite: string, cores?: number) =>
+    `sh ${join(fixtures, "recorder.sh")} ${fixtures} {report} ${suite} ${cores === undefined ? "none" : "<cores>"}`;
+
+  /** `ark test` with a caller TMPDIR of its own, to read what the suites saw. */
+  async function runWithCallerTmpdir(run: string): Promise<{ exitCode: number; caller: string }> {
+    const caller = mkdtempSync(join(tmpdir(), "caller-tmpdir-"));
+    const child = startTest(run, { TMPDIR: caller });
+    await child.stdout;
+    return { exitCode: await child.process.exited, caller };
+  }
+
+  test("ARK-T153 each suite of one ark test runs with its own TMPDIR that is gone when the suite ends", async () => {
+    // The base side runs the same two suites, so one ark test has four suite runs.
+    const run = startRun("tmpdir-project", "TMPDIR-1", "", () => [
+      {
+        name: "cli",
+        level: "integration",
+        repo: ".",
+        command: recorderCommand("cli"),
+        parser: "bun",
+      },
+      {
+        name: "playwright",
+        level: "e2e",
+        repo: ".",
+        command: recorderCommand("playwright"),
+        parser: "bun",
+      },
+    ]);
+    const { exitCode, caller } = await runWithCallerTmpdir(run);
+    expect(exitCode).toBe(0);
+    const suiteRuns = recorded();
+    expect(suiteRuns).toHaveLength(4);
+    const directories = suiteRuns.map((suiteRun) => suiteRun.directory);
+    expect(new Set([...directories, caller]).size).toBe(5);
+    for (const suiteRun of suiteRuns) {
+      expect(suiteRun.files).toContain(`marker-${suiteRun.suite}`);
+      expect(existsSync(suiteRun.directory)).toBe(false);
+    }
+    expect(readdirSync(caller)).toEqual([]);
+
+    // A suite that fails still has its folder deleted.
+    rmSync(recordFile());
+    writeFileSync(join(fixtures, "fail-cli"), "");
+    const failed = await runWithCallerTmpdir(run);
+    expect(failed.exitCode).not.toBe(0);
+    const failedRuns = recorded();
+    expect(failedRuns.length).toBeGreaterThanOrEqual(2);
+    for (const suiteRun of failedRuns) expect(existsSync(suiteRun.directory)).toBe(false);
+    expect(readdirSync(failed.caller)).toEqual([]);
+  });
+
+  test("ARK-T155 the cores of a suite replace <cores> in its command: its own, the whole budget with none, the budget when above it", async () => {
+    const run = startRun("cores-project", "CORES-1", "", () => [
+      {
+        name: "three",
+        level: "integration",
+        repo: ".",
+        command: recorderCommand("three", 3),
+        parser: "bun",
+        cores: 3,
+      },
+      {
+        name: "eight",
+        level: "integration",
+        repo: ".",
+        command: recorderCommand("eight", 8),
+        parser: "bun",
+        cores: 8,
+      },
+      {
+        name: "whole",
+        level: "integration",
+        repo: ".",
+        command: recorderCommand("whole", 6),
+        parser: "bun",
+      },
+    ]);
+    const child = startTest(run);
+    await child.stdout;
+    expect(await child.process.exited).toBe(0);
+    const head = new Map(recorded().map((suiteRun) => [suiteRun.suite, suiteRun.cores]));
+    expect(Object.fromEntries(head)).toEqual({ three: "3", eight: "6", whole: "6" });
+    expect(tickets()).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -144,6 +144,73 @@ test("fixture", () => {
     const { exitCode, output } = await runBunTest(fixturePath, scratch);
     expect(exitCode, output).toBe(0);
     expect(readdirSync(scratch)).toEqual([]);
+  },
+  { timeout: 60_000 },
+);
+
+const refusedTools = ["orca", "gh", "glab", "omp", "plannotator", "launchctl", "portless"];
+
+test(
+  "ARK-T154 bun test refuses a real orca, gh, glab, omp, plannotator, launchctl or portless and a test's own fake still wins",
+  async () => {
+    // Sentinels stand in for the real tools, behind the preload shims on the PATH the child inherits. Each logs its
+    // name and exits 0, so a refusal cannot come from a real tool's own failure. The PATH holds nothing else named
+    // like a tool: the sentinels, then the system folders and the folder of bun.
+    const sentinels = mkdtempSync(join(fixtureRoot, "sentinels-"));
+    const sentinelLog = join(sentinels, "calls.log");
+    for (const tool of refusedTools) {
+      const file = join(sentinels, tool);
+      writeFileSync(file, `#!/bin/sh\necho ${tool} >> ${sentinelLog}\n`);
+      chmodSync(file, 0o755);
+    }
+    const environment = { PATH: `${sentinels}:/usr/bin:/bin:${dirname(process.execPath)}` };
+    const fixturePath = writeFixture(
+      "refused-tools",
+      `
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, test } from "bun:test";
+
+// Product code spawns with Bun's default environment (cli/exec.ts); a test may also pass env: process.env.
+const environments = [{}, { env: process.env }];
+
+test.each(${JSON.stringify(refusedTools)})("refuses %s by name", (tool) => {
+  for (const options of environments) {
+    const result = Bun.spawnSync([tool, "--version"], { stdout: "pipe", stderr: "pipe", ...options });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout.toString() + result.stderr.toString()).toContain(tool);
+  }
+});
+
+test("a test's own fake orca gets the call", () => {
+  const directory = mkdtempSync(join(tmpdir(), "fake-orca-"));
+  writeFileSync(join(directory, "orca"), "#!/bin/sh\\necho fake-orca-output\\n");
+  chmodSync(join(directory, "orca"), 0o755);
+  process.env.PATH = directory + ":" + process.env.PATH;
+  for (const options of environments) {
+    const result = Bun.spawnSync(["orca"], { stdout: "pipe", ...options });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString().trim()).toBe("fake-orca-output");
+  }
+});
+
+test("a tool outside the seven still runs", () => {
+  expect(Bun.spawnSync(["git", "--version"]).exitCode).toBe(0);
+});
+`,
+    );
+    const child = Bun.spawn(["bun", "test", fixturePath], {
+      cwd: repositoryRoot,
+      env: { ...environment, TMPDIR: scratchDirectory(), HOME: process.env.HOME! },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output =
+      (await new Response(child.stdout).text()) + (await new Response(child.stderr).text());
+    expect(await child.exited, output).toBe(0);
+    expect(output).toContain(" 9 pass");
+    expect(existsSync(sentinelLog)).toBe(false);
   },
   { timeout: 60_000 },
 );
