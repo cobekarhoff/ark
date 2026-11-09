@@ -311,7 +311,7 @@ describe("ark test", () => {
   });
 
   // Real processes: the base suite holds until SIGTERM, and the wall clock is the only signal to poll.
-  test("an ark test killed during the base run leaves no worktree in the source repo", async () => {
+  test("ARK-T171 an ark test killed during the base run leaves no worktree in the source repo", async () => {
     const marker = join(mkdtempSync(join(tmpdir(), "ark-marker-")), "at-base");
     const { runId, workspace } = buildingRun({
       criteria: ["FAKE-1-AC1"],

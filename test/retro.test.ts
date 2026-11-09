@@ -193,7 +193,7 @@ describe("usage parsers", () => {
 });
 
 describe("ark retro", () => {
-  test("ARK-160-AC1 gives byte-identical metrics.json for the same run data", () => {
+  test("ARK-T170 gives byte-identical metrics.json for the same run data", () => {
     installAllSessions();
     retro(runId);
     const first = readFileSync(join(runDirectory, "metrics.json"), "utf8");
