@@ -2664,13 +2664,13 @@ test("ARK-T150 gather.ts in each repo of a 2-repo run writes that repo's own hos
 
   const expected = {
     [a]: {
-      files: ["cli/a.ts"],
+      files: ["repos/a/cli/a.ts"],
       host: "github",
       owner: "owner-a",
       heading: "Alpha verification",
     },
     [b]: {
-      files: ["cli/b.ts"],
+      files: ["repos/b/cli/b.ts"],
       host: "gitlab",
       owner: "owner-b",
       heading: "Bravo verification",

@@ -11,7 +11,7 @@ import {
   writeLedgerFile,
 } from "../lib/ledger.ts";
 import { probeOpenMergeRequest, ProbeFailure } from "../lib/post.ts";
-import { currentBranch, emit, ledgerForBranch, repoRoot, runCli, say } from "./cli.ts";
+import { currentBranch, emit, ledgerForRepo, repoRoot, runCli, say } from "./cli.ts";
 
 const name = "gather";
 
@@ -70,7 +70,7 @@ await runCli(
 function run(values: { base?: string; "run-dir"?: string; "existing-only"?: boolean }): number {
   const root = repoRoot();
   if (root === null) {
-    say(name, "not a git repository (or git is not installed).");
+    say(name, `${process.cwd()} is not a git repository (or git is not installed).`);
     emit({ error: "not a git repo" });
     return 2;
   }
@@ -122,16 +122,21 @@ function run(values: { base?: string; "run-dir"?: string; "existing-only"?: bool
       ? { directory: root, base: values.base, prWriting: config }
       : { runFolder: values["run-dir"] },
   );
-  const ledger = ledgerForBranch(full, branch);
+  const ledger = ledgerForRepo(full, root);
+  if (ledger === null) {
+    say(name, `${root} is not a worktree of run ${full.run?.id ?? values["run-dir"]}`);
+    emit({ error: "not a worktree of the run", directory: root });
+    return 1;
+  }
   const repo = ledger.repos[0];
-  if (repo === undefined || repo.files.length === 0) {
+  if (repo.files.length === 0) {
     say(name, `no changed files on ${branch} against the base: nothing to write.`);
     emit({ error: "empty diff" });
     return 1;
   }
   say(
     name,
-    `branch ${branch} vs ${repo.base}, ${repo.commits.length} commits, ${repo.files.length} files, host ${full.host}`,
+    `branch ${branch} vs ${repo.base}, ${repo.commits.length} commits, ${repo.files.length} files, host ${ledger.host}`,
   );
   writeLedgerFile(root, full);
   // The folder keeps ledger.json, body.md and nothing of it in `git status`.
