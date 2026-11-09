@@ -108,7 +108,7 @@ If two rules match with different answers, or none match, the source is unknown:
 
 ### Roles
 
-Roles come from the harnesses installed here, and the human confirms them before bootstrap writes `ark.yml`. Cross-vendor review is the default: the validator and reviewer run on a different vendor from the implementer.
+Roles come from the harnesses installed here, and the human confirms them before bootstrap writes `ark.yml`. Cross-vendor review is the default for the reviewer and the test reviewer: they run on OpenAI, and every other role runs on Anthropic.
 
 1. Look up `claude`, `codex`, `omp` and `pi` on PATH, `omp` first. `ark.yml` accepts only these four harnesses.
 2. With `omp`: every role uses harness `omp`. Read the selectors from `omp models --json` (once). The implementer, validator, evaluator, designer, chief and test writer use the newest Anthropic Sonnet-class selector: among `anthropic/claude-sonnet-*`, the highest version number, ignoring selectors that end in a date (such as `-20250929`). The reviewer and test reviewer use the newest OpenAI GPT-class selector: among `openai-codex/gpt-*`, the highest version number, then the variant `sol` over the others. Write the selector exactly as the list prints it.
@@ -120,7 +120,7 @@ For example, with `omp` and the list holding `anthropic/claude-sonnet-5-5` and `
 ```yaml
 roles:
   implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-  validator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+  validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
   reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
   evaluator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
   designer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
@@ -129,7 +129,7 @@ roles:
   test_reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
 ```
 
-The test writer designs the test cases before the plan, and the test reviewer checks them before any implementer step starts. The reviewer uses a different vendor from the implementer and the writer. Without `roles.test_writer` or `roles.test_reviewer`, the run lead stops and escalates to Master Chief. Old configs without them still load. The evaluator checks the ticket before the run lead plans. Give it a different vendor from the run lead. Without `roles.evaluator`, `ark evaluation record` refuses and no plan passes `ark plan check`. The designer makes mockups for the strategy gate when the ticket changes something a person sees. Without `roles.designer`, `ark strategy record` refuses such a ticket and names the role. It needs neither a designer nor a mockup when the surface is only `none`, or when there is one card and the surface is only `document`. Old configs without it still load. The chief role sets the harness and model Master Chief uses for run leads, and the hub uses it to spawn Master Chief. Without `roles.chief`, the chief playbook stops before it starts a run lead and names the role.
+The test writer designs the test cases before the plan, and the test reviewer checks them before any implementer step starts. The test reviewer uses a different vendor from the implementer and the writer. Without `roles.test_writer` or `roles.test_reviewer`, the run lead stops and escalates to Master Chief. Old configs without them still load. The evaluator checks the ticket before the run lead plans. Without `roles.evaluator`, `ark evaluation record` refuses and no plan passes `ark plan check`. The designer makes mockups for the strategy gate when the ticket changes something a person sees. Without `roles.designer`, `ark strategy record` refuses such a ticket and names the role. It needs neither a designer nor a mockup when the surface is only `none`, or when there is one card and the surface is only `document`. Old configs without it still load. The chief role sets the harness and model Master Chief uses for run leads, and the hub uses it to spawn Master Chief. Without `roles.chief`, the chief playbook stops before it starts a run lead and names the role.
 
 `ark status` then checks that each role can run.
 

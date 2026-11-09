@@ -37,7 +37,7 @@ You need:
 
 3. Answer any questions. Master Chief asks one at a time and recommends an answer. For example:
 
-   > Which models should the roles use? Recommended: the detected default, `anthropic/claude-sonnet-5-5` for the implementer and `openai-codex/gpt-6.1-sol` for the validator and reviewer, because cross-vendor review catches more defects.
+   > Which models should the roles use? Recommended: the detected default, `anthropic/claude-sonnet-5-5` for the implementer, validator, evaluator, designer, chief and test writer and `openai-codex/gpt-6.1-sol` for the reviewer and test reviewer, because cross-vendor review catches more defects.
 
    Reply with "yes" to take the recommendation, or give your own answer.
 
@@ -64,7 +64,7 @@ You need:
        parser: bun
    roles:
      implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     validator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+     validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
      chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
@@ -117,7 +117,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
        parser: behave
    roles:
      implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     validator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+     validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
      chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }

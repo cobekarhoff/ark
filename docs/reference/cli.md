@@ -397,9 +397,9 @@ suites:
     paths: [hub/, cli/, test/pw/, package.json, bun.lock]
 roles:
   implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-  validator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+  validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
   reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
-  evaluator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+  evaluator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
   designer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
 concurrency: 2
 round_budget: 2

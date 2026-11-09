@@ -129,7 +129,7 @@ The company whose model runs a worker, such as Anthropic or OpenAI.
 _Avoid_: Provider, model family
 
 **Cross-vendor review**:
-The default that validators and reviewers use a different vendor from the implementers. The plan sets it per step, and you can change it at the plan gate.
+The default that reviewers use a different vendor from the implementers. The plan sets it per step, and you can change it at the plan gate.
 _Avoid_: Vendor rule
 
 ## Planning and proof
