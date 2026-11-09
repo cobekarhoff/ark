@@ -400,6 +400,13 @@ function localOnlyLines(project: string, directory: string, state: RunState): st
   };
   const repos = [...new Set([...order, ...state.worktrees.map((worktree) => worktree.repo)])];
   const width = Math.max(0, ...repos.map((repo) => repo.length)) + 3;
+  // A submodule needs the head of the upstream worktree branch; a package needs a version that is not published yet.
+  const neededValue = (edge: { kind: string; repo: string }) => {
+    const upstream = state.worktrees.find((worktree) => worktree.repo === edge.repo);
+    if (!upstream || edge.kind !== "submodule") return "<published version>";
+    const head = Bun.spawnSync(["git", "-C", upstream.path, "rev-parse", "HEAD"]);
+    return head.exitCode === 0 ? head.stdout.toString().trim().slice(0, 8) : "<published version>";
+  };
   const pendingBumps = (repo: string) =>
     (plan?.repos.find((entry) => entry.repo === repo)?.depends_on ?? [])
       .filter(
@@ -407,7 +414,8 @@ function localOnlyLines(project: string, directory: string, state: RunState): st
           edge.bump && state.steps.find((step) => step.id === edge.bump)?.status !== "succeeded",
       )
       .map(
-        (edge) => `           pending bump: ${edge.bump} (${edge.kind} ${edge.repo}, ${edge.pin})`,
+        (edge) =>
+          `           pending bump: ${edge.bump} (${edge.kind} ${edge.repo}, ${edge.pin}) needs ${neededValue(edge)}`,
       );
   const lines: string[] = [];
   const unlisted: string[] = [];

@@ -143,7 +143,15 @@ Pushes each repo's branch and posts one ready MR (not Draft) for each repo, in m
 ```text
 ark merge-request status <run> [--since <time>] [--json] [--project <name>]
 
-For a project with `merge_requests: none` it prints `merge requests: none`, exits 0 and calls no gh and no glab. Otherwise it prints each MR of the run as `<repo>  <state>  <url>`, then `ci: passed|failed|running|none|unknown`, `conflict` when the MR cannot merge into its target branch (`conflict: unknown` when the host cannot say), and `checks failing: <names>`, read from gh or glab. With --since <ISO 8601 time> it also lists each human comment written after that time (bots and the logged-in Ark user left out), indented under its MR with author, file:line, body and URL; `comments: unknown` when they cannot be read. With --json it prints one array of {repo,url,state,ci,failedChecks:[{name,url}],conflict,comments}; conflict and comments are null when unknown. A value gh or glab cannot answer prints `unknown` and the command exits 0; unknown is never a pass. It changes nothing.
+For a project with `merge_requests: none` it prints `merge requests: none`, exits 0 and calls no gh and no glab. Otherwise it prints each MR of the run as `<repo>  <state>  <url>`, then `ci: passed|failed|running|none|unknown`, `conflict` when the MR cannot merge into its target branch (`conflict: unknown` when the host cannot say), and `checks failing: <names>`, read from gh or glab. Under an MR that lists upstreams in `waits_for` it prints `  waits for !N (<state>)` for each, then `  bump <step>  <kind> <upstream repo>  pin <pin>  <state>` for each bump step of its repo in the plan. The bump state is `refreshed to <value>` once `ark bump refresh` recorded it (8 characters for a submodule); else for a submodule `points at upstream branch <8 characters>` (the pointer in the downstream worktree), and for any other kind `waits for upstream merge` or, with the upstream MR merged, `waits for upstream publish`. Ark asks no package registry. With --since <ISO 8601 time> it also lists each human comment written after that time (bots and the logged-in Ark user left out), indented under its MR with author, file:line, body and URL; `comments: unknown` when they cannot be read. With --json it prints one array of {repo,url,state,ci,failedChecks:[{name,url}],conflict,comments}; conflict and comments are null when unknown. A value gh or glab cannot answer prints `unknown` and the command exits 0; unknown is never a pass. It changes nothing.
+```
+
+### bump refresh
+
+```text
+ark bump refresh <run> <step> [--to <value>] [--project <name>]
+
+Records `bump.refreshed` for a bump step of the plan (a step named in the `bump` field of a repo edge) and prints `refreshed <step> to <value>`. For a submodule edge it fetches the submodule in the downstream worktree, moves its pointer (the `pin` path) to the merge commit of the upstream MR (`merge_commit_sha` or `squash_commit_sha` on GitLab, `mergeCommit` on GitHub), never to the branch head, commits the pointer and records the commit. It refuses when the upstream MR is not merged or names no merge commit. `--to <commit>` replaces the merge commit. For any other edge kind `--to <value>` is required and the command only records it: the pin edit is an implementer round. It refuses a step that is not a bump step. `ark merge-request status` then shows `refreshed to <value>` (8 characters for a submodule).
 ```
 
 ### worktree sync
@@ -171,7 +179,7 @@ Prints the state of one run: phase, round, first unfinished step, waiting gate, 
 
 The list adds the age of the newest event of each open run after the step, as `Nm`, `Nh` or `Nd` (largest whole unit; hours up to 47), and ends the line with `  stale` when that age is over 24 hours: `<run>  <phase>  <step>  <age>[  stale]`. It prints the `kind` of the run after the ticket line.
 
-For a `merge_requests: none` run with a `repos` block it prints, after the branch line of a repo (or after the last branch line when the repo has none), `pending bump: <step> (<kind> <upstream repo>, <pin>)` for each bump step of that repo that has not succeeded. A plan with several repos and no `repos` block takes the order from step `needs` and prints `order: from step needs (no repos list)` once above the branches.
+For a `merge_requests: none` run with a `repos` block it prints, after the branch line of a repo (or after the last branch line when the repo has none), `pending bump: <step> (<kind> <upstream repo>, <pin>) needs <value>` for each bump step of that repo that has not succeeded. The value is 8 characters of the head of the upstream worktree for a submodule, and `<published version>` for any other kind. A plan with several repos and no `repos` block takes the order from step `needs` and prints `order: from step needs (no repos list)` once above the branches.
 ```
 
 ### retro
