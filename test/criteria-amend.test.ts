@@ -1,7 +1,7 @@
 import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { manualCriteria } from "../cli/criteria.ts";
+import { manualCriteria } from "../cli/ticket.ts";
 import { appendEvent } from "../cli/events.ts";
 import { ark, recordEvaluation, tempArkHome, tempGitRepo, writeProject } from "./helpers.ts";
 

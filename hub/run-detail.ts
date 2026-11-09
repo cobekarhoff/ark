@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { ArkEvent } from "../cli/events.ts";
-import { isInside } from "../cli/usage/index.ts";
+import { isInside } from "../cli/paths.ts";
 import type { TimelineEntry } from "./types.ts";
 
 /**

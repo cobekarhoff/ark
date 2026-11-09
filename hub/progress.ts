@@ -1,4 +1,4 @@
-import type { StepWindow } from "../cli/usage/owners.ts";
+import type { StepWindow } from "../cli/events.ts";
 import type { RoleTimes } from "./types.ts";
 
 /** Nearest-rank percentile of a sorted list. */

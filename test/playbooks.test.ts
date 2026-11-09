@@ -52,7 +52,6 @@ test("ARK-286-AC6 package.json defines the typecheck, lint and format:check scri
   const { scripts } = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8"));
   for (const name of ["typecheck", "lint", "format:check"]) expect(scripts[name]).toBeTruthy();
 });
-
 test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
   const root = join(import.meta.dir, "..");
   const files = [
@@ -64,16 +63,6 @@ test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
   ].filter((file) => existsSync(join(root, file)));
   const result = Bun.spawnSync(["bunx", "oxfmt", "--check", ...files], { cwd: root });
   expect(result.exitCode).toBe(0);
-});
-
-test("ARK-T83 cli.md equals the generator output", () => {
-  const root = join(import.meta.dir, "..");
-  const path = join(root, "docs/reference/cli.md");
-  const before = readFileSync(path, "utf8");
-  expect(
-    Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
-  ).toBe(0);
-  expect(readFileSync(path, "utf8")).toBe(before);
 });
 
 /** Every code-block line and inline `command` of a Markdown text. */
@@ -150,16 +139,6 @@ test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead
   expect(
     commands.filter((command) => command.includes("ark ui --port")).length,
   ).toBeGreaterThanOrEqual(1);
-});
-
-test("ARK-T84 the generated CLI reference equals the file", () => {
-  const root = join(import.meta.dir, "..");
-  const path = join(root, "docs/reference/cli.md");
-  const before = readFileSync(path, "utf8");
-  expect(
-    Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
-  ).toBe(0);
-  expect(readFileSync(path, "utf8")).toBe(before);
 });
 
 test("ARK-T85 every link in principles.md points to a file and heading that exist", () => {

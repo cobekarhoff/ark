@@ -247,9 +247,12 @@ function prefixPattern(rule: string): RegExp {
   return new RegExp(`^${source}$`);
 }
 
+export const maxTitleLength = 72;
+
 const TITLE01: Check = ({ title, ledger }) => {
   const problems: string[] = [];
-  if (title.length > 72) problems.push(`${title.length} characters, 72 allowed`);
+  if (title.length > maxTitleLength)
+    problems.push(`${title.length} characters, ${maxTitleLength} allowed`);
   if (title.endsWith(".")) problems.push("ends with a period");
   const rule = ledger.prWriting.title_prefix;
   if (rule && !prefixPattern(rule).test(title))

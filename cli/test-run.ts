@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadConfig, type ProjectConfig } from "./config.ts";
-import { hasTestCriterion, runCriteria } from "./criteria.ts";
+import { hasTestCriterion, runCriteria } from "./ticket.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
@@ -28,7 +28,6 @@ import { linkUntouched } from "./worktree.ts";
 
 type Status = CriterionStatus;
 
-/** Running child processes, so a signal can stop them: each has its own process group. */
 const children = new Set<{ pid: number }>();
 
 /** Milliseconds a suite process group gets after SIGTERM before SIGKILL. */

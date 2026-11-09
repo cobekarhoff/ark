@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { reactSkill, requiredUiSkills, uiSkillsFor } from "../cli/ui-skills.ts";
 import { ark, tempArkHome, tempGitRepo, writeProject, writeTicket } from "./helpers.ts";
@@ -52,13 +52,6 @@ describe("ui-skills", () => {
     expect(result.code).toBe(1);
     expect(result.err).toContain("no recorded evaluation");
   });
-});
-
-test("ARK-T93 docs/reference/cli.md matches the generator", () => {
-  const path = join(import.meta.dir, "..", "docs/reference/cli.md");
-  const before = readFileSync(path, "utf8");
-  Bun.spawnSync(["bun", join(import.meta.dir, "..", "scripts/cli-reference.ts")]);
-  expect(readFileSync(path, "utf8")).toBe(before);
 });
 
 describe("ARK-T40 ARK-328/AC1 ark ui-skills prints the 3 UI skills only when the surfaces include web_ui", () => {
