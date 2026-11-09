@@ -48,9 +48,9 @@ Do this before you write `plan.yml`. `ark plan check` refuses a run that has no 
 
 ### A busy agent
 
-A send to Master Chief or to a worker can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn. Pick a retry id once for the message, unique for each message and each target, such as `<run>-<subject slug>-<target dispatch id>`, and use that same `--retry-request <id>` for every try. Wait 30 seconds, then send the same message again, up to 5 times. Every `orca orchestration send` in this playbook follows this rule.
+A send to Master Chief or to a worker can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn. Wait 30 seconds, then send again with the request UUID that Orca printed, up to 5 times. Every `orca orchestration send` in this playbook follows this rule.
 
-After 5 sends that all fail, for a worker: wait for its `worker_done` with `orca orchestration check --wait`, then send once more. For Master Chief: record the undelivered message (subject and body) in the final report. Never treat the message as delivered until a send succeeds.
+After 5 sends that all fail, for a worker: wait for its `worker_done` with `orca orchestration check --wait ... --json 2>/dev/null`, then send once more. For Master Chief: record the undelivered message (subject and body) in the final report. Never treat the message as delivered until a send succeeds.
 
 ### Anchor
 
@@ -60,13 +60,13 @@ Your own working folder is the run worktree Master Chief made. Run this before y
 ark worktree anchor <run>
 ```
 
-It prints one line, `path:<absolute path>`, and prints the same line when the worktree already exists. If it exits non-zero (for example `setup` fails), do not continue and never start a worker in the main workspace: send an escalation to Master Chief with `orca orchestration send --retry-request <id> --type escalation` and the error.
+It prints one line, `path:<absolute path>`, and prints the same line when the worktree already exists. If it exits non-zero (for example `setup` fails), do not continue and never start a worker in the main workspace: send an escalation to Master Chief with `orca orchestration send --type escalation` and the error.
 
 ### Evaluate
 
 Skip this part when `ark status <run>` shows that the run has an `evaluation.recorded` event (you replace a stopped run lead).
 
-1. Read `roles` in `ark.yml`. If it has no `evaluator` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --retry-request <id> --type escalation`, and say that `ark.yml` has no `roles.evaluator`: add its `harness` and `model`, then start a new run lead.
+1. Read `roles` in `ark.yml`. If it has no `evaluator` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.evaluator`: add its `harness` and `model`, then start a new run lead.
 2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the run worktree and reads the ticket and the code. It has no plan step. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
 
    ```sh
@@ -115,7 +115,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
 
 1. Write `<run folder>/strategies.md`: 2 or 3 short cards, one level-2 heading for each card (`## <id> <title>`). Each card has these fields, one per line: `Approach:`, `Interfaces:`, `Tradeoffs:` (risk, size, what it leaves out), `Steps:` (a rough list), `Mockup:` (links to files in `<run folder>/mockups/`), `Skills:` (only when `Surfaces` includes `web_ui`: the UI skills that guided the card, from `ark ui-skills <run>`) and `Recommended: yes` on exactly one card. If only one strategy is possible, write one card with a `Reason:` line that says why there is no alternative.
 2. Read `Surfaces` in `evaluation.md`. When a surface is not `none`, every card needs a `Mockup:` link, and `ark strategy record` refuses a card with none. Exception: when `Surfaces` is only `none`, or when there is one card and `Surfaces` is only `document`, leave out the `Mockup:` line (never write `Mockup: none`, it is refused), skip the Designer and go to step 3. Otherwise start a Designer to make them:
-   1. Read `roles` in `ark.yml`. If it has no `designer` entry, stop. Send an escalation to Master Chief with `orca orchestration send --retry-request <id> --type escalation`, and say that `ark.yml` has no `roles.designer`: add its `harness` and `model`, then start a new run lead.
+   1. Read `roles` in `ark.yml`. If it has no `designer` entry, stop. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.designer`: add its `harness` and `model`, then start a new run lead.
    2. Start the Designer with the `harness` and `model` of `roles.designer`. It works in the run worktree, has no plan step, and is named `designer`:
 
       ```sh
@@ -148,7 +148,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
 
    Add your recommendation.
 
-7. **Design round.** If the human writes notes or annotations and does not pick a card, send them to the same Designer (`orca orchestration send --retry-request <id>` to its terminal, or start it again with the notes). Revise `strategies.md` with the Designer's changes, run `ark strategy record <run>` again, and show it again. Each new `strategy.recorded` before the answer is one design round. Design rounds have no budget. They never use the build round budget, and they never open the escalation gate. To mix two strategies, write a mixed card from the human's note and record again.
+7. **Design round.** If the human writes notes or annotations and does not pick a card, send them to the same Designer (`orca orchestration send` to its terminal, or start it again with the notes). Revise `strategies.md` with the Designer's changes, run `ark strategy record <run>` again, and show it again. Each new `strategy.recorded` before the answer is one design round. Design rounds have no budget. They never use the build round budget, and they never open the escalation gate. To mix two strategies, write a mixed card from the human's note and record again.
 8. Record the human's answer with the exact card ID, or `abort`:
 
    ```sh
@@ -162,10 +162,10 @@ The strategy comes after the evaluation and before the plan. Skip this part when
 
 This part comes after the strategy part and before the plan: wherever the strategy part says to go to section 3, do this part first. Skip it when `<run folder>/findings/test-case-review-<n>.md` has the line `Verdict: approve` for the latest design (you replace a stopped run lead). The writer and the reviewer are not plan steps: no plan step is named after a role, and they are named `test-case-writer` and `test-case-reviewer`.
 
-1. Read `roles` in `ark.yml`. If it has no `test_writer` or no `test_reviewer` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --retry-request <id> --type escalation`, and say which of `roles.test_writer` and `roles.test_reviewer` is missing: add its `harness` and `model`, then start a new run lead.
+1. Read `roles` in `ark.yml`. If it has no `test_writer` or no `test_reviewer` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say which of `roles.test_writer` and `roles.test_reviewer` is missing: add its `harness` and `model`, then start a new run lead.
 2. **Test design.** Start the test case writer with the `harness` and `model` of `roles.test_writer`, with the command of the Designer (above), in the run worktree. Name it `test-case-writer`, and use the spec `/skill:ark worker <run> test-case-writer` and the line `You are the TEST CASE WRITER for run <run>. Follow /skill:test-case-writer.` Wait for its `worker_done` and release the terminal as in section 7. It writes the cases and `<run folder>/test-design.md`.
 3. **Test review.** Start the test case reviewer with the `harness` and `model` of `roles.test_reviewer`, named `test-case-reviewer`, the same way with `/skill:test-case-reviewer`. It writes `<run folder>/findings/test-case-review-<n>.md` with a `Verdict: approve` or `Verdict: reject` line.
-4. On `Verdict: reject`, send the rejection to the writer (`orca orchestration send --retry-request <id>` to its terminal, or start it again with the findings file), wait for its `worker_done`, and start the reviewer again. Count each rejection. After 3 rejections, send an escalation to Master Chief with the three findings files and wait. The count of 3 is separate from the round budget of section 9: a rejection is not a round.
+4. On `Verdict: reject`, send the rejection to the writer (`orca orchestration send` to its terminal, or start it again with the findings file), wait for its `worker_done`, and start the reviewer again. Count each rejection. After 3 rejections, send an escalation to Master Chief with the three findings files and wait. The count of 3 is separate from the round budget of section 9: a rejection is not a round.
 5. On `Verdict: approve`, go to section 3. The plan needs the cases of `test-design.md` in `test_cases`. No implementer step starts before the reviewer approves the cases.
 
 ### Live human check
@@ -310,7 +310,7 @@ echo $! > "<run folder>/gates/plan-<n>.pid"
 - First tell Master Chief that a review is open, so it can point the human to it. Send this before you run the command:
 
   ```sh
-  orca orchestration send --retry-request <id> --type status --subject "Plan review open for <run>" --body "Plannotator is open on plan.md. The human answers there."
+  orca orchestration send --type status --subject "Plan review open for <run>" --body "Plannotator is open on plan.md. The human answers there."
   ```
 
 - Read `<run folder>/gates/plan-<n>.json`. The `decision` gives the answer. If the process ended and left no result file, the gate failed to start (exit 2):
@@ -393,7 +393,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 3. Keep the terminal handle from the `worker-start --json` output: the `id` of the entry in `result.effects[]` with `"kind": "terminal"` (`term_...`). About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds, then read its terminal, without waiting for the long wait below:
 
    ```sh
-   orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 120000 --json
+   orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 120000 --json 2>/dev/null
    ```
 
    If a `worker_done` arrives in this short wait, process it as in step 4. Then read the terminal:
@@ -411,10 +411,10 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
 4. Wait for the worker. Wait for every started worker together:
 
    ```sh
-   orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
+   orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json 2>/dev/null
    ```
 
-   Process every message, then acknowledge the batch with `--ack <delivery id>`. A timeout is a checkpoint: wait again. After one empty wait, read each running worker's output with `orca orchestration worker-read --dispatch <dispatch id> --source terminal --limit 40 --json` and look for a provider error, such as `usage_limit_reached` or a rate limit. A worker that hit one idles and never sends `worker_done`. Tell Master Chief the provider and the reset time, and ask whether to wait or change the model. Also look for a worker that finished but whose `worker_done` did not arrive: a new commit in its worktree (`git log`), checks reported as passing, and a quiet terminal. Ask that worker to send `worker_done` again with `orca orchestration send --retry-request <id>`, and if it cannot, finish the step from its commit and its report. After three empty waits, run `orca orchestration worker-list --include-remote --json` and act on `projection.nextAction`. Never stop or restart a worker without proof that it exited.
+   Process every message, then acknowledge the batch with `--ack <delivery id>`. A timeout is a checkpoint: wait again. After one empty wait, read each running worker's output with `orca orchestration worker-read --dispatch <dispatch id> --source terminal --limit 40 --json` and look for a provider error, such as `usage_limit_reached` or a rate limit. A worker that hit one idles and never sends `worker_done`. Tell Master Chief the provider and the reset time, and ask whether to wait or change the model. Also look for a worker that finished but whose `worker_done` did not arrive: a new commit in its worktree (`git log`), checks reported as passing, and a quiet terminal. Ask that worker to send `worker_done` again with `orca orchestration send`, and if it cannot, finish the step from its commit and its report. After three empty waits, run `orca orchestration worker-list --include-remote --json` and act on `projection.nextAction`. Never stop or restart a worker without proof that it exited.
 
    - `question` from a worker: answer it with `orca orchestration reply --id <message id> --body "<answer>" --json` if it is yours to decide. If only the human can decide, ask Master Chief and relay the answer.
    - `escalation` from a worker: read it, and fix the cause or take it to Master Chief.
@@ -475,7 +475,7 @@ Each return to the implementer after the first build is a round. A `human_decisi
 With `gates.escalation: auto` in `ark.yml`, Ark answers the first 2 of these refusals itself. `start` records `gate: escalation`, `answer: one_more_round`, `by: auto`, prints `escalation one_more_round by auto (<n> of 2)` and then starts the step. Do not record the answer and do not `ask`. Send Master Chief a `status` instead, and go on with section 7:
 
 ```sh
-orca orchestration send --retry-request <id> --type status --subject "Escalation answered by auto: <ticket id> round <round> (<n> of 2)" --body "Run <run> spent its round budget. Ark answered escalation one_more_round by auto (<n> of 2) and started step <step>, round <round>/<budget>. No action needed."
+orca orchestration send --type status --subject "Escalation answered by auto: <ticket id> round <round> (<n> of 2)" --body "Run <run> spent its round budget. Ark answered escalation one_more_round by auto (<n> of 2) and started step <step>, round <round>/<budget>. No action needed."
 ```
 
 For a `--merge` start the printed line is `escalation one_more_round by auto (merge, not counted)`: write `(merge, not counted)` in the subject and `not counted toward 2` in the body. Ark never answers an escalation after `ark escalate` (a requested escalation), and never a third spent budget: the `ask` flow below stays for those cases. `criteria` is not covered by this: it still goes to the human.
@@ -544,7 +544,7 @@ When you are started again for an MR round, do not rewrite `retro.md`, and do no
 Do this when the MRs are open, and also when the run ends in an abort. The human can abort in any phase before an MR opens. The run lead then runs `ark run close <run> aborted`, then does the steps below. Never do it again when `retro.md` exists: an MR round of section 10a does not rewrite it, and its `worker_done` is its own report.
 
 1. Run `ark retro <run>`. It writes `<run folder>/metrics.json`.
-2. Write `<run folder>/retro.md` on top of those numbers. Read `playbooks/retro.md` and follow "Part 1: Close check", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
+2. Write `<run folder>/retro.md` on top of those numbers. Read `playbooks/retro.md` and follow "Part 1: Write retro.md", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
 3. Send your final report to Master Chief. For a `none` project, list the branches from `ark status <run>` in place of MR links. Use the exact `worker_done` command in your Orca preamble. Use `--outcome succeeded`, and write three sentences: what changed, the MR links in the order to merge them (for a `none` project, the branches from `ark status <run>` in place of MR links), and what remains for the human. Use `--outcome failed` if the human aborted or you could not finish, and say why.
 4. End your turn and idle.
 

@@ -1,19 +1,12 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { deriveState, readEvents, type RunState } from "./events.ts";
 import { exec, execJson } from "./exec.ts";
-import {
-  findLiveChief,
-  orcaPages,
-  orcaRead,
-  orcaTimeout,
-  readTerminals,
-  retroUnanswered,
-} from "./orca.ts";
+import { findLiveChief, orcaPages, orcaRead, orcaTimeout, readTerminals } from "./orca.ts";
 import { readTestLock } from "./test-lock.ts";
-import { listProjects, runsDirectory } from "./paths.ts";
+import { listProjects, projectDirectory, runsDirectory } from "./paths.ts";
 
 /** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for a one-off command. */
 const orcaTimeoutMilliseconds = orcaTimeout(10_000);
@@ -40,14 +33,18 @@ function table(headers: string[], rows: string[][]): string {
   return [line(headers), line(headers.map(() => "---")), ...rows.map(line)].join("\n");
 }
 
-function readStates(project: string): RunState[] {
+/** Each run's state and, when closed, the time of its `run.closed` event in milliseconds. */
+function readStates(project: string): { state: RunState; closedAt: number | null }[] {
   const runsRoot = runsDirectory(project);
   if (!existsSync(runsRoot)) return [];
   return readdirSync(runsRoot)
     .sort()
     .map((name) => ({ directory: join(runsRoot, name), events: readEvents(join(runsRoot, name)) }))
     .filter(({ events }) => events.length > 0)
-    .map(({ events }) => deriveState(events));
+    .map(({ events }) => {
+      const closed = events.findLast((event) => event.type === "run.closed");
+      return { state: deriveState(events), closedAt: closed ? Date.parse(closed.time) : null };
+    });
 }
 
 function elapsed(since: string): string {
@@ -61,8 +58,8 @@ export async function chiefState(inProject?: string): Promise<void> {
   const project = resolveProject(inProject);
   const config = loadConfig(project);
   const workspace = resolve(config.workspace);
-  const states = readStates(project);
-  const openRuns = states.filter((state) => state.phase !== "closed");
+  const runs = readStates(project);
+  const openRuns = runs.map(({ state }) => state).filter((state) => state.phase !== "closed");
   const sections: string[] = [`# Chief state: ${project} (${new Date().toISOString()})`];
 
   sections.push(
@@ -178,14 +175,19 @@ export async function chiefState(inProject?: string): Promise<void> {
     `- concurrency: ${config.concurrency} (${openRuns.length} open)`,
   );
 
-  const unanswered = states.filter(
-    (state) => state.phase === "closed" && retroUnanswered(join(runsDirectory(project), state.run)),
-  );
+  const interviews = join(projectDirectory(project), "interviews");
+  const lastInterview = existsSync(interviews)
+    ? Math.max(
+        0,
+        ...readdirSync(interviews).map((name) => statSync(join(interviews, name)).mtimeMs),
+      )
+    : 0;
+  const sinceInterview = runs.filter(
+    ({ state, closedAt }) => state.phase === "closed" && (closedAt ?? 0) > lastInterview,
+  ).length;
   sections.push(
-    "## Closed runs with an empty Close check",
-    unanswered.length === 0
-      ? "none"
-      : unanswered.map((state) => `- ${state.run} (${state.outcome ?? "unknown"})`).join("\n"),
+    "## Interview",
+    `- Closed runs since the last interview: ${sinceInterview}${sinceInterview >= 10 ? " (due)" : ""}`,
   );
 
   const df = await exec(["df", "-k", "/"]);
