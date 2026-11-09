@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../cli/config.ts";
-import { appendEvent } from "../cli/events.ts";
+import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
 import { timelineOf } from "../hub/run-detail.ts";
 import {
@@ -1272,7 +1272,9 @@ test("ARK-T116 a none project lists each branch with commits beyond its base, be
  * a repo in `unchanged`), the tests passed at the heads, and impl-core and bump-platform done. `repos: false` gives the
  * old plan with no repos block and no reviewer step.
  */
-function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
+function claraRun(
+  options: { repos?: boolean; unchanged?: string[]; submoduleBump?: boolean } = {},
+) {
   writeProject(
     "demo",
     validConfig({
@@ -1284,6 +1286,9 @@ function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
   const { runId, directory } = startRun();
   recordEvaluation(directory);
   const parts = claraPlan(["ARK-900-AC1"]);
+  // submoduleBump: platform holds core as a submodule, and its bump step is not done.
+  if (options.submoduleBump)
+    Object.assign(parts.repos[1].depends_on[0], { kind: "submodule", pin: "libs/core" });
   const withRepos = options.repos !== false;
   writeFileSync(
     join(directory, "plan.yml"),
@@ -1331,7 +1336,7 @@ function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
   for (const { repo, path } of created)
     if (!options.unchanged?.includes(repo))
       for (let i = 0; i < commits[repo]; i++) commitIn(path, `change-${i}`);
-  for (const step of ["impl-core", "bump-platform"])
+  for (const step of options.submoduleBump ? ["impl-core"] : ["impl-core", "bump-platform"])
     for (const action of ["start", "finish"]) run("run", "step", runId, step, action);
   appendEvent(directory, "test.completed", {
     passed: true,
@@ -1370,6 +1375,25 @@ test("ARK-T108 hand-off and status list the branches in repo order and the pendi
   expect(closed.code, closed.err).toBe(0);
   expect(handOffLines(closed.out)).toEqual(expected);
   expect(handOffLines(ark("status", runId).out)).toEqual(expected);
+});
+
+test("ARK-T143 the hand-off report lists a submodule and a package bump with their needed values in repo order", () => {
+  const { runId, directory, branchLine } = claraRun({ submoduleBump: true });
+  const core = deriveState(readEvents(directory)).worktrees.find(
+    (worktree) => worktree.repo === clara.core,
+  )!;
+  const coreHead = Bun.spawnSync(["git", "-C", core.path, "rev-parse", "HEAD"])
+    .stdout.toString()
+    .trim();
+  const closed = ark("run", "close", runId, "handed_off");
+  expect(closed.code, closed.err).toBe(0);
+  expect(handOffLines(closed.out)).toEqual([
+    branchLine(clara.core),
+    branchLine(clara.platform),
+    `           pending bump: bump-platform (submodule ${clara.core}, libs/core) needs ${coreHead.slice(0, 8)}`,
+    branchLine(clara.reports),
+    pendingBump,
+  ]);
 });
 
 test("ARK-T108 status prints no pending bump once every bump step is done", () => {

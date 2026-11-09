@@ -1,11 +1,11 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { appendEvent } from "../cli/events.ts";
+import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
 import {
   ark,
+  fakeHosts,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
@@ -22,34 +22,14 @@ afterEach(() => {
 });
 
 const SINCE = "2026-11-01T00:00:00Z";
-type Answers = Record<string, unknown>;
 const GH_CORE = "https://github.com/example/core/pull";
 const GL = "https://gitlab.com/example/app/-/merge_requests";
 
-/** Fake gh and glab: each answers from `answers`, keyed by its exact argument list. A missing key fails with exit 1, like an unreachable host. */
-function fakeHosts(answers: Answers) {
-  const bin = mkdtempSync(join(tmpdir(), "ark-status-hosts-"));
-  const scenario = join(bin, "answers.json");
-  writeFileSync(scenario, JSON.stringify(answers));
-  for (const tool of ["gh", "glab"]) {
-    const file = join(bin, tool);
-    writeFileSync(
-      file,
-      `#!/usr/bin/env bun
-import { readFileSync } from "node:fs";
-const answers = JSON.parse(readFileSync(${JSON.stringify(scenario)}, "utf8"));
-const key = "${tool} " + process.argv.slice(2).join(" ");
-if (!Object.hasOwn(answers, key)) { console.error("host cannot answer: " + key); process.exit(1); }
-const answer = answers[key];
-console.log(typeof answer === "string" ? answer : JSON.stringify(answer));
-`,
-    );
-    chmodSync(file, 0o755);
-  }
-  process.env.PATH = `${bin}:${originalPath}`;
-}
-
-function openRun(extra: { repo: string; url: string; number: number }[]) {
+/** Opens a run with the "." MR. `options.plan` adds fields to plan.yml; `options.downstream` replaces the "." MR. */
+function openRun(
+  extra: { repo: string; url: string; number: number }[],
+  options: { plan?: object; downstream?: object } = {},
+) {
   tempArkHome();
   const workspace = tempGitRepo({
     "contract.test.ts":
@@ -84,7 +64,7 @@ function openRun(extra: { repo: string; url: string; number: number }[]) {
     needs: [],
     criteria: ["ARK-900-AC1"],
   }));
-  writeFileSync(join(directory, "plan.yml"), JSON.stringify({ steps }));
+  writeFileSync(join(directory, "plan.yml"), JSON.stringify({ steps, ...options.plan }));
   recordEvaluation(directory);
   appendEvent(directory, "plan.checked", {
     valid: true,
@@ -96,11 +76,11 @@ function openRun(extra: { repo: string; url: string; number: number }[]) {
   ark("worktree", "create", runId);
   ark("run", "step", runId, "implementer", "start");
   ark("run", "step", runId, "implementer", "finish");
-  appendEvent(directory, "merge_request.opened", {
-    repo: ".",
-    url: `${GH_CORE}/1`,
-    number: 1,
-  });
+  appendEvent(
+    directory,
+    "merge_request.opened",
+    options.downstream ?? { repo: ".", url: `${GH_CORE}/1`, number: 1 },
+  );
   for (const merge of extra) {
     appendEvent(directory, "worktree.created", {
       repo: merge.repo,
@@ -403,4 +383,86 @@ test("ARK-200-AC4 a failed gh call prints unknown for that value, a failed glab 
   expect(json.map((entry: { ci: string }) => entry.ci)).toEqual(["passed", "unknown", "failed"]);
   expect(json[2].failedChecks).toEqual([]);
   expect(json[1]).toMatchObject({ state: "unknown", conflict: null });
+});
+
+const UPSTREAM = merge("core", `${GL}/2`, 2);
+const PACKAGE_PIN = "clara-core>=0.0.5rc3,<1.0";
+const bumpEdge = (kind: string, pin: string) => ({
+  repo: "core",
+  kind,
+  pin,
+  evidence: "pyproject.toml:14",
+  bump: "bump-lib",
+});
+
+/** A GitLab run whose "." MR (!1) waits for the MR of repo core (!2) and whose plan has one bump step for the edge. */
+function bumpRun(kind: string, pin: string, upstream: object) {
+  const runId = openRun([UPSTREAM], {
+    downstream: { repo: ".", url: `${GL}/1`, number: 1, waits_for: [2] },
+    plan: {
+      repos: [
+        { repo: "core", why: "the library", depends_on: [] },
+        { repo: ".", why: "the consumer", depends_on: [bumpEdge(kind, pin)] },
+      ],
+    },
+  });
+  fakeHosts({ ...glView(1, { state: "opened", has_conflicts: false }), ...glView(2, upstream) });
+  return runId;
+}
+const statusLines = (runId: string) => {
+  const result = ark("merge-request", "status", runId);
+  expect(result.code, result.err).toBe(0);
+  return result.out.trim().split("\n");
+};
+const packageBump = (state: string) =>
+  `  bump bump-lib  package core  pin ${PACKAGE_PIN}  ${state}`;
+
+test("ARK-T137 status prints the live state of each upstream MR under the MR that waits for it", () => {
+  const runId = bumpRun("package", PACKAGE_PIN, { state: "merged" });
+  expect(statusLines(runId)).toContain("  waits for !2 (merged)");
+});
+
+test("ARK-T137 status prints unknown for an upstream MR when the host call fails", () => {
+  const runId = bumpRun("package", PACKAGE_PIN, { state: "merged" });
+  // the host answers the downstream MR only: the call for !2 exits 1
+  fakeHosts(glView(1, { state: "opened", has_conflicts: false }));
+  expect(statusLines(runId)).toContain("  waits for !2 (unknown)");
+});
+
+test("ARK-T138 status shows a submodule bump that points at the upstream branch head", () => {
+  const runId = bumpRun("submodule", "libs/lib", { state: "opened" });
+  const directory = join(process.env.ARK_HOME!, "projects", "demo", "runs", runId);
+  const downstream = deriveState(readEvents(directory)).worktrees.find(
+    (worktree) => worktree.repo === ".",
+  )!;
+  const branchHead = "1234567890abcdef1234567890abcdef12345678";
+  const git = (...args: string[]) => {
+    const result = Bun.spawnSync(["git", "-C", downstream.path, ...args]);
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+  };
+  git("update-index", "--add", "--cacheinfo", `160000,${branchHead},libs/lib`);
+  git("commit", "-m", "point libs/lib at the upstream branch");
+  expect(statusLines(runId)).toContain(
+    "  bump bump-lib  submodule core  pin libs/lib  points at upstream branch 12345678",
+  );
+});
+
+test("ARK-T139 status shows a package bump that waits for the upstream merge", () => {
+  const runId = bumpRun("package", PACKAGE_PIN, { state: "opened" });
+  const lines = statusLines(runId);
+  expect(lines).toContain("  waits for !2 (open)");
+  expect(lines).toContain(packageBump("waits for upstream merge"));
+});
+
+test("ARK-T140 status shows a package bump that waits for the upstream publish", () => {
+  const runId = bumpRun("package", PACKAGE_PIN, { state: "merged" });
+  expect(statusLines(runId)).toContain(packageBump("waits for upstream publish"));
+});
+
+test("ARK-T141 status shows a refreshed bump with the recorded value", () => {
+  const runId = bumpRun("package", PACKAGE_PIN, { state: "merged" });
+  const refreshed = ark("bump", "refresh", runId, "bump-lib", "--to", "0.0.6rc1");
+  expect(refreshed.code, refreshed.err).toBe(0);
+  expect(refreshed.out).toContain("refreshed bump-lib to 0.0.6rc1");
+  expect(statusLines(runId)).toContain(packageBump("refreshed to 0.0.6rc1"));
 });
