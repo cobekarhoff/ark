@@ -4,6 +4,7 @@ import { layoutGraph, roundedPath, type GraphInput } from "./roadmap-graph.ts";
 import { StatusChip, type RoadmapData, entryOf } from "./RoadmapParts.tsx";
 import { ticketHref } from "./store.tsx";
 import type { RoadmapMilestone } from "../roadmap.ts";
+import { isFinishedTicket } from "../../cli/lifecycle.ts";
 
 const marker = (name: string, className: string) => (
   <marker
@@ -56,10 +57,7 @@ export function RoadmapGraph({
         id: ticket.id,
         lane: laneOf(ticket.milestone),
         needs: needs.filter((id) => shown.has(id)),
-        finishedNeeds: needs.filter((id) => {
-          const status = dependency(id)?.status;
-          return status === "done" || status === "superseded";
-        }),
+        finishedNeeds: needs.filter((id) => isFinishedTicket(dependency(id)?.status ?? "")),
       };
     }),
   };

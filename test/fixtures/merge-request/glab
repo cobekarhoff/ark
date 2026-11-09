@@ -1,17 +1,18 @@
 #!/usr/bin/env bun
 // Fake `glab`: records each call, keeps open MRs in the fake host state, and answers the calls `ark merge-request open` makes.
 // The blocks call fails when FAKE_GLAB_BLOCK_FAIL is set.
-import { creates, editAfterFirstProbe, option, owner, raceAfterFirstProbe, readState, record, repo, writeState } from "./fake-host.ts";
+import { creates, editAfterFirstProbe, nextNumber, option, owner, raceAfterFirstProbe, readState, record, repo, writeState } from "./fake-host.ts";
 
 const argv = process.argv.slice(2);
 const body = option(argv, "--description");
 const previous = creates();
+const number = argv[0] === "mr" && argv[1] === "create" ? nextNumber(previous) : 0;
 record("glab", argv, body);
 const state = readState();
 
 if (argv[0] === "mr" && argv[1] === "create") {
-  const url = `https://gitlab.com/org/${repo}/-/merge_requests/${previous + 1}`;
-  writeState([...state, { number: previous + 1, url, head: option(argv, "--source-branch"), repo, body: body! }]);
+  const url = `https://gitlab.com/org/${repo}/-/merge_requests/${number}`;
+  writeState([...state, { number, url, head: option(argv, "--source-branch"), repo, body: body! }]);
   console.log(url);
 } else if (argv[0] === "mr" && argv[1] === "update") {
   writeState(state.map((mr) => (mr.number === Number(argv[2]) && mr.repo === repo ? { ...mr, body: body! } : mr)));

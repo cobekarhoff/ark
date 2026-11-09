@@ -10,25 +10,7 @@ import { assertAllowed } from "./transitions.ts";
 export type EventData = Record<string, any>;
 export type ArkEvent = { seq: number; time: string; type: string; data: EventData };
 
-export type Phase =
-  | "awaiting_criteria"
-  | "awaiting_strategy"
-  | "planning"
-  | "building"
-  | "escalation"
-  | "merge_requests_open"
-  | "closed";
-export type CriterionStatus =
-  | "pending"
-  | "passing"
-  | "failing"
-  | "missing"
-  | "manual pending"
-  | "manual ok"
-  | "manual problem";
-export const ticketKinds = ["bug", "perf", "refactor", "feature"] as const;
-export type TicketKind = (typeof ticketKinds)[number];
-export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "stopped";
+import type { CriterionStatus, Phase, StepStatus, TicketKind } from "./lifecycle.ts";
 
 export type RunState = {
   run: string;
@@ -78,7 +60,13 @@ export type RunState = {
   red_test: boolean;
   /** Suites at the base commit of a refactor run: undefined until `ark test` ran them. */
   base_passed?: boolean;
-  merge_requests: { repo: string; url: string; number: number }[];
+  merge_requests: {
+    repo: string;
+    url: string;
+    number: number;
+    order?: number;
+    waits_for?: number[];
+  }[];
   outcome: string | null;
   implementer?: "human";
   events: number;
@@ -299,7 +287,13 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "merge_request.opened":
         if (mergeRequests.length === 0) escalationAnswered = false;
-        mergeRequests.push({ repo: data.repo, url: data.url, number: data.number });
+        mergeRequests.push({
+          repo: data.repo,
+          url: data.url,
+          number: data.number,
+          ...(data.order === undefined ? {} : { order: data.order }),
+          ...(data.waits_for === undefined ? {} : { waits_for: data.waits_for }),
+        });
         break;
       case "run.closed":
         outcome = data.outcome;

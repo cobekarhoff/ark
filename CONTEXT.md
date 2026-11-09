@@ -182,6 +182,14 @@ _Avoid_: Monorepo, environment
 A git repository in a project's workspace.
 _Avoid_: Package, component
 
+**Repo edge**:
+A fact that one repo builds against another: a submodule, a package pin, a compose service or an API. The plan lists each edge in its `repos` block, with the evidence the run lead found in the workspace. The edges set the merge order of the MRs. A step `needs` makes none.
+_Avoid_: Dependency, link
+
+**Bump step**:
+An implementer step in the downstream repo that moves a submodule or package pin to the upstream change of the ticket. The plan names it in the `bump` field of the repo edge.
+_Avoid_: Update step, pin step
+
 **Worktree**:
 A run's own checkout of one repo. A run folder mirrors its workspace: the repos the run touches are worktrees, and everything else links to the workspace.
 _Avoid_: Checkout, sandbox
