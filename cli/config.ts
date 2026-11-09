@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { ArkError } from "./errors.ts";
+import { ArkError, yamlQuoteHint } from "./errors.ts";
 import { projectDirectory } from "./paths.ts";
 import { discoverRepos } from "./workspace.ts";
 
@@ -73,7 +73,7 @@ export function loadConfig(project: string): ProjectConfig {
   try {
     raw = Bun.YAML.parse(readFileSync(file, "utf8"));
   } catch (err) {
-    throw new ArkError(`${file}: not valid YAML: ${(err as Error).message}`);
+    throw new ArkError(`${file}: not valid YAML: ${(err as Error).message} (${yamlQuoteHint})`);
   }
   return validateConfig(raw, file);
 }

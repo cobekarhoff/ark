@@ -188,8 +188,6 @@ function expectPng(file: string): void {
   expect(readFileSync(file).subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
 }
 
-// --- ARK-T1: the two-repo base run -------------------------------------------------------------------------------
-
 const caseEntry = (id: string) =>
   [
     "---",
@@ -504,8 +502,6 @@ describe("ark test base run", () => {
   );
 });
 
-// --- ARK-T2: result.json of each case ----------------------------------------------------------------------------
-
 describe("ark test case evidence", () => {
   test("ARK-T2 ark test writes base and head result.json with the SHA of the checkout that ran, not run for a suite skipped at base and failed for a crashed base suite", () => {
     const directory = fixtureDirectory();
@@ -748,8 +744,6 @@ test.skip("FAKE-T3 is skipped", () => {});
     }
   });
 
-  // --- ARK-T5: command.log ---------------------------------------------------------------------------------------
-
   const configuredCommand =
     "bun test test/suite.test.ts --reporter=junit --reporter-outfile={report}";
 
@@ -826,8 +820,6 @@ afterAll(() => { if (side === "head" && ${headExitCode ?? 0} !== 0) process.exit
     },
   );
 });
-
-// --- ARK-T3 and ARK-T4: checkpoint screenshots ---------------------------------------------------------------------
 
 function playwrightRun(arkEvidenceDirectory: string | undefined, output: string) {
   const environment: Record<string, string | undefined> = { ...process.env };

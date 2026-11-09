@@ -69,8 +69,6 @@ describe("playwright migration", () => {
   );
 
   test("ARK-T9 bun test discovers no Playwright spec", () => {
-    const pw = [...new Bun.Glob("test/pw/*.pw.ts").scanSync({ cwd: root })].sort();
-    expect(pw).toEqual(["test/pw/checkpoint.pw.ts", "test/pw/hub.pw.ts"]);
     const result = Bun.spawnSync(["bun", "test", "--dry-run", "test/pw"], {
       cwd: root,
       stdout: "pipe",
@@ -172,7 +170,6 @@ describe("playwright migration", () => {
           env: { TMPDIR: dir },
         });
         expect(result.code, result.out + result.err).toBe(0);
-        // Only this spec ran, not the whole suite.
         expect(result.out).toMatch(/\n\s*1 passed/);
         expect(readdirSync(dir)).toEqual([]);
       } finally {

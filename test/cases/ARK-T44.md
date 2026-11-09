@@ -5,7 +5,8 @@ level: integration
 technique: generated-file equality
 priority: medium
 risk: docs/reference/cli.md is stale against what bun scripts/cli-reference.ts generates
-status: active
+status: retired
+retired_reason: duplicate of ARK-302-AC10 in test/project-checks.test.ts, the one owner of the CLI reference equality
 changed_by: 2026-11-07-ARK-322-1
 ---
 

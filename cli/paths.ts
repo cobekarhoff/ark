@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { ArkError } from "./errors.ts";
 
 export function arkHome(): string {
@@ -15,11 +15,10 @@ export function runsDirectory(project: string): string {
   return join(projectDirectory(project), "runs");
 }
 
-/**
- * Names of the projects under `$ARK_HOME/projects`, sorted. A folder is a project when it has an
- * `ark.yml` or a run folder (a directory entry under `runs/`). A missing or empty `runs/`, or one
- * holding only files, is no run folder: such a leftover folder is skipped.
- */
+export function isInside(directory: string, parent: string): boolean {
+  return directory === parent || directory.startsWith(parent + sep);
+}
+
 export function listProjects(): string[] {
   const projectsDirectory = join(arkHome(), "projects");
   if (!existsSync(projectsDirectory)) return [];

@@ -14,16 +14,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadConfig, type ProjectConfig } from "./config.ts";
-import { hasTestCriterion, runCriteria } from "./criteria.ts";
+import { hasTestCriterion, runCriteria } from "./ticket.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
-import {
-  appendEvent,
-  deriveState,
-  readEvents,
-  type CriterionStatus,
-  type RunState,
-} from "./events.ts";
+import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
+import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
 import { findRun } from "./paths.ts";
@@ -33,7 +28,6 @@ import { linkUntouched } from "./worktree.ts";
 
 type Status = CriterionStatus;
 
-/** Running child processes, so a signal can stop them: each has its own process group. */
 const children = new Set<{ pid: number }>();
 
 /** Milliseconds a suite process group gets after SIGTERM before SIGKILL. */
@@ -144,10 +138,6 @@ function verifiedByStatus(
   if (cases.some((entry) => entry.status === "failed")) return "failing";
   if (cases.some((entry) => entry.status === "missing")) return "missing";
   return cases.some((entry) => entry.status === "not run") ? "not run" : "passing";
-}
-
-function manualStatus(answer: string | undefined): Status {
-  return answer === "ok" ? "manual ok" : answer === "problem" ? "manual problem" : "manual pending";
 }
 
 type Suite = ProjectConfig["suites"][number];
@@ -398,6 +388,8 @@ function composeFor(config: ProjectConfig, root: string, runId: string): string[
  * runs `base_command` on the test files of its own commits and skips a suite with none, and with every
  * suite skipped there is no checkout, setup or compose. Returns whether all that ran passed; a failure here is
  * data except for `kind: refactor`.
+ * Each checkout is a `git clone --shared`, not a worktree: it registers nothing in the source repo, so a run
+ * killed before its cleanup leaves only a temp folder, never a dangling detached worktree.
  */
 async function baseSuitesPassed(
   config: ProjectConfig,
@@ -428,7 +420,6 @@ async function baseSuitesPassed(
   }
   if (plan.length === 0) return true;
   const root = mkdtempSync(join(tmpdir(), "ark-base-"));
-  const added: { source: string; path: string }[] = [];
   const compose = composeFor(config, root, `${runId}-base`);
   try {
     for (const { repo, path: source, base } of [...worktrees].sort((a, b) =>
@@ -437,10 +428,16 @@ async function baseSuitesPassed(
       if (base === undefined) throw new ArkError(`worktree.created of ${repo} has no base commit`);
       const path = join(root, repo);
       mkdirSync(dirname(path), { recursive: true });
-      const created = await run(["git", "worktree", "add", "--detach", path, base], source);
+      const cloned = await run(
+        ["git", "clone", "--shared", "--no-checkout", "--quiet", source, path],
+        root,
+      );
+      const created =
+        cloned.code === 0
+          ? await run(["git", "checkout", "--quiet", "--detach", base], path)
+          : cloned;
       if (created.code !== 0)
         throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
-      added.push({ source, path });
       await copyHeadTests(join(mirror, repo), path, base);
     }
     linkUntouched(config.workspace, root, discoverRepos(config.workspace));
@@ -475,8 +472,6 @@ async function baseSuitesPassed(
     return allPassed;
   } finally {
     if (compose) await run([...compose, "down"], root);
-    for (const { source, path } of added.reverse())
-      await run(["git", "worktree", "remove", "--force", path], source);
     rmSync(root, { recursive: true, force: true });
   }
 }

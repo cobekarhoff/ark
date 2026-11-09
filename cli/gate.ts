@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
-import { evidenceFile, manualCriteria, parseCriteria, runCriteria } from "./criteria.ts";
+import { evidenceFile, frontmatter, manualCriteria, parseCriteria, runCriteria } from "./ticket.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 
@@ -22,11 +22,7 @@ function acceptCriteria(runDirectory: string): void {
   if (!ticketFile || !existsSync(ticketFile)) {
     throw new ArkError(`ticket file not found: ${ticketFile ?? "(none recorded)"}`);
   }
-  const content = readFileSync(ticketFile, "utf8");
-  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  const fields = frontmatter
-    ? ((Bun.YAML.parse(frontmatter[1]) ?? {}) as Record<string, unknown>)
-    : {};
+  const fields = frontmatter(readFileSync(ticketFile, "utf8")).fields ?? {};
   const parsed = parseCriteria(fields, ticketFile);
   const ids = parsed.map((criterion) => criterion.id);
   if (ids.length === 0) {

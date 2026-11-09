@@ -1,15 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ProjectConfig, loadConfig } from "./config.ts";
-import { ArkError } from "./errors.ts";
-import { runCriteria, type TicketCriterion } from "./criteria.ts";
-import { canonicalCriterion, isCaseId } from "./criterion-id.ts";
-import { type RunState, type TicketKind, appendEvent, deriveState, readEvents } from "./events.ts";
-import { findRun } from "./paths.ts";
-import { assertAllowed } from "./transitions.ts";
-import { readWorkspaceCases, type CaseEntry } from "./test-case.ts";
-import { allowedUiSkills, uiSkillsFor } from "./ui-skills.ts";
+import { ArkError, yamlQuoteHint } from "./errors.ts";
+import { canonicalCriterion } from "./criterion-id.ts";
 
 export type PlanStep = {
   id: string;
@@ -53,18 +46,23 @@ export type PlanDecision = {
   /** Empty while the human has not answered. */
   chosen: string;
 };
+/** An edge of the repo graph: the repo of the entry depends on `repo`. `evidence` is a file and line; `bump` a step id. */
+export type PlanRepoEdge = {
+  repo: string;
+  kind: string;
+  pin: string;
+  evidence: string;
+  bump: string;
+};
+export type PlanRepo = { repo: string; why: string; depends_on: PlanRepoEdge[] };
 export type Plan = {
   summary: { why: string; changes: PlanSummaryChange[] };
   design: PlanDesign;
   decisions: PlanDecision[];
+  repos: PlanRepo[];
   steps: PlanStep[];
   test_cases: PlanTestCase[];
 };
-
-const roles = ["implementer", "validator", "reviewer"];
-const levels = ["integration", "e2e"];
-const actions = ["add", "update", "reuse", "retire"];
-const caseLevels = ["unit", "integration", "e2e"];
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 const textList = (value: unknown): string[] =>
@@ -90,12 +88,12 @@ export function loadPlan(runDirectory: string, ticketId?: string): Plan {
   try {
     raw = Bun.YAML.parse(readFileSync(file, "utf8"));
   } catch (err) {
-    throw new ArkError(`plan.yml is not valid YAML: ${(err as Error).message}`);
+    throw new ArkError(`plan.yml is not valid YAML: ${(err as Error).message} (${yamlQuoteHint})`);
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ArkError("plan.yml must be a mapping with steps and test_cases");
   }
-  const { steps, test_cases, summary, design, decisions } = raw as Record<string, unknown>;
+  const { steps, test_cases, summary, design, decisions, repos } = raw as Record<string, unknown>;
   const criterionId = (value: string) => canonicalCriterion(value.trim(), ticketId);
   const designBlock =
     design && typeof design === "object" ? (design as Record<string, unknown>) : {};
@@ -132,6 +130,17 @@ export function loadPlan(runDirectory: string, ticketId?: string): Plan {
       ),
       recommended: text(decision.recommended),
       chosen: text(decision.chosen),
+    })),
+    repos: objectList(repos).map((entry) => ({
+      repo: text(entry.repo),
+      why: text(entry.why),
+      depends_on: objectList(entry.depends_on).map((edge) => ({
+        repo: text(edge.repo),
+        kind: text(edge.kind),
+        pin: text(edge.pin),
+        evidence: text(edge.evidence),
+        bump: text(edge.bump),
+      })),
     })),
     steps: objectList(steps).map((step) => ({
       id: text(step.id),
@@ -180,9 +189,41 @@ export function loadPlan(runDirectory: string, ticketId?: string): Plan {
 
 // Stable output: nodes in file order, then edges in file order. Node names are
 // positional so step ids such as "end" or ids with punctuation cannot break the diagram.
+// A plan with steps in several repos draws one subgraph per repo, in merge order.
 export function renderMermaid(plan: Plan): string {
   const nodeName = new Map(plan.steps.map((step, i) => [step.id, `step${i + 1}`]));
   const lines = ["flowchart LR"];
+  if (hasMultipleRepos(plan)) {
+    const { order, upstream } = repoGraph(plan);
+    const quote = (value: string) => value.replaceAll('"', "#quot;");
+    const drawn = new Set(plan.steps.map((step) => step.repo));
+    order.forEach((repo, r) => {
+      if (!drawn.has(repo)) return;
+      lines.push(`  subgraph repo${r + 1}["${quote(`${r + 1} ${repo}`)}"]`);
+      plan.steps.forEach((step, i) => {
+        if (step.repo === repo)
+          lines.push(`    step${i + 1}["${quote(`${step.id}: ${step.role}`)}"]`);
+      });
+      lines.push("  end");
+    });
+    plan.steps.forEach((step) => {
+      plan.steps.forEach((target, j) => {
+        if (!target.needs.includes(step.id)) return;
+        const arrow = step.repo === target.repo ? "-->" : "==>";
+        lines.push(`  ${nodeName.get(step.id)} ${arrow} step${j + 1}`);
+      });
+    });
+    order.forEach((repo, r) => {
+      order.forEach((downstream, d) => {
+        if (!upstream.get(downstream)!.has(repo) || !drawn.has(repo) || !drawn.has(downstream))
+          return;
+        const entry = plan.repos.find((candidate) => candidate.repo === downstream);
+        for (const edge of entry?.depends_on.filter((candidate) => candidate.repo === repo) ?? [])
+          lines.push(`  repo${r + 1} -.->|"${quote(`${edge.kind} ${edge.pin}`)}"| repo${d + 1}`);
+      });
+    });
+    return `${lines.join("\n")}\n`;
+  }
   plan.steps.forEach((step, i) => {
     const label = `${step.id}: ${step.role} @ ${step.repo}`.replaceAll('"', "#quot;");
     lines.push(`  step${i + 1}["${label}"]`);
@@ -196,429 +237,53 @@ export function renderMermaid(plan: Plan): string {
   return `${lines.join("\n")}\n`;
 }
 
-function findCycles(plan: Plan): string[][] {
-  const needsById = new Map(plan.steps.map((step) => [step.id, step.needs]));
-  const finished = new Set<string>();
-  const path: string[] = [];
-  const cycles: string[][] = [];
-  const visit = (id: string) => {
-    const onPath = path.indexOf(id);
-    if (onPath >= 0) {
-      cycles.push([...path.slice(onPath), id]);
-      return;
-    }
-    if (finished.has(id) || !needsById.has(id)) return;
-    path.push(id);
-    for (const need of needsById.get(id)!) visit(need);
-    path.pop();
-    finished.add(id);
-  };
-  for (const step of plan.steps) visit(step.id);
-  return cycles;
-}
+export const hasMultipleRepos = (plan: Plan): boolean =>
+  new Set(plan.steps.map((step) => step.repo)).size > 1;
 
-export function findProblems(
-  plan: Plan,
-  ticketCriteria: string[],
-  surfaces: string[],
-  configuredRoles: ProjectConfig["roles"],
-  manual: string[] = [],
-  kind: TicketKind = "feature",
-  links: { criteria: TicketCriterion[]; entries: CaseEntry[] } = { criteria: [], entries: [] },
-): string[] {
-  const allowedPairs = [
-    ...new Set(Object.values(configuredRoles).map((role) => `${role.harness}/${role.model}`)),
-  ];
-  const problems: string[] = [];
-  const stepIds = new Set<string>();
-  plan.steps.forEach((step, i) => {
-    const name = step.id || `#${i + 1}`;
-    if (!step.id) problems.push(`step #${i + 1} has no id`);
-    else if (stepIds.has(step.id)) problems.push(`duplicate step id: ${step.id}`);
-    stepIds.add(step.id);
-    if (!step.role) problems.push(`step ${name} has no role`);
-    else if (!roles.includes(step.role)) {
-      problems.push(`step ${name} has unknown role "${step.role}": use ${roles.join(", ")}`);
+/**
+ * The repos of a plan in merge order, and the upstream repos each one waits for. With a `repos` list the edges come
+ * from it and step `needs` make none; with no list (an old plan) they come from step `needs`.
+ * Ties go by first step of the repo in the plan, then by name, so the order does not depend on the list order.
+ */
+export function repoGraph(plan: {
+  steps: { id: string; repo: string; needs: string[] }[];
+  repos?: PlanRepo[];
+}): { order: string[]; upstream: Map<string, Set<string>> } {
+  const upstream = new Map<string, Set<string>>();
+  const stepRepos = [...new Set(plan.steps.map((step) => step.repo))];
+  for (const repo of stepRepos) upstream.set(repo, new Set());
+  if (plan.repos && plan.repos.length > 0) {
+    const extras = new Set<string>();
+    for (const entry of plan.repos) {
+      extras.add(entry.repo);
+      for (const edge of entry.depends_on) extras.add(edge.repo);
     }
-    if (!step.repo) problems.push(`step ${name} has no repo`);
-    if (!step.harness) problems.push(`step ${name} has no harness`);
-    if (!step.model) problems.push(`step ${name} has no model`);
-    if (step.harness && step.model && !allowedPairs.includes(`${step.harness}/${step.model}`)) {
-      problems.push(
-        `step ${name} uses ${step.harness}/${step.model}, which is not in ark.yml roles: ${allowedPairs.join(", ")}`,
-      );
-    }
-  });
-  for (const step of plan.steps) {
-    for (const need of step.needs) {
-      if (!stepIds.has(need)) problems.push(`step ${step.id} needs "${need}", which is not a step`);
-    }
-  }
-  for (const cycle of findCycles(plan)) problems.push(`cycle in needs: ${cycle.join(" -> ")}`);
-
-  const proven = new Set<string>();
-  const entryById = new Map(links.entries.map((entry) => [entry.id, entry]));
-  const planById = new Map<string, PlanTestCase>();
-  for (const testCase of plan.test_cases) {
-    const name = testCase.id || "(no id)";
-    const modern = testCase.action !== "";
-    if (modern && !actions.includes(testCase.action)) {
-      problems.push(
-        `test case ${name} has action "${testCase.action}": use add, update, reuse or retire`,
-      );
-      continue;
-    }
-    if (modern) {
-      if (!isCaseId(testCase.id))
-        problems.push(`test case ${name} has an id that is not a test case id <KEY>-T<n>`);
-      if (planById.has(testCase.id)) problems.push(`duplicate test case id: ${testCase.id}`);
-      planById.set(testCase.id, testCase);
-    }
-    const scenario = !modern || testCase.action === "add" || testCase.action === "update";
-    if (scenario) {
-      for (const group of ["when", "then"] as const) {
-        if (testCase[group].length === 0)
-          problems.push(`test case ${name} has an empty ${group} list`);
+    for (const repo of [...extras].filter((repo) => !upstream.has(repo)).sort())
+      upstream.set(repo, new Set());
+    for (const entry of plan.repos)
+      for (const edge of entry.depends_on) upstream.get(entry.repo)!.add(edge.repo);
+  } else {
+    const repoOfStep = new Map(plan.steps.map((step) => [step.id, step.repo]));
+    for (const step of plan.steps)
+      for (const needed of step.needs) {
+        const neededRepo = repoOfStep.get(needed);
+        if (neededRepo !== undefined && neededRepo !== step.repo)
+          upstream.get(step.repo)!.add(neededRepo);
       }
-      if (!testCase.expected.trim()) problems.push(`test case ${name} has no expected sentence`);
-    }
-    if (modern && testCase.action === "retire" && !testCase.reason.trim())
-      problems.push(`test case ${name} is retired with no reason`);
-    if (modern && testCase.action !== "add" && !entryById.has(testCase.id))
-      problems.push(
-        `test case ${name} is ${testCase.action}, but no entry ${testCase.id}.md is in test/cases/ of a repo of the workspace`,
-      );
-    const allowedLevels = modern ? caseLevels : levels;
-    if (testCase.level === "" && modern && !scenario) continue;
-    if (!allowedLevels.includes(testCase.level)) {
-      problems.push(
-        `test case ${name} has level "${testCase.level}": use ${allowedLevels.join(", ").replace(/, ([^,]*)$/, " or $1")}`,
-      );
-      continue;
-    }
-    if (modern && testCase.criterion === "") continue;
-    if (!ticketCriteria.includes(testCase.criterion)) {
-      problems.push(
-        `test case ${name} is for criterion "${testCase.criterion}", which is not in the ticket`,
-      );
-      continue;
-    }
-    if (levels.includes(testCase.level)) proven.add(testCase.criterion);
   }
-  // A new-scheme AC with method test is proved through verified_by; the others keep the old rule.
-  const throughCases = links.criteria.filter(
-    (criterion) =>
-      criterion.newScheme && criterion.method === "test" && ticketCriteria.includes(criterion.id),
-  );
-  for (const criterion of throughCases) {
-    let integration = false;
-    for (const id of criterion.verified_by) {
-      const planned = planById.get(id);
-      const entry = entryById.get(id);
-      if (planned?.action === "retire")
-        problems.push(`criterion ${criterion.id} verified_by ${id}, which the plan retires`);
-      else if (planned?.action !== "add" && entry?.status !== "active")
-        problems.push(
-          `criterion ${criterion.id} verified_by ${id}, which is no active entry in test/cases/ and no add entry of the plan`,
-        );
-      if (levels.includes(planned?.level || entry?.level || "")) integration = true;
-    }
-    if (!integration)
-      problems.push(`criterion ${criterion.id} has no integration or e2e test case in verified_by`);
-  }
-  // A manual criterion is proved by the manual gate: a test case for it is allowed, never required.
-  for (const criterion of ticketCriteria) {
-    if (
-      !proven.has(criterion) &&
-      !manual.includes(criterion) &&
-      !throughCases.some((through) => through.id === criterion)
-    )
-      problems.push(`criterion ${criterion} has no integration or e2e test case`);
-  }
-  if (!plan.summary.why) problems.push("plan.yml has no summary.why: add a summary block");
-  if (plan.summary.changes.length === 0)
-    problems.push("plan.yml has no summary.changes: add a summary block");
-  plan.summary.changes.forEach((change, i) => {
-    for (const field of ["criterion", "where", "now", "fix"] as const) {
-      if (!change[field]) problems.push(`summary change #${i + 1} has no ${field}`);
-    }
-  });
-  const summarized = new Set<string>();
-  for (const change of plan.summary.changes) {
-    if (!change.criterion) continue;
-    summarized.add(change.criterion);
-    if (!ticketCriteria.includes(change.criterion)) {
-      problems.push(
-        `summary change is for criterion "${change.criterion}", which is not in the ticket`,
-      );
-    }
-  }
-  for (const criterion of ticketCriteria) {
-    if (!summarized.has(criterion))
-      problems.push(`criterion ${criterion} has no row in summary.changes`);
-  }
-  if (plan.design.interfaces.length === 0)
-    problems.push("plan.yml has no design.interfaces: add a design block");
-  plan.design.interfaces.forEach((entry, i) => {
-    if (!entry.name) problems.push(`design interface #${i + 1} has no name`);
-    if (entry.callers.length === 0) {
-      problems.push(`design interface ${entry.name || `#${i + 1}`} has no callers`);
-    } else if (entry.callers.includes("")) {
-      problems.push(`design interface ${entry.name || `#${i + 1}`} has a blank caller`);
-    }
-  });
-  const decisionIds = new Set<string>();
-  plan.decisions.forEach((decision, i) => {
-    const name = decision.id || `#${i + 1}`;
-    if (!decision.id) problems.push(`decision #${i + 1} has no id`);
-    else if (decisionIds.has(decision.id)) problems.push(`duplicate decision id: ${decision.id}`);
-    decisionIds.add(decision.id);
-    if (!decision.question) problems.push(`decision ${name} has no question`);
-    const labels = decision.options.map((option) => option.label);
-    if (decision.options.length < 2 || decision.options.length > 4) {
-      problems.push(`decision ${name} has ${decision.options.length} options: use 2 to 4`);
-    }
-    if (labels.includes("")) problems.push(`decision ${name} has an option with no label`);
-    if (!labels.includes(decision.recommended)) {
-      problems.push(`decision ${name} recommended "${decision.recommended}" is not an option`);
-    }
-    if (decision.chosen && !labels.includes(decision.chosen)) {
-      problems.push(`decision ${name} chosen "${decision.chosen}" is not an option`);
-    }
-  });
-  const first = plan.steps[0];
-  const last = plan.steps.at(-1);
-  if (kind === "bug") {
-    if (first?.role !== "validator" || !ticketCriteria.every((id) => first.criteria.includes(id)))
-      problems.push("bug run: the first step must be a validator step that serves every criterion");
-  }
-  if (kind === "perf") {
-    if (!first?.goal.includes("results/baseline.md"))
-      problems.push("perf run: the first step goal must name results/baseline.md");
-    if (!last?.goal.includes("results/compare.md"))
-      problems.push("perf run: the last step goal must name results/compare.md");
-  }
-  const required = uiSkillsFor(surfaces);
-  if (required.length > 0) {
-    if (plan.steps.every((step) => step.skills.length === 0))
-      problems.push("no step has a skills list: add one with the skills of `ark ui-skills <run>`");
-    const allowed = allowedUiSkills(surfaces);
-    for (const step of plan.steps) {
-      for (const skill of step.skills.filter((skill) => !allowed.includes(skill)))
-        problems.push(
-          `step ${step.id} skills has "${skill}", which \`ark ui-skills <run>\` does not list`,
-        );
-      const missing = required.filter((skill) => !step.skills.includes(skill));
-      if (step.skills.length > 0 && missing.length > 0)
-        problems.push(`step ${step.id} skills lacks ${missing.join(", ")}`);
-    }
-  }
-  return problems;
-}
-
-/** The ACs a case serves: those whose `verified_by` lists it, and the old-shape `criterion`. */
-function servedBy(testCase: PlanTestCase, criteria: TicketCriterion[]): string[] {
-  return [
-    ...new Set([
-      ...criteria
-        .filter((criterion) => criterion.verified_by.includes(testCase.id))
-        .map((criterion) => criterion.id),
-      ...(testCase.criterion ? [testCase.criterion] : []),
-    ]),
-  ];
-}
-
-// Stable output. Markdown table cells cannot hold a pipe or a newline.
-export function renderPlanMarkdown(
-  plan: Plan,
-  risks: string[],
-  strategy: RunState["strategy"] = null,
-  amendments: RunState["amended_criteria"] = [],
-  withSkills = false,
-  criteria: TicketCriterion[] = [],
-): string {
-  const tableCell = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ");
-  const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
-  const lines = openDecisions
-    ? [`${openDecisions} decisions need an answer before approval`, ""]
-    : [];
-  lines.push("# Plan", "", "## Summary", "", plan.summary.why, "", "## Changes", "");
-  lines.push("| Criterion | Where | Now | Fix |", "| --- | --- | --- | --- |");
-  for (const change of plan.summary.changes) {
-    lines.push(
-      `| ${[change.criterion, change.where, change.now, change.fix].map(tableCell).join(" | ")} |`,
+  const repos = [...upstream.keys()];
+  const order: string[] = [];
+  while (order.length < repos.length) {
+    const next = repos.find(
+      (repo) =>
+        !order.includes(repo) &&
+        [...upstream.get(repo)!].every((dependency) => order.includes(dependency)),
     );
-  }
-  if (amendments.length > 0) {
-    lines.push(
-      "",
-      "## Amended criteria",
-      "",
-      "The human approved these amendments. Judge the new text, not the original.",
-    );
-    for (const amendment of amendments) {
-      lines.push(
-        "",
-        `### ${amendment.id}`,
-        "",
-        `- **Old:** ${amendment.old.replaceAll("\n", " ")}`,
-        `- **New:** ${amendment.new.replaceAll("\n", " ")}`,
-        ...(amendment.reason ? [`- **Reason:** ${amendment.reason}`] : []),
-      );
+    if (next === undefined) {
+      const remaining = repos.filter((repo) => !order.includes(repo));
+      throw new ArkError(`the plan has a dependency cycle between repos: ${remaining.join(", ")}`);
     }
+    order.push(next);
   }
-  if (strategy) {
-    lines.push("", "## Strategy", "");
-    if (strategy.count === 1) {
-      lines.push(
-        strategy.card_text[strategy.cards[0]] ?? strategy.cards[0],
-        "",
-        `Only one strategy considered, because ${strategy.reason}`,
-      );
-    } else {
-      lines.push(
-        `Chosen: ${strategy.chosen ?? "none yet"} (recommended: ${strategy.recommended}; cards: ${strategy.cards.join(", ")})`,
-      );
-      if (strategy.chosen) lines.push("", strategy.card_text[strategy.chosen] ?? strategy.chosen);
-    }
-  }
-  lines.push("", "## Design", "", plan.design.approach.trim() || "No approach given.", "");
-  lines.push("| Interface | Callers |", "| --- | --- |");
-  for (const entry of plan.design.interfaces) {
-    lines.push(`| ${tableCell(entry.name)} | ${entry.callers.map(tableCell).join("<br>")} |`);
-  }
-  lines.push("");
-  if (plan.design.example.trim()) {
-    const longestRun = Math.max(
-      0,
-      ...(plan.design.example.match(/`+/g) ?? []).map((run) => run.length),
-    );
-    const fence = "`".repeat(Math.max(3, longestRun + 1));
-    lines.push(`${fence}text`, plan.design.example.trimEnd(), fence);
-  } else lines.push("No example given.");
-  if (plan.decisions.length > 0) {
-    lines.push("", "## Decisions", "");
-    for (const decision of plan.decisions) {
-      lines.push(":::question", `${decision.question.replaceAll("\n", " ")} (${decision.id})`, "");
-      for (const option of decision.options) {
-        const tradeoffs = option.tradeoffs.replaceAll("\n", " ");
-        lines.push(
-          `- [${option.label === decision.chosen ? "x" : " "}] ${option.label}${tradeoffs ? ` — ${tradeoffs}` : ""}`,
-        );
-      }
-      lines.push("", `Recommended: ${decision.recommended}`, ":::", "");
-    }
-  }
-  lines.push("", "## Evaluation", "");
-  if (risks.length === 0) lines.push("No risks.");
-  else for (const risk of risks) lines.push(`- ${risk.replaceAll("\n", " ")}`);
-  lines.push("", "## Steps", "", "```mermaid", renderMermaid(plan).trimEnd(), "```", "");
-  lines.push(
-    `| Step | Role | Repo | Needs | Criteria |${withSkills ? " Skills |" : ""}`,
-    `| --- | --- | --- | --- | --- |${withSkills ? " --- |" : ""}`,
-  );
-  for (const step of plan.steps) {
-    const cells = [
-      step.id,
-      step.role,
-      step.repo,
-      step.needs.join(", ") || "none",
-      step.criteria.join(", "),
-    ];
-    if (withSkills) cells.push(step.skills.join(", "));
-    lines.push(`| ${cells.map(tableCell).join(" | ")} |`);
-  }
-  lines.push("", "## Test cases", "");
-  if (plan.test_cases.some((testCase) => testCase.action !== "")) {
-    lines.push(
-      "| Case | Action | Level | Serves | Title | Reason |",
-      "| --- | --- | --- | --- | --- | --- |",
-    );
-    for (const testCase of plan.test_cases) {
-      const serves = testCase.action === "retire" ? [] : servedBy(testCase, criteria);
-      lines.push(
-        `| ${[testCase.id, testCase.action || "-", testCase.level, serves.join(", ") || "none", testCase.title, testCase.reason].map(tableCell).join(" | ")} |`,
-      );
-    }
-    lines.push("");
-  }
-  for (const testCase of plan.test_cases) {
-    if (testCase.action === "reuse" || testCase.action === "retire") continue;
-    lines.push(
-      `### ${testCase.id} (${testCase.action || testCase.criterion}, ${testCase.level})`,
-      "",
-      "```gherkin",
-    );
-    for (const [group, keyword] of [
-      ["given", "Given"],
-      ["when", "When"],
-      ["then", "Then"],
-    ] as const) {
-      testCase[group].forEach((line, i) => lines.push(`${i === 0 ? keyword : "And"} ${line}`));
-    }
-    lines.push("```", "", `Expected: ${testCase.expected}`, "");
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-export function planCheck(runId: string, inProject?: string): void {
-  const { project, directory } = findRun(runId, inProject);
-  const state = deriveState(readEvents(directory));
-  // Refuse a run that is not ready for a plan check before reading plan.yml.
-  assertAllowed(state, "plan.checked", {});
-  const plan = loadPlan(directory, state.ticket.id);
-  const ticketCriteria = runCriteria(directory);
-  const cases = readWorkspaceCases(loadConfig(project).workspace);
-  const surfaces = state.evaluation?.surfaces ?? ["none"];
-  const problems = findProblems(
-    plan,
-    state.criteria.map((criterion) => criterion.id),
-    surfaces,
-    loadConfig(project).roles,
-    ticketCriteria
-      .filter((criterion) => criterion.method !== "test")
-      .map((criterion) => criterion.id),
-    state.kind,
-    { criteria: ticketCriteria, entries: cases.entries },
-  );
-  problems.unshift(...cases.problems);
-  const valid = problems.length === 0;
-  const openDecisions = plan.decisions.filter((decision) => !decision.chosen).length;
-  appendEvent(directory, "plan.checked", {
-    valid,
-    problems,
-    plan_hash: planHash(directory),
-    open_decisions: openDecisions,
-    steps: plan.steps.map(({ id, role, repo, needs, criteria }) => ({
-      id,
-      role,
-      repo,
-      needs,
-      criteria,
-    })),
-  });
-  if (!valid) {
-    for (const problem of problems) console.log(problem);
-    throw new ArkError(
-      `plan is invalid: ${problems.length} problem${problems.length === 1 ? "" : "s"}`,
-    );
-  }
-  writeFileSync(
-    join(directory, "plan.md"),
-    renderPlanMarkdown(
-      plan,
-      state.evaluation?.risks ?? [],
-      state.strategy,
-      state.amended_criteria,
-      uiSkillsFor(surfaces).length > 0,
-      ticketCriteria,
-    ),
-  );
-  console.log(
-    `plan is valid: ${plan.steps.length} steps, ${plan.test_cases.length} test cases; wrote plan.md`,
-  );
-  if (loadConfig(project).gates.plan === "auto" && openDecisions === 0) {
-    appendEvent(directory, "gate.answered", { gate: "plan", answer: "approve", by: "auto" });
-    console.log("gates.plan is auto: recorded plan approve by auto");
-  }
+  return { order, upstream };
 }

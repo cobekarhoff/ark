@@ -4,6 +4,8 @@
  * in `docs/reference/roadmap.md`.
  */
 
+import { isFinishedTicket } from "../cli/lifecycle.ts";
+
 export type RoadmapTicket = {
   id: string;
   title: string | null;
@@ -59,9 +61,6 @@ export type RoadmapResult = { ok: true; roadmap: Roadmap } | { ok: false; errors
 
 const states: readonly string[] = ["done", "active", "later"];
 const horizons = ["now", "next", "later"] as const;
-const isFinished = (ticket: RoadmapTicket) =>
-  ticket.status === "done" || ticket.status === "superseded";
-
 const toItem = (ticket: RoadmapTicket): RoadmapItem => ({
   id: ticket.id,
   title: ticket.title,
@@ -141,7 +140,7 @@ export function readRoadmap(markdown: string, tickets: RoadmapTicket[]): Roadmap
         ids: [id],
         message: `${id} is listed but has no ticket file.`,
       });
-    else if (isFinished(ticket))
+    else if (isFinishedTicket(ticket.status))
       warnings.push({
         kind: "finished_listed",
         ids: [id],
@@ -153,11 +152,11 @@ export function readRoadmap(markdown: string, tickets: RoadmapTicket[]): Roadmap
     a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
   for (const [id, place] of position) {
     const ticket = byId.get(id);
-    if (!ticket || isFinished(ticket)) continue;
+    if (!ticket || isFinishedTicket(ticket.status)) continue;
     for (const dependency of ticket.depends_on) {
       const target = byId.get(dependency);
       const targetPlace = position.get(dependency);
-      if (target && !isFinished(target) && targetPlace && before(place, targetPlace))
+      if (target && !isFinishedTicket(target.status) && targetPlace && before(place, targetPlace))
         warnings.push({
           kind: "rank_above_dependency",
           ids: [id, dependency],
@@ -169,9 +168,9 @@ export function readRoadmap(markdown: string, tickets: RoadmapTicket[]): Roadmap
   const horizon = (ids: string[]) =>
     ids.flatMap((id) => {
       const ticket = byId.get(id);
-      return ticket && !isFinished(ticket) ? [toItem(ticket)] : [];
+      return ticket && !isFinishedTicket(ticket.status) ? [toItem(ticket)] : [];
     });
-  const open = tickets.filter((ticket) => !isFinished(ticket));
+  const open = tickets.filter((ticket) => !isFinishedTicket(ticket.status));
   const unranked = open.filter(
     (ticket) => ticket.status !== "proposed" && !position.has(ticket.id),
   );
@@ -204,7 +203,9 @@ export function readRoadmap(markdown: string, tickets: RoadmapTicket[]): Roadmap
       unranked: unranked.map(toItem),
       review: tickets.filter((ticket) => ticket.status === "proposed").map(toItem),
       shipped: order.flatMap((id) => {
-        const finished = tickets.filter((t) => (t.milestone ?? "") === id && isFinished(t));
+        const finished = tickets.filter(
+          (t) => (t.milestone ?? "") === id && isFinishedTicket(t.status),
+        );
         return finished.length > 0 ? [{ milestone: id, tickets: finished.map(toItem) }] : [];
       }),
       warnings,

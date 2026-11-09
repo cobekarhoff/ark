@@ -1,19 +1,21 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ArkError } from "./errors";
+import { ArkError } from "./errors.ts";
+import { canonicalCriterion } from "./criterion-id.ts";
+import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events.ts";
+import { loadConfig, mergeRequestsMode } from "./config.ts";
+import { findRun } from "./paths.ts";
+import { loadPlan, repoGraph } from "./plan.ts";
 import {
   evidenceFile,
+  evidenceProblem,
+  frontmatter,
   hasTestCriterion,
   manualCriteria,
   runCriteria,
-  type Method,
-} from "./criteria.ts";
-import { canonicalCriterion } from "./criterion-id.ts";
-import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events";
-import { loadConfig, mergeRequestsMode } from "./config.ts";
-import { findRun } from "./paths";
-import { loadPlan } from "./plan";
+} from "./ticket.ts";
+import { manualStatus } from "./lifecycle.ts";
 import { discoverRepos, repoBase } from "./workspace.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import {
@@ -25,8 +27,6 @@ import {
 import { lintBody } from "../skills/pr-writing/lib/lint.ts";
 import { buildTitle, postMergeRequest } from "../skills/pr-writing/lib/post.ts";
 
-type PlanStep = { id: string; repo: string; needs: string[]; criteria: string[] };
-type PlanSteps = { steps: PlanStep[] };
 type Worktree = { repo: string; path: string; branch: string; base: string };
 type OpenedMergeRequest = { repo: string; url: string; number: number };
 type Host = "github" | "gitlab";
@@ -49,40 +49,6 @@ function run(command: string[], cwd: string): string {
   return result.stdout;
 }
 
-// For each repo, the other repos whose steps it needs.
-function upstreamRepos(plan: PlanSteps): Map<string, Set<string>> {
-  const repoOfStep = new Map(plan.steps.map((step) => [step.id, step.repo]));
-  const upstream = new Map<string, Set<string>>();
-  for (const step of plan.steps) {
-    const dependencies = upstream.get(step.repo) ?? new Set<string>();
-    for (const needed of step.needs) {
-      const neededRepo = repoOfStep.get(needed);
-      if (neededRepo !== undefined && neededRepo !== step.repo) dependencies.add(neededRepo);
-    }
-    upstream.set(step.repo, dependencies);
-  }
-  return upstream;
-}
-
-export function mergeOrder(plan: PlanSteps): string[] {
-  const upstream = upstreamRepos(plan);
-  const repos = [...upstream.keys()]; // first appearance in the plan file
-  const ordered: string[] = [];
-  while (ordered.length < repos.length) {
-    const next = repos.find(
-      (repo) =>
-        !ordered.includes(repo) &&
-        [...upstream.get(repo)!].every((dependency) => ordered.includes(dependency)),
-    );
-    if (next === undefined) {
-      const remaining = repos.filter((repo) => !ordered.includes(repo));
-      throw new ArkError(`the plan has a dependency cycle between repos: ${remaining.join(", ")}`);
-    }
-    ordered.push(next);
-  }
-  return ordered;
-}
-
 function detectHost(remoteUrl: string): Host {
   const lowered = remoteUrl.toLowerCase();
   if (lowered.includes("github.com")) return "github";
@@ -91,19 +57,15 @@ function detectHost(remoteUrl: string): Host {
 }
 
 function criterionTexts(runDirectory: string): Map<string, Criterion> {
-  const match = readFileSync(join(runDirectory, "ticket.md"), "utf8").match(
-    /^---\n([\s\S]*?)\n---/,
-  );
-  const frontmatter = match
-    ? (Bun.YAML.parse(match[1]) as {
-        id?: string;
-        acceptance_criteria?: { id: string; text: string }[];
-      })
-    : {};
+  const fields = (frontmatter(readFileSync(join(runDirectory, "ticket.md"), "utf8")).fields ??
+    {}) as {
+    id?: string;
+    acceptance_criteria?: { id: string; text: string }[];
+  };
   const manual = new Set(manualCriteria(runDirectory));
   return new Map(
-    (frontmatter.acceptance_criteria ?? []).map(({ id: written, text }) => {
-      const id = canonicalCriterion(written, frontmatter.id);
+    (fields.acceptance_criteria ?? []).map(({ id: written, text }) => {
+      const id = canonicalCriterion(written, fields.id);
       return [id, { id, text, manual: manual.has(id) }];
     }),
   );
@@ -244,91 +206,6 @@ function worktreeMap(events: ArkEvent[]): Map<string, Worktree> {
   return worktrees;
 }
 
-const headingLine = /^#{1,6}\s+(.+?)\s*$/;
-const screenshotPath = /\S+\.(png|jpe?g|gif|webp)\b/i;
-
-/** The lines under the heading `name`, up to the next heading of the same or a higher level; undefined when the heading is missing. */
-function sectionOf(lines: string[], name: string): string[] | undefined {
-  const start = lines.findIndex(
-    (line) => headingLine.exec(line)?.[1].toLowerCase() === name.toLowerCase(),
-  );
-  if (start === -1) return undefined;
-  const level = lines[start].indexOf(" ");
-  const body: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (headingLine.test(line) && line.indexOf(" ") <= level) break;
-    body.push(line);
-  }
-  return body;
-}
-
-/** True when the section names `label` as a sub-heading with text under it, or as a line `label: text`. */
-function hasLabel(body: string[], label: string): boolean {
-  const inline = new RegExp(`^\\s*(?:[-*]\\s+)?\\**${label}\\**\\s*:\\s*\\**\\s*\\S`, "i");
-  return body.some((line, i) => {
-    if (inline.test(line)) return true;
-    if (headingLine.exec(line)?.[1].toLowerCase() !== label.toLowerCase()) return false;
-    for (const next of body.slice(i + 1)) {
-      if (headingLine.test(next)) return false;
-      if (next.trim() !== "") return true;
-    }
-    return false;
-  });
-}
-
-/**
- * The shape of `results/evidence/<AC id>.md` for its method. Returns the reason the file is malformed, naming the
- * section, or undefined. Screenshot paths are checked for shape, not for existence.
- */
-export function evidenceProblem(method: Method, text: string): string | undefined {
-  const lines = text.split("\n").map((line) => line.trimEnd());
-  const missing = (name: string) => `missing section "${name}"`;
-  const empty = (name: string) => `section "${name}" is empty`;
-  if (method === "demonstration") {
-    for (const name of ["What the human did", "What the human saw", "Before", "After"]) {
-      const body = sectionOf(lines, name);
-      if (body === undefined) return missing(name);
-      if (body.every((line) => line.trim() === "")) return empty(name);
-      if (
-        (name === "Before" || name === "After") &&
-        !body.some((line) => screenshotPath.test(line))
-      )
-        return `section "${name}" has no screenshot path`;
-    }
-    return lines.findLast((line) => line !== "") === "human: ok"
-      ? undefined
-      : 'the last line is not "human: ok"';
-  }
-  if (method === "inspection") {
-    for (const name of ["Files", "Checked against", "Verdict"]) {
-      const body = sectionOf(lines, name);
-      if (body === undefined) return missing(name);
-      if (body.every((line) => line.trim() === "")) return empty(name);
-      if (name !== "Files") continue;
-      const entry = body
-        .map((line) =>
-          line
-            .replace(/^\s*[-*]\s+/, "")
-            .replace(/`/g, "")
-            .trim(),
-        )
-        .find((line) => line !== "" && !/^\S+:\d+(-\d+)?$/.test(line));
-      if (entry !== undefined)
-        return `section "Files": "${entry}" has no path:start-end line range`;
-    }
-    return sectionOf(lines, "Verdict")!.some((line) => /^reviewer: (pass|fail)$/.test(line.trim()))
-      ? undefined
-      : 'section "Verdict" has no reviewer line: write "reviewer: pass" or "reviewer: fail"';
-  }
-  for (const name of ["Command", "Output", "Threshold", "Result"]) {
-    const body = sectionOf(lines, name);
-    if (body === undefined) return missing(name);
-    for (const label of ["Base", "Head"])
-      if (!hasLabel(body, label)) return `section "${name}" has no ${label}`;
-  }
-  return undefined;
-}
-
 /** Local id `AC<k>` of a criterion, as the evidence refusals and files name it. */
 const localId = (criterionId: string): string => criterionId.split("/").pop()!;
 
@@ -398,7 +275,9 @@ export function assertShippable(
     throw new ArkError(
       `the last test at this head is quick, not a gate: run \`ark test ${runId}\``,
     );
-  const unproven = manualCriteria(directory).filter((id) => state.gates[`manual:${id}`] !== "ok");
+  const unproven = manualCriteria(directory).filter(
+    (id) => manualStatus(state.gates[`manual:${id}`]) !== "manual ok",
+  );
   if (unproven.length > 0)
     throw new ArkError(
       unproven.length === 1
@@ -479,9 +358,11 @@ export function mergeRequestOpen(
   const ledger = buildLedger({ runFolder: directory });
   const worktrees = worktreeMap(events);
   const plan = loadPlan(directory);
-  const upstream = upstreamRepos(plan);
-  const order = mergeOrder(plan);
-  const repos = [...order, ...[...worktrees.keys()].filter((repo) => !order.includes(repo))];
+  const { order: graphOrder, upstream } = repoGraph(plan);
+  const repos = [
+    ...graphOrder,
+    ...[...worktrees.keys()].filter((repo) => !graphOrder.includes(repo)),
+  ];
   const opened = new Map<string, OpenedMergeRequest>();
   for (const event of events)
     if (event.type === "merge_request.opened")
@@ -511,12 +392,11 @@ export function mergeRequestOpen(
       } else if (!needsMergeRequest(repo)) continue;
 
       const host = detectHost(run(["git", "remote", "get-url", "origin"], worktree.path));
-      const upstreamOpened = [...(upstream.get(repo) ?? [])].flatMap(
-        (name) => opened.get(name) ?? [],
-      );
-      const dependsOn = upstreamOpened.map(
-        (merge) => `Depends on ${host === "github" ? "#" : "!"}${merge.number}`,
-      );
+      const upstreamOpened = [...(upstream.get(repo) ?? [])]
+        .sort((left, right) => repos.indexOf(left) - repos.indexOf(right))
+        .flatMap((name) => opened.get(name) ?? []);
+      const marker = host === "github" ? "#" : "!";
+      const dependsOn = upstreamOpened.map((merge) => `Depends on ${marker}${merge.number}`);
       // Evidence and risk are run-wide; host, token owner and template are this repo's own.
       const repoLedger: Ledger = {
         ...ledger,
@@ -524,7 +404,7 @@ export function mergeRequestOpen(
         tokenOwner: tokenOwner(host, worktree.path),
         template: findTemplate(worktree.path),
         // A repo with no commits opens no MR, so the merge order leaves it out.
-        mergeOrder: ledger.mergeOrder.filter((name) =>
+        mergeOrder: graphOrder.filter((name) =>
           ledger.repos.some((entry) => entry.repo === name && entry.commits.length > 0),
         ),
         repos: ledger.repos
@@ -561,14 +441,21 @@ export function mergeRequestOpen(
         console.log(`${repo}  ${posted.action}  ${posted.url}`);
         continue;
       }
-      const created = { repo, url: posted.url, number: posted.number };
+      const order = repos.indexOf(repo) + 1;
+      const waitsFor = upstreamOpened.map((merge) => merge.number);
+      const created = { repo, url: posted.url, number: posted.number, order, waits_for: waitsFor };
       if (host === "gitlab") {
         for (const merge of upstreamOpened)
           blockOnGitLab(created, merge, worktree.path, worktrees.get(merge.repo)!.path);
       }
       appendEvent(directory, "merge_request.opened", created);
       opened.set(repo, created);
-      console.log(`${repo}  ${created.url}`);
+      console.log(
+        `${order}  ${repo}  ${marker}${created.number}  ${created.url}` +
+          (waitsFor.length > 0
+            ? `  waits for ${waitsFor.map((number) => marker + number).join(", ")}`
+            : ""),
+      );
     }
   } finally {
     rmSync(folder, { recursive: true, force: true });

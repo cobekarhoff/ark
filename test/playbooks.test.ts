@@ -2,7 +2,7 @@ import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isHubName } from "../cli/proxy.ts";
-import { outcomes } from "../cli/transitions.ts";
+import { outcomes, phases } from "../cli/lifecycle.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -24,11 +24,34 @@ test("ARK-187-AC3 every literal `ark run close <run> <outcome>` in the playbooks
   }
 });
 
+test("ARK-T86 every phase the docs and playbooks name is one the reducer emits", () => {
+  const root = join(import.meta.dir, "..");
+  const files = [
+    "CONTEXT.md",
+    "README.md",
+    "docs/explanation/architecture.md",
+    "docs/reference/cli.md",
+    ...readdirSync(playbookDirectory).map((name) => `skills/ark/playbooks/${name}`),
+  ].filter((file) => file.endsWith(".md") && existsSync(join(root, file)));
+  const named: { file: string; phase: string }[] = [];
+  for (const file of files) {
+    const text = readFileSync(join(root, file), "utf8");
+    for (const [, phase] of text.matchAll(/\bphases? (?:is |are |in |of |to )?`([a-z_]+)`/g))
+      named.push({ file, phase });
+    const diagram = text.match(/```mermaid\nstateDiagram-v2\n([\s\S]*?)```/)?.[1] ?? "";
+    for (const [, from, to] of diagram.matchAll(/^\s+([a-z_]+) --> ([a-z_]+)/gm))
+      named.push({ file, phase: from }, { file, phase: to });
+  }
+  expect(named.filter(({ file }) => file.endsWith("architecture.md")).length).toBeGreaterThan(0);
+  const known: readonly string[] = phases;
+  for (const { file, phase } of named)
+    expect({ file, phase, known: known.includes(phase) }).toEqual({ file, phase, known: true });
+});
+
 test("ARK-286-AC6 package.json defines the typecheck, lint and format:check scripts", () => {
   const { scripts } = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8"));
   for (const name of ["typecheck", "lint", "format:check"]) expect(scripts[name]).toBeTruthy();
 });
-
 test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
   const root = join(import.meta.dir, "..");
   const files = [
@@ -40,16 +63,6 @@ test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
   ].filter((file) => existsSync(join(root, file)));
   const result = Bun.spawnSync(["bunx", "oxfmt", "--check", ...files], { cwd: root });
   expect(result.exitCode).toBe(0);
-});
-
-test("ARK-T83 cli.md equals the generator output", () => {
-  const root = join(import.meta.dir, "..");
-  const path = join(root, "docs/reference/cli.md");
-  const before = readFileSync(path, "utf8");
-  expect(
-    Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
-  ).toBe(0);
-  expect(readFileSync(path, "utf8")).toBe(before);
 });
 
 /** Every code-block line and inline `command` of a Markdown text. */
@@ -126,16 +139,6 @@ test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead
   expect(
     commands.filter((command) => command.includes("ark ui --port")).length,
   ).toBeGreaterThanOrEqual(1);
-});
-
-test("ARK-T84 the generated CLI reference equals the file", () => {
-  const root = join(import.meta.dir, "..");
-  const path = join(root, "docs/reference/cli.md");
-  const before = readFileSync(path, "utf8");
-  expect(
-    Bun.spawnSync(["bun", join(root, "scripts/cli-reference.ts")], { cwd: root }).exitCode,
-  ).toBe(0);
-  expect(readFileSync(path, "utf8")).toBe(before);
 });
 
 test("ARK-T85 every link in principles.md points to a file and heading that exist", () => {

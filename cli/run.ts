@@ -1,68 +1,29 @@
 import { now as hubNow } from "./clock.ts";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
-import { hasTestCriterion, manualCriteria, parseCriteria } from "./criteria.ts";
 import {
   appendEvent,
   deriveState,
   readEvents,
+  waitingGate,
   writeState,
   type ArkEvent,
   type EventData,
-  ticketKinds,
   type RunState,
-  type TicketKind,
 } from "./events.ts";
+import { ticketStatusAfter } from "./lifecycle.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
 import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, worktreeCleanup } from "./worktree.ts";
+import { loadPlan, repoGraph, type Plan } from "./plan.ts";
+import { hasTestCriterion, manualCriteria, readTicket, setTicketStatus } from "./ticket.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
-
-function readTicket(ticketFile: string): {
-  id: string;
-  title: string;
-  kind: TicketKind;
-  criteria: string[];
-} {
-  const frontmatter = readFileSync(ticketFile, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!frontmatter)
-    throw new ArkError(
-      `${ticketFile}: the ticket needs YAML frontmatter with id, title and acceptance_criteria`,
-    );
-  const fields = (Bun.YAML.parse(frontmatter[1]) ?? {}) as Record<string, unknown>;
-  for (const key of ["id", "title"]) {
-    if (typeof fields[key] !== "string" || fields[key] === "")
-      throw new ArkError(`${ticketFile}: ticket field ${key} is required`);
-  }
-  if (fields.summary !== undefined && (typeof fields.summary !== "string" || fields.summary === ""))
-    throw new ArkError(`${ticketFile}: ticket field summary must be a non-empty string`);
-  const kind = fields.kind ?? "feature";
-  if (!(ticketKinds as readonly unknown[]).includes(kind))
-    throw new ArkError(
-      `${ticketFile}: kind must be one of ${ticketKinds.join(", ")}, not ${JSON.stringify(kind)}`,
-    );
-  const ids = parseCriteria(fields, ticketFile).map((criterion) => criterion.id);
-  return {
-    id: fields.id as string,
-    title: fields.title as string,
-    kind: kind as TicketKind,
-    criteria: ids,
-  };
-}
 
 function resolveProject(absoluteTicketFile: string, project?: string): string {
   const chosen = project ?? process.env.ARK_PROJECT;
@@ -81,21 +42,6 @@ function today(): string {
   const now = new Date(hubNow());
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
-/** Sets the first `status:` line of the ticket front matter. Changes no other byte. Returns false when there is no such line. */
-function setTicketStatus(ticketFile: string, status: string): boolean {
-  const text = readFileSync(ticketFile, "utf8");
-  const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!frontmatter) return false;
-  const line = /^status:[^\r\n]*/m.exec(frontmatter[0]);
-  if (!line) return false;
-  const start = line.index + (frontmatter.index ?? 0);
-  writeFileSync(
-    ticketFile,
-    text.slice(0, start) + `status: ${status}` + text.slice(start + line[0].length),
-  );
-  return true;
 }
 
 /** Largest whole unit only: Nm, Nh or Nd. */
@@ -192,7 +138,7 @@ function answerEscalationByAuto(
     by: "auto",
     ...(start.merge ? { merge: true } : {}),
   };
-  if (refused(() => assertAllowed(state, "gate.answered", answer))) return null;
+  if (refused(() => assertAllowed(state, "gate.answered", answer, directory))) return null;
   const answered = deriveState([
     ...events,
     {
@@ -301,12 +247,7 @@ function warnSetTicketStatus(ticketFile: string, project: string, status: string
 
 /** Keeps a local ticket's status in step with its run. handed_off leaves the file as it is. */
 function syncClosedTicket(started: EventData | undefined, outcome: string): void {
-  const status =
-    outcome === "merged"
-      ? "done"
-      : outcome === "aborted" || outcome === "abandoned"
-        ? "ready"
-        : undefined;
+  const status = ticketStatusAfter(outcome);
   if (!status || !started?.ticket_file) return;
   warnSetTicketStatus(started.ticket_file, started.project, status);
 }
@@ -316,12 +257,17 @@ export async function runClose(runId: string, outcome: string, inProject?: strin
   const events = readEvents(directory);
   if (outcome === "handed_off") {
     const state = deriveState(events);
-    assertAllowed(state, "run.closed", { outcome });
+    assertAllowed(state, "run.closed", { outcome }, directory);
     assertShippable(runId, project, directory, events, state);
   }
   const started = events.find((event) => event.type === "run.started");
   appendEvent(directory, "run.closed", { outcome });
   console.log(`${runId} closed: ${outcome}`);
+  if (outcome === "handed_off" && statusMergeRequestsMode(project) === "none")
+    for (const line of localOnlyLines(project, directory, deriveState(readEvents(directory))).slice(
+      1,
+    ))
+      console.log(line);
   syncClosedTicket(started?.data, outcome);
   worktreeCleanup(runId, inProject);
   // After the record and the cleanup, so an Orca failure cannot fail the close.
@@ -345,14 +291,6 @@ export async function runCloseSweep(inProject?: string): Promise<void> {
         console.log([`${name}:`, ...lines.map((line) => `  ${line}`)].join("\n"));
     }
   }
-}
-
-export function waitingGate(state: RunState): string {
-  if (state.phase === "awaiting_criteria") return "criteria";
-  if (state.phase === "awaiting_strategy") return "strategy";
-  if (state.phase === "planning" && state.plan?.valid) return "plan";
-  if (state.phase === "escalation") return "escalation";
-  return "none";
 }
 
 function costLine(directory: string): string {
@@ -420,18 +358,69 @@ function statusMergeRequestsMode(project: string): ProjectConfig["merge_requests
   }
 }
 
-/** The `none` project's merge request line and one `branch` line for each worktree with commits beyond its base. */
-function localOnlyLines(project: string, state: RunState): string[] {
-  const workspace = loadConfig(project).workspace;
-  const branches: string[] = [];
-  for (const { repo, branch, base } of state.worktrees) {
-    const ahead = commitsAhead(join(workspace, repo), branch, base);
-    if (ahead)
-      branches.push(
-        `branch   ${repo}  ${branch}  ${ahead} commit(s) ahead of ${base?.slice(0, 8)}`,
-      );
+/** The plan's repo order, repos list and steps, or none when the plan is missing or invalid (status stays readable). */
+function readablePlan(directory: string, ticketId: string): Plan | undefined {
+  try {
+    return loadPlan(directory, ticketId);
+  } catch {
+    return undefined;
   }
-  return ["merge requests: none (local only)", ...branches];
+}
+
+/** The plan's merge order, or none when the graph cannot be ordered (a dependency cycle): status stays readable. */
+function repoOrder(plan: Plan): string[] {
+  try {
+    return repoGraph(plan).order;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The `none` project's merge request line, then one `branch` line for each worktree with commits beyond its base, in
+ * merge order (the repos graph, else step needs), each followed by the bump steps of its repo that are not done.
+ * A bump of a repo with no branch line comes after the last branch line.
+ */
+function localOnlyLines(project: string, directory: string, state: RunState): string[] {
+  const workspace = loadConfig(project).workspace;
+  const plan = readablePlan(directory, state.ticket.id);
+  const order = plan ? repoOrder(plan) : [];
+  const position = (repo: string) => {
+    const index = order.indexOf(repo);
+    return index < 0 ? order.length : index;
+  };
+  const repos = [...new Set([...order, ...state.worktrees.map((worktree) => worktree.repo)])];
+  const width = Math.max(0, ...repos.map((repo) => repo.length)) + 3;
+  const pendingBumps = (repo: string) =>
+    (plan?.repos.find((entry) => entry.repo === repo)?.depends_on ?? [])
+      .filter(
+        (edge) =>
+          edge.bump && state.steps.find((step) => step.id === edge.bump)?.status !== "succeeded",
+      )
+      .map(
+        (edge) => `           pending bump: ${edge.bump} (${edge.kind} ${edge.repo}, ${edge.pin})`,
+      );
+  const lines: string[] = [];
+  const unlisted: string[] = [];
+  const worktrees = [...state.worktrees].sort(
+    (left, right) => position(left.repo) - position(right.repo),
+  );
+  const branchRepos = new Set<string>();
+  for (const { repo, branch, base } of worktrees) {
+    const ahead = commitsAhead(join(workspace, repo), branch, base);
+    if (!ahead) continue;
+    branchRepos.add(repo);
+    lines.push(
+      `branch   ${position(repo) + 1}  ${repo.padEnd(width)}${branch}   ${ahead} commit(s) ahead of ${base?.slice(0, 8)}`,
+      ...pendingBumps(repo),
+    );
+  }
+  for (const repo of order) if (!branchRepos.has(repo)) unlisted.push(...pendingBumps(repo));
+  const fallback =
+    plan && plan.repos.length === 0 && new Set(plan.steps.map((step) => step.repo)).size > 1
+      ? ["order: from step needs (no repos list)"]
+      : [];
+  return ["merge requests: none (local only)", ...fallback, ...lines, ...unlisted];
 }
 
 /** The words of `from` and `to` that differ, with "..." on each cut side. */
@@ -499,7 +488,7 @@ function printRun(runId: string, inProject?: string): void {
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") + (state.last_test.mode === "quick" ? " (quick, not a gate)" : "") : "none"}`,
     ...testHeadLines(directory),
     ...(statusMergeRequestsMode(project) === "none"
-      ? localOnlyLines(project, state)
+      ? localOnlyLines(project, directory, state)
       : [
           `merge requests: ${state.merge_requests.length === 0 ? "none" : ""}`,
           ...state.merge_requests.map((request) => `  ${request.repo} ${request.url}`),

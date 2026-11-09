@@ -1,15 +1,12 @@
-// test ids: ticket-row (data-ticket, data-horizon), ticket-link, rank, blocked-by, unblocks,
-// ticket-run (data-run), status-chip, milestone-chip, review (column or bar), review-item (data-ticket),
-// copy-button, copy-command, shipped-bar, shipped-toggle, shipped-panel, shipped-fold (data-milestone),
-// superseded-fold, shipped-ticket, milestone-rail, milestone-pick (data-milestone, aria-pressed),
-// milestone-bar, done-fold, roadmap-warning (data-kind). Nothing here changes a ticket or a rank.
 import { useEffect, useState, type ReactNode } from "react";
 import type { TicketEntry } from "./derive.ts";
+
 import { phaseLabel } from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { ticketHref } from "./store.tsx";
 import type { RoadmapItem, RoadmapMilestone, RoadmapWarning } from "../roadmap.ts";
 import type { TicketRunView, TicketView } from "../types.ts";
+import { isFinishedTicket } from "../../cli/lifecycle.ts";
 
 export type RoadmapData = {
   byId: Map<string, TicketView>;
@@ -20,15 +17,14 @@ export type RoadmapData = {
   project: string;
 };
 
-const finished = (ticket: TicketView | undefined) =>
-  ticket !== undefined && (ticket.status === "done" || ticket.status === "superseded");
-
 export const entryOf = (data: RoadmapData, id: string) =>
   data.entries.get(`${data.project}/${id}`) as TicketEntry;
 
 /** Dependencies that are not finished, then the open tickets that wait on this one. */
 export const relationsOf = (data: RoadmapData, id: string) => ({
-  blockedBy: (data.byId.get(id)?.depends_on ?? []).filter((need) => !finished(data.byId.get(need))),
+  blockedBy: (data.byId.get(id)?.depends_on ?? []).filter(
+    (need) => !isFinishedTicket(data.byId.get(need)?.status),
+  ),
   unblocks: data.open.filter((other) => other.depends_on.includes(id)).map((other) => other.id),
 });
 

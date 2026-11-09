@@ -10,7 +10,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { mergeOrder, requiredLiterals } from "../cli/merge-request";
+import { requiredLiterals } from "../cli/merge-request.ts";
+import { repoGraph } from "../cli/plan.ts";
 import {
   ark,
   recordEvaluation,
@@ -48,6 +49,8 @@ beforeEach(() => {
   logFile = join(mkdtempSync(join(tmpdir(), "ark-fake-log-")), "calls.ndjson");
   process.env.FAKE_LOG = logFile;
   delete process.env.FAKE_GLAB_BLOCK_FAIL;
+  delete process.env.FAKE_NUMBERS;
+  delete process.env.FAKE_CREATE_FAIL_AT;
   process.env.PATH = `${fixtures}:${(process.env.PATH ?? "")
     .split(":")
     .filter((entry) => entry !== fixtures)
@@ -67,12 +70,84 @@ const edited = () =>
   calls().filter((call) => call.argv.includes("edit") || call.argv.includes("update"));
 const optionValue = (call: LoggedCall, option: string) => call.argv[call.argv.indexOf(option) + 1];
 
-// Three repos. The plan lists app first, but app needs core. docs gets no commits.
+type PlanStep = { id: string; role: string; repo: string; needs: string[]; criteria: string[] };
+type Shape = { names: string[]; steps: PlanStep[]; repos?: unknown[]; noCommits: string[] };
+
+const planStep = (
+  id: string,
+  repo: string,
+  needs: string[],
+  criteria: string[],
+  role = "implementer",
+) => ({
+  id,
+  role,
+  repo,
+  harness: "claude",
+  model: "claude-sonnet",
+  needs,
+  criteria,
+});
+const edge = (repo: string, kind: string, pin: string) => ({
+  repo,
+  kind,
+  pin,
+  evidence: "file.txt:1",
+});
+
+// Three repos. The plan lists app first, and the repos block holds the edge app to core. app-impl also needs
+// core-impl, which agrees. docs gets no commits.
+const twoRepoShape: Shape = {
+  names: ["core", "app", "docs"],
+  steps: [
+    planStep("app-impl", "repos/app", ["core-impl"], ["ARK-900-AC2"]),
+    planStep("core-impl", "repos/core", [], ["ARK-900-AC1"]),
+    planStep("docs-impl", "repos/docs", [], []),
+  ],
+  repos: [
+    { repo: "repos/core", why: "units", depends_on: [] },
+    { repo: "repos/app", why: "shows units", depends_on: [edge("repos/core", "api", "units@v1")] },
+    { repo: "repos/docs", why: "docs", depends_on: [] },
+  ],
+  noCommits: ["docs"],
+};
+
+// Three repos with commits. The step needs run against the repos block: validate (platform) needs bump-reports and
+// review-core (core) needs validate, so the needs alone put reports first and core last; the edges say core first.
+const claraShape: Shape = {
+  names: ["core", "platform", "reports"],
+  steps: [
+    planStep("impl-core", "repos/core", [], ["ARK-900-AC1"]),
+    planStep("bump-platform", "repos/platform", [], ["ARK-900-AC2"]),
+    planStep("bump-reports", "repos/reports", [], ["ARK-900-AC2"]),
+    planStep("validate", "repos/platform", ["bump-reports"], ["ARK-900-AC2"], "validator"),
+    planStep("review-core", "repos/core", ["validate"], ["ARK-900-AC1"], "reviewer"),
+  ],
+  repos: [
+    { repo: "repos/core", why: "client", depends_on: [] },
+    {
+      repo: "repos/platform",
+      why: "calls core",
+      depends_on: [edge("repos/core", "package", "core>=1")],
+    },
+    {
+      repo: "repos/reports",
+      why: "calls core and platform",
+      depends_on: [
+        edge("repos/core", "package", "core>=1"),
+        edge("repos/platform", "api", "openapi@v3"),
+      ],
+    },
+  ],
+  noCommits: [],
+};
+
 function scenario(
   hosts: Record<"core" | "app", Host>,
   testPassed = true,
   manual: string[] = [],
   config: Record<string, unknown> = {},
+  shape: Shape = twoRepoShape,
 ) {
   tempArkHome();
   const workspace = mkdtempSync(join(tmpdir(), "ark-workspace-"));
@@ -103,21 +178,33 @@ function scenario(
   copyFileSync(ticketFile, join(runDirectory, "ticket.md"));
   for (const id of manual) writeEvidenceFile(runDirectory, id);
 
-  const step = (id: string, repo: string, needs: string[], criteria: string[]) => ({
-    id,
-    role: "implementer",
-    repo,
-    harness: "claude",
-    model: "claude-sonnet",
-    needs,
-    criteria,
-  });
-  const steps = [
-    step("app-impl", "repos/app", ["core-impl"], ["ARK-900-AC2"]),
-    step("core-impl", "repos/core", [], ["ARK-900-AC1"]),
-    step("docs-impl", "repos/docs", [], []),
-  ];
-  writeFileSync(join(runDirectory, "plan.yml"), JSON.stringify({ steps, test_cases: [] }));
+  const { steps } = shape;
+  if (steps.some((planned) => planned.role === "reviewer")) {
+    mkdirSync(join(runDirectory, "findings"), { recursive: true });
+    writeFileSync(
+      join(runDirectory, "findings", "review-core.md"),
+      [
+        "No findings.",
+        "",
+        "## Merge risk",
+        "",
+        "- Verification: good — tested",
+        "- Alignment: good — in plan",
+        "- Impact: good — small",
+        "- Rollback cost: good — revert",
+        "- Door: two-way",
+        "- Blast radius: three repos",
+        ...shape.names.map((name) => `- Not in plan: repos/${name}/${name}.txt — fixture commit`),
+        "",
+        "Verdict: accepted",
+        "",
+      ].join("\n"),
+    );
+  }
+  writeFileSync(
+    join(runDirectory, "plan.yml"),
+    JSON.stringify({ steps, repos: shape.repos, test_cases: [] }),
+  );
 
   const worktrees: Record<string, string> = {};
   const bares: Record<string, string> = {};
@@ -136,7 +223,15 @@ function scenario(
     { type: "plan.checked", data: { valid: true, problems: [], plan_hash: "hash", steps } },
     { type: "gate.answered", data: { gate: "plan", answer: "approve" } },
   ];
-  for (const name of ["core", "app", "docs"]) {
+  events.push(
+    ...steps
+      .filter((planned) => planned.role === "reviewer")
+      .map((planned) => ({
+        type: "step.started",
+        data: { step: planned.id, role: planned.role, repo: planned.repo, round: 1 },
+      })),
+  );
+  for (const name of shape.names) {
     const source = join(workspace, "repos", name);
     mkdirSync(join(workspace, "repos"), { recursive: true });
     renameSync(tempGitRepo(), source);
@@ -155,7 +250,7 @@ function scenario(
     git(source, "config", "remote.origin.pushurl", bare);
     const worktree = join(mkdtempSync(join(tmpdir(), "ark-worktree-")), name);
     git(source, "worktree", "add", "-b", `ark/${run}`, worktree, base);
-    if (name !== "docs") commit(worktree, name);
+    if (!shape.noCommits.includes(name)) commit(worktree, name);
     worktrees[name] = worktree;
     bares[name] = bare;
     events.push({
@@ -208,8 +303,12 @@ test(
     expect(optionValue(opened[0], "--title")).toBe("ARK-900: Show units");
 
     // The run branch reached each origin; docs had no commits and opened nothing.
-    expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
-    expect(git(bares.app, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
+    expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toMatch(
+      /^[0-9a-f]{40}$/,
+    );
+    expect(git(bares.app, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toMatch(
+      /^[0-9a-f]{40}$/,
+    );
     expect(
       Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.docs })
         .exitCode,
@@ -223,8 +322,20 @@ test(
     expect(appBody).toContain("Depends on #1");
 
     expect(openedEvents(runDirectory).map((event) => event.data)).toEqual([
-      { repo: "repos/core", url: "https://github.com/org/core/pull/1", number: 1 },
-      { repo: "repos/app", url: "https://github.com/org/app/pull/2", number: 2 },
+      {
+        repo: "repos/core",
+        url: "https://github.com/org/core/pull/1",
+        number: 1,
+        order: 1,
+        waits_for: [],
+      },
+      {
+        repo: "repos/app",
+        url: "https://github.com/org/app/pull/2",
+        number: 2,
+        order: 2,
+        waits_for: [1],
+      },
     ]);
 
     // Rerun with no new head: no new pull request, no new event, no body write.
@@ -296,6 +407,153 @@ test(
   { timeout: 30_000 },
 );
 
+const claraHosts: Record<"core" | "app", Host> = { core: "gitlab", app: "gitlab" };
+const claraEvents = [
+  {
+    repo: "repos/core",
+    url: "https://gitlab.com/org/core/-/merge_requests/412",
+    number: 412,
+    order: 1,
+    waits_for: [],
+  },
+  {
+    repo: "repos/platform",
+    url: "https://gitlab.com/org/platform/-/merge_requests/88",
+    number: 88,
+    order: 2,
+    waits_for: [412],
+  },
+  {
+    repo: "repos/reports",
+    url: "https://gitlab.com/org/reports/-/merge_requests/31",
+    number: 31,
+    order: 3,
+    waits_for: [412, 88],
+  },
+];
+
+test(
+  "ARK-T107 merge-request open follows the repos graph against the step needs and records order and waits_for",
+  () => {
+    process.env.FAKE_NUMBERS = "[412, 88, 31]";
+    const { runDirectory } = scenario(
+      claraHosts,
+      true,
+      [],
+      { pr_writing: { tier_floor: 2 } },
+      claraShape,
+    );
+    const result = ark("merge-request", "open", run);
+    expect(result.code, result.err).toBe(0);
+    expect(created().map((call) => call.cwd.split("/").at(-1))).toEqual([
+      "core",
+      "platform",
+      "reports",
+    ]);
+    expect(openedEvents(runDirectory).map((event) => event.data)).toEqual(claraEvents);
+    expect(result.out.trim().split("\n")).toEqual([
+      "1  repos/core  !412  https://gitlab.com/org/core/-/merge_requests/412",
+      "2  repos/platform  !88  https://gitlab.com/org/platform/-/merge_requests/88  waits for !412",
+      "3  repos/reports  !31  https://gitlab.com/org/reports/-/merge_requests/31  waits for !412, !88",
+    ]);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-T107 merge-request open opens the MRs of the playbook plan shape, whose step needs alone make a repo cycle",
+  () => {
+    process.env.FAKE_NUMBERS = "[412, 88, 31]";
+    // The bump steps need impl-core as in the playbook; review-core needs validate. By step needs core waits for
+    // platform and platform waits for core. The repos block holds the real edges only.
+    const steps = claraShape.steps.map((planned) =>
+      planned.id.startsWith("bump-") ? { ...planned, needs: ["impl-core"] } : planned,
+    );
+    const { runDirectory } = scenario(
+      claraHosts,
+      true,
+      [],
+      { pr_writing: { tier_floor: 2 } },
+      { ...claraShape, steps },
+    );
+    const result = ark("merge-request", "open", run);
+    expect(result.err).not.toContain("dependency cycle between repos");
+    expect(result.code, result.err).toBe(0);
+    expect(openedEvents(runDirectory).map((event) => event.data)).toEqual(claraEvents);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-T107 a resumed merge-request open records the same order and waits_for and opens no MR twice",
+  () => {
+    process.env.FAKE_NUMBERS = "[412, 88, 31]";
+    process.env.FAKE_CREATE_FAIL_AT = "2";
+    const { runDirectory } = scenario(
+      claraHosts,
+      true,
+      [],
+      { pr_writing: { tier_floor: 2 } },
+      claraShape,
+    );
+    expect(ark("merge-request", "open", run).code).toBe(1);
+    expect(openedEvents(runDirectory).map((event) => event.data)).toEqual([claraEvents[0]]);
+
+    delete process.env.FAKE_CREATE_FAIL_AT;
+    const resumed = ark("merge-request", "open", run);
+    expect(resumed.code, resumed.err).toBe(0);
+    expect(openedEvents(runDirectory).map((event) => event.data)).toEqual(claraEvents);
+    expect(created()).toHaveLength(3);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-T107 a plan with no repos list takes the order from step needs, and an event with no order still loads",
+  () => {
+    const { runDirectory } = scenario(
+      { core: "github", app: "github" },
+      true,
+      [],
+      {},
+      { ...twoRepoShape, repos: undefined },
+    );
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    expect(created().map((call) => call.cwd.split("/").at(-1))).toEqual(["core", "app"]);
+    expect(
+      openedEvents(runDirectory).map((event) => [event.data.order, event.data.waits_for]),
+    ).toEqual([
+      [1, []],
+      [2, [1]],
+    ]);
+
+    // An event written before ARK-336 has neither field.
+    const file = join(runDirectory, "events.ndjson");
+    writeFileSync(
+      file,
+      readFileSync(file, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const event = JSON.parse(line);
+          if (event.type === "merge_request.opened") {
+            delete event.data.order;
+            delete event.data.waits_for;
+          }
+          return JSON.stringify(event);
+        })
+        .join("\n") + "\n",
+    );
+    const status = ark("status", run);
+    expect(status.code, status.err).toBe(0);
+    expect(status.out).toContain("https://github.com/org/core/pull/1");
+    const rerun = ark("merge-request", "open", run);
+    expect(rerun.code, rerun.err).toBe(0);
+    expect(created()).toHaveLength(2);
+  },
+  { timeout: 30_000 },
+);
+
 test(
   "ARK-155-AC6 refuses when the last test run failed",
   () => {
@@ -322,7 +580,7 @@ test(
   { timeout: 30_000 },
 );
 
-test("ARK-155-AC2 mergeOrder follows needs across repos, ties by first appearance, same plan same order", () => {
+test("ARK-155-AC2 merge order follows needs across repos, ties by first appearance, same plan same order", () => {
   const step = (id: string, repo: string, needs: string[] = []) => ({
     id,
     repo,
@@ -338,11 +596,11 @@ test("ARK-155-AC2 mergeOrder follows needs across repos, ties by first appearanc
       step("web-2", "web", ["web-1"]),
     ],
   };
-  expect(mergeOrder(plan)).toEqual(["docs", "lib", "api", "web"]);
-  expect(mergeOrder(structuredClone(plan))).toEqual(mergeOrder(plan));
+  expect(repoGraph(plan).order).toEqual(["docs", "lib", "api", "web"]);
+  expect(repoGraph(structuredClone(plan)).order).toEqual(repoGraph(plan).order);
 });
 
-test("ARK-155-AC2 mergeOrder refuses a dependency cycle between repos", () => {
+test("ARK-155-AC2 merge order refuses a dependency cycle between repos", () => {
   const plan = {
     steps: [
       { id: "a-1", repo: "a", needs: ["b-1"], criteria: [] },
@@ -350,7 +608,7 @@ test("ARK-155-AC2 mergeOrder refuses a dependency cycle between repos", () => {
       { id: "a-2", repo: "a", needs: [], criteria: [] },
     ],
   };
-  expect(() => mergeOrder(plan)).toThrow(/cycle.*a, b/);
+  expect(() => repoGraph(plan)).toThrow(/cycle.*a, b/);
 });
 
 test("ARK-155-AC7 no source under cli/ runs a merge, approve or auto-merge command", () => {

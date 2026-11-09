@@ -1,8 +1,8 @@
-import { hasTestCriterion } from "./criteria.ts";
 import { ArkError } from "./errors.ts";
 import type { EventData, RunState } from "./events.ts";
-
-export const outcomes = ["merged", "abandoned", "aborted", "handed_off"];
+import { buildPhases, outcomes } from "./lifecycle.ts";
+import { planHash } from "./plan.ts";
+import { hasTestCriterion } from "./ticket.ts";
 
 const gateAnswers: Record<string, string[]> = {
   criteria: ["accept", "edit", "abort"],
@@ -10,8 +10,6 @@ const gateAnswers: Record<string, string[]> = {
   escalation: ["one_more_round", "take_over", "abort"],
   manual: ["ok", "problem"],
 };
-
-const buildPhases = ["building", "escalation", "merge_requests_open"];
 
 /** The event that moves a run out of `phase`, named in refusals. */
 function missingEvent(state: RunState): string {
@@ -28,19 +26,19 @@ function missingEvent(state: RunState): string {
   return `a run in phase ${state.phase}`;
 }
 
-function requirePhase(state: RunState, type: string, phases: string[]): void {
+function requirePhase(state: RunState, type: string, phases: readonly string[]): void {
   if (phases.includes(state.phase)) return;
   throw new ArkError(
     `${type} refused: run is in phase ${state.phase}; missing ${missingEvent(state)}`,
   );
 }
 
-/** Throws an ArkError naming the missing event when `type` is not allowed in `state`. */
+/** Throws an ArkError naming the missing event when `type` is not allowed in `state`. `runDirectory` holds the ticket and plan files some rules read. */
 export function assertAllowed(
   state: RunState,
   type: string,
   data: EventData,
-  runDirectory?: string,
+  runDirectory: string,
 ): void {
   if (type === "run.started") {
     if (state.events > 0) throw new ArkError("run.started refused: it must be the first event");
@@ -109,7 +107,7 @@ export function assertAllowed(
         throw new ArkError("plan.checked refused: missing strategy.recorded (ark strategy record)");
       return;
     case "gate.answered":
-      return assertGateAllowed(state, data);
+      return assertGateAllowed(state, data, runDirectory);
     case "worktree.created":
       return; // every open phase: closed is refused above
     case "worktree.synced":
@@ -123,7 +121,7 @@ export function assertAllowed(
         state.kind === "bug" &&
         data.role === "implementer" &&
         !state.red_test &&
-        (runDirectory === undefined || hasTestCriterion(runDirectory))
+        hasTestCriterion(runDirectory)
       )
         throw new ArkError(
           "step.started refused: bug run: record a failing ark test of the ACs before the fix",
@@ -153,8 +151,11 @@ export function assertAllowed(
         data.round > state.round_budget &&
         state.implementer !== "human"
       ) {
+        const choice = "one_more_round, take_over or abort";
         throw new ArkError(
-          "round budget spent: record gate escalation (one_more_round, take_over or abort)",
+          state.phase === "building"
+            ? `round budget spent: run ark escalate ${state.run} --reason <text> first, then ask the human, then record the escalation gate (${choice})`
+            : `round budget spent: record gate escalation with ark gate record (${choice})`,
         );
       }
       return;
@@ -181,6 +182,13 @@ export function assertAllowed(
       return;
     case "merge_request.opened":
       requirePhase(state, type, ["building", "merge_requests_open"]);
+      if (data.order !== undefined && !(Number.isInteger(data.order) && data.order >= 1))
+        throw new ArkError(`${type} refused: order must be a whole number from 1`);
+      if (
+        data.waits_for !== undefined &&
+        !(Array.isArray(data.waits_for) && data.waits_for.every(Number.isInteger))
+      )
+        throw new ArkError(`${type} refused: waits_for must be a list of MR numbers`);
       return;
     case "run.closed":
       return assertCloseAllowed(state, data);
@@ -192,7 +200,7 @@ export function assertAllowed(
 // Not in config.ts gateNames on purpose: the manual gate is always the human's.
 export const gateNames = ["criteria", "strategy", "plan", "escalation", "manual"];
 
-function assertGateAllowed(state: RunState, data: EventData): void {
+function assertGateAllowed(state: RunState, data: EventData, runDirectory: string): void {
   if (!gateNames.includes(data.gate))
     throw new ArkError(`unknown gate "${data.gate}": use ${gateNames.join(", ")}`);
   // The strategy gate takes the id of a card in the latest strategy.recorded, or abort.
@@ -238,6 +246,10 @@ function assertGateAllowed(state: RunState, data: EventData): void {
         `gate.answered plan approve refused: the plan has ${state.plan.open_decisions} open decision${state.plan.open_decisions === 1 ? "" : "s"}; write the human's answers into plan.yml chosen and run ark plan check again`,
       );
     }
+    if (planHash(runDirectory) !== state.plan.plan_hash)
+      throw new ArkError(
+        "plan.yml changed after plan.checked: run ark plan check again before gate.answered plan approve",
+      );
   }
 }
 

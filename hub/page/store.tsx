@@ -17,7 +17,6 @@ type Live = {
 
 const Context = createContext<Live>({ snapshot: null, receivedAt: 0, connected: false });
 
-/** The only connection of the page: one EventSource on /events. Views read it; none fetches. */
 export function LiveProvider({ children }: { children: ReactNode }) {
   const [live, setLive] = useState<Live>({ snapshot: null, receivedAt: 0, connected: false });
   useEffect(() => {
@@ -86,17 +85,6 @@ export function useAge(): (time: string) => number {
         Math.max(0, now - receivedAt),
     );
 }
-
-export const sourceNames: SourceName[] = [
-  "ark",
-  "orca",
-  "plannotator",
-  "github",
-  "usage",
-  "providerLimits",
-  "agentWait",
-  "evidence",
-];
 
 /** Hash routes: client-side, so a view change never reaches the server. */
 export type Route = {
