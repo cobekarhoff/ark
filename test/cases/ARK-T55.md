@@ -26,11 +26,12 @@ Expected: When the diff touches a sensitive path, the system shall keep the tier
   - `test/fixtures/pr-writing/lint/RISK01/` holds the offending input of step 7 and its corrected control.
   - `test/fixtures/pr-writing/lint/SEC01/` holds the offending input of step 8 and its corrected control.
   - `test/fixtures/pr-writing/lint/ELI01/` holds the offending input of step 9 and its corrected control.
+  - `test/fixtures/pr-writing/lint/VOICE01/` holds the offending input of step 10 and its corrected control.
 - Fixture diffs of 20, 21, 149, 150, 399 and 400 changed lines with no sensitive path; a 5-line diff that touches `cli/gate.ts` (in `sensitive_paths`); a 5-line diff on a non-sensitive file, `cli/helpers.ts`.
 
 ## Steps
 
-1. Run lint on the good body. Check that none of the eight checks warns.
+1. Run lint on the good body. Check that none of the nine checks warns.
 2. TITLE01-imperative: the title `ARK-316: Fixed stale MR bodies` and the title `ARK-316: Fixes stale MR bodies` (each warn); control `ARK-316: Fix stale MR bodies` (pass).
 3. DIFF01 (warn: the stated change is not supported by the three-dot diff): the diff changes only `cli/events.ts` (12 lines) and the body says `Adds a retry loop to cli/gate.ts` (warn; reason names `cli/gate.ts`). Control: the body names `cli/events.ts`.
 4. EVID01 (warn: the evidence does not fit the ticket `kind`): `kind: bug` with an evidence section that shows the AC test passing at head and says nothing about base (warn); `kind: perf` with an evidence section that names neither `baseline.md` nor `compare.md` (warn). Control: bug evidence with fail at base and pass at head; perf evidence naming both files.
@@ -39,11 +40,12 @@ Expected: When the diff touches a sensitive path, the system shall keep the tier
 7. RISK01 (warn: the risk and revert text is missing or too vague): a diff on `cli/events.ts` with the risk section `Risk: low.` and no revert text (warn). Control: the section says which events a bad change would corrupt and names `git revert <sha>`. The fixtures break none of RISK02-RISK04.
 8. SEC01 (warn: a security-relevant diff has no security note): a diff that adds a line reading `process.env.GH_TOKEN` and sending it in an `Authorization` header, a body with no security note (warn). Control: the body has `Security: the token comes from the env and is never logged.`
 9. ELI01 (warn: the problem text is jargon or implementation-only): problem text `Refactors the reducer so memoized selectors no longer invalidate on shallow-equal args.` (warn). Control: `An MR body listed a bug that was already fixed, so reviewers chased a problem that was gone.`
-10. Compute the tier for a 20-line diff, a 21-line diff, 149, 150, 399 and 400 lines.
-11. Compute the tier for the 5-line diff on `cli/gate.ts` with no reason line and `tier_floor: 0`.
-12. Compute the tier for the 5-line diff on non-sensitive `cli/helpers.ts`: with no raise requested; with a raise and a reason line `raise: parser change`; with a raise and no reason line.
-13. Compute the tier of a 5-line diff with `tier_floor: 2`, and of a 400-line diff with `tier_floor: 1`.
-14. Run `bun test test/pr-writing.test.ts`.
+10. VOICE01 (warn: the body names who did the work): problem text `A run lead reading the diagram looked for phases the human never sees.` (warn; reason names `run lead` and `the human`). Control: `The diagram named phases the reducer never emits, so the log never shows them.`
+11. Compute the tier for a 20-line diff, a 21-line diff, 149, 150, 399 and 400 lines.
+12. Compute the tier for the 5-line diff on `cli/gate.ts` with no reason line and `tier_floor: 0`.
+13. Compute the tier for the 5-line diff on non-sensitive `cli/helpers.ts`: with no raise requested; with a raise and a reason line `raise: parser change`; with a raise and no reason line.
+14. Compute the tier of a 5-line diff with `tier_floor: 2`, and of a 400-line diff with `tier_floor: 1`.
+15. Run `bun test test/pr-writing.test.ts`.
 
 ## Expected results
 

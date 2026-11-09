@@ -43,3 +43,4 @@ What counts as evidence in an MR or PR body, and every check `lint_body.ts` runs
 | STALE01              | fail   | The ledger head equals the branch head, and the body equals the body that was linted.                                                             |
 | SEC01                | warn   | A diff that touches a token, credential or auth line has a Security note.                                                                         |
 | ELI01                | warn   | The problem text is in plain words, not implementation verbs and jargon.                                                                          |
+| VOICE01              | warn   | The body is written about the system: no process role (`run lead`, `agent`, `the human`) or first person outside the provenance line.             |
