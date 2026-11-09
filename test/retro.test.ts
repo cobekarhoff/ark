@@ -54,7 +54,7 @@ const scenario: EventRow[] = [
       project: "demo",
       ticket: { id: "ARK-901", title: "t" },
       criteria: ["ARK-901-AC1"],
-      round_budget: 2,
+      round_budget: 1,
     },
   ],
   ["14:20:30.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
@@ -73,6 +73,7 @@ const scenario: EventRow[] = [
     { step: "review", role: "reviewer", repo: "repos/shared", round: 1 },
   ],
   ["14:55:00.000", "step.finished", { step: "review", outcome: "failed" }],
+  ["14:55:00.000", "escalation.requested", { reason: "review failed" }],
   ["14:55:30.000", "gate.answered", { gate: "escalation", answer: "one_more_round" }],
   [
     "14:56:00.000",
@@ -389,6 +390,36 @@ describe("ark retro", () => {
     retro(runId);
 
     expect(readMetrics().time.gate_wait_seconds).toBe(3601);
+  });
+
+  test("an escalation wait starts when the run enters phase escalation, not at an earlier failed step", () => {
+    writeEvents(runDirectory, [
+      [
+        "14:00:00.000",
+        "run.started",
+        {
+          run: runId,
+          project: "demo",
+          ticket: { id: "ARK-901" },
+          criteria: ["ARK-901-AC1"],
+          round_budget: 1,
+        },
+      ],
+      ["14:00:00.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
+      ["14:00:00.000", "gate.answered", { gate: "plan", answer: "approve" }],
+      [
+        "14:10:00.000",
+        "step.started",
+        { step: "review", role: "reviewer", repo: "repos/shared", round: 1 },
+      ],
+      ["14:20:00.000", "step.finished", { step: "review", outcome: "failed" }],
+      ["14:50:00.000", "test.completed", { passed: false, criteria: {}, heads: {} }],
+      ["14:51:00.000", "gate.answered", { gate: "escalation", answer: "abort" }],
+    ]);
+
+    retro(runId);
+
+    expect(readMetrics().time.gate_wait_seconds).toBe(60);
   });
 
   /** An event log of plan answers only; each answer is one gate.answered event, in order. */

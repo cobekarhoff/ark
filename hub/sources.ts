@@ -400,8 +400,7 @@ export async function readOrca(
           step: null,
           planned: null,
           terminal: chief!.coordinator_handle ?? null,
-          live: true,
-          running: false,
+          presence: "live",
           activity: unknownActivity,
         });
       const leadHandle = orcaRun.coordinator_handle;
@@ -423,17 +422,21 @@ export async function readOrca(
           step: null,
           planned: null,
           terminal: leadHandle ?? null,
-          live: leadConnected && leadHandle !== undefined,
-          running: leadRunning,
+          presence: leadConnected ? "live" : "running",
           activity: unknownActivity,
         });
-      // A released or disconnected worker stays in the list with `live: false`: the page says
+      // A released or disconnected worker stays in the list as `ended`: the page says
       // "ended, not in Orca" instead of hiding it.
       for (const worker of workers.value) {
         const handle = worker.agentTerminalHandle ?? worker.terminal ?? null;
         const terminal = byHandle.get(handle ?? "");
         const title = titles.get(worker.taskId ?? "") ?? worker.taskId ?? "worker";
-        const live = handle !== null && isLive(worker) && terminal?.connected === true;
+        const presence =
+          handle !== null && isLive(worker) && terminal?.connected === true
+            ? "live"
+            : isLive(worker)
+              ? "running"
+              : "ended";
         list.push({
           role: roleOfTask(title),
           harness: terminal?.agentIdentity ?? null,
@@ -442,8 +445,7 @@ export async function readOrca(
           step: title.match(stepTask)?.[1] ?? null,
           planned: null,
           terminal: handle,
-          live,
-          running: !live && isLive(worker),
+          presence,
           activity: unknownActivity,
         });
       }

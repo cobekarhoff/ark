@@ -5,9 +5,11 @@ import {
   type ArkEvent,
   type StageTimes,
   type StepWindow,
+  deriveState,
   readEvents,
   stageTimes,
   stepWindows,
+  waitingGate,
 } from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
 import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
@@ -158,7 +160,7 @@ function decisionCounts(
   return { total, overridden };
 }
 
-/** Each gate wait of the run, in order; `answered` is null while the gate is open. A gate that is asked again before its answer keeps its first wait for the criteria, plan and strategy gates, and replaces it for the escalation gate. */
+/** Each gate wait of the run, in order; `answered` is null while the gate is open. */
 export type GateWait = {
   gate: string;
   asked: string;
@@ -171,30 +173,13 @@ export type GateWait = {
 export function gateWaits(events: ArkEvent[]): GateWait[] {
   const waits: GateWait[] = [];
   const waiting = new Map<string, GateWait>();
-  const ask = (gate: string, time: string, keepFirst = false) => {
-    const open = waiting.get(gate);
-    if (open && keepFirst) return;
-    if (open) waits.splice(waits.indexOf(open), 1);
+  const ask = (gate: string, time: string) => {
+    if (waiting.has(gate)) return;
     const wait = { gate, asked: time, answered: null, answer: null, by: null };
     waiting.set(gate, wait);
     waits.push(wait);
   };
-  for (const event of events) {
-    if (
-      event.type === "run.started" &&
-      (event.data.criteria.length === 0 || event.data.criteria_gate === true)
-    )
-      ask("criteria", event.time);
-    if (event.type === "evaluation.recorded" && event.data.blockers.length > 0)
-      ask("criteria", event.time, true);
-    if (event.type === "plan.checked" && event.data.valid) ask("plan", event.time, true);
-    if (event.type === "strategy.recorded" && event.data.count >= 2)
-      ask("strategy", event.time, true);
-    if (event.type === "step.finished" && event.data.outcome === "failed")
-      ask("escalation", event.time);
-    if (event.type === "test.completed")
-      for (const [criterion, status] of Object.entries(event.data.criteria ?? {}))
-        if (status === "manual pending") ask(`manual:${criterion}`, event.time, true);
+  events.forEach((event, index) => {
     if (event.type === "gate.answered") {
       const key = event.data.gate === "manual" ? `manual:${event.data.criterion}` : event.data.gate;
       const wait = waiting.get(key);
@@ -205,7 +190,20 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
       }
       waiting.delete(key);
     }
-  }
+    if (event.type === "test.completed")
+      for (const [criterion, status] of Object.entries(event.data.criteria ?? {}))
+        if (status === "manual pending") ask(`manual:${criterion}`, event.time);
+    // ponytail: O(n²) replay; fold with a step function if logs reach thousands of events
+    const state = deriveState(events.slice(0, index + 1));
+    const gate = waitingGate(state);
+    if (gate !== "none") ask(gate, event.time);
+    if (
+      state.phase === "merge_requests_open" &&
+      event.type === "step.finished" &&
+      event.data.outcome === "failed"
+    )
+      ask("escalation", event.time);
+  });
   return waits;
 }
 
@@ -213,7 +211,8 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
  * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
  * run start (it opens on every run since ARK-311; an older log opens it only without ACs or with blockers), the strategy gate at a
  * strategy record of 2 or more cards, the plan gate at the first valid plan check after its last answer, the escalation gate
- * at the failed step that spent the round budget. An unanswered gate adds nothing.
+ * when the run enters phase `escalation` (a spent budget with a failed test or `ark escalate`), or at a failed step once
+ * merge requests are open. An unanswered gate adds nothing.
  */
 function gateWaitSeconds(events: ArkEvent[]): number {
   const intervals = gateWaits(events)
