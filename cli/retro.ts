@@ -299,7 +299,7 @@ function mergeRequestActivity(
   return { comments, commits };
 }
 
-function escapedDefects(
+export function escapedDefects(
   project: string,
   runId: string,
 ): { ticket: string; run: string; note: string; fix: string; reviewer: string }[] {
