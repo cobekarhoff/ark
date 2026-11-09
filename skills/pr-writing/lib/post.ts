@@ -53,6 +53,8 @@ export type PostInput = {
   draft?: boolean;
   /** `hashBody` of the generated body when it was linted last (see `persist.ts`). A different hash makes STALE01 fail. */
   lintedBodyHash?: string;
+  /** The current head of the repo, when the caller just read it: the lint skips its own `rev-parse HEAD`. */
+  head?: string;
 };
 
 export type Posted = {
@@ -209,13 +211,18 @@ export function currentState(
   ledger: Ledger,
   directory: string,
   base: string,
+  knownHead?: string,
 ): { currentHeads?: Record<string, string>; diff?: string } {
   const repo = ledger.repos[0];
-  const head = git(["rev-parse", "HEAD"], directory);
+  const head = knownHead ?? git(["rev-parse", "HEAD"], directory);
   if (repo === undefined || head === null) return {};
-  const ref = git(["rev-parse", "--verify", "--quiet", `origin/${base}`], directory)
-    ? `origin/${base}`
-    : base;
+  // The ledger's merge base makes `<baseSha>...HEAD` the same diff without asking git for the base ref again.
+  const ref =
+    repo.baseSha !== "unknown"
+      ? repo.baseSha
+      : git(["rev-parse", "--verify", "--quiet", `origin/${base}`], directory)
+        ? `origin/${base}`
+        : base;
   return {
     currentHeads: { [repo.repo]: head },
     diff: git(["diff", `${ref}...HEAD`], directory) ?? undefined,
@@ -241,9 +248,10 @@ function refuseOnFail(
   existing: Existing | null,
   body: string,
   generated: string,
+  state: ReturnType<typeof currentState>,
   showWarnings = true,
 ) {
-  const { currentHeads, diff } = currentState(input.ledger, input.directory, input.base);
+  const { currentHeads, diff } = state;
   const lint = (text: string, bodyHash = hashBody(text)) =>
     lintBody({
       body: text,
@@ -343,11 +351,13 @@ function writeCommand(input: PostInput, existing: Existing | null, bodyFile: str
 export function postMergeRequest(input: PostInput): Posted {
   const generated = readFileSync(input.bodyFile, "utf8");
   // First look: refuse early. Second look, just before the write: the host may have changed in between.
+  // The head and diff are read once: the probes between the two looks do not move HEAD.
+  const state = currentState(input.ledger, input.directory, input.base, input.head);
   const first = probeOpenMergeRequest(input);
-  refuseOnFail(input, first, finalBodyOf(generated, first).body, generated, false);
+  refuseOnFail(input, first, finalBodyOf(generated, first).body, generated, state, false);
   const existing = probeOpenMergeRequest(input);
   const { body, note } = finalBodyOf(generated, existing);
-  refuseOnFail(input, existing, body, generated);
+  refuseOnFail(input, existing, body, generated, state);
   if (existing !== null && body === existing.body)
     return {
       action: "unchanged",

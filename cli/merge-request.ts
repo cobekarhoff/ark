@@ -16,7 +16,7 @@ import {
   runCriteria,
 } from "./ticket.ts";
 import { manualStatus } from "./lifecycle.ts";
-import { discoverRepos, repoBase } from "./workspace.ts";
+import { discoverRepos } from "./workspace.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import {
   buildLedger,
@@ -141,16 +141,6 @@ function emptyResultFiles(directory: string): string[] {
     const path = join(directory, file);
     return !existsSync(path) || statSync(path).size === 0;
   });
-}
-
-/** The configured `repos.<repo>.base`, else the branch origin's HEAD names, else the worktree's base commit. */
-function defaultBranch(worktree: Worktree, base: string | undefined): string {
-  if (base !== undefined) return base;
-  const result = spawn(
-    ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    worktree.path,
-  );
-  return result.ok ? result.stdout.replace(/^origin\//, "") : worktree.base;
 }
 
 // GitLab merge request dependencies need a paid tier. A failure is fine:
@@ -360,7 +350,6 @@ export function mergeRequestOpen(
     throw new ArkError(
       `project ${project} has merge_requests: none: close the run with ark run close ${runId} handed_off`,
     );
-  const projectConfig = loadConfig(project);
   const events = readEvents(directory);
   const state = deriveState(events);
   if (!["building", "escalation", "merge_requests_open"].includes(state.phase)) {
@@ -381,8 +370,15 @@ export function mergeRequestOpen(
   for (const event of events)
     if (event.type === "merge_request.opened")
       opened.set(event.data.repo, event.data as OpenedMergeRequest);
-  const ahead = (worktree: Worktree) =>
-    Number(run(["git", "rev-list", "--count", `${worktree.base}..HEAD`], worktree.path));
+  const aheadOf = new Map<string, number>();
+  const ahead = (worktree: Worktree) => {
+    if (!aheadOf.has(worktree.path))
+      aheadOf.set(
+        worktree.path,
+        Number(run(["git", "rev-list", "--count", `${worktree.base}..HEAD`], worktree.path)),
+      );
+    return aheadOf.get(worktree.path)!;
+  };
   const needsMergeRequest = (repo: string) => {
     const worktree = worktrees.get(repo);
     return worktree !== undefined && !opened.has(repo) && ahead(worktree) > 0;
@@ -449,7 +445,8 @@ export function mergeRequestOpen(
         host,
         directory: worktree.path,
         branch: worktree.branch,
-        base: defaultBranch(worktree, repoBase(projectConfig, repo)),
+        base: repoLedger.repos[0].base,
+        head: heads.get(repo),
         title,
         bodyFile,
         ledger: repoLedger,
