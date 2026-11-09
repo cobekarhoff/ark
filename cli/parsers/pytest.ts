@@ -46,6 +46,7 @@ export const parsePytest: Parser = ({ report }) => {
     const attributes = match[1];
     const body = match[2] ?? "";
     const className = attributes.match(/\bclassname="([^"]*)"/)?.[1] ?? "";
+    const file = attributes.match(/\bfile="([^"]*)"/)?.[1];
     const testName = attributes.match(/\bname="([^"]*)"/)?.[1] ?? "";
     const criteria = new Set<string>();
     const cases = new Set<string>();
@@ -65,6 +66,7 @@ export const parsePytest: Parser = ({ report }) => {
       criteria: [...criteria].sort(),
       cases: [...cases].sort(),
       status,
+      ...(file ? { file: unescapeXml(file).replace(/^\.\//, "") } : {}),
     });
   }
   return results;

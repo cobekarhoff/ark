@@ -9,6 +9,8 @@ export type TestResult = {
   /** Test case ids `<KEY>-T<n>` the test carries. */
   cases: string[];
   status: "passed" | "failed" | "skipped";
+  /** The test file, when the report names it, relative to the suite's repo. */
+  file?: string;
 };
 export type Parser = (input: { report: string; stdout: string }) => TestResult[];
 

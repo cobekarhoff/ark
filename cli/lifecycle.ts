@@ -32,6 +32,7 @@ export type CriterionStatus =
   | "passing"
   | "failing"
   | "missing"
+  | "not run"
   | "manual pending"
   | "manual ok"
   | "manual problem";

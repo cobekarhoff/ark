@@ -69,8 +69,15 @@ const describers: Record<string, Describe> = {
       fail: statuses.filter((status) => status === "failing" || status === "manual problem").length,
       missing: statuses.filter((status) => status === "missing" || status === "manual pending")
         .length,
+      notRun: statuses.filter((status) => status === "not run").length,
     };
-    return { why: data.passed ? "passed" : "failed", counts, url: null };
+    // An event with no mode is an old full run.
+    const quick = data.mode === "quick";
+    return {
+      why: `${data.passed ? "passed" : "failed"}${quick ? " (quick, not a gate)" : ""}`,
+      counts,
+      url: null,
+    };
   },
   "merge_request.opened": (data) => ({
     why: `${data.repo} !${data.number} opened`,
