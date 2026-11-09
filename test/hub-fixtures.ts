@@ -30,6 +30,13 @@ export type FixtureRun = {
   startedAt?: Date;
   /** The ACs of the ticket. Default: `<ticket id>-AC1`. */
   criteria?: string[];
+  /** Closed runs only: the `run.closed` outcome (default handed_off) and seconds after start (default 3500). */
+  outcome?: "merged" | "aborted" | "abandoned" | "handed_off";
+  closedAfter?: number;
+  /** Closed runs only: the `test.completed` statuses by criterion id. */
+  statuses?: Record<string, string>;
+  /** Closed runs only: the verbatim text of `metrics.json`, written instead of `metricsCostUsd`. */
+  metricsText?: string;
 };
 
 /** `YYYY-MM-DD` of today, for run ids. */
@@ -110,7 +117,15 @@ export function writeRun(fixture: FixtureRun): string {
           });
       }
       for (const request of fixture.mergeRequests ?? []) add(3000, "merge_request.opened", request);
-      if (fixture.phase === "closed") add(3500, "run.closed", { outcome: "handed_off" });
+      if (fixture.statuses)
+        add(3400, "test.completed", {
+          passed: Object.values(fixture.statuses).every((status) => status === "passing"),
+          criteria: fixture.statuses,
+        });
+      if (fixture.phase === "closed")
+        add(fixture.closedAfter ?? 3500, "run.closed", {
+          outcome: fixture.outcome ?? "handed_off",
+        });
     }
   }
   writeFileSync(join(directory, "events.ndjson"), `${events.join("\n")}\n`);
@@ -118,7 +133,9 @@ export function writeRun(fixture: FixtureRun): string {
     join(directory, "ticket.md"),
     `---\nid: ${fixture.ticket.id}\ntitle: ${JSON.stringify(fixture.ticket.title)}\n---\n`,
   );
-  if (fixture.metricsCostUsd !== undefined)
+  if (fixture.metricsText !== undefined)
+    writeFileSync(join(directory, "metrics.json"), fixture.metricsText);
+  else if (fixture.metricsCostUsd !== undefined)
     writeFileSync(
       join(directory, "metrics.json"),
       JSON.stringify({ cost: { total_usd: fixture.metricsCostUsd, by_step: {} } }),
