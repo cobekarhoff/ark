@@ -140,6 +140,10 @@ function verifiedByStatus(
   return cases.some((entry) => entry.status === "not run") ? "not run" : "passing";
 }
 
+/** A quick run runs the changed files only: its pass proves no AC and proof it left out is not run, not missing. A failure stays. */
+const quickStatus = (status: Status, quick: boolean): Status =>
+  quick && (status === "passing" || status === "missing") ? "not run" : status;
+
 type Suite = ProjectConfig["suites"][number];
 
 type Side = "base" | "head";
@@ -314,16 +318,25 @@ async function runSuite(
 
 const testFolder = /(^|\/)(test|tests|features)\//;
 
-/** Copies the head's version of each file the diff adds or changes under a test folder into the base checkout. Deleted and renamed-from files stay at base. */
-async function copyHeadTests(headPath: string, basePath: string, base: string): Promise<void> {
+/** Copies the head's version of each file the diff adds or changes under a test folder, and each selected test file wherever it lives, into the base checkout. Deleted and renamed-from files stay at base. */
+async function copyHeadTests(
+  headPath: string,
+  basePath: string,
+  base: string,
+  selected: string[],
+): Promise<void> {
   const changed = await run(
     ["git", "diff", "--name-only", "--no-renames", "--diff-filter=AM", "-z", base, "HEAD"],
     headPath,
   );
   if (changed.code !== 0)
     throw new ArkError(`git diff against the base failed in ${headPath}: ${changed.stderr.trim()}`);
-  for (const path of changed.stdout.split("\0")) {
-    if (path === "" || !testFolder.test(path) || !existsSync(join(headPath, path))) continue;
+  const paths = [
+    ...changed.stdout.split("\0").filter((path) => testFolder.test(path)),
+    ...selected,
+  ];
+  for (const path of paths) {
+    if (path === "" || !existsSync(join(headPath, path))) continue;
     mkdirSync(dirname(join(basePath, path)), { recursive: true });
     copyFileSync(join(headPath, path), join(basePath, path));
   }
@@ -438,7 +451,12 @@ async function baseSuitesPassed(
           : cloned;
       if (created.code !== 0)
         throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
-      await copyHeadTests(join(mirror, repo), path, base);
+      await copyHeadTests(
+        join(mirror, repo),
+        path,
+        base,
+        plan.filter((entry) => entry.suite.repo === repo).flatMap((entry) => entry.files ?? []),
+      );
     }
     linkUntouched(config.workspace, root, discoverRepos(config.workspace));
     for (const { repo } of worktrees) {
@@ -590,15 +608,13 @@ export async function testRun(runId: string, inProject?: string, quick = false):
           id,
           status: caseStatus(id, allResults, headRun.skipped.size > 0),
         }));
-        criterionStatuses[criterion] = verifiedByStatus(cases);
-        // A quick run covers the changed files only: a pass proves no AC.
-        if (quick && criterionStatuses[criterion] === "passing")
-          criterionStatuses[criterion] = "not run";
+        criterionStatuses[criterion] = quickStatus(verifiedByStatus(cases), quick);
         via[criterion] = `via ${cases.map((entry) => `${entry.id} ${entry.status}`).join(", ")}`;
       } else {
-        criterionStatuses[criterion] = criterionStatus(criterion, provingResults);
-        if (quick && criterionStatuses[criterion] === "passing")
-          criterionStatuses[criterion] = "not run";
+        criterionStatuses[criterion] = quickStatus(
+          criterionStatus(criterion, provingResults),
+          quick,
+        );
         via[criterion] = "via tag";
       }
     }

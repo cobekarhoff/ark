@@ -15,7 +15,13 @@ import { caseIdsIn } from "./case";
 import type { Parser, TestResult } from "./index";
 
 type BehaveElement = { type: string; name: string; tags?: string[]; status?: string };
-type BehaveFeature = { name: string; tags?: string[]; elements?: BehaveElement[] };
+type BehaveFeature = {
+  name: string;
+  location?: string;
+  filename?: string;
+  tags?: string[];
+  elements?: BehaveElement[];
+};
 
 const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+[-/]AC\d+\b/g;
 
@@ -34,11 +40,17 @@ export const parseBehave: Parser = ({ report }) => {
     for (const element of feature.elements ?? []) {
       if (element.type !== "scenario") continue;
       const tags = [...(feature.tags ?? []), ...(element.tags ?? [])].join(" ");
+      // behave names the file in `filename` or as `<file>:<line>` in `location`.
+      const file = (feature.filename ?? feature.location?.replace(/:\d+$/, ""))?.replace(
+        /^\.\//,
+        "",
+      );
       results.push({
         name: `${feature.name}: ${element.name.trim()}`,
         criteria: [...new Set(tags.match(criterionPattern) ?? [])].sort(),
         cases: caseIdsIn(tags).sort(),
         status: statusOf(element.status),
+        ...(file ? { file } : {}),
       });
     }
   }

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parseBun } from "../cli/parsers/bun";
 import { parseBehave } from "../cli/parsers/behave";
 import { parsePytest } from "../cli/parsers/pytest";
+import type { TestResult } from "../cli/parsers/index";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -13,9 +14,12 @@ setDefaultTimeout(30_000);
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, "fixtures/parsers", name), "utf8");
 
+// The file of each result is asserted in its own test below.
+const bare = (results: TestResult[]) => results.map(({ file: _file, ...rest }) => rest);
+
 test("ARK-158-AC5 pytest maps ac markers to per-test results", () => {
   const results = parsePytest({ report: fixture("pytest-report.xml"), stdout: "" });
-  expect(results).toEqual([
+  expect(bare(results)).toEqual([
     { name: "test_sample::test_passes", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
     {
       name: "test_sample::test_fails",
@@ -30,7 +34,7 @@ test("ARK-158-AC5 pytest maps ac markers to per-test results", () => {
 
 test("ARK-158-AC5 behave maps feature and scenario tags to per-scenario results", () => {
   const results = parseBehave({ report: fixture("behave-report.json"), stdout: "" });
-  expect(results).toEqual([
+  expect(bare(results)).toEqual([
     { name: "Other: Untagged", criteria: [], cases: [], status: "passed" },
     { name: "Sample: Passes", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
     {
@@ -101,7 +105,7 @@ test("ARK-311-AC1 bun reads case ids and old AC ids from the JUnit title into ca
 });
 
 test("ARK-311-AC1 pytest reads case properties into cases and ac properties into criteria", () => {
-  expect(parsePytest({ report: fixture("pytest-cases-report.xml"), stdout: "" })).toEqual([
+  expect(bare(parsePytest({ report: fixture("pytest-cases-report.xml"), stdout: "" }))).toEqual([
     { name: "test_cases::test_case_only", criteria: [], cases: ["ARK-T12"], status: "passed" },
     {
       name: "test_cases::test_ac_only",
@@ -121,7 +125,7 @@ test("ARK-311-AC1 pytest reads case properties into cases and ac properties into
 });
 
 test("ARK-311-AC1 behave reads @ARK-T12 and @case:ARK-T12 tags into cases and AC tags into criteria", () => {
-  expect(parseBehave({ report: fixture("behave-cases-report.json"), stdout: "" })).toEqual([
+  expect(bare(parseBehave({ report: fixture("behave-cases-report.json"), stdout: "" }))).toEqual([
     { name: "Cases: Case only", criteria: [], cases: ["ARK-T12"], status: "passed" },
     { name: "Cases: Case with prefix", criteria: [], cases: ["ARK-T15"], status: "passed" },
     { name: "Cases: Old only", criteria: ["CLARA-12-AC1"], cases: [], status: "passed" },
@@ -133,5 +137,15 @@ test("ARK-311-AC1 behave reads @ARK-T12 and @case:ARK-T12 tags into cases and AC
     },
     { name: "Cases: Neither", criteria: [], cases: [], status: "passed" },
     { name: "Cases: Slash", criteria: ["ARK-9/AC1"], cases: [], status: "passed" },
+  ]);
+});
+
+test("pytest and behave results carry the repo-relative file of each test", () => {
+  const files = (results: TestResult[]) => [...new Set(results.map((result) => result.file))];
+  expect(files(parsePytest({ report: fixture("pytest-cases-report.xml"), stdout: "" }))).toEqual([
+    "test_cases.py",
+  ]);
+  expect(files(parseBehave({ report: fixture("behave-cases-report.json"), stdout: "" }))).toEqual([
+    "features/cases.feature",
   ]);
 });
