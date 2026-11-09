@@ -517,6 +517,87 @@ describe("ark test budget", () => {
   });
 });
 
+describe("ark test budget admission", () => {
+  // Two real processes use the real scheduler. Hooks only pause them at fixed points; they supply no data.
+  // `older` pauses inside its first ticket write, `newer` pauses just before its admission rename. Without a
+  // host-wide critical section, `newer` publishes during the pause and both start (12 cores against 6).
+  const child = (home: string, name: "older" | "newer") => `
+import { mock } from "bun:test";
+import * as real from "node:fs";
+const fs = { ...real };
+const home = ${JSON.stringify(home)};
+const name = ${JSON.stringify(name)};
+const mark = (file) => fs.writeFileSync(home + "/" + file, "");
+const until = (file) => { while (!fs.existsSync(home + "/" + file)) Bun.sleepSync(10); };
+let writes = 0;
+let renames = 0;
+if (name === "newer") {
+  const wait = Atomics.wait;
+  Atomics.wait = (...args) => { mark("newer-blocked"); return wait(...args); };
+}
+mock.module("node:fs", () => ({
+  ...fs,
+  writeFileSync: (file, ...args) => {
+    if (name === "older" && String(file).endsWith(".json.tmp") && ++writes === 1) {
+      mark("older-ready");
+      until("release-older");
+    }
+    return fs.writeFileSync(file, ...args);
+  },
+  renameSync: (from, to) => {
+    if (name === "newer" && String(to).endsWith(".json") && ++renames === 2) {
+      mark("newer-ready");
+      until("older-admitted");
+    }
+    return fs.renameSync(from, to);
+  },
+}));
+const { openTestBudget } = await import(${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))});
+const budget = openTestBudget(name, 6, async () => {}, { print: () => mark("newer-waiting") });
+await budget.take(6);
+mark(name + "-admitted");
+await new Promise((done) => process.stdin.once("data", done));
+budget.close();`;
+
+  test("ARK-T155 two requests of the whole budget never run together, whatever the interleaving of their publication", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ark-admission-"));
+    const children: Subprocess[] = [];
+    const spawn = (name: "older" | "newer") => {
+      const process = Bun.spawn(["bun", "-e", child(home, name)], {
+        env: { ...Bun.env, ARK_HOME: home },
+        stdin: "pipe",
+        stdout: "ignore",
+        stderr: "inherit",
+      });
+      children.push(process);
+    };
+    const waitFor = async (...names: string[]) => {
+      while (!names.some((name) => existsSync(join(home, name)))) await Bun.sleep(10);
+    };
+    try {
+      spawn("older");
+      await waitFor("older-ready");
+      spawn("newer");
+      // With the mutex `newer` blocks on it; without, it publishes and reaches its admission rename.
+      await waitFor("newer-blocked", "newer-ready");
+      writeFileSync(join(home, "release-older"), "");
+      await waitFor("older-admitted");
+      await waitFor("newer-waiting", "newer-admitted");
+      const started = readdirSync(join(home, "test-budget"))
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => JSON.parse(readFileSync(join(home, "test-budget", name), "utf8")))
+        .filter((ticket) => ticket.started !== undefined);
+      expect(started.map((ticket) => ticket.run)).toEqual(["older"]);
+    } finally {
+      for (const process of children) {
+        process.kill("SIGKILL");
+        await process.exited;
+      }
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("ark test suite TMPDIR and cores", () => {
   const recordFile = () => join(fixtures, "record");
   const recorded = () =>

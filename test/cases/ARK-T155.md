@@ -28,6 +28,7 @@ Expected: A request that fits starts at once; one that does not waits; it starts
 4. End B's suite: W1 starts alone (`--n=6`). End W1's suite: W2 starts (`--n=1`). Release is per suite, not at the end of the run's whole `ark test`.
 5. Request with no cores in the suite: it takes the whole budget and runs alone (the ARK-343 one-at-a-time behaviour). Request above the budget (8 cores, budget 6): it clamps to 6 and starts when idle (`--n=6`).
 6. With no `test_budget_cores` in `ark.yml` on a host the case fixes at 10 cores: the budget is 6.
+7. Two real processes each request the whole budget. The older one is paused inside its first ticket write and the newer one is started meanwhile: the newer one must wait on the host-wide mutex, and after the older one starts, only the older one has `started`.
 
 Not repeated here: chief-state holder/waiter data (ARK-T61), dead-holder recovery (ARK-T60), SIGINT cleanup and whole-budget mutual exclusion (ARK-T59), older-waiter precedence of equal-size requests (ARK-T113). They are updated for budget tickets and linked to AC3.
 
@@ -38,6 +39,7 @@ Not repeated here: chief-state holder/waiter data (ARK-T61), dead-holder recover
 - Step 4: W1 starts first, alone, with `--n=6`; then W2 with `--n=1`; running cores <= budget at every observed state.
 - Step 5: whole-budget request has cores equal to the budget and runs alone; the 8-core request shows 6 and starts.
 - Step 6: budget 6.
+- Step 7: running cores = 6 and only the older run is started, whatever the interleaving of publication and admission.
 
 ## Screenshot checkpoints
 

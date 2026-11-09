@@ -5,6 +5,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -15,8 +16,9 @@ import { arkHome } from "./paths.ts";
  * A CPU budget per host instead of one `ark test` at a time. The folder `test-budget` under $ARK_HOME holds one
  * ticket file per suite (or check) of every `ark test`: run, pid, cores and arrival, plus `started` once admitted.
  * A ticket is admitted in arrival order, with no overtaking, when the cores of the running tickets plus its own fit
- * the budget. Admission needs no mutex: only a ticket whose every older ticket already runs may start, so two
- * waiters never pass at once. A ticket of an ended pid is deleted by whoever sees it.
+ * the budget. Ticket publication (arrival time and file) and the admission
+ * read/check/start run one at a time under a host-wide mutex file, so a newly published older ticket cannot be
+ * missed by a snapshot that is already taken. A ticket of an ended pid is deleted by whoever sees it.
  */
 export type Ticket = { run: string; pid: number; cores: number; arrival: string; started?: string };
 
@@ -24,6 +26,43 @@ const pollMilliseconds = 100;
 const lineWindowMilliseconds = 30_000;
 
 const ticketDirectory = () => join(arkHome(), "test-budget");
+
+const mutexStaleMilliseconds = 5_000;
+
+/**
+ * Runs `action` while holding the host-wide mutex: an exclusive-create file with the owner pid. It is held for one
+ * short synchronous step only. A mutex of an ended pid (or an unreadable one older than a few seconds) is taken over.
+ * ponytail: two takers of one stale mutex can race on the unlink; the window needs a crashed owner, add a rename
+ * protocol if it ever shows.
+ */
+function withMutex<T>(action: () => T): T {
+  mkdirSync(ticketDirectory(), { recursive: true });
+  const file = join(ticketDirectory(), "mutex.lock");
+  for (;;) {
+    try {
+      writeFileSync(file, String(process.pid), { flag: "wx" });
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      let stale = false;
+      try {
+        const owner = Number.parseInt(readFileSync(file, "utf8"), 10);
+        stale = Number.isInteger(owner)
+          ? !alive(owner)
+          : Date.now() - statSync(file).mtimeMs > mutexStaleMilliseconds;
+      } catch {
+        // released between the two calls: try to create it again
+      }
+      if (stale) rmSync(file, { force: true });
+      else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+  try {
+    return action();
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
 
 /** A pid is alive when signal 0 reaches it; EPERM means it exists under another user. */
 function alive(pid: number): boolean {
@@ -168,31 +207,36 @@ export function openTestBudget(
     },
     async take(requested) {
       const cores = requested === undefined || requested > budget ? budget : Math.max(1, requested);
-      mkdirSync(ticketDirectory(), { recursive: true });
       const file = join(ticketDirectory(), `${process.pid}-${randomUUID()}.json`);
-      const ticket: Ticket = {
-        run: runId,
-        pid: process.pid,
-        cores,
-        arrival: new Date().toISOString(),
-      };
-      writeTicket(file, ticket);
-      files.add(file);
+      withMutex(() => {
+        writeTicket(file, {
+          run: runId,
+          pid: process.pid,
+          cores,
+          arrival: new Date().toISOString(),
+        });
+        files.add(file);
+      });
       let printedKey: string | null = null;
       let printedAt = 0;
       try {
         for (;;) {
-          const tickets = readTickets();
-          const mine = tickets.findIndex((entry) => entry.file === file);
+          const { tickets, admitted } = withMutex(() => {
+            const snapshot = readTickets();
+            const mine = snapshot.findIndex((entry) => entry.file === file);
+            const used = snapshot
+              .filter((entry) => entry.ticket.started !== undefined)
+              .reduce((sum, entry) => sum + entry.ticket.cores, 0);
+            const fits =
+              mine >= 0 &&
+              snapshot.slice(0, mine).every((entry) => entry.ticket.started !== undefined) &&
+              used + cores <= budget;
+            if (fits)
+              writeTicket(file, { ...snapshot[mine]!.ticket, started: new Date().toISOString() });
+            return { tickets: snapshot, admitted: fits };
+          });
           const running = tickets.filter((entry) => entry.ticket.started !== undefined);
-          const used = running.reduce((sum, entry) => sum + entry.ticket.cores, 0);
-          const older = tickets.slice(0, mine);
-          if (
-            mine >= 0 &&
-            older.every((entry) => entry.ticket.started !== undefined) &&
-            used + cores <= budget
-          ) {
-            writeTicket(file, { ...ticket, started: new Date().toISOString() });
+          if (admitted) {
             return {
               cores,
               release: () => {
