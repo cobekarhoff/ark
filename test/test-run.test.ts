@@ -240,6 +240,22 @@ describe("ark test", () => {
     expect(readFileSync(join(runDirectory, "results/e2e.log"), "utf8")).toContain(
       "ark-log-marker FAKE-1-AC2 works",
     );
+    expect(event).not.toHaveProperty("reused");
+    expect(event).not.toHaveProperty("flaky");
+
+    // An identical second call reuses the passed suites and records which ones.
+    expect(ark("test", runId).code).toBe(0);
+    const second = testCompleted(runDirectory).at(-1);
+    expect(second.reused).toEqual(["head:unit", "head:e2e", "base:unit", "base:e2e"]);
+    expect({ ...second, reused: undefined, duration: undefined }).toEqual({
+      ...event,
+      suites: [
+        { name: "unit", level: "unit", passed: true, reused: true },
+        { name: "e2e", level: "e2e", passed: true, reused: true },
+      ],
+      reused: undefined,
+      duration: undefined,
+    });
   });
 
   test("ARK-154-AC6 exits non-zero when a unit suite fails even though every AC passes", () => {
