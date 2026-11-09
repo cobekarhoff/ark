@@ -406,6 +406,17 @@ test("ARK-288-AC4 a requested escalation is never answered by auto and the phase
   expect(start(runId).code).toBe(0);
 });
 
+test("an event refused outside a gate phase names the phases that allow it", () => {
+  const { runId, directory } = buildingRun({});
+  spendRounds(runId, directory, false);
+  expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
+  const again = ark("escalate", runId, "--reason", "still open");
+  expect(again.code).toBe(1);
+  expect(again.err).toContain(
+    "escalation.requested refused: run is in phase escalation; allowed in building",
+  );
+});
+
 for (const [label, gates] of [
   ["human", { escalation: "human" }],
   ["no setting", {}],

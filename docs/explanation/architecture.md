@@ -50,7 +50,7 @@ The rule: if a step must be repeatable, it goes in the `ark` command. If it need
 
 ## Run lifecycle
 
-A run moves through the seven phases below; `cli/lifecycle.ts` lists them and `cli/transitions.ts` keeps the transition table, so a run cannot reach `building` before you approve the plan, and cannot open an MR before every criterion passes at head. `ark status <run>` prints the phase.
+A run moves through the seven phases below. `cli/lifecycle.ts` holds the machine as data: `phases`, the transition table `eventPhases` (the phases each event is allowed in), `gateAnswers` and `gateAnswerPhases` (each gate's answers and the phases that take them). `cli/transitions.ts` adds each event's own rules, and `deriveState` in `cli/events.ts` folds the events into the next phase, so a run cannot reach `building` before you approve the plan, and cannot open an MR before every criterion passes at head. A refused event names the event that is missing at a gate, or else the phases that allow it. `ark status <run>` prints the phase.
 
 ```mermaid
 stateDiagram-v2
@@ -71,6 +71,8 @@ stateDiagram-v2
 ```
 
 Testing and review happen inside `building`: the implementer and validator finish, `ark test` runs, the reviewer reports. Each return to implementation after the first build is a round. The round budget defaults to two. When it is spent, the run opens an escalation gate. With `gates.escalation: auto`, Ark grants the first two extra rounds itself and asks you after that. If you take over, you are the implementer and the run continues through testing and review. The plan gate is `planning` with a valid `plan.yml`; `ark status` names it as the waiting gate.
+
+Inside `building`, the escalation gate has its own state (`EscalationState` in `cli/lifecycle.ts`): `none`, then `requested` after `ark escalate`, then `answered` until the round it granted starts, then `none` again.
 
 A run closes with one outcome: `merged`, `abandoned`, `aborted` or `handed_off`. A project with `merge_requests: none` ends every run `handed_off`: the branches stay in their clones for a person to review and nothing is pushed.
 

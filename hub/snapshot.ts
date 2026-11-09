@@ -381,20 +381,19 @@ export function createSnapshotReader() {
       const { state, events, directory } = run;
       const kind = waitingGate(state);
       if (kind !== "none") {
-        const gateKind = kind as GateKind;
         const document = join(
           directory,
-          gateKind === "plan" ? "plan.md" : gateKind === "strategy" ? "strategies.md" : "ticket.md",
+          kind === "plan" ? "plan.md" : kind === "strategy" ? "strategies.md" : "ticket.md",
         );
         gates.push({
           id: `gate:${state.run}:${kind}`,
           run: state.run,
           project: state.project,
           ticket: state.ticket.id,
-          kind: gateKind,
-          question: questions[gateKind](state.ticket.title),
+          kind,
+          question: questions[kind](state.ticket.title),
           review_url: sessions.find((session) => session.target === document)?.url ?? null,
-          since: (events.findLast((event) => event.type === gateEvents[gateKind]) ?? events.at(-1)!)
+          since: (events.findLast((event) => event.type === gateEvents[kind]) ?? events.at(-1)!)
             .time,
         });
       }
