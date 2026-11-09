@@ -1,8 +1,7 @@
 import { hasTestCriterion } from "./criteria.ts";
 import { ArkError } from "./errors.ts";
 import type { EventData, RunState } from "./events.ts";
-
-export const outcomes = ["merged", "abandoned", "aborted", "handed_off"];
+import { buildPhases, outcomes } from "./lifecycle.ts";
 
 const gateAnswers: Record<string, string[]> = {
   criteria: ["accept", "edit", "abort"],
@@ -10,8 +9,6 @@ const gateAnswers: Record<string, string[]> = {
   escalation: ["one_more_round", "take_over", "abort"],
   manual: ["ok", "problem"],
 };
-
-const buildPhases = ["building", "escalation", "merge_requests_open"];
 
 /** The event that moves a run out of `phase`, named in refusals. */
 function missingEvent(state: RunState): string {
@@ -28,7 +25,7 @@ function missingEvent(state: RunState): string {
   return `a run in phase ${state.phase}`;
 }
 
-function requirePhase(state: RunState, type: string, phases: string[]): void {
+function requirePhase(state: RunState, type: string, phases: readonly string[]): void {
   if (phases.includes(state.phase)) return;
   throw new ArkError(
     `${type} refused: run is in phase ${state.phase}; missing ${missingEvent(state)}`,

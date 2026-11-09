@@ -557,3 +557,4 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 - Never write `plan.yml` before the strategy is recorded and, with 2 or more cards, answered. Never put a mockup or a prototype in a repo worktree or an MR.
 - Never open MRs while a test fails or a review sends work back.
 - Never close the run, except after an abort: then run `ark run close <run> aborted`. Master Chief closes every other run after the human merges.
+- Never run `git worktree add` yourself; only `ark worktree` makes worktrees. For a checkout of another commit, use `git clone --shared` into `<run folder>/scratch/<name>`, as the worker playbook says, and remove it when you are done.

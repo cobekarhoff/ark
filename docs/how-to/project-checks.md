@@ -37,7 +37,7 @@ checks:
 
 ## Evidence
 
-`ark test <run>` runs the suites twice, on every run and for every `kind`: at head on the run's workspace, and at base on a throwaway checkout of each touched repo at its `worktree.created` commit. Before the base run it copies the head's version of each file that the diff adds or changes under a `test`, `tests` or `features` folder, at any depth, into the base checkout, so a new test meets the base build. A deleted file stays at base, and production files are never copied. A failure at base is data: a new test fails there, and `ark test` still exits 0. A failure at head fails `ark test`. A `refactor` run also needs its suites to pass at base. The base run is never reused.
+`ark test <run>` runs the suites twice, on every run and for every `kind`: at head on the run's workspace, and at base on a throwaway checkout of each touched repo at its `worktree.created` commit. The base checkout is a `git clone --shared` under `$TMPDIR/ark-base-*`, not a git worktree, so an `ark test` that is killed leaves no detached worktree in the repo or in Orca. Before the base run it copies the head's version of each file that the diff adds or changes under a `test`, `tests` or `features` folder, at any depth, into the base checkout, so a new test meets the base build. A deleted file stays at base, and production files are never copied. A failure at base is data: a new test fails there, and `ark test` still exits 0. A failure at head fails `ark test`. A `refactor` run also needs its suites to pass at base. The base run is never reused.
 
 The base logs stay in `<run folder>/results/base-<suite>.log`. The evidence goes to the run folder:
 
