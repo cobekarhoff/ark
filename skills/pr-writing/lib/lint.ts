@@ -638,11 +638,32 @@ const ELI01: Check = ({ body }) => {
 };
 
 const RISK01: Check = ({ body }) => {
-  const scope = sectionOf(body, /^Risk\b/i) ?? body;
-  if (!/\brisk\b/i.test(scope)) return warn("the body has no risk and revert text");
+  const section = sectionOf(body, /^Risk\b/i);
+  const scope = section ?? body;
+  if (section === null && !/\brisk\b/i.test(body))
+    return warn("the body has no risk and revert text");
   return !/git revert/.test(body) || sentences(scope).split(" ").length < 8
     ? warn("the risk and revert text is too vague: name what breaks and the `git revert` step")
     : pass("risk and revert text present");
+};
+
+const actor =
+  /\b(run lead|master chief|implementer|validator|evaluator|designer|an agent|the agent|agents|an AI|the AI|a human|the human|humans|I|I'm|we|we're|our|my)\b/g;
+
+/** The subject of a body sentence is the system: code, command, document or data. Roles stay in the provenance line. */
+const VOICE01: Check = ({ body }) => {
+  const prose = body
+    .split("\n")
+    .filter((line) => !line.startsWith("> Written by"))
+    .join("\n")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`\n]*`/g, "");
+  const found = [...new Set((prose.match(actor) ?? []).map((term) => term.toLowerCase()))];
+  return found.length > 0
+    ? warn(
+        `the body names who did the work (${found.join(", ")}): write about the system, so the subject is the code, command, document or data`,
+      )
+    : pass("the body is written about the system");
 };
 
 const checks: [string, Check][] = [
@@ -670,6 +691,7 @@ const checks: [string, Check][] = [
   ["STALE01", STALE01],
   ["SEC01", SEC01],
   ["ELI01", ELI01],
+  ["VOICE01", VOICE01],
 ];
 
 export function lintBody(input: LintInput): LintResult[] {
