@@ -2091,3 +2091,227 @@ for (const [name, criteria, message] of [
     );
   });
 }
+
+// --- ARK-T157, ARK-T158: harness names and role availability (ARK-340) --------------------------
+
+const ompModel = "anthropic/claude-sonnet-5-5";
+const roleNames = [
+  "implementer",
+  "validator",
+  "reviewer",
+  "evaluator",
+  "designer",
+  "chief",
+  "test_writer",
+  "test_reviewer",
+];
+
+function ompRoles(
+  overrides: Record<string, { harness: string; model: string }> = {},
+): Record<string, { harness: string; model: string }> {
+  const roles = Object.fromEntries(
+    roleNames.map((role) => [role, { harness: "omp", model: ompModel }]),
+  );
+  return { ...roles, ...overrides };
+}
+
+const loadError = (project: string): string => {
+  try {
+    loadConfig(project);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  return "";
+};
+
+test("ARK-T157 config load refuses a role whose harness is not claude, codex, omp or pi, and names the role and the four harnesses", () => {
+  tempArkHome();
+  writeProject("base", validConfig({ roles: ompRoles() }));
+  expect(loadError("base")).toBe("");
+  for (const harness of ["claude", "codex", "omp", "pi"]) {
+    writeProject(
+      `with-${harness}`,
+      validConfig({ roles: ompRoles({ implementer: { harness, model: ompModel } }) }),
+    );
+    expect(loadError(`with-${harness}`)).toBe("");
+  }
+
+  writeProject(
+    "typo",
+    validConfig({ roles: ompRoles({ reviewer: { harness: "ompp", model: ompModel } }) }),
+  );
+  const typo = loadError("typo");
+  expect(typo).toContain("reviewer");
+  expect(typo).toContain("ompp");
+  for (const harness of ["claude", "codex", "omp", "pi"]) expect(typo).toContain(harness);
+
+  writeProject(
+    "case",
+    validConfig({ roles: ompRoles({ designer: { harness: "Claude", model: ompModel } }) }),
+  );
+  const wrongCase = loadError("case");
+  expect(wrongCase).toContain("designer");
+  for (const harness of ["claude", "codex", "omp", "pi"]) expect(wrongCase).toContain(harness);
+});
+
+type FakeOmp = { path: string; calls: () => number };
+
+/** A PATH of a fake omp, bun and the system folders; it has no codex. The caller restores PATH. */
+function controlledPath(list: "ok" | "fail", extraCommands: string[] = []): FakeOmp {
+  const directory = mkdtempSync(join(tmpdir(), "ark-role-path-"));
+  const counter = join(directory, "models-calls");
+  writeFileSync(counter, "");
+  const omp = join(directory, "omp");
+  writeFileSync(
+    omp,
+    list === "ok"
+      ? `#!/bin/sh\necho "$@" >> '${counter}'\nprintf '%s' '{"models":[{"selector":"${ompModel}"}]}'\n`
+      : `#!/bin/sh\necho "$@" >> '${counter}'\necho "no credentials" >&2\nexit 1\n`,
+  );
+  chmodSync(omp, 0o755);
+  for (const name of extraCommands) {
+    writeFileSync(join(directory, name), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(directory, name), 0o755);
+  }
+  symlinkBun(directory);
+  process.env.PATH = `${directory}:/usr/bin:/bin`;
+  return {
+    path: directory,
+    calls: () => readFileSync(counter, "utf8").split("\n").filter(Boolean).length,
+  };
+}
+
+const statusProject = (name: string, overrides = {}): void => {
+  writeProject(name, validConfig({ roles: ompRoles(overrides) }));
+};
+
+const failingRoles = {
+  reviewer: { harness: "omp", model: "openai-codex/gpt-6.1-solx" },
+  validator: { harness: "codex", model: "gpt-6.1-sol" },
+};
+
+const withControlledPath = (
+  list: "ok" | "fail",
+  body: (fake: FakeOmp) => void,
+  extraCommands: string[] = [],
+): void => {
+  const outer = process.env.PATH;
+  try {
+    body(controlledPath(list, extraCommands));
+  } finally {
+    process.env.PATH = outer;
+  }
+};
+
+const lineWith = (text: string, ...needles: string[]): string | undefined =>
+  text.split("\n").find((line) => needles.every((needle) => line.includes(needle)));
+
+test("ARK-T158 ark status prints one line per failing role and runs omp models once", () => {
+  tempArkHome();
+  statusProject("a", failingRoles);
+  statusProject("b");
+  withControlledPath("ok", (fake) => {
+    const result = ark("status");
+    const text = result.out + result.err;
+    expect(result.code).toBe(1);
+    expect(
+      lineWith(text, "reviewer", "openai-codex/gpt-6.1-solx", "model not found by omp"),
+    ).toBeDefined();
+    expect(lineWith(text, "validator", "harness codex not installed")).toBeDefined();
+    expect(text).not.toContain("role models: unchecked");
+    expect(text.split("\n").filter((line) => line.includes("role "))).toHaveLength(2);
+    expect(fake.calls()).toBe(1);
+  });
+});
+
+test("ARK-T158 ark status exits 0 and prints no role line when every role can run", () => {
+  tempArkHome();
+  statusProject("a-ok");
+  statusProject("b");
+  withControlledPath("ok", (fake) => {
+    const result = ark("status");
+    expect(result.code).toBe(0);
+    expect(result.out + result.err).not.toContain("role ");
+    expect(fake.calls()).toBe(1);
+  });
+});
+
+test("ARK-T158 ark status prints role models unchecked and still exits 0 when omp models fails and no role fails", () => {
+  tempArkHome();
+  statusProject("a-codex", { validator: { harness: "claude", model: "claude-sonnet-5-5" } });
+  withControlledPath(
+    "fail",
+    (fake) => {
+      const result = ark("status");
+      expect(result.code).toBe(0);
+      expect(result.out + result.err).toContain("role models: unchecked (");
+      expect(result.out + result.err).not.toContain("not found by omp");
+      expect(fake.calls()).toBe(1);
+    },
+    ["claude"],
+  );
+});
+
+test("ARK-T158 ark status exits 1 for a missing harness when omp models fails, and prints no model line", () => {
+  tempArkHome();
+  statusProject("a", failingRoles);
+  withControlledPath("fail", () => {
+    const result = ark("status");
+    const text = result.out + result.err;
+    expect(result.code).toBe(1);
+    expect(text).toContain("role models: unchecked (");
+    expect(lineWith(text, "validator", "harness codex not installed")).toBeDefined();
+    expect(text).not.toContain("model not found by omp");
+  });
+});
+
+test("ARK-T158 ark status leaves a project with no ark.yml to the existing check and adds no role line", () => {
+  const home = tempArkHome();
+  statusProject("a-ok");
+  mkdirSync(join(home, "projects/nocfg/runs/2026-01-01-X-1"), { recursive: true });
+  withControlledPath("ok", () => {
+    const result = ark("status");
+    const text = result.out + result.err;
+    expect(result.code).toBe(1);
+    expect(text).toContain("project nocfg has no ark.yml");
+    expect(text).toContain("project config(s) invalid");
+    expect(text).not.toContain("role ");
+  });
+
+  rmSync(join(home, "projects/nocfg"), { recursive: true });
+  mkdirSync(join(home, "projects/nocfg/runs"), { recursive: true });
+  withControlledPath("ok", () => {
+    const result = ark("status");
+    expect(result.code).toBe(0);
+    expect(result.out + result.err).not.toContain("nocfg");
+    expect(result.out + result.err).not.toContain("role ");
+  });
+});
+
+test("ARK-T158 ark status keeps the config error of an invalid ark.yml and prints no role line for it", () => {
+  tempArkHome();
+  statusProject("a-ok");
+  writeProject("badcfg", validConfig({ ticket_source: "trello", roles: ompRoles(failingRoles) }));
+  withControlledPath("ok", () => {
+    const result = ark("status");
+    const text = result.out + result.err;
+    expect(result.code).toBe(1);
+    expect(text).toContain("config error: badcfg:");
+    expect(text).toContain("1 project config(s) invalid");
+    expect(text).not.toContain("role ");
+  });
+});
+
+test("ARK-T158 ark status for a run and other commands print no role line and never call omp", () => {
+  tempArkHome();
+  statusProject("a", failingRoles);
+  const { runId } = startRun("a");
+  withControlledPath("ok", (fake) => {
+    const run = ark("status", runId, "--project", "a");
+    expect(run.code).toBe(0);
+    expect(run.out + run.err).not.toContain("role ");
+    const other = ark("ui-skills", runId, "--project", "a");
+    expect(other.out + other.err).not.toContain("role ");
+    expect(fake.calls()).toBe(0);
+  });
+});
