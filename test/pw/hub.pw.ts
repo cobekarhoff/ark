@@ -860,26 +860,25 @@ test("ARK-284-AC2 the run page shows Open in Orca for each live agent, Master Ch
 
   await open(page, baseUrl, `run/${run}`);
   await expect(home).toBeVisible();
-  // Each agent of the snapshot has its handle and live flag.
+  // Each agent of the snapshot has its handle and presence.
   await expect
     .poll(async () => {
       const snapshot = await (await fetch(`${baseUrl}/api/snapshot`)).json();
       const agents = Array.isArray(snapshot.runs) ? snapshot.runs[0]?.agents : null;
       return Array.isArray(agents)
-        ? agents.map((agent: { terminal: string; live: boolean; running: boolean }) => [
+        ? agents.map((agent: { terminal: string; presence: string }) => [
             agent.terminal,
-            agent.live,
-            agent.running,
+            agent.presence,
           ])
         : [];
     })
     .toEqual(
       expect.arrayContaining([
-        ["term-chief", true, false],
-        ["term-lead", true, false],
-        ["term-worker", true, false],
-        ["term-gone", false, false],
-        ["structworker_unlisted", false, true],
+        ["term-chief", "live"],
+        ["term-lead", "live"],
+        ["term-worker", "live"],
+        ["term-gone", "ended"],
+        ["structworker_unlisted", "running"],
       ]),
     );
 
@@ -887,7 +886,7 @@ test("ARK-284-AC2 the run page shows Open in Orca for each live agent, Master Ch
   for (const handle of ["term-chief", "term-lead", "term-worker"])
     await expect(home.locator(`[data-terminal="${handle}"]`)).toHaveText("Open in Orca");
   await expect(home.locator('[data-testid="agent"][data-role="Master Chief"]')).toHaveCount(1);
-  const ended = home.locator('[data-testid="agent"][data-live="false"]', {
+  const ended = home.locator('[data-testid="agent"][data-presence="ended"]', {
     hasText: "ended, not in Orca",
   });
   await expect(ended).toHaveCount(1);

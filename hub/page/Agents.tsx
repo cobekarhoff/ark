@@ -35,7 +35,7 @@ export function Agents({ agents }: { agents: Agent[] | "unknown" }) {
       className="agentrow"
       data-testid="agent"
       data-role={agent.role}
-      data-live={agent.live}
+      data-presence={agent.presence}
     >
       <div className="agent-main">
         <span className="pill">{agent.role}</span>
