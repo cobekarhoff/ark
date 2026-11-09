@@ -132,6 +132,8 @@ function evidenceBlock(ledger: Ledger): Block {
     );
   if (ledger.evidence === null && kind !== "perf")
     lines.push("- No base and head evidence recorded: the run has no `results/evidence/`.");
+  for (const { suite, file } of ledger.flaky)
+    lines.push(`- Flaky: \`${file}\` in suite \`${suite}\` failed once and passed on retry.`);
   const { shown, total } = screenshotFlows(ledger);
   if (shown.length > 0)
     lines.push(

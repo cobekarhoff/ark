@@ -18,6 +18,7 @@ import { ticketStatusAfter } from "./lifecycle.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
+import { runnerStatusLines } from "./test-runner.ts";
 import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, submoduleLines, worktreeCleanup } from "./worktree.ts";
 import { loadPlan, repoGraph, type Plan } from "./plan.ts";
@@ -504,6 +505,7 @@ function printRun(runId: string, inProject?: string): void {
     ...amendedLines(state),
     ...statusSubmoduleLines(project, state.worktrees),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") + (state.last_test.mode === "quick" ? " (quick, not a gate)" : "") : "none"}`,
+    ...runnerStatusLines(directory),
     ...testHeadLines(directory),
     ...(statusMergeRequestsMode(project) === "none"
       ? localOnlyLines(project, directory, state)

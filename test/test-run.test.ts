@@ -316,8 +316,10 @@ describe("ark test", () => {
       if (waited > 25_000) throw new Error("the base run never started");
       await Bun.sleep(50);
     }
-    child.kill("SIGTERM");
-    expect(await child.exited).toBe(143);
+    // The runner outlives its caller: ark test --stop ends it and its suites.
+    child.kill("SIGKILL");
+    await child.exited;
+    expect(ark("test", runId, "--stop").out).toContain("stopped the ark test");
 
     const worktrees = Bun.spawnSync(["git", "-C", workspace, "worktree", "list", "--porcelain"]);
     expect(worktrees.stdout.toString()).not.toContain("ark-base-");

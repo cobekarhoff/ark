@@ -1106,6 +1106,7 @@ function baseLedger(overrides: Record<string, any> = {}): Ledger {
     evidence: null,
     findings: [],
     hasReviewerStep: false,
+    flaky: [],
     checks: [],
     reviewer: null,
     mergeOrder: ["."],
