@@ -114,19 +114,55 @@ export function reviewQueue(runs: RunView[]): RunView[] {
     .toSorted((left, right) => waited(left) - waited(right) || left.run.localeCompare(right.run));
 }
 
+/**
+ * The states the hub derives for a ticket, each with its lane of the Runs board. `ticketEntries`
+ * picks the first that holds: needs me, awaiting merge, planning or building (an open run), closed
+ * (the newest run), then blocked or queued (a ready ticket). A ticket in none of them shows its
+ * own status and sits on no lane.
+ */
+export const ticketLanes = {
+  "needs me": "Needs me",
+  "awaiting merge": "Awaiting merge",
+  planning: "Building",
+  building: "Building",
+  closed: "Closed",
+  blocked: "Queued",
+  queued: "Queued",
+} as const;
+export type TicketState = keyof typeof ticketLanes;
+export type Lane = (typeof ticketLanes)[TicketState];
+
 export type TicketEntry = {
   ticket: TicketView;
   key: string;
   open: RunView | null;
   newest: TicketRunView | null;
-  /** One word: `needs me`, `building`, `planning`, `awaiting merge`, `closed`, `queued`, `blocked`, or the ticket status. */
+  /** A `TicketState`, or the ticket status with spaces for a ticket in none. */
   state: string;
   /** Phase class for color: `p-gate`, `p-build`, `p-review`, `p-done`, `p-plan`, `p-none`. */
   tone: string;
-  /** The lane of the Runs board; `null` for a ticket that is on no lane (proposed, done without a closed run). */
-  lane: "Queued" | "Building" | "Needs me" | "Awaiting merge" | "Closed" | null;
+  lane: Lane | null;
   satisfied: boolean;
 };
+
+function ticketState(
+  snapshot: Snapshot,
+  run: RunView | null,
+  newest: TicketRunView | null,
+  status: string,
+  blocked: boolean,
+): TicketState | null {
+  if (run && needsHuman(snapshot, run)) return "needs me";
+  if (run)
+    return run.phase === "merge_requests_open"
+      ? "awaiting merge"
+      : run.phase === "planning"
+        ? "planning"
+        : "building";
+  if (newest?.phase === "closed") return "closed";
+  if (status === "ready") return blocked ? "blocked" : "queued";
+  return null;
+}
 
 export const ticketKey = (project: string, id: string) => `${project}/${id}`;
 
@@ -156,21 +192,19 @@ export function ticketEntries(snapshot: Snapshot): Map<string, TicketEntry> {
     const blocked = ticket.depends_on.some(
       (id) => !isFinishedTicket(byKey.get(ticketKey(ticket.project, id))?.status),
     );
-    let entry: Pick<TicketEntry, "state" | "tone" | "lane">;
-    if (run && needsHuman(snapshot, run))
-      entry = { state: "needs me", tone: "p-gate", lane: "Needs me" };
-    else if (run?.phase === "merge_requests_open")
-      entry = { state: "awaiting merge", tone: phaseClass(run.phase), lane: "Awaiting merge" };
-    else if (run)
-      entry = {
-        state: run.phase === "planning" ? "planning" : "building",
-        tone: phaseClass(run.phase),
-        lane: "Building",
-      };
-    else if (last?.phase === "closed") entry = { state: "closed", tone: "p-done", lane: "Closed" };
-    else if (ticket.status === "ready")
-      entry = { state: blocked ? "blocked" : "queued", tone: "p-none", lane: "Queued" };
-    else entry = { state: ticket.status.replaceAll("_", " "), tone: "p-none", lane: null };
+    const state = ticketState(snapshot, run, last, ticket.status, blocked);
+    const entry: Pick<TicketEntry, "state" | "tone" | "lane"> = {
+      state: state ?? ticket.status.replaceAll("_", " "),
+      tone:
+        state === "needs me"
+          ? "p-gate"
+          : run
+            ? phaseClass(run.phase)
+            : state === "closed"
+              ? "p-done"
+              : "p-none",
+      lane: state ? ticketLanes[state] : null,
+    };
     entries.set(key, {
       ticket,
       key,

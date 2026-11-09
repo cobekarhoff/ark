@@ -18,6 +18,7 @@ One line for each principle that Ark already uses, with a link to the rule that 
 - Read the callers of changed code, not only the diff. [Reviewer rubric: Correctness](rubrics/reviewer.md#what-to-check)
 - Check input at trust boundaries; keep secrets out of code and logs. [Reviewer rubric: Security](rubrics/reviewer.md#what-to-check)
 - Use full words for identifiers, commands, flags, gate names and filenames. [Naming gate](../../rules/naming.md#naming-gate)
+- Keep each set of states, and the moves between them, in one typed list and one table or function; a refusal names the state and what allows the action. [State machine gate](../../rules/state-machines.md#state-machine-gate)
 
 ## Review
 
