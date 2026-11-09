@@ -1,4 +1,3 @@
-// test ids: agent (data-role, data-live)
 import { Unknown, known } from "./format.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import type { Agent } from "../types.ts";

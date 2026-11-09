@@ -5,7 +5,7 @@ import { criteriaAmend } from "./criteria.ts";
 import { evaluationRecord } from "./evaluation.ts";
 import { escalate, gateRecord } from "./gate.ts";
 import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
-import { planCheck } from "./plan.ts";
+import { planCheck } from "./plan-check.ts";
 import { retro } from "./retro.ts";
 import { runClose, runCloseSweep, runStart, runStep, status } from "./run.ts";
 import { strategyRecord } from "./strategy.ts";
@@ -13,8 +13,7 @@ import { testCaseNew } from "./test-case.ts";
 import { testRun } from "./test-run.ts";
 import { uiSkills } from "./ui-skills.ts";
 import { ui, uiInstall, uiUninstall } from "./ui.ts";
-import { workspaceSync } from "./workspace.ts";
-import { worktreeAnchor, worktreeCreate, worktreeSync } from "./worktree.ts";
+import { workspaceSync, worktreeAnchor, worktreeCreate, worktreeSync } from "./worktree.ts";
 
 type Flags = Record<string, string | true>;
 

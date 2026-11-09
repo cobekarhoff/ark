@@ -10,7 +10,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { mergeOrder, requiredLiterals } from "../cli/merge-request";
+import { requiredLiterals } from "../cli/merge-request.ts";
+import { repoGraph } from "../cli/plan.ts";
 import {
   ark,
   recordEvaluation,
@@ -302,8 +303,12 @@ test(
     expect(optionValue(opened[0], "--title")).toBe("ARK-900: Show units");
 
     // The run branch reached each origin; docs had no commits and opened nothing.
-    expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
-    expect(git(bares.app, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
+    expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toMatch(
+      /^[0-9a-f]{40}$/,
+    );
+    expect(git(bares.app, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toMatch(
+      /^[0-9a-f]{40}$/,
+    );
     expect(
       Bun.spawnSync(["git", "rev-parse", "--verify", `refs/heads/ark/${run}`], { cwd: bares.docs })
         .exitCode,
@@ -575,7 +580,7 @@ test(
   { timeout: 30_000 },
 );
 
-test("ARK-155-AC2 mergeOrder follows needs across repos, ties by first appearance, same plan same order", () => {
+test("ARK-155-AC2 merge order follows needs across repos, ties by first appearance, same plan same order", () => {
   const step = (id: string, repo: string, needs: string[] = []) => ({
     id,
     repo,
@@ -591,11 +596,11 @@ test("ARK-155-AC2 mergeOrder follows needs across repos, ties by first appearanc
       step("web-2", "web", ["web-1"]),
     ],
   };
-  expect(mergeOrder(plan)).toEqual(["docs", "lib", "api", "web"]);
-  expect(mergeOrder(structuredClone(plan))).toEqual(mergeOrder(plan));
+  expect(repoGraph(plan).order).toEqual(["docs", "lib", "api", "web"]);
+  expect(repoGraph(structuredClone(plan)).order).toEqual(repoGraph(plan).order);
 });
 
-test("ARK-155-AC2 mergeOrder refuses a dependency cycle between repos", () => {
+test("ARK-155-AC2 merge order refuses a dependency cycle between repos", () => {
   const plan = {
     steps: [
       { id: "a-1", repo: "a", needs: ["b-1"], criteria: [] },
@@ -603,7 +608,7 @@ test("ARK-155-AC2 mergeOrder refuses a dependency cycle between repos", () => {
       { id: "a-2", repo: "a", needs: [], criteria: [] },
     ],
   };
-  expect(() => mergeOrder(plan)).toThrow(/cycle.*a, b/);
+  expect(() => repoGraph(plan)).toThrow(/cycle.*a, b/);
 });
 
 test("ARK-155-AC7 no source under cli/ runs a merge, approve or auto-merge command", () => {

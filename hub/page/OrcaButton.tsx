@@ -1,4 +1,3 @@
-// test ids: open-in-orca (data-terminal), orca-ended, orca-status
 import { useState } from "react";
 import type { Agent } from "../types.ts";
 

@@ -1,4 +1,5 @@
 import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
+import type { Harness } from "../cli/usage/index.ts";
 import type { TranscriptEntry, TranscriptPage } from "./types.ts";
 
 /** Entries in one page of a transcript. */
@@ -15,7 +16,6 @@ type ToolEntry = Extract<TranscriptEntry, { kind: "tool" }>;
 type Result = { id: string; status: "ok" | "error"; text: string };
 /** What one record of a session file adds: an entry (a tool call also names its id), or the result of a call. */
 type Item = { entry: TranscriptEntry; callId?: string } | { result: Result };
-export type TranscriptHarness = "omp" | "claude" | "codex";
 
 const cut = (text: string, limit: number) =>
   text.length > limit ? `${text.slice(0, limit)}… (+${text.length - limit} characters cut)` : text;
@@ -159,7 +159,7 @@ function codexItems(record: Record<string, any>): Item[] {
   }
 }
 
-const readers: Record<TranscriptHarness, (record: Record<string, any>) => Item[]> = {
+const readers: Record<Harness, (record: Record<string, any>) => Item[]> = {
   omp: ompItems,
   claude: claudeItems,
   codex: codexItems,
@@ -232,7 +232,7 @@ function parse(text: string): Record<string, any> | null {
  */
 export function readTranscriptPage(
   file: string,
-  harness: TranscriptHarness,
+  harness: Harness,
   cursor: number,
   limit = pageSize,
 ): TranscriptPage {

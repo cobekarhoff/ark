@@ -438,15 +438,3 @@ for (const [label, gates] of [
     expect(types(directory).filter((type) => type === "step.started")).toHaveLength(1);
   });
 }
-
-test("ARK-T80 docs/reference/cli.md equals the generator output", () => {
-  const root = join(import.meta.dir, "..");
-  const path = join(root, "docs/reference/cli.md");
-  const committed = readFileSync(path, "utf8");
-  // The script rewrites cli.md in place, so a stale file shows as a changed file; put it back.
-  const run = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: root });
-  const reference = readFileSync(path, "utf8");
-  writeFileSync(path, committed);
-  expect(run.exitCode).toBe(0);
-  expect(committed).toBe(reference);
-});

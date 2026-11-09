@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { isInside } from "../cli/usage/index.ts";
-import { ownersOf, stageOf, type StageTimes, type StepWindow } from "../cli/usage/owners.ts";
+import { isInside } from "../cli/paths.ts";
+import { type Harness, sessionRoots } from "../cli/usage/index.ts";
+import type { StageTimes, StepWindow } from "../cli/events.ts";
+import { ownersOf, stageOf } from "../cli/usage/owners.ts";
 import type { SessionFile, TranscriptPage } from "./types.ts";
 
-export type Harness = "omp" | "claude" | "codex";
 export type CompactMessage = {
   time: number;
   cost: number | null;
@@ -46,26 +46,6 @@ type Entry = {
   messages: CompactMessage[] | null;
   failed: boolean;
 };
-
-function roots(): { harness: Harness; root: string; pattern: string }[] {
-  return [
-    {
-      harness: "omp",
-      root: process.env.ARK_OMP_SESSIONS ?? join(homedir(), ".omp", "agent", "sessions"),
-      pattern: "**/*.jsonl",
-    },
-    {
-      harness: "claude",
-      root: process.env.ARK_CLAUDE_SESSIONS ?? join(homedir(), ".claude", "projects"),
-      pattern: "**/*.jsonl",
-    },
-    {
-      harness: "codex",
-      root: process.env.ARK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions"),
-      pattern: "**/*.jsonl{,.zst}",
-    },
-  ];
-}
 
 const workerCount = 3;
 /** A worker that has not answered this long is hung: it is dropped and its requests fail. */
@@ -109,9 +89,7 @@ export function readMetricsCost(directory: string): RunCost | null {
  * Workers, so the event loop of the server never waits for it.
  */
 export class UsageIndex {
-  /** Whole-file parses since the index was made. A refresh with no changed file adds 0. */
   parseCount = 0;
-  /** Grows each time a refresh changed what the index holds. */
   version = 0;
   #entries = new Map<string, Entry>();
   #workers: (Worker | undefined)[] = [];
@@ -136,7 +114,7 @@ export class UsageIndex {
     const parents = directories.flatMap(parentsOf);
     const seen = new Set<string>();
     const changed: [string, Entry][] = [];
-    for (const { harness, root, pattern } of roots()) {
+    for (const { harness, root, pattern } of sessionRoots()) {
       if (!existsSync(root)) continue;
       for await (const relative of new Bun.Glob(pattern).scan({ cwd: root, dot: true })) {
         const file = join(root, relative);

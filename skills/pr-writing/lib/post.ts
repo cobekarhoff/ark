@@ -10,9 +10,7 @@ import { join } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { beginMarker, endMarker } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
-import { hashBody, lintBody, type LintResult } from "./lint.ts";
-
-export const maxTitleLength = 72;
+import { hashBody, lintBody, maxTitleLength, type LintResult } from "./lint.ts";
 
 /** An MR title: `<ticket id>: <summary>`, or the repo `title_prefix` rule when the config has one. */
 export function buildTitle(ledger: Ledger, summaryFlag?: string): string {
