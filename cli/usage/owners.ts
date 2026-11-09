@@ -1,15 +1,6 @@
 import { join } from "node:path";
-import { isInside } from "./index.ts";
-
-export type StepWindow = {
-  id: string;
-  role: string;
-  repo: string;
-  start: number;
-  end: number | null;
-};
-
-export type StageTimes = { evaluationEnd?: number; designStart?: number; designEnd?: number };
+import type { StageTimes, StepWindow } from "../events.ts";
+import { isInside } from "../paths.ts";
 
 /** The evaluator reports to the run lead after the lead recorded the evaluation: allow that closing message. */
 export const evaluatorGraceMilliseconds = 60_000;
@@ -41,7 +32,6 @@ export function stageOf(times: number[], stages: StageTimes): "evaluator" | "des
   return null;
 }
 
-/** What one session file looks like to the owner rule. Times are milliseconds. */
 export type OwnableFile = {
   cwd: string;
   /** First timestamp of the file, or null when its head holds none. */

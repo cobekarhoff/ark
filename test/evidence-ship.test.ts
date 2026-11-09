@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
-import { evidenceProblem } from "../cli/merge-request.ts";
+import { evidenceProblem } from "../cli/ticket.ts";
 import {
   ark,
   recordEvaluation,

@@ -1,5 +1,3 @@
-// test ids: timeline (ol), timeline-entry (data-type), timeline-counts, run-file-link (data-path),
-// run-lead-link, unassigned-file (data-file), closed-banner, session-link (data-step)
 import { useEffect, useState } from "react";
 import { ExternalLink } from "./format.tsx";
 import { hashOf } from "./store.tsx";

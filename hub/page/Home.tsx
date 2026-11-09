@@ -1,8 +1,3 @@
-// test ids: tile (data-tile), gate (data-gate), gate-link, waiting (data-run, data-kind), stuck
-// (data-run, data-kind), review (data-run), mr (data-state), mr-state, ci (data-ci), check,
-// findings-link, ac-square (data-status), run (data-run), run-age, run-idle, cost, usage-window
-// (data-provider, data-window, data-near), usage-reset, cost-day, stale-label (in the nav, data-source),
-// open-in-orca (data-terminal), orca-ended, orca-status
 import { OpenInOrca } from "./OrcaButton.tsx";
 import {
   costByDay,

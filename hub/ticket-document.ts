@@ -1,4 +1,5 @@
 import { canonicalCriterion } from "../cli/criterion-id.ts";
+import { frontmatter, splitFrontmatter } from "../cli/ticket.ts";
 import type { TicketCriterionView, TicketDocument } from "./types.ts";
 
 /** Text of a section of a ticket body: the lines under `## <heading>` up to the next `## `. */
@@ -18,7 +19,7 @@ export const withoutCodeMarks = (text: string): string => text.replaceAll("`", "
 
 /** The first sentence of the `## Problem` section, else of `## Why`, as plain text (no backticks, never past a heading or paragraph); null when neither has text. */
 export function whyOf(source: string): string | null {
-  const body = source.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/)?.[1] ?? source;
+  const { body } = splitFrontmatter(source);
   const text = sectionOf(body, "problem") || sectionOf(body, "why");
   const paragraph = text.split(/\r?\n\s*\r?\n|\r?\n#{1,6}\s/)[0];
   const sentence = paragraph.replace(/\s+/g, " ").match(/^.*?(?:[.!?](?=\s)|[.!?]$|$)/)?.[0];
@@ -30,11 +31,10 @@ export function whyOf(source: string): string | null {
  * plain strings: the page puts them in the document as text, never as Markdown HTML.
  */
 export function parseTicketDocument(source: string): TicketDocument {
-  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  const body = match ? match[2] : source;
-  let fields: Record<string, unknown> | null = null;
+  const { body } = splitFrontmatter(source);
+  let fields: Record<string, unknown> | undefined;
   try {
-    fields = match ? (Bun.YAML.parse(match[1]) as Record<string, unknown> | null) : null;
+    fields = frontmatter(source).fields;
   } catch {
     // A front matter that does not parse still leaves the body readable.
   }

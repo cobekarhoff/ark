@@ -22,12 +22,23 @@ import {
   retiredTarget,
   withProject,
   savedTheme,
-  sourceNames,
   useHash,
   useLive,
   type ThemeChoice,
 } from "./store.tsx";
 import { TicketPage } from "./Ticket.tsx";
+import type { SourceName } from "../types.ts";
+
+const sourceNames: SourceName[] = [
+  "ark",
+  "orca",
+  "plannotator",
+  "github",
+  "usage",
+  "providerLimits",
+  "agentWait",
+  "evidence",
+];
 
 const views = [
   ["home", "#/", "Home"],

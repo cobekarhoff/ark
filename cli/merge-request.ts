@@ -1,20 +1,21 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ArkError } from "./errors";
+import { ArkError } from "./errors.ts";
+import { canonicalCriterion } from "./criterion-id.ts";
+import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events.ts";
+import { loadConfig, mergeRequestsMode } from "./config.ts";
+import { findRun } from "./paths.ts";
+import { loadPlan, repoGraph } from "./plan.ts";
 import {
   evidenceFile,
+  evidenceProblem,
+  frontmatter,
   hasTestCriterion,
   manualCriteria,
   runCriteria,
-  type Method,
-} from "./criteria.ts";
-import { canonicalCriterion } from "./criterion-id.ts";
-import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events";
-import { loadConfig, mergeRequestsMode } from "./config.ts";
+} from "./ticket.ts";
 import { manualStatus } from "./lifecycle.ts";
-import { findRun } from "./paths";
-import { loadPlan, repoGraph } from "./plan";
 import { discoverRepos, repoBase } from "./workspace.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import {
@@ -48,10 +49,6 @@ function run(command: string[], cwd: string): string {
   return result.stdout;
 }
 
-export function mergeOrder(plan: Parameters<typeof repoGraph>[0]): string[] {
-  return repoGraph(plan).order;
-}
-
 function detectHost(remoteUrl: string): Host {
   const lowered = remoteUrl.toLowerCase();
   if (lowered.includes("github.com")) return "github";
@@ -60,19 +57,15 @@ function detectHost(remoteUrl: string): Host {
 }
 
 function criterionTexts(runDirectory: string): Map<string, Criterion> {
-  const match = readFileSync(join(runDirectory, "ticket.md"), "utf8").match(
-    /^---\n([\s\S]*?)\n---/,
-  );
-  const frontmatter = match
-    ? (Bun.YAML.parse(match[1]) as {
-        id?: string;
-        acceptance_criteria?: { id: string; text: string }[];
-      })
-    : {};
+  const fields = (frontmatter(readFileSync(join(runDirectory, "ticket.md"), "utf8")).fields ??
+    {}) as {
+    id?: string;
+    acceptance_criteria?: { id: string; text: string }[];
+  };
   const manual = new Set(manualCriteria(runDirectory));
   return new Map(
-    (frontmatter.acceptance_criteria ?? []).map(({ id: written, text }) => {
-      const id = canonicalCriterion(written, frontmatter.id);
+    (fields.acceptance_criteria ?? []).map(({ id: written, text }) => {
+      const id = canonicalCriterion(written, fields.id);
       return [id, { id, text, manual: manual.has(id) }];
     }),
   );
@@ -211,91 +204,6 @@ function worktreeMap(events: ArkEvent[]): Map<string, Worktree> {
   for (const event of events)
     if (event.type === "worktree.created") worktrees.set(event.data.repo, event.data as Worktree);
   return worktrees;
-}
-
-const headingLine = /^#{1,6}\s+(.+?)\s*$/;
-const screenshotPath = /\S+\.(png|jpe?g|gif|webp)\b/i;
-
-/** The lines under the heading `name`, up to the next heading of the same or a higher level; undefined when the heading is missing. */
-function sectionOf(lines: string[], name: string): string[] | undefined {
-  const start = lines.findIndex(
-    (line) => headingLine.exec(line)?.[1].toLowerCase() === name.toLowerCase(),
-  );
-  if (start === -1) return undefined;
-  const level = lines[start].indexOf(" ");
-  const body: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (headingLine.test(line) && line.indexOf(" ") <= level) break;
-    body.push(line);
-  }
-  return body;
-}
-
-/** True when the section names `label` as a sub-heading with text under it, or as a line `label: text`. */
-function hasLabel(body: string[], label: string): boolean {
-  const inline = new RegExp(`^\\s*(?:[-*]\\s+)?\\**${label}\\**\\s*:\\s*\\**\\s*\\S`, "i");
-  return body.some((line, i) => {
-    if (inline.test(line)) return true;
-    if (headingLine.exec(line)?.[1].toLowerCase() !== label.toLowerCase()) return false;
-    for (const next of body.slice(i + 1)) {
-      if (headingLine.test(next)) return false;
-      if (next.trim() !== "") return true;
-    }
-    return false;
-  });
-}
-
-/**
- * The shape of `results/evidence/<AC id>.md` for its method. Returns the reason the file is malformed, naming the
- * section, or undefined. Screenshot paths are checked for shape, not for existence.
- */
-export function evidenceProblem(method: Method, text: string): string | undefined {
-  const lines = text.split("\n").map((line) => line.trimEnd());
-  const missing = (name: string) => `missing section "${name}"`;
-  const empty = (name: string) => `section "${name}" is empty`;
-  if (method === "demonstration") {
-    for (const name of ["What the human did", "What the human saw", "Before", "After"]) {
-      const body = sectionOf(lines, name);
-      if (body === undefined) return missing(name);
-      if (body.every((line) => line.trim() === "")) return empty(name);
-      if (
-        (name === "Before" || name === "After") &&
-        !body.some((line) => screenshotPath.test(line))
-      )
-        return `section "${name}" has no screenshot path`;
-    }
-    return lines.findLast((line) => line !== "") === "human: ok"
-      ? undefined
-      : 'the last line is not "human: ok"';
-  }
-  if (method === "inspection") {
-    for (const name of ["Files", "Checked against", "Verdict"]) {
-      const body = sectionOf(lines, name);
-      if (body === undefined) return missing(name);
-      if (body.every((line) => line.trim() === "")) return empty(name);
-      if (name !== "Files") continue;
-      const entry = body
-        .map((line) =>
-          line
-            .replace(/^\s*[-*]\s+/, "")
-            .replace(/`/g, "")
-            .trim(),
-        )
-        .find((line) => line !== "" && !/^\S+:\d+(-\d+)?$/.test(line));
-      if (entry !== undefined)
-        return `section "Files": "${entry}" has no path:start-end line range`;
-    }
-    return sectionOf(lines, "Verdict")!.some((line) => /^reviewer: (pass|fail)$/.test(line.trim()))
-      ? undefined
-      : 'section "Verdict" has no reviewer line: write "reviewer: pass" or "reviewer: fail"';
-  }
-  for (const name of ["Command", "Output", "Threshold", "Result"]) {
-    const body = sectionOf(lines, name);
-    if (body === undefined) return missing(name);
-    for (const label of ["Base", "Head"])
-      if (!hasLabel(body, label)) return `section "${name}" has no ${label}`;
-  }
-  return undefined;
 }
 
 /** Local id `AC<k>` of a criterion, as the evidence refusals and files name it. */

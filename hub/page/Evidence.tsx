@@ -1,7 +1,3 @@
-// test ids: criterion-method, case-entry (data-id, data-state), case-link, case-missing,
-// case-listing, case-listing-ref, criterion-warning, evidence-panel, evidence-case (data-id),
-// evidence-side (data-side, data-result), evidence-log, shot-pair (data-name), shot-missing,
-// shot-image (data-side), ac-evidence (data-id, data-method), evidence-section (data-title), no-evidence
 import { useEffect, useState } from "react";
 import { ticketHref } from "./store.tsx";
 import type {

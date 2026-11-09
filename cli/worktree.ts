@@ -203,7 +203,7 @@ export function worktreeAnchor(runId: string, inProject?: string): void {
   const repo = discoverRepos(config.workspace)[0];
   if (repo === undefined) throw new ArkError(`workspace ${config.workspace} has no git repo`);
   const state = deriveState(readEvents(directory));
-  assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
+  assertAllowed(state, "worktree.created", {}, directory); // refuse before git changes anything
   addRepoWorktree(directory, config, state, repo, () => {});
   const mirror = mirrorRoot(directory);
   console.log(`path:${repo === "." ? mirror : join(mirror, repo)}`);
@@ -271,7 +271,7 @@ export function worktreeCreate(
   }
 
   const state = deriveState(readEvents(directory));
-  assertAllowed(state, "worktree.created", {}); // refuse before git changes anything
+  assertAllowed(state, "worktree.created", {}, directory); // refuse before git changes anything
   checkClean(workspace, knownRepos, touched, state, allowDirty);
 
   // every fetch happens before the first worktree add or event: one bad base leaves nothing behind
@@ -338,10 +338,12 @@ export function worktreeSync(runId: string, inProject?: string): void {
   if (state.worktrees.length === 0) throw new ArkError(`${runId} has no worktrees`);
   const config = loadConfig(project);
   const mayPush = config.merge_requests !== "none";
-  assertAllowed(state, "worktree.synced", {
-    repo: state.worktrees[0].repo,
-    conflict: false,
-  });
+  assertAllowed(
+    state,
+    "worktree.synced",
+    { repo: state.worktrees[0].repo, conflict: false },
+    directory,
+  );
   const conflicts: string[] = [];
   for (const worktree of state.worktrees) {
     git(worktree.path, "fetch", "origin");
@@ -498,4 +500,25 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
   }
   // What is left of workspace/ is Ark's own symlinks and empty folders; rmSync does not follow links.
   if (!kept) rmSync(mirrorRoot(directory), { recursive: true, force: true });
+}
+
+/** Fast-forwards the workspace checkout's target branch of each repo the run touched to origin. */
+export function workspaceSync(runId: string, inProject?: string): void {
+  const { project, directory } = findRun(runId, inProject);
+  const config = loadConfig(project);
+  const workspace = config.workspace;
+  for (const { repo } of deriveState(readEvents(directory)).worktrees) {
+    const path = join(workspace, repo);
+    try {
+      git(path, "fetch", "origin");
+      const target = targetBranch(path, repoBase(config, repo));
+      if (git(path, "branch", "--show-current") === target)
+        git(path, "merge", "--ff-only", `origin/${target}`);
+      else git(path, "fetch", "origin", `${target}:${target}`); // not checked out: git moves the ref only if it fast-forwards
+      console.log(`${repo}  ${target}  ${git(path, "rev-parse", target)}`);
+    } catch (err) {
+      if (err instanceof ArkError) throw new ArkError(`repo ${repo}: ${err.message}`);
+      throw err;
+    }
+  }
 }
