@@ -1,68 +1,29 @@
 import { now as hubNow } from "./clock.ts";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
-import { hasTestCriterion, manualCriteria, parseCriteria } from "./criteria.ts";
 import {
   appendEvent,
   deriveState,
   readEvents,
+  waitingGate,
   writeState,
   type ArkEvent,
   type EventData,
   type RunState,
 } from "./events.ts";
-import { ticketKinds, ticketStatusAfter, type TicketKind } from "./lifecycle.ts";
+import { ticketStatusAfter } from "./lifecycle.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
 import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, worktreeCleanup } from "./worktree.ts";
 import { loadPlan, repoGraph, type Plan } from "./plan.ts";
+import { hasTestCriterion, manualCriteria, readTicket, setTicketStatus } from "./ticket.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
-
-function readTicket(ticketFile: string): {
-  id: string;
-  title: string;
-  kind: TicketKind;
-  criteria: string[];
-} {
-  const frontmatter = readFileSync(ticketFile, "utf8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!frontmatter)
-    throw new ArkError(
-      `${ticketFile}: the ticket needs YAML frontmatter with id, title and acceptance_criteria`,
-    );
-  const fields = (Bun.YAML.parse(frontmatter[1]) ?? {}) as Record<string, unknown>;
-  for (const key of ["id", "title"]) {
-    if (typeof fields[key] !== "string" || fields[key] === "")
-      throw new ArkError(`${ticketFile}: ticket field ${key} is required`);
-  }
-  if (fields.summary !== undefined && (typeof fields.summary !== "string" || fields.summary === ""))
-    throw new ArkError(`${ticketFile}: ticket field summary must be a non-empty string`);
-  const kind = fields.kind ?? "feature";
-  if (!(ticketKinds as readonly unknown[]).includes(kind))
-    throw new ArkError(
-      `${ticketFile}: kind must be one of ${ticketKinds.join(", ")}, not ${JSON.stringify(kind)}`,
-    );
-  const ids = parseCriteria(fields, ticketFile).map((criterion) => criterion.id);
-  return {
-    id: fields.id as string,
-    title: fields.title as string,
-    kind: kind as TicketKind,
-    criteria: ids,
-  };
-}
 
 function resolveProject(absoluteTicketFile: string, project?: string): string {
   const chosen = project ?? process.env.ARK_PROJECT;
@@ -81,21 +42,6 @@ function today(): string {
   const now = new Date(hubNow());
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
-/** Sets the first `status:` line of the ticket front matter. Changes no other byte. Returns false when there is no such line. */
-function setTicketStatus(ticketFile: string, status: string): boolean {
-  const text = readFileSync(ticketFile, "utf8");
-  const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!frontmatter) return false;
-  const line = /^status:[^\r\n]*/m.exec(frontmatter[0]);
-  if (!line) return false;
-  const start = line.index + (frontmatter.index ?? 0);
-  writeFileSync(
-    ticketFile,
-    text.slice(0, start) + `status: ${status}` + text.slice(start + line[0].length),
-  );
-  return true;
 }
 
 /** Largest whole unit only: Nm, Nh or Nd. */
@@ -192,7 +138,7 @@ function answerEscalationByAuto(
     by: "auto",
     ...(start.merge ? { merge: true } : {}),
   };
-  if (refused(() => assertAllowed(state, "gate.answered", answer))) return null;
+  if (refused(() => assertAllowed(state, "gate.answered", answer, directory))) return null;
   const answered = deriveState([
     ...events,
     {
@@ -311,7 +257,7 @@ export async function runClose(runId: string, outcome: string, inProject?: strin
   const events = readEvents(directory);
   if (outcome === "handed_off") {
     const state = deriveState(events);
-    assertAllowed(state, "run.closed", { outcome });
+    assertAllowed(state, "run.closed", { outcome }, directory);
     assertShippable(runId, project, directory, events, state);
   }
   const started = events.find((event) => event.type === "run.started");
@@ -345,14 +291,6 @@ export async function runCloseSweep(inProject?: string): Promise<void> {
         console.log([`${name}:`, ...lines.map((line) => `  ${line}`)].join("\n"));
     }
   }
-}
-
-export function waitingGate(state: RunState): string {
-  if (state.phase === "awaiting_criteria") return "criteria";
-  if (state.phase === "awaiting_strategy") return "strategy";
-  if (state.phase === "planning" && state.plan?.valid) return "plan";
-  if (state.phase === "escalation") return "escalation";
-  return "none";
 }
 
 function costLine(directory: string): string {

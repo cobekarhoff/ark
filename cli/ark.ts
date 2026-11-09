@@ -5,7 +5,7 @@ import { criteriaAmend } from "./criteria.ts";
 import { evaluationRecord } from "./evaluation.ts";
 import { escalate, gateRecord } from "./gate.ts";
 import { mergeRequestOpen, mergeRequestStatus } from "./merge-request.ts";
-import { planCheck } from "./plan.ts";
+import { planCheck } from "./plan-check.ts";
 import { retro } from "./retro.ts";
 import { runClose, runCloseSweep, runStart, runStep, status } from "./run.ts";
 import { strategyRecord } from "./strategy.ts";
@@ -13,8 +13,7 @@ import { testCaseNew } from "./test-case.ts";
 import { testRun } from "./test-run.ts";
 import { uiSkills } from "./ui-skills.ts";
 import { ui, uiInstall, uiUninstall } from "./ui.ts";
-import { workspaceSync } from "./workspace.ts";
-import { worktreeAnchor, worktreeCreate, worktreeSync } from "./worktree.ts";
+import { workspaceSync, worktreeAnchor, worktreeCreate, worktreeSync } from "./worktree.ts";
 
 type Flags = Record<string, string | true>;
 
@@ -95,7 +94,7 @@ const commands: Command[] = [
   {
     usage: "criteria amend <run> <criterion id> <file> --reason <text> [--project <name>]",
     description:
-      "Writes the text in <file> as the new text of one criterion in the run's ticket.md (frontmatter and table row) and records criteria.amended with the criterion, the old text, the new text, `by: human` and the required --reason (the human's reason for the new text). Use it for an amendment the human approved, when an AC wording is wrong after planning, instead of aborting the run. It works in every phase before merge_requests_open (awaiting_strategy, planning, building, escalation, testing) and refuses a run in merge_requests_open or closed (naming the phase), an unknown criterion, an empty file, and a missing or empty --reason. It clears the manual answer of the criterion. Before the plan is approved it also clears the plan check: run ark plan check again so plan.md lists the amendment. After plan approval the run keeps its phase and approval and the next ark test judges the new text: do not run ark plan check again, it can change the plan hash and reset the approval. ark status lists each amendment with its reason.",
+      "Writes the text in <file> as the new text of one criterion in the run's ticket.md (frontmatter and table row) and records criteria.amended with the criterion, the old text, the new text, `by: human` and the required --reason (the human's reason for the new text). Use it for an amendment the human approved, when an AC wording is wrong after planning, instead of aborting the run. It works in every phase before merge_requests_open (awaiting_strategy, planning, building, escalation) and refuses a run in merge_requests_open or closed (naming the phase), an unknown criterion, an empty file, and a missing or empty --reason. It clears the manual answer of the criterion. Before the plan is approved it also clears the plan check: run ark plan check again so plan.md lists the amendment. After plan approval the run keeps its phase and approval and the next ark test judges the new text: do not run ark plan check again, it can change the plan hash and reset the approval. ark status lists each amendment with its reason.",
     flags: { "--project": true, "--reason": true },
     minimum: 3,
     maximum: 3,

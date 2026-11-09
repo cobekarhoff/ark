@@ -1,5 +1,3 @@
-// test ids: roadmap-graph, graph-lane (data-milestone), graph-strip, graph-dot (data-ticket),
-// graph-node (data-ticket, data-state, aria-current), graph-edge (data-from, data-to, data-blocking)
 import { layoutGraph, roundedPath, type GraphInput } from "./roadmap-graph.ts";
 import { StatusChip, type RoadmapData, entryOf } from "./RoadmapParts.tsx";
 import { ticketHref } from "./store.tsx";
@@ -57,7 +55,7 @@ export function RoadmapGraph({
         id: ticket.id,
         lane: laneOf(ticket.milestone),
         needs: needs.filter((id) => shown.has(id)),
-        finishedNeeds: needs.filter((id) => isFinishedTicket(dependency(id)?.status ?? "")),
+        finishedNeeds: needs.filter((id) => isFinishedTicket(dependency(id)?.status)),
       };
     }),
   };

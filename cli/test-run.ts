@@ -14,11 +14,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadConfig, type ProjectConfig } from "./config.ts";
-import { hasTestCriterion, runCriteria } from "./criteria.ts";
+import { hasTestCriterion, runCriteria } from "./ticket.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
-import type { CriterionStatus } from "./lifecycle.ts";
+import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
 import { findRun } from "./paths.ts";
@@ -28,7 +28,6 @@ import { linkUntouched } from "./worktree.ts";
 
 type Status = CriterionStatus;
 
-/** Running child processes, so a signal can stop them: each has its own process group. */
 const children = new Set<{ pid: number }>();
 
 /** Milliseconds a suite process group gets after SIGTERM before SIGKILL. */
@@ -132,10 +131,6 @@ function verifiedByStatus(
 ): Status {
   if (cases.some((entry) => entry.status === "failed")) return "failing";
   return cases.some((entry) => entry.status === "missing") ? "missing" : "passing";
-}
-
-function manualStatus(answer: string | undefined): Status {
-  return answer === "ok" ? "manual ok" : answer === "problem" ? "manual problem" : "manual pending";
 }
 
 type Suite = ProjectConfig["suites"][number];

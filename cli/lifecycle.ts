@@ -36,6 +36,11 @@ export type CriterionStatus =
   | "manual ok"
   | "manual problem";
 
+/** The criterion status a manual gate answer shows in `ark test`; no answer yet is `manual pending`. */
+export function manualStatus(answer: string | undefined): CriterionStatus {
+  return answer === "ok" ? "manual ok" : answer === "problem" ? "manual problem" : "manual pending";
+}
+
 export const ticketKinds = ["bug", "perf", "refactor", "feature"] as const;
 export type TicketKind = (typeof ticketKinds)[number];
 
@@ -43,8 +48,8 @@ export type TicketKind = (typeof ticketKinds)[number];
 export const ticketStatuses = ["proposed", "ready", "in_progress", "done", "superseded"] as const;
 export type TicketStatus = (typeof ticketStatuses)[number];
 
-/** A finished ticket no longer blocks the tickets that depend on it. */
-export const isFinishedTicket = (status: string): boolean =>
+/** A finished ticket no longer blocks the tickets that depend on it; an unknown ticket still blocks. */
+export const isFinishedTicket = (status: string | undefined): boolean =>
   status === "done" || status === "superseded";
 
 /** The ticket status a closed run leaves behind; `handed_off` leaves the file as it is. */
