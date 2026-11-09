@@ -507,7 +507,11 @@ rmdirSync(home+'/inside');release();`,
     mkdirSync(waiterDirectory(), { recursive: true });
     writeFileSync(
       join(waiterDirectory(), `${ended.pid}.json`),
-      JSON.stringify({ run: "2019-01-01-GHOST-1", pid: ended.pid, since: "2019-01-01T00:00:00.000Z" }),
+      JSON.stringify({
+        run: "2019-01-01-GHOST-1",
+        pid: ended.pid,
+        since: "2019-01-01T00:00:00.000Z",
+      }),
     );
     writeFileSync(
       join(waiterDirectory(), `${live.pid}.json`),
