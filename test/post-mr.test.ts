@@ -241,14 +241,18 @@ test("ARK-208-AC3 status prints ci: failed when the GitLab pipeline failed, neve
 
 // A submodule lives on a local bare remote: git refuses the file transport unless told.
 function git(directory: string, ...args: string[]): string {
-  const result = Bun.spawnSync([
-    "git",
-    "-c",
-    "protocol.file.allow=always",
-    "-C",
-    directory,
-    ...args,
-  ]);
+  const result = Bun.spawnSync(
+    ["git", "-c", "protocol.file.allow=always", "-C", directory, ...args],
+    {
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Ark Test",
+        GIT_AUTHOR_EMAIL: "ark@example.com",
+        GIT_COMMITTER_NAME: "Ark Test",
+        GIT_COMMITTER_EMAIL: "ark@example.com",
+      },
+    },
+  );
   expect(result.exitCode, `git ${args.join(" ")}: ${result.stderr.toString()}`).toBe(0);
   return result.stdout.toString().trim();
 }
