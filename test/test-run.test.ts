@@ -50,6 +50,8 @@ function buildingRun(options: {
   manual?: string[];
   roundBudget?: number;
   kind?: string;
+  /** Gives each suite `base_files` that match no test file, so only a refactor run (the whole base) runs it at the base. */
+  selectiveBase?: boolean;
   checks?: { name: string; repo: string; command: string }[];
   /** Give the repo a GitHub origin whose pushes go to a local bare repo, so `merge-request open` can run against the fake `gh`. */
   forge?: boolean;
@@ -77,7 +79,11 @@ function buildingRun(options: {
     suites: [
       { name: "unit", level: "unit", repo: ".", command: junit("unit.test.ts"), parser: "bun" },
       { name: "e2e", level: "e2e", repo: ".", command: junit("e2e.test.ts"), parser: "bun" },
-    ],
+    ].map((suite) =>
+      options.selectiveBase
+        ? { ...suite, base_files: "nomatch/*.test.ts", base_command: `${suite.command} # {files}` }
+        : suite,
+    ),
     roles,
   });
   const ticket = writeTicket(
@@ -204,7 +210,7 @@ describe("ark test", () => {
     expect(event.passed).toBe(false);
   });
 
-  test("ARK-154-AC6 records suites and the head of each worktree, and exits 0 when every AC passes", () => {
+  test("ARK-T135 records suites and the head of each worktree, and exits 0 when every AC passes", () => {
     const { runId, runDirectory, workspace } = buildingRun({
       criteria: ["FAKE-1-AC1", "FAKE-1-AC2"],
       e2e: [passing("FAKE-1-AC1 works"), passing("FAKE-1-AC2 works")],
@@ -224,6 +230,8 @@ describe("ark test", () => {
         { name: "e2e", level: "e2e", passed: true },
       ],
       criteria: { "FAKE-1/AC1": "passing", "FAKE-1/AC2": "passing" },
+      mode: "full",
+      duration: expect.any(Number),
     });
     expect(event.heads["."]).not.toBe(head(workspace));
     expect(readFileSync(join(runDirectory, "results/e2e.report"), "utf8")).toContain(
@@ -470,6 +478,7 @@ describe("ark test on a refactor run", () => {
   test("ARK-T12 a refactor run whose base fails exits 1, reruns the base on each ark test and merge-request open refuses", () => {
     const { runId, runDirectory } = buildingRun({
       kind: "refactor",
+      selectiveBase: true,
       criteria: ["FAKE-1-AC1"],
       ticketCriteria: [{ id: "FAKE-1-AC1", method: "test" }],
       e2e: [failing("FAKE-1-AC1 works")],

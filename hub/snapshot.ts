@@ -24,8 +24,10 @@ import {
 } from "./sources.ts";
 import type {
   Agent,
+  ClosedBand,
   Gate,
   GateKind,
+  MergeRequestView,
   ProviderWindow,
   RoleTimes,
   RunDetail,
@@ -41,8 +43,9 @@ import type {
 import { stageTimes } from "../cli/events.ts";
 import { roleTimesOf } from "./progress.ts";
 import { readRunEvidence, readTicketCases } from "./evidence.ts";
-import { listRunFiles, timelineOf } from "./run-detail.ts";
-import { UsageIndex, type RunCost } from "./usage.ts";
+import { escapedDefects } from "../cli/retro.ts";
+import { isProved, listRunFiles, timelineOf } from "./run-detail.ts";
+import { UsageIndex, readMetricsCost, readMetricsRounds, type RunCost } from "./usage.ts";
 
 export const intervalMilliseconds: Record<SourceName, number> = {
   ark: 2000, // also woken by fs watchers; Orca (0.3 to 0.5 s a call) is never the trigger
@@ -50,7 +53,8 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   plannotator: 5000,
   github: 15_000,
   usage: 5000,
-  providerLimits: 60_000,
+  // ARK_PROVIDER_LIMITS_MS shortens the refresh for tests; unset keeps 60 s.
+  providerLimits: Number(process.env.ARK_PROVIDER_LIMITS_MS) || 60_000,
   agentWait: 3000,
   evidence: 5000,
 };
@@ -261,6 +265,43 @@ export function createSnapshotReader() {
       : null;
   }
 
+  /** The MR state of a closed run, from its outcome, never from gh. An unknown or null outcome stays unknown. */
+  function closedMrState(outcome: string | null): MergeRequestView["state"] {
+    return outcome === "merged"
+      ? "merged"
+      : outcome === "aborted" || outcome === "abandoned"
+        ? "closed"
+        : "unknown";
+  }
+
+  /** The summary of a closed run, read when its detail opens. Never throws: a damaged file is "not recorded". */
+  function bandOf(run: ArkRun, closedAt: string | null): ClosedBand {
+    const cost = readMetricsCost(run.directory)?.total ?? null;
+    const rounds = readMetricsRounds(run.directory);
+    let defects: ClosedBand["escaped_defects"] = [];
+    try {
+      defects = escapedDefects(run.state.project, run.state.run).map(({ ticket, note, fix }) => ({
+        ticket,
+        note,
+        fix,
+      }));
+    } catch {
+      // A malformed escaped-defects.yml shows no list.
+    }
+    const { criteria } = run.state;
+    return {
+      wall_seconds:
+        closedAt === null ? null : (Date.parse(closedAt) - Date.parse(run.events[0].time)) / 1000,
+      criteria: {
+        passing: criteria.filter(({ status }) => isProved(status)).length,
+        total: criteria.length,
+      },
+      cost_usd: cost ?? "not recorded",
+      rework_rounds: rounds ?? "not recorded",
+      escaped_defects: defects,
+    };
+  }
+
   /** One run as the page draws it. A closed run has no Orca agents and nothing it waits for. */
   function viewOf(run: ArkRun, closed: boolean): RunView {
     const { state, events } = run;
@@ -292,19 +333,22 @@ export function createSnapshotReader() {
           started_at: startOf(step.id),
           waiting: waiting.find((wait) => wait.step === step.id) ?? null,
         })) ?? null,
-      merge_requests: state.merge_requests.map((request) => {
-        const facts = githubFacts.get(request.url);
-        return {
-          ...request,
-          state: facts?.state ?? "unknown",
-          ci: facts?.ci ?? "unknown",
-          checks: facts?.checks ?? [],
-          additions: facts?.additions ?? null,
-          deletions: facts?.deletions ?? null,
-          changed_files: facts?.changed_files ?? null,
-          created_at: facts?.created_at ?? null,
-        };
-      }),
+      // handed_off: the MR stays with a person, so the page shows no card.
+      merge_requests: (closed && state.outcome === "handed_off" ? [] : state.merge_requests).map(
+        (request) => {
+          const facts = githubFacts.get(request.url);
+          return {
+            ...request,
+            state: closed ? closedMrState(state.outcome) : (facts?.state ?? "unknown"),
+            ci: facts?.ci ?? "unknown",
+            checks: facts?.checks ?? [],
+            additions: facts?.additions ?? null,
+            deletions: facts?.deletions ?? null,
+            changed_files: facts?.changed_files ?? null,
+            created_at: facts?.created_at ?? null,
+          };
+        },
+      ),
       agents: closed ? [] : agentsOf(run),
       waiting,
       progress: progressOf(run, startOf),
@@ -358,6 +402,15 @@ export function createSnapshotReader() {
     });
     gates.sort((left, right) => left.since.localeCompare(right.since));
 
+    const allEntry = (run: ArkRun): TicketRunView["all"][number] => {
+      const closed = run.state.phase === "closed";
+      return {
+        run: run.state.run,
+        phase: run.state.phase,
+        outcome: closed ? run.state.outcome : null,
+        cost_usd: closed ? costOf(run, true).total : null,
+      };
+    };
     // Runs are newest first, so the first run seen for a ticket is its newest.
     const newest = new Map<string, TicketRunView>();
     for (const run of ark.runs) {
@@ -365,7 +418,7 @@ export function createSnapshotReader() {
       const closed = run.state.phase === "closed";
       const known = newest.get(key);
       if (known) {
-        known.all.push({ run: run.state.run, phase: run.state.phase });
+        known.all.push(allEntry(run));
         continue;
       }
       newest.set(key, {
@@ -375,7 +428,7 @@ export function createSnapshotReader() {
         phase: run.state.phase,
         waiting: !closed && (slots.orca.value?.waits.get(run.state.run)?.length ?? 0) > 0,
         cost_usd: costOf(run, closed).total,
-        all: [{ run: run.state.run, phase: run.state.phase }],
+        all: [allEntry(run)],
       });
     }
     return {
@@ -571,13 +624,15 @@ export function createSnapshotReader() {
       if (!found) return null;
       const closed = found.state.phase === "closed";
       const { events } = found;
+      const closedAt = closed
+        ? (events.findLast((event) => event.type === "run.closed")?.time ?? null)
+        : null;
       return {
         view: viewOf(found, closed),
         closed,
         outcome: found.state.outcome,
-        closed_at: closed
-          ? (events.findLast((event) => event.type === "run.closed")?.time ?? null)
-          : null,
+        closed_at: closedAt,
+        band: closed ? bandOf(found, closedAt) : null,
         timeline: timelineOf(events),
         files: listRunFiles(found.directory),
         sessions: usage.sessionsOf(

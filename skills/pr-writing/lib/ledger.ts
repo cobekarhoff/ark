@@ -51,6 +51,11 @@ export type RepoLedger = {
   files: { path: string; status: string }[];
   /** `Depends on #N` or `Depends on !N` lines for the upstream repos whose MR is open. */
   dependsOn: string[];
+  /** Worktree (or repo root) directory. A ledger written before per-repo fields lacks these four; readers fall back to the run-level values. */
+  path: string;
+  host: Host;
+  tokenOwner: string;
+  template: { path: string; text: string } | null;
 };
 
 export type RiskScore = {
@@ -432,13 +437,26 @@ export function findTemplate(root: string): Ledger["template"] {
   return path ? { path, text: readFileSync(join(root, path), "utf8") } : null;
 }
 
+/** The host, token owner and template of the repo at `directory`. */
+function repoIdentity(
+  directory: string,
+): Pick<RepoLedger, "path" | "host" | "tokenOwner" | "template"> {
+  const host = hostOf(capture(["git", "remote", "get-url", "origin"], directory));
+  return {
+    path: directory,
+    host,
+    tokenOwner: tokenOwner(host, directory),
+    template: findTemplate(directory),
+  };
+}
+
 function repoLedger(
   repo: string,
   directory: string,
   branch: string,
   base: string,
   dependsOn: string[],
-): RepoLedger {
+): Omit<RepoLedger, keyof ReturnType<typeof repoIdentity>> {
   const remoteBase = capture(
     ["git", "rev-parse", "--verify", "--quiet", `origin/${base}`],
     directory,
@@ -553,7 +571,7 @@ function gitLedger(source: { directory: string; base?: string; prWriting?: PrWri
     throw new ArkError(
       `cannot tell the base branch (open MR target ${probes.mergeRequestTarget}, origin/HEAD ${probes.originHead}, host default branch ${probes.hostDefault}): pass --base <branch>`,
     );
-  const repo = repoLedger(".", root, branch, chosen, []);
+  const repo = { ...repoLedger(".", root, branch, chosen, []), ...repoIdentity(root) };
   const prWriting = source.prWriting ?? defaultPrWriting;
   const risk = scoreRisk(repo.files, [], null, null, prWriting);
   return {
@@ -730,13 +748,16 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
       );
       const targetBranch = configured ?? (symbolic ? symbolic.replace(/^origin\//, "") : null);
       return existsSync(worktree.path)
-        ? repoLedger(
-            worktree.repo,
-            worktree.path,
-            worktree.branch,
-            targetBranch ?? worktree.base ?? "main",
-            dependsOn,
-          )
+        ? {
+            ...repoLedger(
+              worktree.repo,
+              worktree.path,
+              worktree.branch,
+              targetBranch ?? worktree.base ?? "main",
+              dependsOn,
+            ),
+            ...repoIdentity(worktree.path),
+          }
         : ({
             repo: worktree.repo,
             branch: worktree.branch,
@@ -747,6 +768,10 @@ function runLedger(source: { runFolder: string; prWriting?: PrWriting }): Ledger
             commits: [],
             files: [],
             dependsOn,
+            path: worktree.path,
+            host: "unknown",
+            tokenOwner: "unknown",
+            template: null,
           } satisfies RepoLedger);
     });
 

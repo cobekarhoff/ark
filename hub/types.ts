@@ -311,8 +311,8 @@ export type TicketRunView = {
   waiting: boolean;
   /** Closed run: from `metrics.json`. Open run: from the usage index. */
   cost_usd: number | null;
-  /** Every run of the ticket, newest first: names and phases only, so a long history stays small. */
-  all: { run: string; phase: Phase }[];
+  /** Every run of the ticket, newest first. Small on purpose: an open run has no outcome and no cost here; a closed run's cost_usd is null when metrics.json holds none. */
+  all: { run: string; phase: Phase; outcome: string | null; cost_usd: number | null }[];
 };
 
 export type Snapshot = {
@@ -337,7 +337,7 @@ export type TimelineEntry = {
   type: string;
   why: string;
   /** Test counts of `test.completed`; null for every other type. */
-  counts: { pass: number; fail: number; missing: number } | null;
+  counts: { pass: number; fail: number; missing: number; notRun: number } | null;
   /** The merge request of `merge_request.opened`; null for every other type. */
   url: string | null;
 };
@@ -361,6 +361,18 @@ export type SessionFile = {
   owner: SessionOwner;
 };
 
+/** The summary of a closed run. Every metrics value is "not recorded" when metrics.json is missing or damaged. */
+export type ClosedBand = {
+  /** `run.started` to `run.closed`, in seconds. */
+  wall_seconds: number | null;
+  /** Criteria that pass (passing or manual ok) of all criteria. Zero criteria is 0 of 0: the page shows a dash. */
+  criteria: { passing: number; total: number };
+  cost_usd: number | "not recorded";
+  rework_rounds: number | "not recorded";
+  /** The entries of escaped-defects.yml for this run: free text, never HTML. */
+  escaped_defects: { ticket: string; note: string; fix: string }[];
+};
+
 /** What `GET /api/run/<run>` answers: any run, open or closed, read on request and never part of the snapshot. */
 export type RunDetail = {
   view: RunView;
@@ -368,6 +380,8 @@ export type RunDetail = {
   outcome: string | null;
   /** Time of `run.closed`, or null for an open run. */
   closed_at: string | null;
+  /** Null for an open run. */
+  band: ClosedBand | null;
   timeline: TimelineEntry[];
   /** Run files that exist, relative to the run folder: plan.md, strategies.md, retro.md, findings/*, results/*. */
   files: string[];

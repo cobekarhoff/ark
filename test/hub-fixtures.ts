@@ -30,6 +30,13 @@ export type FixtureRun = {
   startedAt?: Date;
   /** The ACs of the ticket. Default: `<ticket id>-AC1`. */
   criteria?: string[];
+  /** Closed runs only: the `run.closed` outcome (default handed_off) and seconds after start (default 3500). */
+  outcome?: "merged" | "aborted" | "abandoned" | "handed_off";
+  closedAfter?: number;
+  /** Closed runs only: the `test.completed` statuses by criterion id. */
+  statuses?: Record<string, string>;
+  /** Closed runs only: the verbatim text of `metrics.json`, written instead of `metricsCostUsd`. */
+  metricsText?: string;
 };
 
 /** `YYYY-MM-DD` of today, for run ids. */
@@ -110,7 +117,15 @@ export function writeRun(fixture: FixtureRun): string {
           });
       }
       for (const request of fixture.mergeRequests ?? []) add(3000, "merge_request.opened", request);
-      if (fixture.phase === "closed") add(3500, "run.closed", { outcome: "handed_off" });
+      if (fixture.statuses)
+        add(3400, "test.completed", {
+          passed: Object.values(fixture.statuses).every((status) => status === "passing"),
+          criteria: fixture.statuses,
+        });
+      if (fixture.phase === "closed")
+        add(fixture.closedAfter ?? 3500, "run.closed", {
+          outcome: fixture.outcome ?? "handed_off",
+        });
     }
   }
   writeFileSync(join(directory, "events.ndjson"), `${events.join("\n")}\n`);
@@ -118,7 +133,9 @@ export function writeRun(fixture: FixtureRun): string {
     join(directory, "ticket.md"),
     `---\nid: ${fixture.ticket.id}\ntitle: ${JSON.stringify(fixture.ticket.title)}\n---\n`,
   );
-  if (fixture.metricsCostUsd !== undefined)
+  if (fixture.metricsText !== undefined)
+    writeFileSync(join(directory, "metrics.json"), fixture.metricsText);
+  else if (fixture.metricsCostUsd !== undefined)
     writeFileSync(
       join(directory, "metrics.json"),
       JSON.stringify({ cost: { total_usd: fixture.metricsCostUsd, by_step: {} } }),
@@ -402,6 +419,14 @@ if [ "$mode" = twice ]; then
   [ "$count" -gt 2 ] && exit 1
 fi`;
 
+/**
+ * Holds a fake tool until the file named by ARK_FAKE_GATE exists (no variable: no wait). A separate loop, not part of
+ * `modeGate`, because `omp` and `gh` have none. Bounded at 60 s so a test that never releases cannot hang the suite.
+ */
+export const fakeGateEnvironment = "ARK_FAKE_GATE";
+const gateWait = `n=0
+while [ -n "\${ARK_FAKE_GATE:-}" ] && [ ! -e "\${ARK_FAKE_GATE}" ] && [ "$n" -lt 600 ]; do sleep 0.1; n=$((n + 1)); done`;
+
 /** Shell scripts for the fake `orca`, `gh` and `plannotator`. None of them touches the network or a real tool. */
 export function fakeToolScripts(state: string): {
   orca: string;
@@ -411,6 +436,7 @@ export function fakeToolScripts(state: string): {
 } {
   return {
     orca: `echo "$*" >> '${state}/orca.log'
+${gateWait}
 sleep "$(cat '${state}/orca.sleep')"
 cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
 ${modeGate(state, "orca", "$cmd")}
@@ -426,6 +452,7 @@ case "$1 $2" in
 esac`,
     // `gh pr view` is the one call the hub makes: state, the checks, diff size and creation time.
     gh: `echo "$*" >> '${state}/gh.log'
+${gateWait}
 case "$1 $2" in
   "pr view")
     if grep -qxF "$3" '${state}/gh.viewfailing'; then exit 1; fi
@@ -436,6 +463,7 @@ case "$1 $2" in
 esac`,
     // Answers `usage --json` once, then exits 1 in mode `once` (counted in the state folder).
     omp: `[ "$1 $2" = "usage --json" ] || exit 1
+${gateWait}
 mode=$(cat '${state}/omp.mode' 2>/dev/null || echo up)
 [ "$mode" = down ] && exit 1
 count=$(cat '${state}/omp.count' 2>/dev/null || echo 0)
@@ -443,7 +471,8 @@ count=$((count + 1))
 printf '%s' "$count" > '${state}/omp.count'
 [ "$mode" = once ] && [ "$count" -gt 1 ] && exit 1
 cat '${state}/omp.usage'`,
-    plannotator: `${modeGate(state, "plannotator", "sessions")}
+    plannotator: `${gateWait}
+${modeGate(state, "plannotator", "sessions")}
 cat '${state}/plannotator.sessions'`,
   };
 }

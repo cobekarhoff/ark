@@ -364,7 +364,7 @@ function submoduleRun() {
   // bump-lib: libs/lib points at the head of the lib branch
   const submodule = join(appTree.path, "libs/lib");
   git(appTree.path, "submodule", "update", "--init", "-q", "libs/lib");
-  git(submodule, "fetch", "-q", "origin");
+  git(submodule, "fetch", "-q", libTree.path, branchHead);
   git(submodule, "checkout", "-q", "--detach", branchHead);
   git(appTree.path, "commit", "-q", "-am", "point libs/lib at the lib branch");
   finish("bump-lib");

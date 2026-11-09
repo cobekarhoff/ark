@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "test/pw",
   testMatch: "**/*.pw.ts",
-  fullyParallel: false,
+  fullyParallel: true,
   workers: 2,
   retries: 0,
   // Slow Linux CI runners timed out the Bun.WebView tests (ARK-180, ARK-235).

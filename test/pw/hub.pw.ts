@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -12,6 +13,7 @@ import { dirname, join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import {
   appendRawEvent,
+  fakeGateEnvironment,
   commitCase,
   ompMessagesText,
   orcaAnswersFor,
@@ -47,9 +49,21 @@ test.beforeAll(() => {
 });
 
 const started: StartedHub[] = [];
+const gates: string[] = [];
 test.afterEach(async () => {
+  // Release held fake tools, so a failing case leaves no waiting process behind.
+  for (const gate of gates.splice(0)) writeFileSync(gate, "");
+  delete process.env[fakeGateEnvironment];
   await Promise.all(started.splice(0).map((hub) => stopHub(hub.process)));
 });
+
+/** Holds every fake tool until the returned function runs. Call it before `launch`, so the hub inherits the gate. */
+function holdFakeTools(): () => void {
+  const gate = join(tempDirectory("ark-gate-"), "release");
+  process.env[fakeGateEnvironment] = gate;
+  gates.push(gate);
+  return () => writeFileSync(gate, "");
+}
 
 async function launch(): Promise<string> {
   const hub = await startHub();
@@ -161,10 +175,9 @@ test("ARK-277-AC3 handlers read only memory: p95 under 200 ms on 25 runs and 300
 
 // ---------------------------------------------------------------- AC4
 
-test("ARK-277-AC4 the page sends no request but its first load and one event stream, and an appended event shows on Home within 5 s", async ({
+test("ARK-T133 ARK-277-AC4 the page sends no request but its first load and one event stream, and an appended event shows on Home within 5 s", async ({
   page,
 }) => {
-  test.setTimeout(300_000);
   isolate();
   const run = runId("ARK-201");
   const directory = writeRun({
@@ -211,8 +224,9 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
     ["Runs", "Runs"],
     ["Roadmap", "Roadmap"],
   ] as const;
+  // The page clock runs from here; the real Date.now steps (the Home append below) are the test's own, not the page's.
+  await page.clock.install();
   for (const [name, heading] of views) {
-    const viewStartedAt = Date.now();
     await page.getByRole("navigation", { name: "Views" }).getByRole("link", { name }).click();
     await expect(page.getByRole("heading", { name: new RegExp(heading) }).first()).toBeVisible();
     if (name === "Home") {
@@ -227,8 +241,13 @@ test("ARK-277-AC4 the page sends no request but its first load and one event str
       await expect(page.getByTestId("mr")).toContainText("!77", { timeout: 5000 });
       expect(Date.now() - appendedAt).toBeLessThan(5000);
     }
-    // The AC is about 30 s of silence on each view: a real wait, there is no event to wait for.
-    await page.waitForTimeout(Math.max(0, 30_000 - (Date.now() - viewStartedAt)));
+    // The AC is about 30 s of silence on each view: advance the page clock, no real wait.
+    const before = requests.length;
+    await page.clock.fastForward(30_000);
+    expect(
+      requests.slice(before).map((request) => request.url()),
+      `${name} after 30 s`,
+    ).toEqual([]);
   }
 
   // No view reads anything after the first load: Runs and Roadmap draw from the snapshot, and the
@@ -1436,7 +1455,7 @@ const usageAt = (fraction: number, baseInstant = Date.now()) => ({
 });
 
 /** Home with 1 gate, 1 stuck agent (a prompt), 2 MRs in review and the 5h window of anthropic at 82%. The usage reset is `baseInstant` + 74 min: the page compares it with its own clock, every age with the server's. */
-async function homeWithBlockers(baseInstant = Date.now()) {
+async function homeWithBlockers(baseInstant = Date.now(), holdOrca = false) {
   isolate();
   const gate = writeRun({
     project: "p",
@@ -1514,7 +1533,9 @@ async function homeWithBlockers(baseInstant = Date.now()) {
       { index: 1, target: join(gate, "ticket.md"), url: "http://localhost:20000/review/gate" },
     ],
   });
-  return { baseUrl: await launch(), older, newer, stuckRun };
+  // Held fake tools make the first snapshot late until `release` runs.
+  const release = holdOrca ? holdFakeTools() : () => {};
+  return { baseUrl: await launch(), older, newer, stuckRun, release };
 }
 
 /** The fixture and the page clock share one instant in UTC, so the reset form (HH:MM or date and time) never depends on when the suite runs. */
@@ -1663,7 +1684,7 @@ test("ARK-285-AC5 a javascript: URL in a gate or an MR shows as text, never a li
   await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
 });
 
-test("ARK-285-AC7 Runs shows every run on one board and graph with filters, rings of steps done, dashed edges to open tickets and what each run unblocks", async ({
+test("ARK-T152 Runs shows every run on one board and graph with filters, rings of steps done, dashed edges to open tickets and what each run unblocks", async ({
   page,
 }) => {
   isolate();
@@ -1745,9 +1766,9 @@ test("ARK-285-AC7 Runs shows every run on one board and graph with filters, ring
   await expect(lane("Building").getByTestId("run-card")).toHaveCount(2);
   await expect(lane("Needs me").getByTestId("run-card")).toHaveCount(0);
   await expect(lane("Awaiting merge").getByTestId("run-card")).toHaveCount(1);
-  // Closed: the last 5, and a count of the older run.
-  await expect(lane("Closed").getByTestId("run-card")).toHaveCount(5);
-  await expect(lane("Closed").getByTestId("older-runs")).toHaveText("1 older run in graph");
+  // Closed: all 6 show (the lane pages by 20), with no older-runs control.
+  await expect(lane("Closed").getByTestId("run-card")).toHaveCount(6);
+  await expect(lane("Closed").getByTestId("older-runs")).toHaveCount(0);
 
   // A ring of steps done, from plan.yml: 1 of 3 for ARK-601. A title wraps to 2 lines.
   const ring = lane("Building").locator('[data-ticket="ARK-601"] [data-testid="ring"]');
@@ -1805,15 +1826,128 @@ test("ARK-285-AC7 Runs shows every run on one board and graph with filters, ring
   expect(
     await page.getByTestId("graph-edge").evaluate((path) => getComputedStyle(path).strokeDasharray),
   ).toBe("none");
-  // The older-runs button opens the Old filter too.
-  await filter("Active").click();
-  await lane("Closed").getByTestId("older-runs").click();
-  await expect(filter("Old")).toHaveAttribute("aria-pressed", "true");
 
   // A click on a run opens its run page.
   await lane("Building").locator('[data-ticket="ARK-601"]').click();
   await expect(page).toHaveURL(new RegExp(`#/run/${runId("ARK-601")}$`));
   await expect(page.locator("main h1")).toContainText("ARK-601");
+});
+
+/** The Roadmap of ARK-T26: 44 open tickets, so the page scrolls. */
+function roadmapOf44(): void {
+  const ticket = (
+    id: string,
+    status: string,
+    extra: Partial<Parameters<typeof writeBacklogTicket>[0]> = {},
+  ) =>
+    writeBacklogTicket({
+      project: "p",
+      id,
+      title: `Title of ${id}`,
+      status,
+      milestone: "M4",
+      ...extra,
+    });
+  ticket("ARK-701", "ready");
+  writeRun({
+    project: "p",
+    run: runId("ARK-701"),
+    ticket: { id: "ARK-701", title: "Title of ARK-701" },
+    phase: "building",
+  });
+  ticket("ARK-702", "in_progress");
+  ticket("ARK-703", "ready", {
+    dependsOn: ["ARK-701"],
+    title: "The ticket page",
+    problem:
+      "The first line.\n\nSecond paragraph with <b>raw markup</b> in it.\n\n- one bullet\n- another bullet",
+    change: "Change the page <script>window.__ran = 1</script>.",
+    criteria: [
+      { id: "ARK-703-AC1", text: "The page shows the title" },
+      { id: "ARK-703-AC2", text: "Esc returns to the list" },
+    ],
+  });
+  ticket("ARK-704", "ready", { dependsOn: ["ARK-703"] });
+  ticket("ARK-705", "superseded");
+  ticket("ARK-706", "done");
+  const proposed = Array.from(
+    { length: 40 },
+    (_, number) => `ARK-8${String(number).padStart(2, "0")}`,
+  );
+  for (const id of proposed) ticket(id, "proposed");
+  writeRoadmap("p", {
+    now: ["ARK-701"],
+    next: ["ARK-702", "ARK-703"],
+    later: ["ARK-704", ...proposed, "ARK-705", "ARK-706"],
+  });
+}
+
+test("ARK-T117 Esc from a ticket page returns the Roadmap to the scroll position read while the nav source labels showed, after the labels vanish", async ({
+  page,
+}) => {
+  isolate();
+  roadmapOf44();
+  const release = holdFakeTools();
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "roadmap");
+  const labels = page.getByTestId("stale-label");
+  await expect.poll(() => labels.count()).toBeGreaterThanOrEqual(4);
+  const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
+  await expect(selected).toHaveAttribute("data-ticket", "ARK-701");
+  for (let press = 0; press < 30; press++) await page.keyboard.press("j");
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(100);
+  // The read above had 4 or more labels; they vanish now, before Enter and Esc.
+  expect(await labels.count()).toBeGreaterThanOrEqual(4);
+  const target = (await selected.getAttribute("data-ticket"))!;
+  release();
+  await expect(labels).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`#/ticket/${target}$`));
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/roadmap$/);
+  await expect(selected).toHaveAttribute("data-ticket", target);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+});
+
+test("ARK-T118 The hub header has the same height with 4 or more stale source labels in the nav as with none", async ({
+  page,
+}) => {
+  isolate();
+  roadmapOf44();
+  const release = holdFakeTools();
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "roadmap");
+  const labels = page.getByTestId("stale-label");
+  await expect.poll(() => labels.count()).toBeGreaterThanOrEqual(4);
+  const header = page.locator("header.top");
+  const heightOf = async () => (await header.boundingBox())!.height;
+  await checkpoint(page, "header-with-labels");
+  const withLabels = await heightOf();
+  // Every label and every chip of the nav lies inside the header box.
+  const box = (await header.boundingBox())!;
+  const parts = page.locator(".nav-right > *, [data-testid=stale-label]");
+  for (const part of await parts.all()) {
+    const inner = await part.boundingBox();
+    if (!inner) continue; // an empty wrapper has no box
+    expect(inner.y).toBeGreaterThanOrEqual(box.y);
+    expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
+  }
+  // Narrow window: overflowing labels start at the scroll origin, so every one is reachable.
+  const wideViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 320, height: 800 });
+  const row = page.locator(".asof-list");
+  const rowLeft = (await row.boundingBox())!.x;
+  const firstLabel = (await labels.first().boundingBox())!;
+  expect(firstLabel.x).toBeGreaterThanOrEqual(rowLeft);
+  await page.setViewportSize(wideViewport);
+  release();
+  await expect(labels).toHaveCount(0);
+  await checkpoint(page, "header-without-labels");
+  expect(await heightOf()).toBe(withLabels);
 });
 
 test("ARK-T26 Roadmap lists the tickets by horizon, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
@@ -1970,7 +2104,7 @@ test("ARK-T26 Roadmap lists the tickets by horizon, keys move and open them, a t
   await expect(page.locator("main h1")).toHaveText("Title of ARK-704");
 });
 
-test("ARK-285-AC9 the run page puts a progress strip, the vertical step plan, then agents, MR evidence and a link to the ticket in the hybrid-1 layout, and keeps the decisions, run files and Open in Orca", async ({
+test("ARK-T131 ARK-285-AC9 the run page puts a progress strip, the vertical step plan, then agents, MR evidence and a link to the ticket in the hybrid-1 layout, and keeps the decisions, run files and Open in Orca", async ({
   page,
 }) => {
   isolate();
@@ -2067,17 +2201,31 @@ test("ARK-285-AC9 the run page puts a progress strip, the vertical step plan, th
   );
   await expect(page.locator("main")).not.toContainText(/\bETA\b/);
 
+  // A test-owned late layout (nothing in product code): once released, a 400 ms transition grows the strip by 1000 px and moves the plan and the side column.
+  await page.addStyleTag({
+    content:
+      ".strip { transition: padding-bottom 400ms, margin-right 400ms; } html.late .strip { padding-bottom: 1000px; margin-right: 40px; }",
+  });
+  const stripSelector = ".strip";
+  const [stripBefore] = await settledBoxes(page, [stripSelector]);
+  await page.evaluate(() => document.documentElement.classList.add("late"));
+  await checkpoint(page, "layout-released");
+  // Read every box in one frame, after the late layout settled.
+  const [first, second, third, stripBox, agents] = await settledBoxes(page, [
+    '[data-testid="step-node"][data-step="first"]',
+    '[data-testid="step-node"][data-step="second"]',
+    '[data-testid="step-node"][data-step="third"]',
+    stripSelector,
+    '[data-testid="agents"]',
+  ]);
+  // The forced change happened: the strip grew by the 1000 px the hook adds.
+  expect(stripBox.height).toBeGreaterThanOrEqual(stripBefore.height + 999);
+  await checkpoint(page, "layout-settled");
   // The vertical plan: one step below the other, the strip above the plan, the plan left of the side column.
-  const box = async (selector: string) => (await page.locator(selector).boundingBox())!;
-  const first = await box('[data-testid="step-node"][data-step="first"]');
-  const second = await box('[data-testid="step-node"][data-step="second"]');
-  const third = await box('[data-testid="step-node"][data-step="third"]');
   expect(second.y).toBeGreaterThan(first.y + first.height);
   expect(third.y).toBeGreaterThan(second.y + second.height);
   expect(Math.abs(first.x - third.x)).toBeLessThan(2);
-  const stripBox = (await strip.boundingBox())!;
   expect(first.y).toBeGreaterThan(stripBox.y + stripBox.height);
-  const agents = await box('[data-testid="agents"]');
   expect(agents.x).toBeGreaterThan(first.x + first.width);
 
   // The side column: agents with Open in Orca, the merge request, a link to the ticket page.
@@ -2176,11 +2324,33 @@ async function weakContrast(page: Page): Promise<{ checked: number; weak: Contra
   });
 }
 
+/** WCAG contrast of the element's own text colour on its own background colour, as the browser computed them now. */
+function contrastRatioOf(element: Locator): Promise<number> {
+  return element.evaluate((node) => {
+    const channels = (css: string) =>
+      css
+        .match(/[\d.]+/g)!
+        .slice(0, 3)
+        .map(Number);
+    const light = (css: string) => {
+      const [r, g, b] = channels(css).map((channel) => {
+        const value = channel / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const style = getComputedStyle(node);
+    const [one, two] = [light(style.color), light(style.backgroundColor)].sort((a, b) => b - a);
+    return (one + 0.05) / (two + 0.05);
+  });
+}
+
 test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or Dark and keeps it after a reload, and text keeps its contrast on Home, Runs and a ticket page in both themes", async ({
   page,
 }) => {
   test.setTimeout(120_000);
-  const { baseUrl } = await homeWithBlockers();
+  // The fake Orca is held: the first snapshot is late until the test releases it.
+  const { baseUrl, release } = await homeWithBlockers(Date.now(), true);
   for (const [id, status] of [
     ["ARK-511", "ready"],
     ["ARK-512", "ready"],
@@ -2199,6 +2369,14 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   page.on("request", (request) => requests.push(new URL(request.url()).pathname));
   await page.emulateMedia({ colorScheme: "light" });
   await open(page, baseUrl, "");
+  // Held: the agent probe has not answered, so no action button exists yet.
+  // The gate link is not an agent action: the held gate's own snapshot already draws it.
+  const actions = page.locator(
+    '.btn.primary:not(:disabled):not([data-testid="gate-link"]), .btn-orca:not(:disabled)',
+  );
+  await expect(page.getByTestId("stuck")).toHaveCount(1, { timeout: 20_000 });
+  await expect(actions).toHaveCount(0);
+  release();
   // Wait for every panel the contrast check must see.
   await expect(page.getByTestId("stuck")).toHaveCount(1, { timeout: 20_000 });
   await expect(page.getByTestId("review").first().getByTestId("tests")).toHaveText(
@@ -2253,30 +2431,23 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   await theme("Dark").click();
   await open(page, baseUrl, "");
   await expect(page.getByTestId("stuck")).toHaveCount(1);
-  const actions = page.locator(".btn.primary:not(:disabled), .btn-orca:not(:disabled)");
   // The buttons render after the stuck row once the agent probe answers: wait, don't count once.
   await expect(actions.first()).toBeVisible({ timeout: 20_000 });
   for (let index = 0; index < (await actions.count()); index++) {
     const action = actions.nth(index);
-    await action.hover();
-    await page.waitForTimeout(400); // the color transition has ended
-    const ratio = await action.evaluate((element) => {
-      const channels = (css: string) =>
-        css
-          .match(/[\d.]+/g)!
-          .slice(0, 3)
-          .map(Number);
-      const light = (css: string) => {
-        const [r, g, b] = channels(css).map((channel) => {
-          const value = channel / 255;
-          return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-        });
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      };
-      const style = getComputedStyle(element);
-      const [one, two] = [light(style.color), light(style.backgroundColor)].sort((a, b) => b - a);
-      return (one + 0.05) / (two + 0.05);
+    // Hover state reached (a snapshot push may re-render the button and drop it: hover again), then the color transition (a Web Animation) finished.
+    await expect(async () => {
+      await action.hover();
+      expect(await action.evaluate((element) => element.matches(":hover"))).toBe(true);
+    }).toPass();
+    await action.evaluate(async (element) => {
+      await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
+      await Promise.all(
+        element.getAnimations().map((fade) => fade.finished.catch(() => undefined)),
+      );
     });
+    await checkpoint(page, "hover-state-final");
+    const ratio = await contrastRatioOf(action);
     expect(ratio, `hovered action ${index} in Dark`).toBeGreaterThanOrEqual(4.5);
   }
 
@@ -2290,6 +2461,72 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
   expect(await background()).toBe(systemLight);
   await theme("Auto").click();
   await expect.poll(background).toBe(systemDark);
+});
+
+test("ARK-T123 every test runs on its own worker slot with its own ARK_HOME and its own hub port", async () => {
+  expect(test.info().config.fullyParallel).toBe(true);
+  expect(test.info().config.workers).toBeGreaterThanOrEqual(2);
+  // Two tests of one run would collide on these three if they were shared.
+  const firstHome = tempArkHome();
+  const secondHome = tempArkHome();
+  expect(firstHome).not.toBe(secondHome);
+  installFakeTools({});
+  const firstHub = await launch();
+  const secondHub = await launch();
+  expect(new URL(firstHub).port).not.toBe("0");
+  expect(new URL(firstHub).port).not.toBe(new URL(secondHub).port);
+});
+
+test("ARK-T124 the 30 s page-clock silence check sees a 25 s poll and stays empty without one", async ({
+  page,
+}) => {
+  isolate();
+  installFakeTools({});
+  const baseUrl = await launch();
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  await open(page, baseUrl, "");
+  await page.clock.install();
+
+  // No poll: 30 s of page time send nothing.
+  const quiet = requests.length;
+  await page.clock.fastForward(30_000);
+  expect(requests.slice(quiet)).toEqual([]);
+
+  // The injected fault: a poll every 25 s. fastForward fires it, so the same check now fails.
+  await page.evaluate(() => {
+    setInterval(() => void fetch("/api/snapshot"), 25_000);
+  });
+  const polled = requests.length;
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => requests.slice(polled)).toContain("/api/snapshot");
+});
+
+test("ARK-T128 the first action of Home is visible and its hover colour final after a late first snapshot", async ({
+  page,
+}) => {
+  // The fake Orca is held, so the first snapshot is late until the test releases it.
+  const { baseUrl, release } = await homeWithBlockers(Date.now(), true);
+  // The gate link is not an agent action: the held gate's own snapshot already draws it.
+  const actions = page.locator(
+    '.btn.primary:not(:disabled):not([data-testid="gate-link"]), .btn-orca:not(:disabled)',
+  );
+  await open(page, baseUrl, "");
+  await expect(actions).toHaveCount(0);
+  release();
+  const action = actions.first();
+  await expect(action).toBeVisible();
+  await expect(async () => {
+    await action.hover();
+    expect(await action.evaluate((element) => element.matches(":hover"))).toBe(true);
+  }).toPass();
+  await action.evaluate(async (element) => {
+    await new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame)));
+    await Promise.all(element.getAnimations().map((fade) => fade.finished.catch(() => undefined)));
+  });
+  await checkpoint(page, "hover-state-final");
+  // The transition has ended: the resting colours of the hovered button keep 4.5:1.
+  expect(await contrastRatioOf(action), "hovered first action of Home").toBeGreaterThanOrEqual(4.5);
 });
 
 test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ page }) => {
@@ -3577,7 +3814,7 @@ test("ARK-309-AC4 the notes button of a later project's section scrolls to that 
   await expect(notes("alpha")).not.toBeInViewport();
 });
 
-test("ARK-309-AC5 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it", async ({
+test("ARK-T136 ARK-309-AC5 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it", async ({
   page,
 }) => {
   filterWorld(40);
@@ -3629,6 +3866,8 @@ test("ARK-309-AC5 a ticket and a run of another project open by direct link with
   await expect(page.getByTestId("stale-label")).toHaveCount(0); // the layout settles once every source has answered
   const item = page.locator('[data-testid="review-item"][data-ticket="ARK-939"]');
   await item.evaluate((node) => node.scrollIntoView({ block: "center" }));
+  // Click only on the final geometry: no animation runs and the box is equal across two frames.
+  await settledBoxes(page, ['[data-testid="review-item"][data-ticket="ARK-939"]']);
   const before = await page.evaluate(() => window.scrollY);
   expect(before).toBeGreaterThan(100);
   await item.click();
@@ -5008,3 +5247,369 @@ test("ARK-T78 ARK-329/AC3 the ticket page shows the snapshot title at once, show
   await expect(problem).toHaveText("Third text", { timeout: 5000 });
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
+
+// ---------------------------------------------------------------- ARK-353 closed runs
+
+const closedRunId = (ticket: string) => runId(ticket);
+const closedTicket = (id: string) => ({ id, title: `Title of ${id}` });
+const bandOf = (page: Page) => page.getByTestId("closed-band");
+
+test("ARK-T144 the page of a merged closed run opens with a summary band of outcome, wall time, ACs and metrics", async ({
+  page,
+}) => {
+  isolate();
+  const run = closedRunId("ARK-801");
+  writeRun({
+    project: "p",
+    run,
+    ticket: closedTicket("ARK-801"),
+    phase: "closed",
+    outcome: "merged",
+    closedAfter: 4320,
+    criteria: ["A1", "A2", "A3", "A4"],
+    statuses: { A1: "passing", A2: "passing", A3: "passing", A4: "failing" },
+    metricsText: JSON.stringify({
+      cost: { total_usd: 4.2 },
+      rework: { rounds: 2 },
+      time: { wall_seconds: 60 },
+    }),
+  });
+  installFakeTools({});
+  await open(page, await launch(), `run/${run}`);
+
+  const band = bandOf(page);
+  await expect(band).toBeVisible();
+  await expect(band.getByTestId("band-outcome")).toHaveText("merged");
+  await expect(band.getByTestId("band-wall")).toHaveText("1h 12m");
+  await expect(band.getByTestId("band-acs")).toHaveText("3 of 4");
+  await expect(band.getByTestId("band-cost")).toHaveText("$4.20");
+  await expect(band.getByTestId("band-rounds")).toHaveText("2");
+  // Above the plan, and the outcome shows once.
+  const bandTop = (await band.boundingBox())!;
+  const planTop = (await page.locator(".plan-panel").boundingBox())!;
+  expect(bandTop.y + bandTop.height).toBeLessThanOrEqual(planTop.y);
+  await expect(page.getByTestId("band-outcome")).toHaveCount(1);
+  await expect(page.getByTestId("closed-banner")).not.toContainText("merged");
+  await checkpoint(page, "closed-band-merged");
+});
+
+test("ARK-T145 a closed run with no or damaged metrics.json shows not recorded for cost and rounds and keeps the other values", async ({
+  page,
+}) => {
+  isolate();
+  const make = (ticket: string, extra: Partial<FixtureRun>) => {
+    writeRun({
+      project: "p",
+      run: closedRunId(ticket),
+      ticket: closedTicket(ticket),
+      phase: "closed",
+      outcome: "merged",
+      closedAfter: 2700,
+      criteria: ["A1", "A2", "A3"],
+      statuses: { A1: "passing", A2: "passing", A3: "failing" },
+      ...extra,
+    });
+    return closedRunId(ticket);
+  };
+  const runA = make("ARK-811", {});
+  const runB = make("ARK-812", { metricsText: "{ not json" });
+  const runC = make("ARK-813", {
+    outcome: "aborted",
+    criteria: [],
+    statuses: undefined,
+    closedAfter: 600,
+  });
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  for (const run of [runA, runB]) {
+    await open(page, baseUrl, `run/${run}`);
+    const band = bandOf(page);
+    await expect(band.getByTestId("band-cost")).toHaveText("not recorded");
+    await expect(band.getByTestId("band-rounds")).toHaveText("not recorded");
+    await expect(band.getByTestId("band-outcome")).toHaveText("merged");
+    await expect(band.getByTestId("band-wall")).toHaveText("45m");
+    await expect(band.getByTestId("band-acs")).toHaveText("2 of 3");
+    if (run === runA) await checkpoint(page, "closed-band-not-recorded");
+  }
+  await open(page, baseUrl, `run/${runC}`);
+  const band = bandOf(page);
+  await expect(band.getByTestId("band-outcome")).toHaveText("aborted");
+  await expect(band.getByTestId("band-wall")).toHaveText("10m");
+  await expect(band.getByTestId("band-acs")).toHaveText(/^(0 of 0|–)$/);
+  await expect(band.getByTestId("band-cost")).toHaveText("not recorded");
+  await expect(band).not.toContainText("NaN");
+  await expect(band).not.toContainText("$0");
+});
+
+test("ARK-T146 the MR card of a closed run takes its state from the run outcome and gh is never asked about a closed run", async ({
+  page,
+}) => {
+  isolate();
+  const url = (number: number) => `https://github.com/example/repo/pull/${number}`;
+  const outcomes = ["merged", "aborted", "abandoned", "handed_off"] as const;
+  const runs = outcomes.map((outcome, index) => {
+    const ticket = `ARK-82${index}`;
+    writeRun({
+      project: "p",
+      run: closedRunId(ticket),
+      ticket: closedTicket(ticket),
+      phase: "closed",
+      outcome,
+      mergeRequests: [{ repo: ".", url: url(index + 1), number: index + 1 }],
+    });
+    return closedRunId(ticket);
+  });
+  const openRun = closedRunId("ARK-829");
+  writeRun({
+    project: "p",
+    run: openRun,
+    ticket: closedTicket("ARK-829"),
+    phase: "merge_requests_open",
+    mergeRequests: [{ repo: ".", url: url(9), number: 9 }],
+  });
+  const state = installFakeTools({});
+  const baseUrl = await launch();
+
+  // One refresh finished: gh was asked about the open run.
+  const log = () =>
+    existsSync(join(state, "gh.log")) ? readFileSync(join(state, "gh.log"), "utf8") : "";
+  await expect.poll(log).toContain(url(9));
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("mr")).toHaveAttribute("data-state", "open");
+
+  const expected = ["merged", "closed", "closed", null];
+  for (const [index, run] of runs.entries()) {
+    await open(page, baseUrl, `run/${run}`);
+    await expect(bandOf(page)).toBeVisible();
+    if (expected[index] === null) await expect(page.getByTestId("mr")).toHaveCount(0);
+    else await expect(page.getByTestId("mr-state")).toHaveText(expected[index]);
+    await checkpoint(page, `closed-mr-${outcomes[index]}`);
+  }
+  // Let another refresh run, then read the log.
+  await expect.poll(() => log().split(url(9)).length - 1).toBeGreaterThan(1);
+  const asked = log();
+  expect(asked).toContain(url(9));
+  for (const number of [1, 2, 3, 4]) expect(asked).not.toContain(url(number));
+});
+
+test("ARK-T147 the band links retro.md and each findings file that exists and no link for an absent file", async ({
+  page,
+}) => {
+  isolate();
+  const runA = closedRunId("ARK-831");
+  const runB = closedRunId("ARK-832");
+  const directoryA = writeRun({
+    project: "p",
+    run: runA,
+    ticket: closedTicket("ARK-831"),
+    phase: "closed",
+    outcome: "merged",
+  });
+  writeRun({
+    project: "p",
+    run: runB,
+    ticket: closedTicket("ARK-832"),
+    phase: "closed",
+    outcome: "merged",
+  });
+  mkdirSync(join(directoryA, "findings"), { recursive: true });
+  writeFileSync(join(directoryA, "retro.md"), "# Retro text\n");
+  writeFileSync(join(directoryA, "findings", "review round 1.md"), "round one text\n");
+  writeFileSync(join(directoryA, "findings", "qe.md"), "qe text\n");
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, `run/${runA}`);
+  const links = bandOf(page).getByTestId("band-link");
+  await expect(links).toHaveCount(3);
+  expect(
+    await links.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-path"))),
+  ).toEqual(["retro.md", "findings/qe.md", "findings/review round 1.md"]);
+  const texts: Record<string, string> = {
+    "retro.md": "# Retro text",
+    "findings/qe.md": "qe text",
+    "findings/review round 1.md": "round one text",
+  };
+  for (const [path, text] of Object.entries(texts)) {
+    const response = await page.request.get(
+      `${baseUrl}/api/run/${runA}/file?path=${encodeURIComponent(path)}`,
+    );
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toContain(text);
+  }
+  // A click opens the file in the page, also for the name with a space.
+  await links.filter({ hasText: "review round 1.md" }).click();
+  await expect(page.getByText("round one text")).toBeVisible();
+  await checkpoint(page, "closed-band-links");
+
+  // Without the files: no link, no placeholder.
+  await open(page, baseUrl, `run/${runB}`);
+  await expect(bandOf(page)).toBeVisible();
+  await expect(page.getByTestId("band-link")).toHaveCount(0);
+  await checkpoint(page, "closed-band-no-links");
+
+  // Delete retro.md and reload: its link goes.
+  rmSync(join(directoryA, "retro.md"));
+  await open(page, baseUrl, `run/${runA}`);
+  await expect(page.getByTestId("band-link")).toHaveCount(2);
+  await expect(page.locator('[data-testid="band-link"][data-path="retro.md"]')).toHaveCount(0);
+});
+
+test("ARK-T148 the band lists the escaped defects of this run from escaped-defects.yml and nothing for a run with none", async ({
+  page,
+}) => {
+  isolate();
+  const make = (ticket: string) => {
+    writeRun({
+      project: "p",
+      run: closedRunId(ticket),
+      ticket: closedTicket(ticket),
+      phase: "closed",
+      outcome: "merged",
+      metricsText: JSON.stringify({
+        cost: { total_usd: 1 },
+        rework: { rounds: 0 },
+        escaped_defects: 0,
+      }),
+    });
+    return closedRunId(ticket);
+  };
+  const runA = make("ARK-841");
+  const runB = make("ARK-842");
+  const runC = make("ARK-843");
+  const file = join(process.env.ARK_HOME as string, "projects", "p", "escaped-defects.yml");
+  writeFileSync(
+    file,
+    [
+      { ticket: "ARK-901", run: runA, note: "first <b>x</b> note", fix: "fix one", reviewer: "r" },
+      { ticket: "ARK-902", run: runA, note: "second note", fix: "fix two", reviewer: "r" },
+      { ticket: "ARK-903", run: runB, note: "other run note", fix: "other fix", reviewer: "r" },
+    ]
+      .map(
+        (entry) =>
+          `- ticket: ${entry.ticket}\n  run: ${entry.run}\n  note: ${JSON.stringify(entry.note)}\n  fix: ${JSON.stringify(entry.fix)}\n  reviewer: ${entry.reviewer}\n`,
+      )
+      .join(""),
+  );
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, `run/${runA}`);
+  const defects = page.getByTestId("band-defect");
+  await expect(defects).toHaveCount(2);
+  await expect(defects.nth(0)).toContainText("ARK-901");
+  await expect(defects.nth(0)).toContainText("first <b>x</b> note");
+  await expect(defects.nth(0)).toContainText("fix one");
+  await expect(defects.nth(1)).toContainText("ARK-902");
+  await expect(defects.nth(1)).toContainText("fix two");
+  await expect(bandOf(page)).not.toContainText("other run note");
+  await expect(bandOf(page).locator("b")).toHaveCount(2); // the two ticket ids, no <b> from the note
+  await checkpoint(page, "closed-band-defects");
+
+  await open(page, baseUrl, `run/${runC}`);
+  await expect(bandOf(page)).toBeVisible();
+  await expect(page.getByTestId("band-defect")).toHaveCount(0);
+  await expect(bandOf(page).getByRole("heading")).toHaveCount(0);
+  await checkpoint(page, "closed-band-no-defects");
+
+  writeFileSync(file, "- ticket: [unclosed\n  run: {\n");
+  await open(page, baseUrl, `run/${runA}`);
+  await expect(bandOf(page)).toBeVisible();
+  await expect(page.getByTestId("band-defect")).toHaveCount(0);
+  rmSync(file);
+  await open(page, baseUrl, `run/${runA}`);
+  await expect(bandOf(page)).toBeVisible();
+  await expect(page.getByTestId("band-defect")).toHaveCount(0);
+});
+
+test("ARK-T149 the Closed lane shows 20 closed runs with outcome and cost and Show more adds 20 until all 45 show", async ({
+  page,
+}) => {
+  isolate();
+  const ids = Array.from({ length: 45 }, (_, index) => `ARK-${900 + index}`);
+  const withoutMetrics = new Set(["ARK-901", "ARK-920", "ARK-944"]);
+  for (const [index, id] of ids.entries()) {
+    writeBacklogTicket({ project: "p", id, title: `Title of ${id}`, status: "done" });
+    writeRun({
+      project: "p",
+      run: closedRunId(id),
+      ticket: closedTicket(id),
+      phase: "closed",
+      outcome: index % 9 === 4 ? "aborted" : "merged",
+      startedAt: ago(200_000 - index * 3000),
+      ...(withoutMetrics.has(id) ? {} : { metricsCostUsd: 1 + index }),
+    });
+  }
+  for (const id of ["ARK-950", "ARK-951"]) {
+    writeBacklogTicket({ project: "p", id, title: `Title of ${id}`, status: "ready" });
+    writeRun({
+      project: "p",
+      run: closedRunId(id),
+      ticket: closedTicket(id),
+      phase: "building",
+      steps: [{ id: "only", role: "implementer", harness: "omp", model: "m", needs: [] }],
+    });
+  }
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "runs");
+  const closed = page.locator('[data-testid="lane"][data-lane="Closed"]');
+  const cards = closed.getByTestId("run-card");
+  const runsOf = () =>
+    cards.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-run")));
+  const newestFirst = ids.map(closedRunId).toSorted().reverse();
+
+  await expect(cards).toHaveCount(20);
+  expect(await runsOf()).toEqual(newestFirst.slice(0, 20));
+  const card = (id: string) => closed.locator(`[data-run="${closedRunId(id)}"]`);
+  await expect(card("ARK-944").getByTestId("card-outcome")).toHaveText("merged");
+  await expect(card("ARK-944").getByTestId("card-cost")).toHaveText("not recorded");
+  await expect(card("ARK-943").getByTestId("card-cost")).toHaveText("$44.00");
+  await expect(cards.first().getByTestId("card-outcome")).toBeVisible();
+  await checkpoint(page, "closed-lane-20");
+
+  await closed.getByTestId("show-more").click();
+  await expect(cards).toHaveCount(40);
+  expect(await runsOf()).toEqual(newestFirst.slice(0, 40));
+  await closed.getByTestId("show-more").click();
+  await expect(cards).toHaveCount(45);
+  expect(await runsOf()).toEqual(newestFirst);
+  await expect(closed.getByTestId("show-more")).toHaveCount(0);
+  await expect(closed.getByTestId("older-runs")).toHaveCount(0);
+  await expect(card("ARK-901").getByTestId("card-cost")).toHaveText("not recorded");
+  await expect(card("ARK-920").getByTestId("card-cost")).toHaveText("not recorded");
+  await expect(card("ARK-904").getByTestId("card-outcome")).toHaveText("aborted");
+  await expect(page.getByText("last 5")).toHaveCount(0);
+  await expect(
+    page.locator('[data-testid="lane"][data-lane="Building"]').getByTestId("run-card"),
+  ).toHaveCount(2);
+  await checkpoint(page, "closed-lane-45");
+});
+
+type Box = { x: number; y: number; width: number; height: number };
+
+/** The boxes of the selectors in one frame, read once no animation runs and the geometry is equal across two frames. */
+async function settledBoxes(page: Page, selectors: string[]): Promise<Box[]> {
+  return page.evaluate(async (list) => {
+    const read = () =>
+      JSON.stringify(
+        list.map((selector) => {
+          const { x, y, width, height } = document.querySelector(selector)!.getBoundingClientRect();
+          return { x, y, width, height };
+        }),
+      );
+    const frame = () => new Promise((done) => requestAnimationFrame(done));
+    let last = "";
+    for (;;) {
+      await document.fonts.ready;
+      await Promise.all(
+        document.getAnimations().map((fade) => fade.finished.catch(() => undefined)),
+      );
+      await frame();
+      const now = read();
+      if (now === last && document.getAnimations().length === 0) return JSON.parse(now);
+      last = now;
+    }
+  }, selectors);
+}

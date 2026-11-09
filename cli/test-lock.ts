@@ -65,7 +65,7 @@ export function readTestLock(): { holder: TestLockEntry | null; waiters: TestLoc
     ? readdirSync(waiterDirectory())
         .map((name) => readEntry(join(waiterDirectory(), name)))
         .filter((entry): entry is TestLockEntry => entry !== null && alive(entry.pid))
-        .sort((a, b) => a.since.localeCompare(b.since))
+        .sort((a, b) => a.since.localeCompare(b.since) || a.pid - b.pid)
     : [];
   return { holder: holder && alive(holder.pid) ? holder : null, waiters };
 }
@@ -163,8 +163,16 @@ export async function takeTestLock(
 
   try {
     let waiting = false;
+    const since = new Date().toISOString();
     for (;;) {
-      const taken = tryTake(runId);
+      // ponytail: a live waiter that never takes the lock blocks newer ones; ARK-390 replaces this lock.
+      const olderWaiter = readTestLock().waiters.find(
+        (other) =>
+          other.pid !== process.pid &&
+          (other.since < since || (other.since === since && other.pid < process.pid)),
+      );
+      const blocked = olderWaiter !== undefined;
+      const taken = blocked ? null : tryTake(runId);
       if (taken !== null) {
         holderFile = taken;
         rmSync(waiterFile, { force: true });
@@ -176,11 +184,11 @@ export async function takeTestLock(
         const entry: TestLockEntry = {
           run: runId,
           pid: process.pid,
-          since: new Date().toISOString(),
+          since,
         };
         writeFileSync(waiterFile, JSON.stringify(entry));
-        const holder = readHolder()?.entry;
-        if (holder) console.log(`waiting for ark test of ${holder.run} (pid ${holder.pid})`);
+        const blocker = readHolder()?.entry ?? olderWaiter;
+        if (blocker) console.log(`waiting for ark test of ${blocker.run} (pid ${blocker.pid})`);
       }
       await Bun.sleep(pollMilliseconds);
     }

@@ -19,7 +19,7 @@ import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
 import { assertAllowed } from "./transitions.ts";
-import { commitsAhead, worktreeCleanup } from "./worktree.ts";
+import { commitsAhead, submoduleLines, worktreeCleanup } from "./worktree.ts";
 import { loadPlan, repoGraph, type Plan } from "./plan.ts";
 import { hasTestCriterion, manualCriteria, readTicket, setTicketStatus } from "./ticket.ts";
 
@@ -358,6 +358,15 @@ function statusMergeRequestsMode(project: string): ProjectConfig["merge_requests
   }
 }
 
+/** Submodule lines need the config's workspace; without a valid ark.yml, status prints none. */
+function statusSubmoduleLines(project: string, worktrees: RunState["worktrees"]): string[] {
+  try {
+    return submoduleLines(loadConfig(project), worktrees);
+  } catch {
+    return [];
+  }
+}
+
 /** The plan's repo order, repos list and steps, or none when the plan is missing or invalid (status stays readable). */
 function readablePlan(directory: string, ticketId: string): Plan | undefined {
   try {
@@ -493,7 +502,8 @@ function printRun(runId: string, inProject?: string): void {
     ...(manualPending.length > 0 ? [`manual pending: ${manualPending.join(", ")}`] : []),
     ...(answered.length > 0 ? ["gates answered:", ...answered] : []),
     ...amendedLines(state),
-    `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") : "none"}`,
+    ...statusSubmoduleLines(project, state.worktrees),
+    `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") + (state.last_test.mode === "quick" ? " (quick, not a gate)" : "") : "none"}`,
     ...testHeadLines(directory),
     ...(statusMergeRequestsMode(project) === "none"
       ? localOnlyLines(project, directory, state)

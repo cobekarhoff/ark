@@ -246,10 +246,17 @@ a.chip[aria-current] {
 .dot.live {
   --c: var(--green);
 }
+/* Own full-width header row: reserved height, so labels appearing or vanishing never move the page. */
 .asof-list {
+  flex: 0 0 100%;
   display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: safe flex-end;
   gap: 10px;
-  flex-wrap: wrap;
+  min-height: 22px;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 .asof {
   color: var(--amber-t);
@@ -2783,4 +2790,73 @@ a.case-chip:hover {
 .doc-alert strong {
   display: block;
   margin-bottom: 2px;
+}
+.closed-band {
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.band-top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.band-links {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.band-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+.band-stats div {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+.band-stats dt {
+  font-size: 11px;
+  color: var(--mute);
+}
+.band-stats dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.nr {
+  color: var(--mute);
+  font-weight: 400;
+  font-style: italic;
+  font-size: 13px;
+}
+.band-escaped {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.band-escaped h2 {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.band-escaped ul {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.band-escaped li {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  overflow-wrap: anywhere;
 }

@@ -6,17 +6,17 @@ technique: state transition (base fail / head pass) plus equivalence classes of 
 priority: high
 risk: ark test skips base for non-refactor kinds, copies no head test files into base, or lets a base failure fail a feature run; or a head failure stops failing the run
 status: active
-changed_by: 2026-11-07-ARK-351-1
+changed_by: 2026-11-08-ARK-389-1
 ---
 
 ## Objective
 
-Prove that `ark test` runs every suite at the `worktree.created` base commit for a `feature` run, after copying the head's added or changed test files into the base checkout, and that a base failure is data: `ark test` exits 0.
+Prove that `ark test` runs at the `worktree.created` base commit, for a `feature` run, the suites that have a changed test file of the run's own commits (ARK-T119 owns the file selection; here each suite's `base_files` matches a changed file, so every suite runs), and every suite for a `refactor` run, after copying the head's added or changed test files into the base checkout, and that a base failure is data: `ark test` exits 0.
 
 ## Preconditions
 
 - Fake project helper as in `test/test-run.test.ts`, no git mocking. Two touched repos, `repoA` and `repoB`, each with its own base commit (different SHAs). Expected base SHAs are read with `git rev-parse` in each fixture repo right after creating the base commit and written into that run's `worktree.created` event by the fixture; the assertions compare against those values.
-- Each repo's test config has two suites (`s1`, `s2`). Every suite prints `SUITE=<repo>/<suite> CHECKOUT=<base|head>` where CHECKOUT is derived from `git rev-parse HEAD` compared with the fixture's recorded base SHA, never from the code under test.
+- Each repo's test config has two suites (`s1`, `s2`), each with `base_files` and `base_command`, and each matching at least one test file that the run's own commits add (so no suite is skipped at base here; skipping is ARK-T119). Every suite prints `SUITE=<repo>/<suite> CHECKOUT=<base|head>` where CHECKOUT is derived from `git rev-parse HEAD` compared with the fixture's recorded base SHA, never from the code under test.
 - Base commit of each repo: production `src/feature.ts` without `feature()`; tests `test/keep.test.ts` (to be deleted at head), `test/old-name.test.ts` (to be renamed), `test/helpers/util.ts` (helper, old content `v1`), `tests/nested/a.test.ts`, `features/x.feature` (old content `v1`), `test/cases/ARK-X.md`, `packages/app/test/helpers/h.ts` (old content `v1`), `packages/app/features/z.feature` (old content `v1`), `packages/app/tests/a.test.ts`.
 - Head commit of each repo: adds `src/feature.ts: feature()` (production, must stay absent at base); adds `test/new.test.ts`, `tests/nested/deep/b.test.ts`, `features/y.feature`, `test/fixtures/data.json`, `test/cases/ARK-Y.md`, and the non-root files `packages/app/test/new.test.ts`, `packages/app/tests/new.test.ts`, `packages/app/features/y.feature`; changes `test/helpers/util.ts` (`v2`), `features/x.feature` (`v2`), `packages/app/test/helpers/h.ts` (`v2`), `packages/app/features/z.feature` (`v2`); deletes `test/keep.test.ts`; renames `test/old-name.test.ts` to `test/renamed.test.ts` (git rename, content unchanged). A production file `packages/app/src/p.ts` is added at head and must stay absent at base.
 - Run fixtures (same repos, different `kind` in `state.json`): K1 `feature`, K2 `bug`, K3 `perf`, K4 `refactor` (suites fail at base), K5 `feature` where `test/new.test.ts` also fails at head, K6 `bug` and K7 `perf` where `test/new.test.ts` fails at head, K8 `refactor` where every suite passes at base and `test/new.test.ts` fails at head.
@@ -37,9 +37,9 @@ Prove that `ark test` runs every suite at the `worktree.created` base commit for
 ## Expected results
 
 - When a new test fails at base and passes at head in a `feature`, `bug` or `perf` run, the system shall exit 0 from `ark test`.
-- When `ark test` runs, the system shall run every configured suite of every touched repo at that repo's own recorded base SHA.
+- When `ark test` runs, the system shall run every suite that selects a changed test file (every suite for a `refactor` run) of every touched repo at that repo's own recorded base SHA. A suite with no changed file is skipped on purpose (ARK-T119), not a failure.
 - When `ark test` runs, the system shall copy head's added, changed and renamed-to files under any `test`, `tests` or `features` folder (any depth, including non-root folders such as `packages/app/test`, helpers, fixtures and `test/cases/`) into the base checkout, and shall not delete a base file deleted or renamed at head, and shall not copy production files.
-- When `ark test` runs a `feature`, `bug`, `perf` or `refactor` run, the system shall run the suites at base on every invocation and shall not reuse an earlier base result.
+- When `ark test` runs a full (not `--quick`) `feature`, `bug`, `perf` or `refactor` run, the system shall run the suites at base on every invocation and shall not reuse an earlier base result.
 - When the suites fail at base in a `refactor` run with at least one `method: test` AC, the system shall exit non-zero. A `refactor` run with no `method: test` AC is not refused for this (ARK-T63).
 - When a suite fails at head, the system shall exit non-zero for every kind, including `bug`, `perf` and `refactor` runs whose base passes.
 

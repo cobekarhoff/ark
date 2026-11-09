@@ -271,6 +271,10 @@ export function assertShippable(
 ): void {
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
+  if (lastTest.data.mode === "quick")
+    throw new ArkError(
+      `the last test at this head is quick, not a gate: run \`ark test ${runId}\``,
+    );
   const unproven = manualCriteria(directory).filter(
     (id) => manualStatus(state.gates[`manual:${id}`]) !== "manual ok",
   );
@@ -889,6 +893,8 @@ export function bumpRefresh(
       value = viewed.mergeCommit;
     }
     const submodule = join(worktree.path, edge.pin);
+    // composing the worktree cloned the submodule from a local source: point origin back at the .gitmodules URL
+    run(["git", "submodule", "sync", "--", edge.pin], worktree.path);
     run(["git", "fetch", "origin"], submodule);
     run(["git", "checkout", "--detach", value], submodule);
     value = run(["git", "rev-parse", "HEAD"], submodule);

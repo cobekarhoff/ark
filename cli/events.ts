@@ -54,7 +54,13 @@ export type RunState = {
   sync_conflicts: string[];
   /** Value of the last `bump.refreshed` of each bump step. */
   bump_refreshed: Record<string, string>;
-  last_test: { passed: boolean; heads: Record<string, string> } | null;
+  /** `mode` is `full` for an old event with none; a `quick` result is never a gate. `duration` is seconds. */
+  last_test: {
+    passed: boolean;
+    heads: Record<string, string>;
+    mode: "quick" | "full";
+    duration?: number;
+  } | null;
   /** Some test.completed had every non-manual criterion failing: the bug run's proof that the tests fail before the fix. */
   red_test: boolean;
   /** Suites at the base commit of a refactor run: undefined until `ark test` ran them. */
@@ -267,7 +273,12 @@ export function deriveState(events: ArkEvent[]): RunState {
             ([id, status]) => [alias(id), status],
           ),
         );
-        lastTest = { passed: data.passed, heads: data.heads };
+        lastTest = {
+          passed: data.passed,
+          heads: data.heads,
+          mode: data.mode === "quick" ? "quick" : "full",
+          ...(typeof data.duration === "number" ? { duration: data.duration } : {}),
+        };
         basePassed = data.base_passed ?? basePassed;
         testRuns.push(criteriaStatus);
         if (mergeRequests.length === 0 && escalation === "answered") escalation = "none";

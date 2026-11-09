@@ -27,14 +27,20 @@ export const parseBun: Parser = ({ report }) => {
   for (const [, attributeText, , body = ""] of report.matchAll(
     /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g,
   )) {
-    const { name = "", classname = "" } = attributesOf(attributeText);
+    const { name = "", classname = "", file } = attributesOf(attributeText);
     const criteria = [...new Set(`${classname} ${name}`.match(criterionPattern) ?? [])].sort();
     const status = /<(failure|error)\b/.test(body)
       ? "failed"
       : /<skipped\b/.test(body)
         ? "skipped"
         : "passed";
-    results.push({ name, criteria, cases: caseIdsIn(`${classname} ${name}`).sort(), status });
+    results.push({
+      name,
+      criteria,
+      cases: caseIdsIn(`${classname} ${name}`).sort(),
+      status,
+      ...(file ? { file } : {}),
+    });
   }
   return results;
 };

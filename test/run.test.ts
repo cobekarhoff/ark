@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -27,6 +29,8 @@ import {
   writeTicket,
   workspaceWithRepos,
 } from "./helpers.ts";
+
+const repositoryRoot = join(import.meta.dir, "..");
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -684,14 +688,19 @@ test("ARK-228-AC2 ark escalate stores the reason without outer whitespace", () =
 });
 
 // Fake `orca`: a bun script over $FAKE_ORCA_DIR/state.json. It logs each call to calls.log, pages lists
-// by `pageSize`, turns a released worker into terminalState "released", and sleeps when `hang` is set.
+// by `pageSize`, turns a released worker into terminalState "released", and sleeps when `hang` is set and waits for the test to release `gate`.
 const fakeOrca = `#!/usr/bin/env bun
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 const dir = process.env.FAKE_ORCA_DIR;
 const args = process.argv.slice(2);
 appendFileSync(dir + "/calls.log", args.join(" ") + "\\n");
 const state = JSON.parse(readFileSync(dir + "/state.json", "utf8"));
-if (state.delayMs) await Bun.sleep(state.delayMs);
+if (state.gate) {
+  // The first call tells the test it arrived (the write waits for the test to read), then every call
+  // waits on the gate FIFO until the test releases it.
+  appendFileSync(dir + "/env.log", (process.env.ARK_ORCA_TIMEOUT_MS ?? "") + "\\n");
+  try { writeFileSync(dir + "/reached", "1"); readFileSync(dir + "/gate"); } catch {}
+}
 if (state.hang) await Bun.sleep(30000);
 const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const page = (rows, key) => {
@@ -716,7 +725,7 @@ type FakeState = {
   workers: Record<string, FakeWorker[]>;
   pageSize?: number;
   hang?: boolean;
-  delayMs?: number;
+  gate?: boolean;
   failRelease?: string[];
 };
 
@@ -802,7 +811,9 @@ test("ARK-278-AC2 run close keeps an active dispatch and says so", () => {
   ]);
 });
 
-test("ARK-278-AC3 an Orca failure prints one orca line and the close still records and exits 0", () => {
+test("ARK-T129 ARK-278-AC3 an Orca failure prints one orca line and the close still records and exits 0", async () => {
+  // The reader timeout is far above any host stall: only the hang case below lets it decide.
+  process.env.ARK_ORCA_TIMEOUT_MS = "600000";
   const closedEvent = (directory: string) =>
     JSON.parse(eventLines(directory).at(-1) as string).type === "run.closed";
 
@@ -835,8 +846,9 @@ test("ARK-278-AC3 an Orca failure prints one orca line and the close still recor
       ],
     },
     failRelease: ["ctx_bad", "ctx_bad2"],
+    gate: true,
   });
-  const part = ark("run", "close", partial.runId, "aborted");
+  const part = await closeWhileOrcaWaits(partial.runId);
   expect(part.code).toBe(0);
   expect(part.out).toBe(
     `${partial.runId} closed: aborted\nctx_good released (succeeded)\norca: workers not released: orca orchestration worker-release failed or timed out\n`,
@@ -851,30 +863,62 @@ test("ARK-278-AC3 an Orca failure prints one orca line and the close still recor
   expect(nothing.out).toBe(`${none.runId} closed: aborted\n`);
 });
 
-test("ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later close against a slow orca", () => {
+test("ARK-T132 ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later close against a slow orca", async () => {
+  const outer = process.env.ARK_ORCA_TIMEOUT_MS;
   runHangingClose();
+  // The hang case restored the variable it set: the 300 ms does not outlive it.
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBe(outer);
 
-  // real wall-clock delay: the fake orca subprocess must outlast the leaked 300 ms to prove the override is gone
+  // The slow orca answers when the test releases it; the close it serves has the long reader timeout.
   const slow = startRun("demo", "ARK-904");
   useFakeOrca({
-    delayMs: 700,
+    gate: true,
     runs: [{ id: "orca_slow", objective: `Ark run ${slow.runId}` }],
     workers: { orca_slow: [worker("ctx_slow", "succeeded", "reclaimable")] },
   });
-  const closed = ark("run", "close", slow.runId, "aborted");
+  const closed = await closeWhileOrcaWaits(slow.runId);
   expect(closed.out).toContain("ctx_slow released (succeeded)");
   expect(closed.out).not.toContain("orca:");
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBe(outer);
 });
+
+/** Runs `ark run close` while the fake orca holds its first call; the test releases it once the close is waiting. */
+async function closeWhileOrcaWaits(run: string): Promise<{ code: number; out: string }> {
+  const gate = join(fakeDirectory, "gate");
+  const reached = join(fakeDirectory, "reached");
+  for (const fifo of [gate, reached]) Bun.spawnSync(["mkfifo", fifo]);
+  const holder = openSync(gate, "r+"); // readers of the gate wait while this writer end is open
+  const outer = process.env.ARK_ORCA_TIMEOUT_MS;
+  process.env.ARK_ORCA_TIMEOUT_MS = "600000"; // far above any host stall: the gate decides, not the reader timeout
+  try {
+    const child = Bun.spawn(
+      ["bun", join(repositoryRoot, "cli", "ark.ts"), "run", "close", run, "aborted"],
+      { env: process.env, stdout: "pipe", stderr: "pipe" },
+    );
+    readFileSync(reached); // blocks until the orca arrives (Bun.file cannot read a FIFO)
+    rmSync(reached);
+    expect(child.exitCode).toBeNull(); // the close is still waiting for the orca
+    rmSync(gate); // a later call finds no gate
+    closeSync(holder); // EOF for the waiting reader: the orca answers
+    const [out] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    return { code: child.exitCode ?? 1, out };
+  } finally {
+    if (outer === undefined) delete process.env.ARK_ORCA_TIMEOUT_MS;
+    else process.env.ARK_ORCA_TIMEOUT_MS = outer;
+  }
+}
 
 // Shared by ARK-278-AC3 and ARK-292-AC1: the hang case sets a short timeout and must clean it up itself.
 function runHangingClose() {
   const hung = startRun("demo", "ARK-901");
   useFakeOrca({ runs: [], workers: {}, hang: true });
+  const outer = process.env.ARK_ORCA_TIMEOUT_MS;
   process.env.ARK_ORCA_TIMEOUT_MS = "300";
   try {
     return { directory: hung.directory, output: ark("run", "close", hung.runId, "aborted") };
   } finally {
-    delete process.env.ARK_ORCA_TIMEOUT_MS;
+    if (outer === undefined) delete process.env.ARK_ORCA_TIMEOUT_MS;
+    else process.env.ARK_ORCA_TIMEOUT_MS = outer;
   }
 }
 

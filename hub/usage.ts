@@ -82,6 +82,16 @@ export function readMetricsCost(directory: string): RunCost | null {
   }
 }
 
+/** Rework rounds of a closed run from `metrics.json`; null when the file is missing, damaged or has no number. */
+export function readMetricsRounds(directory: string): number | null {
+  try {
+    const rounds = JSON.parse(readFileSync(join(directory, "metrics.json"), "utf8")).rework?.rounds;
+    return typeof rounds === "number" ? rounds : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Per-message cost of every session file whose cwd is inside an open run, in memory. A file is
  * keyed by path, size and mtime; when one changes the whole file is parsed again (Claude removes
