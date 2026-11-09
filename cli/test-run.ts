@@ -23,8 +23,8 @@ import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
 import { findRun } from "./paths.ts";
 import { takeTestLock } from "./test-lock.ts";
-import { discoverRepos, mirrorRoot } from "./workspace.ts";
-import { linkUntouched } from "./worktree.ts";
+import { discoverRepos, mirrorRoot, submodulesOf } from "./workspace.ts";
+import { initSubmodule, linkUntouched } from "./worktree.ts";
 
 type Status = CriterionStatus;
 
@@ -457,6 +457,17 @@ async function baseSuitesPassed(
           : cloned;
       if (created.code !== 0)
         throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
+      if (existsSync(join(path, ".gitmodules"))) {
+        // base runs use the pointer the base commit records, never the run's library head; the head worktree's
+        // folders are a local source, so an unreachable remote does not stop the base side
+        try {
+          for (const submodule of submodulesOf(path))
+            initSubmodule(path, submodule, [join(source, submodule.path)]);
+        } catch (err) {
+          if (!(err instanceof ArkError)) throw err;
+          throw new ArkError(`base submodules of ${repo} failed: ${err.message}`);
+        }
+      }
       await copyHeadTests(
         join(mirror, repo),
         path,
