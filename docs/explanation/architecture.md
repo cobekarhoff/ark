@@ -142,6 +142,20 @@ flowchart LR
 
 For a multi-repo ticket, `ark worktree create` builds `<run>/workspace/` as a mirror of the workspace. Each repo the run touches is a worktree at its usual path; every other repo and every root file is a symlink to the workspace. Agents in a worktree find the workspace's context by walking up. `ark test` runs docker compose with `--project-directory <run>/workspace`, so every `./repos/*` path in the compose file resolves to the run's changes. The plan has a step per repo in dependency order, the integration tests run against both worktrees together, and Ark opens one MR per repo in that order, with a dependency where the host supports it and `Depends on !N` in the body otherwise. For a single-repo workspace, `<run>/workspace` is itself the worktree.
 
+### Submodule composition
+
+A worktree of a repo with submodules (`.gitmodules`) is filled, not left empty. `ark worktree create` runs `git -c protocol.file.allow=always submodule update --init` in it, before the project's `setup` so install and build commands find their libraries. The clone URL is the run's library worktree when the submodule maps to one, else the source clone's initialised submodule, else the `.gitmodules` URL, so an unreachable or private remote does not stop a worktree whose objects are local. Each submodule sits at the commit the consumer's index records. The flag `protocol.file.allow=always` is needed because git 2.38 and later refuse a local-path submodule by default. Create runs this step every time, also when the consumer's worktree already exists, so a library worktree made after its consumer is picked up; `ark worktree sync` runs it again after the merges.
+
+Which repo is the library: a submodule maps to the run worktree whose repo has an `origin` URL equal to the `.gitmodules` URL (a trailing `.git` or `/` is ignored), else the run repo with the same basename as the URL (or the submodule folder). The consumer is never its own library. A submodule with no such worktree stays at its recorded commit.
+
+For a mapped submodule, create and sync fetch the committed `HEAD` of the library worktree into the submodule and check it out detached. Run head means that committed `HEAD`: uncommitted library changes are invisible, so commit in the library step, then run `ark worktree sync`. Ark never stages the submodule. `git ls-files --stage` of the consumer is the same before and after, and `ark worktree sync` first puts the recorded commit back, so its merge does not meet a modified submodule. `git status` in the consumer shows ` M <path>`; an implementer must not run `git add -A` or `git commit -a` on it, and `ark worktree cleanup` does not count that line as an uncommitted change only while the submodule is at the library head and its own tree is clean; edited or untracked submodule files keep the worktree. Bumping the pointer is a separate change.
+
+`ark status` recomputes from git when it prints, with no event field: one line `submodule <consumer>/<path> at run head of <repo> <8 characters>` per submodule whose checkout equals the library worktree's head.
+
+`discoverRepos` skips submodule folders: a submodule is part of its consumer, so `ark worktree create` does not accept `vendor/lib` as a repo. The `worktree.created` event is recorded before the submodule step. A submodule failure stops with the consumer, the submodule path and the git cause, and keeps the worktree; the next create finds the event, does not remove the worktree as stale, and runs the step again.
+
+`ark test` at the base commit uses the recorded pointer, not the run head: the base checkout is a throwaway checkout of the consumer at its base, so its submodules are the library as recorded there, cloned from the head worktree's submodule folders first so the remote need not be reachable. A package pin edge needs no worktree change: compose mounts the upstream repo's worktree, so the consumer already builds against the run's library.
+
 ## Run folder
 
 Each project keeps its files under `~/.ark/projects/<project>/`.
