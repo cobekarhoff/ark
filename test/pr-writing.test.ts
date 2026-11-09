@@ -163,7 +163,10 @@ function makeRun(spec: RunSpec = {}) {
     ticket_source: "local",
     suites: [{ name: "s", level: "integration", repo: ".", command: "true", parser: "bun" }],
     roles: Object.fromEntries(
-      ["implementer", "validator", "reviewer"].map((role) => [role, { harness: "h", model: "m" }]),
+      ["implementer", "validator", "reviewer"].map((role) => [
+        role,
+        { harness: "omp", model: "m" },
+      ]),
     ),
     ...(spec.checks
       ? {
@@ -199,7 +202,7 @@ function makeRun(spec: RunSpec = {}) {
   writeFileSync(
     join(directory, "plan.yml"),
     JSON.stringify({
-      steps: steps.map((step) => ({ harness: "h", model: "m", criteria: [], ...step })),
+      steps: steps.map((step) => ({ harness: "omp", model: "m", criteria: [], ...step })),
       test_cases: [],
       design: { interfaces: spec.interfaces ?? [] },
       summary: {
@@ -616,7 +619,10 @@ function cliRun(
     suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
     pr_writing: { tier_floor: 1, ...(extraConfig.pr_writing as object) },
     roles: Object.fromEntries(
-      ["implementer", "validator", "reviewer"].map((role) => [role, { harness: "h", model: "m" }]),
+      ["implementer", "validator", "reviewer"].map((role) => [
+        role,
+        { harness: "omp", model: "m" },
+      ]),
     ),
   });
   const directory = join(projectDirectory, "runs", runId);
@@ -643,7 +649,7 @@ function cliRun(
           id: "core-impl",
           role: "implementer",
           repo: "repos/core",
-          harness: "h",
+          harness: "omp",
           model: "m",
           needs: [],
           criteria: ["ARK-316-AC1"],
@@ -1715,7 +1721,7 @@ const configBase = () => ({
   ticket_source: "local",
   suites: [{ name: "s", level: "unit", repo: ".", command: "c", parser: "bun" }],
   roles: Object.fromEntries(
-    ["implementer", "validator", "reviewer"].map((role) => [role, { harness: "h", model: "m" }]),
+    ["implementer", "validator", "reviewer"].map((role) => [role, { harness: "omp", model: "m" }]),
   ),
 });
 

@@ -261,7 +261,7 @@ describe("plan approval survives only an unchanged valid recheck", () => {
       ticket_source: "local",
       suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
       roles: {
-        implementer: { harness: "other", model: "other" },
+        implementer: { harness: "omp", model: "other" },
         validator: { harness: "codex", model: "gpt-codex" },
         reviewer: { harness: "codex", model: "gpt-codex" },
       },

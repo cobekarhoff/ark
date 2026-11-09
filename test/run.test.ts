@@ -350,26 +350,38 @@ test("ARK-152-AC5 a failed step stays the current step", () => {
 });
 
 test("ARK-152-AC6 status without a run lists every open run with phase and current step, across projects", () => {
-  const first = startRun("demo", "ARK-900");
-  approvePlan(first.directory);
-  ark("run", "step", first.runId, "build", "start");
-  writeProject("other", validConfig());
-  const second = startRun("other", "ARK-910");
-  const closed = startRun("demo", "ARK-920");
-  ark("run", "close", closed.runId, "aborted");
+  withControlledPath(
+    "ok",
+    () => {
+      const first = startRun("demo", "ARK-900");
+      approvePlan(first.directory);
+      ark("run", "step", first.runId, "build", "start");
+      writeProject("other", validConfig());
+      const second = startRun("other", "ARK-910");
+      const closed = startRun("demo", "ARK-920");
+      ark("run", "close", closed.runId, "aborted");
 
-  const listing = ark("status");
-  expect(listing.code).toBe(0);
-  const lines = listing.out.trim().split("\n");
-  expect(lines).toContain(`${first.runId}  building  build  0m`);
-  expect(lines).toContain(`${second.runId}  awaiting_criteria  -  0m`);
-  expect(listing.out).not.toContain(closed.runId);
+      const listing = ark("status");
+      expect(listing.code).toBe(0);
+      const lines = listing.out.trim().split("\n");
+      expect(lines).toContain(`${first.runId}  building  build  0m`);
+      expect(lines).toContain(`${second.runId}  awaiting_criteria  -  0m`);
+      expect(listing.out).not.toContain(closed.runId);
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-152-AC2 status passes when every project config is valid", () => {
-  const result = ark("status");
-  expect(result.code).toBe(0);
-  expect(result.out).not.toContain("config error");
+  withControlledPath(
+    "ok",
+    () => {
+      const result = ark("status");
+      expect(result.code).toBe(0);
+      expect(result.out).not.toContain("config error");
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-152-AC2 status exits 1 and names the bad field and project of an invalid config", () => {
@@ -383,36 +395,48 @@ test("ARK-152-AC2 status exits 1 and names the bad field and project of an inval
 });
 
 test("ARK-152-AC2 ARK_PROJECT limits the status config check to one project", () => {
-  writeProject("broken", validConfig({ ticket_source: "trello" }));
-  try {
-    process.env.ARK_PROJECT = "demo";
-    expect(ark("status").code).toBe(0);
-    process.env.ARK_PROJECT = "broken";
-    expect(ark("status").code).toBe(1);
-    process.env.ARK_PROJECT = "ghost";
-    const missing = ark("status");
-    expect(missing.code).toBe(1);
-    expect(missing.err).toContain("ghost");
-  } finally {
-    delete process.env.ARK_PROJECT;
-  }
+  withControlledPath(
+    "ok",
+    () => {
+      writeProject("broken", validConfig({ ticket_source: "trello" }));
+      try {
+        process.env.ARK_PROJECT = "demo";
+        expect(ark("status").code).toBe(0);
+        process.env.ARK_PROJECT = "broken";
+        expect(ark("status").code).toBe(1);
+        process.env.ARK_PROJECT = "ghost";
+        const missing = ark("status");
+        expect(missing.code).toBe(1);
+        expect(missing.err).toContain("ghost");
+      } finally {
+        delete process.env.ARK_PROJECT;
+      }
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-T18 ARK-321/AC1 ark status skips a project folder that holds no run", () => {
-  const home = tempArkHome();
-  writeProject("good", validConfig());
-  mkdirSync(join(home, "projects/empty-runs/runs"), { recursive: true });
-  mkdirSync(join(home, "projects/no-runs"), { recursive: true });
-  mkdirSync(join(home, "projects/stray-file/runs"), { recursive: true });
-  writeFileSync(join(home, "projects/stray-file/runs/notes.txt"), "stray\n");
+  withControlledPath(
+    "ok",
+    () => {
+      const home = tempArkHome();
+      writeProject("good", validConfig());
+      mkdirSync(join(home, "projects/empty-runs/runs"), { recursive: true });
+      mkdirSync(join(home, "projects/no-runs"), { recursive: true });
+      mkdirSync(join(home, "projects/stray-file/runs"), { recursive: true });
+      writeFileSync(join(home, "projects/stray-file/runs/notes.txt"), "stray\n");
 
-  const result = ark("status");
-  expect(result.code).toBe(0);
-  expect(result.out + result.err).not.toContain("has no ark.yml");
-  expect(result.out + result.err).not.toContain("config(s) invalid");
-  for (const name of ["empty-runs", "no-runs", "stray-file"]) {
-    expect(result.out + result.err).not.toContain(name);
-  }
+      const result = ark("status");
+      expect(result.code).toBe(0);
+      expect(result.out + result.err).not.toContain("has no ark.yml");
+      expect(result.out + result.err).not.toContain("config(s) invalid");
+      for (const name of ["empty-runs", "no-runs", "stray-file"]) {
+        expect(result.out + result.err).not.toContain(name);
+      }
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-T19 ARK-321/AC2 ark status reports a folder with a run and no ark.yml", () => {
@@ -427,20 +451,26 @@ test("ARK-T19 ARK-321/AC2 ark status reports a folder with a run and no ark.yml"
   expect(result.err).toContain("project config(s) invalid");
 });
 test("ARK-164-AC2 status accepts --project for config checks and run state", () => {
-  writeProject("broken", validConfig({ ticket_source: "trello" }));
+  withControlledPath(
+    "ok",
+    () => {
+      writeProject("broken", validConfig({ ticket_source: "trello" }));
 
-  const configCheck = ark("status", "--project", "demo");
-  expect(configCheck.code).toBe(0);
-  expect(configCheck.out).not.toContain("config error");
+      const configCheck = ark("status", "--project", "demo");
+      expect(configCheck.code).toBe(0);
+      expect(configCheck.out).not.toContain("config error");
 
-  const { runId } = startRun();
-  const runStatus = ark("status", runId, "--project", "demo");
-  expect(runStatus.code).toBe(0);
-  expect(runStatus.out).toContain("phase: awaiting_criteria");
+      const { runId } = startRun();
+      const runStatus = ark("status", runId, "--project", "demo");
+      expect(runStatus.code).toBe(0);
+      expect(runStatus.out).toContain("phase: awaiting_criteria");
 
-  const missingProject = ark("status", "--project", "missing");
-  expect(missingProject.code).toBe(1);
-  expect(missingProject.err).toContain("missing");
+      const missingProject = ark("status", "--project", "missing");
+      expect(missingProject.code).toBe(1);
+      expect(missingProject.err).toContain("missing");
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-152-AC6 status for one run shows phase, round, waiting gate and cost", () => {

@@ -307,15 +307,15 @@ steps:
   - id: core-package
     role: implementer
     repo: repos/shared/packages
-    harness: claude
-    model: claude-sonnet
+    harness: omp
+    model: anthropic/claude-sonnet-5-5
     needs: []
     criteria: [CLARA-512/AC1]
   - id: core-package-review
     role: reviewer
     repo: repos/shared/packages
-    harness: codex
-    model: gpt-codex
+    harness: omp
+    model: openai-codex/gpt-6.1-sol
     needs: [core-package]
     criteria: [CLARA-512/AC1]
 test_cases:
@@ -396,11 +396,11 @@ suites:
     parser: bun
     paths: [hub/, cli/, test/pw/, package.json, bun.lock]
 roles:
-  implementer: { harness: claude, model: claude-sonnet }
-  validator: { harness: codex, model: gpt-codex }
-  reviewer: { harness: codex, model: gpt-codex }
-  evaluator: { harness: codex, model: gpt-codex }
-  designer: { harness: claude, model: claude-opus }
+  implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+  validator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+  reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
+  evaluator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+  designer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
 concurrency: 2
 round_budget: 2
 gates:

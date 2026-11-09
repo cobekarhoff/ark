@@ -216,8 +216,8 @@ steps:
   - id: core-package
     role: implementer
     repo: shared/packages
-    harness: claude
-    model: claude-sonnet
+    harness: omp
+    model: anthropic/claude-sonnet-5-5
     needs: []
     criteria: [CLARA-512/AC1]
 design:

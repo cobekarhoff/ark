@@ -7,6 +7,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  withFakeHarnesses,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -109,7 +110,9 @@ test("ARK-234-AC1 an unknown gates key exits 1 and names the field", () => {
 
 test("ARK-234-AC1 a gates map with only plan set loads, and the other keys stay human", () => {
   const { runId, directory } = startRun({ plan: "auto" });
-  expect(ark("status").code).toBe(0);
+  withFakeHarnesses(["pi/task", "pi/validate", "pi/design"], () =>
+    expect(ark("status").code).toBe(0),
+  );
   // gates.strategy is missing, so two cards must still wait for the human.
   expect(recordTwoCards(runId, directory, "yes", "no").code).toBe(0);
   expect(deriveState(eventsOf(directory)).phase).toBe("awaiting_strategy");

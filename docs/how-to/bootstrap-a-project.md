@@ -37,7 +37,7 @@ You need:
 
 3. Answer any questions. Master Chief asks one at a time and recommends an answer. For example:
 
-   > Which models should the roles use? Recommended: the default, `claude-sonnet` for the implementer and `gpt-codex` for the validator and reviewer, because cross-vendor review catches more defects.
+   > Which models should the roles use? Recommended: the detected default, `anthropic/claude-sonnet-5-5` for the implementer and `openai-codex/gpt-6.1-sol` for the validator and reviewer, because cross-vendor review catches more defects.
 
    Reply with "yes" to take the recommendation, or give your own answer.
 
@@ -63,12 +63,12 @@ You need:
        command: bun test --reporter=junit --reporter-outfile={report}
        parser: bun
    roles:
-     implementer: { harness: claude, model: claude-sonnet }
-     validator: { harness: codex, model: gpt-codex }
-     reviewer: { harness: codex, model: gpt-codex }
-     chief: { harness: claude, model: claude-opus }
-     test_writer: { harness: claude, model: claude-sonnet }
-     test_reviewer: { harness: codex, model: gpt-codex }
+     implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+     validator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+     reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
+     chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+     test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+     test_reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
    ```
 
    If a repo has UI code, Master Chief also offers to make `PRODUCT.md` with impeccable `init` and `DESIGN.md` with impeccable `document` in that repo. With no UI code, it asks one question: is the project designed for a UI that does not exist yet? On yes it offers `PRODUCT.md` only. On no it makes no design file. It never writes over an existing `PRODUCT.md` or `DESIGN.md`: it skips the file and names it in the summary.
@@ -116,12 +116,12 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
        command: behave --format json -o {report} features
        parser: behave
    roles:
-     implementer: { harness: claude, model: claude-sonnet }
-     validator: { harness: codex, model: gpt-codex }
-     reviewer: { harness: codex, model: gpt-codex }
-     chief: { harness: claude, model: claude-opus }
-     test_writer: { harness: claude, model: claude-sonnet }
-     test_reviewer: { harness: codex, model: gpt-codex }
+     implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+     validator: { harness: omp, model: openai-codex/gpt-6.1-sol }
+     reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
+     chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+     test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+     test_reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
    ```
 
    The reviewer of the test cases (`test_reviewer`) uses a different vendor from the implementer and the writer. Without `roles.test_writer` or `roles.test_reviewer`, the run lead stops and escalates to Master Chief.
