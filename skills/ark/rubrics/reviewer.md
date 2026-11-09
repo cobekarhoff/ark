@@ -22,6 +22,7 @@ Read the ticket and the step's ACs first. If the repo has a web UI, also load th
 3. **Security.** Check input at trust boundaries, secrets in code or logs, injection (shell, SQL, path), authentication and authorization gaps, and unsafe defaults.
 4. **Complexity.** Flag code that does more than the ACs need: abstractions with one user, options nobody sets, dead code, copied logic that an existing helper already covers.
 5. **Naming.** Check code names against `rules/naming.md`: full words for identifiers, commands, flags, gate names and filenames. This rubric covers code names only, not prose.
+6. **State.** Check code that tracks a status or lifecycle against `rules/state-machines.md`: one typed list of states, one owner for the moves, no flags that can stand for a state the product does not have, and a refusal that names the state and what allows the action. Making a stored or printed state value explicit must not rename it.
 
 ## How to report
 
