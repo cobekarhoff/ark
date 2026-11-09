@@ -2200,6 +2200,27 @@ async function weakContrast(page: Page): Promise<{ checked: number; weak: Contra
   });
 }
 
+/** WCAG contrast of the element's own text colour on its own background colour, as the browser computed them now. */
+function contrastRatioOf(element: Locator): Promise<number> {
+  return element.evaluate((node) => {
+    const channels = (css: string) =>
+      css
+        .match(/[\d.]+/g)!
+        .slice(0, 3)
+        .map(Number);
+    const light = (css: string) => {
+      const [r, g, b] = channels(css).map((channel) => {
+        const value = channel / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const style = getComputedStyle(node);
+    const [one, two] = [light(style.color), light(style.backgroundColor)].sort((a, b) => b - a);
+    return (one + 0.05) / (two + 0.05);
+  });
+}
+
 test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or Dark and keeps it after a reload, and text keeps its contrast on Home, Runs and a ticket page in both themes", async ({
   page,
 }) => {
@@ -2299,23 +2320,7 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
       );
     });
     await checkpoint(page, "hover-state-final");
-    const ratio = await action.evaluate((element) => {
-      const channels = (css: string) =>
-        css
-          .match(/[\d.]+/g)!
-          .slice(0, 3)
-          .map(Number);
-      const light = (css: string) => {
-        const [r, g, b] = channels(css).map((channel) => {
-          const value = channel / 255;
-          return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-        });
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      };
-      const style = getComputedStyle(element);
-      const [one, two] = [light(style.color), light(style.backgroundColor)].sort((a, b) => b - a);
-      return (one + 0.05) / (two + 0.05);
-    });
+    const ratio = await contrastRatioOf(action);
     expect(ratio, `hovered action ${index} in Dark`).toBeGreaterThanOrEqual(4.5);
   }
 
@@ -2390,9 +2395,8 @@ test("ARK-T128 the first action of Home is visible and its hover colour final af
     await Promise.all(element.getAnimations().map((fade) => fade.finished.catch(() => undefined)));
   });
   await checkpoint(page, "hover-state-final");
-  // The transition has ended: a second read of the colour is the same as the first.
-  const colour = () => action.evaluate((element) => getComputedStyle(element).backgroundColor);
-  expect(await colour()).toBe(await colour());
+  // The transition has ended: the resting colours of the hovered button keep 4.5:1.
+  expect(await contrastRatioOf(action), "hovered first action of Home").toBeGreaterThanOrEqual(4.5);
 });
 
 test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ page }) => {

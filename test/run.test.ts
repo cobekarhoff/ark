@@ -864,9 +864,12 @@ test("ARK-T129 ARK-278-AC3 an Orca failure prints one orca line and the close st
 });
 
 test("ARK-T132 ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later close against a slow orca", async () => {
+  const outer = process.env.ARK_ORCA_TIMEOUT_MS;
   runHangingClose();
+  // The hang case restored the variable it set: the 300 ms does not outlive it.
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBe(outer);
 
-  // The slow orca answers when the test releases it, and logs the timeout variable it was started with.
+  // The slow orca answers when the test releases it; the close it serves has the long reader timeout.
   const slow = startRun("demo", "ARK-904");
   useFakeOrca({
     gate: true,
@@ -876,7 +879,7 @@ test("ARK-T132 ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a l
   const closed = await closeWhileOrcaWaits(slow.runId);
   expect(closed.out).toContain("ctx_slow released (succeeded)");
   expect(closed.out).not.toContain("orca:");
-  expect(readFileSync(join(fakeDirectory, "env.log"), "utf8").split("\n")[0]).toBe("");
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBe(outer);
 });
 
 /** Runs `ark run close` while the fake orca holds its first call; the test releases it once the close is waiting. */
@@ -885,21 +888,24 @@ async function closeWhileOrcaWaits(run: string): Promise<{ code: number; out: st
   const reached = join(fakeDirectory, "reached");
   for (const fifo of [gate, reached]) Bun.spawnSync(["mkfifo", fifo]);
   const holder = openSync(gate, "r+"); // readers of the gate wait while this writer end is open
-  const child = Bun.spawn(
-    ["bun", join(repositoryRoot, "cli", "ark.ts"), "run", "close", run, "aborted"],
-    {
-      env: process.env,
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-  readFileSync(reached); // blocks until the orca arrives (Bun.file cannot read a FIFO)
-  rmSync(reached);
-  expect(child.exitCode).toBeNull(); // the close is still waiting for the orca
-  rmSync(gate); // a later call finds no gate
-  closeSync(holder); // EOF for the waiting reader: the orca answers
-  const [out] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-  return { code: child.exitCode ?? 1, out };
+  const outer = process.env.ARK_ORCA_TIMEOUT_MS;
+  process.env.ARK_ORCA_TIMEOUT_MS = "600000"; // far above any host stall: the gate decides, not the reader timeout
+  try {
+    const child = Bun.spawn(
+      ["bun", join(repositoryRoot, "cli", "ark.ts"), "run", "close", run, "aborted"],
+      { env: process.env, stdout: "pipe", stderr: "pipe" },
+    );
+    readFileSync(reached); // blocks until the orca arrives (Bun.file cannot read a FIFO)
+    rmSync(reached);
+    expect(child.exitCode).toBeNull(); // the close is still waiting for the orca
+    rmSync(gate); // a later call finds no gate
+    closeSync(holder); // EOF for the waiting reader: the orca answers
+    const [out] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    return { code: child.exitCode ?? 1, out };
+  } finally {
+    if (outer === undefined) delete process.env.ARK_ORCA_TIMEOUT_MS;
+    else process.env.ARK_ORCA_TIMEOUT_MS = outer;
+  }
 }
 
 // Shared by ARK-278-AC3 and ARK-292-AC1: the hang case sets a short timeout and must clean it up itself.

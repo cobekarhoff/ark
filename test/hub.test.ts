@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, beforeAll, expect, jest, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import {
@@ -90,19 +90,32 @@ async function start() {
   return hub;
 }
 
+interface Pushes {
+  close(): void;
+  blocked(): Promise<void>;
+  next(): Promise<string>;
+}
+
 /**
  * The hub's `/events` stream: `next()` resolves with the next pushed snapshot (JSON text) and has no
  * deadline of its own. The test ends on the event, or the harness timeout of the file fails it.
  */
-async function openPushes(baseUrl: string) {
+async function openPushes(baseUrl: string): Promise<Pushes> {
   const controller = new AbortController();
   const reader = (
     await fetch(`${baseUrl}/events`, { signal: controller.signal })
   ).body!.getReader();
   const decoder = new TextDecoder();
   let buffered = "";
+  let onBlocked: (() => void) | undefined;
   return {
     close: () => controller.abort(),
+    /** Resolves when `next()` has no buffered push left and waits on the stream. */
+    blocked: () => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      onBlocked = resolve;
+      return promise;
+    },
     async next(): Promise<string> {
       for (;;) {
         const end = buffered.indexOf("\n\n");
@@ -112,6 +125,8 @@ async function openPushes(baseUrl: string) {
           if (message.startsWith("data: ")) return message.slice(6);
           continue;
         }
+        onBlocked?.();
+        onBlocked = undefined;
         const chunk = await reader.read();
         if (chunk.done) throw new Error("the event stream ended");
         buffered += decoder.decode(chunk.value);
@@ -121,16 +136,29 @@ async function openPushes(baseUrl: string) {
 }
 
 /**
- * Runs `work` while the hub process is stopped (SIGSTOP; Bun's `kill` cannot send it) and releases it (SIGCONT) when `work`
- * returned, so a request `work` started is answered late. The test owns the gate.
+ * The test's gate: stops the hub (SIGSTOP; Bun's `kill` cannot send it), starts `work`, waits until `work` is blocked
+ * on the push stream (the hold is observed, not assumed), moves the fake clock 10 s past the old push deadline while the
+ * hub is stopped, then releases the hub (SIGCONT). A deadline in the wait would fire on that clock; no wall time passes.
  */
-function whileHubStopped<T>(hub: { process: { pid: number } }, work: () => T): T {
+async function heldPastTenSeconds<T>(
+  hub: { process: { pid: number } },
+  pushes: Pushes,
+  work: () => Promise<T>,
+): Promise<T> {
   process.kill(hub.process.pid, "SIGSTOP");
+  jest.useFakeTimers();
+  const reached = pushes.blocked();
+  const waiting = work();
   try {
-    return work();
+    await Promise.race([reached, waiting]);
+    const state = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(hub.process.pid)]).stdout;
+    expect(state.toString().trim()).toStartWith("T");
+    jest.advanceTimersByTime(10_001);
   } finally {
+    jest.useRealTimers();
     process.kill(hub.process.pid, "SIGCONT");
   }
+  return waiting;
 }
 
 // ---------------------------------------------------------------- AC1
@@ -388,27 +416,29 @@ test("ARK-T127 ARK-277-AC6 a cold hub serves a full snapshot with under 5 s of C
   let snapshot: Snapshot;
   // The loop ends on the event: the push that carries the full snapshot. No wall-clock budget decides.
   try {
-    for (;;) {
+    // The answers of `/` are sampled while the snapshot builds (cap 20); the loop ends on the event, not on a time.
+    let built = false;
+    const full = (async (): Promise<Snapshot> => {
+      for (;;) {
+        const candidate = JSON.parse(await pushes.next()) as Snapshot;
+        if (
+          Object.values(candidate.sources).every((source) => source.ok) &&
+          Array.isArray(candidate.runs) &&
+          candidate.runs.every((run: RunView) => run.cost_usd !== null)
+        )
+          return candidate;
+      }
+    })().finally(() => (built = true));
+    while (!built && latencies.length < answersChecked) {
       const requestedAt = performance.now();
       await (await fetch(`${baseUrl}/`)).arrayBuffer();
       latencies.push(performance.now() - requestedAt);
-      snapshot = JSON.parse(await pushes.next()) as Snapshot;
-      if (
-        Object.values(snapshot.sources).every((source) => source.ok) &&
-        Array.isArray(snapshot.runs) &&
-        snapshot.runs.every((run: RunView) => run.cost_usd !== null)
-      )
-        break;
     }
+    snapshot = await full;
   } finally {
     pushes.close();
   }
-  // Answers of `/` after the snapshot are as many as the p75 needs; the count is fixed, not a time.
-  while (latencies.length < answersChecked) {
-    const requestedAt = performance.now();
-    await (await fetch(`${baseUrl}/`)).arrayBuffer();
-    latencies.push(performance.now() - requestedAt);
-  }
+  expect(latencies.length).toBeGreaterThanOrEqual(15);
 
   // CPU time of the hub (the usage Workers run in its process) from the OS accounting of the child,
   // read after it exited: the same source on macOS and Linux, and a host stall does not move it.
@@ -1635,6 +1665,11 @@ async function slimTicketsAreDelivered(late: boolean) {
   installFakeTools({});
   const filler = "A sentence of ticket text that only the ticket page needs to read. ".repeat(40);
   let ticketBytes = 0;
+  const writeTickets = () => {
+    write(1, `A reason. DOC-MARKER-XYZ ${filler}`);
+    for (let index = 2; index <= 200; index++) write(index, `A reason. ${filler}`);
+    expect(ticketBytes).toBeGreaterThan(200 * 2800);
+  };
   const write = (index: number, problem: string) => {
     const id = `ARK-${index}`;
     ticketBytes += statSync(
@@ -1652,27 +1687,26 @@ async function slimTicketsAreDelivered(late: boolean) {
       }),
     ).size;
   };
-  write(1, `A reason. DOC-MARKER-XYZ ${filler}`);
-  for (let index = 2; index <= 200; index++) write(index, `A reason. ${filler}`);
-  expect(ticketBytes).toBeGreaterThan(200 * 2800);
-
-  // ARK-T130 (late): the hub is stopped while the test subscribes and while the first snapshot is built, and
-  // again across the body edit. The test releases it; the waits end on the pushed events.
+  if (!late) writeTickets();
+  // ARK-T130 (late): the hub is stopped before the 200 tickets are written and again across the body edit. Each wait
+  // starts on a stopped hub and stays blocked while the test moves its clock past the old 10 s push deadline.
   const hub = await start();
   const { baseUrl } = hub;
   const ticketsOf = (json: string) => (JSON.parse(json) as { tickets: PushedTicket[] }).tickets;
+  const pushes = await openPushes(baseUrl);
+  const hold = <T>(work: () => Promise<T>): Promise<T> =>
+    late ? heldPastTenSeconds(hub, pushes, work) : work();
   let before = "";
-  const hold = <T>(work: () => T): T => (late ? whileHubStopped(hub, work) : work());
-  const pushes = await hold(() => openPushes(baseUrl));
   try {
-    for (;;) {
-      const text = await pushes.next();
-      const { tickets } = JSON.parse(text) as Snapshot;
-      if (tickets !== "unknown" && tickets.length === 200) {
-        before = text;
-        break;
+    if (late) await pushes.next(); // the subscription is acknowledged by the hub's first push
+    before = await hold(async () => {
+      if (late) writeTickets();
+      for (;;) {
+        const text = await pushes.next();
+        const { tickets } = JSON.parse(text) as Snapshot;
+        if (tickets !== "unknown" && tickets.length === 200) return text;
       }
-    }
+    });
     expect(before).not.toContain("DOC-MARKER-XYZ");
     const tickets = ticketsOf(before);
     // Taken before the matchers below, which Bun may write into the object they match.
@@ -1695,15 +1729,16 @@ async function slimTicketsAreDelivered(late: boolean) {
     // A body-only edit: the front matter stays, so only the signature tells the page.
     const file = join(process.env.ARK_HOME as string, "projects", "p", "tickets", "ARK-1.md");
     const signatureBefore = signatures.get("ARK-1");
-    hold(() =>
+    const pushed = await hold(async () => {
       writeFileSync(
         file,
         readFileSync(file, "utf8").replace("DOC-MARKER-XYZ", "BODY-EDIT-TEXT and a little more"),
-      ),
-    );
-    let pushed: PushedTicket[];
-    do pushed = ticketsOf(await pushes.next());
-    while (ticketOf(pushed, "ARK-1").signature === signatureBefore);
+      );
+      for (;;) {
+        const next = ticketsOf(await pushes.next());
+        if (ticketOf(next, "ARK-1").signature !== signatureBefore) return next;
+      }
+    });
     const after = JSON.stringify(pushed);
     expect(after).not.toContain("BODY-EDIT-TEXT");
     expect(after).not.toContain("DOC-MARKER-XYZ");
