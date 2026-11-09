@@ -2,7 +2,7 @@
 id: ARK-T151
 title: ARK-T151 gather.ts refuses a directory that is not a worktree of the run and names it
 level: integration
-technique: equivalence classes (directory in the run / directory outside the run) with one boundary: a git repo on the same branch name that is not a run worktree
+technique: "equivalence classes (directory in the run / directory outside the run) with one boundary: a git repo on the same branch name that is not a run worktree"
 priority: medium
 risk: with no path match, gather falls back to the first repo on the branch (or the first repo) and writes that repo's ledger into a foreign directory, so a wrong MR could be posted from it, or it exits non-zero without naming the directory
 status: active

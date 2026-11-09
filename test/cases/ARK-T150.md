@@ -2,7 +2,7 @@
 id: ARK-T150
 title: ARK-T150 gather.ts in each repo of a 2-repo run writes that repo's own host, token owner and template, and lint_body and post_mr use them
 level: integration
-technique: equivalence classes (one class per repo: github vs gitlab origin, different templates) with a shared branch name as the discriminating input
+technique: "equivalence classes (one class per repo: github vs gitlab origin, different templates) with a shared branch name as the discriminating input"
 priority: high
 risk: the ledger builder picks worktrees[0] (or the first repo on the branch) for host, token owner and template, so the second repo of a run gets the first repo's host, owner and template, and lint_body and post_mr act on the wrong host or body shape
 status: active
