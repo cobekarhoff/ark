@@ -1,7 +1,7 @@
 import { ArkError } from "./errors.ts";
 import type { EventData, RunState } from "./events.ts";
 import { buildPhases, outcomes } from "./lifecycle.ts";
-import { planHash } from "./plan.ts";
+import { loadPlan, planHash } from "./plan.ts";
 import { hasTestCriterion } from "./ticket.ts";
 
 const gateAnswers: Record<string, string[]> = {
@@ -190,6 +190,17 @@ export function assertAllowed(
       )
         throw new ArkError(`${type} refused: waits_for must be a list of MR numbers`);
       return;
+    case "bump.refreshed": {
+      requirePhase(state, type, buildPhases);
+      if (typeof data.value !== "string" || data.value.trim() === "")
+        throw new ArkError(`${type} refused: value is required`);
+      const isBump = loadPlan(runDirectory, state.ticket.id).repos.some((entry) =>
+        entry.depends_on.some((edge) => edge.bump === data.step),
+      );
+      if (!isBump)
+        throw new ArkError(`${type} refused: ${data.step} is not a bump step of the plan`);
+      return;
+    }
     case "run.closed":
       return assertCloseAllowed(state, data);
     default:

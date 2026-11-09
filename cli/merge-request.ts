@@ -6,7 +6,7 @@ import { canonicalCriterion } from "./criterion-id.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events.ts";
 import { loadConfig, mergeRequestsMode } from "./config.ts";
 import { findRun } from "./paths.ts";
-import { loadPlan, repoGraph } from "./plan.ts";
+import { loadPlan, repoGraph, type Plan, type PlanRepoEdge } from "./plan.ts";
 import {
   evidenceFile,
   evidenceProblem,
@@ -486,8 +486,13 @@ type GithubCheck = {
   targetUrl?: string;
 };
 
-/** Reads one MR from the host in `cwd`. Throws when `gh` or `glab` fails. `status` is `open`, `merged`, `closed` or another host state, lowercase. `forStatus` also asks GitHub for `mergeable`. */
-function viewMergeRequest(merge: OpenedMergeRequest, cwd: string, forStatus = false) {
+/** Reads one MR from the host in `cwd`. Throws when `gh` or `glab` fails. `status` is `open`, `merged`, `closed` or another host state, lowercase. `forStatus` also asks GitHub for `mergeable`; `forCommit` asks for the merge commit. */
+function viewMergeRequest(
+  merge: OpenedMergeRequest,
+  cwd: string,
+  forStatus = false,
+  forCommit = false,
+) {
   const github = detectHost(merge.url) === "github";
   const output = run(
     github
@@ -497,14 +502,21 @@ function viewMergeRequest(merge: OpenedMergeRequest, cwd: string, forStatus = fa
           "view",
           merge.url,
           "--json",
-          forStatus ? "state,statusCheckRollup,mergeable" : "state,statusCheckRollup",
+          forCommit
+            ? "state,mergeCommit"
+            : forStatus
+              ? "state,statusCheckRollup,mergeable"
+              : "state,statusCheckRollup",
         ]
       : ["glab", "mr", "view", String(merge.number), "--output", "json"],
     cwd,
   );
   const view = JSON.parse(output);
   const raw = String(view.state).toLowerCase();
-  return { view, status: raw === "opened" ? "open" : raw, github };
+  // A squash or rebase merge leaves a commit that is not the branch head: GitLab names it in merge_commit_sha or squash_commit_sha.
+  const mergeCommit: string | undefined =
+    (github ? view.mergeCommit?.oid : view.merge_commit_sha || view.squash_commit_sha) || undefined;
+  return { view, status: raw === "opened" ? "open" : raw, github, mergeCommit };
 }
 
 /** State of one MR: `merged`, `open`, `closed`, or `unknown` when the host call fails or answers something else. Returns a value and prints nothing; run it before the worktree in `cwd` is removed. */
@@ -781,5 +793,104 @@ export function mergeRequestStatus(
     if (worktree === undefined) throw new ArkError(`no worktree for repo ${merge.repo}`);
     return reportMergeRequest(merge, worktree.path, sinceTime);
   });
-  console.log(options.json ? JSON.stringify(reports) : reports.flatMap(plainLines).join("\n"));
+  if (options.json) return console.log(JSON.stringify(reports));
+  let plan: Plan | undefined;
+  try {
+    plan = loadPlan(directory, state.ticket.id);
+  } catch {
+    // no readable plan: no bump lines
+  }
+  const lines = state.merge_requests.flatMap((merge, index) => [
+    ...plainLines(reports[index]),
+    ...dependencyLines(merge, state, reports, plan),
+  ]);
+  console.log(lines.join("\n"));
+}
+
+/** `waits for !N (<state>)` for each upstream of `merge`, then one line for each bump step of its repo. */
+function dependencyLines(
+  merge: OpenedMergeRequest & { waits_for?: number[] },
+  state: RunState,
+  reports: MergeRequestReport[],
+  plan: Plan | undefined,
+): string[] {
+  const marker = detectHost(merge.url) === "github" ? "#" : "!";
+  const upstreamState = (repo: string) =>
+    reports[state.merge_requests.findIndex((candidate) => candidate.repo === repo)]?.state;
+  const waits = state.merge_requests
+    .filter((candidate) => merge.waits_for?.includes(candidate.number))
+    .map((upstream) => `  waits for ${marker}${upstream.number} (${upstreamState(upstream.repo)})`);
+  const bumps = (plan?.repos.find((entry) => entry.repo === merge.repo)?.depends_on ?? [])
+    .filter((edge) => edge.bump)
+    .map((edge) => {
+      const worktree = state.worktrees.find((candidate) => candidate.repo === merge.repo);
+      return `  bump ${edge.bump}  ${edge.kind} ${edge.repo}  pin ${edge.pin}  ${bumpState(edge, worktree?.path, state, upstreamState(edge.repo))}`;
+    });
+  return [...waits, ...bumps];
+}
+
+/** `refreshed to <value>` once recorded; else a submodule shows its pointer, a package waits on its upstream MR. No registry is asked. */
+function bumpState(
+  edge: PlanRepoEdge,
+  downstreamPath: string | undefined,
+  state: RunState,
+  upstreamMr: string | undefined,
+): string {
+  const refreshed = state.bump_refreshed[edge.bump];
+  if (refreshed !== undefined)
+    return `refreshed to ${edge.kind === "submodule" ? refreshed.slice(0, 8) : refreshed}`;
+  if (edge.kind === "submodule") {
+    const pointer = downstreamPath
+      ? spawn(["git", "ls-tree", "HEAD", edge.pin], downstreamPath).stdout.split(/\s+/)[2]
+      : undefined;
+    return `points at upstream branch ${pointer?.slice(0, 8) || "unknown"}`;
+  }
+  return upstreamMr === "merged" ? "waits for upstream publish" : "waits for upstream merge";
+}
+
+/**
+ * Records `bump.refreshed` for a bump step. A submodule edge moves the pointer in the downstream worktree to the
+ * merge commit of the upstream MR (or `--to`), commits it and records the commit. Any other edge needs `--to`:
+ * the pin edit is an implementer round, and the run lead has checked the value with the project's own tool.
+ */
+export function bumpRefresh(
+  runId: string,
+  stepId: string,
+  options: { to?: string; project?: string } = {},
+): void {
+  const { directory } = findRun(runId, options.project);
+  const state = deriveState(readEvents(directory));
+  const plan = loadPlan(directory, state.ticket.id);
+  const found = plan.repos.flatMap((entry) =>
+    entry.depends_on.filter((edge) => edge.bump === stepId).map((edge) => ({ entry, edge })),
+  )[0];
+  if (found === undefined) throw new ArkError(`${stepId} is not a bump step of the plan`);
+  const { entry, edge } = found;
+  let value = options.to?.trim();
+  if (edge.kind !== "submodule") {
+    if (!value) throw new ArkError(`${stepId} is a ${edge.kind} bump: --to <value> is required`);
+  } else {
+    const worktree = state.worktrees.find((candidate) => candidate.repo === entry.repo);
+    if (worktree === undefined) throw new ArkError(`no worktree for repo ${entry.repo}`);
+    if (!value) {
+      const upstreamMr = state.merge_requests.find((candidate) => candidate.repo === edge.repo);
+      const upstreamTree = state.worktrees.find((candidate) => candidate.repo === edge.repo);
+      if (upstreamMr === undefined || upstreamTree === undefined)
+        throw new ArkError(`upstream repo ${edge.repo} has no merge request: pass --to <commit>`);
+      const viewed = viewMergeRequest(upstreamMr, upstreamTree.path, false, true);
+      if (viewed.status !== "merged")
+        throw new ArkError(`upstream MR of ${edge.repo} is ${viewed.status}, not merged`);
+      if (!viewed.mergeCommit)
+        throw new ArkError(`the host names no merge commit for the upstream MR of ${edge.repo}`);
+      value = viewed.mergeCommit;
+    }
+    const submodule = join(worktree.path, edge.pin);
+    run(["git", "fetch", "origin"], submodule);
+    run(["git", "checkout", "--detach", value], submodule);
+    value = run(["git", "rev-parse", "HEAD"], submodule);
+    run(["git", "add", edge.pin], worktree.path);
+    run(["git", "commit", "-m", `Bump ${edge.pin} to ${value.slice(0, 8)}`], worktree.path);
+  }
+  appendEvent(directory, "bump.refreshed", { step: stepId, value });
+  console.log(`refreshed ${stepId} to ${edge.kind === "submodule" ? value.slice(0, 8) : value}`);
 }

@@ -1352,7 +1352,7 @@ function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
   return { runId, directory, branchLine, run };
 }
 
-const pendingBump = `           pending bump: bump-reports (package ${clara.core}, clara-core>=0.0.6rc1)`;
+const pendingBump = `           pending bump: bump-reports (package ${clara.core}, clara-core>=0.0.6rc1) needs <published version>`;
 const handOffLines = (out: string) =>
   out.split("\n").filter((line) => /^branch |pending bump|^order:/.test(line));
 
