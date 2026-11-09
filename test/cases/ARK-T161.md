@@ -28,6 +28,8 @@ Prove that the detached runner, not the caller, holds the host lock from its sta
 6. After the runner exits, check that the lock is released and that `runner.json` shows the finished state.
 7. Repeat steps 1-5 with the failing suite: `--wait` exits 1.
 8. Set `runner.json` to a dead pid in a running state and run `--wait`; run `--wait` on a run with no `runner.json`.
+9. Leave a `runner.lock` whose owner file names a dead pid, start two `ark test <run>` callers at once, and open the gate.
+10. Start a second caller and `--wait` while the runner finishes: the runner may end between the record read and the liveness check of the caller.
 
 ## Expected results
 
@@ -38,6 +40,8 @@ Prove that the detached runner, not the caller, holds the host lock from its sta
 - Step 6: no lock file remains.
 - Step 7: the same failure lines and exit 1.
 - Step 8: a dead pid is reported as a stale runner and `--wait` returns at once with a non-zero exit; no runner gives a message that no test runs for the run.
+- Step 9: exactly one runner and one suite start, only the inspected dead owner file is removed, and both callers print the same lines and exit 0.
+- Step 10: a caller that reads the record as running, then finds the pid gone, reads the final record again and prints the result and exit code, never "ended without a result".
 
 ## Screenshot checkpoints
 

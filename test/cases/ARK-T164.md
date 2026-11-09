@@ -27,6 +27,7 @@ Prove that a failed file is retried exactly once, that a pass on retry passes th
 5. Run both suites together.
 6. Run the suite with a failed test that has no `file`.
 7. Put the same failing file name in two suites, one that passes on retry and one that fails twice.
+8. Run a file whose failed test is skipped, or absent under that name, in the retry.
 
 ## Expected results
 
@@ -37,6 +38,7 @@ Prove that a failed file is retried exactly once, that a pass on retry passes th
 - Step 5: the run fails; the `flaky` suite is still listed as flaky and `broken` as failed.
 - Step 6: the fallback in the plan applies and the output states it; the suite does not pass by skipping the failure.
 - Step 7: the failure in the second suite is not hidden by the pass in the first.
+- Step 8: the file starts exactly twice, the suite fails, nothing is listed as flaky: a retry passes only when every originally failed test is back and passed.
 
 ## Screenshot checkpoints
 

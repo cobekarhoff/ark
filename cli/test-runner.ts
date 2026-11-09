@@ -1,10 +1,14 @@
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  rmdirSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +23,7 @@ import { ArkError } from "./errors.ts";
  *   results/runner.json  { pid, start, mode, state, exit_code }  state: running | done | stopped
  *   results/runner.out   what the run printed to stdout
  *   results/runner.err   what it printed to stderr
- *   results/runner.lock/ one live runner per run: a directory with owner.json, moved into place by one rename
+ *   results/runner.lock/ one live runner per run: a directory with one owner-*.json file, moved into place by one rename
  */
 export type RunnerRecord = {
   pid: number;
@@ -76,30 +80,57 @@ function writeRecord(resultsDirectory: string, record: RunnerRecord): void {
   renameSync(`${file}.${process.pid}`, file);
 }
 
-/** Moves a prepared folder to runner.lock; false when a live runner owns it. A dead owner's folder is removed. */
+/**
+ * Moves a prepared folder to runner.lock; false when a live runner owns it. The folder holds one owner file named
+ * for its owner. A dead owner is taken over by removing only the owner file that was inspected, as in
+ * test-lock.ts: when another runner replaced the claim first, the removal fails and this runner looks again.
+ */
 function claim(resultsDirectory: string, start: string): boolean {
   const { lock } = files(resultsDirectory);
   const prepared = `${lock}.${process.pid}`;
   rmSync(prepared, { recursive: true, force: true });
   mkdirSync(prepared);
-  writeFileSync(join(prepared, "owner.json"), JSON.stringify({ pid: process.pid, start }));
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      renameSync(prepared, lock);
-      return true;
-    } catch {
+  writeFileSync(
+    join(prepared, `owner-${process.pid}-${randomUUID()}.json`),
+    JSON.stringify({ pid: process.pid, start }),
+  );
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        const owner = JSON.parse(readFileSync(join(lock, "owner.json"), "utf8"));
-        if (identityLive(owner)) break;
-      } catch {
-        // no owner file: the folder is not a live claim
+        renameSync(prepared, lock);
+        return true;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOTEMPTY" && code !== "EEXIST") throw err;
       }
-      // ponytail: two runners that both find the same dead owner can both remove it; the second rename then loses and exits
-      rmSync(lock, { recursive: true, force: true });
+      const name = (() => {
+        try {
+          return readdirSync(lock).find((entry) => entry.startsWith("owner-"));
+        } catch {
+          return undefined; // removed meanwhile: try the rename again
+        }
+      })();
+      if (name !== undefined) {
+        try {
+          if (identityLive(JSON.parse(readFileSync(join(lock, name), "utf8")))) return false;
+          unlinkSync(join(lock, name));
+        } catch {
+          continue; // taken over by another runner first, or unreadable: look again
+        }
+      } else {
+        rmSync(lock, { recursive: true, force: true }); // a folder with no owner is no claim
+        continue;
+      }
+      try {
+        rmdirSync(lock); // fails when a new claim already replaced the emptied folder
+      } catch {
+        // in use again, or already gone
+      }
     }
+    return false;
+  } finally {
+    rmSync(prepared, { recursive: true, force: true });
   }
-  rmSync(prepared, { recursive: true, force: true });
-  return false;
 }
 
 /**
@@ -199,6 +230,12 @@ async function follow(resultsDirectory: string, runId: string): Promise<number> 
       throw new ArkError(`no ark test runner for ${runId}: run ark test ${runId}`);
     if (!running) return record.exit_code ?? 1;
     if (!identityLive(record)) {
+      // the runner may have finished between the record read and this check: its final record is then on disk
+      const final = readRecord(resultsDirectory);
+      if (final !== null && final.state !== "running") {
+        drain(resultsDirectory, offsets);
+        return final.exit_code ?? 1;
+      }
       console.error(`ark: the runner of ${runId} (pid ${record.pid}) ended without a result`);
       return 1;
     }

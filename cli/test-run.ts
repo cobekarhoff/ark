@@ -316,11 +316,13 @@ async function retryFailedFiles(
     const again = parsers[suite.parser]({ report, stdout: outcome.stdout });
     const separator = output === "" || output.endsWith("\n") ? "" : "\n";
     log += `retry ${file}\n${command}\n${output}${separator}exit ${outcome.code}\n`;
-    if (
-      outcome.code === 0 &&
-      again.length > 0 &&
-      again.every((result) => result.status !== "failed")
-    ) {
+    // every test that failed in this file must be back and passed: a skipped or missing result keeps the failure
+    const recovered = failed
+      .filter((result) => result.file === file)
+      .every((original) =>
+        again.some((result) => result.name === original.name && result.status === "passed"),
+      );
+    if (outcome.code === 0 && recovered && again.every((result) => result.status !== "failed")) {
       kept = [...kept.filter((result) => result.file !== file), ...again];
       flaky.push(file);
     }

@@ -360,7 +360,17 @@ describe("detached ark test runner", () => {
     const [secondDone, waitDone] = await Promise.all([second.finished(), waiting.finished()]);
 
     expect(lines(startsFile)).toEqual(["start"]);
-    expect([secondDone.code, waitDone.code]).toEqual([0, 0]);
+    const detail = {
+      second: secondDone,
+      waiting: waitDone,
+      runnerOut: existsSync(join(fixture.runDirectory, "results", "runner.out"))
+        ? readFileSync(join(fixture.runDirectory, "results", "runner.out"), "utf8")
+        : "",
+      runnerErr: existsSync(join(fixture.runDirectory, "results", "runner.err"))
+        ? readFileSync(join(fixture.runDirectory, "results", "runner.err"), "utf8")
+        : "",
+    };
+    expect([secondDone.code, waitDone.code], JSON.stringify(detail, null, 2)).toEqual([0, 0]);
     expect(waitDone.out).toBe(secondDone.out);
     expect(waitDone.out).toBe(
       readFileSync(join(fixture.runDirectory, "results", "runner.out"), "utf8"),
@@ -413,6 +423,30 @@ describe("detached ark test runner", () => {
     const none = await arkDone(fixture, "test", fixture.runId, "--wait");
     expect(none.code).toBe(1);
     expect(none.err).toContain(`no ark test runner for ${fixture.runId}`);
+  });
+
+  test("ARK-T161 two callers that find the same dead runner claim start one runner and one suite", async () => {
+    const fixture = makeFixture({ suites: gateSuite });
+    const dead = Bun.spawn(["true"]);
+    await dead.exited;
+    const stale = join(fixture.runDirectory, "results", "runner.lock");
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(
+      join(stale, `owner-${dead.pid}-stale.json`),
+      JSON.stringify({ pid: dead.pid, start: "" }),
+    );
+    const callers = [
+      spawnArk(fixture, ["test", fixture.runId]),
+      spawnArk(fixture, ["test", fixture.runId]),
+    ];
+    await appears(join(fixture.directory, "started"));
+    await openGate(fixture);
+    const done = await Promise.all(callers.map((caller) => caller.finished()));
+
+    expect(done.map((result) => result.code)).toEqual([0, 0]);
+    expect(lines(join(fixture.directory, "starts"))).toEqual(["start"]);
+    expect(done[1].out).toBe(done[0].out);
+    expect(runnerRecord(fixture)).toMatchObject({ state: "done", exit_code: 0 });
   });
 
   const stopSuite = (directory: string): Suite[] => [
@@ -766,6 +800,31 @@ describe("ark test flaky retry", () => {
     expect(result.out).not.toContain("flaky:");
     expect(completedEvents(fixture).at(-1).flaky).toBeUndefined();
   });
+
+  test.each([
+    [
+      "skipped",
+      'const run = starts === 1 ? test : test.skip;\nrun("retried", () => { throw new Error("flake"); });',
+    ],
+    [
+      "missing",
+      'test(starts === 1 ? "retried" : "renamed", () => { if (starts === 1) throw new Error("flake"); });',
+    ],
+  ])(
+    "ARK-T164 a failed test that is %s in the retry keeps the failure: one retry, the suite fails and nothing is flaky",
+    async (_kind, tests) => {
+      const fixture = makeFixture({ suites: () => [bunSuite("retried", ["retried"])] });
+      const header = countedFile(fixture.directory, "retried", "").split("\ntest(")[0];
+      commitFiles(fixture.mirrorOf("."), { "test/retried.test.ts": `${header}\n${tests}\n` });
+      const result = await arkDone(fixture, "test", fixture.runId);
+
+      expect(result.code, result.err).toBe(1);
+      expect(headStarts(fixture, "retried")).toBe(2);
+      expect(result.err).toContain("suite retried failed");
+      expect(result.out).not.toContain("flaky:");
+      expect(completedEvents(fixture).at(-1).flaky).toBeUndefined();
+    },
+  );
 
   test("ARK-T164 with a flaky and a broken suite the run fails, the flaky suite stays listed and the broken suite is failed", async () => {
     const fixture = makeFixture({
