@@ -258,13 +258,36 @@ const startedTests: Subprocess[] = [];
  */
 function killStarted(): void {
   for (const child of startedTests.splice(0)) child.kill("SIGKILL");
-  // The detached runners outlive their callers: find them by their run id. A caller killed while it spawns its
-  // runner leaves a runner that appears after the first pass, so the second pass comes after a pause.
+  // The detached runners outlive their callers: kill those recorded under this file's own ARK_HOME. Run ids repeat
+  // across concurrent copies of this file, so no pattern on the run id may match. A caller killed while it spawns
+  // its runner leaves a runner whose record appears after the first pass, so the second pass comes after a pause.
   for (let pass = 0; pass < 2; pass++) {
-    for (const run of [runA, runB]) Bun.spawnSync(["pkill", "-9", "-f", `test-runner ${run} `]);
+    for (const pid of runnerPids()) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {} // already gone
+    }
     Bun.spawnSync(["pkill", "-9", "-f", fixtures]);
     if (pass === 0) Bun.sleepSync(300);
   }
+}
+
+/** The pids of the live runners recorded under this file's ARK_HOME. */
+function runnerPids(): number[] {
+  const pids: number[] = [];
+  for (const project of [projectA, "lock-two"]) {
+    const runsDirectory = join(arkHome, "projects", project, "runs");
+    if (!existsSync(runsDirectory)) continue;
+    for (const run of readdirSync(runsDirectory)) {
+      try {
+        const record = JSON.parse(
+          readFileSync(join(runsDirectory, run, "results", "runner.json"), "utf8"),
+        );
+        if (record.state === "running") pids.push(record.pid);
+      } catch {} // no runner record yet
+    }
+  }
+  return pids;
 }
 
 /** The pid in the ticket of a run: the detached runner that holds the budget, not the caller. */
@@ -384,6 +407,34 @@ describe("ark test budget", () => {
       await first.stdout;
       await expectCleanRunOfB();
     });
+
+  // Another copy of this file, or another agent's ark test, runs a runner of the same run id under its own ARK_HOME.
+  // It is stood in for by a process with a runner's command line that has no record under this ARK_HOME.
+  test("the cleanup of one copy of this file leaves the runner of another copy with the same run id alone", async () => {
+    const other = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        "await new Promise(() => {})",
+        "test-runner",
+        runA,
+        "--project",
+        "other",
+      ],
+      { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+    );
+    try {
+      const first = startTest(runA);
+      await waitFor(started(runA));
+      const runner = runnerPid(runA);
+      killStarted();
+      await first.process.exited;
+      expect(() => process.kill(runner, 0)).toThrow(); // the runner of this copy is gone
+      expect(other.exitCode).toBeNull(); // the other copy's runner lives
+    } finally {
+      other.kill("SIGKILL");
+    }
+  });
 
   // The suite of A needs two seconds to end after the signal, as a suite with its own cleanup does.
   for (const signal of ["SIGINT", "SIGTERM"] as const)
