@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { loadConfig, type ProjectConfig } from "./config.ts";
 import { hasTestCriterion, runCriteria } from "./ticket.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
+import { writeOwnerFile } from "./owner-file.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
 import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
@@ -358,9 +359,9 @@ async function runSuite(
 ) {
   const prefix = sideRun.side === "base" ? "base-" : "";
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
-  const scratch = mkdtempSync(join(tmpdir(), "ark-evidence-"));
+  const scratch = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-evidence-")));
   // ARK-390: a private TMPDIR per suite, so two suites or two runs never share temp files.
-  const suiteTmpdir = mkdtempSync(join(tmpdir(), "ark-suite-"));
+  const suiteTmpdir = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-suite-")));
   let taken: { cores: number; release: () => void } | null = null;
   try {
     const cached = cache ? loadCached(cache.project, cache.key, scratch) : null;
@@ -630,6 +631,8 @@ async function baseSuitesPassed(
             : cloned;
         if (created.code !== 0)
           throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
+        // after the clone: a repo of "." is cloned into the root, which must still be empty
+        writeOwnerFile(root);
         if (existsSync(join(path, ".gitmodules"))) {
           // base runs use the pointer the base commit records, never the run's library head; the head worktree's
           // folders are a local source, so an unreachable remote does not stop the base side
@@ -662,7 +665,11 @@ async function baseSuitesPassed(
     }
     // Every suite runs, also after a failed one.
     let allPassed = true;
+    const checkBase = () => {
+      if (root !== null && !existsSync(root)) throw new ArkError(`base checkout missing: ${root}`);
+    };
     for (const { suite, command, files, cache } of keyed) {
+      checkBase();
       const { passed, reused } = await runSuite(
         suite,
         join(root ?? "", suite.repo),
@@ -678,9 +685,12 @@ async function baseSuitesPassed(
         console.log(`suite      ${suite.name} base  reused  base key ${cache.key.slice(0, 6)}`);
       allPassed &&= passed;
     }
+    checkBase();
     return allPassed;
   } finally {
-    if (compose && root !== null) await run([...compose, "down"], root);
+    // a vanished root is no cwd: down runs from tmpdir() (it names the root by --project-directory), so spawn cannot throw over the ArkError
+    if (compose && root !== null)
+      await run([...compose, "down"], existsSync(root) ? root : tmpdir());
     if (root !== null) rmSync(root, { recursive: true, force: true });
   }
 }

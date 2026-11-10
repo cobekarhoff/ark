@@ -10,7 +10,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { ownerFileName } from "./owner-file.ts";
 import type { TestResult } from "./parsers/index.ts";
 import { projectDirectory } from "./paths.ts";
 
@@ -80,7 +81,10 @@ export function storeCached(
   mkdirSync(prepared, { recursive: true });
   writeFileSync(join(prepared, "entry.json"), JSON.stringify(entry));
   writeFileSync(join(prepared, "used"), new Date().toISOString());
-  cpSync(scratch, join(prepared, "scratch"), { recursive: true });
+  cpSync(scratch, join(prepared, "scratch"), {
+    recursive: true,
+    filter: (source) => basename(source) !== ownerFileName,
+  });
   const target = join(directory, key);
   rmSync(target, { recursive: true, force: true });
   renameSync(prepared, target);
