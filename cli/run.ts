@@ -2,6 +2,7 @@ import { now as hubNow } from "./clock.ts";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
+import { readTerminals } from "./orca.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { checkRoles } from "./role-check.ts";
@@ -11,6 +12,7 @@ import {
   readEvents,
   waitingGate,
   writeState,
+  lastWorker,
   type ArkEvent,
   type EventData,
   type RunState,
@@ -155,7 +157,54 @@ function answerEscalationByAuto(
   return `escalation one_more_round by auto (${start.merge ? "merge, not counted" : `${used + 1} of ${autoEscalationCap}`})`;
 }
 
-export function runStep(
+/**
+ * Records a running step as interrupted once Orca shows its worker terminal gone. It never guesses:
+ * a terminal Orca lists in any state (disconnected too) or an Orca that does not answer refuses it.
+ * It runs no git command, so the worktree keeps every file.
+ */
+async function markInterrupted(
+  runId: string,
+  directory: string,
+  events: ArkEvent[],
+  state: RunState,
+  stepId: string,
+): Promise<void> {
+  const status = state.steps.find((step) => step.id === stepId)?.status;
+  if (status !== "running")
+    throw new ArkError(
+      `step.finished refused: ${stepId} is ${status ?? "not in the plan"}, not running`,
+    );
+  const worker = lastWorker(events, stepId);
+  if (worker !== null) {
+    if (!worker.terminal || worker.terminal === "unknown")
+      throw new ArkError(
+        `step.finished refused: no worker terminal is recorded for ${stepId}, so ark cannot tell if its worker is live`,
+      );
+    const snapshot = await readTerminals();
+    if (snapshot === null)
+      throw new ArkError(
+        `step.finished refused: cannot tell if the worker of ${stepId} is live (orca terminal list failed)`,
+      );
+    const listed = snapshot.terminals.find((terminal) => terminal.handle === worker.terminal);
+    if (listed)
+      throw new ArkError(
+        `step.finished refused: the worker of ${stepId} is live (terminal ${worker.terminal}, ${listed.connected === false ? "disconnected" : "running"})`,
+      );
+  }
+  const started = events.findLast(
+    (event) => event.type === "step.started" && event.data.step === stepId,
+  );
+  appendEvent(directory, "step.finished", {
+    step: stepId,
+    outcome: "interrupted",
+    ...(started?.data.merge ? { merge: true } : {}),
+  });
+  console.log(
+    `${runId} ${stepId} interrupted (round ${started?.data.round ?? state.round} given back, worktree untouched)`,
+  );
+}
+
+export async function runStep(
   runId: string,
   stepId: string,
   action: string,
@@ -163,17 +212,22 @@ export function runStep(
   merge = false,
   notStarted = false,
   inProject?: string,
-): void {
-  if (action !== "start" && action !== "finish")
-    throw new ArkError(`unknown step action "${action}": use start or finish`);
-  if (failed && action === "start") throw new ArkError("--failed only applies to finish");
-  if (merge && action === "finish") throw new ArkError("--merge only applies to start");
-  if (notStarted && action === "start") throw new ArkError("--not-started only applies to finish");
+): Promise<void> {
+  if (action !== "start" && action !== "finish" && action !== "interrupted")
+    throw new ArkError(`unknown step action "${action}": use start, finish or interrupted`);
+  if (failed && action !== "finish") throw new ArkError("--failed only applies to finish");
+  if (merge && action !== "start") throw new ArkError("--merge only applies to start");
+  if (notStarted && action !== "finish") throw new ArkError("--not-started only applies to finish");
   if (notStarted && !failed) throw new ArkError("--not-started needs --failed");
   if (notStarted && merge) throw new ArkError("--not-started cannot be used with --merge");
   const { project, directory } = findRun(runId, inProject);
   const events = readEvents(directory);
   const state = deriveState(events);
+
+  if (action === "interrupted") {
+    await markInterrupted(runId, directory, events, state, stepId);
+    return;
+  }
 
   if (action === "finish") {
     const outcome = failed ? "failed" : "succeeded";
@@ -214,7 +268,8 @@ export function runStep(
       event.type === "step.finished" &&
       event.data.step === stepId &&
       !event.data.merge &&
-      !event.data.not_started,
+      !event.data.not_started &&
+      event.data.outcome !== "interrupted",
   ).length;
   const round = planned.role === "implementer" && !merge ? finishes + 1 : state.round;
   const start: EventData = {

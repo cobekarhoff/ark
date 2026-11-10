@@ -102,6 +102,21 @@ export function readEvents(runDirectory: string): ArkEvent[] {
     });
 }
 
+/** The worker of a step as its last `worker.started` event records it; null when the step has none (old runs). */
+export type StepWorker = {
+  step: string;
+  dispatch: string;
+  terminal: string;
+  harness: string;
+  session: string;
+};
+export function lastWorker(events: ArkEvent[], step: string): StepWorker | null {
+  const found = events.findLast(
+    (event) => event.type === "worker.started" && event.data.step === step,
+  );
+  return found ? (found.data as StepWorker) : null;
+}
+
 export function appendEvent(runDirectory: string, type: string, data: EventData): ArkEvent {
   const events = readEvents(runDirectory);
   assertAllowed(deriveState(events), type, data, runDirectory);
@@ -136,7 +151,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   // Latches on the first evaluation with blockers; only a criteria accept clears it, not a later clean evaluation.
   let blocked = false;
   let round = 1;
-  // Rounds of the non-merge starts, so a finish with not_started can take its start back.
+  // Rounds of the non-merge starts, so a finish with not_started or interrupted can take its start back.
   const startedRounds: { step: string; round: number }[] = [];
   let roundBudget = 0;
   let criteriaIds: string[] = [];
@@ -266,7 +281,8 @@ export function deriveState(events: ArkEvent[]): RunState {
       case "step.finished": {
         stepStatus.set(data.step, data.outcome);
         // A merge start never moved the round, so its not_started finish has no round to restore.
-        if (data.not_started && !data.merge) {
+        // An interrupted finish gives the round back the same way.
+        if ((data.not_started || data.outcome === "interrupted") && !data.merge) {
           const last = startedRounds.findLastIndex((started) => started.step === data.step);
           if (last !== -1) startedRounds.splice(last, 1);
           round = Math.max(1, ...startedRounds.map((started) => started.round));

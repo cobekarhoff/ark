@@ -75,6 +75,7 @@ export const eventPhases = {
   "worktree.synced": ["planning", ...buildPhases],
   "step.started": buildPhases,
   "step.finished": buildPhases,
+  "worker.started": buildPhases,
   "escalation.requested": ["building"],
   "test.completed": buildPhases,
   "merge_request.opened": ["building", "merge_requests_open"],
@@ -90,8 +91,8 @@ export type EventType = keyof typeof eventPhases;
  */
 export type EscalationState = "none" | "requested" | "answered";
 
-/** `pending` until `step.started`, then `running` until `step.finished` records `succeeded` or `failed`. `stopped` is never recorded: a closed run shows a step it left running as stopped. */
-export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "stopped";
+/** `pending` until `step.started`, then `running` until `step.finished` records `succeeded`, `failed` or `interrupted` (its worker is gone; the step can start again). `stopped` is never recorded: a closed run shows a step it left running as stopped. */
+export type StepStatus = "pending" | "running" | "succeeded" | "failed" | "interrupted" | "stopped";
 
 export type CriterionStatus =
   | "pending"
