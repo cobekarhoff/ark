@@ -18,6 +18,7 @@ let arkHome: string;
 let runDirectory: string;
 let ompRoot: string;
 let claudeRoot: string;
+let codexRoot: string;
 
 /** Copies a sanitized fixture into a session root; `__RUN__` in the fixture becomes the run folder. */
 function installSession(root: string, relativePath: string, fixture: string): void {
@@ -93,6 +94,8 @@ beforeEach(() => {
   claudeRoot = mkdtempSync(join(tmpdir(), "ark-claude-sessions-"));
   process.env.ARK_OMP_SESSIONS = ompRoot;
   process.env.ARK_CLAUDE_SESSIONS = claudeRoot;
+  codexRoot = mkdtempSync(join(tmpdir(), "ark-codex-sessions-"));
+  process.env.ARK_CODEX_SESSIONS = codexRoot;
   writeEvents(runDirectory, scenario);
 });
 
@@ -192,14 +195,30 @@ describe("usage parsers", () => {
   });
 });
 
+/** Runs `ark retro` and returns what it prints. */
+function captureRetro(): string {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => void lines.push(args.join(" "));
+  try {
+    retro(runId);
+  } finally {
+    console.log = original;
+  }
+  return lines.join("\n");
+}
+
 describe("ark retro", () => {
   test("ARK-T170 gives byte-identical metrics.json for the same run data", () => {
     installAllSessions();
+    installToolErrorSessions();
     retro(runId);
     const first = readFileSync(join(runDirectory, "metrics.json"), "utf8");
     retro(runId);
     expect(readFileSync(join(runDirectory, "metrics.json"), "utf8")).toBe(first);
     expect(first).not.toMatch(/\d\.\d{7,}/); // rounded to 6 decimals
+    // The list has ties in count, so only a fixed order keeps the bytes equal.
+    expect(JSON.parse(first).orchestration.tool_error_list.length).toBeGreaterThan(1);
     expect(Object.keys(JSON.parse(first))).toEqual([
       "run",
       "actual_models",
@@ -217,6 +236,195 @@ describe("ark retro", () => {
       "comparison",
     ]);
   });
+  const longError =
+    "Edit failed: the old text was not found in the file because the file changed since it was last read, so the replacement was refused";
+
+  function installToolErrorSessions(): void {
+    installSession(ompRoot, "platform/session-tool-errors.jsonl", "omp/tool-errors.jsonl");
+    installSession(claudeRoot, "workspace/session-tool-errors.jsonl", "claude/tool-errors.jsonl");
+    installSession(codexRoot, "2026/10/29/rollout-tool-errors.jsonl", "codex/tool-errors.jsonl");
+  }
+
+  /** One omp session in the run folder: each call is a tool, its arguments and the error text (undefined: it succeeds). */
+  function installOmpCalls(
+    name: string,
+    calls: { tool: string; args: unknown; error?: string }[],
+  ): void {
+    const message = (id: string, body: Record<string, unknown>) => ({
+      type: "message",
+      id,
+      timestamp: day("14:30:00.000"),
+      message: body,
+    });
+    const records: unknown[] = [
+      { type: "session", id: name, timestamp: day("14:30:00.000"), cwd: runDirectory },
+      message("a", {
+        role: "assistant",
+        model: "claude-haiku-4-5",
+        content: calls.map((call, index) => ({
+          type: "toolCall",
+          id: `t${index}`,
+          name: call.tool,
+          arguments: call.args,
+        })),
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } },
+      }),
+      ...calls.map((call, index) =>
+        message(`r${index}`, {
+          role: "toolResult",
+          toolCallId: `t${index}`,
+          isError: call.error !== undefined,
+          content: [{ type: "text", text: call.error ?? "ok" }],
+        }),
+      ),
+    ];
+    mkdirSync(join(ompRoot, "platform"), { recursive: true });
+    writeFileSync(
+      join(ompRoot, "platform", `${name}.jsonl`),
+      `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    );
+  }
+
+  test("ARK-T192 lists the failed calls of an omp, a claude and a codex session by tool and first command word", () => {
+    installToolErrorSessions();
+    const printed = captureRetro();
+    const orchestration = readMetrics().orchestration;
+    // Three failed calls of two tools in each session; the successful calls add nothing.
+    // The count-2 tie and the count-1 tie sort by tool, plain string comparison: uppercase first.
+    expect(orchestration.tool_error_list).toEqual([
+      { tool: "Bash", word: "orca", count: 2, first_error: "orca: command failed" },
+      { tool: "bash", word: "orca", count: 2, first_error: "usage: orca run list" },
+      { tool: "shell", word: "orca", count: 2, first_error: "orca: no such run" },
+      { tool: "Edit", word: "", count: 1, first_error: longError.slice(0, 120) },
+      {
+        tool: "apply_patch",
+        word: "",
+        count: 1,
+        first_error: "patch failed: hunk 1 does not apply",
+      },
+      { tool: "edit", word: "", count: 1, first_error: "Stale tag: file changed since last read" },
+    ]);
+    expect(longError.length).toBeGreaterThan(120);
+    // The list counts failed calls (9); tool_errors counts the messages that hold them (omp 1, claude 1, codex 0).
+    expect(
+      orchestration.tool_error_list.reduce(
+        (sum: number, entry: { count: number }) => sum + entry.count,
+        0,
+      ),
+    ).toBe(9);
+    expect(orchestration.tool_errors).toBe(2);
+    // Stdout: exactly the five largest, after the orchestration line, the word omitted when empty.
+    const lines = printed.split("\n");
+    const start = lines.findIndex((line) => line.startsWith("orchestration:"));
+    expect(
+      lines.slice(start + 1, start + 7).filter((line) => line.startsWith("tool error:")),
+    ).toEqual([
+      "tool error: Bash orca x2: orca: command failed",
+      "tool error: bash orca x2: usage: orca run list",
+      "tool error: shell orca x2: orca: no such run",
+      `tool error: Edit x1: ${longError.slice(0, 120)}`,
+      "tool error: apply_patch x1: patch failed: hunk 1 does not apply",
+    ]);
+    expect(lines.filter((line) => line.startsWith("tool error:"))).toHaveLength(5);
+  });
+
+  test("ARK-T192 writes every pair to metrics.json but prints only the five largest of seven", () => {
+    installOmpCalls(
+      "seven",
+      ["a", "b", "c", "d", "e", "f", "g"].flatMap((tool, index) =>
+        Array.from({ length: 7 - index }, () => ({
+          tool,
+          args: { command: "run it" },
+          error: `${tool} failed`,
+        })),
+      ),
+    );
+    const printed = captureRetro();
+    expect(
+      readMetrics().orchestration.tool_error_list.map((entry: { tool: string; count: number }) => [
+        entry.tool,
+        entry.count,
+      ]),
+    ).toEqual([
+      ["a", 7],
+      ["b", 6],
+      ["c", 5],
+      ["d", 4],
+      ["e", 3],
+      ["f", 2],
+      ["g", 1],
+    ]);
+    expect(printed.split("\n").filter((line) => line.startsWith("tool error:"))).toEqual([
+      "tool error: a run x7: a failed",
+      "tool error: b run x6: b failed",
+      "tool error: c run x5: c failed",
+      "tool error: d run x4: d failed",
+      "tool error: e run x3: e failed",
+    ]);
+  });
+
+  test("ARK-T192 writes an empty list and no tool error line when no call failed", () => {
+    installOmpCalls("clean", [{ tool: "bash", args: { command: "orca status" } }]);
+    const printed = captureRetro();
+    expect(readMetrics().orchestration.tool_error_list).toEqual([]);
+    expect(printed).not.toContain("tool error:");
+  });
+
+  test("ARK-T192 gives word '' for a failed call whose command cannot be read, without throwing", () => {
+    installOmpCalls("unreadable", [
+      { tool: "bash", args: { command: 42 }, error: "bad command" },
+      { tool: "bash", args: {}, error: "bad command" },
+    ]);
+    mkdirSync(join(codexRoot, "2026/10/29"), { recursive: true });
+    writeFileSync(
+      join(codexRoot, "2026/10/29/rollout-unreadable.jsonl"),
+      [
+        {
+          timestamp: day("14:30:00.000"),
+          type: "session_meta",
+          payload: { id: "u", cwd: runDirectory },
+        },
+        {
+          type: "response_item",
+          payload: { type: "function_call", name: "shell", call_id: "u1", arguments: "{not json" },
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "u1",
+            output: JSON.stringify({ output: "boom", metadata: { exit_code: 1 } }),
+          },
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "shell",
+            call_id: "u2",
+            arguments: JSON.stringify({ command: ["git", "status"] }),
+          },
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "u2",
+            output: JSON.stringify({ output: "not a repo", metadata: { exit_code: 128 } }),
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n"),
+    );
+    captureRetro();
+    expect(readMetrics().orchestration.tool_error_list).toEqual([
+      { tool: "bash", word: "", count: 2, first_error: "bad command" },
+      { tool: "shell", word: "", count: 1, first_error: "boom" },
+      { tool: "shell", word: "git", count: 1, first_error: "not a repo" },
+    ]);
+  });
+
   test("ARK-T183 attributes pre-evaluation usage and starts criteria wait at the blocker event", () => {
     const evaluationTime = "14:21:00.000";
     writeEvents(runDirectory, [
@@ -695,7 +903,7 @@ describe("ark retro", () => {
     });
   });
 
-  test("ARK-160-AC6 reports tool errors, context overflows, idle gaps, crashes, restarts and the cost of the run lead", () => {
+  test("ARK-T195 reports tool errors, context overflows, idle gaps, crashes, restarts and the cost of the run lead", () => {
     installAllSessions();
     retro(runId);
     expect(readMetrics().orchestration).toEqual({
