@@ -11,6 +11,10 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import { addWorktree, useFakeOrca } from "./fake-orca.ts";
+
+// A step in plan.yml starts its worker through Orca (ARK-359): a fake `orca` answers, in a scratch worktree.
+useFakeOrca();
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -127,6 +131,7 @@ test("ARK-234-AC2 gates.plan auto approves a valid plan with no open decision by
   expect(plan).toHaveLength(1);
   expect(plan[0].data).toEqual({ gate: "plan", answer: "approve", by: "auto" });
   expect(deriveState(eventsOf(directory)).phase).toBe("building");
+  addWorktree(directory);
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
 });
 
@@ -243,6 +248,7 @@ function buildingRun(gates: Record<string, unknown>) {
   recordEvaluation(run.directory);
   expect(checkPlan(run.runId, run.directory).code).toBe(0);
   expect(deriveState(eventsOf(run.directory)).phase).toBe("building");
+  addWorktree(run.directory);
   return run;
 }
 
@@ -291,7 +297,11 @@ test("ARK-288-AC1 a spent budget with gates.escalation auto records the answer b
   expect(result.code).toBe(0);
   expect(result.out).toContain("escalation one_more_round by auto (1 of 2)");
   const added = eventsOf(directory).slice(before);
-  expect(added.map((event) => event.type)).toEqual(["gate.answered", "step.started"]);
+  expect(added.map((event) => event.type)).toEqual([
+    "gate.answered",
+    "step.started",
+    "worker.started",
+  ]);
   expect(added[0].data).toEqual({ gate: "escalation", answer: "one_more_round", by: "auto" });
   expect(deriveState(eventsOf(directory)).steps[0].status).toBe("running");
 });

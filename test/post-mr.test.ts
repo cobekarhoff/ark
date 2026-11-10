@@ -14,17 +14,21 @@ import {
   workspaceWithRepos,
   writeTicket,
 } from "./helpers.ts";
+import { installFakeOrca, removeFakeOrca } from "./fake-orca.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
 
 const originalPath = process.env.PATH;
 afterEach(() => {
+  removeFakeOrca();
   process.env.PATH = originalPath;
 });
 
+/** A building run; every step in plan.yml starts its worker through the fake Orca (ARK-359). */
 function openRun(withMergeRequest = true) {
   tempArkHome();
+  installFakeOrca();
   const workspace = tempGitRepo({
     "contract.test.ts":
       'import { expect, test } from "bun:test"; test("ARK-900-AC1 fixture", () => expect(2 + 2).toBe(4));\n',
@@ -85,7 +89,7 @@ test("ARK-208-AC1 post-MR validator and reviewer steps persist starts, finishes 
   const { runId, directory } = openRun();
   for (const role of ["validator", "reviewer"]) {
     expect(ark("run", "step", runId, role, "start").code).toBe(0);
-    expect(readEvents(directory).at(-1)).toMatchObject({
+    expect(readEvents(directory).at(-2)).toMatchObject({
       type: "step.started",
       data: { step: role, role },
     });
@@ -114,7 +118,7 @@ test("ARK-208-AC2 every post-MR implementer round needs a fresh escalation answe
     expect(readEvents(directory)).toEqual(before);
     expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
     expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
-    expect(readEvents(directory).at(-1)).toMatchObject({
+    expect(readEvents(directory).at(-2)).toMatchObject({
       type: "step.started",
       data: { step: "implementer", round },
     });
@@ -132,7 +136,7 @@ test("ARK-287-AC1 an escalation answer survives ark test after an MR is open and
 
   expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
   expect(answers()).toHaveLength(answered);
-  expect(readEvents(directory).at(-1)).toMatchObject({
+  expect(readEvents(directory).at(-2)).toMatchObject({
     type: "step.started",
     data: { step: "implementer", round: 2 },
   });
@@ -263,6 +267,7 @@ function git(directory: string, ...args: string[]): string {
  */
 function submoduleRun() {
   tempArkHome();
+  installFakeOrca(); // each plan step starts its worker through Orca (ARK-359)
   const workspace = workspaceWithRepos(["app", "lib"]);
   const root = mkdtempSync(join(tmpdir(), "ark-remotes-"));
   const libRemote = join(root, "lib.git");

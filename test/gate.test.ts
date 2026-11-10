@@ -10,6 +10,10 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import { addWorktree, useFakeOrca } from "./fake-orca.ts";
+
+// A step in plan.yml starts its worker through Orca (ARK-359): a fake `orca` answers, in a scratch worktree.
+useFakeOrca();
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -178,6 +182,7 @@ describe("gate record", () => {
       by: "human",
     });
     expect(stateOf(directory).phase).toBe("building");
+    addWorktree(directory);
     expect(ark("run", "step", runId, "build", "start").code).toBe(0);
     expect(stateOf(directory).current_step).toBe("build");
   });
@@ -236,6 +241,7 @@ describe("plan approval survives only an unchanged valid recheck", () => {
   test("ARK-187-AC1 a recheck of an unchanged plan keeps approval and the step starts", () => {
     const { runId, directory } = approvedRun();
     expect(ark("plan", "check", runId).code).toBe(0);
+    addWorktree(directory);
     const started = ark("run", "step", runId, "build", "start");
     expect(started.code).toBe(0);
     expect(stateOf(directory).current_step).toBe("build");
@@ -477,6 +483,7 @@ test("ARK-T102 ARK-334/AC2 a spent round budget names ark escalate in building a
   writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
   expect(ark("plan", "check", runId).code).toBe(0);
   expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
+  addWorktree(directory);
   const build = (action: string) => ark("run", "step", runId, "build", action);
   expect(build("start").code).toBe(0); // round 1
   expect(build("finish").code).toBe(0);

@@ -29,6 +29,9 @@ import {
   writeTicket,
   workspaceWithRepos,
 } from "./helpers.ts";
+import { installFakeOrca, removeFakeOrca } from "./fake-orca.ts";
+
+afterEach(removeFakeOrca);
 
 const repositoryRoot = join(import.meta.dir, "..");
 
@@ -1154,6 +1157,7 @@ function worktreeRun(config: Record<string, unknown> = {}): {
   directory: string;
   worktree: string;
 } {
+  installFakeOrca(); // a step in plan.yml starts its worker through Orca (ARK-359)
   const workspace = tempGitRepo({
     "ac.test.ts": `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
   });
@@ -1349,6 +1353,7 @@ test("ARK-T116 a none project lists each branch with commits beyond its base, be
 function claraRun(
   options: { repos?: boolean; unchanged?: string[]; submoduleBump?: boolean } = {},
 ) {
+  installFakeOrca(); // each plan step starts its worker through Orca (ARK-359)
   writeProject(
     "demo",
     validConfig({
