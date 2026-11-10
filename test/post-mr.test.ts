@@ -60,6 +60,8 @@ function openRun(withMergeRequest = true) {
   const steps = ["implementer", "validator", "reviewer"].map((role) => ({
     id: role,
     role,
+    harness: "omp",
+    model: "test",
     repo: ".",
     needs: [],
     criteria: ["ARK-900-AC1"],
@@ -314,6 +316,8 @@ function submoduleRun() {
   const step = (id: string, role: string, repo: string, needs: string[]) => ({
     id,
     role,
+    harness: "omp",
+    model: "test",
     repo,
     needs,
     criteria: ["ARK-900-AC1"],
