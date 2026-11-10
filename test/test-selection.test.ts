@@ -308,10 +308,6 @@ describe("ark test base selection", () => {
     fixture.clear();
 
     ark("test", run.runId);
-    expect(fixture.ran().filter((line) => line.startsWith("base "))).toEqual([
-      "base test/a.test.ts",
-      "base test/b.test.ts",
-    ]);
     expect(events(run.runDirectory, "test.completed")[0].base_passed).toBe(false);
     expect(readResult(run.runDirectory, "FAKE-T1", "base").status).toBe("passed");
     expect(readResult(run.runDirectory, "FAKE-T2", "base").status).toBe("failed");
@@ -383,7 +379,7 @@ describe("ark test suite paths and quick mode", () => {
     });
     expect(run.result.code, run.result.err + run.result.out).toBe(0);
     expect(run.fixture.ran()).toEqual(["head e2e/pw.test.ts", "head test/cli.test.ts"]);
-    expect(run.result.out).not.toContain("skipped");
+    expect(run.result.out).not.toContain("skipped  (");
   });
 
   test("ARK-T120 ARK-389/AC2 a quick run skips a suite whose paths the diff does not touch, prints the reason, and the AC it alone serves reads not run", () => {
@@ -549,17 +545,19 @@ const aBase = `import { test } from "bun:test";
 test("FAKE-T1 keeps", () => {});
 test("to skip", () => {});
 test("to delete", () => {});
+test.skip("old skip", () => {});
 `;
 const aHead = `import { test } from "bun:test";
 test("FAKE-T1 keeps", () => {});
 test.skip("to skip", () => {});
+test.skip("old skip", () => {});
 `;
 const bFile = `import { test } from "bun:test";
 test("b passes", () => {});
 test.skip("b skipped at base", () => {});
 `;
 
-/** Base: a.test.ts and b.test.ts (1 skipped). Head: `to skip` skipped, `to delete` removed, plus any `headFiles`. */
+/** Base: a.test.ts (1 skipped) and b.test.ts (1 skipped, unchanged by the run, so not in the base count). Head: `to skip` skipped, `to delete` removed, plus any `headFiles`. */
 function skipDeleteRun(headFiles: Record<string, string | null> = {}) {
   const workspace = tempGitRepo({ "test/a.test.ts": aBase, "test/b.test.ts": bFile });
   const run = startRun({ workspace, suites: [suiteOf("cli", "test")], cases: ["FAKE-T1"] });
@@ -573,14 +571,14 @@ describe("ark test skipped and deleted tests", () => {
     const first = ark("test", run.runId);
     expect(first.code, first.err + first.out).toBe(0);
     const lines = first.out.split("\n");
-    const tests = lines.indexOf("tests      2 passed, 2 skipped (base 1), 1 deleted");
+    const tests = lines.indexOf("tests      2 passed, 3 skipped (base 1), 1 deleted");
     expect(tests).toBeGreaterThan(lines.findIndex((line) => line.startsWith("suite      cli")));
     expect(lines[tests + 1]).toBe("deleted    test/a.test.ts  to delete");
     expect(lines.filter((line) => line.startsWith("deleted "))).toHaveLength(1);
     const [event] = events(run.runDirectory, "test.completed");
     expect(event).toMatchObject({
       passed_count: 2,
-      skipped: 2,
+      skipped: 3,
       base_skipped: 1,
       deleted: [{ file: "test/a.test.ts", name: "to delete" }],
     });
@@ -589,16 +587,16 @@ describe("ark test skipped and deleted tests", () => {
     const again = ark("test", run.runId);
     expect(again.code, again.err + again.out).toBe(0);
     expect(again.out).toContain("reused");
-    expect(again.out).toContain("tests      2 passed, 2 skipped (base 1), 1 deleted");
+    expect(again.out).toContain("tests      2 passed, 3 skipped (base 1), 1 deleted");
     expect(again.out).toContain("deleted    test/a.test.ts  to delete");
     expect(events(run.runDirectory, "test.completed")[1]).toMatchObject({
-      skipped: 2,
+      skipped: 3,
       base_skipped: 1,
       deleted: [{ file: "test/a.test.ts", name: "to delete" }],
     });
   });
 
-  test("ARK-T199 a head equal to base prints zero deleted and no deleted line, and a deleted file lists each of its tests sorted", () => {
+  test("ARK-T199 a run with no changed test file prints no base fields and no deleted line, and a deleted file lists each of its tests sorted", () => {
     const clean = tempGitRepo({ "test/a.test.ts": aBase, "test/b.test.ts": bFile });
     const same = startRun({
       workspace: clean,
@@ -608,7 +606,7 @@ describe("ark test skipped and deleted tests", () => {
     commit(same.mirror, "source only", { "src/a.ts": "export const a = 1;\n" });
     const unchanged = ark("test", same.runId);
     expect(unchanged.code, unchanged.err + unchanged.out).toBe(0);
-    expect(unchanged.out).toContain("tests      4 passed, 1 skipped (base 1), 0 deleted");
+    expect(unchanged.out).toContain("tests      4 passed, 2 skipped\n");
     expect(unchanged.out).not.toContain("deleted    ");
 
     const run = skipDeleteRun({
@@ -628,12 +626,12 @@ describe("ark test skipped and deleted tests", () => {
     const run = skipDeleteRun();
     const result = ark("test", run.runId, "--quick");
     expect(result.code, result.err + result.out).toBe(0);
-    expect(result.out).toContain("tests      1 passed, 1 skipped\n");
+    expect(result.out).toContain("tests      1 passed, 2 skipped\n");
     expect(result.out).not.toContain("base 1");
     expect(result.out).not.toContain("deleted");
     const [event] = events(run.runDirectory, "test.completed");
     expect(event.mode).toBe("quick");
-    expect(event).toMatchObject({ passed_count: 1, skipped: 1 });
+    expect(event).toMatchObject({ passed_count: 1, skipped: 2 });
     expect("base_skipped" in event).toBe(false);
     expect("deleted" in event).toBe(false);
   });

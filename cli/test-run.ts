@@ -150,7 +150,7 @@ const quickStatus = (status: Status, quick: boolean): Status =>
 
 type Suite = ProjectConfig["suites"][number];
 
-/** `census`: the whole suites at the pristine base commit, run only to list and count their tests. */
+/** `census`: the run's own test files that exist at the pristine base commit, run only to list and count their tests. */
 type Side = "base" | "head" | "census";
 /** What one side knows of a case: the winning result of every suite that carries it, and the suites that did. */
 type CaseEntry = {
@@ -175,7 +175,7 @@ type SideRun = {
   reused: string[];
   /** Test files that failed once and passed on retry. */
   flaky: { suite: string; file: string }[];
-  /** Every result of each suite that ran (the census side only). */
+  /** Every result of each suite that ran on this side. */
   listed: Map<string, TestResult[]>;
 };
 
@@ -394,7 +394,6 @@ async function runSuite(
   cache?: SuiteCache,
 ) {
   const prefix = sideRun.side === "base" ? "base-" : "";
-  const census = sideRun.side === "census";
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
   const scratch = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-evidence-")));
   // ARK-390: a private TMPDIR per suite, so two suites or two runs never share temp files.
@@ -404,18 +403,16 @@ async function runSuite(
     const cached = cache ? loadCached(cache.project, cache.key, scratch) : null;
     if (cached !== null) {
       writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), cached.output);
-      if (!census)
-        addSuite(
-          sideRun,
-          suite,
-          sha,
-          cached.log,
-          cached.results,
-          scratch,
-          join(resultsDirectory, "evidence"),
-          selected,
-        );
-      if (census) sideRun.listed.set(suite.name, cached.results);
+      addSuite(
+        sideRun,
+        suite,
+        sha,
+        cached.log,
+        cached.results,
+        scratch,
+        join(resultsDirectory, "evidence"),
+        selected,
+      );
       sideRun.reused.push(suite.name);
       for (const file of cached.flaky) sideRun.flaky.push({ suite: suite.name, file });
       return { results: cached.results, passed: true, flaky: cached.flaky, reused: true };
@@ -445,24 +442,22 @@ async function runSuite(
       log += retried.log;
     }
     writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
-    if (!census)
-      addSuite(
-        sideRun,
-        suite,
-        sha,
-        log,
-        results,
-        scratch,
-        join(resultsDirectory, "evidence"),
-        selected,
-      );
+    addSuite(
+      sideRun,
+      suite,
+      sha,
+      log,
+      results,
+      scratch,
+      join(resultsDirectory, "evidence"),
+      selected,
+    );
     const flaky = retried?.flaky ?? [];
     for (const file of flaky) sideRun.flaky.push({ suite: suite.name, file });
     // A non-zero exit is the failed tests only when every failed file passed on retry.
     const passed =
       (outcome.code === 0 || retried?.allPassed === true) &&
       results.every((result) => result.status !== "failed");
-    if (census) sideRun.listed.set(suite.name, results);
     if (passed && cache)
       storeCached(cache.project, cache.key, { results, output, log, flaky }, scratch);
     return { results, passed, flaky, reused: false };
@@ -530,15 +525,30 @@ export async function pathsSkipReason(
   return changed.some(covered) ? null : `diff touches none of: ${suite.paths.join(", ")}`;
 }
 
-/** The test files of the run's own commits (no merge-in files) that still exist at head and match `base_files`. */
-async function ownTestFiles(suite: Suite, base: string, mirror: string): Promise<string[]> {
+/** The test files of the run's own commits (no merge-in files) that match `base_files`. */
+async function ownPaths(suite: Suite, base: string, mirror: string): Promise<string[]> {
   const glob = new Bun.Glob(suite.base_files!);
-  const cwd = join(mirror, suite.repo);
   const logged = await gitPaths(
     ["log", "--first-parent", "--no-merges", "--name-only", "--format=", "-z", `${base}..HEAD`],
-    cwd,
+    join(mirror, suite.repo),
   );
-  return [...new Set(logged)].filter((path) => glob.match(path) && existsSync(join(cwd, path)));
+  return [...new Set(logged)].filter((path) => glob.match(path));
+}
+
+/** The own test files that still exist at head. */
+async function ownTestFiles(suite: Suite, base: string, mirror: string): Promise<string[]> {
+  return (await ownPaths(suite, base, mirror)).filter((path) =>
+    existsSync(join(mirror, suite.repo, path)),
+  );
+}
+
+/** The own test files that exist at the base commit: the changed and the deleted ones. */
+async function ownBaseFiles(suite: Suite, base: string, mirror: string): Promise<string[]> {
+  const cwd = join(mirror, suite.repo);
+  const files: string[] = [];
+  for (const path of await ownPaths(suite, base, mirror))
+    if ((await run(["git", "cat-file", "-e", `${base}:${path}`], cwd)).code === 0) files.push(path);
+  return files;
 }
 
 function composeFor(config: ProjectConfig, root: string, runId: string): string[] | null {
@@ -600,9 +610,20 @@ async function baseSuitesPassed(
         files,
       });
   }
-  // The census lists the tests of the pristine base, which the base run cannot: it holds the head's test files.
-  const census: PlanEntry[] =
-    worktrees.length === 0 ? [] : config.suites.map((suite) => ({ suite, command: suite.command }));
+  // The base run holds the head's copy of each changed test file, so it cannot list a test the head removed from
+  // one. The census runs those same files as the base has them: only the run's own files, never the whole suite.
+  const census: PlanEntry[] = [];
+  for (const suite of config.suites) {
+    const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+    if (suite.base_files === undefined || base === undefined) continue;
+    const files = await ownBaseFiles(suite, base, mirror);
+    if (files.length > 0)
+      census.push({
+        suite,
+        command: suite.base_command!.replaceAll("{files}", files.map(shellQuote).join(" ")),
+        files,
+      });
+  }
   if (plan.length === 0 && census.length === 0) return true;
   const censusDirectory = join(resultsDirectory, "census");
   mkdirSync(censusDirectory, { recursive: true });
@@ -748,7 +769,7 @@ async function runAtBase(
           copyHeadTests(join(mirror, repo), join(root, repo), copied.get(repo)!);
       for (const { suite, command, files, cache } of keyed[index]!) {
         checkBase();
-        const { passed, reused } = await runSuite(
+        const { results, passed, reused } = await runSuite(
           suite,
           join(root ?? "", suite.repo),
           phase.directory,
@@ -759,6 +780,7 @@ async function runAtBase(
           files,
           cache,
         );
+        phase.run.listed.set(suite.name, results);
         if (reused && phase.copyHead)
           console.log(`suite      ${suite.name} base  reused  base key ${cache.key.slice(0, 6)}`);
         if (phase.copyHead) allPassed &&= passed;
@@ -989,15 +1011,17 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
         censusRun,
         state.kind === "refactor",
       ));
-    // Every worktree has a base here, except in an old run, whose census is skipped.
-    const counted = !quick && censusRun.listed.size > 0;
+    // What the base lists, per suite: the census of the own files when there is one, else the base run itself.
+    // A suite with no base result (no changed test file, a quick run) contributes nothing.
+    const baseListed = new Map([...baseRun.listed, ...censusRun.listed]);
+    const counted = !quick && baseListed.size > 0;
     const passedCount = countStatus(allResults, "passed");
     const skippedCount = countStatus(allResults, "skipped");
-    const baseSkipped = [...censusRun.listed.values()].reduce(
+    const baseSkipped = [...baseListed.values()].reduce(
       (sum, results) => sum + countStatus(results, "skipped"),
       0,
     );
-    const deleted = counted ? deletedTests(censusRun.listed, headResults) : [];
+    const deleted = counted ? deletedTests(baseListed, headResults) : [];
     if (!quick) {
       addMissing(baseRun, headRun, evidenceDirectory);
       addMissing(headRun, baseRun, evidenceDirectory);
