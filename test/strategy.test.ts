@@ -405,7 +405,7 @@ test("ARK-T92 mockups remain outside actual worktrees and use one human review l
   expect(existsSync(join(runDirectory, "workspace", "mockups", "s1.html"))).toBe(false);
 });
 
-test("ARK-173-AC11 retro counts design rounds, strategy wait and Designer cost without escalation", () => {
+test("ARK-T186 retro counts design rounds, strategy wait and Designer cost without escalation", () => {
   const rows: RetroEventRow[] = [
     [
       "14:20:00.000",
@@ -471,7 +471,7 @@ test("ARK-173-AC11 retro counts design rounds, strategy wait and Designer cost w
   expect(retroResult).toMatchObject({ code: 0 });
   const metrics = JSON.parse(readFileSync(join(runDirectory, "metrics.json"), "utf8"));
   expect(metrics.design_rounds).toBe(2);
-  expect(metrics.time.gate_wait_seconds).toBe(300);
+  expect(metrics.time.waiting_on_you_seconds).toBe(300);
   expect(metrics.cost.by_role.designer.usd).toBeCloseTo(0.25);
   expect(metrics.rework.escalations).toBe(0);
 });
