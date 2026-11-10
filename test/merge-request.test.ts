@@ -1,10 +1,13 @@
 import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  appendFileSync,
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
@@ -35,6 +38,19 @@ function git(cwd: string, ...args: string[]): string {
   const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr.toString()}`);
   return result.stdout.toString().trim();
+}
+
+let bareTemplate: string | undefined;
+
+/** A fresh empty bare repo, copied from one `git init --bare` made per process. */
+function bareRepo(): string {
+  if (bareTemplate === undefined) {
+    bareTemplate = mkdtempSync(join(tmpdir(), "ark-bare-template-"));
+    git(bareTemplate, "init", "--bare");
+  }
+  const directory = mkdtempSync(join(tmpdir(), "ark-bare-"));
+  cpSync(bareTemplate, directory, { recursive: true });
+  return directory;
 }
 
 function commit(worktree: string, name: string) {
@@ -235,19 +251,14 @@ function scenario(
     const source = join(workspace, "repos", name);
     mkdirSync(join(workspace, "repos"), { recursive: true });
     renameSync(tempGitRepo(), source);
-    const base = git(source, "branch", "--show-current");
-    const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
-    git(bare, "init", "--bare");
+    const base = "main"; // tempGitRepo inits on main
+    const bare = bareRepo();
     const host: Host = name === "app" ? hosts.app : hosts.core;
     // `remote get-url` reports the host URL; pushes go to the local bare repo.
-    git(
-      source,
-      "remote",
-      "add",
-      "origin",
-      `https://${host === "github" ? "github.com" : "gitlab.com"}/org/${name}.git`,
+    appendFileSync(
+      join(source, ".git", "config"),
+      `[remote "origin"]\n\turl = https://${host === "github" ? "github.com" : "gitlab.com"}/org/${name}.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tpushurl = ${bare}\n`,
     );
-    git(source, "config", "remote.origin.pushurl", bare);
     const worktree = join(mkdtempSync(join(tmpdir(), "ark-worktree-")), name);
     git(source, "worktree", "add", "-b", `ark/${run}`, worktree, base);
     if (!shape.noCommits.includes(name)) commit(worktree, name);
@@ -634,8 +645,7 @@ function testedRun() {
   const workspace = tempGitRepo({
     "ac.test.ts": `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
   });
-  const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
-  git(bare, "init", "--bare");
+  const bare = bareRepo();
   git(workspace, "remote", "add", "origin", "https://github.com/org/core.git");
   git(workspace, "config", "remote.origin.pushurl", bare);
   writeProject("demo", {
@@ -1407,6 +1417,63 @@ test(
     scenario({ core: "github", app: "github" });
     expect(ark("merge-request", "open", run).code).toBe(0);
     for (const call of created()) expect(optionValue(call, "--body")).not.toContain("UI/UX");
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-T160 ark merge-request open on a run with 3 repos runs rev-parse HEAD at most once for each repo and each ledger git query once for each repo",
+  () => {
+    process.env.FAKE_NUMBERS = "[412, 88, 31]";
+    const { runDirectory, worktrees } = scenario(
+      claraHosts,
+      true,
+      [],
+      { pr_writing: { tier_floor: 2 } },
+      claraShape,
+    );
+    // A shim in front of git logs `<cwd>\t<args>` and runs the real git.
+    const shim = mkdtempSync(join(tmpdir(), "ark-git-shim-"));
+    const gitLog = join(shim, "git.log");
+    writeFileSync(
+      join(shim, "git"),
+      `#!/bin/sh\nprintf '%s\\t%s\\n' "$PWD" "$*" >> "${gitLog}"\nexec /usr/bin/git "$@"\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${shim}:${process.env.PATH}`;
+    const result = ark("merge-request", "open", run);
+    expect(result.code, result.err).toBe(0);
+    expect(created()).toHaveLength(3);
+
+    const gitCalls = readFileSync(gitLog, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t") as [string, string]);
+    for (const [name, worktree] of Object.entries(worktrees)) {
+      const own = gitCalls.filter(([cwd]) => realpathSync(cwd) === realpathSync(worktree));
+      const count = (args: string) => own.filter(([, argv]) => argv === args).length;
+      expect(count("rev-parse HEAD"), `${name} rev-parse HEAD`).toBe(1);
+      expect(count("remote get-url origin"), `${name} remote get-url origin`).toBeLessThanOrEqual(
+        1,
+      );
+      expect(
+        own.filter(([, argv]) => argv.startsWith("merge-base")).length,
+        `${name} merge-base`,
+      ).toBeLessThanOrEqual(1);
+      // Every ledger query, the base-ref probe included, runs once for each repo.
+      for (const query of [
+        "rev-parse --verify --quiet origin/main",
+        "diff --shortstat origin/main...HEAD",
+      ])
+        expect(count(query), `${name} ${query}`).toBeLessThanOrEqual(1);
+    }
+
+    // Each repo's single head read is its real head: the ledger of each MR body names it, and the heads differ.
+    const heads = Object.values(worktrees).map((path) => git(path, "rev-parse", "HEAD"));
+    expect(new Set(heads).size).toBe(3);
+    expect(
+      openedEvents(runDirectory).filter((e) => e.type === "merge_request.opened"),
+    ).toHaveLength(3);
   },
   { timeout: 30_000 },
 );
