@@ -1113,6 +1113,7 @@ function baseLedger(overrides: Record<string, any> = {}): Ledger {
     findings: [],
     hasReviewerStep: false,
     flaky: [],
+    tests: null,
     checks: [],
     reviewer: null,
     mergeOrder: ["."],

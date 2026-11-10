@@ -14,6 +14,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { requiredLiterals } from "../cli/merge-request.ts";
+import { buildBody } from "../skills/pr-writing/lib/body.ts";
+import { buildLedger } from "../skills/pr-writing/lib/ledger.ts";
 import { repoGraph } from "../cli/plan.ts";
 import {
   ark,
@@ -1476,4 +1478,110 @@ test(
     ).toHaveLength(3);
   },
   { timeout: 30_000 },
+);
+
+/** Replaces the data of the last `test.completed` event: the counts a real `ark test` would have recorded. */
+function recordCounts(runDirectory: string, counts: Record<string, unknown>, drop: string[] = []) {
+  const file = join(runDirectory, "events.ndjson");
+  const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+  const index = lines.findLastIndex((line) => JSON.parse(line).type === "test.completed");
+  const event = JSON.parse(lines[index]!);
+  for (const key of ["passed_count", "skipped", "base_skipped", "deleted", ...drop])
+    delete event.data[key];
+  Object.assign(event.data, counts);
+  lines[index] = JSON.stringify(event);
+  writeFileSync(file, `${lines.join("\n")}\n`);
+}
+
+const testsLines = (body: string) =>
+  body.split("\n").filter((line) => /^\s*- (Tests|Deleted):/.test(line));
+
+test(
+  "ARK-T200 the merge request body shows a Tests line with passed, skipped (and the base count) and deleted, lists each deleted title, and stays deterministic",
+  () => {
+    const { runId, runDirectory, worktree } = testedRun();
+    commit(worktree, "feature");
+    expect(ark("test", runId).code).toBe(0);
+    const posted = () => (edited().at(-1) ?? created()[0]!).body!;
+    const open = () => {
+      const result = ark("merge-request", "open", runId);
+      expect(result.code, result.err).toBe(0);
+      return posted();
+    };
+
+    // (a) one deleted test
+    recordCounts(runDirectory, {
+      passed_count: 42,
+      skipped: 3,
+      base_skipped: 2,
+      deleted: [{ file: "cli/merge-request.test.ts", name: "rejects a stale head" }],
+    });
+    const a = open();
+    expect(testsLines(a)).toEqual([
+      "- Tests: 42 passed, 3 skipped (base 2), 1 deleted",
+      "  - Deleted: `cli/merge-request.test.ts` rejects a stale head",
+    ]);
+
+    // (b) clean: a zero count, no Deleted bullet
+    recordCounts(runDirectory, { passed_count: 42, skipped: 0, base_skipped: 0, deleted: [] });
+    expect(testsLines(open())).toEqual(["- Tests: 42 passed, 0 skipped (base 0), 0 deleted"]);
+
+    // (c) unsorted input, a duplicate title once per copy, a title with backticks and a pipe, one with no file
+    recordCounts(runDirectory, {
+      passed_count: 5,
+      skipped: 0,
+      base_skipped: 0,
+      deleted: [
+        { file: "b.test.ts", name: "dup" },
+        { file: "a.test.ts", name: "has `tick` | pipe" },
+        { file: "b.test.ts", name: "dup" },
+        { name: "no file" },
+      ],
+    });
+    const c = open();
+    expect(testsLines(c)).toEqual([
+      "- Tests: 5 passed, 0 skipped (base 0), 4 deleted",
+      "  - Deleted: no file",
+      "  - Deleted: `a.test.ts` has \\`tick\\` \\| pipe",
+      "  - Deleted: `b.test.ts` dup",
+      "  - Deleted: `b.test.ts` dup",
+    ]);
+
+    // (e) an old event: no Tests line, no n/a
+    recordCounts(runDirectory, {});
+    const e = open();
+    expect(testsLines(e)).toEqual([]);
+    expect(e).not.toContain("n/a");
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T200 a quick or absent test result gives a Tests line without base claims or no line, and the same events give the same body",
+  () => {
+    const { runDirectory, worktree } = testedRun();
+    const heads = { ".": git(worktree, "rev-parse", "HEAD") };
+    const body = () => buildBody(buildLedger({ runFolder: runDirectory, heads }));
+
+    // (d) quick: passed and skipped at head only
+    recordCounts(runDirectory, { passed_count: 42, skipped: 3 }, ["mode"]);
+    const events = join(runDirectory, "events.ndjson");
+    writeFileSync(events, readFileSync(events, "utf8").replace('"mode":"full"', '"mode":"quick"'));
+    const d = body();
+    expect(testsLines(d)).toEqual([
+      "- Tests: 42 passed, 3 skipped (no base count, deleted not counted)",
+    ]);
+    expect(body()).toBe(d);
+
+    // (f) no test.completed event at all
+    writeFileSync(
+      events,
+      readFileSync(events, "utf8")
+        .split("\n")
+        .filter((line) => !line.includes('"test.completed"'))
+        .join("\n"),
+    );
+    expect(testsLines(body())).toEqual([]);
+  },
+  { timeout: 120_000 },
 );
