@@ -289,12 +289,12 @@ describe("ark retro", () => {
     installToolErrorSessions();
     const printed = captureRetro();
     const orchestration = readMetrics().orchestration;
-    // Three failed calls of two tools in each session; the successful calls add nothing.
+    // Codex shell calls fail three ways: a non-zero exit, an object success:false and a serialized success:false.
     // The count-2 tie and the count-1 tie sort by tool, plain string comparison: uppercase first.
     expect(orchestration.tool_error_list).toEqual([
+      { tool: "shell", word: "orca", count: 3, first_error: "orca: no such run" },
       { tool: "Bash", word: "orca", count: 2, first_error: "orca: command failed" },
       { tool: "bash", word: "orca", count: 2, first_error: "usage: orca run list" },
-      { tool: "shell", word: "orca", count: 2, first_error: "orca: no such run" },
       { tool: "Edit", word: "", count: 1, first_error: longError.slice(0, 120) },
       {
         tool: "apply_patch",
@@ -305,13 +305,13 @@ describe("ark retro", () => {
       { tool: "edit", word: "", count: 1, first_error: "Stale tag: file changed since last read" },
     ]);
     expect(longError.length).toBeGreaterThan(120);
-    // The list counts failed calls (9); tool_errors counts the messages that hold them (omp 1, claude 1, codex 0).
+    // The list counts failed calls (10); tool_errors counts the messages that hold them (omp 1, claude 1, codex 0).
     expect(
       orchestration.tool_error_list.reduce(
         (sum: number, entry: { count: number }) => sum + entry.count,
         0,
       ),
-    ).toBe(9);
+    ).toBe(10);
     expect(orchestration.tool_errors).toBe(2);
     // Stdout: exactly the five largest, after the orchestration line, the word omitted when empty.
     const lines = printed.split("\n");
@@ -319,9 +319,9 @@ describe("ark retro", () => {
     expect(
       lines.slice(start + 1, start + 7).filter((line) => line.startsWith("tool error:")),
     ).toEqual([
+      "tool error: shell orca x3: orca: no such run",
       "tool error: Bash orca x2: orca: command failed",
       "tool error: bash orca x2: usage: orca run list",
-      "tool error: shell orca x2: orca: no such run",
       `tool error: Edit x1: ${longError.slice(0, 120)}`,
       "tool error: apply_patch x1: patch failed: hunk 1 does not apply",
     ]);
