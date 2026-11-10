@@ -1,5 +1,6 @@
 import {
   existsSync,
+  realpathSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -9,8 +10,10 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { ArkError, yamlQuoteHint } from "./errors.ts";
+import { deriveState, readEvents } from "./events.ts";
+import { findRun, listProjects, projectDirectory } from "./paths.ts";
 import { frontmatter } from "./ticket.ts";
-import { discoverRepos } from "./workspace.ts";
+import { discoverRepos, mirrorRoot } from "./workspace.ts";
 
 export const caseLevels = ["unit", "integration", "e2e"];
 export const caseStatuses = ["active", "retired"];
@@ -158,10 +161,45 @@ function withLock<T>(lock: string, action: () => T): T {
   }
 }
 
-export function testCaseNew(key: string): void {
+/** Root repo of the run's mirror; refuses a closed run or one with no worktree. */
+function runRoot(runId: string, project?: string): string {
+  const { directory } = findRun(runId, project);
+  if (deriveState(readEvents(directory)).phase === "closed")
+    throw new ArkError(`run ${runId} is closed; it has no worktree to write into`);
+  const mirror = mirrorRoot(directory);
+  if (!existsSync(join(mirror, ".git")))
+    throw new ArkError(
+      `run ${runId} has no worktree yet; run \`ark worktree create ${runId}\` first`,
+    );
+  return mirror;
+}
+
+/** True when `root` is the `workspace:` checkout of a project. Only `workspace:` is read, so any other fault in ark.yml, or an unreadable one, does not matter here. */
+function isWorkspaceCheckout(root: string): boolean {
+  const real = realpathSync(root);
+  return listProjects().some((project) => {
+    try {
+      const raw = Bun.YAML.parse(readFileSync(join(projectDirectory(project), "ark.yml"), "utf8"));
+      const workspace = (raw as { workspace?: unknown } | null)?.workspace;
+      return typeof workspace === "string" && realpathSync(workspace) === real;
+    } catch {
+      return false;
+    }
+  });
+}
+
+export function testCaseNew(key: string, runId?: string, project?: string): void {
   if (!/^[A-Z][A-Z0-9]*$/.test(key))
     throw new ArkError(`test case key "${key}" must be capital letters and digits, such as ARK`);
-  const root = git(process.cwd(), "rev-parse", "--show-toplevel");
+  if (project !== undefined && runId === undefined) throw new ArkError("--project needs --run");
+  const root =
+    runId === undefined
+      ? git(process.cwd(), "rev-parse", "--show-toplevel")
+      : git(runRoot(runId, project), "rev-parse", "--show-toplevel");
+  if (runId === undefined && isWorkspaceCheckout(root))
+    throw new ArkError(
+      `refusing to write a test case into the workspace checkout ${root}: it belongs to no run\nuse: ark test-case new ${key} --run <run>`,
+    );
   const lock = join(
     git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"),
     "ark-test-case.lock",
@@ -214,5 +252,5 @@ export function testCaseNew(key: string): void {
     return next;
   });
   console.log(id);
-  console.error(`wrote test/cases/${id}.md`);
+  console.error(join(directory, `${id}.md`));
 }
