@@ -1652,6 +1652,7 @@ test("ARK-T25 ticket text and criteria are read from the ticket's own file and s
   expect(await documentOf("ARK-840")).toEqual({
     problem: "Why it hurts",
     change: "What changes",
+    evidence: "",
     criteria: [{ id: "AC1", text: "It works", method: "test", verified_by: [] }],
   });
   expect(((await documentOf("..%2F..%2F..%2Foutside")) as { problem: string }).problem).toBe(
@@ -1798,6 +1799,7 @@ test("ARK-T77 ARK-329/AC2 GET /api/ticket/<project>/<id> answers one ticket docu
   expect(JSON.parse(found.text).document).toEqual({
     problem: "Why it hurts",
     change: "What changes",
+    evidence: "",
     criteria: [{ id: "AC1", text: "It works", method: "test", verified_by: ["ARK-T1"] }],
   });
 
