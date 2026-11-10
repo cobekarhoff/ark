@@ -1019,7 +1019,7 @@ describe("ark test suite TMPDIR and cores", () => {
   }
 
   test("ARK-T153 each suite of one ark test runs with its own TMPDIR that is gone when the suite ends", async () => {
-    // The base side runs the same two suites, so one ark test has four suite runs.
+    // The census and the base side run the same two suites, so one ark test has six suite runs.
     const run = startRun("tmpdir-project", "TMPDIR-1", "", () => [
       {
         name: "cli",
@@ -1039,9 +1039,9 @@ describe("ark test suite TMPDIR and cores", () => {
     const { exitCode, caller } = await runWithCallerTmpdir(run);
     expect(exitCode).toBe(0);
     const suiteRuns = recorded();
-    expect(suiteRuns).toHaveLength(4);
+    expect(suiteRuns).toHaveLength(6);
     const directories = suiteRuns.map((suiteRun) => suiteRun.directory);
-    expect(new Set([...directories, caller]).size).toBe(5);
+    expect(new Set([...directories, caller]).size).toBe(7);
     for (const suiteRun of suiteRuns) {
       expect(suiteRun.files).toContain(`marker-${suiteRun.suite}`);
       expect(existsSync(suiteRun.directory)).toBe(false);

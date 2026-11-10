@@ -120,6 +120,28 @@ function screenshotFlows(ledger: Ledger): { shown: string[]; total: number } {
   return { shown: shown.slice(0, 5), total: paths.length };
 }
 
+/** A test title as literal Markdown text: one line, with the characters that format or break a table escaped. */
+const escapeTitle = (title: string) =>
+  title.replace(/\s+/g, " ").replace(/[\\`*_[\]<>|~#]/g, "\\$&");
+
+/** The Tests line and one Deleted bullet for each deleted test, sorted by file then title; none for an old run. */
+function testLines({ tests }: Ledger): string[] {
+  if (tests === null) return [];
+  const { passed, skipped, baseSkipped, deleted } = tests;
+  if (baseSkipped === undefined || deleted === undefined)
+    return [`- Tests: ${passed} passed, ${skipped} skipped (no base count, deleted not counted)`];
+  const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return [
+    `- Tests: ${passed} passed, ${skipped} skipped (base ${baseSkipped}), ${deleted.length} deleted`,
+    ...[...deleted]
+      .sort((a, b) => order(a.file ?? "", b.file ?? "") || order(a.name, b.name))
+      .map(
+        ({ file, name }) =>
+          `  - Deleted: ${file === undefined ? "" : `\`${file}\` `}${escapeTitle(name)}`,
+      ),
+  ];
+}
+
 function evidenceBlock(ledger: Ledger): Block {
   const kind = ledger.ticket?.kind;
   const lines = (ledger.evidence ?? []).map(
@@ -132,6 +154,7 @@ function evidenceBlock(ledger: Ledger): Block {
     );
   if (ledger.evidence === null && kind !== "perf")
     lines.push("- No base and head evidence recorded: the run has no `results/evidence/`.");
+  lines.push(...testLines(ledger));
   for (const { suite, file } of ledger.flaky)
     lines.push(`- Flaky: \`${file}\` in suite \`${suite}\` failed once and passed on retry.`);
   const { shown, total } = screenshotFlows(ledger);
