@@ -13,6 +13,7 @@
  */
 
 import type { Phase, PhaseGate, StepStatus } from "../cli/lifecycle.ts";
+import type { TimeSplit } from "../cli/time-split.ts";
 import type { Roadmap } from "./roadmap.ts";
 
 export type SourceName =
@@ -373,6 +374,8 @@ export type ClosedBand = {
   escaped_defects: { ticket: string; note: string; fix: string }[];
 };
 
+export type { TimeSplit };
+
 /** What `GET /api/run/<run>` answers: any run, open or closed, read on request and never part of the snapshot. */
 export type RunDetail = {
   view: RunView;
@@ -382,6 +385,8 @@ export type RunDetail = {
   closed_at: string | null;
   /** Null for an open run. */
   band: ClosedBand | null;
+  /** Where the run's time went, from the events: to `run.closed`, or to now for an open run. */
+  time_split: TimeSplit;
   timeline: TimelineEntry[];
   /** Run files that exist, relative to the run folder: plan.md, strategies.md, retro.md, findings/*, results/*. */
   files: string[];
