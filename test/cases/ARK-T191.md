@@ -1,6 +1,6 @@
 ---
 id: ARK-T191
-title: ARK-T191 ark test exits 1 with "base checkout missing: <path>" when the base folder vanishes during the base suites, with no posix_spawn ENOENT
+title: 'ARK-T191 ark test exits 1 with "base checkout missing: <path>" when the base folder vanishes during the base suites, with no posix_spawn ENOENT'
 level: integration
 technique: state transition (folder present, then gone) at each suite-spawn boundary
 priority: high
