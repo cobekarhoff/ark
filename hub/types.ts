@@ -208,6 +208,7 @@ export type RunView = {
 export type TicketDocument = {
   problem: string;
   change: string;
+  evidence: string;
   criteria: TicketCriterionView[];
 };
 

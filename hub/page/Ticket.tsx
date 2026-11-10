@@ -65,6 +65,7 @@ function TicketText({ ticket }: { ticket: TicketView }) {
           {[
             ["Problem", [90, 75, 60]],
             ["Change", [90, 40]],
+            ["Evidence", [75, 50]],
             ["Acceptance criteria", [75, 60, 75]],
           ].map(([title, widths]) => (
             <div key={title as string}>
@@ -100,6 +101,8 @@ function TicketText({ ticket }: { ticket: TicketView }) {
       {section(document.problem, "ticket-problem")}
       <h2>Change</h2>
       {section(document.change, "ticket-change")}
+      <h2>Evidence</h2>
+      {section(document.evidence, "ticket-evidence")}
       <h2>Acceptance criteria · {document.criteria.length}</h2>
       <Criteria
         project={ticket.project}

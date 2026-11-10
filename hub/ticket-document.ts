@@ -27,7 +27,7 @@ export function whyOf(source: string): string | null {
 }
 
 /**
- * The Problem and Change sections and the numbered acceptance criteria of a ticket file. Leaves as
+ * The Problem, Change and Evidence sections and the numbered acceptance criteria of a ticket file. Leaves as
  * plain strings: the page puts them in the document as text, never as Markdown HTML.
  */
 export function parseTicketDocument(source: string): TicketDocument {
@@ -42,6 +42,7 @@ export function parseTicketDocument(source: string): TicketDocument {
   return {
     problem: sectionOf(body, "problem"),
     change: sectionOf(body, "change"),
+    evidence: sectionOf(body, "evidence"),
     criteria: criteriaOf(listed),
   };
 }

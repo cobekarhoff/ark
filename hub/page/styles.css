@@ -2954,6 +2954,10 @@ code.ic {
   font-weight: 600;
   white-space: nowrap;
 }
+.md td:first-child {
+  /* An id such as ARK-323/AC1 stays on one line. */
+  white-space: nowrap;
+}
 .md tr:last-child td {
   border-bottom: 0;
 }
