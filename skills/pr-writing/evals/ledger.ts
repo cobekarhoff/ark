@@ -19,6 +19,7 @@ export const evalsLedger: Ledger = {
   evidence: null,
   findings: [],
   hasReviewerStep: false,
+  flaky: [],
   checks: [],
   reviewer: null,
   mergeOrder: [],

@@ -22,7 +22,9 @@ import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
 import { findRun } from "./paths.ts";
+import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
 import { takeTestLock } from "./test-lock.ts";
+import { callTest, runnerMain } from "./test-runner.ts";
 import { discoverRepos, mirrorRoot, submodulesOf } from "./workspace.ts";
 import { initSubmodule, linkUntouched } from "./worktree.ts";
 
@@ -97,14 +99,15 @@ async function run(command: string[], cwd: string, env?: Record<string, string>)
   }
 }
 
-// The worktree's HEAD for a touched repo, the workspace checkout's HEAD for an untouched one.
-async function headOf(repo: string, workspace: string, mirror: string): Promise<string> {
+// The worktree for a touched repo, the workspace checkout for an untouched one.
+function checkoutOf(repo: string, workspace: string, mirror: string): string {
   const mirrored = join(mirror, repo);
   const touched = existsSync(join(mirrored, ".git")) && !lstatSync(mirrored).isSymbolicLink();
-  const result = await run(
-    ["git", "rev-parse", "HEAD"],
-    touched ? mirrored : join(workspace, repo),
-  );
+  return touched ? mirrored : join(workspace, repo);
+}
+
+async function headOf(repo: string, workspace: string, mirror: string): Promise<string> {
+  const result = await run(["git", "rev-parse", "HEAD"], checkoutOf(repo, workspace, mirror));
   if (result.code !== 0)
     throw new ArkError(`git rev-parse HEAD failed for ${repo}: ${result.stderr.trim()}`);
   return result.stdout.trim();
@@ -166,6 +169,10 @@ type SideRun = {
   suites: Map<string, { repo: string; sha: string; log: string; selected?: string[] }>;
   /** Suites skipped on purpose, with the reason. */
   skipped: Map<string, string>;
+  /** Suites whose passed result came from the cache. */
+  reused: string[];
+  /** Test files that failed once and passed on retry. */
+  flaky: { suite: string; file: string }[];
 };
 const statusRank = { "not run": -1, skipped: 0, passed: 1, failed: 2 };
 
@@ -174,6 +181,8 @@ const newSide = (side: Side): SideRun => ({
   cases: new Map(),
   suites: new Map(),
   skipped: new Map(),
+  reused: [],
+  flaky: [],
 });
 
 /** Merges the results of one suite into the side. A failed test wins over a passed one, a passed over a skipped one, across suites too. */
@@ -271,10 +280,62 @@ function writeResults(run: SideRun, evidenceDirectory: string): void {
     );
 }
 
+/** Where a suite's passed result is kept: the project's cache folder and the key of the result. */
+type SuiteCache = { project: string; key: string };
+
 /**
- * Runs one suite in `cwd`. Its log goes to `<name>.log` of `resultsDirectory` (`base-<name>.log` at base).
+ * Runs each failed test file once more through `base_command` with that one file. A file that passes the second
+ * time is flaky: its second results replace the failed ones. No retry (null) when the suite has no
+ * `base_command`, or a failed test has no `file` (the report does not name it), so the failure stands.
+ */
+async function retryFailedFiles(
+  suite: Suite,
+  cwd: string,
+  reportBase: string,
+  scratch: string,
+  results: TestResult[],
+): Promise<{ results: TestResult[]; flaky: string[]; allPassed: boolean; log: string } | null> {
+  const failed = results.filter((result) => result.status === "failed");
+  if (failed.length === 0 || suite.base_command === undefined) return null;
+  if (failed.some((result) => result.file === undefined)) {
+    console.log(`suite      ${suite.name} head  not retried  (a failed test names no file)`);
+    return null;
+  }
+  const failedFiles = [...new Set(failed.map((result) => result.file!))];
+  let kept = results;
+  let log = "";
+  const flaky: string[] = [];
+  for (const [index, file] of failedFiles.entries()) {
+    const reportPath = `${reportBase}.retry-${index}`;
+    const command = suite.base_command
+      .replaceAll("{files}", shellQuote(file))
+      .replaceAll("{report}", reportPath);
+    const outcome = await run(["sh", "-c", command], cwd, { ARK_EVIDENCE_DIR: scratch });
+    const output = outcome.stdout + outcome.stderr;
+    const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
+    const again = parsers[suite.parser]({ report, stdout: outcome.stdout });
+    const separator = output === "" || output.endsWith("\n") ? "" : "\n";
+    log += `retry ${file}\n${command}\n${output}${separator}exit ${outcome.code}\n`;
+    // every test that failed in this file must be back and passed: a skipped or missing result keeps the failure
+    const recovered = failed
+      .filter((result) => result.file === file)
+      .every((original) =>
+        again.some((result) => result.name === original.name && result.status === "passed"),
+      );
+    if (outcome.code === 0 && recovered && again.every((result) => result.status !== "failed")) {
+      kept = [...kept.filter((result) => result.file !== file), ...again];
+      flaky.push(file);
+    }
+  }
+  return { results: kept, flaky, allPassed: flaky.length === failedFiles.length, log };
+}
+
+/**
+ * Runs one suite in `cwd`, or replays its passed result when `cache` holds one. Its log goes to `<name>.log` of
+ * `resultsDirectory` (`base-<name>.log` at base).
  * `ARK_EVIDENCE_DIR` names a scratch folder for the run; the evidence of each test case is merged into `sideRun`.
- * `command.log` is the whole suite output, so every case of the suite shares it. Passed also needs no failed test.
+ * `command.log` is the whole suite output, so every case of the suite shares it. Passed also needs no failed test,
+ * after the retry of each failed file. A passed result is stored under `cache`.
  */
 async function runSuite(
   suite: Suite,
@@ -285,32 +346,66 @@ async function runSuite(
   /** The suite command, or `base_command` with `{files}` already replaced. */
   template: string = suite.command,
   selected?: string[],
+  cache?: SuiteCache,
 ) {
   const prefix = sideRun.side === "base" ? "base-" : "";
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
   const command = template.replaceAll("{report}", reportPath);
   const scratch = mkdtempSync(join(tmpdir(), "ark-evidence-"));
   try {
+    const cached = cache ? loadCached(cache.project, cache.key, scratch) : null;
+    if (cached !== null) {
+      writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), cached.output);
+      addSuite(
+        sideRun,
+        suite,
+        sha,
+        cached.log,
+        cached.results,
+        scratch,
+        join(resultsDirectory, "evidence"),
+        selected,
+      );
+      sideRun.reused.push(suite.name);
+      for (const file of cached.flaky) sideRun.flaky.push({ suite: suite.name, file });
+      return { results: cached.results, passed: true, flaky: cached.flaky, reused: true };
+    }
     const outcome = await run(["sh", "-c", command], cwd, { ARK_EVIDENCE_DIR: scratch });
-    const output = outcome.stdout + outcome.stderr;
-    writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
-    const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
-    const results = parsers[suite.parser]({ report, stdout: outcome.stdout });
+    let output = outcome.stdout + outcome.stderr;
     const separator = output === "" || output.endsWith("\n") ? "" : "\n";
+    let log = `${command}\n${output}${separator}exit ${outcome.code}\n`;
+    const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
+    let results = parsers[suite.parser]({ report, stdout: outcome.stdout });
+    // A failure at base is data, so only the head side retries.
+    const retried =
+      sideRun.side === "head"
+        ? await retryFailedFiles(suite, cwd, reportPath, scratch, results)
+        : null;
+    if (retried !== null) {
+      results = retried.results;
+      output += retried.log;
+      log += retried.log;
+    }
+    writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
     addSuite(
       sideRun,
       suite,
       sha,
-      `${command}\n${output}${separator}exit ${outcome.code}\n`,
+      log,
       results,
       scratch,
       join(resultsDirectory, "evidence"),
       selected,
     );
-    return {
-      results,
-      passed: outcome.code === 0 && results.every((result) => result.status !== "failed"),
-    };
+    const flaky = retried?.flaky ?? [];
+    for (const file of flaky) sideRun.flaky.push({ suite: suite.name, file });
+    // A non-zero exit is the failed tests only when every failed file passed on retry.
+    const passed =
+      (outcome.code === 0 || retried?.allPassed === true) &&
+      results.every((result) => result.status !== "failed");
+    if (passed && cache)
+      storeCached(cache.project, cache.key, { results, output, log, flaky }, scratch);
+    return { results, passed, flaky, reused: false };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -318,13 +413,12 @@ async function runSuite(
 
 const testFolder = /(^|\/)(test|tests|features)\//;
 
-/** Copies the head's version of each file the diff adds or changes under a test folder, and each selected test file wherever it lives, into the base checkout. Deleted and renamed-from files stay at base. */
-async function copyHeadTests(
+/** The head files that go into the base checkout: each the diff adds or changes under a test folder, and each selected test file wherever it lives, that exists at head. Deleted and renamed-from files stay at base. */
+async function headTestPaths(
   headPath: string,
-  basePath: string,
   base: string,
   selected: string[],
-): Promise<void> {
+): Promise<string[]> {
   const changed = await run(
     ["git", "diff", "--name-only", "--no-renames", "--diff-filter=AM", "-z", base, "HEAD"],
     headPath,
@@ -335,8 +429,11 @@ async function copyHeadTests(
     ...changed.stdout.split("\0").filter((path) => testFolder.test(path)),
     ...selected,
   ];
+  return paths.filter((path) => path !== "" && existsSync(join(headPath, path)));
+}
+
+function copyHeadTests(headPath: string, basePath: string, paths: string[]): void {
   for (const path of paths) {
-    if (path === "" || !existsSync(join(headPath, path))) continue;
     mkdirSync(dirname(join(basePath, path)), { recursive: true });
     copyFileSync(join(headPath, path), join(basePath, path));
   }
@@ -401,11 +498,14 @@ function composeFor(config: ProjectConfig, root: string, runId: string): string[
  * runs `base_command` on the test files of its own commits and skips a suite with none, and with every
  * suite skipped there is no checkout, setup or compose. Returns whether all that ran passed; a failure here is
  * data except for `kind: refactor`.
+ * A suite whose key (the base commits, the hash of the copied test files, the suite command) has a stored passed
+ * result is replayed; when every suite of the plan is stored there is no checkout, setup or compose.
  * Each checkout is a `git clone --shared`, not a worktree: it registers nothing in the source repo, so a run
  * killed before its cleanup leaves only a temp folder, never a dangling detached worktree.
  */
 async function baseSuitesPassed(
   config: ProjectConfig,
+  project: string,
   runId: string,
   resultsDirectory: string,
   mirror: string,
@@ -438,80 +538,150 @@ async function baseSuitesPassed(
       });
   }
   if (plan.length === 0) return true;
-  const root = mkdtempSync(join(tmpdir(), "ark-base-"));
-  const compose = composeFor(config, root, `${runId}-base`);
-  try {
-    for (const { repo, path: source, base } of [...worktrees].sort((a, b) =>
-      a.repo.localeCompare(b.repo),
-    )) {
-      if (base === undefined) throw new ArkError(`worktree.created of ${repo} has no base commit`);
-      const path = join(root, repo);
-      mkdirSync(dirname(path), { recursive: true });
-      const cloned = await run(
-        ["git", "clone", "--shared", "--no-checkout", "--quiet", source, path],
-        root,
-      );
-      const created =
-        cloned.code === 0
-          ? await run(["git", "checkout", "--quiet", "--detach", base], path)
-          : cloned;
-      if (created.code !== 0)
-        throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
-      if (existsSync(join(path, ".gitmodules"))) {
-        // base runs use the pointer the base commit records, never the run's library head; the head worktree's
-        // folders are a local source, so an unreachable remote does not stop the base side
-        try {
-          for (const submodule of submodulesOf(path))
-            initSubmodule(path, submodule, [join(source, submodule.path)]);
-        } catch (err) {
-          if (!(err instanceof ArkError)) throw err;
-          throw new ArkError(`base submodules of ${repo} failed: ${err.message}`);
-        }
-      }
-      await copyHeadTests(
+  // What gets copied into the base checkout, per repo, and what the plan's keys hash.
+  const copied = new Map<string, string[]>();
+  for (const { repo, base } of worktrees) {
+    if (base === undefined) throw new ArkError(`worktree.created of ${repo} has no base commit`);
+    copied.set(
+      repo,
+      await headTestPaths(
         join(mirror, repo),
-        path,
         base,
         plan.filter((entry) => entry.suite.repo === repo).flatMap((entry) => entry.files ?? []),
-      );
-    }
-    linkUntouched(config.workspace, root, discoverRepos(config.workspace));
-    for (const { repo } of worktrees) {
-      if (config.setup) {
-        const setup = await run(["sh", "-c", config.setup], join(root, repo));
-        if (setup.code !== 0)
-          throw new ArkError(
-            `setup failed at the base of ${repo}: ${(setup.stderr || setup.stdout).trim()}`,
-          );
+      ),
+    );
+  }
+  const bases = [...worktrees]
+    .map(({ repo, base }) => [repo, base])
+    .sort(([a], [b]) => a!.localeCompare(b!));
+  const touched = new Set(worktrees.map((worktree) => worktree.repo));
+  // ponytail: an untouched repo is keyed by its workspace head, not by uncommitted edits in it
+  const untouchedHeads = await Promise.all(
+    discoverRepos(config.workspace)
+      .filter((repo) => !touched.has(repo))
+      .sort()
+      .map(async (repo) => [repo, await headOf(repo, config.workspace, mirror)]),
+  );
+  const testFiles = hashFiles(
+    [...copied].flatMap(([repo, paths]) =>
+      paths.map((path) => ({ path: `${repo}/${path}`, absolute: join(mirror, repo, path) })),
+    ),
+  );
+  const keyed = plan.map((entry) => ({
+    ...entry,
+    cache: {
+      project,
+      key: cacheKey({
+        side: "base",
+        bases,
+        untouchedHeads,
+        testFiles,
+        suite: [
+          entry.suite.name,
+          entry.suite.repo,
+          entry.suite.parser,
+          entry.suite.base_command,
+          entry.command,
+        ],
+        setup: config.setup,
+        compose: config.compose,
+      }),
+    },
+  }));
+  const allCached = keyed.every((entry) => hasCached(project, entry.cache.key));
+  const root = allCached ? null : mkdtempSync(join(tmpdir(), "ark-base-"));
+  const compose = root === null ? null : composeFor(config, root, `${runId}-base`);
+  try {
+    if (root !== null)
+      for (const { repo, path: source, base } of [...worktrees].sort((a, b) =>
+        a.repo.localeCompare(b.repo),
+      )) {
+        if (base === undefined)
+          throw new ArkError(`worktree.created of ${repo} has no base commit`);
+        const path = join(root, repo);
+        mkdirSync(dirname(path), { recursive: true });
+        const cloned = await run(
+          ["git", "clone", "--shared", "--no-checkout", "--quiet", source, path],
+          root,
+        );
+        const created =
+          cloned.code === 0
+            ? await run(["git", "checkout", "--quiet", "--detach", base], path)
+            : cloned;
+        if (created.code !== 0)
+          throw new ArkError(`base checkout of ${repo} failed: ${created.stderr.trim()}`);
+        if (existsSync(join(path, ".gitmodules"))) {
+          // base runs use the pointer the base commit records, never the run's library head; the head worktree's
+          // folders are a local source, so an unreachable remote does not stop the base side
+          try {
+            for (const submodule of submodulesOf(path))
+              initSubmodule(path, submodule, [join(source, submodule.path)]);
+          } catch (err) {
+            if (!(err instanceof ArkError)) throw err;
+            throw new ArkError(`base submodules of ${repo} failed: ${err.message}`);
+          }
+        }
+        copyHeadTests(join(mirror, repo), path, copied.get(repo)!);
+      }
+    if (root !== null) {
+      linkUntouched(config.workspace, root, discoverRepos(config.workspace));
+      for (const { repo } of worktrees) {
+        if (config.setup) {
+          const setup = await run(["sh", "-c", config.setup], join(root, repo));
+          if (setup.code !== 0)
+            throw new ArkError(
+              `setup failed at the base of ${repo}: ${(setup.stderr || setup.stdout).trim()}`,
+            );
+        }
       }
     }
-    if (compose) {
+    if (compose && root !== null) {
       const up = await run([...compose, "up", "-d", "--wait"], root);
       if (up.code !== 0)
         throw new ArkError(`compose up failed: ${(up.stderr || up.stdout).trim()}`);
     }
     // Every suite runs, also after a failed one.
     let allPassed = true;
-    for (const { suite, command, files } of plan) {
-      const { passed } = await runSuite(
+    for (const { suite, command, files, cache } of keyed) {
+      const { passed, reused } = await runSuite(
         suite,
-        join(root, suite.repo),
+        join(root ?? "", suite.repo),
         resultsDirectory,
         baseRun,
-        await headOf(suite.repo, root, root),
+        worktrees.find((worktree) => worktree.repo === suite.repo)?.base ??
+          (await headOf(suite.repo, config.workspace, mirror)),
         command,
         files,
+        cache,
       );
+      if (reused)
+        console.log(`suite      ${suite.name} base  reused  base key ${cache.key.slice(0, 6)}`);
       allPassed &&= passed;
     }
     return allPassed;
   } finally {
-    if (compose) await run([...compose, "down"], root);
-    rmSync(root, { recursive: true, force: true });
+    if (compose && root !== null) await run([...compose, "down"], root);
+    if (root !== null) rmSync(root, { recursive: true, force: true });
   }
 }
 
-export async function testRun(runId: string, inProject?: string, quick = false): Promise<void> {
+/** `ark test`: the caller side. The runner below does the work, detached from this process. */
+export async function testRun(
+  runId: string,
+  inProject: string | undefined,
+  options: { quick: boolean; wait: boolean; stop: boolean },
+): Promise<void> {
+  const { project, directory } = findRun(runId, inProject);
+  await callTest(runId, project, directory, options);
+}
+
+/** `ark test-runner`: the process of the detached runner; returns its exit code. SIGTERM stops every suite process group. */
+export function testRunnerMain(runId: string, project: string, quick: boolean): Promise<number> {
+  const { directory } = findRun(runId, project);
+  return runnerMain(directory, quick, () => executeTest(runId, project, quick), stopChildren);
+}
+
+async function executeTest(runId: string, inProject: string, quick: boolean): Promise<void> {
   const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
   const mirror = mirrorRoot(directory);
@@ -543,7 +713,7 @@ export async function testRun(runId: string, inProject?: string, quick = false):
     throw new ArkError(entryProblems.map((problem) => `test case entry ${problem}`).join("; "));
 
   // One ark test at a time per host: the checks, compose and suites all load the machine.
-  const releaseLock = await takeTestLock(runId, stopChildren);
+  const releaseLock = await takeTestLock(runId);
   const started = Date.now();
   try {
     const composeBase = composeFor(config, mirror, runId);
@@ -558,7 +728,35 @@ export async function testRun(runId: string, inProject?: string, quick = false):
         console.log(output.trimEnd().split("\n").slice(-20).join("\n"));
       }
     }
-    const suites: { name: string; level: string; passed: boolean }[] = [];
+    const repos = discoverRepos(config.workspace);
+    const heads = Object.fromEntries(
+      await Promise.all(
+        repos.map(async (repo) => [repo, await headOf(repo, config.workspace, mirror)]),
+      ),
+    );
+    // A dirty checkout has results no head names: nothing of this run is read from or stored in the cache.
+    const dirty = (
+      await Promise.all(
+        repos.map(
+          async (repo) =>
+            (
+              await run(
+                ["git", "status", "--porcelain"],
+                checkoutOf(repo, config.workspace, mirror),
+              )
+            ).stdout !== "",
+        ),
+      )
+    ).some(Boolean);
+    const mode = quick ? "quick" : "full";
+    const suites: {
+      name: string;
+      level: string;
+      passed: boolean;
+      reused?: boolean;
+      flaky?: string[];
+    }[] = [];
+    const headKeys = new Map<string, string>();
     // The join through `verified_by` counts every level; the old tag path only integration and e2e.
     const allResults: TestResult[] = [];
     const provingResults: TestResult[] = [];
@@ -591,14 +789,30 @@ export async function testRun(runId: string, inProject?: string, quick = false):
           }
           template = suite.base_command!.replaceAll("{files}", files.map(shellQuote).join(" "));
         }
-        const { results, passed } = await runSuite(
+        const key = cacheKey({
+          side: "head",
+          mode,
+          heads,
+          suite: [
+            suite.name,
+            suite.repo,
+            suite.parser,
+            suite.base_command,
+            template ?? suite.command,
+          ],
+          setup: config.setup,
+          compose: config.compose,
+        });
+        headKeys.set(suite.name, key.slice(0, 6));
+        const { results, passed, flaky, reused } = await runSuite(
           suite,
           join(mirror, suite.repo),
           resultsDirectory,
           headRun,
-          await headOf(suite.repo, config.workspace, mirror),
+          heads[suite.repo]!,
           template,
           files,
+          dirty ? undefined : { project, key },
         );
         allResults.push(...results);
         if (suite.level !== "unit") provingResults.push(...results);
@@ -606,6 +820,8 @@ export async function testRun(runId: string, inProject?: string, quick = false):
           name: suite.name,
           level: suite.level,
           passed,
+          ...(reused ? { reused } : {}),
+          ...(flaky.length > 0 ? { flaky } : {}),
         });
       }
     } finally {
@@ -635,21 +851,14 @@ export async function testRun(runId: string, inProject?: string, quick = false):
         via[criterion] = "via tag";
       }
     }
-    const heads = Object.fromEntries(
-      await Promise.all(
-        discoverRepos(config.workspace).map(async (repo) => [
-          repo,
-          await headOf(repo, config.workspace, mirror),
-        ]),
-      ),
-    );
-    // Every run also runs the suites at the base commit, on each `ark test`: the new tests change from round to round.
+    // Every run also runs the suites at the base commit; a passed base result is reused by its key.
     // A base failure is data, except that a refactor run must keep its behavior.
     // A quick run has no base run.
     const basePassed =
       quick ||
       (await baseSuitesPassed(
         config,
+        project,
         runId,
         resultsDirectory,
         mirror,
@@ -673,11 +882,17 @@ export async function testRun(runId: string, inProject?: string, quick = false):
         ([criterion, status]) =>
           manual.has(criterion) || status === "passing" || status === "not run",
       );
+    const reused = [
+      ...headRun.reused.map((name) => `head:${name}`),
+      ...baseRun.reused.map((name) => `base:${name}`),
+    ];
     appendEvent(directory, "test.completed", {
       passed,
       ...(checks.length > 0 ? { checks } : {}),
       heads,
       suites,
+      ...(headRun.flaky.length > 0 ? { flaky: headRun.flaky } : {}),
+      ...(reused.length > 0 ? { reused } : {}),
       criteria: criterionStatuses,
       ...(state.kind === "refactor" && !quick ? { base_passed: basePassed } : {}),
       mode: quick ? "quick" : "full",
@@ -687,7 +902,7 @@ export async function testRun(runId: string, inProject?: string, quick = false):
     if (!quick) console.log(`base      ${basePassed ? "passed" : "failed"}`);
     for (const suite of suites)
       console.log(
-        `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}`,
+        `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}${suite.reused ? `  reused  head key ${headKeys.get(suite.name)}` : ""}${suite.flaky ? `  flaky: ${suite.flaky.join(", ")} (failed once, passed on retry)` : ""}`,
       );
     for (const [criterion, status] of Object.entries(criterionStatuses))
       console.log(`criterion  ${criterion}  ${status.padEnd(14)}  ${via[criterion]}`);

@@ -8,7 +8,15 @@ import {
   setDefaultTimeout,
   test,
 } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -184,6 +192,9 @@ afterEach(() => {
     join(fixtures, "release"),
     join(fixtures, `fail-${runA}`),
     join(fixtures, "slowterm"),
+    // the suites read files of the fixture folder, so a stored result of an earlier test would answer for them
+    join(arkHome, "projects", projectA, "test-cache"),
+    join(arkHome, "projects", "lock-two", "test-cache"),
   ])
     rmSync(path, { recursive: true, force: true });
 });
@@ -204,7 +215,25 @@ const startedTests: Subprocess[] = [];
  */
 function killStarted(): void {
   for (const child of startedTests.splice(0)) child.kill("SIGKILL");
+  // The detached runners outlive their callers: find them by their run id.
+  for (const run of [runA, runB]) Bun.spawnSync(["pkill", "-9", "-f", `test-runner ${run} `]);
   Bun.spawnSync(["pkill", "-9", "-f", fixtures]);
+}
+
+/** The pid in the waiter file of a run's runner, or null: the runner, not the caller, waits for the lock. */
+function waiterPid(run: string): number | null {
+  if (!existsSync(waiterDirectory())) return null;
+  for (const name of readdirSync(waiterDirectory())) {
+    const entry = JSON.parse(readFileSync(join(waiterDirectory(), name), "utf8"));
+    if (entry.run === run) return entry.pid;
+  }
+  return null;
+}
+
+/** The pid of the detached runner that holds the lock: ark test of ARK-366 runs the suites there, not in the caller. */
+function holderPid(): number {
+  const holder = readdirSync(lockDirectory()).find((name) => name.startsWith("holder-"))!;
+  return JSON.parse(readFileSync(join(lockDirectory(), holder), "utf8")).pid;
 }
 
 /** Starts `ark test <run>` as a child process of the temp ARK_HOME with its stdout collected. */
@@ -251,6 +280,8 @@ describe("ark test lock", () => {
   test("ARK-T59 ARK-343/AC1 a second ark test of another project waits for the first and starts its suites only after it ends", async () => {
     const first = startTest(runA);
     await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
+    const runnerPid = holderPid();
+    expect(runnerPid).not.toBe(first.process.pid);
     const second = startTest(runB);
     const secondOut = await second.stdout;
     await Promise.all([first.process.exited, second.process.exited]);
@@ -258,7 +289,7 @@ describe("ark test lock", () => {
     const lines = logLines();
     expect(lines.indexOf(`end ${runA}`)).toBeGreaterThanOrEqual(0);
     expect(lines.indexOf(`end ${runA}`)).toBeLessThan(lines.indexOf(`start ${runB}`));
-    expect(secondOut).toContain(`waiting for ark test of ${runA} (pid ${first.process.pid})`);
+    expect(secondOut).toContain(`waiting for ark test of ${runA} (pid ${runnerPid})`);
     expect(countOf(secondOut, "waiting for ark test of")).toBe(1);
     expect(existsSync(lockDirectory())).toBe(false);
   });
@@ -271,26 +302,27 @@ describe("ark test lock", () => {
     await expectCleanRunOfB();
   });
 
+  // The signal goes to the runner that holds the lock; a signal to the caller no longer stops the suites (ARK-T161).
   for (const signal of ["SIGINT", "SIGTERM"] as const)
-    test(`ARK-T59 ARK-343/AC1 the lock is gone right after ${signal} ends ark test`, async () => {
+    test(`ARK-T59 ARK-343/AC1 the lock is gone right after ${signal} ends the runner`, async () => {
       const first = startTest(runA);
       await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
-      first.process.kill(signal);
-      await first.process.exited;
+      process.kill(holderPid(), signal);
+      expect(await first.process.exited).toBe(128 + (signal === "SIGINT" ? 2 : 15));
       await first.stdout;
       await expectCleanRunOfB();
     });
 
   // The suite of A needs two seconds to end after SIGTERM, as a suite with its own cleanup does.
   for (const signal of ["SIGINT", "SIGTERM"] as const)
-    test(`ARK-T59 ARK-343/AC1 ${signal} keeps the lock until the suite of the signalled ark test has ended`, async () => {
+    test(`ARK-T59 ARK-343/AC1 ${signal} keeps the lock until the suite of the signalled runner has ended`, async () => {
       writeFileSync(join(fixtures, "hold"), "");
       writeFileSync(join(fixtures, "slowterm"), "");
       const first = startTest(runA);
       await waitFor(() => logLines().includes(`start ${runA}`), `start ${runA}`);
       const second = startTest(runB);
       await waitFor(() => second.seen().includes("waiting for ark test"), "B to wait");
-      first.process.kill(signal);
+      process.kill(holderPid(), signal);
       await first.process.exited;
       writeFileSync(join(fixtures, "release"), "");
       await second.process.exited;
@@ -430,10 +462,10 @@ rmdirSync(home+'/inside');release();`,
     const lockSection = listed.split(/^## /m).find((part) => part.startsWith("ark test lock"));
     expect(lockSection).toBeDefined();
     expect(lockSection).toMatch(
-      new RegExp(`holder: ${runA} \\(pid ${first.process.pid}\\), running \\d+\\s?(s|m|min)`),
+      new RegExp(`holder: ${runA} \\(pid ${holderPid()}\\), running \\d+\\s?(s|m|min)`),
     );
     expect(lockSection).toMatch(
-      new RegExp(`waiting: ${runB} \\(pid ${second.process.pid}\\), waited \\d+\\s?(s|m|min)`),
+      new RegExp(`waiting: ${runB} \\(pid ${waiterPid(runB)}\\), waited \\d+\\s?(s|m|min)`),
     );
 
     const dead = Bun.spawn(["true"]);
@@ -471,14 +503,13 @@ rmdirSync(home+'/inside');release();`,
     );
 
     const newer = startTest(runB);
-    const newerFile = join(waiterDirectory(), `${newer.process.pid}.json`);
     // The newer ark test registers and waits. At the base commit it takes the lock and ends without registering.
     await waitFor(
-      () => existsSync(newerFile) || newer.process.exitCode !== null,
+      () => waiterPid(runB) !== null || newer.process.exitCode !== null,
       "the newer ark test to register as a waiter",
       10_000,
     );
-    expect(existsSync(newerFile)).toBe(true);
+    expect(waiterPid(runB)).not.toBeNull();
 
     // A negative claim ("does not take") can only be shown by watching for a bounded time: about seven poll
     // periods of the lock, with the older waiter alive. A fake clock cannot drive a real child process.
@@ -519,14 +550,13 @@ rmdirSync(home+'/inside');release();`,
     );
 
     const newer = startTest(runB);
-    const newerFile = join(waiterDirectory(), `${newer.process.pid}.json`);
     // At the base commit the newer test takes the free lock at once and ends without registering.
     await waitFor(
-      () => existsSync(newerFile) || newer.process.exitCode !== null,
+      () => waiterPid(runB) !== null || newer.process.exitCode !== null,
       "the newer ark test to register as a waiter",
       10_000,
     );
-    expect(existsSync(newerFile)).toBe(true);
+    expect(waiterPid(runB)).not.toBeNull();
     expect(newer.process.exitCode).toBeNull();
     expect(existsSync(lockDirectory())).toBe(false);
     expect(logLines()).not.toContain(`start ${runB}`);

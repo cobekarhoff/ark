@@ -207,6 +207,18 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
   return waits;
 }
 
+/** Test runs of the run: how many, how many suite results came from the cache, and the files that were flaky. */
+function testMetrics(events: ArkEvent[]) {
+  const completed = events.filter((event) => event.type === "test.completed");
+  const flaky = new Set<string>();
+  let reused = 0;
+  for (const event of completed) {
+    reused += Array.isArray(event.data.reused) ? event.data.reused.length : 0;
+    for (const entry of event.data.flaky ?? []) flaky.add(`${entry.suite}: ${entry.file}`);
+  }
+  return { runs: completed.length, reused_suites: reused, flaky_files: [...flaky].sort() };
+}
+
 /**
  * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
  * run start (it opens on every run since ARK-311; an older log opens it only without ACs or with blockers), the strategy gate at a
@@ -662,6 +674,7 @@ export function retro(runId: string, inProject?: string): void {
       merge_steps: events.filter((event) => event.type === "step.started" && event.data.merge)
         .length,
     },
+    tests: testMetrics(events),
     design_rounds: designRounds,
     decisions: decisionCounts(runDirectory, events),
     human_intervention: {

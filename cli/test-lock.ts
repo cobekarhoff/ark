@@ -114,14 +114,11 @@ function tryTake(runId: string): string | null {
 }
 
 /**
- * Waits for the host-wide `ark test` lock and returns its release. SIGINT, SIGTERM and SIGHUP call `onSignal` (it
- * stops child processes and resolves when they have ended), then release the lock, remove the waiter file and exit
- * 128+signal: the lock is held until the work under it has stopped.
+ * Waits for the host-wide `ark test` lock and returns its release. Only the detached runner of `ark test` calls
+ * it: the runner handles its own signals (it stops the suites, then exits), and the lock is released when the
+ * process exits; the lock of a runner that was killed is taken over as a dead pid.
  */
-export async function takeTestLock(
-  runId: string,
-  onSignal: () => Promise<void>,
-): Promise<() => void> {
+export async function takeTestLock(runId: string): Promise<() => void> {
   const waiterFile = join(waiterDirectory(), `${process.pid}.json`);
   let holderFile: string | null = null;
   const cleanup = () => {
@@ -137,25 +134,8 @@ export async function takeTestLock(
       holderFile = null;
     }
   };
-  const signals = { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 } as const;
-  let shuttingDown = false;
-  const handlers = Object.entries(signals).map(([name, number]) => {
-    const handler = async () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      try {
-        await onSignal();
-      } finally {
-        cleanup();
-        process.exit(128 + number);
-      }
-    };
-    process.on(name as NodeJS.Signals, handler);
-    return [name as NodeJS.Signals, handler] as const;
-  });
 
   const release = () => {
-    for (const [name, handler] of handlers) process.off(name, handler);
     process.off("exit", cleanup);
     cleanup();
   };

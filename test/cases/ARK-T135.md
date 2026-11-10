@@ -6,7 +6,7 @@ technique: state transition (run passes, one event written) with an exit-code ch
 priority: high
 risk: test.completed misses the suites, heads, mode or duration, so a stale or quick result passes the MR gate; or ark test exits non-zero on a fully proved run
 status: active
-changed_by: 2026-11-08-ARK-389-1
+changed_by: 2026-11-09-ARK-366-1
 ---
 
 ## Objective
@@ -30,6 +30,7 @@ Expected: When every AC has a passing test, the system shall record the suites, 
 - Exit code 0.
 - The event holds `passed: true`, `heads` with the run branch head (not the workspace head), the suites `unit` and `e2e` each passed, both criteria `passing`, `mode: full` and a numeric `duration`.
 - `results/e2e.report` and `results/e2e.log` hold the test names and log lines.
+- A fresh run with no stored result: the event carries `reused` false (or empty) for every suite and an empty `flaky` list; after a second identical `ark test`, the new event carries `reused` true for the suites that were reused and the same suites, heads, mode and exit 0 (the cache semantics are ARK-T163; the fields are listed here so the record stays complete). When a file passes on retry, the event's `flaky` field names it (ARK-T164).
 
 ## Screenshot checkpoints
 
