@@ -744,7 +744,10 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     throw new ArkError(entryProblems.map((problem) => `test case entry ${problem}`).join("; "));
 
   // The checks and suites of every ark test on the host share one CPU budget, held by this runner until it exits.
-  budget = openTestBudget(runId, config.test_budget_cores);
+  budget = openTestBudget(runId, config.test_budget_cores, {
+    minimumFreeMemoryPercent: config.test_min_free_memory_percent,
+    maximumSwapGigabytes: config.test_max_swap_gb,
+  });
   const started = Date.now();
   try {
     const composeBase = composeFor(config, mirror, runId);

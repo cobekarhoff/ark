@@ -9,6 +9,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import {
+  defaultMaximumSwapGigabytes,
+  defaultMinimumFreeMemoryPercent,
+  memoryReasons,
+  readHost,
+} from "./host.ts";
 import { arkHome } from "./paths.ts";
 
 /**
@@ -26,6 +32,7 @@ export type Ticket = { run: string; pid: number; cores: number; arrival: string;
 
 const pollMilliseconds = 100;
 const lineWindowMilliseconds = 30_000;
+const memoryReadingMilliseconds = 1000;
 
 const ticketDirectory = () => join(arkHome(), "test-budget");
 
@@ -129,6 +136,10 @@ type Options = {
   now?: () => number;
   /** Where waiting lines go. */
   print?: (line: string) => void;
+  /** A suite waits while free memory is below this percent (inclusive: equal admits). */
+  minimumFreeMemoryPercent?: number;
+  /** A suite waits while swap used is above this many GB (inclusive: equal admits). */
+  maximumSwapGigabytes?: number;
 };
 
 /**
@@ -139,8 +150,33 @@ type Options = {
 export function openTestBudget(
   runId: string,
   budget: number,
-  { now = Date.now, print = console.log }: Options = {},
+  {
+    now = Date.now,
+    print = console.log,
+    minimumFreeMemoryPercent = defaultMinimumFreeMemoryPercent,
+    maximumSwapGigabytes = defaultMaximumSwapGigabytes,
+  }: Options = {},
 ): TestBudget {
+  let uncheckedPrinted = false;
+  let reasons: string[] = [];
+  let readAt = -Infinity;
+  /** The memory reasons that hold a suite now. One reading a second, because a reading starts processes. */
+  const memoryHold = async (): Promise<string[]> => {
+    if (Date.now() - readAt >= memoryReadingMilliseconds) {
+      const verdict = memoryReasons(
+        await readHost(),
+        minimumFreeMemoryPercent,
+        maximumSwapGigabytes,
+      );
+      readAt = Date.now();
+      reasons = verdict.reasons;
+      if (verdict.unchecked && !uncheckedPrinted) {
+        uncheckedPrinted = true;
+        print("memory: unchecked");
+      }
+    }
+    return reasons;
+  };
   const files = new Set<string>();
   const cleanup = () => {
     for (const file of files) rmSync(file, { force: true });
@@ -166,6 +202,7 @@ export function openTestBudget(
       files.add(file);
       let printedKey: string | null = null;
       let printedAt = 0;
+      let memoryPrinted: string | null = null;
       try {
         for (;;) {
           const tickets = readTickets();
@@ -199,6 +236,16 @@ export function openTestBudget(
               firstWaiting?.file === file &&
               sumOf(startedTickets) + cores <= budget
             ) {
+              const held = await memoryHold();
+              if (held.length > 0) {
+                // Its own line and key: once for each change of reason, never for each poll.
+                const line = `ark test: waiting for memory: ${held.join("; ")}`;
+                if (line !== memoryPrinted) print(line);
+                memoryPrinted = line;
+                await Bun.sleep(pollMilliseconds);
+                continue;
+              }
+              memoryPrinted = null;
               writeTicket(file, { ...tickets[mine]!.ticket, started: new Date().toISOString() });
               continue; // read everything again before running
             }

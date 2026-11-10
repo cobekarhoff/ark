@@ -234,7 +234,7 @@ test("ARK-T115 chief state prints each live source in one Markdown snapshot", ()
   expect(out).toMatch(/strategy\W+auto/);
   expect(out).toMatch(/concurrency\W+3/);
   expect(section(out, "Interview")).toMatch(/last interview: 1\s*$/);
-  expect(section(out, "Disk")).toMatch(/\d+ GiB/);
+  expect(section(out, "Host")).toMatch(/free disk: \d+ GB/);
 });
 
 test("ARK-244-AC1 chief state lists the run lead from Master Chief's own Run, not step workers", () => {

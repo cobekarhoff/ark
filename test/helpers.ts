@@ -1,6 +1,14 @@
 import { afterAll, beforeAll } from "bun:test";
 import type { Subprocess } from "bun";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
@@ -349,3 +357,30 @@ export function claraPlan(criteria: string[]) {
     ],
   };
 }
+
+/** Rewrites the fake host reading of test/tmpdir-preload.ts. `null` makes the reader fail, so the reading is unchecked. */
+export function setFakeHost(reading: {
+  freePercent: number | null;
+  swapGigabytes: number | null;
+}): void {
+  const root = process.env.ARK_FAKE_HOST as string;
+  const write = (name: string, text: string | null) =>
+    text === null
+      ? rmSync(join(root, name), { force: true })
+      : writeFileSync(join(root, name), text);
+  write(
+    "memory_pressure",
+    reading.freePercent === null
+      ? null
+      : `System-wide memory free percentage: ${reading.freePercent}%\n`,
+  );
+  write(
+    "swapusage",
+    reading.swapGigabytes === null
+      ? null
+      : `vm.swapusage: total = 16384.00M  used = ${(reading.swapGigabytes * 1024).toFixed(2)}M  free = 0.00M  (encrypted)\n`,
+  );
+}
+
+/** The healthy host that the preload sets: 50 percent free, 2 GB of swap. */
+export const healthyHost = { freePercent: 50, swapGigabytes: 2 };

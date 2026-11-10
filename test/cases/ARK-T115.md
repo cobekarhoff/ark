@@ -21,7 +21,7 @@ Prove that `ark chief state` prints each live source in one Markdown snapshot. T
 ## Steps
 
 1. Run `ark chief state --project <project>`. Assert exit code 0 and empty stderr.
-2. Read the `Open runs`, `Queued Orca Tasks`, `Interview` and `Disk` sections and the gates and concurrency lines.
+2. Read the `Open runs`, `Queued Orca Tasks`, `Interview` and `Host` sections and the gates and concurrency lines.
 
 ## Expected results
 
