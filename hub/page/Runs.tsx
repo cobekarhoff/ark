@@ -3,12 +3,22 @@ import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import {
   isUnknownProject,
   scoped,
+  outcomeOf,
   ticketEntries,
   ticketKey,
   type Lane,
   type TicketEntry,
 } from "./derive.ts";
-import { Ring, Unknown, UnknownProject, dollars, known } from "./format.tsx";
+import {
+  Outcome,
+  Ring,
+  Unknown,
+  UnknownProject,
+  dollars,
+  known,
+  outcomeClass,
+  outcomeRing,
+} from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { ticketHref, useLive, useProject } from "./store.tsx";
 import type { RunView, Snapshot, TicketRunView } from "../types.ts";
@@ -54,7 +64,7 @@ const ringOf = (entry: TicketEntry): GraphTicket["ring"] =>
     : entry.open
       ? { done: 0, total: 1, label: "–" }
       : entry.lane === "Closed"
-        ? { done: 1, total: 1, label: "✓" }
+        ? outcomeRing(outcomeOf(entry) ?? null)
         : { done: 0, total: 1, label: "–" };
 
 const hrefOf = (entry: TicketEntry) =>
@@ -83,6 +93,7 @@ function Card({
   tone,
   href,
   note,
+  outcome,
 }: {
   lane: string;
   run: string | null;
@@ -92,10 +103,12 @@ function Card({
   tone: string;
   href: string;
   note: ReactNode;
+  /** Set on a closed run: its outcome colours the ring and border. */
+  outcome?: string | null;
 }) {
   return (
     <a
-      className={`gnode card ${tone}`}
+      className={`gnode card ${tone}${outcome === undefined ? "" : ` ${outcomeClass(outcome)}`}`}
       href={href}
       data-testid="run-card"
       data-lane={lane}
@@ -174,12 +187,13 @@ function Board({ snapshot, entries }: { snapshot: Snapshot; entries: Map<string,
                   run={run.run}
                   ticket={run.ticket}
                   title={titleOf(run.ticket)}
-                  ring={{ done: 1, total: 1, label: "✓" }}
+                  ring={outcomeRing(run.outcome)}
+                  outcome={run.outcome}
                   tone={tone}
                   href={runHref(run.run)}
                   note={
                     <>
-                      <span data-testid="card-outcome">{run.outcome ?? "unknown"}</span>
+                      <Outcome outcome={run.outcome} testId="card-outcome" />
                       {" · "}
                       <span
                         data-testid="card-cost"
@@ -272,6 +286,7 @@ export function Runs() {
     tone: entry.tone,
     href: hrefOf(entry),
     ring: ringOf(entry),
+    outcome: outcomeOf(entry),
     needs: entry.ticket.depends_on.map((id) => ticketKey(entry.ticket.project, id)),
     satisfied: entry.satisfied,
   }));
@@ -287,12 +302,13 @@ export function Runs() {
       ),
     }));
   const open = known(snapshot.runs) ? snapshot.runs.length : 0;
+  const closedCount = known(snapshot.ticket_runs) ? closedRuns(snapshot.ticket_runs).length : 0;
   return (
     <>
       <h1>
         Runs <span className="filter-name">· {project ?? "All projects"}</span>{" "}
         <span className="mut sub">
-          {open} open · {counts.Queued} queued · {counts.Old} closed. Click a run for its plan.
+          {open} open · {counts.Queued} queued · {closedCount} closed. Click a run for its plan.
         </span>
       </h1>
       <Board snapshot={snapshot} entries={entries} />
@@ -310,6 +326,7 @@ export function Runs() {
                 onClick={() => setFilter(name)}
               >
                 {name} <span className="count">{counts[name]}</span>
+                {name === "Old" ? <span className="mut small"> tickets</span> : null}
               </button>
             ))}
           </div>
