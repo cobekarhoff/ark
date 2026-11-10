@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { ArkError } from "../errors.ts";
-import type { SessionUsage, UsageMessage } from "./index.ts";
+import { codexResult } from "../../hub/transcript.ts";
+import { commandWord, type FailedCall, type SessionUsage, type UsageMessage } from "./index.ts";
 
 type CodexTokens = {
   input_tokens?: number;
@@ -16,6 +17,10 @@ type CodexRecord = {
     type?: string;
     cwd?: string;
     model?: string;
+    name?: string;
+    call_id?: string;
+    arguments?: unknown;
+    output?: unknown;
     model_provider?: string;
     info?: {
       total_token_usage?: CodexTokens;
@@ -50,6 +55,8 @@ export function parseCodexSession(file: string): SessionUsage {
   let contextOverflows = 0;
   const messages: UsageMessage[] = [];
   const seenTotals = new Set<number>();
+  const calls = new Map<string, { tool: string; word: string }>();
+  const failedCalls: FailedCall[] = [];
 
   for (const line of readCodexText(file).split("\n")) {
     let record: CodexRecord;
@@ -66,6 +73,29 @@ export function parseCodexSession(file: string): SessionUsage {
     } else if (record.type === "turn_context") {
       cwd ||= payload.cwd ?? "";
       model = payload.model ?? model;
+    } else if (record.type === "response_item" && payload.type === "function_call") {
+      let command: unknown;
+      try {
+        command = JSON.parse(String(payload.arguments)).command;
+      } catch {
+        // unreadable arguments: no command word
+      }
+      calls.set(payload.call_id ?? "", {
+        tool: payload.name ?? "unknown",
+        word: commandWord(command),
+      });
+    } else if (record.type === "response_item" && payload.type === "custom_tool_call") {
+      calls.set(payload.call_id ?? "", { tool: payload.name ?? "unknown", word: "" });
+    } else if (
+      record.type === "response_item" &&
+      (payload.type === "function_call_output" || payload.type === "custom_tool_call_output")
+    ) {
+      const outcome = codexResult(payload.call_id, payload.output);
+      if ("result" in outcome && outcome.result.status === "error")
+        failedCalls.push({
+          ...(calls.get(payload.call_id ?? "") ?? { tool: "unknown", word: "" }),
+          error: outcome.result.text,
+        });
     } else if (record.type === "compacted") {
       contextOverflows += 1;
     } else if (record.type === "event_msg" && payload.type === "token_count") {
@@ -91,5 +121,5 @@ export function parseCodexSession(file: string): SessionUsage {
       });
     }
   }
-  return { file, cwd, messages, contextOverflows, crashed: false };
+  return { file, cwd, messages, contextOverflows, failedCalls, crashed: false };
 }
