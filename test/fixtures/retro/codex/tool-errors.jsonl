@@ -1,0 +1,13 @@
+{"timestamp":"2026-10-29T14:30:00.000Z","type":"session_meta","payload":{"id":"tool-errors","cwd":"__RUN__/workspace"}}
+{"timestamp":"2026-10-29T14:30:01.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"x1","arguments":"{\"command\":[\"bash\",\"-lc\",\"orca status --json\"]}"}}
+{"timestamp":"2026-10-29T14:30:02.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"x1","output":"{\"output\":\"\\norca: no such run\\nexit code 2\",\"metadata\":{\"exit_code\":2}}"}}
+{"timestamp":"2026-10-29T14:30:03.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"x2","arguments":"{\"command\":[\"bash\",\"-lc\",\"orca status --json\"]}"}}
+{"timestamp":"2026-10-29T14:30:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"x2","output":{"success":false}}}
+{"timestamp":"2026-10-29T14:30:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","call_id":"x3","input":"*** Begin Patch"}}
+{"timestamp":"2026-10-29T14:30:06.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"x3","output":"{\"output\":\"patch failed: hunk 1 does not apply\",\"metadata\":{\"exit_code\":1}}"}}
+{"timestamp":"2026-10-29T14:30:07.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"x4","arguments":"{\"command\":[\"bash\",\"-lc\",\"orca ok\"]}"}}
+{"timestamp":"2026-10-29T14:30:08.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"x4","output":"{\"output\":\"ok\",\"metadata\":{\"exit_code\":0}}"}}
+{"timestamp":"2026-10-29T14:30:09.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","call_id":"x5","input":"*** Begin Patch"}}
+{"timestamp":"2026-10-29T14:30:10.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"x5","output":"{\"output\":\"ok\",\"metadata\":{\"exit_code\":0}}"}}
+{"timestamp":"2026-10-29T14:30:11.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"x6","arguments":"{\"command\":[\"bash\",\"-lc\",\"orca status --json\"]}"}}
+{"timestamp":"2026-10-29T14:30:12.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"x6","output":"{\"success\":false,\"output\":\"permission denied\"}"}}

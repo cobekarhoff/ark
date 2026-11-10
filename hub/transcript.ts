@@ -115,20 +115,21 @@ function claudeItems(record: Record<string, any>): Item[] {
 }
 
 /** The exit status a Codex tool output reports, or "ok" when it reports none. */
-function codexResult(id: unknown, output: unknown): Item {
+export function codexResult(id: unknown, output: unknown): Item {
   let text = textOf(output);
-  let failed = isRecord(output) && !Array.isArray(output) && output.success === false;
+  let decoded: unknown = output;
   if (typeof output === "string") {
     try {
-      const parsed = JSON.parse(output);
-      if (isRecord(parsed)) {
-        if (typeof parsed.output === "string") text = parsed.output;
-        if (typeof parsed.metadata?.exit_code === "number")
-          failed = parsed.metadata.exit_code !== 0;
-      }
+      decoded = JSON.parse(output);
     } catch {
       // plain text output
     }
+  }
+  let failed = false;
+  if (isRecord(decoded) && !Array.isArray(decoded)) {
+    if (typeof output === "string" && typeof decoded.output === "string") text = decoded.output;
+    if (decoded.success === false) failed = true;
+    if (typeof decoded.metadata?.exit_code === "number") failed = decoded.metadata.exit_code !== 0;
   }
   const exit = text.match(/(?:process exited with code|exit code:?)\s*(-?\d+)/i);
   if (exit && failed === false && Number(exit[1]) !== 0) failed = true;

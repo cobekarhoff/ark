@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { ArkError } from "../errors.ts";
-import type { SessionUsage, UsageMessage } from "./index.ts";
+import {
+  commandWord,
+  resultText,
+  type FailedCall,
+  type SessionUsage,
+  type UsageMessage,
+} from "./index.ts";
 
 const OVERFLOW_PATTERN =
   /context (length|window)|prompt is too long|input is too long|maximum context/i;
@@ -22,7 +28,9 @@ type OmpMessage = {
   isError?: boolean;
   purpose?: string;
   toolCallId?: string;
-  content?: { type?: string; id?: string }[] | string;
+  content?:
+    | { type?: string; id?: string; name?: string; arguments?: { command?: unknown } }[]
+    | string;
 };
 type OmpRecord = OmpMessage & {
   type?: string;
@@ -55,6 +63,8 @@ export function parseOmpSession(file: string): SessionUsage {
   const messages: UsageMessage[] = [];
   const toolCallIds: Set<string>[] = []; // parallel to messages
   const failedToolCallIds = new Set<string>();
+  const calls = new Map<string, { tool: string; word: string }>();
+  const failedCalls: FailedCall[] = [];
 
   for (const line of text.split("\n")) {
     let record: OmpRecord;
@@ -74,6 +84,22 @@ export function parseOmpSession(file: string): SessionUsage {
       message.toolCallId
     ) {
       failedToolCallIds.add(message.toolCallId);
+      failedCalls.push({
+        ...(calls.get(message.toolCallId) ?? { tool: "unknown", word: "" }),
+        error: resultText(message.content),
+      });
+    }
+    if (
+      record.type === "message" &&
+      message.role === "assistant" &&
+      Array.isArray(message.content)
+    ) {
+      for (const block of message.content)
+        if (block.type === "toolCall" && block.id)
+          calls.set(block.id, {
+            tool: block.name ?? "unknown",
+            word: commandWord(block.arguments?.command),
+          });
     }
 
     const isAssistant = record.type === "message" && message.role === "assistant";
@@ -85,12 +111,12 @@ export function parseOmpSession(file: string): SessionUsage {
     const usageSource = isAssistant ? message : record.type === "model_usage" ? record : undefined;
     if (!usageSource?.usage) continue;
     const usage = usageSource.usage;
-    const calls = new Set<string>();
+    const callIds = new Set<string>();
     if (isAssistant && Array.isArray(message.content)) {
       for (const block of message.content)
-        if (block.type === "toolCall" && block.id) calls.add(block.id);
+        if (block.type === "toolCall" && block.id) callIds.add(block.id);
     }
-    toolCallIds.push(calls);
+    toolCallIds.push(callIds);
     messages.push({
       time: record.timestamp ?? "",
       model: usageSource.model ?? "unknown",
@@ -109,5 +135,5 @@ export function parseOmpSession(file: string): SessionUsage {
   messages.forEach((message, index) => {
     message.toolError = [...toolCallIds[index]].some((id) => failedToolCallIds.has(id));
   });
-  return { file, cwd, messages, contextOverflows, crashed };
+  return { file, cwd, messages, contextOverflows, failedCalls, crashed };
 }

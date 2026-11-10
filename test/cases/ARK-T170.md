@@ -6,7 +6,7 @@ technique: idempotence (same input twice), equivalence class on number formattin
 priority: medium
 risk: a second `ark retro` of the same run rewrites metrics.json with different bytes (key order, float noise, a clock value), so comparisons and diffs of runs show false changes
 status: active
-changed_by: 2026-11-09-ARK-366-1
+changed_by: 2026-11-10-ARK-410-1
 ---
 
 ## Objective
@@ -26,7 +26,7 @@ Expected: When `ark retro` runs again on the same run data, the system shall wri
 
 ## Expected results
 
-- The second file equals the first, byte for byte.
+- The second file equals the first, byte for byte, including `orchestration.tool_error_list` (fixture with failed tool calls, ties in count).
 - No number has 7 or more decimals.
 - The top-level keys are, in order: run, actual_models, same_vendor_review, cost, time, rework, tests, design_rounds, decisions, human_intervention, gates, escaped_defects, orchestration, comparison.
 

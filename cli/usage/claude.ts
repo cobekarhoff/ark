@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { ArkError } from "../errors.ts";
-import type { SessionUsage, UsageMessage } from "./index.ts";
+import {
+  commandWord,
+  resultText,
+  type FailedCall,
+  type SessionUsage,
+  type UsageMessage,
+} from "./index.ts";
 
 /**
  * USD per million tokens: input, output, cache read, cache write (5-minute cache).
@@ -26,6 +32,9 @@ const OVERFLOW_PATTERN = /prompt is too long|context (length|window)|maximum con
 type ClaudeContentBlock = {
   type?: string;
   id?: string;
+  name?: string;
+  input?: { command?: unknown };
+  content?: unknown;
   tool_use_id?: string;
   is_error?: boolean;
   text?: string;
@@ -87,6 +96,8 @@ export function parseClaudeSession(file: string): SessionUsage {
   const responses = new Map<string, UsageMessage>();
   const toolUseIds = new Map<string, string[]>(); // response id -> tool_use ids
   const failedToolUseIds = new Set<string>();
+  const calls = new Map<string, { tool: string; word: string }>();
+  const failedCalls: FailedCall[] = [];
 
   for (const line of text.split("\n")) {
     let record: ClaudeRecord;
@@ -109,8 +120,20 @@ export function parseClaudeSession(file: string): SessionUsage {
       for (const block of blocks) {
         if (block.type === "tool_result" && block.is_error === true && block.tool_use_id) {
           failedToolUseIds.add(block.tool_use_id);
+          failedCalls.push({
+            ...(calls.get(block.tool_use_id) ?? { tool: "unknown", word: "" }),
+            error: resultText(block.content),
+          });
         }
       }
+    }
+    if (record.type === "assistant") {
+      for (const block of blocks)
+        if (block.type === "tool_use" && block.id)
+          calls.set(block.id, {
+            tool: block.name ?? "unknown",
+            word: commandWord(block.input?.command),
+          });
     }
     if (record.type !== "assistant" || !message) continue;
 
@@ -144,5 +167,5 @@ export function parseClaudeSession(file: string): SessionUsage {
     ...message,
     toolError: (toolUseIds.get(id) ?? []).some((toolUseId) => failedToolUseIds.has(toolUseId)),
   }));
-  return { file, cwd, messages, contextOverflows, crashed };
+  return { file, cwd, messages, contextOverflows, failedCalls, crashed };
 }

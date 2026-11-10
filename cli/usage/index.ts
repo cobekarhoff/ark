@@ -24,11 +24,35 @@ export type UsageMessage = {
   sessionFile: string;
 };
 
+/** One failed tool call: the tool, the first word of its command ("" when it has none) and its error text. */
+export type FailedCall = { tool: string; word: string; error: string };
+
+/** The first word of a tool command: a string, or a codex argv (`["bash","-lc","<script>"]` gives the script's first word). Anything else gives "". */
+export function commandWord(command: unknown): string {
+  const first = (text: unknown) =>
+    typeof text === "string" ? (text.trim().split(/\s+/)[0] ?? "") : "";
+  if (!Array.isArray(command)) return first(command);
+  return command[1] === "-lc" && typeof command[2] === "string"
+    ? first(command[2])
+    : first(command[0]);
+}
+
+/** Text of a tool result content field: a string, or the `text` of its blocks. */
+export function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) => (typeof block?.text === "string" ? block.text : ""))
+    .filter((text) => text !== "")
+    .join("\n");
+}
+
 export type SessionUsage = {
   file: string;
   cwd: string;
   messages: UsageMessage[];
   contextOverflows: number;
+  failedCalls: FailedCall[];
   /** True when the last assistant record is an error: the agent died instead of finishing. */
   crashed: boolean;
 };

@@ -214,3 +214,62 @@ test("a tool outside the seven still runs", () => {
   },
   { timeout: 60_000 },
 );
+
+// --- ARK-404: the roots of the preload and of the Playwright helpers hold an owner file ---
+
+test(
+  "ARK-T189 the bun-test root of the preload holds ark-owner.pid with the pid of the bun test process",
+  async () => {
+    const fixturePath = writeFixture(
+      "owner",
+      `
+import { test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+test("fixture", () => {
+  const root = process.env.TMPDIR!;
+  const file = join(root, "ark-owner.pid");
+  console.log("OWNER " + JSON.stringify({ pid: process.pid, root, content: existsSync(file) ? readFileSync(file, "utf8") : null }));
+});
+`,
+    );
+    const { exitCode, output } = await runBunTest(fixturePath, scratchDirectory());
+    expect(exitCode, output).toBe(0);
+    const owner = JSON.parse(output.match(/OWNER (.*)/)![1]!);
+    expect(owner.root).toMatch(/bun-test-/);
+    expect(owner.content).toBe(`${owner.pid}\n`);
+  },
+  { timeout: 60_000 },
+);
+
+test(
+  "ARK-T189 each fixture root of tempDirectory() in the Playwright helpers holds ark-owner.pid with the pid of the Node process",
+  () => {
+    const scratch = scratchDirectory();
+    const script = join(fixtureRoot, "playwright-roots.mjs");
+    writeFileSync(
+      script,
+      `
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tempDirectory } from ${JSON.stringify(join(helpersPath, "..", "pw", "helpers.ts"))};
+const roots = ["ark-home-", "ark-repo-", "ark-fake-tools-", "ark-gate-"].map((prefix) => tempDirectory(prefix));
+const content = roots.map((root) => {
+  const file = join(root, "ark-owner.pid");
+  return existsSync(file) ? readFileSync(file, "utf8") : null;
+});
+console.log("OWNER " + JSON.stringify({ pid: process.pid, roots, content }));
+`,
+    );
+    const result = Bun.spawnSync(["node", script], {
+      cwd: repositoryRoot,
+      env: { ...process.env, TMPDIR: scratch },
+    });
+    const output = result.stdout.toString() + result.stderr.toString();
+    expect(result.exitCode, output).toBe(0);
+    const owner = JSON.parse(output.match(/OWNER (.*)/)![1]!);
+    expect(owner.roots).toHaveLength(4);
+    expect(owner.content).toEqual(owner.roots.map(() => `${owner.pid}\n`));
+  },
+  { timeout: 60_000 },
+);

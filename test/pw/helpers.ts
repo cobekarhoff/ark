@@ -5,6 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../../cli/events.ts";
+import { writeOwnerFile } from "../../cli/owner-file.ts";
 import { caseIdsIn } from "../../cli/parsers/case.ts";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
@@ -24,7 +25,7 @@ let savedEnvironment: Record<string, string | undefined> | undefined;
 
 /** Creates a temp directory that `useCleanup` removes after the file's tests. */
 export function tempDirectory(prefix: string): string {
-  const directory = mkdtempSync(join(tmpdir(), prefix));
+  const directory = writeOwnerFile(mkdtempSync(join(tmpdir(), prefix)));
   tempDirectories.push(directory);
   return directory;
 }
