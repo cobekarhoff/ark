@@ -1,4 +1,4 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -421,6 +421,16 @@ describe("ark test old-id gate", () => {
 
   const pytestCommand = `printf '<testsuites><testsuite><testcase classname="x" name="t"/></testsuite></testsuites>' > {report}`;
 
+  // The fake `ark test` runner is detached: stop it and kill anything of the fake run, even when a test failed.
+  let runIds: string[] = [];
+  afterEach(() => {
+    for (const runId of runIds) {
+      ark("test", runId, "--stop");
+      Bun.spawnSync(["pkill", "-f", runId]);
+    }
+    runIds = [];
+  });
+
   /** A building run on a repo whose base commit holds old-id tests; a bun suite and a pytest suite. */
   function run() {
     const arkHome = tempArkHome();
@@ -433,11 +443,15 @@ describe("ark test old-id gate", () => {
         { name: "py", level: "unit", repo: ".", command: pytestCommand, parser: "pytest" },
       ],
       roles,
+      // the fake run never waits for the host: no memory floor, no swap ceiling
+      test_min_free_memory_percent: 0,
+      test_max_swap_gb: 1_000_000,
     });
     const ticket = writeTicket("fx", "FAKE-1", [{ id: "FAKE-1-AC1", text: "criterion" }]);
     const runId = ark("run", "start", ticket, "--project", "fx").out.match(
       /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
     )![0];
+    runIds.push(runId);
     const runDirectory = join(arkHome, "projects", "fx", "runs", runId);
     recordEvaluation(runDirectory);
     writeFileSync(
