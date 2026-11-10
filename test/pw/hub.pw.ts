@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request, type Route } from "@playwright/test";
+import { readdir } from "node:fs/promises";
 import {
   existsSync,
   mkdirSync,
@@ -87,7 +88,7 @@ const ago = (seconds: number) => new Date(Date.now() - seconds * 1000);
 /** Opens a view and waits for the app to mount (the main heading) before any input. */
 async function open(page: Page, baseUrl: string, hash: string): Promise<void> {
   await page.goto(`${baseUrl}/#/${hash}`);
-  await expect(page.locator("main h1")).toBeVisible();
+  await expect(page.locator("main h1").first()).toBeVisible();
 }
 
 const percentile95 = (durations: number[]) =>
@@ -1291,7 +1292,7 @@ function rawGet(baseUrl: string, path: string): Promise<{ status: number; body: 
   });
 }
 
-test("ARK-284-AC8 the run page links the run files that exist and shows them as text, a missing file has no link, and a path outside the run folder answers 404", async ({
+test("ARK-T182 the run page links the run files that exist, shows them rendered, a missing file has no link, and a path outside the run folder answers 404", async ({
   page,
 }) => {
   isolate();
@@ -1322,9 +1323,10 @@ test("ARK-284-AC8 the run page links the run files that exist and shows them as 
   ).toEqual(["ticket.md", "plan.md", "findings/note.md"]);
   await links.filter({ hasText: /^plan\.md$/ }).click();
   await expect(page.getByTestId("run-file-text")).toContainText("PLAN-BODY");
-  // Text, not markup.
+  // Rendered through Markdown: the heading is an element, the raw tag is text and makes no element.
+  await expect(page.getByTestId("run-file-text").locator("h1")).toHaveText("Plan");
   await expect(page.getByTestId("run-file-text")).toContainText("<b>not markup</b>");
-  await expect(page.locator("pre b")).toHaveCount(0);
+  await expect(page.getByTestId("run-file-text").locator("b")).toHaveCount(0);
   await open(page, baseUrl, `run/${run}`);
   await links.filter({ hasText: "note.md" }).click();
   await expect(page.getByTestId("run-file-text")).toContainText("FINDING-BODY");
@@ -2072,7 +2074,7 @@ test("ARK-T26 Roadmap lists the tickets by horizon, keys move and open them, a t
   ]);
   // The text is escaped: the markup shows as written and nothing runs.
   await expect(page.getByTestId("ticket-problem")).toContainText("<b>raw markup</b>");
-  await expect(page.locator(".prose b")).toHaveCount(0);
+  await expect(page.getByTestId("ticket-problem").locator("b")).toHaveCount(0);
   await expect(page.getByTestId("ticket-change")).toContainText(
     "<script>window.__ran = 1</script>",
   );
@@ -5613,3 +5615,571 @@ async function settledBoxes(page: Page, selectors: string[]): Promise<Box[]> {
     }
   }, selectors);
 }
+
+// ---------------------------------------------------------------- ARK-323
+
+const longCodeLine = `const longLine = "${"x".repeat(300)}";`;
+/** Every markdown token class once. No line starts with `## `, which ends a ticket section: the h2 is in the plan.md of the test. */
+const markdownFixture = [
+  "# Heading one",
+  "",
+  "### Heading three",
+  "",
+  "A paragraph with **bold words**, *italic words*, `inline code` and a [safe link](https://example.com/page).",
+  "",
+  "1. first step",
+  "2. second step",
+  "",
+  "- outer item",
+  "  - nested item",
+  "",
+  "| name | wide column |",
+  "| --- | --- |",
+  `| cell | ${"wide".repeat(60)} |`,
+  "",
+  "> quoted words",
+  "",
+  "---",
+  "",
+  "```ts",
+  longCodeLine,
+  "```",
+].join("\n");
+
+/** A closed run with a `plan.md`, and the files of its `results/` folder. */
+function runWithFiles(
+  ticket: string,
+  files: Record<string, string>,
+): { run: string; directory: string } {
+  const run = runId(ticket);
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: ticket, title: `Files of ${ticket}` },
+    phase: "closed",
+  });
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(directory, path)), { recursive: true });
+    writeFileSync(join(directory, path), text);
+  }
+  return { run, directory };
+}
+
+const scriptRequests = (requests: string[]) =>
+  requests.filter((path) => /^\/assets\/.+\.js$/.test(path));
+
+test("ARK-T172 Markdown renders headings, paragraphs, bold, italic, inline code, links, nested lists, GFM tables, blockquotes, rules and fenced code as elements", async ({
+  page,
+}) => {
+  isolate();
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-901",
+    title: "Markdown fixture",
+    status: "ready",
+    problem: markdownFixture,
+  });
+  const { run } = runWithFiles("ARK-902", { "plan.md": "## Heading two\n\nBody of the plan.\n" });
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, "ticket/ARK-901");
+  const problem = page.getByTestId("ticket-problem");
+  await expect(problem.locator("h1")).toBeVisible();
+  await checkpoint(page, "markdown-fixture");
+  await expect(problem.locator("h1")).toHaveText("Heading one");
+  await expect(problem.locator("h3")).toHaveText("Heading three");
+  await expect(problem.locator("p strong")).toHaveText("bold words");
+  await expect(problem.locator("p em")).toHaveText("italic words");
+  await expect(problem.locator("p code.ic")).toHaveText("inline code");
+  const link = problem.locator("p a");
+  await expect(link).toHaveText("safe link");
+  await expect(link).toHaveAttribute("href", "https://example.com/page");
+  await expect(problem.locator("ol > li")).toHaveText(["first step", "second step"]);
+  await expect(problem.locator("ul > li > ul > li")).toHaveText("nested item");
+  await expect(problem.locator("thead th")).toHaveText(["name", "wide column"]);
+  await expect(problem.locator("tbody td")).toHaveText(["cell", "wide".repeat(60)]);
+  await expect(problem.locator("blockquote")).toHaveText("quoted words");
+  await expect(problem.locator("hr")).toHaveCount(1);
+  await expect(problem.getByTestId("code-block").locator(".lang")).toHaveText("ts");
+  await expect(problem.getByTestId("code-block").locator("pre")).toHaveText(longCodeLine);
+  // No marker of the source leaks into the text.
+  expect(await problem.innerText()).not.toMatch(/[*`|]|##/);
+
+  // A wide table and a long code line scroll in their own box, never the page.
+  await checkpoint(page, "no-overflow");
+  const overflow = (selector: string) =>
+    problem.locator(selector).evaluate((element) => element.scrollWidth > element.clientWidth);
+  expect(await overflow(".tablewrap")).toBe(true);
+  expect(await overflow("pre")).toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+
+  // The h2 of a run file.
+  await open(page, baseUrl, `run/${run}/file/${encodeURIComponent("plan.md")}`);
+  await expect(page.getByTestId("run-file-text").locator("h2")).toHaveText("Heading two");
+});
+
+/** Raw HTML in every position, and every link scheme of the case. */
+const hostileFixture = [
+  "<script>window.__xss = 1</script>",
+  "",
+  '<img src=x onerror="window.__xss = 2">',
+  "",
+  "- in a list <script>window.__xss = 3</script>",
+  "",
+  "| cell |",
+  "| --- |",
+  '| <img src=x onerror="window.__xss = 4"> |',
+  "",
+  '> in a quote <img src=x onerror="window.__xss = 5">',
+  "",
+  '[<img src=x onerror="window.__xss = 6">](https://example.com/with-tag)',
+  "",
+  "[a](javascript:alert(1))",
+  "",
+  "[b](JaVaScRiPt:alert(1))",
+  "",
+  "[c](  javascript:alert(1))",
+  "",
+  "[d](//evil.example)",
+  "",
+  "[e](data:text/html,x)",
+  "",
+  "[f](http://example.com/f) [g](https://example.com/g) [h](/local) [i](#anchor)",
+].join("\n");
+
+test("ARK-T173 Markdown makes no HTML from text: script and img onerror show as text, only http, https, / and # links are links, and no hub file uses dangerouslySetInnerHTML", async ({
+  page,
+}) => {
+  isolate();
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-903",
+    title: "Hostile fixture",
+    status: "ready",
+    problem: hostileFixture,
+  });
+  const { run } = runWithFiles("ARK-904", { "plan.md": hostileFixture });
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  const surfaces: [string, string, string][] = [
+    ["ticket", "ticket/ARK-903", "ticket-problem"],
+    ["run file", `run/${run}/file/plan.md`, "run-file-text"],
+  ];
+  for (const [name, hash, testId] of surfaces) {
+    await open(page, baseUrl, hash);
+    const area = page.getByTestId(testId);
+    await expect(area).toContainText("[e](data:text/html,x)");
+    await page.waitForTimeout(300);
+    await checkpoint(page, `raw-html-as-text-${name.replace(" ", "-")}`);
+    // The tags show as text, in every position, and make no element.
+    await expect(area).toContainText("<script>window.__xss = 1</script>");
+    await expect(area).toContainText('<img src=x onerror="window.__xss = 2">');
+    await expect(area.locator("li")).toContainText("<script>window.__xss = 3</script>");
+    await expect(area.locator("td")).toContainText('<img src=x onerror="window.__xss = 4">');
+    await expect(area.locator("blockquote")).toContainText(
+      '<img src=x onerror="window.__xss = 5">',
+    );
+    await expect(area.locator("a").first()).toContainText('<img src=x onerror="window.__xss = 6">');
+    await expect(area.locator("script, img")).toHaveCount(0);
+    expect(await page.evaluate(() => "__xss" in window)).toBe(false);
+
+    // Only http://, https://, / and # targets are links. `//evil.example` starts with `/`, so it is one.
+    await checkpoint(page, `links-${name.replace(" ", "-")}`);
+    for (const source of [
+      "[a](javascript:alert(1))",
+      "[b](JaVaScRiPt:alert(1))",
+      "[c](  javascript:alert(1))",
+      "[e](data:text/html,x)",
+    ])
+      await expect(area).toContainText(source);
+    expect(
+      await area
+        .locator("a")
+        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href"))),
+    ).toEqual([
+      "https://example.com/with-tag",
+      "//evil.example",
+      "http://example.com/f",
+      "https://example.com/g",
+      "/local",
+      "#anchor",
+    ]);
+  }
+
+  // No file of hub/ makes HTML from a string.
+  const hubDirectory = join(import.meta.dirname, "..", "..", "hub");
+  const files = (await readdir(hubDirectory, { recursive: true })).filter((path) =>
+    /\.(tsx?|css|html)$/.test(path),
+  );
+  expect(files.length).toBeGreaterThan(20);
+  const users = files.filter((path) =>
+    readFileSync(join(hubDirectory, path), "utf8").includes("dangerouslySetInnerHTML"),
+  );
+  expect(users).toEqual([]);
+});
+
+const jsonValue = {
+  name: "ark",
+  count: 42,
+  ok: true,
+  off: false,
+  none: null,
+  items: Array.from({ length: 31 }, (_, index) => index + 1),
+};
+/** On one line, as a tool writes it: the page formats it. */
+const jsonSource = JSON.stringify(jsonValue);
+const copiedSource = 'const copied: string = "source";\nconsole.log(copied);';
+
+test("ARK-T175 Json shows a 40-line value indented by 2 with token colours, folds to 12 lines behind Show all; Code shows its language label and a Copy button that copies the source", async ({
+  page,
+}) => {
+  isolate();
+  const { run } = runWithFiles("ARK-905", {
+    "results/data.json": jsonSource,
+    "plan.md": `\`\`\`ts\n${copiedSource}\n\`\`\`\n`,
+  });
+  installFakeTools({});
+  const baseUrl = await launch();
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseUrl });
+
+  await open(page, baseUrl, `run/${run}/file/${encodeURIComponent("results/data.json")}`);
+  const block = page.getByTestId("json-block");
+  const pre = block.locator("pre");
+  await expect(block.locator(".tk-key").first()).toBeVisible();
+  await checkpoint(page, "json-folded");
+  // Indent 2: 40 lines, the keys 2 spaces in, the items 4.
+  const lines = (await pre.textContent())!.split("\n");
+  expect(lines).toHaveLength(40);
+  expect(lines[1]).toBe('  "name": "ark",');
+  expect(lines[7]).toBe("    1,");
+  // Folded: 12 of the 40 lines show, with a Show all control.
+  const shown = () =>
+    pre.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+      const lineHeight = parseFloat(style.lineHeight);
+      return {
+        visible: Math.round((element.clientHeight - padding) / lineHeight),
+        total: Math.round((element.scrollHeight - padding) / lineHeight),
+      };
+    });
+  expect(await shown()).toEqual({ visible: 12, total: 40 });
+  // Colours: key, string, number and the literals each have their own, apart from plain text.
+  const colour = (selector: string) =>
+    block
+      .locator(selector)
+      .first()
+      .evaluate((element) => getComputedStyle(element).color);
+  const colours = [
+    await colour(".tk-key"),
+    await colour(".tk-str"),
+    await colour(".tk-num"),
+    await colour(".tk-lit"),
+  ];
+  expect(new Set(colours).size).toBe(4);
+  expect(colours).not.toContain(await pre.evaluate((element) => getComputedStyle(element).color));
+  await expect(block.locator(".tk-lit")).toHaveText(["true", "false", "null"]);
+
+  await block.getByRole("button", { name: "Show all" }).click();
+  await checkpoint(page, "json-expanded");
+  expect(await shown()).toEqual({ visible: 40, total: 40 });
+  await expect(block.getByRole("button", { name: "Show all" })).toHaveCount(0);
+
+  // Code: its language label and a Copy button that copies the source.
+  await open(page, baseUrl, `run/${run}/file/plan.md`);
+  const code = page.getByTestId("code-block");
+  await expect(code.locator(".lang")).toHaveText("ts");
+  await checkpoint(page, "code-label-copy");
+  await code.getByRole("button", { name: "Copy" }).click();
+  await expect(code.getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(copiedSource);
+});
+
+/** One block for each language of AC4, each with at least two token classes. */
+const languageSamples: [string, string][] = [
+  ["ts", 'const answer: number = 42; // note\nfunction f(x: string) { return "s" + x; }'],
+  ["js", 'const a = 1;\nconsole.log("hi", a); // note'],
+  ["json", '{"a": 1, "b": "two", "c": true}'],
+  ["yaml", "key: value\nlist:\n  - one\n  - 2\n# note"],
+  ["bash", 'echo "hi" | grep h # note\nif [ -f x ]; then ls; fi'],
+  ["diff", "--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new"],
+  ["python", 'def f(x):\n    return "s" + str(x)  # note'],
+  ["markdown", "# Title\n- item\n[link](target)"],
+  ["gherkin", "Feature: F\n  Scenario: S\n    Given a thing\n    When it runs\n    Then ok"],
+];
+
+test("ARK-T177 Code loads shiki in its own chunk on the first code block: Home's first load requests none, the block is plain monospace until the chunk loads, then it has coloured spans for 9 languages", async ({
+  page,
+}) => {
+  isolate();
+  writeRun({
+    project: "p",
+    run: runId("ARK-906"),
+    ticket: { id: "ARK-906", title: "Gate with **markdown**" },
+    phase: "awaiting_criteria",
+  });
+  const { run } = runWithFiles("ARK-907", {
+    "plan.md": languageSamples
+      .map(([language, source]) => `\`\`\`${language}\n${source}\n\`\`\``)
+      .join("\n\n"),
+  });
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  const requests: string[] = [];
+  const responses: { path: string; status: number; type: string }[] = [];
+  page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  page.on("response", (response) =>
+    responses.push({
+      path: new URL(response.url()).pathname,
+      status: response.status(),
+      type: response.headers()["content-type"] ?? "",
+    }),
+  );
+
+  // The first load of Home: markdown shows, and the entry bundle is the only script.
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("gate").locator("strong")).toHaveText("markdown");
+  await page.waitForTimeout(500);
+  // Home's scripts: the entry and the chunks it shares with the page. None holds shiki.
+  const homeScripts = scriptRequests(requests);
+  for (const path of homeScripts)
+    expect(await (await page.request.get(baseUrl + path)).text(), path).not.toContain(
+      "codeToTokens",
+    );
+
+  // Hold every other script until the test releases it.
+  const held: Route[] = [];
+  let released = false;
+  await page.route(/\/assets\/.+\.js$/, (route) => {
+    if (released) void route.continue();
+    else held.push(route);
+  });
+  await page.evaluate((hash) => (location.hash = hash), `#/run/${run}/file/plan.md`);
+  await expect.poll(() => held.length).toBeGreaterThan(0);
+
+  // While the response waits, each block is plain monospace text: no colour span.
+  const blocks = page.locator("main pre.code-plain, main figure.code");
+  await expect(blocks).toHaveCount(languageSamples.length);
+  await checkpoint(page, "code-plain-before-chunk");
+  await expect(page.locator(".shiki-token")).toHaveCount(0);
+  const family = await blocks
+    .first()
+    .evaluate((element) => getComputedStyle(element.querySelector("pre") ?? element).fontFamily);
+  expect(family).toMatch(/monospace/);
+  await expect(blocks.first()).toContainText("const answer");
+
+  released = true;
+  for (const route of held.splice(0)) await route.continue();
+  const figures = page.locator("main figure.code");
+  await expect(figures).toHaveCount(languageSamples.length);
+  await expect(figures.locator(".lang")).toHaveText(languageSamples.map(([language]) => language));
+  for (let index = 0; index < languageSamples.length; index++)
+    await expect(figures.nth(index).locator(".shiki-token").first()).toBeVisible();
+  await checkpoint(page, "code-coloured");
+
+  // The chunks are scripts of /assets/, served as JavaScript: the build split them from the entry.
+  const chunks = scriptRequests(requests).filter((path) => !homeScripts.includes(path));
+  expect(chunks.length).toBeGreaterThan(0);
+  const bodies = await Promise.all(
+    chunks.map(async (path) => (await page.request.get(baseUrl + path)).text()),
+  );
+  expect(bodies.some((body) => body.includes("codeToTokens"))).toBe(true);
+  for (const path of chunks) {
+    const answer = responses.find((candidate) => candidate.path === path);
+    expect(answer, path).toMatchObject({ status: 200 });
+    expect(answer!.type, path).toMatch(/javascript/);
+  }
+
+  // Two token colours or more in each language, and another theme in dark.
+  const coloursOf = () =>
+    figures.evaluateAll((nodes) =>
+      nodes.map((node) =>
+        [...node.querySelectorAll(".shiki-token")].map((span) => getComputedStyle(span).color),
+      ),
+    );
+  await page.emulateMedia({ colorScheme: "light" });
+  const light = await coloursOf();
+  await page.emulateMedia({ colorScheme: "dark" });
+  const dark = await coloursOf();
+  languageSamples.forEach(([language], index) => {
+    expect(new Set(light[index]).size, `${language} light`).toBeGreaterThanOrEqual(2);
+    expect(new Set(dark[index]).size, `${language} dark`).toBeGreaterThanOrEqual(2);
+    expect([...new Set(dark[index])].sort(), `${language} theme`).not.toEqual(
+      [...new Set(light[index])].sort(),
+    );
+  });
+});
+
+const surfaceText = (label: string) =>
+  `**bold ${label}**\n\n- list item one ${label}\n- list item two ${label}\n\nand \`code ${label}\``;
+
+/** The surfaces of ARK-T179 and ARK-T181 on one hub; ids are those of the ARK-323 fixtures. */
+function surfacesWorld() {
+  isolate();
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-910",
+    title: "Rendered surfaces",
+    status: "ready",
+    problem: surfaceText("problem"),
+    change: surfaceText("change"),
+    criteria: [
+      { id: "AC1", method: "inspection", text: "**bold criterion** and `code criterion`" },
+    ],
+  });
+  const stateJson = JSON.stringify({ phase: "closed", count: 2 });
+  const notes = "**not bold**\n- not a list";
+  const { run, directory } = runWithFiles("ARK-911", {
+    "plan.md": `# Plan\n\n${surfaceText("plan")}\n`,
+    "results/state.json": stateJson,
+    "results/notes.txt": notes,
+  });
+  // A decision whose text holds markdown.
+  const events = readFileSync(join(directory, "events.ndjson"), "utf8").trim().split("\n").length;
+  appendRawEvent(
+    directory,
+    "escalation.requested",
+    { reason: surfaceText("decision") },
+    events + 1,
+  );
+  // An open run at a gate whose question holds markdown, a list among it: the question quotes the ticket title.
+  writeRun({
+    project: "p",
+    run: runId("ARK-912"),
+    ticket: {
+      id: "ARK-912",
+      title: "Gate **bold** and `code`\n\n- gate item one\n- gate item two\n\nend",
+    },
+    phase: "awaiting_criteria",
+  });
+  // A ROADMAP.md note: the id of a missing ticket is `**ARK-950**`.
+  writeBacklogTicket({ project: "p", id: "ARK-913", title: "Ranked", status: "ready" });
+  writeRoadmap("p", { now: ["ARK-913", "**ARK-950**"] });
+  installFakeTools({});
+  return { run, stateJson, notes };
+}
+
+test("ARK-T179 each surface renders through Markdown, a .json run file through Json and any other run file through Code as plain text", async ({
+  page,
+}) => {
+  const { run } = surfacesWorld();
+  const baseUrl = await launch();
+  const renders = async (area: Locator, label: string) => {
+    await expect(area.locator("strong")).toHaveText(`bold ${label}`);
+    await expect(area.locator("li")).toHaveText([
+      `list item one ${label}`,
+      `list item two ${label}`,
+    ]);
+    await expect(area.locator("code.ic")).toHaveText(`code ${label}`);
+    expect(await area.innerText()).not.toMatch(/[*`]/);
+  };
+
+  await open(page, baseUrl, "ticket/ARK-910");
+  await expect(page.getByTestId("ticket-problem")).toBeVisible();
+  await checkpoint(page, "ticket");
+  await renders(page.getByTestId("ticket-problem"), "problem");
+  await renders(page.getByTestId("ticket-change"), "change");
+  const criterion = page.getByTestId("ticket-criterion");
+  await expect(criterion.locator("strong")).toHaveText("bold criterion");
+  await expect(criterion.locator("code.ic")).toHaveText("code criterion");
+  expect(await criterion.innerText()).not.toMatch(/[*`]/);
+
+  await open(page, baseUrl, `run/${run}/file/plan.md`);
+  await expect(page.getByTestId("run-file-text")).toBeVisible();
+  await checkpoint(page, "run-file-md");
+  await renders(page.getByTestId("run-file-text"), "plan");
+
+  await open(page, baseUrl, `run/${run}/file/${encodeURIComponent("results/state.json")}`);
+  await expect(page.getByTestId("json-block").locator(".tk-key")).toHaveText([
+    '"phase"',
+    '"count"',
+  ]);
+  await checkpoint(page, "run-file-json");
+  expect((await page.getByTestId("json-block").locator("pre").textContent())!.split("\n")).toEqual([
+    "{",
+    '  "phase": "closed",',
+    '  "count": 2',
+    "}",
+  ]);
+
+  await open(page, baseUrl, `run/${run}/file/${encodeURIComponent("results/notes.txt")}`);
+  const text = page.getByTestId("code-block");
+  await expect(text.locator(".lang")).toHaveText("text");
+  await checkpoint(page, "run-file-text");
+  await expect(text.locator("pre")).toHaveText("**not bold**\n- not a list");
+  await expect(text.locator("strong, li")).toHaveCount(0);
+
+  await open(page, baseUrl, "");
+  await expect(page.getByTestId("gate")).toBeVisible();
+  await checkpoint(page, "gate-question");
+  const gate = page.getByTestId("gate");
+  await expect(gate.locator("strong")).toHaveText("bold");
+  await expect(gate.locator("code.ic")).toHaveText("code");
+  await expect(gate.locator("li")).toHaveText(["gate item one", "gate item two"]);
+
+  await open(page, baseUrl, `run/${run}`);
+  const decision = page.locator('[data-testid="timeline-entry"][data-type="escalation.requested"]');
+  await expect(decision).toBeVisible();
+  await checkpoint(page, "decision-timeline");
+  await renders(decision, "decision");
+
+  await open(page, baseUrl, "roadmap");
+  const note = page.locator('[data-testid="roadmap-warning"][data-kind="missing_ticket"]');
+  await expect(note).toBeVisible();
+  await checkpoint(page, "roadmap-note");
+  await expect(note.locator("strong")).toHaveText("ARK-950");
+});
+
+test("ARK-T181 the run file viewer and the ticket page each have a Rendered and Raw switch and Raw shows the source text as written", async ({
+  page,
+}) => {
+  const { run } = surfacesWorld();
+  const baseUrl = await launch();
+  const switchOf = (name: "Rendered" | "Raw") =>
+    page.getByRole("group", { name: "View" }).getByRole("button", { name });
+
+  // A .md file: the source with its marks, then the elements again.
+  const plan = `# Plan\n\n${surfaceText("plan")}\n`;
+  await open(page, baseUrl, `run/${run}/file/plan.md`);
+  const file = page.getByTestId("run-file-text");
+  await expect(file.locator("strong")).toHaveText("bold plan");
+  await switchOf("Raw").click();
+  await checkpoint(page, "run-file-raw");
+  expect(await file.textContent()).toBe(plan);
+  await expect(file.locator("strong, li, h1")).toHaveCount(0);
+  await switchOf("Rendered").click();
+  await expect(file.locator("strong")).toHaveText("bold plan");
+
+  // A .json file stored on one line: Raw is the file as written, not the formatted value.
+  await open(page, baseUrl, `run/${run}/file/${encodeURIComponent("results/state.json")}`);
+  await expect(page.getByTestId("json-block")).toBeVisible();
+  await switchOf("Raw").click();
+  expect(await page.getByTestId("run-file-text").textContent()).toBe(
+    JSON.stringify({ phase: "closed", count: 2 }),
+  );
+  await expect(page.getByTestId("json-block")).toHaveCount(0);
+  await switchOf("Rendered").click();
+  await expect(page.getByTestId("json-block")).toBeVisible();
+
+  // The ticket page: the source of Problem, Change and the criterion, then the elements again.
+  await open(page, baseUrl, "ticket/ARK-910");
+  await expect(page.getByTestId("ticket-problem").locator("strong")).toHaveText("bold problem");
+  await switchOf("Raw").click();
+  await checkpoint(page, "ticket-raw");
+  expect(await page.getByTestId("ticket-problem").textContent()).toBe(surfaceText("problem"));
+  expect(await page.getByTestId("ticket-change").textContent()).toBe(surfaceText("change"));
+  expect(await page.getByTestId("ticket-criterion").locator("pre.raw").textContent()).toBe(
+    "**bold criterion** and `code criterion`",
+  );
+  await expect(page.locator("main .md strong")).toHaveCount(0);
+  await switchOf("Rendered").click();
+  await expect(page.getByTestId("ticket-problem").locator("strong")).toHaveText("bold problem");
+  await expect(page.getByTestId("ticket-criterion").locator("strong")).toHaveText("bold criterion");
+});

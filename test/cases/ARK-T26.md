@@ -6,7 +6,7 @@ technique: state transition (list, search box, ticket page, back to list) with b
 priority: medium
 risk: "a done or superseded ticket shows in the list, j, k or Enter act inside the search box or on a focused button, Esc loses the selected row or the scroll position, ticket text runs as markup or script, a criterion shows a list number or the long form of its id in place of its own id, or the graph and the dependency lists are wrong"
 status: active
-changed_by: 2026-11-06-ARK-314-1
+changed_by: 2026-11-09-ARK-323-1
 ---
 
 ## Objective
@@ -27,14 +27,14 @@ Prove the Roadmap lists tickets under Now, Next, Later and Unranked, that keys s
 4. Press `j`, focus the List view button, press Enter; assert the URL stays `#/roadmap`.
 5. Press `j` 30 times, record `scrollY` (above 100) and the selected ticket. Press Enter; assert the URL is `#/ticket/<id>` and the ticket page shows.
 6. Press Esc; assert the URL is `#/roadmap`, the same row is selected and `scrollY` equals the recorded value.
-7. Open `ARK-703` from its row link. Assert the heading `The ticket page`, the problem text and its two bullets, the markup shown as written (no `<b>` element) and the `<script>` text shown as written with `window.__ran` undefined.
+7. Open `ARK-703` from its row link. Assert the heading `The ticket page`, the Problem rendered through Markdown (its two bullets as list items), the raw `<b>raw markup</b>` shown as text with no `b` element in the Problem, and the `<script>` text of the Change shown as written with `window.__ran` undefined.
 8. `checkpoint(page, "ticket-criteria")`. Assert two criteria; the second contains `Esc returns to the list`; the ids in `.crit-head .mono` read `AC1` and `AC2`.
 9. Assert the graph holds nodes `ARK-701`, `ARK-703`, `ARK-704` and two edges, the depends-on list reads `ARK-701` and the unblocks list reads `ARK-704`; click the `ARK-704` link and assert its page opens with the title `Title of ARK-704`.
 
 ## Expected results
 
 - When the Roadmap opens, the system shall list each open ticket once under its horizon, and no done or superseded ticket.
-- When a ticket opens from the Roadmap, the system shall show each criterion with its id (`AC1`, `AC2`), its text escaped, and its graph and lists.
+- When a ticket opens from the Roadmap, the system shall show each criterion with its id (`AC1`, `AC2`), its Problem rendered through Markdown with raw HTML shown as text, and its graph and lists.
 - When Esc is pressed on the ticket page, the system shall return to the Roadmap with the same selected row and scroll position.
 
 ## Screenshot checkpoints
