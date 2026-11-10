@@ -294,9 +294,10 @@ function writeProbe(directory: string): string {
   writeFileSync(
     file,
     `#!/bin/sh
-# usage: probe.sh <repo> <suite> <base sha> <counter file>
+# usage: probe.sh <repo> <suite> <base sha> <counter file> <report>
 sha=$(git rev-parse HEAD)
 if [ "$sha" = "$3" ]; then side=base; else side=head; fi
+case "$5" in */census/*) side=census;; esac
 echo "SUITE=$1/$2 CHECKOUT=$side SHA=$sha"
 echo "$side" >> "$4"
 for path in ${[...copiedPaths, ...keptPaths, ...absentPaths].join(" ")}; do
@@ -319,7 +320,7 @@ function twoRepoRun(kind: string, mode: NewTest, testCriterion = false) {
   const baseShas: Record<string, string> = {};
   for (const name of repoNames) baseShas[name] = createRepo(workspace, name, baseFiles(name));
   const probeCommand = (name: string, suite: string) =>
-    `sh ${probe} ${name} ${suite} ${baseShas[name]} ${join(counters, `${name}-${suite}`)}`;
+    `sh ${probe} ${name} ${suite} ${baseShas[name]} ${join(counters, `${name}-${suite}`)} {report}`;
   const bunTest = (files: string) =>
     `bun test ${files} --reporter=junit --reporter-outfile={report}`;
   // s1 and s2 each match a test file of the run's own commits. s3 matches none: only a refactor run runs it at base.
