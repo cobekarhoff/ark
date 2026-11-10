@@ -1330,6 +1330,9 @@ test("ARK-T182 the run page links the run files that exist, shows them rendered,
   await open(page, baseUrl, `run/${run}`);
   await links.filter({ hasText: "note.md" }).click();
   await expect(page.getByTestId("run-file-text")).toContainText("FINDING-BODY");
+  // A nested path with plain slashes opens too, as a hand-written or pasted link does.
+  await page.goto(`${baseUrl}/#/run/${run}/file/findings/note.md`);
+  await expect(page.getByTestId("run-file-text")).toContainText("FINDING-BODY");
 
   // A path that leaves the run folder shows no file.
   await page.goto(`${baseUrl}/#/run/${run}/file/${encodeURIComponent("../ticket.md")}`);
