@@ -1,15 +1,9 @@
 import { dollars } from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
-import type { ClosedBand as ClosedBandData } from "../types.ts";
+import { TimeBar, wall } from "./TimeBar.tsx";
+import type { ClosedBand as ClosedBandData, TimeSplit } from "../types.ts";
 
 export const notRecorded = "not recorded";
-
-/** `1h 12m`, `41m`, `45s`: the wall time of a closed run. */
-function wall(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 1) return `${Math.floor(seconds)}s`;
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
 
 const outcomeTone: Record<string, string> = {
   merged: "ok",
@@ -39,19 +33,21 @@ function Stat({
 
 /**
  * The summary of a closed run, above the plan. The only place the page shows the outcome.
- * `data-testid="closed-band"` is stable: ARK-355 adds its time bar inside the band.
+ * `data-testid="closed-band"` is stable. The time bar comes from the events, not from metrics.json.
  */
 export function ClosedBand({
   run,
   outcome,
   closedAt,
   band,
+  timeSplit,
   files,
 }: {
   run: string;
   outcome: string | null;
   closedAt: string | null;
   band: ClosedBandData;
+  timeSplit: TimeSplit;
   files: string[];
 }) {
   const links = files.filter((path) => path === "retro.md" || path.startsWith("findings/"));
@@ -99,6 +95,7 @@ export function ClosedBand({
           value={band.rework_rounds === notRecorded ? null : (band.rework_rounds as number)}
         />
       </dl>
+      <TimeBar split={timeSplit} live={false} />
       {band.escaped_defects.length > 0 ? (
         <div className="band-escaped">
           <h2>Escaped defects ({band.escaped_defects.length})</h2>

@@ -1,7 +1,9 @@
 import { watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
+import { now } from "../cli/clock.ts";
 import { loadConfig } from "../cli/config.ts";
 import { waitingGate } from "../cli/events.ts";
+import { splitRunTime } from "../cli/time-split.ts";
 import {
   createArkReader,
   createEvidenceReader,
@@ -632,6 +634,7 @@ export function createSnapshotReader() {
         outcome: found.state.outcome,
         closed_at: closedAt,
         band: closed ? bandOf(found, closedAt) : null,
+        time_split: splitRunTime(events, now()),
         timeline: timelineOf(events),
         files: listRunFiles(found.directory),
         sessions: usage.sessionsOf(

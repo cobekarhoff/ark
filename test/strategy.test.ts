@@ -471,7 +471,7 @@ test("ARK-173-AC11 retro counts design rounds, strategy wait and Designer cost w
   expect(retroResult).toMatchObject({ code: 0 });
   const metrics = JSON.parse(readFileSync(join(runDirectory, "metrics.json"), "utf8"));
   expect(metrics.design_rounds).toBe(2);
-  expect(metrics.time.gate_wait_seconds).toBe(300);
+  expect(metrics.time.waiting_on_you_seconds).toBe(300);
   expect(metrics.cost.by_role.designer.usd).toBeCloseTo(0.25);
   expect(metrics.rework.escalations).toBe(0);
 });

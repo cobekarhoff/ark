@@ -258,7 +258,7 @@ describe("ark retro", () => {
     retro(runId);
 
     expect(readMetrics().cost.by_role.evaluator.usd).toBeCloseTo(0.003);
-    expect(readMetrics().time.gate_wait_seconds).toBe(30);
+    expect(readMetrics().time.waiting_on_you_seconds).toBe(30);
   });
 
   test("ARK-160-AC1 compares with the project's other closed runs that have metrics", () => {
@@ -282,6 +282,7 @@ describe("ark retro", () => {
       runs_compared: 2,
       median_cost_usd: 2,
       median_wall_seconds: 20,
+      median_waiting_on_you_seconds: "unknown", // no earlier metrics file has the new field
     });
   });
 
@@ -344,14 +345,16 @@ describe("ark retro", () => {
     expect(runningCost(runDirectory)).toEqual({ usd: "unknown", tokens: 0 });
   });
 
-  test("ARK-160-AC4 reports wall time per run and step, with gate wait separate from work time", () => {
+  test("ARK-160-AC4 reports wall time per run and step, split into waiting on you, working, waiting to merge and idle", () => {
     retro(runId);
     const { time } = readMetrics();
     expect(time.wall_seconds).toBe(2400);
     expect(time.by_step).toEqual({ build: 120, review: 1620 });
     // plan change 30s, plan approve 30s (each from a valid plan.checked), escalation 30s (from the failed review)
-    expect(time.gate_wait_seconds).toBe(90);
-    expect(time.work_seconds).toBe(2310);
+    expect(time.waiting_on_you_seconds).toBe(90);
+    expect(time.working_seconds).toBe(1740);
+    expect(time.waiting_to_merge_seconds).toBe(0);
+    expect(time.idle_seconds).toBe(570);
   });
 
   test("ARK-217-AC1 counts each plan wait from the first valid check after the previous answer", () => {
@@ -372,7 +375,7 @@ describe("ark retro", () => {
     retro(runId);
 
     // change wait 30 s, approve wait 30 s from the second check (20 s if it restarted at the third)
-    expect(readMetrics().time.gate_wait_seconds).toBe(60);
+    expect(readMetrics().time.waiting_on_you_seconds).toBe(60);
   });
 
   test("ARK-217-AC2 reports a plan wait of 3601 s for checks at T and T+3600 s and an answer at T+3601 s", () => {
@@ -390,7 +393,7 @@ describe("ark retro", () => {
 
     retro(runId);
 
-    expect(readMetrics().time.gate_wait_seconds).toBe(3601);
+    expect(readMetrics().time.waiting_on_you_seconds).toBe(3601);
   });
 
   test("an escalation wait starts when the run enters phase escalation, not at an earlier failed step", () => {
@@ -420,7 +423,7 @@ describe("ark retro", () => {
 
     retro(runId);
 
-    expect(readMetrics().time.gate_wait_seconds).toBe(60);
+    expect(readMetrics().time.waiting_on_you_seconds).toBe(60);
   });
 
   /** An event log of plan answers only; each answer is one gate.answered event, in order. */
@@ -758,8 +761,8 @@ describe("ark retro", () => {
     ]);
     retro(runId);
     const { time } = readMetrics();
-    expect(time.gate_wait_seconds).toBe(600);
-    expect(time.work_seconds).toBe(time.wall_seconds - 600);
+    expect(time.waiting_on_you_seconds).toBe(600);
+    expect(time.working_seconds + time.waiting_to_merge_seconds + time.idle_seconds).toBe(1200);
     expect(time.wall_seconds).toBe(1800);
   });
 
@@ -772,7 +775,7 @@ describe("ark retro", () => {
       ["14:30:00.000", "run.closed", { outcome: "aborted" }],
     ]);
     retro(runId);
-    expect(readMetrics().time.gate_wait_seconds).toBe(600);
+    expect(readMetrics().time.waiting_on_you_seconds).toBe(600);
   });
 
   test("ARK-283-AC3 a problem answer closes the wait and a later manual pending opens a new one", () => {
@@ -785,7 +788,7 @@ describe("ark retro", () => {
       ["14:30:00.000", "run.closed", { outcome: "aborted" }],
     ]);
     retro(runId);
-    expect(readMetrics().time.gate_wait_seconds).toBe(180);
+    expect(readMetrics().time.waiting_on_you_seconds).toBe(180);
   });
 
   test("ARK-283-AC3 two manual criteria keep separate waits but count elapsed time once", () => {
@@ -798,10 +801,10 @@ describe("ark retro", () => {
     ]);
     retro(runId);
     // AC1 waits 60 s inside AC2's 300 s; an answer for AC1 must not close AC2, and the union is 300 s.
-    expect(readMetrics().time.gate_wait_seconds).toBe(300);
+    expect(readMetrics().time.waiting_on_you_seconds).toBe(300);
   });
 
-  test("ARK-283-AC3 work time is never negative when manual waits overlap", () => {
+  test("ARK-283-AC3 overlapping manual waits leave no idle time when they span the whole run", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:00:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
@@ -811,18 +814,18 @@ describe("ark retro", () => {
     ]);
     retro(runId);
     const time = readMetrics().time;
-    expect(time.gate_wait_seconds).toBeLessThanOrEqual(time.wall_seconds);
-    expect(time.work_seconds).toBeGreaterThanOrEqual(0);
+    expect(time.waiting_on_you_seconds).toBeLessThanOrEqual(time.wall_seconds);
+    expect(time.idle_seconds).toBe(0);
   });
 
-  test("ARK-283-AC3 an unanswered manual pending adds no gate wait", () => {
+  test("ARK-355 a manual pending still open at close counts as waiting on you up to the close", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
       ["14:30:00.000", "run.closed", { outcome: "aborted" }],
     ]);
     retro(runId);
-    expect(readMetrics().time.gate_wait_seconds).toBe(0);
+    expect(readMetrics().time.waiting_on_you_seconds).toBe(1200);
   });
 });
 

@@ -5,14 +5,13 @@ import {
   type ArkEvent,
   type StageTimes,
   type StepWindow,
-  deriveState,
   readEvents,
   stageTimes,
   stepWindows,
-  waitingGate,
 } from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
 import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
+import { splitRunTime, withoutNotStarted } from "./time-split.ts";
 import { type SessionWithKey, type UsageMessage, readUsage } from "./usage/index.ts";
 import { type Owner, ownersOf, stageOf } from "./usage/owners.ts";
 
@@ -160,53 +159,6 @@ function decisionCounts(
   return { total, overridden };
 }
 
-/** Each gate wait of the run, in order; `answered` is null while the gate is open. */
-export type GateWait = {
-  gate: string;
-  asked: string;
-  answered: string | null;
-  answer: string | null;
-  /** Who answered; events from before `by` existed read as human. */
-  by: "human" | "auto" | null;
-};
-
-export function gateWaits(events: ArkEvent[]): GateWait[] {
-  const waits: GateWait[] = [];
-  const waiting = new Map<string, GateWait>();
-  const ask = (gate: string, time: string) => {
-    if (waiting.has(gate)) return;
-    const wait = { gate, asked: time, answered: null, answer: null, by: null };
-    waiting.set(gate, wait);
-    waits.push(wait);
-  };
-  events.forEach((event, index) => {
-    if (event.type === "gate.answered") {
-      const key = event.data.gate === "manual" ? `manual:${event.data.criterion}` : event.data.gate;
-      const wait = waiting.get(key);
-      if (wait) {
-        wait.answered = event.time;
-        wait.answer = event.data.answer ?? null;
-        wait.by = event.data.by === "auto" ? "auto" : "human";
-      }
-      waiting.delete(key);
-    }
-    if (event.type === "test.completed")
-      for (const [criterion, status] of Object.entries(event.data.criteria ?? {}))
-        if (status === "manual pending") ask(`manual:${criterion}`, event.time);
-    // ponytail: O(n²) replay; fold with a step function if logs reach thousands of events
-    const state = deriveState(events.slice(0, index + 1));
-    const gate = waitingGate(state);
-    if (gate !== "none") ask(gate, event.time);
-    if (
-      state.phase === "merge_requests_open" &&
-      event.type === "step.finished" &&
-      event.data.outcome === "failed"
-    )
-      ask("escalation", event.time);
-  });
-  return waits;
-}
-
 /** Test runs of the run: how many, how many suite results came from the cache, and the files that were flaky. */
 function testMetrics(events: ArkEvent[]) {
   const completed = events.filter((event) => event.type === "test.completed");
@@ -217,27 +169,6 @@ function testMetrics(events: ArkEvent[]) {
     for (const entry of event.data.flaky ?? []) flaky.add(`${entry.suite}: ${entry.file}`);
   }
   return { runs: completed.length, reused_suites: reused, flaky_files: [...flaky].sort() };
-}
-
-/**
- * Gate wait: from the moment a gate needs an answer to the answer. The criteria gate needs one at
- * run start (it opens on every run since ARK-311; an older log opens it only without ACs or with blockers), the strategy gate at a
- * strategy record of 2 or more cards, the plan gate at the first valid plan check after its last answer, the escalation gate
- * when the run enters phase `escalation` (a spent budget with a failed test or `ark escalate`), or at a failed step once
- * merge requests are open. An unanswered gate adds nothing.
- */
-function gateWaitSeconds(events: ArkEvent[]): number {
-  const intervals = gateWaits(events)
-    .filter((wait) => wait.answered !== null)
-    .map((wait) => [toMilliseconds(wait.asked), toMilliseconds(wait.answered as string)])
-    .sort((left, right) => left[0] - right[0]);
-  let coveredMilliseconds = 0;
-  let coveredUntil = -Infinity;
-  for (const [start, end] of intervals) {
-    coveredMilliseconds += Math.max(0, end - Math.max(start, coveredUntil));
-    coveredUntil = Math.max(coveredUntil, end);
-  }
-  return secondsBetween(0, coveredMilliseconds);
 }
 
 function runCommand(command: string[], cwd: string): unknown {
@@ -344,6 +275,7 @@ function median(values: number[]): Unknowable {
 function compareWithEarlierRuns(project: string, runId: string) {
   const costs: number[] = [];
   const wallSeconds: number[] = [];
+  const waitingOnYou: number[] = [];
   let runsCompared = 0;
   const directory = runsDirectory(project);
   for (const name of existsSync(directory) ? readdirSync(directory).sort() : []) {
@@ -358,11 +290,15 @@ function compareWithEarlierRuns(project: string, runId: string) {
     runsCompared += 1;
     if (typeof metrics.cost?.total_usd === "number") costs.push(metrics.cost.total_usd);
     if (typeof metrics.time?.wall_seconds === "number") wallSeconds.push(metrics.time.wall_seconds);
+    // An older file has no such field: skip it, a missing part is not 0 s.
+    if (typeof metrics.time?.waiting_on_you_seconds === "number")
+      waitingOnYou.push(metrics.time.waiting_on_you_seconds);
   }
   return {
     runs_compared: runsCompared,
     median_cost_usd: median(costs),
     median_wall_seconds: median(wallSeconds),
+    median_waiting_on_you_seconds: median(waitingOnYou),
   };
 }
 
@@ -403,22 +339,6 @@ function countFindingsSentBack(runDirectory: string): number {
     for (const line of readFileSync(join(findingsDirectory, name), "utf8").split("\n"))
       if (RANKED_LINE.test(line)) count++;
   return count;
-}
-
-/** A step that finished with not_started never ran: drop its last start and that finish. */
-function withoutNotStarted(events: ArkEvent[]): ArkEvent[] {
-  const dropped = new Set<ArkEvent>();
-  events.forEach((event, index) => {
-    if (event.type !== "step.finished" || !event.data.not_started) return;
-    dropped.add(event);
-    const started = events
-      .slice(0, index)
-      .findLast(
-        (candidate) => candidate.type === "step.started" && candidate.data.step === event.data.step,
-      );
-    if (started) dropped.add(started);
-  });
-  return events.filter((event) => !dropped.has(event));
 }
 
 export function retro(runId: string, inProject?: string): void {
@@ -497,7 +417,7 @@ export function retro(runId: string, inProject?: string): void {
     implementer.usd > 0;
 
   const wallSeconds = secondsBetween(firstTime, runEnd);
-  const gateWait = gateWaitSeconds(events);
+  const timeSplit = splitRunTime(events, runEnd);
   const stepSeconds = new Map<string, number>();
   for (const window of windows) {
     stepSeconds.set(
@@ -655,9 +575,8 @@ export function retro(runId: string, inProject?: string): void {
     },
     time: {
       wall_seconds: wallSeconds,
-      work_seconds: wallSeconds - gateWait,
+      ...timeSplit,
       by_step: sortedObject([...stepSeconds]),
-      gate_wait_seconds: gateWait,
     },
     rework: {
       rounds: Math.max(
@@ -713,7 +632,7 @@ export function retro(runId: string, inProject?: string): void {
     [
       `retro ${runId}`,
       `cost: ${formatUsd(total.usd, total.includes_unknown)}, ${total.tokens} tokens`,
-      `time: ${Math.round(wallSeconds)}s wall, ${Math.round(gateWait)}s waiting at gates`,
+      `time: ${Math.round(wallSeconds)}s wall: ${Math.round(timeSplit.waiting_on_you_seconds)}s waiting on you, ${Math.round(timeSplit.working_seconds)}s working, ${Math.round(timeSplit.waiting_to_merge_seconds)}s waiting to merge, ${Math.round(timeSplit.idle_seconds)}s idle`,
       `rework: ${metrics.rework.rounds} rounds, ${metrics.rework.escalations} escalations, ${metrics.rework.findings_sent_back} findings sent back, ${metrics.rework.merge_steps} merge steps`,
       `orchestration: ${metrics.orchestration.restarts} restarts, ${metrics.orchestration.tool_errors} tool errors, ${metrics.orchestration.context_overflows} context overflows, ${metrics.orchestration.idle_gaps} idle gaps`,
       `gate answers: ${metrics.gates.auto_answers} auto, ${metrics.gates.human_answers} human`,
@@ -740,6 +659,11 @@ export function retro(runId: string, inProject?: string): void {
         : []),
       ...(mixedSteps.length > 0 ? [`mixed review steps: ${mixedSteps.join("; ")}`] : []),
       `compared with ${comparison.runs_compared} earlier closed runs`,
+      ...(comparison.median_waiting_on_you_seconds === "unknown"
+        ? []
+        : [
+            `waiting on you: ${Math.round(timeSplit.waiting_on_you_seconds)}s here, ${Math.round(comparison.median_waiting_on_you_seconds)}s typical`,
+          ]),
       `wrote ${metricsFile}`,
     ].join("\n"),
   );

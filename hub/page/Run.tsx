@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Agents } from "./Agents.tsx";
 import { ClosedBand } from "./ClosedBand.tsx";
+import { TimeBar } from "./TimeBar.tsx";
 import {
   ArrowMarker,
   Cost,
@@ -325,8 +326,14 @@ function Body({
           outcome={detail.outcome}
           closedAt={detail.closed_at}
           band={detail.band}
+          timeSplit={detail.time_split}
           files={detail.files}
         />
+      ) : null}
+      {!closed && detail ? (
+        <div className="open-top">
+          <TimeBar split={detail.time_split} live />
+        </div>
       ) : null}
       <Strip run={run} />
       <div className="runcols">
