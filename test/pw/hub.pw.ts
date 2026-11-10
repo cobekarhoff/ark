@@ -5627,6 +5627,8 @@ const markdownFixture = [
   "",
   "A paragraph with **bold words**, *italic words*, `inline code` and a [safe link](https://example.com/page).",
   "",
+  'Fish &amp; chips and [entity link](https://example.com/?a=1&amp;b=2 "t &amp; u").',
+  "",
   "1. first step",
   "2. second step",
   "",
@@ -5692,9 +5694,14 @@ test("ARK-T172 Markdown renders headings, paragraphs, bold, italic, inline code,
   await expect(problem.locator("p strong")).toHaveText("bold words");
   await expect(problem.locator("p em")).toHaveText("italic words");
   await expect(problem.locator("p code.ic")).toHaveText("inline code");
-  const link = problem.locator("p a");
+  const link = problem.getByRole("link", { name: "safe link" });
   await expect(link).toHaveText("safe link");
   await expect(link).toHaveAttribute("href", "https://example.com/page");
+  // Character references show as their characters, in text and in a link target and title.
+  await expect(problem.locator("p").nth(1)).toHaveText("Fish & chips and entity link.");
+  const entityLink = problem.getByRole("link", { name: "entity link" });
+  await expect(entityLink).toHaveAttribute("href", "https://example.com/?a=1&b=2");
+  await expect(entityLink).toHaveAttribute("title", "t & u");
   await expect(problem.locator("ol > li")).toHaveText(["first step", "second step"]);
   await expect(problem.locator("ul > li > ul > li")).toHaveText("nested item");
   await expect(problem.locator("thead th")).toHaveText(["name", "wide column"]);
@@ -5902,6 +5909,16 @@ test("ARK-T175 Json shows a 40-line value indented by 2 with token colours, fold
   await code.getByRole("button", { name: "Copy" }).click();
   await expect(code.getByRole("button", { name: "Copied" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(copiedSource);
+  await expect(code.getByTestId("code-copy-status")).toHaveText("Copied");
+
+  // A refused write says so in the live status; the code stays as it was.
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = () => Promise.reject(new Error("denied"));
+  });
+  await code.getByRole("button", { name: "Copy" }).click();
+  await expect(code.getByTestId("code-copy-status")).toHaveText(/copy it by hand/);
+  await expect(code.getByTestId("code-copy-status")).toHaveAttribute("aria-live", "polite");
+  await expect(code.getByRole("button", { name: "Copy" })).toBeVisible();
 });
 
 /** One block for each language of AC4, each with at least two token classes. */

@@ -3046,6 +3046,10 @@ pre.code-plain {
     background-color 120ms var(--ease),
     transform 120ms var(--ease);
 }
+.copy-note {
+  color: var(--red-t);
+  font: 11px var(--sans);
+}
 .copy:active {
   transform: scale(0.96);
 }

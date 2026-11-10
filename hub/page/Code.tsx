@@ -4,20 +4,42 @@ import type { HighlightToken } from "./highlight.ts";
 const FOLD_LINES = 12;
 
 function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
+  const [state, setState] = useState<"idle" | "done" | "refused">("idle");
   useEffect(() => {
-    if (!done) return;
-    const timer = setTimeout(() => setDone(false), 1500);
+    if (state === "idle") return;
+    const timer = setTimeout(() => setState("idle"), state === "done" ? 1500 : 6000);
     return () => clearTimeout(timer);
-  }, [done]);
+  }, [state]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("done");
+    } catch {
+      // Refused or no clipboard: the code stays selectable, the status says to copy by hand.
+      setState("refused");
+    }
+  };
   return (
-    <button
-      type="button"
-      className={done ? "copy done" : "copy"}
-      onClick={() => void navigator.clipboard.writeText(text).then(() => setDone(true))}
-    >
-      {done ? "Copied" : "Copy"}
-    </button>
+    <>
+      <span
+        className={state === "refused" ? "copy-note" : "sr"}
+        aria-live="polite"
+        data-testid="code-copy-status"
+      >
+        {state === "done"
+          ? "Copied"
+          : state === "refused"
+            ? "Copy refused. Select the code and copy it by hand."
+            : ""}
+      </span>
+      <button
+        type="button"
+        className={state === "done" ? "copy done" : "copy"}
+        onClick={() => void copy()}
+      >
+        {state === "done" ? "Copied" : "Copy"}
+      </button>
+    </>
   );
 }
 

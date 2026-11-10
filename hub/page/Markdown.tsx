@@ -11,6 +11,15 @@ const safeTarget = (href: string) => {
   return LINK_PREFIXES.some((prefix) => target.startsWith(prefix));
 };
 
+/** Character references of marked text, link and title values to their characters. A textarea reads its content as text, so no element is made. */
+let decoder: HTMLTextAreaElement | undefined;
+const decode = (value: string) => {
+  if (!value.includes("&")) return value;
+  decoder ??= document.createElement("textarea");
+  decoder.innerHTML = value;
+  return decoder.value;
+};
+
 function inline(tokens: Token[] | undefined): React.ReactNode {
   return tokens?.map((token, at) => {
     switch (token.type) {
@@ -30,12 +39,13 @@ function inline(tokens: Token[] | undefined): React.ReactNode {
         return <br key={at} />;
       case "link": {
         const link = token as Tokens.Link;
-        return safeTarget(link.href) ? (
+        const href = decode(link.href);
+        return safeTarget(href) ? (
           <a
             key={at}
-            href={link.href}
-            title={link.title ?? undefined}
-            {...(/^\s*https?:\/\//i.test(link.href) ? { target: "_blank", rel: "noreferrer" } : {})}
+            href={href}
+            title={link.title ? decode(link.title) : undefined}
+            {...(/^\s*https?:\/\//i.test(href) ? { target: "_blank", rel: "noreferrer" } : {})}
           >
             {inline(link.tokens)}
           </a>
@@ -45,7 +55,7 @@ function inline(tokens: Token[] | undefined): React.ReactNode {
       }
       case "text": {
         const text = token as Tokens.Text;
-        return text.tokens ? inline(text.tokens) : text.text;
+        return text.tokens ? inline(text.tokens) : decode(text.text);
       }
       case "escape":
         return (token as Tokens.Escape).text;
@@ -71,7 +81,7 @@ function blocks(tokens: Token[]): React.ReactNode {
         return <p key={at}>{inline((token as Tokens.Paragraph).tokens)}</p>;
       case "text": {
         const text = token as Tokens.Text;
-        return <p key={at}>{text.tokens ? inline(text.tokens) : text.text}</p>;
+        return <p key={at}>{text.tokens ? inline(text.tokens) : decode(text.text)}</p>;
       }
       case "hr":
         return <hr key={at} />;
