@@ -118,7 +118,11 @@ function claim(resultsDirectory: string, start: string): boolean {
           continue; // taken over by another runner first, or unreadable: look again
         }
       } else {
-        rmSync(lock, { recursive: true, force: true }); // a folder with no owner is no claim
+        try {
+          rmdirSync(lock); // a folder with no owner is no claim; fails on a non-empty folder, so a live claim stays
+        } catch {
+          // a live claim arrived, or the folder is already gone
+        }
         continue;
       }
       try {
