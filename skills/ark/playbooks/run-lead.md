@@ -39,7 +39,7 @@ Throughout this playbook:
    orca orchestration run-create --objective "Ark run <run>" --json
    ```
 
-7. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered. If the phase is `merge_requests_open` and `<run folder>/retro.md` exists, Master Chief started you again for MR work: go to section 10a, and skip sections 2 to 9 and 11. If the phase is `merge_requests_open` and `retro.md` does not exist, run section 10 (the first status read, and the items of section 10a if any) and then section 11 as normal. In every other phase, resume at the first unfinished step.
+7. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered. If the phase is `merge_requests_open` and `<run folder>/retro.md` exists, Master Chief started you again for MR work: go to section 10a, and skip sections 2 to 9 and 11. If the phase is `merge_requests_open` and `retro.md` does not exist, run section 10 (the first status read, and the items of section 10a if any) and then section 11 as normal. In every other phase, resume at the first unfinished step. A step that shows `running` with no live worker (you replaced the run lead, or the worker died) is not unfinished work to wait for: follow the resume rule of section 7.
 8. Open your harness's todo list with one item for each numbered section of this playbook, in order, and mark each item done when you finish its section. When you replace a stopped run lead, mark done the sections that `ark status <run>` shows as finished.
 
 ## 2. Evaluate the ticket and open the criteria gate
@@ -174,7 +174,7 @@ Use this when the human must try a running thing: a prototype for the strategy g
 
 1. Slug, stated once: the run's ticket id and counter in lowercase, without the date. Run `2026-11-03-ARK-284-1` gives `ark-284-1`.
 2. Pick a free `<port>` first: the proxy needs it before the server starts.
-3. In the run worktree, start the hub in a background terminal (a background process, not a worker, so "never start an agent except through `worker-start`" does not bar it):
+3. In the run worktree, start the hub in a background terminal (a background process, not a worker, so the rule on starting agents does not bar it):
 
    ```sh
    portless hub.<slug> --app-port <port> ark ui --port <port> --name hub.<slug>.localhost
@@ -369,37 +369,32 @@ If the `status` message says an upstream MR merged, also refresh each waiting bu
 
 Work through the steps in the order `needs` allows. Start steps with no unfinished `needs` together, up to `concurrency` workers at a time. For each step:
 
-1. Mark it started:
+**Resume rule.** A step that `ark status <run>` shows as `running`, with no live worker (the run lead was replaced, or the worker died), is marked interrupted, then started again:
+
+```sh
+ark run step <run> <step> interrupted
+ark run step <run> <step> start
+```
+
+`interrupted` is refused while Orca lists the terminal of the worker, or when Orca does not answer: wait, and never force it. It gives the round back and keeps the files. The next `start` restores the session of the worker, or briefs a fresh worker when it cannot. Never run `finish` for a step whose worker died.
+
+1. Start the step. This records it and starts its worker, in the step's worktree, with the `harness` and `model` of its role and a spec that `ark` builds itself (the role, the step id, the Risks, the applied learnings, the AC strings of the step, the rules and the UI skills). Never start a plan step with `orca orchestration worker-start`.
 
    ```sh
    ark run step <run> <step> start
    ```
 
-   If the command refuses with `round budget spent`, go to section 9. If it names a missing event, record that event first.
+   If the command refuses with `round budget spent`, go to section 9. If it names a missing event, record that event first. It prints the dispatch id and the terminal of the worker: keep both. When Orca fails to start the worker, `start` gives the round back itself: read its message, and when the error names a model, harness or ACP model, read `roles` in `ark.yml` again, fix `harness` and `model` in `plan.yml` to a pair that `roles` has, and run `ark plan check <run>`. Then decide what to do. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
 
-2. Start the worker:
+   Anything the spec cannot know (for example the path of the findings file of a rework round) goes to the worker in a message (`orca orchestration send` to its terminal).
 
-   ```sh
-   orca orchestration worker-start --spec $'/skill:ark worker <run> <step>\nYou are the <ROLE> for step <step> of run <run>.' --task-title "<step> (<role>, <repo>)" --worktree path:<worktree path> --agent <harness> --model <model> --json
-   ```
-
-   The worktree path is `<run folder>/workspace/<repo>`. For a repo named `.` it is `<run folder>/workspace`, with no trailing `/.`. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
-
-   In the worker spec, copy every literal string an AC names (a field, flag or message) word for word. Do not paraphrase it. Example: `Literal strings: field "owner_id", flag --dry-run, message "Run not found".`
-
-   When the step has a `skills` list in `plan.yml`, add a line `UI skills: <the skills of the step>` to the worker spec.
-
-   For a reviewer step, add the line `Last reviewed head: <sha>` to the worker spec: the `Reviewed head:` of the previous findings file of the run. The first review has none and reads the full diff.
-
-   Use the step's `harness` and `model` from `plan.yml`. Give `--effort` only if the harness supports it. If `worker-start` exits non-zero, do not start it again: read `failedStage` and `residualResources`. When no worker ran (the output has `failedStage` and no running terminal), run `ark run step <run> <step> finish --failed --not-started`, and not `finish --failed`: `--not-started` gives back the round that `start` took. Never use `--not-started` for a worker that ran. When the error names a model, harness or ACP model, read `roles` in `ark.yml` again, fix `harness` and `model` in `plan.yml` to a pair that `roles` has, and run `ark plan check <run>`. Then decide what to do.
-
-3. Keep the terminal handle from the `worker-start --json` output: the `id` of the entry in `result.effects[]` with `"kind": "terminal"` (`term_...`). About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds, then read its terminal, without waiting for the long wait below:
+2. Use the terminal and the dispatch id that `start` printed. About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds, then read its terminal, without waiting for the long wait below:
 
    ```sh
    orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 120000 --json 2>/dev/null
    ```
 
-   If a `worker_done` arrives in this short wait, process it as in step 4. Then read the terminal:
+   If a `worker_done` arrives in this short wait, process it as in step 3. Then read the terminal:
 
    ```sh
    orca orchestration worker-read --dispatch <dispatch id> --source terminal --limit 40 --json
@@ -411,7 +406,7 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
    orca terminal read --terminal <handle> --json
    ```
 
-4. Wait for the worker. Wait for every started worker together:
+3. Wait for the worker. Wait for every started worker together:
 
    ```sh
    orca orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json 2>/dev/null
@@ -423,14 +418,14 @@ Work through the steps in the order `needs` allows. Start steps with no unfinish
    - `escalation` from a worker: read it, and fix the cause or take it to Master Chief.
    - `worker_done`: check that it comes from the dispatch you started. Read its report.
 
-5. Record the result:
+4. Record the result:
 
    ```sh
    ark run step <run> <step> finish
    ark run step <run> <step> finish --failed
    ```
 
-   Use `--failed` when the worker reported `--outcome failed` or the report shows the step did not finish. Then release the worker with `orca orchestration worker-release --dispatch <dispatch id> --json`. Release every worker with this command after its `worker_done`, after a failed exit, and after an abnormal exit (the worker is gone and sent no `worker_done`), the evaluator and the designer too. Run `finish` for every step a worker completed, reviewer steps too, before you start the same step again: `ark run step ... start` refuses a step that is still `running`.
+   Use `--failed` when the worker reported `--outcome failed` or the report shows the step did not finish. Then release the worker with `orca orchestration worker-release --dispatch <dispatch id> --json`. Release every worker with this command after its `worker_done`, after a failed exit, and after an abnormal exit (the worker is gone and sent no `worker_done`), the evaluator and the designer too. Run `finish` for every step a worker completed, reviewer steps too, before you start the same step again: `ark run step ... start` refuses a step that is still `running`. Release the dispatch of a dead worker too.
 
 If a step fails, read the worker's output with `orca orchestration worker-read --dispatch <dispatch id> --json`, and decide: start the step again, change the plan (run `ark plan check <run>` and go back to section 5), or ask Master Chief.
 
@@ -562,7 +557,7 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 ## Rules
 
 - Never write product code. Never edit a worktree except to read it.
-- Never start an agent except through `orca orchestration worker-start`. Never start more workers at once than `concurrency` in `ark.yml`.
+- Never start an agent except through `ark run step <run> <step> start` (plan steps) or `orca orchestration worker-start` (evaluator, designer, test-case writer and test-case reviewer). Never start more workers at once than `concurrency` in `ark.yml`.
 - Never write to `events.ndjson` or `state.json`. Use the `ark` commands.
 - Never record a gate answer the human did not give. A `plan` or `strategy` gate set to `auto` in `ark.yml` is answered by Ark, not by you. This includes the strategy card and each plan decision. `escalation` set to `auto` is answered by Ark too, up to 2 times; you never record it, and you report it with a `status`, not an `ask`. `criteria` always goes to the human, and so does `escalation` once the 2 automatic answers are used or after `ark escalate`.
 - Never write `plan.yml` before the strategy is recorded and, with 2 or more cards, answered. Never put a mockup or a prototype in a repo worktree or an MR.
