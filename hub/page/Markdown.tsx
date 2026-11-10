@@ -11,14 +11,15 @@ const safeTarget = (href: string) => {
   return LINK_PREFIXES.some((prefix) => target.startsWith(prefix));
 };
 
-/** Character references of marked text, link and title values to their characters. A textarea reads its content as text, so no element is made. */
+/** Semicolon-terminated character references of marked text, link and title values to their characters (CommonMark). A bare ampersand stays as written. A textarea reads its content as text, so no element is made. */
+const CHARACTER_REFERENCE = /&(?:#\d+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/g;
 let decoder: HTMLTextAreaElement | undefined;
-const decode = (value: string) => {
-  if (!value.includes("&")) return value;
-  decoder ??= document.createElement("textarea");
-  decoder.innerHTML = value;
-  return decoder.value;
-};
+const decode = (value: string) =>
+  value.replace(CHARACTER_REFERENCE, (reference) => {
+    decoder ??= document.createElement("textarea");
+    decoder.innerHTML = reference;
+    return decoder.value;
+  });
 
 function inline(tokens: Token[] | undefined): React.ReactNode {
   return tokens?.map((token, at) => {
