@@ -440,7 +440,11 @@ describe("detached ark test runner", () => {
       spawnArk(fixture, ["test", fixture.runId]),
       spawnArk(fixture, ["test", fixture.runId]),
     ];
-    await appears(join(fixture.directory, "started"));
+    // One caller won the claim and spawned the runner; the other prints this line once it attached to that
+    // runner. Opening the gate earlier lets the runner end first, and the late caller then claims a new runner.
+    await Promise.race(
+      callers.map((caller) => caller.errorHas("attaching to the full ark test of")),
+    );
     await openGate(fixture);
     const done = await Promise.all(callers.map((caller) => caller.finished()));
 
