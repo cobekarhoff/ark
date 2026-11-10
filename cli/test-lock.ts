@@ -200,7 +200,7 @@ export function openTestBudget(
               continue;
             }
             // Fits among the earlier tickets. A later started ticket may not have seen mine yet: wait for it to
-            // revoke or end, so that two suites never run together.
+            // revoke or end, so that two suites never run together. Report like any other waiting ticket.
             if (sumOf(startedTickets) <= budget) {
               return {
                 cores,
@@ -210,18 +210,25 @@ export function openTestBudget(
                 },
               };
             }
-            await Bun.sleep(pollMilliseconds);
-            continue;
+          } else {
+            const firstWaiting = tickets.find((entry) => entry.ticket.started === undefined);
+            if (
+              mine >= 0 &&
+              firstWaiting?.file === file &&
+              sumOf(startedTickets) + cores <= budget
+            ) {
+              writeTicket(file, { ...tickets[mine]!.ticket, started: new Date().toISOString() });
+              continue; // read everything again before running
+            }
           }
-          const firstWaiting = tickets.find((entry) => entry.ticket.started === undefined);
-          if (mine >= 0 && firstWaiting?.file === file && sumOf(startedTickets) + cores <= budget) {
-            writeTicket(file, { ...tickets[mine]!.ticket, started: new Date().toISOString() });
-            continue; // read everything again before running
-          }
-          const running = startedTickets;
-          const waiting = tickets.filter((entry) => entry.ticket.started === undefined);
+          // My own reservation is not a running suite: it counts as waiting, in arrival order.
+          const waiting = tickets.filter(
+            (entry) => entry.ticket.started === undefined || entry.file === file,
+          );
           const place = waiting.findIndex((entry) => entry.file === file) + 1;
-          const holders = running.map((entry) => entry.ticket);
+          const holders = startedTickets
+            .filter((entry) => entry.file !== file)
+            .map((entry) => entry.ticket);
           // Minutes ticking over never count as a change.
           const key = `${place}/${waiting.length}|${holders.map((holder) => `${holder.run}:${holder.cores}`).join(",")}`;
           const time = now();

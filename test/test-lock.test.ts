@@ -563,7 +563,9 @@ mock.module("node:fs", () => ({
   },
 }));
 const { openTestBudget } = await import(${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))});
-const budget = openTestBudget(name, 6, async () => {}, { print: () => {} });
+const budget = openTestBudget(name, 6, async () => {}, {
+  print: (line) => fs.appendFileSync(home + "/" + name + "-lines", line + "\\n"),
+});
 await budget.take(6);
 mark(name + "-running");
 await new Promise((done) => process.stdin.once("data", done));
@@ -647,7 +649,7 @@ budget.close();`;
   });
 
   test("ARK-T155 an older started ticket waits while a newer one that missed it runs", async () => {
-    await scenario(async ({ spawn, waitFor, has, go, stop }) => {
+    await scenario(async ({ home, spawn, waitFor, has, go, stop }) => {
       spawn("older", "publish", "start");
       await waitFor("older-at-publish");
       spawn("newer", "start");
@@ -659,6 +661,10 @@ budget.close();`;
       go("older", "start");
       await waitFor("older-r2-poll-3");
       expect(has("older-running")).toBe(false);
+      // The older ticket holds a reservation but still waits: it prints its place and the running suite.
+      expect(readFileSync(join(home, "older-lines"), "utf8")).toContain(
+        "waiting: place 1 of 1; running: newer 6 cores",
+      );
       stop("newer");
       await waitFor("older-running");
     });
