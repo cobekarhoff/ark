@@ -102,7 +102,7 @@ function ProjectFilter({ projects, project }: { projects: string[]; project: str
 function Shell() {
   const hash = useHash();
   const route = parseRoute(hash);
-  const { snapshot: whole, connected } = useLive();
+  const { snapshot: whole, connection } = useLive();
   // The Map is gone: its old links land on Runs. Backlog is now Roadmap. Both keep the query and the tail.
   useEffect(() => {
     const target = retiredTarget(location.hash);
@@ -148,9 +148,15 @@ function Shell() {
           <span
             className="chip"
             data-testid="master-chief"
-            title={connected ? "live" : "connecting…"}
+            title={
+              connection === "live"
+                ? "live"
+                : connection === "reconnecting"
+                  ? "reconnecting… showing the last snapshot"
+                  : "connecting…"
+            }
           >
-            <i className={connected ? "live dot" : "dot"} />
+            <i className={connection === "live" ? "live dot" : "dot"} />
             Master Chief · {snapshot && known(snapshot.runs) ? snapshot.runs.length : "?"} runs
           </span>
           {top && top.used_fraction !== null ? (

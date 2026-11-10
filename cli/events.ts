@@ -3,7 +3,15 @@ import { join } from "node:path";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
 import { now } from "./clock.ts";
-import type { CriterionStatus, Phase, StepStatus, TicketKind } from "./lifecycle.ts";
+import type {
+  CriterionStatus,
+  EscalationState,
+  Outcome,
+  Phase,
+  PhaseGate,
+  StepStatus,
+  TicketKind,
+} from "./lifecycle.ts";
 import { assertAllowed } from "./transitions.ts";
 
 export type EventData = Record<string, any>;
@@ -74,7 +82,7 @@ export type RunState = {
     order?: number;
     waits_for?: number[];
   }[];
-  outcome: string | null;
+  outcome: Outcome | null;
   implementer?: "human";
   events: number;
 };
@@ -125,6 +133,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   const alias = (id: string) => canonicalCriterion(id, ticket.id);
   let evaluation: RunState["evaluation"] = null;
   let strategy: RunState["strategy"] = null;
+  // Latches on the first evaluation with blockers; only a criteria accept clears it, not a later clean evaluation.
   let blocked = false;
   let round = 1;
   // Rounds of the non-merge starts, so a finish with not_started can take its start back.
@@ -135,8 +144,8 @@ export function deriveState(events: ArkEvent[]): RunState {
   const gates: Record<string, string> = {};
   let plan: RunState["plan"] = null;
   const amendments = new Map<string, RunState["amended_criteria"][number]>();
-  let planApproved = false;
-  let approvedPlanHash: string | null = null;
+  // The plan gate's approval and the plan.yml hash it approved; null until approve, and again once a check finds plan.yml changed.
+  let approval: { plan_hash: string | null } | null = null;
   let planSteps: { id: string; role: string; repo: string }[] = [];
   const stepStatus = new Map<string, StepStatus>();
   const startedSteps: { id: string; role: string; repo: string }[] = [];
@@ -147,9 +156,9 @@ export function deriveState(events: ArkEvent[]): RunState {
   let kind: TicketKind = "feature";
   const testRuns: Record<string, string>[] = [];
   let basePassed: boolean | undefined;
-  let escalation: "none" | "requested" | "answered" = "none";
+  let escalation: EscalationState = "none";
   const mergeRequests: RunState["merge_requests"] = [];
-  let outcome: string | null = null;
+  let outcome: Outcome | null = null;
   let human = false;
 
   for (const { type, data } of events) {
@@ -181,7 +190,7 @@ export function deriveState(events: ArkEvent[]): RunState {
         // New text needs a new human decision: an earlier manual answer no longer stands.
         delete gates[`manual:${id}`];
         // The amendment changes what plan.md must show, so the plan needs a new check.
-        if (!planApproved) plan = null;
+        if (!approval) plan = null;
         break;
       }
       case "evaluation.recorded":
@@ -195,7 +204,7 @@ export function deriveState(events: ArkEvent[]): RunState {
           plan_hash: data.plan_hash,
           open_decisions: data.open_decisions ?? 0,
         };
-        planApproved = planApproved && data.valid && data.plan_hash === approvedPlanHash;
+        if (approval && !(data.valid && data.plan_hash === approval.plan_hash)) approval = null;
         if (data.valid)
           planSteps = data.steps.map(
             ({ id, role, repo }: { id: string; role: string; repo: string }) => ({
@@ -220,10 +229,8 @@ export function deriveState(events: ArkEvent[]): RunState {
         if (data.gate === "strategy" && strategy && strategy.cards.includes(data.answer))
           strategy.chosen = data.answer;
         if (data.gate === "criteria" && data.answer === "accept") blocked = false;
-        if (data.gate === "plan" && data.answer === "approve") {
-          planApproved = true;
-          approvedPlanHash = plan?.plan_hash ?? null;
-        }
+        if (data.gate === "plan" && data.answer === "approve")
+          approval = { plan_hash: plan?.plan_hash ?? null };
         // A change answer sends the plan back for edits, so the old check no longer stands.
         if (data.gate === "plan" && data.answer === "change") plan = null;
         if (data.answer === "abort") outcome = "aborted";
@@ -319,13 +326,14 @@ export function deriveState(events: ArkEvent[]): RunState {
         : (stepStatus.get(id) ?? ("pending" as StepStatus)),
   }));
 
+  // The phase is the first open gate, in run order; `lifecycle.ts` eventPhases says what each phase allows.
   let phase: Phase;
   if (outcome !== null) phase = "closed";
   else if (mergeRequests.length > 0) phase = "merge_requests_open";
   else if (blocked || ((startedWithoutCriteria || gateAlwaysOpen) && gates.criteria !== "accept"))
     phase = "awaiting_criteria";
   else if (strategy && strategy.count >= 2 && strategy.chosen === null) phase = "awaiting_strategy";
-  else if (!planApproved) phase = "planning";
+  else if (!approval) phase = "planning";
   else if (
     round >= roundBudget &&
     (escalation === "requested" || (escalation === "none" && lastTest && !lastTest.passed)) &&
@@ -381,7 +389,7 @@ export function deriveState(events: ArkEvent[]): RunState {
 }
 
 /** The gate a run waits on, or `none`. */
-export function waitingGate(state: RunState): string {
+export function waitingGate(state: RunState): PhaseGate | "none" {
   if (state.phase === "awaiting_criteria") return "criteria";
   if (state.phase === "awaiting_strategy") return "strategy";
   if (state.phase === "planning" && state.plan?.valid) return "plan";

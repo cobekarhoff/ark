@@ -217,8 +217,8 @@ steps:
   - id: core-package
     role: implementer
     repo: shared/packages
-    harness: claude
-    model: claude-sonnet
+    harness: omp
+    model: anthropic/claude-sonnet-5-5
     needs: []
     criteria: [CLARA-512/AC1]
 design:
@@ -268,7 +268,7 @@ Rules for the plan:
 - Conversion on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. When the run's diff touches such a test, plan a test case for it: the implementer or validator writes the entry with `ark test-case new <KEY>`, renames the test title to start with the test case ID, and the plan names the case (`add`, or `update` for an existing entry). The reviewer rejects a diff that touches such a test and leaves its title unchanged. Do not migrate old tests in bulk.
 - `design` is required. `ark plan check` rejects a plan with no `design.interfaces`, or with an interface that has no `callers`. `interfaces` lists each interface the change touches: a command, a playbook section, an event, a file format or an exported function. Find the callers of each one before you write it: search the repo, and read the playbooks and docs that name it. A removed or changed interface with a caller you did not list is how earlier runs broke. `approach` (the method, in a few sentences) and `example` (a sample of new or changed output) are optional, but give both. Plan.md shows "No approach given." or "No example given." for a missing part, and the human can ask for it with `change` at the plan gate.
 - `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
-- Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
+- Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the reviewer uses a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
 - When `Surfaces` includes `web_ui`, give a `skills` list (the UI skills of `ark ui-skills <run>`) to every implementer, validator and reviewer step that touches the UI. Add the React skill that command lists to a step that touches React code. You decide which steps touch the UI and React code.
 - Keep each step small enough for one worker. Do not put two repos in one step.
 - Read `kind` in `ticket.md` (`ark status <run>` shows it; a missing `kind` is `feature`). It sets the first and last steps. `steps` may have an optional `goal` text; `ark plan check` reads it for `perf`.

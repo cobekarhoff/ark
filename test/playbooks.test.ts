@@ -20,7 +20,10 @@ test("ARK-187-AC3 every literal `ark run close <run> <outcome>` in the playbooks
   }
   expect(closes.filter(({ file }) => file === "run-lead.md").length).toBeGreaterThan(0);
   for (const { file, outcome } of closes) {
-    expect({ file, known: outcomes.includes(outcome) }).toEqual({ file, known: true });
+    expect({ file, known: (outcomes as readonly string[]).includes(outcome) }).toEqual({
+      file,
+      known: true,
+    });
   }
 });
 
