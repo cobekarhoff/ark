@@ -11,14 +11,24 @@ const safeTarget = (href: string) => {
   return LINK_PREFIXES.some((prefix) => target.startsWith(prefix));
 };
 
-/** Semicolon-terminated character references of marked text, link and title values to their characters (CommonMark). A bare ampersand stays as written. A textarea reads its content as text, so no element is made. */
-const CHARACTER_REFERENCE = /&(?:#\d+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/g;
-let decoder: HTMLTextAreaElement | undefined;
+/** Character references of marked text, link and title values to their characters: decimal and hex numbers, and the names in NAMED_REFERENCES. Any other name stays as written, and so does a bare ampersand. */
+const NAMED_REFERENCES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: "\u00a0",
+};
+const CHARACTER_REFERENCE = /&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|([A-Za-z][A-Za-z0-9]*));/g;
 const decode = (value: string) =>
-  value.replace(CHARACTER_REFERENCE, (reference) => {
-    decoder ??= document.createElement("textarea");
-    decoder.innerHTML = reference;
-    return decoder.value;
+  value.replace(CHARACTER_REFERENCE, (reference, decimal, hex, name) => {
+    if (name) return Object.hasOwn(NAMED_REFERENCES, name) ? NAMED_REFERENCES[name] : reference;
+    const codePoint = decimal ? Number(decimal) : parseInt(hex, 16);
+    // 0 and out-of-range values are U+FFFD in CommonMark.
+    return codePoint > 0 && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+      ? String.fromCodePoint(codePoint)
+      : "\ufffd";
   });
 
 function inline(tokens: Token[] | undefined): React.ReactNode {

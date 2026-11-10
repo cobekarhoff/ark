@@ -5629,7 +5629,7 @@ const markdownFixture = [
   "",
   'Fish &amp; chips and [entity link](https://example.com/?a=1&amp;b=2 "t &amp; u").',
   "",
-  "Literal &copycat and [bare link](https://example.com/?a=1&not=2) keep &amp; and &#65; decoded.",
+  "Literal &copycat; &notit; and [bare link](https://example.com/?a=1&notit;) keep &amp; and &#65; and &#x41; decoded.",
   "",
   "1. first step",
   "2. second step",
@@ -5702,11 +5702,11 @@ test("ARK-T172 Markdown renders headings, paragraphs, bold, italic, inline code,
   // Character references show as their characters, in text and in a link target and title.
   await expect(problem.locator("p").nth(1)).toHaveText("Fish & chips and entity link.");
   await expect(problem.locator("p").nth(2)).toHaveText(
-    "Literal &copycat and bare link keep & and A decoded.",
+    "Literal &copycat; &notit; and bare link keep & and A and A decoded.",
   );
   await expect(problem.getByRole("link", { name: "bare link" })).toHaveAttribute(
     "href",
-    "https://example.com/?a=1&not=2",
+    "https://example.com/?a=1&notit;",
   );
   const entityLink = problem.getByRole("link", { name: "entity link" });
   await expect(entityLink).toHaveAttribute("href", "https://example.com/?a=1&b=2");
