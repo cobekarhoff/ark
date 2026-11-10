@@ -405,7 +405,7 @@ test("ARK-T92 mockups remain outside actual worktrees and use one human review l
   expect(existsSync(join(runDirectory, "workspace", "mockups", "s1.html"))).toBe(false);
 });
 
-test("ARK-173-AC11 retro counts design rounds, strategy wait and Designer cost without escalation", () => {
+test("ARK-T186 retro counts design rounds, strategy wait and Designer cost without escalation", () => {
   const rows: RetroEventRow[] = [
     [
       "14:20:00.000",

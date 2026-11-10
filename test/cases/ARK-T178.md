@@ -4,7 +4,7 @@ title: ARK-T178 ark retro writes the four time parts to metrics.json and compare
 level: integration
 technique: equivalence classes (new metrics, old metrics) and state transition (old field present before, absent after)
 priority: high
-risk: `ark retro` still writes the old gate wait field, writes only some of the four parts, or the comparison counts old `metrics.json` files with no new field as 0 seconds and skews the typical value
+risk: "`ark retro` still writes the old gate wait field, writes only some of the four parts, or the comparison counts old `metrics.json` files with no new field as 0 seconds and skews the typical value"
 status: active
 changed_by: 2026-11-09-ARK-355-1
 ---

@@ -217,7 +217,7 @@ describe("ark retro", () => {
       "comparison",
     ]);
   });
-  test("ARK-170-AC6 attributes pre-evaluation usage and starts criteria wait at the blocker event", () => {
+  test("ARK-T183 attributes pre-evaluation usage and starts criteria wait at the blocker event", () => {
     const evaluationTime = "14:21:00.000";
     writeEvents(runDirectory, [
       [
@@ -261,7 +261,7 @@ describe("ark retro", () => {
     expect(readMetrics().time.waiting_on_you_seconds).toBe(30);
   });
 
-  test("ARK-160-AC1 compares with the project's other closed runs that have metrics", () => {
+  test("ARK-T178 compares with the project's other closed runs that have metrics", () => {
     const projectRuns = join(arkHome, "projects", "demo", "runs");
     const closed = (name: string, cost: number, wallSeconds: number, closing = true) => {
       const directory = join(projectRuns, name);
@@ -345,7 +345,7 @@ describe("ark retro", () => {
     expect(runningCost(runDirectory)).toEqual({ usd: "unknown", tokens: 0 });
   });
 
-  test("ARK-160-AC4 reports wall time per run and step, split into waiting on you, working, waiting to merge and idle", () => {
+  test("ARK-T174 reports wall time per run and step, split into waiting on you, working, waiting to merge and idle", () => {
     retro(runId);
     const { time } = readMetrics();
     expect(time.wall_seconds).toBe(2400);
@@ -357,7 +357,7 @@ describe("ark retro", () => {
     expect(time.idle_seconds).toBe(570);
   });
 
-  test("ARK-217-AC1 counts each plan wait from the first valid check after the previous answer", () => {
+  test("ARK-T184 counts each plan wait from the first valid check after the previous answer", () => {
     writeEvents(runDirectory, [
       [
         "14:20:00.000",
@@ -378,7 +378,7 @@ describe("ark retro", () => {
     expect(readMetrics().time.waiting_on_you_seconds).toBe(60);
   });
 
-  test("ARK-217-AC2 reports a plan wait of 3601 s for checks at T and T+3600 s and an answer at T+3601 s", () => {
+  test("ARK-T184 reports a plan wait of 3601 s for checks at T and T+3600 s and an answer at T+3601 s", () => {
     writeEvents(runDirectory, [
       [
         "14:00:00.000",
@@ -396,7 +396,7 @@ describe("ark retro", () => {
     expect(readMetrics().time.waiting_on_you_seconds).toBe(3601);
   });
 
-  test("an escalation wait starts when the run enters phase escalation, not at an earlier failed step", () => {
+  test("ARK-T176 an escalation wait starts when the run enters phase escalation, not at an earlier failed step", () => {
     writeEvents(runDirectory, [
       [
         "14:00:00.000",
@@ -752,7 +752,7 @@ describe("ark retro", () => {
     { gate: "manual", criterion, answer, by: "human" },
   ];
 
-  test("ARK-283-AC3 counts the wait from manual pending to the manual answer as gate wait, not work time (600 s)", () => {
+  test("ARK-T185 counts the wait from manual pending to the manual answer as gate wait, not work time (600 s)", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
@@ -766,7 +766,7 @@ describe("ark retro", () => {
     expect(time.wall_seconds).toBe(1800);
   });
 
-  test("ARK-283-AC3 the wait starts at the first manual pending, not at a repeated one", () => {
+  test("ARK-T185 the wait starts at the first manual pending, not at a repeated one", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
@@ -778,7 +778,7 @@ describe("ark retro", () => {
     expect(readMetrics().time.waiting_on_you_seconds).toBe(600);
   });
 
-  test("ARK-283-AC3 a problem answer closes the wait and a later manual pending opens a new one", () => {
+  test("ARK-T185 a problem answer closes the wait and a later manual pending opens a new one", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
@@ -791,7 +791,7 @@ describe("ark retro", () => {
     expect(readMetrics().time.waiting_on_you_seconds).toBe(180);
   });
 
-  test("ARK-283-AC3 two manual criteria keep separate waits but count elapsed time once", () => {
+  test("ARK-T185 two manual criteria keep separate waits but count elapsed time once", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:10:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
@@ -804,7 +804,7 @@ describe("ark retro", () => {
     expect(readMetrics().time.waiting_on_you_seconds).toBe(300);
   });
 
-  test("ARK-283-AC3 overlapping manual waits leave no idle time when they span the whole run", () => {
+  test("ARK-T185 overlapping manual waits leave no idle time when they span the whole run", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:00:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
@@ -818,7 +818,7 @@ describe("ark retro", () => {
     expect(time.idle_seconds).toBe(0);
   });
 
-  test("ARK-355 a manual pending still open at close counts as waiting on you up to the close", () => {
+  test("ARK-T185 a manual pending still open at close counts as waiting on you up to the close", () => {
     writeEvents(runDirectory, [
       started,
       testRun("14:10:00.000", { "ARK-901-AC1": "manual pending" }),
