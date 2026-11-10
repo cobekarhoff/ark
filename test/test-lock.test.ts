@@ -790,7 +790,20 @@ describe("ark test memory admission", () => {
   }
   const waitLines = (out: string) =>
     out.split("\n").filter((line) => line.includes("waiting for memory"));
-  const pause = () => Bun.sleep(2500); // over two memory readings and many 100 ms polls
+  const readsFile = () => join(process.env.ARK_FAKE_HOST as string, "reads");
+  const hostReads = () =>
+    existsSync(readsFile()) ? readFileSync(readsFile(), "utf8").split("\n").length - 1 : 0;
+  /** Resolves once the fake host has been read `count` more times: the preload shim logs each memory reading. */
+  function afterHostReads(count: number): Promise<void> {
+    const target = hostReads() + count;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const watcher = watch(process.env.ARK_FAKE_HOST as string, () => {
+      if (hostReads() < target) return;
+      watcher.close();
+      resolve();
+    });
+    return promise;
+  }
 
   /** Holds the suite under a short fake host: one line while it waits, no start, then a start after recovery. */
   async function holdsThenStarts(
@@ -800,7 +813,7 @@ describe("ark test memory admission", () => {
     setFakeHost(reading);
     const child = startTest(runA);
     await child.until("waiting for memory");
-    await pause();
+    await afterHostReads(2); // two further readings while held: a line for each poll would show by now
     expect(waitLines(child.seen())).toHaveLength(1);
     expect(waitLines(child.seen())[0]).toMatch(reason);
     expect(logLines()).not.toContain(`start ${runA}`);

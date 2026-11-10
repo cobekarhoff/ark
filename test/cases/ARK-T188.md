@@ -1,10 +1,10 @@
 ---
 id: ARK-T188
-title: ARK-T188 ark chief state prints a Host section and a 'hold new runs' line for each reason, or 'hold new runs: no'
+title: "ARK-T188 ark chief state prints a Host section and a 'hold new runs' line for each reason, or 'hold new runs: no'"
 level: integration
-technique: equivalence classes (no limit crossed, one class for each of free memory, swap, load, disk) and boundary values at each limit
+technique: "equivalence classes (no limit crossed, one class for each of free memory, swap, load, disk) and boundary values at each limit"
 priority: high
-risk: Master Chief starts runs on a host that is swapping, loaded or out of disk because the hold line is missing, names the wrong reason, or holds a healthy host; or the Host section disappears when no test runs
+risk: "Master Chief starts runs on a host that is swapping, loaded or out of disk because the hold line is missing, names the wrong reason, or holds a healthy host; or the Host section disappears when no test runs"
 status: active
 changed_by: 2026-11-09-ARK-417-1
 ---

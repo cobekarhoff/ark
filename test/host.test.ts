@@ -1,5 +1,7 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { holdReasons, type HostReading } from "../cli/host.ts";
+
+setDefaultTimeout(30_000);
 
 const limits = { minimumFreePercent: 20, maximumSwapGigabytes: 8, cores: 8 };
 

@@ -1,10 +1,10 @@
 ---
 id: ARK-T187
-title: ARK-T187 ark test waits for memory on low free memory or high swap, names the reason once, and starts when memory recovers
+title: "ARK-T187 ark test waits for memory on low free memory or high swap, names the reason once, and starts when memory recovers"
 level: integration
-technique: boundary values (free memory at, below and above the floor; swap at, below and above the ceiling) and state transition (waiting to started)
+technique: "boundary values (free memory at, below and above the floor; swap at, below and above the ceiling) and state transition (waiting to started)"
 priority: high
-risk: Admission ignores memory, so a swapping host takes more test suites; or the wait prints on every poll; or a reading that fails blocks every test forever instead of admitting with 'memory: unchecked'
+risk: "Admission ignores memory, so a swapping host takes more test suites; or the wait prints on every poll; or a reading that fails blocks every test forever instead of admitting with 'memory: unchecked'"
 status: active
 changed_by: 2026-11-09-ARK-417-1
 ---
