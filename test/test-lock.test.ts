@@ -599,8 +599,16 @@ budget.close();`;
             }),
           );
         },
-        waitFor: async (...names) => {
-          while (!names.every(has)) await Bun.sleep(10);
+        waitFor: (...names) => {
+          const { promise, resolve } = Promise.withResolvers<void>();
+          const check = () => {
+            if (!names.every(has)) return;
+            watcher.close();
+            resolve();
+          };
+          const watcher = watch(home, check);
+          check();
+          return promise;
         },
         has,
         go: (name, point) => writeFileSync(join(home, `${name}-go-${point}`), ""),
@@ -674,7 +682,7 @@ budget.close();`;
     await scenario(async ({ home, spawn, waitFor, has, go }) => {
       const dead = Bun.spawn(["true"]);
       await dead.exited;
-      const arrival = new Date(Date.now() - 60_000).toISOString();
+      const arrival = "2026-01-01T00:00:00.000Z";
       mkdirSync(join(home, "test-budget"));
       const stale = join(home, "test-budget", `${dead.pid}-dead.json`);
       writeFileSync(
