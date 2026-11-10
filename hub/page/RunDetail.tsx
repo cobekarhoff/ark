@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ExternalLink } from "./format.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { hashOf } from "./store.tsx";
 import type { RunDetail, SessionFile, TimelineEntry } from "../types.ts";
 
@@ -58,7 +59,7 @@ export function Timeline({ entries }: { entries: TimelineEntry[] }) {
         <li key={index} data-testid="timeline-entry" data-type={entry.type}>
           <Clock time={entry.time} />
           <span className="kind">{entry.type}</span>
-          <span className="why">
+          <div className="why">
             {entry.counts && (
               <span data-testid="timeline-counts">
                 <span className="pill bad">{entry.counts.fail} fail</span>{" "}
@@ -67,8 +68,12 @@ export function Timeline({ entries }: { entries: TimelineEntry[] }) {
                 {entry.counts.notRun > 0 && <> {entry.counts.notRun} not run</>}{" "}
               </span>
             )}
-            {entry.url ? <ExternalLink url={entry.url}>{entry.why}</ExternalLink> : entry.why}
-          </span>
+            {entry.url ? (
+              <ExternalLink url={entry.url}>{entry.why}</ExternalLink>
+            ) : (
+              <Markdown text={entry.why} />
+            )}
+          </div>
         </li>
       ))}
     </ol>
@@ -93,7 +98,9 @@ export function RunFiles({ run, files }: { run: string; files: string[] }) {
           >
             {path}
           </a>
-          <span className="mut">text</span>
+          <span className="mut">
+            {path.endsWith(".md") ? "markdown" : path.endsWith(".json") ? "json" : "text"}
+          </span>
         </li>
       ))}
     </ul>
