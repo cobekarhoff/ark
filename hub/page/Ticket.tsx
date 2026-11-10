@@ -3,31 +3,11 @@ import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
 import { Criteria } from "./Evidence.tsx";
 import { OutsideNote, ProjectValue, Unknown, known } from "./format.tsx";
+import { Markdown, ViewSwitch } from "./Markdown.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { hashOf, ticketHref, useLive } from "./store.tsx";
 import type { TicketDocument, TicketView } from "../types.ts";
-
-/** Paragraphs and bullet lists of plain text: Markdown marks stay as written, nothing becomes HTML. */
-function Prose({ text, testId }: { text: string; testId: string }) {
-  if (text === "") return <p className="mut">Not written in the ticket.</p>;
-  return (
-    <div className="prose" data-testid={testId}>
-      {text.split(/\n\s*\n/).map((block, index) => {
-        const lines = block.split("\n");
-        return lines.every((line) => /^\s*[-*] /.test(line)) ? (
-          <ul key={index}>
-            {lines.map((line, at) => (
-              <li key={at}>{line.replace(/^\s*[-*] /, "")}</li>
-            ))}
-          </ul>
-        ) : (
-          <p key={index}>{block}</p>
-        );
-      })}
-    </div>
-  );
-}
 
 const node = (entry: TicketEntry, base: TicketEntry["ticket"]): GraphTicket => ({
   key: entry.key,
@@ -73,6 +53,7 @@ function useDocument(ticket: TicketView): TicketDocument | null | undefined {
 
 function TicketText({ ticket }: { ticket: TicketView }) {
   const document = useDocument(ticket);
+  const [raw, setRaw] = useState(false);
   if (document === undefined)
     return (
       <>
@@ -84,6 +65,7 @@ function TicketText({ ticket }: { ticket: TicketView }) {
           {[
             ["Problem", [90, 75, 60]],
             ["Change", [90, 40]],
+            ["Evidence", [75, 50]],
             ["Acceptance criteria", [75, 60, 75]],
           ].map(([title, widths]) => (
             <div key={title as string}>
@@ -104,14 +86,30 @@ function TicketText({ ticket }: { ticket: TicketView }) {
         changes.
       </div>
     );
+  const section = (text: string, testId: string) =>
+    text === "" ? (
+      <p className="mut">Not written in the ticket.</p>
+    ) : (
+      <Markdown text={text} raw={raw} testId={testId} />
+    );
   return (
     <>
+      <div className="view-bar">
+        <ViewSwitch raw={raw} onChange={setRaw} />
+      </div>
       <h2>Problem</h2>
-      <Prose text={document.problem} testId="ticket-problem" />
+      {section(document.problem, "ticket-problem")}
       <h2>Change</h2>
-      <Prose text={document.change} testId="ticket-change" />
+      {section(document.change, "ticket-change")}
+      <h2>Evidence</h2>
+      {section(document.evidence, "ticket-evidence")}
       <h2>Acceptance criteria · {document.criteria.length}</h2>
-      <Criteria project={ticket.project} ticket={ticket.id} criteria={document.criteria} />
+      <Criteria
+        project={ticket.project}
+        ticket={ticket.id}
+        criteria={document.criteria}
+        raw={raw}
+      />
     </>
   );
 }

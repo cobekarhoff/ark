@@ -1,0 +1,3550 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hybrid 2 · Ark hub rendering prototype</title>
+    <!-- PROTOTYPE, throwaway. Hybrid 2 = hybrid 1 + context/long user messages shown in full in the inspector + entry-only position counter + slim empty relations.
+     Data: data.js (window.RENDER_DATA). Markdown is built with createElement/textContent only (no innerHTML of input text).
+     The real build uses marked's lexer + a React walker, and shiki core + the JS engine instead of the regex tokenizer below. -->
+    <style>
+      /* ---------- tokens: copied from hub/page/styles.css ---------- */
+      :root {
+        color-scheme: light dark;
+        --bg: light-dark(#f6f4ef, #090b0f);
+        --nav: light-dark(#fbfaf6, #0d1015);
+        --panel: light-dark(#ffffff, #11141a);
+        --panel-2: light-dark(#f8f6f0, #171b23);
+        --panel-3: light-dark(#efece4, #1d222c);
+        --line: light-dark(#e6e2d8, #222833);
+        --line-2: light-dark(#d3cdbf, #2e3644);
+        --line-3: light-dark(#8f887a, #6b7789);
+        --text: light-dark(#1d1c1a, #dde2ea);
+        --dim: light-dark(#4f4c45, #a0abba);
+        --mute: light-dark(#65615a, #8591a2);
+        --red: light-dark(#c2371f, #ff6b5e);
+        --amber: light-dark(#c27a0e, #f2b04a);
+        --green: light-dark(#2d8a57, #46c48a);
+        --blue: light-dark(#2f62d8, #6aa6ff);
+        --violet: light-dark(#7048c8, #a58bff);
+        --red-t: light-dark(#b0301a, #ff9a90);
+        --amber-t: light-dark(#85500a, #f5c26b);
+        --green-t: light-dark(#23693f, #74d8a8);
+        --blue-t: light-dark(#2553c7, #94bfff);
+        --violet-t: light-dark(#6a3fc2, #c0acff);
+        --red-bg: light-dark(#fbe9e5, #2a1311);
+        --amber-bg: light-dark(#fbf0dc, #2a2010);
+        --green-bg: light-dark(#e6f3ec, #10241a);
+        --blue-bg: light-dark(#e6edfb, #121f38);
+        --sel: light-dark(#eaf0fd, #162136);
+        --link: light-dark(#2553c7, #9cc3ff);
+        --on-red: light-dark(#ffffff, #1a0907);
+        --primary: light-dark(#1d1c1a, #2d6cdf);
+        --primary-hover: light-dark(#34322e, #3470e4);
+        --on-primary: #ffffff;
+        --ease: cubic-bezier(0.23, 1, 0.32, 1);
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+        /* prototype-only: code surface, a step off the panel in both themes */
+        --code-bg: light-dark(#f3f0e8, #0b0e13);
+        --nav-h: 45px;
+        --bar-h: 44px;
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        background: var(--bg);
+        color: var(--text);
+        scrollbar-color: var(--line-3) transparent;
+        scrollbar-width: thin;
+      }
+      body {
+        margin: 0;
+        font: 13px/1.4 var(--sans);
+        font-variant-numeric: tabular-nums;
+        background: var(--bg);
+        color: var(--text);
+      }
+      ::selection {
+        background: color-mix(in srgb, var(--blue) 32%, transparent);
+      }
+      a {
+        color: var(--link);
+        text-decoration: none;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+      }
+      h1 {
+        font-size: 22px;
+        line-height: 1.25;
+        margin: 0;
+        font-weight: 650;
+        text-wrap: balance;
+      }
+      .mono {
+        font-family: var(--mono);
+      }
+      .mut {
+        color: var(--mute);
+      }
+      .dim {
+        color: var(--dim);
+      }
+      .sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+      :focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+      * {
+        scrollbar-color: var(--line-3) transparent;
+        scrollbar-width: thin;
+      }
+
+      /* ---------- nav ---------- */
+      .top {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        min-height: 44px;
+        padding: 0 16px;
+        background: var(--nav);
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        margin-right: 18px;
+        font-size: 14px;
+        font-family: var(--mono);
+        letter-spacing: -0.02em;
+      }
+      .top nav {
+        display: flex;
+        gap: 2px;
+      }
+      .tab {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 44px;
+        padding: 0 10px;
+        color: var(--dim);
+        font-weight: 500;
+      }
+      .tab[aria-current="page"] {
+        color: var(--text);
+      }
+      .tab[aria-current="page"]::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: -1px;
+        height: 2px;
+        background: var(--blue);
+        border-radius: 2px;
+      }
+      .nav-right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        color: var(--text);
+      }
+      .seg {
+        display: inline-flex;
+        padding: 2px;
+        gap: 2px;
+        border: 1px solid var(--line-2);
+        border-radius: 7px;
+        background: var(--panel-2);
+      }
+      .seg button {
+        background: none;
+        border: 0;
+        color: var(--dim);
+        padding: 3px 9px;
+        border-radius: 5px;
+        cursor: pointer;
+        transition:
+          color 120ms var(--ease),
+          background-color 120ms var(--ease);
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--panel);
+        color: var(--text);
+        box-shadow: 0 0 0 1px var(--line-2);
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .seg button[aria-pressed="false"]:hover {
+          color: var(--text);
+        }
+      }
+
+      /* ---------- controls ---------- */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--line-2);
+        background: var(--panel);
+        color: var(--text);
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        transition:
+          background-color 120ms var(--ease),
+          transform 120ms var(--ease);
+      }
+      .btn:active,
+      .icon-btn:active,
+      .seg button:active {
+        transform: scale(0.97);
+      }
+      .btn.primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: var(--on-primary);
+      }
+      .btn.sm {
+        padding: 2px 8px;
+        font-size: 12px;
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .btn:not(.primary):hover {
+          background: var(--panel-3);
+        }
+        .btn.primary:hover {
+          background: var(--primary-hover);
+        }
+      }
+      .icon-btn {
+        display: inline-grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border-radius: 6px;
+        border: 1px solid var(--line-2);
+        background: var(--panel);
+        color: var(--dim);
+        cursor: pointer;
+        transition:
+          background-color 120ms var(--ease),
+          transform 120ms var(--ease);
+      }
+      .icon-btn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .icon-btn:not(:disabled):hover {
+          background: var(--panel-3);
+          color: var(--text);
+        }
+      }
+      svg.i {
+        width: 16px;
+        height: 16px;
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      kbd {
+        font: 11px/1 var(--mono);
+        border: 1px solid var(--line-2);
+        border-radius: 4px;
+        padding: 2px 5px;
+        background: var(--panel-2);
+        color: var(--dim);
+      }
+      .pill {
+        display: inline-block;
+        padding: 0 8px;
+        border-radius: 99px;
+        font-size: 12px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        color: var(--text);
+        white-space: nowrap;
+      }
+      .pill.ok {
+        color: var(--green-t);
+        background: var(--green-bg);
+        border-color: var(--green);
+      }
+      .pill.bad {
+        color: var(--red-t);
+        background: var(--red-bg);
+        border-color: var(--red);
+      }
+      .pill.warn {
+        color: var(--amber-t);
+        background: var(--amber-bg);
+        border-color: var(--amber);
+      }
+      .pill.build {
+        color: var(--blue-t);
+        background: var(--blue-bg);
+        border-color: var(--blue);
+      }
+      .pill.review {
+        color: var(--violet-t);
+      }
+      .pill.unk {
+        color: var(--mute);
+        border-style: dashed;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .panel > header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        min-height: 44px;
+      }
+      .panel h2 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .count {
+        display: inline-block;
+        min-width: 20px;
+        padding: 0 6px;
+        border-radius: 10px;
+        background: var(--panel-3);
+        color: var(--dim);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      /* ---------- markdown ---------- */
+      .md {
+        font-size: 14px;
+        line-height: 1.62;
+        overflow-wrap: break-word;
+      }
+      .md > :first-child {
+        margin-top: 0;
+      }
+      .md > :last-child {
+        margin-bottom: 0;
+      }
+      .md p,
+      .md ul,
+      .md ol,
+      .md blockquote,
+      .md h1,
+      .md h2,
+      .md h3,
+      .md h4,
+      .md h5,
+      .md h6 {
+        max-width: 76ch;
+      }
+      .md p {
+        margin: 0 0 12px;
+      }
+      .md h1,
+      .md h2,
+      .md h3,
+      .md h4,
+      .md h5,
+      .md h6 {
+        line-height: 1.3;
+        margin: 26px 0 8px;
+        font-weight: 650;
+        text-wrap: balance;
+      }
+      .md h1 {
+        font-size: 20px;
+      }
+      .md h2 {
+        font-size: 16.5px;
+      }
+      .md h3 {
+        font-size: 14.5px;
+      }
+      .md h4,
+      .md h5,
+      .md h6 {
+        font-size: 13px;
+        color: var(--dim);
+      }
+      .md ul,
+      .md ol {
+        margin: 0 0 12px;
+        padding-left: 22px;
+      }
+      .md li + li {
+        margin-top: 4px;
+      }
+      .md li > ul,
+      .md li > ol {
+        margin: 4px 0 0;
+      }
+      .md li::marker {
+        color: var(--mute);
+      }
+      .md blockquote {
+        margin: 0 0 12px;
+        padding: 8px 14px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--dim);
+      }
+      .md blockquote > :last-child {
+        margin-bottom: 0;
+      }
+      .md hr {
+        border: 0;
+        border-top: 1px solid var(--line-2);
+        margin: 20px 0;
+      }
+      .md a {
+        color: var(--link);
+        text-decoration: underline;
+        text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+        text-underline-offset: 2px;
+      }
+      .md strong {
+        font-weight: 650;
+      }
+      code.ic {
+        font: 0.88em var(--mono);
+        background: var(--panel-3);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 0.5px 5px;
+        overflow-wrap: break-word;
+      }
+      .tablewrap {
+        overflow-x: auto;
+        border: 1px solid var(--line-2);
+        border-radius: 8px;
+        margin: 4px 0 14px;
+        background: var(--panel);
+      }
+      .md table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .md th,
+      .md td {
+        padding: 7px 12px;
+        min-width: 5.5em;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      .md th {
+        background: var(--panel-2);
+        color: var(--dim);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .md tr:last-child td {
+        border-bottom: 0;
+      }
+      .md td.nw {
+        white-space: nowrap;
+      }
+      .md td + td,
+      .md th + th {
+        border-left: 1px solid var(--line);
+      }
+
+      /* ---------- code blocks + tokens ---------- */
+      .code {
+        margin: 4px 0 14px;
+        border: 1px solid var(--line-2);
+        border-radius: 8px;
+        background: var(--code-bg);
+        overflow: hidden;
+      }
+      .code > figcaption {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 4px 3px 12px;
+        border-bottom: 1px solid var(--line);
+        color: var(--mute);
+        font: 11px var(--mono);
+      }
+      .code > figcaption .lang {
+        margin-right: auto;
+      }
+      .code pre {
+        margin: 0;
+        padding: 10px 14px;
+        overflow: auto;
+        tab-size: 2;
+        font: 12.5px/1.55 var(--mono);
+        color: var(--text);
+      }
+      .code pre code {
+        font: inherit;
+      }
+      .code.wrap pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .code.scroll pre {
+        max-height: 440px;
+      }
+      .code.folded pre {
+        max-height: calc(12 * 1.55em + 20px);
+        overflow: hidden;
+        mask-image: linear-gradient(#000 calc(100% - 34px), transparent);
+      }
+      .code .more {
+        display: block;
+        width: 100%;
+        padding: 5px 12px;
+        border: 0;
+        border-top: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--dim);
+        text-align: left;
+        cursor: pointer;
+        font-size: 12px;
+        transition:
+          color 120ms var(--ease),
+          background-color 120ms var(--ease);
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .code .more:hover {
+          color: var(--text);
+          background: var(--panel-3);
+        }
+      }
+      .copy {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 22px;
+        padding: 0 7px;
+        border: 0;
+        border-radius: 5px;
+        background: none;
+        color: var(--mute);
+        cursor: pointer;
+        font: 11px var(--sans);
+        transition:
+          color 120ms var(--ease),
+          background-color 120ms var(--ease),
+          transform 120ms var(--ease);
+      }
+      .copy:active {
+        transform: scale(0.96);
+      }
+      .copy svg.i {
+        width: 13px;
+        height: 13px;
+      }
+      .copy.done {
+        color: var(--green-t);
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .copy:hover {
+          background: var(--panel-3);
+          color: var(--text);
+        }
+      }
+      .tk-key {
+        color: var(--blue-t);
+      }
+      .tk-str {
+        color: var(--green-t);
+      }
+      .tk-num {
+        color: var(--amber-t);
+      }
+      .tk-kw {
+        color: var(--violet-t);
+      }
+      .tk-fn {
+        color: var(--blue-t);
+      }
+      .tk-type {
+        color: var(--amber-t);
+      }
+      .tk-var {
+        color: var(--violet-t);
+      }
+      .tk-flag {
+        color: var(--amber-t);
+      }
+      .tk-com {
+        color: var(--mute);
+        font-style: italic;
+      }
+      .tk-add {
+        color: var(--green-t);
+      }
+      .tk-del {
+        color: var(--red-t);
+      }
+      .tk-hunk {
+        color: var(--violet-t);
+        font-weight: 600;
+      }
+      .tk-head {
+        color: var(--violet-t);
+        font-weight: 650;
+      }
+
+      /* ---------- transcript view ---------- */
+      .tview {
+        height: calc(100vh - var(--nav-h));
+        display: flex;
+        flex-direction: column;
+        padding: 12px 16px 16px;
+        max-width: 1680px;
+        margin: 0 auto;
+      }
+      .thead {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 14px;
+        padding-bottom: 10px;
+      }
+      .crumb {
+        font-size: 12px;
+        color: var(--dim);
+        flex-basis: 100%;
+      }
+      .thead h1 {
+        font-size: 20px;
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 14px;
+        font-size: 12px;
+        color: var(--mute);
+        min-width: 0;
+      }
+      .meta b {
+        font-weight: 400;
+        color: var(--mute);
+        margin-right: 5px;
+      }
+      .meta .v {
+        color: var(--text);
+      }
+      .split {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 400px minmax(0, 1fr);
+        gap: 12px;
+      }
+      .pane {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .pane > header {
+        flex: none;
+      }
+      .pane .scroll {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+      .listhead {
+        justify-content: space-between;
+      }
+      .listhead .keys {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+        color: var(--mute);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .listhead h2 {
+        white-space: nowrap;
+      }
+      .filterbar {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .fchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 9px 2px 7px;
+        border-radius: 6px;
+        border: 1px dashed var(--line-2);
+        background: transparent;
+        color: var(--mute);
+        cursor: pointer;
+        transition:
+          background-color 120ms var(--ease),
+          color 120ms var(--ease),
+          transform 120ms var(--ease);
+      }
+      .fchip:active {
+        transform: scale(0.97);
+      }
+      .fchip .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--c);
+        flex: none;
+      }
+      .fchip .n {
+        color: var(--mute);
+      }
+      .fchip[aria-pressed="true"] {
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        color: var(--text);
+      }
+      .fchip[aria-pressed="true"] .n {
+        color: var(--dim);
+      }
+      .fchip.errors[aria-pressed="true"] {
+        background: var(--red-bg);
+        border-color: var(--red);
+        color: var(--red-t);
+      }
+      .fchip.errors .n,
+      .fchip.errors[aria-pressed="true"] .n {
+        color: var(--red-t);
+      }
+      .filterbar.only-errors .fchip:not(.errors) {
+        opacity: 0.45;
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .fchip:hover {
+          background: var(--panel-3);
+          color: var(--text);
+        }
+      }
+      .fsep {
+        width: 1px;
+        align-self: stretch;
+        margin: 3px 2px;
+        background: var(--line-2);
+      }
+      .nomatch {
+        padding: 18px 12px;
+        color: var(--mute);
+      }
+      .list {
+        padding: 6px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 38px 16px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        min-height: 34px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        text-align: left;
+        cursor: pointer;
+        color: var(--dim);
+        transition: background-color 100ms var(--ease);
+      }
+      .row[hidden] {
+        display: none;
+      }
+      .row + .row {
+        margin-top: 1px;
+      }
+      .row .time {
+        font: 11px var(--mono);
+        color: var(--mute);
+      }
+      .row .main {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .row .main b {
+        font-weight: 600;
+        color: var(--text);
+        margin-right: 6px;
+      }
+      .row .main b.mono {
+        font-weight: 600;
+        font-size: 12px;
+      }
+      .row .end {
+        font: 11px var(--mono);
+        color: var(--mute);
+      }
+      .row svg.i {
+        width: 15px;
+        height: 15px;
+      }
+      .row.k-context svg {
+        color: var(--violet-t);
+      }
+      .row.k-assistant svg {
+        color: var(--blue-t);
+      }
+      .row.k-user svg {
+        color: var(--green-t);
+      }
+      .row.k-thinking svg {
+        color: var(--mute);
+      }
+      .row.k-tool svg {
+        color: var(--dim);
+      }
+      .row.failed {
+        background: color-mix(in srgb, var(--red-bg) 70%, transparent);
+        padding: 6px 8px 7px;
+        row-gap: 3px;
+      }
+      .row.failed svg,
+      .row.failed .main b {
+        color: var(--red-t);
+      }
+      .row .errline {
+        grid-column: 3 / -1;
+        font: 11.5px/1.4 var(--mono);
+        color: var(--red-t);
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .row:hover {
+          background: var(--panel-3);
+        }
+      }
+      .row[aria-selected="true"] {
+        background: var(--sel);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 45%, transparent);
+        color: var(--text);
+      }
+      .filesbox {
+        flex: none;
+        border-top: 1px solid var(--line);
+        background: var(--panel-2);
+        padding: 6px;
+      }
+      .filesbox h2 {
+        padding: 4px 8px 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .filesbox .row {
+        grid-template-columns: 16px minmax(0, 1fr) auto;
+      }
+      .filesbox .row[aria-selected="true"] {
+        background: var(--sel);
+      }
+      .insp {
+        min-width: 0;
+      }
+      .insp > header {
+        gap: 10px;
+        padding: 6px 12px;
+      }
+      .insp .title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        font-weight: 600;
+      }
+      .insp .title svg {
+        color: var(--dim);
+      }
+      .insp .title .sub {
+        font: 12px var(--mono);
+        color: var(--mute);
+        font-weight: 400;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .insp .tools {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .insp .pos {
+        font: 11px var(--mono);
+        color: var(--mute);
+        min-width: 42px;
+        max-width: 200px;
+        text-align: center;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .insp .body {
+        padding: 18px 24px 28px;
+        outline-offset: -2px;
+      }
+      .io {
+        margin-bottom: 20px;
+      }
+      .io > h3 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--dim);
+        min-height: 24px;
+      }
+      .io > h3 .btn {
+        margin-left: auto;
+      }
+      .peek {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 12px;
+        border: 1px solid var(--line-2);
+        border-radius: 8px;
+        background: var(--code-bg);
+        font: 12.5px var(--mono);
+        color: var(--text);
+        min-width: 0;
+      }
+      .peek span:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 0 1 auto;
+      }
+      .peek .extra {
+        color: var(--mute);
+        white-space: nowrap;
+      }
+      .peek.bad {
+        background: var(--red-bg);
+        border-color: var(--red);
+        color: var(--red-t);
+      }
+      .peek.bad .extra {
+        color: var(--red-t);
+        opacity: 0.8;
+      }
+      .note {
+        font-size: 12px;
+        color: var(--mute);
+        margin: -6px 0 12px;
+      }
+      .foldbar {
+        position: sticky;
+        top: -18px;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: -18px -24px 16px;
+        padding: 10px 24px;
+        background: var(--panel-2);
+        border-bottom: 1px solid var(--line);
+      }
+      .foldbar .t {
+        font-weight: 650;
+        font-size: 15px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .foldbar .n {
+        color: var(--mute);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .foldbar .btn {
+        margin-left: auto;
+      }
+      .foldcard {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+        border: 1px dashed var(--line-3);
+        border-radius: 8px;
+        background: var(--panel-2);
+      }
+      .foldcard .t {
+        font-weight: 650;
+        font-size: 15px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .foldcard .n {
+        color: var(--mute);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .foldcard .btn {
+        margin-left: auto;
+      }
+      .role {
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0 8px;
+        border-radius: 99px;
+        border: 1px solid var(--line-2);
+      }
+      .role.assistant {
+        color: var(--blue-t);
+        background: var(--blue-bg);
+        border-color: var(--blue);
+      }
+      .role.user {
+        color: var(--green-t);
+        background: var(--green-bg);
+        border-color: var(--green);
+      }
+
+      /* ---------- ticket view ---------- */
+      .kview {
+        padding: 16px;
+        max-width: 1680px;
+        margin: 0 auto;
+      }
+      .khead {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 8px;
+        font-size: 12px;
+      }
+      .khead .id {
+        font: 13px var(--mono);
+        font-weight: 600;
+      }
+      .ktitle {
+        margin: 8px 0 12px;
+        max-width: 78ch;
+      }
+      .kactions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--mute);
+        font-size: 12px;
+        margin-bottom: 16px;
+      }
+      .band {
+        margin-bottom: 20px;
+      }
+      .graph-panel {
+        display: flex;
+        flex-direction: column;
+      }
+      .graph-panel > header {
+        flex-wrap: wrap;
+      }
+      .graph-panel .legend {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 16px;
+        color: var(--dim);
+        font-size: 12px;
+        margin-left: 8px;
+      }
+      .graph-panel .legend > span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .graph-panel .gtools {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .graph-panel .zoom {
+        font: 12px var(--mono);
+        color: var(--mute);
+        min-width: 34px;
+        text-align: right;
+      }
+      .graph-viewport {
+        overflow: auto;
+        padding: 14px 16px;
+      }
+      .graph-stage {
+        margin: auto;
+        position: relative;
+        flex: none;
+      }
+      .graph-canvas {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform-origin: 0 0;
+      }
+      .graph-canvas svg.edges {
+        position: absolute;
+        inset: 0;
+        overflow: visible;
+        pointer-events: none;
+      }
+      .gedge {
+        fill: none;
+        stroke: var(--line-3);
+        stroke-width: 1.5;
+      }
+      .gedge.blocking {
+        stroke: var(--amber);
+        stroke-dasharray: 5 4;
+      }
+      .gedge.focus {
+        stroke: var(--blue);
+        stroke-width: 2;
+      }
+      .gedge.focus.blocking {
+        stroke: var(--amber);
+      }
+      .arrow.finished {
+        fill: var(--line-3);
+      }
+      .arrow.blocking {
+        fill: var(--amber);
+      }
+      .arrow.focus {
+        fill: var(--blue);
+      }
+      .gnode {
+        position: absolute;
+        display: flex;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1.5px solid var(--c);
+        background: var(--panel-2);
+        font-size: 12px;
+        line-height: 1.3;
+        overflow: hidden;
+      }
+      .gnode .gtext {
+        min-width: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .gnode .ghead {
+        display: flex;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .gnode .gid {
+        font: 600 12px var(--mono);
+        color: var(--text);
+      }
+      .gnode .gm {
+        font: 11px var(--mono);
+        color: var(--mute);
+      }
+      .gnode .gtitle {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        color: var(--dim);
+      }
+      .gnode.s-done {
+        --c: var(--green);
+        background: var(--green-bg);
+      }
+      .gnode.s-in_progress {
+        --c: var(--blue);
+        background: var(--blue-bg);
+      }
+      .gnode.s-ready {
+        --c: var(--violet);
+      }
+      .gnode.s-proposed {
+        --c: var(--line-3);
+        border-style: dashed;
+      }
+      .gnode.focus {
+        box-shadow:
+          0 0 0 2px var(--panel),
+          0 0 0 4px var(--blue);
+      }
+      .glyph {
+        flex: none;
+        margin-top: 1px;
+      }
+      .glyph .ring {
+        fill: none;
+        stroke: var(--c);
+        stroke-width: 1.6;
+      }
+      .glyph .mark {
+        fill: none;
+        stroke: var(--green-t);
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .glyph .fill {
+        fill: var(--c);
+      }
+      .glyph.s-done {
+        --c: var(--green);
+      }
+      .glyph.s-in_progress {
+        --c: var(--blue);
+      }
+      .glyph.s-ready {
+        --c: var(--violet);
+      }
+      .glyph.s-proposed {
+        --c: var(--line-3);
+      }
+      .glyph.s-proposed .ring {
+        stroke-dasharray: 3 2.4;
+      }
+      .legend .glyph {
+        margin: 0;
+      }
+      .legend svg.ln {
+        width: 26px;
+        height: 8px;
+        overflow: visible;
+      }
+      .graph-panel.fs {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        border-radius: 0;
+        border: 0;
+        background: var(--bg);
+        animation: fs-in 180ms var(--ease);
+      }
+      .graph-panel.fs .graph-viewport {
+        flex: 1;
+        min-height: 0;
+        padding: 24px;
+        display: flex;
+      }
+      .graph-panel.fs > header {
+        background: var(--nav);
+      }
+      @keyframes fs-in {
+        from {
+          opacity: 0;
+          transform: scale(0.985);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      .kbar {
+        position: sticky;
+        top: var(--nav-h);
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        height: var(--bar-h);
+        margin: 0 -16px 24px;
+        padding: 0 16px;
+        background: var(--bg);
+        border-bottom: 1px solid var(--line);
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .kbar a {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex: none;
+        padding: 3px 10px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        color: var(--dim);
+        font-weight: 500;
+        white-space: nowrap;
+        transition:
+          background-color 120ms var(--ease),
+          color 120ms var(--ease);
+      }
+      .kbar a.ac-chip {
+        font: 11.5px var(--mono);
+        padding: 2px 7px;
+        border-color: var(--line-2);
+        color: var(--mute);
+      }
+      .kbar a[aria-current="location"] {
+        background: var(--sel);
+        color: var(--text);
+        border-color: color-mix(in srgb, var(--blue) 45%, transparent);
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .kbar a:hover {
+          color: var(--text);
+        }
+        .kbar a:not([aria-current]):hover {
+          background: var(--panel-3);
+        }
+      }
+      .kbar .ksep {
+        flex: none;
+        width: 1px;
+        height: 18px;
+        margin: 0 8px;
+        background: var(--line-2);
+      }
+      .kbar .seg {
+        flex: none;
+        margin-left: auto;
+      }
+      .kgrid {
+        display: grid;
+        grid-template-columns: minmax(0, 680px) minmax(360px, 720px);
+        gap: 56px;
+        justify-content: start;
+        align-items: start;
+      }
+      .kbody,
+      .side {
+        min-width: 0;
+      }
+      .ksec {
+        scroll-margin-top: calc(var(--nav-h) + var(--bar-h) + 12px);
+        padding-bottom: 30px;
+      }
+      .ksec + .ksec {
+        border-top: 1px solid var(--line);
+        padding-top: 24px;
+      }
+      .ksec > h2 {
+        font-size: 17px;
+        font-weight: 650;
+        margin: 0 0 12px;
+        color: var(--text);
+      }
+      .ksec .md {
+        font-size: 15px;
+        line-height: 1.68;
+      }
+      .ksec .md p,
+      .ksec .md ul,
+      .ksec .md ol {
+        max-width: 72ch;
+      }
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .side .panel > header {
+        min-height: 38px;
+      }
+      .side .panel {
+        scroll-margin-top: calc(var(--nav-h) + var(--bar-h) + 12px);
+      }
+      .rels {
+        display: grid;
+        grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+        gap: 12px;
+        align-items: start;
+      }
+      .relnone {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 2px 4px;
+        color: var(--mute);
+        font-size: 12px;
+      }
+      .relnone b {
+        font-weight: 600;
+        color: var(--dim);
+        font-size: 13px;
+      }
+      .aclist {
+        padding: 0 14px;
+      }
+      .ac {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr);
+        gap: 12px;
+        padding: 14px 0;
+        scroll-margin-top: calc(var(--nav-h) + var(--bar-h) + 12px);
+      }
+      .ac + .ac {
+        border-top: 1px solid var(--line);
+      }
+      .ac .acid {
+        font: 600 12px var(--mono);
+        color: var(--dim);
+        padding-top: 3px;
+      }
+      .ac .md {
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      .ac .md p,
+      .ac .md ul,
+      .ac .md ol {
+        max-width: none;
+      }
+      .ac .code {
+        margin-bottom: 0;
+      }
+      .dep {
+        display: block;
+        padding: 10px 12px;
+      }
+      .dep + .dep {
+        border-top: 1px solid var(--line);
+      }
+      .dep .top2 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 2px;
+      }
+      .dep .did {
+        font: 600 12px var(--mono);
+        color: var(--link);
+      }
+      .dep .dt {
+        color: var(--dim);
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .empty {
+        padding: 12px;
+        color: var(--mute);
+      }
+      .steps {
+        display: inline-flex;
+        gap: 3px;
+        vertical-align: middle;
+        margin-right: 6px;
+      }
+      .steps i {
+        width: 14px;
+        height: 6px;
+        border-radius: 2px;
+        background: var(--panel-3);
+        border: 1px solid var(--line-2);
+      }
+      .steps i.on {
+        background: var(--blue);
+        border-color: var(--blue);
+      }
+      @media (max-width: 1180px) {
+        .kgrid {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 32px;
+        }
+        .split {
+          grid-template-columns: 340px minmax(0, 1fr);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <span class="brand">ark hub</span>
+      <nav aria-label="Prototype views">
+        <a class="tab" id="tab-transcript" href="#transcript">Run transcript</a>
+        <a class="tab" id="tab-ticket" href="#ticket">Ticket ARK-313</a>
+      </nav>
+      <div class="nav-right">
+        <span class="chip"
+          >Prototype · hybrid 2 · full context in inspector, slim empty relations</span
+        >
+        <span class="seg" role="group" aria-label="Theme" id="theme">
+          <button type="button" data-theme="auto" aria-pressed="true">Auto</button>
+          <button type="button" data-theme="light" aria-pressed="false">Light</button>
+          <button type="button" data-theme="dark" aria-pressed="false">Dark</button>
+        </span>
+      </div>
+    </header>
+    <main id="view" tabindex="-1"></main>
+
+    <script src="data.js"></script>
+    <script>
+      (() => {
+        "use strict";
+        const DATA = window.RENDER_DATA;
+        const FOLD_LINES = 12;
+        const USER_FOLD_LINES = 40;
+
+        /* ====================================================================== dom helpers */
+        const h = (tag, attributes, ...children) => {
+          const node = document.createElement(tag);
+          for (const [key, value] of Object.entries(attributes || {})) {
+            if (value == null || value === false) continue;
+            if (key === "class") node.className = value;
+            else if (key === "text") node.textContent = value;
+            else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+            else node.setAttribute(key, value === true ? "" : value);
+          }
+          for (const child of children.flat())
+            if (child != null && child !== false) node.append(child);
+          return node;
+        };
+        const svgNs = "http://www.w3.org/2000/svg";
+        const svgEl = (tag, attributes) => {
+          const node = document.createElementNS(svgNs, tag);
+          for (const [key, value] of Object.entries(attributes || {}))
+            node.setAttribute(key, value);
+          return node;
+        };
+        // icons: constant strings authored here, never input text
+        const ICONS = {
+          context: '<path d="M8 2 2 5l6 3 6-3-6-3Z"/><path d="m2 8 6 3 6-3M2 11l6 3 6-3"/>',
+          assistant: '<path d="M3 3h10v7H7.5L4.5 13v-3H3z"/>',
+          user: '<circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c.5-2.6 2.5-4 5-4s4.5 1.4 5 4"/>',
+          thinking:
+            '<path d="M4.6 12.5a3 3 0 0 1-.6-5.9 4 4 0 0 1 7.7-.8A3.3 3.3 0 0 1 11.7 12.5z"/>',
+          bash: '<path d="m3 4 4 4-4 4M8.5 12.5H13"/>',
+          read: '<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/>',
+          edit: '<path d="M10.5 3.5l2 2L5.5 12.5 3 13l.5-2.5z"/>',
+          tool: '<path d="M10 3.5a3 3 0 0 0-3.2 4L2.5 11.8 4.2 13.5 8.5 9.2A3 3 0 0 0 12.5 6l-1.8 1.8-1.5-.5-.5-1.5z"/>',
+          copy: '<rect x="5.5" y="5.5" width="7.5" height="8" rx="1.5"/><path d="M10.5 3.5v-.5A1 1 0 0 0 9.5 2H4A1 1 0 0 0 3 3v7a1 1 0 0 0 1 1h.5"/>',
+          check: '<path d="m3.5 8.5 3 3 6-7"/>',
+          up: '<path d="m4 10 4-4 4 4"/>',
+          down: '<path d="m4 6 4 4 4-4"/>',
+          expand: '<path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/>',
+          close: '<path d="m4 4 8 8M12 4 4 12"/>',
+          file: '<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3M6 8.5h4M6 11h4"/>',
+          json: '<path d="M6 3c-1.5 0-2 .6-2 2v1.5C4 7.4 3.4 8 2.5 8c.9 0 1.5.6 1.5 1.5V11c0 1.4.5 2 2 2M10 3c1.5 0 2 .6 2 2v1.5c0 .9.6 1.5 1.5 1.5-.9 0-1.5.6-1.5 1.5V11c0 1.4-.5 2-2 2"/>',
+        };
+        const icon = (name) => {
+          const node = svgEl("svg", { viewBox: "0 0 16 16", class: "i", "aria-hidden": "true" });
+          node.innerHTML = ICONS[name];
+          return node;
+        };
+
+        const fmtTime = (iso) =>
+          new Date(iso).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
+        const fmtBytes = (bytes) =>
+          bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+        const countLines = (text) => text.split("\n").length;
+        const tailTrim = (text, max) => (text.length > max ? "…" + text.slice(-(max - 1)) : text);
+        const homeShort = (path) => path.replace(/^\/Users\/[^/]+\//, "~/");
+        const byteLength = (text) => new TextEncoder().encode(text).length;
+
+        function copyText(text, button) {
+          const done = () => {
+            const label = button.querySelector("span");
+            button.classList.add("done");
+            label.textContent = "Copied";
+            clearTimeout(button._timer);
+            button._timer = setTimeout(() => {
+              button.classList.remove("done");
+              label.textContent = "Copy";
+            }, 1300);
+          };
+          const fallback = () => {
+            const area = h("textarea", { "aria-hidden": "true" });
+            area.value = text;
+            area.style.cssText = "position:fixed;opacity:0";
+            document.body.append(area);
+            area.select();
+            try {
+              document.execCommand("copy");
+            } catch (_) {
+              /* prototype: ignore */
+            }
+            area.remove();
+            done();
+          };
+          if (navigator.clipboard?.writeText)
+            navigator.clipboard.writeText(text).then(done, fallback);
+          else fallback();
+        }
+
+        /* ====================================================================== regex tokenizer (stand-in for shiki) */
+        const TS_KEYWORDS =
+          "const|let|var|function|return|if|else|for|while|import|from|export|default|class|extends|new|async|await|type|interface|try|catch|throw|of|in|as|true|false|null|undefined|this|switch|case|break|continue|typeof|void|readonly|private|public|static|enum";
+        const GRAMMAR_RULES = {
+          json: [
+            ["key", /"(?:[^"\\\n]|\\.)*"(?=\s*:)/],
+            ["str", /"(?:[^"\\\n]|\\.)*"/],
+            ["num", /-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/],
+            ["kw", /\b(?:true|false|null)\b/],
+          ],
+          ts: [
+            ["com", /\/\/[^\n]*|\/\*[\s\S]*?\*\//],
+            ["str", /`(?:[^`\\]|\\[\s\S])*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/],
+            ["num", /\b\d+(?:\.\d+)?\b/],
+            ["kw", new RegExp(`\\b(?:${TS_KEYWORDS})\\b`)],
+            ["fn", /\b[A-Za-z_$][\w$]*(?=\()/],
+            ["type", /\b[A-Z][A-Za-z0-9]*\b/],
+          ],
+          bash: [
+            ["str", /<<-?\s*['"]?(?<hd>\w+)['"]?[^\n]*\n[\s\S]*?\n\k<hd>(?=\n|$)/],
+            ["com", /(?<![\w$])#[^\n]*/],
+            ["str", /"(?:[^"\\]|\\[\s\S])*"|'[^']*'/],
+            ["var", /\$\{[^}]*\}|\$[A-Za-z_]\w*|\$[0-9?@#]/],
+            ["flag", /(?<=\s)--?[A-Za-z][\w-]*/],
+            [
+              "kw",
+              /\b(?:if|then|else|elif|fi|for|while|do|done|case|esac|function|in|export|local|return|cat|echo|cd|ls|grep|git|sed|head|tail|bun|npm|ark|orca|mkdir|rm|cp|mv|curl)\b/,
+            ],
+            ["num", /\b\d+\b/],
+          ],
+          yaml: [
+            ["com", /#[^\n]*/],
+            ["key", /^[ \t]*(?:-[ \t]+)?[\w.\/-]+(?=:)/m],
+            ["str", /"(?:[^"\\\n]|\\.)*"|'[^'\n]*'/],
+            ["num", /\b\d+(?:\.\d+)?\b/],
+            ["kw", /\b(?:true|false|null|yes|no)\b/],
+          ],
+          python: [
+            ["com", /#[^\n]*/],
+            ["str", /"""[\s\S]*?"""|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/],
+            ["num", /\b\d+(?:\.\d+)?\b/],
+            [
+              "kw",
+              /\b(?:def|class|return|if|elif|else|for|while|import|from|as|with|try|except|raise|pass|None|True|False|and|or|not|in|is|lambda|yield|async|await)\b/,
+            ],
+            ["fn", /\b[A-Za-z_]\w*(?=\()/],
+          ],
+          markdown: [
+            ["com", /<!--[\s\S]*?-->/],
+            ["head", /^#{1,6} .*$/m],
+            ["str", /`[^`\n]+`/],
+            ["kw", /^[ \t]*(?:[-*+]|\d+\.)(?= )/m],
+            ["fn", /\*\*[^*\n]+\*\*/],
+          ],
+          gherkin: [
+            ["com", /#[^\n]*/],
+            [
+              "kw",
+              /^[ \t]*(?:Feature|Scenario(?: Outline)?|Background|Given|When|Then|And|But|Examples)\b/m,
+            ],
+            ["str", /"[^"\n]*"/],
+            ["var", /<[^>\n]+>/],
+          ],
+        };
+        const ALIASES = {
+          sh: "bash",
+          shell: "bash",
+          zsh: "bash",
+          js: "ts",
+          jsx: "ts",
+          tsx: "ts",
+          javascript: "ts",
+          typescript: "ts",
+          yml: "yaml",
+          jsonc: "json",
+          patch: "diff",
+          md: "markdown",
+          py: "python",
+          feature: "gherkin",
+        };
+        const grammarCache = {};
+        function grammarFor(lang) {
+          if (grammarCache[lang]) return grammarCache[lang];
+          let offset = 1;
+          const rules = GRAMMAR_RULES[lang].map(([cls, regex]) => {
+            const groups = new RegExp(`${regex.source}|`).exec("").length - 1;
+            const rule = { cls, offset };
+            offset += groups + 1;
+            return rule;
+          });
+          const source = GRAMMAR_RULES[lang].map(([, regex]) => `(${regex.source})`).join("|");
+          return (grammarCache[lang] = { rules, regex: new RegExp(source, "gm") });
+        }
+        const normalizeLang = (lang) => {
+          const key = (lang || "").toLowerCase();
+          return ALIASES[key] || key;
+        };
+        function tokenize(code, lang) {
+          if (lang === "diff" || lang === "hashline") {
+            return code.split("\n").flatMap((line, index, all) => {
+              const cls =
+                lang === "hashline"
+                  ? line.startsWith("+")
+                    ? "add"
+                    : /^(\[.+#\w+\]|PUT |CUT |REM|MV )/.test(line)
+                      ? "hunk"
+                      : null
+                  : line.startsWith("+") && !line.startsWith("+++")
+                    ? "add"
+                    : line.startsWith("-") && !line.startsWith("---")
+                      ? "del"
+                      : /^(@@|diff |index |\+\+\+|---)/.test(line)
+                        ? "hunk"
+                        : null;
+              return [[cls, line + (index < all.length - 1 ? "\n" : "")]];
+            });
+          }
+          if (!GRAMMAR_RULES[lang]) return [[null, code]];
+          const { rules, regex } = grammarFor(lang);
+          const tokens = [];
+          let last = 0;
+          for (const match of code.matchAll(regex)) {
+            if (!match[0]) continue;
+            const rule = rules.find((candidate) => match[candidate.offset] !== undefined);
+            if (match.index > last) tokens.push([null, code.slice(last, match.index)]);
+            tokens.push([rule.cls, match[0]]);
+            last = match.index + match[0].length;
+          }
+          if (last < code.length) tokens.push([null, code.slice(last)]);
+          return tokens;
+        }
+
+        /* ====================================================================== code block (copy, lang label, fold) */
+        function codeBlock(text, language, options = {}) {
+          const lang = normalizeLang(language);
+          const label = options.label || (language ? lang : "text");
+          const code = h("code");
+          for (const [cls, part] of tokenize(text, lang))
+            code.append(cls ? h("span", { class: `tk-${cls}`, text: part }) : part);
+          const copy = h(
+            "button",
+            {
+              type: "button",
+              class: "copy",
+              "aria-label": `Copy ${label}`,
+              onclick: () => copyText(text, copy),
+            },
+            icon("copy"),
+            h("span", { text: "Copy" }),
+          );
+          const figure = h(
+            "figure",
+            { class: "code" + (options.wrap ? " wrap" : "") + (options.scroll ? " scroll" : "") },
+            h("figcaption", null, h("span", { class: "lang", text: label }), copy),
+            h("pre", null, code),
+          );
+          const lines = countLines(text);
+          if (options.fold && lines > FOLD_LINES) {
+            figure.classList.add("folded");
+            const toggle = h("button", { type: "button", class: "more", "aria-expanded": "false" });
+            const sync = () => {
+              const folded = figure.classList.contains("folded");
+              toggle.textContent = folded
+                ? `Show all ${lines} lines · ${lines - FOLD_LINES} more`
+                : "Fold";
+              toggle.setAttribute("aria-expanded", String(!folded));
+            };
+            toggle.onclick = () => {
+              figure.classList.toggle("folded");
+              sync();
+            };
+            sync();
+            figure.append(toggle);
+          }
+          return figure;
+        }
+        const tryJson = (text) => {
+          const trimmed = text.trim();
+          if (!/^[\[{]/.test(trimmed)) return undefined;
+          try {
+            return JSON.parse(trimmed);
+          } catch (_) {
+            return undefined;
+          }
+        };
+        const jsonBlock = (value, options = {}) =>
+          codeBlock(JSON.stringify(value, null, 2), "json", { fold: true, ...options });
+
+        /* ====================================================================== markdown -> DOM (createElement/textContent only) */
+        const FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})[ \t]*([^\s`]*)[^`]*$/;
+        const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+        const HRULE = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+        const QUOTE = /^ {0,3}>/;
+        const ITEM = /^( {0,3})([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?$/;
+        const TABLE_DELIM = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+        const indentOf = (line) => line.length - line.trimStart().length;
+        const startsBlock = (line) =>
+          FENCE_OPEN.test(line) ||
+          HEADING.test(line) ||
+          HRULE.test(line) ||
+          QUOTE.test(line) ||
+          ITEM.test(line);
+
+        function splitRow(line) {
+          let text = line.trim();
+          if (text.startsWith("|")) text = text.slice(1);
+          if (text.endsWith("|") && !text.endsWith("\\|")) text = text.slice(0, -1);
+          const cells = [];
+          let cell = "";
+          for (let index = 0; index < text.length; index++) {
+            if (text[index] === "\\" && text[index + 1] === "|") {
+              cell += "|";
+              index++;
+            } else if (text[index] === "|") {
+              cells.push(cell.trim());
+              cell = "";
+            } else cell += text[index];
+          }
+          cells.push(cell.trim());
+          return cells;
+        }
+        function findBracket(text, start) {
+          let depth = 0;
+          for (let index = start; index < text.length; index++) {
+            const char = text[index];
+            if (char === "\\") {
+              index++;
+              continue;
+            }
+            if (char === "`") {
+              const close = text.indexOf("`", index + 1);
+              if (close !== -1) {
+                index = close;
+                continue;
+              }
+            }
+            if (char === "[") depth++;
+            else if (char === "]" && --depth === 0) return index;
+          }
+          return -1;
+        }
+        function parseLinkTarget(text, start) {
+          let index = start;
+          while (text[index] === " ") index++;
+          let depth = 0,
+            url = "";
+          while (index < text.length && !/\s/.test(text[index])) {
+            if (text[index] === "(") depth++;
+            else if (text[index] === ")") {
+              if (depth === 0) break;
+              depth--;
+            }
+            url += text[index];
+            index++;
+          }
+          while (/\s/.test(text[index] ?? "")) index++;
+          if (text[index] === '"') {
+            const close = text.indexOf('"', index + 1);
+            if (close === -1) return null;
+            index = close + 1;
+            while (text[index] === " ") index++;
+          }
+          return text[index] === ")" ? { url, next: index + 1 } : null;
+        }
+        const SAFE_URL = /^(?:https?:\/\/|mailto:|#|\/|\.{1,2}\/)/i;
+        const anchor = (url, ...children) =>
+          h(
+            "a",
+            {
+              href: url,
+              target: url.startsWith("#") ? null : "_blank",
+              rel: "noopener noreferrer",
+            },
+            ...children,
+          );
+
+        function renderInline(text, parent) {
+          let buffer = "";
+          let index = 0;
+          const flush = () => {
+            if (buffer) {
+              parent.append(buffer);
+              buffer = "";
+            }
+          };
+          const push = (node) => {
+            flush();
+            parent.append(node);
+          };
+          while (index < text.length) {
+            const char = text[index];
+            if (char === "\\" && /[!-\/:-@\[-`{-~]/.test(text[index + 1] ?? "")) {
+              buffer += text[index + 1];
+              index += 2;
+              continue;
+            }
+            if (char === "\n") {
+              if (/ {2,}$/.test(buffer)) {
+                buffer = buffer.replace(/ +$/, "");
+                push(h("br"));
+              } else buffer += "\n";
+              index++;
+              continue;
+            }
+            if (char === "`") {
+              let run = 1;
+              while (text[index + run] === "`") run++;
+              let close = -1,
+                scan = index + run;
+              while (scan < text.length) {
+                const next = text.indexOf("`", scan);
+                if (next === -1) break;
+                let length = 1;
+                while (text[next + length] === "`") length++;
+                if (length === run) {
+                  close = next;
+                  break;
+                }
+                scan = next + length;
+              }
+              if (close === -1) {
+                buffer += "`".repeat(run);
+                index += run;
+                continue;
+              }
+              let code = text.slice(index + run, close).replace(/\n/g, " ");
+              if (/^ .* $/.test(code) && code.trim()) code = code.slice(1, -1);
+              push(h("code", { class: "ic", text: code }));
+              index = close + run;
+              continue;
+            }
+            if (char === "*" || char === "_" || char === "~") {
+              let run = 1;
+              while (text[index + run] === char) run++;
+              const previous = text[index - 1] ?? " ",
+                following = text[index + run] ?? " ";
+              const canOpen = !/\s/.test(following) && (char !== "_" || !/\w/.test(previous));
+              const size = char === "~" ? (run === 2 ? 2 : 0) : run >= 2 ? 2 : 1;
+              let close = -1;
+              if (canOpen && size) {
+                const marker = char.repeat(size);
+                let from = index + size;
+                while ((from = text.indexOf(marker, from)) !== -1) {
+                  const okBefore = from > index + size && !/\s/.test(text[from - 1]);
+                  const okAfter = char !== "_" || !/\w/.test(text[from + size] ?? " ");
+                  const lone = size === 2 || (text[from + 1] !== char && text[from - 1] !== char);
+                  if (okBefore && okAfter && lone) {
+                    close = from;
+                    break;
+                  }
+                  from++;
+                }
+                if (close !== -1) {
+                  const node = h(char === "~" ? "del" : size === 2 ? "strong" : "em");
+                  renderInline(text.slice(index + size, close), node);
+                  push(node);
+                  index = close + size;
+                  continue;
+                }
+              }
+              buffer += char.repeat(run);
+              index += run;
+              continue;
+            }
+            if (char === "[") {
+              const end = findBracket(text, index);
+              if (end !== -1 && text[end + 1] === "(") {
+                const target = parseLinkTarget(text, end + 2);
+                if (target) {
+                  if (SAFE_URL.test(target.url)) {
+                    const node = anchor(target.url);
+                    renderInline(text.slice(index + 1, end), node);
+                    push(node);
+                  } else buffer += text.slice(index, target.next); // unsafe scheme: show the source as text
+                  index = target.next;
+                  continue;
+                }
+              }
+            }
+            if (char === "<") {
+              const match = /^<((?:https?:\/\/|mailto:)[^\s<>]+)>/i.exec(text.slice(index));
+              if (match) {
+                push(anchor(match[1], match[1]));
+                index += match[0].length;
+                continue;
+              }
+            }
+            if (
+              char === "h" &&
+              /^https?:\/\//.test(text.slice(index, index + 8)) &&
+              /[\s(\[]/.test(text[index - 1] ?? " ")
+            ) {
+              const url = /^https?:\/\/[^\s<>]+/
+                .exec(text.slice(index))[0]
+                .replace(/[.,;:!?)\]]+$/, "");
+              push(anchor(url, url));
+              index += url.length;
+              continue;
+            }
+            buffer += char;
+            index++;
+          }
+          flush();
+        }
+        const inlineInto = (node, text) => {
+          renderInline(text, node);
+          return node;
+        };
+
+        function parseList(lines, start, parent) {
+          const first = ITEM.exec(lines[start]);
+          const ordered = /\d/.test(first[2]);
+          const list = h(ordered ? "ol" : "ul");
+          if (ordered && parseInt(first[2], 10) !== 1)
+            list.setAttribute("start", parseInt(first[2], 10));
+          let index = start;
+          while (index < lines.length) {
+            const match = ITEM.exec(lines[index]);
+            if (!match || HRULE.test(lines[index]) || /\d/.test(match[2]) !== ordered) break;
+            const spaces = match[3] ? match[3].length : 1;
+            const contentIndent = match[1].length + match[2].length + (spaces <= 4 ? spaces : 1);
+            const itemLines = [match[4] || ""];
+            index++;
+            while (index < lines.length) {
+              const next = lines[index];
+              if (!next.trim()) {
+                let ahead = index;
+                while (ahead < lines.length && !lines[ahead].trim()) ahead++;
+                if (ahead < lines.length && indentOf(lines[ahead]) >= contentIndent) {
+                  for (; index < ahead; index++) itemLines.push("");
+                  continue;
+                }
+                break;
+              }
+              if (indentOf(next) >= contentIndent) {
+                itemLines.push(next.slice(contentIndent));
+                index++;
+                continue;
+              }
+              if (itemLines[itemLines.length - 1].trim() && !startsBlock(next)) {
+                itemLines.push(next.trim());
+                index++;
+                continue;
+              }
+              break;
+            }
+            const item = h("li");
+            parseBlocks(itemLines, item);
+            const paragraphs = [...item.children].filter((child) => child.tagName === "P");
+            if (paragraphs.length === 1) paragraphs[0].replaceWith(...paragraphs[0].childNodes); // tight item: no <p> margin
+            list.append(item);
+            let ahead = index;
+            while (ahead < lines.length && !lines[ahead].trim()) ahead++;
+            if (ahead > index && ahead < lines.length) {
+              const sibling = ITEM.exec(lines[ahead]);
+              if (
+                sibling &&
+                indentOf(lines[ahead]) < contentIndent &&
+                /\d/.test(sibling[2]) === ordered
+              ) {
+                index = ahead;
+                continue;
+              }
+              break;
+            }
+          }
+          parent.append(list);
+          return index;
+        }
+
+        function parseBlocks(lines, parent) {
+          let index = 0;
+          while (index < lines.length) {
+            const line = lines[index];
+            if (!line.trim()) {
+              index++;
+              continue;
+            }
+            let match = FENCE_OPEN.exec(line);
+            if (match) {
+              const marker = match[2],
+                body = [];
+              const closer = new RegExp(
+                `^ {0,3}${marker[0] === "`" ? "`" : "~"}{${marker.length},}[ \\t]*$`,
+              );
+              index++;
+              while (index < lines.length && !closer.test(lines[index])) {
+                body.push(lines[index].slice(Math.min(match[1].length, indentOf(lines[index]))));
+                index++;
+              }
+              index++;
+              parent.append(codeBlock(body.join("\n"), match[3]));
+              continue;
+            }
+            if ((match = HEADING.exec(line))) {
+              parent.append(inlineInto(h("h" + match[1].length), match[2]));
+              index++;
+              continue;
+            }
+            if (HRULE.test(line)) {
+              parent.append(h("hr"));
+              index++;
+              continue;
+            }
+            if (QUOTE.test(line)) {
+              const inner = [];
+              while (
+                index < lines.length &&
+                lines[index].trim() &&
+                (QUOTE.test(lines[index]) || !startsBlock(lines[index]))
+              ) {
+                inner.push(lines[index].replace(/^ {0,3}> ?/, ""));
+                index++;
+              }
+              const quote = h("blockquote");
+              parseBlocks(inner, quote);
+              parent.append(quote);
+              continue;
+            }
+            if (
+              line.includes("|") &&
+              index + 1 < lines.length &&
+              lines[index + 1].includes("-") &&
+              TABLE_DELIM.test(lines[index + 1]) &&
+              splitRow(line).length === splitRow(lines[index + 1]).length
+            ) {
+              const head = splitRow(line);
+              const align = splitRow(lines[index + 1]).map((cell) =>
+                cell.startsWith(":") && cell.endsWith(":")
+                  ? "center"
+                  : cell.endsWith(":")
+                    ? "right"
+                    : null,
+              );
+              const body = h("tbody");
+              index += 2;
+              while (index < lines.length && lines[index].trim() && lines[index].includes("|")) {
+                const cells = splitRow(lines[index]);
+                body.append(
+                  h(
+                    "tr",
+                    null,
+                    head.map((_, column) => {
+                      const cell = cells[column] ?? "";
+                      return inlineInto(
+                        h("td", {
+                          class: cell.length <= 16 && !/\s/.test(cell) ? "nw" : null,
+                          style: align[column] ? `text-align:${align[column]}` : null,
+                        }),
+                        cell,
+                      );
+                    }),
+                  ),
+                );
+                index++;
+              }
+              parent.append(
+                h(
+                  "div",
+                  { class: "tablewrap" },
+                  h(
+                    "table",
+                    null,
+                    h(
+                      "thead",
+                      null,
+                      h(
+                        "tr",
+                        null,
+                        head.map((cell, column) =>
+                          inlineInto(
+                            h("th", {
+                              style: align[column] ? `text-align:${align[column]}` : null,
+                            }),
+                            cell,
+                          ),
+                        ),
+                      ),
+                    ),
+                    body,
+                  ),
+                ),
+              );
+              continue;
+            }
+            if (ITEM.test(line)) {
+              index = parseList(lines, index, parent);
+              continue;
+            }
+            const paragraph = [line];
+            index++;
+            while (index < lines.length && lines[index].trim() && !startsBlock(lines[index])) {
+              paragraph.push(lines[index]);
+              index++;
+            }
+            parent.append(inlineInto(h("p"), paragraph.join("\n")));
+          }
+        }
+        function renderMarkdown(source) {
+          const root = h("div", { class: "md" });
+          parseBlocks(source.replace(/\r\n?/g, "\n").split("\n"), root);
+          return root;
+        }
+
+        /* ====================================================================== shared state */
+        const entries = DATA.transcript.entries;
+        const fileNames = Object.keys(DATA.run_files);
+        const state = {
+          view: "transcript",
+          selected: {
+            type: "entry",
+            key: Math.max(0, entries.map((entry) => entry.kind === "message").lastIndexOf(true)),
+          },
+          raw: false, // transcript inspector: sticky Rendered/Raw
+          ticketRaw: false,
+          expanded: new Set(), // entry indexes whose fold is open (context, long user text, thinking)
+          revealed: new Set(), // tool entries whose result is loaded
+        };
+        const selectionKey = (selection) => `${selection.type}:${selection.key}`;
+        const order = [
+          ...entries.map((_, key) => ({ type: "entry", key })),
+          ...fileNames.map((key) => ({ type: "file", key })),
+        ];
+        // B's filter chips: errors shows only failed tool calls and overrides the other three
+        state.filter = { messages: true, tools: true, thinking: true, errors: false };
+        const filterOf = (entry) =>
+          entry.kind === "tool" ? "tools" : entry.kind === "thinking" ? "thinking" : "messages";
+        const isVisible = (item) =>
+          item.type === "file" ||
+          (state.filter.errors
+            ? entries[item.key].kind === "tool" && entries[item.key].ok === false
+            : state.filter[filterOf(entries[item.key])]);
+        const orderIndex = () =>
+          order
+            .filter(isVisible)
+            .findIndex((item) => selectionKey(item) === selectionKey(state.selected));
+        const fullIndex = () =>
+          order.findIndex((item) => selectionKey(item) === selectionKey(state.selected));
+        const neighbor = (delta) => {
+          for (let index = fullIndex() + delta; index >= 0 && index < order.length; index += delta)
+            if (isVisible(order[index])) return order[index];
+        };
+
+        /* ====================================================================== transcript summaries */
+        function plain(text) {
+          return text
+            .replace(/[`*_#>|]/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+        }
+        function foldTitle(text) {
+          const heading = text.split("\n").find((line) => HEADING.test(line));
+          if (heading) return plain(HEADING.exec(heading)[2]);
+          return plain(text.split("\n").find((line) => line.trim()) || "(empty)");
+        }
+        function editedPath(entry) {
+          const match = /^\[([^\]#]+)#/.exec(entry.arguments?.input || "");
+          return match ? match[1] : null;
+        }
+        function entrySummary(entry) {
+          if (entry.kind === "context")
+            return {
+              label: "context",
+              text: foldTitle(entry.text),
+              tone: "context",
+              glyph: "context",
+            };
+          if (entry.kind === "thinking")
+            return {
+              label: "thinking",
+              text: plain(entry.text),
+              tone: "thinking",
+              glyph: "thinking",
+            };
+          if (entry.kind === "message")
+            return {
+              label: entry.role,
+              text: plain(entry.text),
+              tone: entry.role,
+              glyph: entry.role === "user" ? "user" : "assistant",
+            };
+          const args = entry.arguments || {};
+          let text;
+          if (entry.tool === "bash")
+            text = (args.command || "").split("\n").find((line) => line.trim()) || "";
+          else if (args.path) text = tailTrim(homeShort(args.path), 36);
+          else if (entry.tool === "edit") text = editedPath(entry) || args.i || "";
+          else text = args.i || JSON.stringify(args);
+          const glyph = ICONS[entry.tool] ? entry.tool : "tool";
+          return { label: entry.tool, text, tone: "tool", glyph, mono: true };
+        }
+
+        /* ====================================================================== transcript view */
+        let listRows = new Map();
+        let inspectorPane;
+
+        function buildRow(item) {
+          if (item.type === "file") {
+            const text = DATA.run_files[item.key];
+            const row = h(
+              "button",
+              {
+                type: "button",
+                class: "row k-file",
+                role: "option",
+                "aria-selected": "false",
+                onclick: () => select(item),
+              },
+              icon(item.key.endsWith(".json") ? "json" : "file"),
+              h("span", { class: "main" }, h("b", { class: "mono", text: item.key })),
+              h("span", { class: "end", text: fmtBytes(byteLength(text)) }),
+            );
+            return row;
+          }
+          const entry = entries[item.key];
+          const summary = entrySummary(entry);
+          const failed = entry.ok === false;
+          const row = h(
+            "button",
+            {
+              type: "button",
+              class: `row k-${summary.tone}${failed ? " failed" : ""}`,
+              role: "option",
+              "aria-selected": "false",
+              onclick: () => select(item),
+            },
+            h("span", { class: "time", text: fmtTime(entry.time) }),
+            icon(summary.glyph),
+            h(
+              "span",
+              { class: "main" },
+              h("b", { class: summary.mono ? "mono" : "", text: summary.label }),
+              summary.text,
+            ),
+            failed
+              ? h("span", { class: "pill bad", text: "failed" })
+              : h("span", {
+                  class: "end",
+                  text: entry.kind === "tool" ? fmtBytes(entry.result_bytes ?? 0) : "",
+                }),
+            failed
+              ? h("span", {
+                  class: "errline",
+                  text:
+                    (entry.result || "")
+                      .split("\n")
+                      .find((line) => line.trim())
+                      ?.trim() || "(no output)",
+                })
+              : null,
+          );
+          return row;
+        }
+
+        function buildTranscript() {
+          const transcript = DATA.transcript;
+          const failures = entries.filter((entry) => entry.ok === false).length;
+          const toolCount = entries.filter((entry) => entry.kind === "tool").length;
+          listRows = new Map();
+          const list = h("div", {
+            class: "list",
+            role: "listbox",
+            "aria-label": "Transcript entries",
+          });
+          entries.forEach((_, key) => {
+            const item = { type: "entry", key };
+            const row = buildRow(item);
+            listRows.set(selectionKey(item), row);
+            list.append(row);
+          });
+          const nomatch = h("div", { class: "nomatch", text: "No entries match these filters." });
+          const files = h("div", { role: "listbox", "aria-label": "Run files" });
+          fileNames.forEach((key) => {
+            const item = { type: "file", key };
+            const row = buildRow(item);
+            listRows.set(selectionKey(item), row);
+            files.append(row);
+          });
+
+          const countNode = h("span", { class: "count", text: entries.length });
+          const counts = {
+            messages: entries.filter((entry) => filterOf(entry) === "messages").length,
+            tools: toolCount,
+            thinking: entries.filter((entry) => entry.kind === "thinking").length,
+            errors: failures,
+          };
+          const chips = [
+            ["messages", "var(--green)"],
+            ["tools", "var(--blue)"],
+            ["thinking", "var(--violet)"],
+            ["errors", null],
+          ].map(([name, color]) =>
+            h(
+              "button",
+              {
+                type: "button",
+                class: `fchip${name === "errors" ? " errors" : ""}`,
+                "data-filter": name,
+                style: color ? `--c:${color}` : null,
+                title: name === "errors" ? "Only failed tool calls" : `Show ${name}`,
+                onclick: () => {
+                  state.filter[name] = !state.filter[name];
+                  applyFilter(true);
+                },
+              },
+              color ? h("span", { class: "dot" }) : null,
+              name,
+              h("span", { class: "n", text: counts[name] }),
+            ),
+          );
+          chips[3].before(h("span", { class: "fsep", role: "separator" }));
+          const filterbar = h(
+            "div",
+            { class: "filterbar", role: "toolbar", "aria-label": "Filter entries" },
+            ...chips,
+          );
+          function applyFilter(reselect) {
+            let shown = 0;
+            entries.forEach((_, key) => {
+              const visible = isVisible({ type: "entry", key });
+              listRows.get(`entry:${key}`).hidden = !visible;
+              if (visible) shown++;
+            });
+            for (const chip of chips)
+              chip.setAttribute("aria-pressed", String(state.filter[chip.dataset.filter]));
+            filterbar.classList.toggle("only-errors", state.filter.errors);
+            countNode.textContent =
+              shown === entries.length ? entries.length : `${shown} of ${entries.length}`;
+            nomatch.hidden = shown > 0;
+            if (reselect) {
+              if (isVisible(state.selected)) renderInspector();
+              else select(order.find(isVisible));
+            }
+          }
+          inspectorPane = h("section", { class: "panel pane insp", "aria-label": "Inspector" });
+
+          const view = h(
+            "div",
+            { class: "tview" },
+            h(
+              "div",
+              { class: "thead" },
+              h(
+                "div",
+                { class: "crumb" },
+                h("a", { href: "#ticket", text: "← ARK-313" }),
+                " · transcript",
+              ),
+              h("h1", { text: transcript.step }),
+              h(
+                "div",
+                { class: "meta" },
+                h(
+                  "span",
+                  null,
+                  h("b", { text: "harness" }),
+                  h("span", { class: "v mono", text: transcript.harness }),
+                ),
+                h(
+                  "span",
+                  null,
+                  h("b", { text: "session" }),
+                  h("span", { class: "v mono", text: tailTrim(transcript.session, 44) }),
+                ),
+                h(
+                  "span",
+                  null,
+                  h("b", { text: "window" }),
+                  h("span", {
+                    class: "v",
+                    text: `${fmtTime(entries[0].time)} → ${fmtTime(entries[entries.length - 1].time)}`,
+                  }),
+                ),
+              ),
+            ),
+            h(
+              "div",
+              { class: "split" },
+              h(
+                "section",
+                { class: "panel pane", "aria-label": "Transcript" },
+                h(
+                  "header",
+                  { class: "listhead" },
+                  h("h2", null, "Transcript ", countNode),
+                  h(
+                    "span",
+                    { class: "keys", "aria-label": "Keyboard: j next, k previous, r raw" },
+                    h("kbd", { text: "j" }),
+                    h("kbd", { text: "k" }),
+                    " move · ",
+                    h("kbd", { text: "r" }),
+                    " raw",
+                  ),
+                ),
+                filterbar,
+                h("div", { class: "scroll" }, list, nomatch),
+                h(
+                  "div",
+                  { class: "filesbox" },
+                  h(
+                    "h2",
+                    null,
+                    "Run files ",
+                    h("span", { class: "count", text: fileNames.length }),
+                  ),
+                  files,
+                ),
+              ),
+              inspectorPane,
+            ),
+          );
+          applyFilter(false);
+          return view;
+        }
+
+        function select(item, { updateHash = true } = {}) {
+          state.selected = item;
+          for (const [key, row] of listRows)
+            row.setAttribute("aria-selected", String(key === selectionKey(item)));
+          const row = listRows.get(selectionKey(item));
+          row?.scrollIntoView({ block: "nearest" });
+          renderInspector();
+          if (updateHash)
+            history.replaceState(
+              null,
+              "",
+              `#transcript/${item.type === "entry" ? "e" : "f"}/${item.key}`,
+            );
+        }
+        function move(delta) {
+          const next = neighbor(delta);
+          if (next) select(next);
+        }
+
+        const rawSwitch = (isRaw, onChange) =>
+          h(
+            "span",
+            { class: "seg", role: "group", "aria-label": "Rendered or raw" },
+            h("button", {
+              type: "button",
+              "aria-pressed": String(!isRaw),
+              text: "Rendered",
+              onclick: () => onChange(false),
+            }),
+            h("button", {
+              type: "button",
+              "aria-pressed": String(isRaw),
+              text: "Raw",
+              onclick: () => onChange(true),
+            }),
+          );
+        const setRaw = (value) => {
+          state.raw = value;
+          renderInspector();
+        };
+
+        function renderInspector() {
+          const { type, key } = state.selected;
+          const visibleEntries = order.filter((item) => item.type === "entry" && isVisible(item));
+          const position = visibleEntries.findIndex(
+            (item) => selectionKey(item) === selectionKey(state.selected),
+          );
+          const total = visibleEntries.length;
+          let title, sub, glyph, body;
+          if (type === "file") {
+            const text = DATA.run_files[key];
+            title = "Run file";
+            sub = `${fmtBytes(byteLength(text))} · ${countLines(text)} lines`;
+            glyph = key.endsWith(".json") ? "json" : "file";
+            body = renderFile(key, text);
+          } else {
+            const entry = entries[key];
+            const summary = entrySummary(entry);
+            glyph = summary.glyph;
+            title =
+              entry.kind === "tool"
+                ? "Tool call"
+                : entry.kind === "message"
+                  ? `${entry.role === "user" ? "User" : "Assistant"} message`
+                  : entry.kind === "thinking"
+                    ? "Thinking"
+                    : "Context";
+            sub = (entry.kind === "tool" ? `${entry.tool} · ` : "") + fmtTime(entry.time);
+            body = renderEntry(entry, key);
+          }
+          const bodyNode = h(
+            "div",
+            { class: "scroll body", tabindex: "0", "aria-label": `${title} content` },
+            body,
+          );
+          inspectorPane.replaceChildren(
+            h(
+              "header",
+              null,
+              h(
+                "div",
+                { class: "title" },
+                icon(glyph),
+                h("span", { text: title }),
+                h("span", { class: "sub", text: sub }),
+              ),
+              h(
+                "div",
+                { class: "tools" },
+                rawSwitch(state.raw, setRaw),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "icon-btn",
+                    "aria-label": "Previous (k)",
+                    title: "Previous (k)",
+                    disabled: !neighbor(-1),
+                    onclick: () => move(-1),
+                  },
+                  icon("up"),
+                ),
+                h("span", {
+                  class: "pos",
+                  title: type === "file" ? key : null,
+                  text: type === "file" ? key : `${position + 1}/${total}`,
+                }),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "icon-btn",
+                    "aria-label": "Next (j)",
+                    title: "Next (j)",
+                    disabled: !neighbor(1),
+                    onclick: () => move(1),
+                  },
+                  icon("down"),
+                ),
+              ),
+            ),
+            bodyNode,
+          );
+        }
+
+        function renderFile(name, text) {
+          if (state.raw) return codeBlock(text, "", { wrap: true, label: `raw · ${name}` });
+          if (name.endsWith(".json")) {
+            const value = tryJson(text);
+            return value === undefined
+              ? codeBlock(text, "", { wrap: true })
+              : jsonBlock(value, { label: `json · ${name}` });
+          }
+          return renderMarkdown(text);
+        }
+
+        /* inspector fold gate: only thinking stays folded. Context and long user text show in full here; their fold lives on the list row. */
+        function needsFold(entry) {
+          return entry.kind === "thinking";
+        }
+        function renderText(entry) {
+          if (state.raw) return codeBlock(entry.text, "", { wrap: true, label: "raw" });
+          const json = tryJson(entry.text);
+          return json !== undefined ? jsonBlock(json) : renderMarkdown(entry.text);
+        }
+        function renderEntry(entry, key) {
+          if (entry.kind === "tool") return renderTool(entry, key);
+          if (!needsFold(entry)) return renderText(entry);
+          const open = state.expanded.has(key);
+          const lines = countLines(entry.text);
+          const isThinking = entry.kind === "thinking";
+          const toggle = h("button", {
+            type: "button",
+            class: "btn sm",
+            "aria-expanded": String(open),
+            text: open ? "Collapse" : isThinking ? "Show thinking" : `Expand`,
+            onclick: () => {
+              open ? state.expanded.delete(key) : state.expanded.add(key);
+              renderInspector();
+            },
+          });
+          const title = isThinking ? "Thinking hidden" : foldTitle(entry.text);
+          const meta = `${lines} ${lines === 1 ? "line" : "lines"}${isThinking ? "" : ` · ${fmtBytes(byteLength(entry.text))}`}`;
+          if (!open)
+            return h(
+              "div",
+              { class: "foldcard" },
+              icon(isThinking ? "thinking" : "context"),
+              h("span", { class: "t", text: title }),
+              h("span", { class: "n", text: meta }),
+              toggle,
+            );
+          return h(
+            "div",
+            null,
+            h(
+              "div",
+              { class: "foldbar" },
+              h("span", { class: "t", text: title }),
+              h("span", { class: "n", text: meta }),
+              toggle,
+            ),
+            renderText(entry),
+          );
+        }
+
+        /* tool calls: full arguments (pretty, folded), result peek + on-demand full result */
+        const LANG_BY_EXTENSION = {
+          ts: "ts",
+          tsx: "ts",
+          js: "ts",
+          json: "json",
+          yml: "yaml",
+          yaml: "yaml",
+          md: "markdown",
+          sh: "bash",
+          py: "python",
+          diff: "diff",
+        };
+        function renderTool(entry, key) {
+          const args = entry.arguments || {};
+          const rest = { ...args };
+          const blocks = [];
+          if (typeof rest.command === "string") {
+            blocks.push(codeBlock(rest.command, "bash", { fold: true, label: "bash · command" }));
+            delete rest.command;
+          }
+          if (typeof rest.input === "string") {
+            blocks.push(
+              codeBlock(rest.input, "hashline", { fold: true, label: `${entry.tool} · input` }),
+            );
+            delete rest.input;
+          }
+          if (typeof rest.content === "string") {
+            blocks.push(
+              codeBlock(rest.content, LANG_BY_EXTENSION[(rest.path || "").split(".").pop()] || "", {
+                fold: true,
+                label: `${entry.tool} · content`,
+              }),
+            );
+            delete rest.content;
+          }
+          if (state.raw) {
+            return h(
+              "div",
+              null,
+              h(
+                "div",
+                { class: "io" },
+                h("h3", { text: "Arguments, as stored" }),
+                codeBlock(JSON.stringify(args), "", { wrap: true, label: "raw json" }),
+              ),
+              h(
+                "div",
+                { class: "io" },
+                h(
+                  "h3",
+                  null,
+                  "Result, as stored ",
+                  h("span", { class: "mut mono", text: fmtBytes(entry.result_bytes ?? 0) }),
+                ),
+                codeBlock(entry.result ?? "", "", { wrap: true, scroll: true, label: "raw" }),
+              ),
+            );
+          }
+          const failed = entry.ok === false;
+          const result = entry.result ?? "";
+          const open = state.revealed.has(key);
+          const resultLines = result.split("\n");
+          const first = resultLines.find((line) => line.trim()) ?? "(empty)";
+          const toggle = h("button", {
+            type: "button",
+            class: "btn sm",
+            "aria-expanded": String(open),
+            text: open
+              ? "Hide result"
+              : `Show result · ${fmtBytes(entry.result_bytes ?? byteLength(result))}`,
+            onclick: () => {
+              open ? state.revealed.delete(key) : state.revealed.add(key);
+              renderInspector();
+            },
+          });
+          let resultNode;
+          if (!open) {
+            resultNode = h(
+              "div",
+              { class: `peek${failed ? " bad" : ""}` },
+              h("span", { text: first }),
+              resultLines.length > 1
+                ? h("span", {
+                    class: "extra",
+                    text: `+${resultLines.length - 1} more ${resultLines.length === 2 ? "line" : "lines"}`,
+                  })
+                : null,
+            );
+          } else {
+            const json = tryJson(result);
+            resultNode = h(
+              "div",
+              null,
+              (entry.result_bytes ?? 0) > byteLength(result)
+                ? h("p", {
+                    class: "note",
+                    text: `Prototype data holds the first ${byteLength(result).toLocaleString()} of ${entry.result_bytes.toLocaleString()} bytes. The real build loads the result on demand, capped at 64 KB.`,
+                  })
+                : null,
+              json !== undefined
+                ? jsonBlock(json, { label: "json · result" })
+                : codeBlock(result, "", { scroll: true, label: failed ? "error" : "result" }),
+            );
+          }
+          return h(
+            "div",
+            null,
+            h(
+              "div",
+              { class: "io" },
+              h("h3", { text: "Arguments" }),
+              ...blocks,
+              Object.keys(rest).length
+                ? jsonBlock(rest, { label: blocks.length ? "json · other arguments" : "json" })
+                : null,
+            ),
+            h(
+              "div",
+              { class: "io" },
+              h(
+                "h3",
+                null,
+                "Result",
+                failed
+                  ? h("span", { class: "pill bad", text: "failed" })
+                  : h("span", { class: "pill ok", text: "ok" }),
+                toggle,
+              ),
+              resultNode,
+            ),
+          );
+        }
+
+        /* ====================================================================== ticket view */
+        const STATUS_LABEL = {
+          done: "closed",
+          in_progress: "in_progress",
+          ready: "ready",
+          proposed: "proposed",
+        };
+        const STATUS_PILL = { done: "ok", in_progress: "build", ready: "review", proposed: "unk" };
+        function statusGlyph(status) {
+          const glyph = svgEl("svg", {
+            viewBox: "0 0 18 18",
+            width: 18,
+            height: 18,
+            class: `glyph s-${status}`,
+            "aria-hidden": "true",
+          });
+          glyph.append(svgEl("circle", { cx: 9, cy: 9, r: 7, class: "ring" }));
+          if (status === "done")
+            glyph.append(svgEl("path", { d: "M5.6 9.2l2.4 2.4 4.4-4.8", class: "mark" }));
+          if (status === "in_progress")
+            glyph.append(svgEl("path", { d: "M9 4.2a4.8 4.8 0 0 1 0 9.6z", class: "fill" }));
+          return glyph;
+        }
+
+        const NODE = { width: 236, height: 68, gapX: 88, gapY: 14, lane: 8 };
+        // Layered layout, left to right by dependency depth. An edge that skips a column gets a thin
+        // "lane" item per skipped column (one per source, shared), so it runs between cards instead of behind them.
+        function layoutGraph(nodes, focusId) {
+          const byId = Object.fromEntries(nodes.map((node) => [node.id, node]));
+          const depth = {};
+          const level = (id) =>
+            (depth[id] ??= Math.max(
+              0,
+              ...byId[id].depends_on.filter((dep) => byId[dep]).map((dep) => level(dep) + 1),
+            ));
+          nodes.forEach((node) => level(node.id));
+          const items = new Map(
+            nodes.map((node) => [
+              node.id,
+              { id: node.id, column: depth[node.id], height: NODE.height, preds: [], succs: [] },
+            ]),
+          );
+          const link = (from, to) => {
+            const a = items.get(from),
+              b = items.get(to);
+            if (!a.succs.includes(to)) a.succs.push(to);
+            if (!b.preds.includes(from)) b.preds.push(from);
+          };
+          const chains = [];
+          nodes.forEach((node) =>
+            node.depends_on
+              .filter((dep) => byId[dep])
+              .forEach((dep) => {
+                const chain = [dep];
+                for (let column = depth[dep] + 1; column < depth[node.id]; column++) {
+                  const id = `${dep}~${column}`;
+                  if (!items.has(id))
+                    items.set(id, {
+                      id,
+                      column,
+                      height: NODE.lane,
+                      preds: [],
+                      succs: [],
+                      lane: true,
+                    });
+                  chain.push(id);
+                }
+                chain.push(node.id);
+                for (let i = 1; i < chain.length; i++) link(chain[i - 1], chain[i]);
+                chains.push({
+                  chain,
+                  blocking: byId[dep].status !== "done",
+                  focus: dep === focusId || node.id === focusId,
+                });
+              }),
+          );
+          const columns = [];
+          items.forEach((item) => (columns[item.column] ??= []).push(item));
+          const rowOf = {};
+          columns.forEach((column) =>
+            column.forEach((item, row) => {
+              rowOf[item.id] = row;
+            }),
+          );
+          const mean = (values) =>
+            values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+          for (let sweep = 0; sweep < 6; sweep++) {
+            // barycenter sweeps: fewer crossings
+            const forward = sweep % 2 === 0;
+            for (const columnIndex of columns.map((_, i) =>
+              forward ? i : columns.length - 1 - i,
+            )) {
+              const column = columns[columnIndex];
+              const score = (item) =>
+                mean((forward ? item.preds : item.succs).map((id) => rowOf[id])) ?? rowOf[item.id];
+              column.sort((a, b) => score(a) - score(b) || a.id.localeCompare(b.id));
+              column.forEach((item, row) => {
+                rowOf[item.id] = row;
+              });
+            }
+          }
+          const columnHeight = (column) =>
+            column.reduce((sum, item) => sum + item.height, 0) + (column.length - 1) * NODE.gapY;
+          const height = Math.max(...columns.map(columnHeight));
+          const position = {};
+          columns.forEach((column, columnIndex) => {
+            let y = (height - columnHeight(column)) / 2;
+            column.forEach((item) => {
+              position[item.id] = { x: columnIndex * (NODE.width + NODE.gapX), y };
+              y += item.height + NODE.gapY;
+            });
+          });
+          const bezier = (x1, y1, x2, y2) => {
+            const bend = Math.max(28, (x2 - x1) / 2);
+            return `C${x1 + bend} ${y1} ${x2 - bend} ${y2} ${x2} ${y2}`;
+          };
+          const edges = chains.map(({ chain, blocking, focus }) => {
+            const start = position[chain[0]];
+            let px = start.x + NODE.width,
+              py = start.y + NODE.height / 2;
+            let d = `M${px} ${py}`;
+            for (const id of chain.slice(1)) {
+              const item = items.get(id),
+                place = position[id];
+              const cy = place.y + item.height / 2;
+              if (item.lane) {
+                d += bezier(px, py, place.x, cy) + `L${place.x + NODE.width} ${cy}`;
+                px = place.x + NODE.width;
+                py = cy;
+              } else d += bezier(px, py, place.x - 3, cy);
+            }
+            return { d, blocking, focus };
+          });
+          return {
+            position,
+            edges,
+            width: columns.length * NODE.width + (columns.length - 1) * NODE.gapX,
+            height,
+          };
+        }
+
+        function buildGraph(onToggleFullscreen) {
+          const nodes = DATA.graph;
+          const focusId = DATA.ticket.id;
+          const layout = layoutGraph(nodes, focusId);
+          const canvas = h("div", {
+            class: "graph-canvas",
+            style: `width:${layout.width}px;height:${layout.height}px`,
+          });
+          const edgeLayer = svgEl("svg", {
+            class: "edges",
+            width: layout.width,
+            height: layout.height,
+            "aria-hidden": "true",
+          });
+          const defs = svgEl("defs");
+          for (const kind of ["finished", "blocking", "focus"]) {
+            const marker = svgEl("marker", {
+              id: `arrow-${kind}`,
+              viewBox: "0 0 10 10",
+              refX: 9,
+              refY: 5,
+              markerWidth: 9,
+              markerHeight: 9,
+              markerUnits: "userSpaceOnUse",
+              orient: "auto",
+            });
+            marker.append(svgEl("path", { d: "M0 0 10 5 0 10z", class: `arrow ${kind}` }));
+            defs.append(marker);
+          }
+          edgeLayer.append(defs);
+          // draw non-focus edges first so the focus ticket's edges sit on top
+          [...layout.edges]
+            .sort((a, b) => a.focus - b.focus)
+            .forEach((edge) => {
+              const kind = edge.blocking ? "blocking" : edge.focus ? "focus" : "finished";
+              edgeLayer.append(
+                svgEl("path", {
+                  d: edge.d,
+                  class: `gedge${edge.blocking ? " blocking" : ""}${edge.focus ? " focus" : ""}`,
+                  "marker-end": `url(#arrow-${kind})`,
+                }),
+              );
+            });
+          canvas.append(edgeLayer);
+          nodes.forEach((node) => {
+            const place = layout.position[node.id];
+            canvas.append(
+              h(
+                "div",
+                {
+                  class: `gnode s-${node.status}${node.id === focusId ? " focus" : ""}`,
+                  style: `left:${place.x}px;top:${place.y}px;width:${NODE.width}px;height:${NODE.height}px`,
+                  title: `${node.id} · ${STATUS_LABEL[node.status]} · ${node.milestone}\n${node.title}`,
+                },
+                statusGlyph(node.status),
+                h(
+                  "div",
+                  { class: "gtext" },
+                  h(
+                    "div",
+                    { class: "ghead" },
+                    h("span", { class: "gid", text: node.id }),
+                    h("span", { class: "gm", text: node.milestone }),
+                  ),
+                  h("div", { class: "gtitle", text: node.title }),
+                ),
+              ),
+            );
+          });
+          const stage = h("div", { class: "graph-stage" }, canvas);
+          const viewport = h(
+            "div",
+            {
+              class: "graph-viewport",
+              tabindex: "0",
+              role: "group",
+              "aria-label": "Dependency graph, scrollable",
+            },
+            stage,
+          );
+
+          let mode = "fit",
+            lastScale = 0;
+          const zoom = h("span", { class: "zoom", text: "" });
+          const fitButton = h("button", {
+            type: "button",
+            "aria-pressed": "true",
+            text: "Fit",
+            onclick: () => setMode("fit"),
+          });
+          const fullButton = h("button", {
+            type: "button",
+            "aria-pressed": "false",
+            text: "100%",
+            onclick: () => setMode("100"),
+          });
+          const fullscreenButton = h(
+            "button",
+            {
+              type: "button",
+              class: "btn sm",
+              "aria-label": "Full screen",
+              onclick: () => onToggleFullscreen(),
+            },
+            icon("expand"),
+            h("span", { text: "Full screen" }),
+          );
+          const panel = h(
+            "section",
+            { class: "panel graph-panel", "aria-label": "Dependency graph" },
+            h(
+              "header",
+              null,
+              h("h2", { text: "Dependency graph" }),
+              h("span", { class: "count", text: nodes.length }),
+              h(
+                "div",
+                { class: "legend" },
+                ...["done", "in_progress", "ready", "proposed"].map((status) =>
+                  h("span", null, statusGlyph(status), STATUS_LABEL[status]),
+                ),
+                h("span", null, lineSample(false), "finished"),
+                h("span", null, lineSample(true), "still blocking"),
+              ),
+              h(
+                "div",
+                { class: "gtools" },
+                zoom,
+                h(
+                  "span",
+                  { class: "seg", role: "group", "aria-label": "Graph zoom" },
+                  fitButton,
+                  fullButton,
+                ),
+                fullscreenButton,
+              ),
+            ),
+            viewport,
+          );
+
+          function applyScale(force) {
+            const panelIsFullscreen = panel.classList.contains("fs");
+            const styles = getComputedStyle(viewport);
+            const availableWidth =
+              viewport.clientWidth -
+              parseFloat(styles.paddingLeft) -
+              parseFloat(styles.paddingRight);
+            const availableHeight =
+              viewport.clientHeight -
+              parseFloat(styles.paddingTop) -
+              parseFloat(styles.paddingBottom);
+            let scale = 1;
+            if (mode === "fit") {
+              const ceiling = panelIsFullscreen ? 1.6 : 1;
+              const fit = panelIsFullscreen
+                ? Math.min(availableWidth / layout.width, availableHeight / layout.height)
+                : availableWidth / layout.width;
+              scale = Math.min(ceiling, Math.max(0.6, fit)); // scale down to 60%, then the viewport scrolls
+            }
+            scale = Math.round(scale * 1000) / 1000;
+            if (scale === lastScale && !force) return;
+            lastScale = scale;
+            canvas.style.transform = `scale(${scale})`;
+            stage.style.width = `${layout.width * scale}px`;
+            stage.style.height = `${layout.height * scale}px`;
+            zoom.textContent = `${Math.round(scale * 100)}%`;
+          }
+          function setMode(next) {
+            mode = next;
+            fitButton.setAttribute("aria-pressed", String(next === "fit"));
+            fullButton.setAttribute("aria-pressed", String(next === "100"));
+            applyScale(true);
+          }
+          new ResizeObserver(() => applyScale(false)).observe(viewport);
+          panel.refit = () => {
+            lastScale = 0;
+            applyScale(true);
+          };
+          panel.fullscreenButton = fullscreenButton;
+          panel.setFullscreenLabel = (isFullscreen) => {
+            fullscreenButton.replaceChildren(
+              icon(isFullscreen ? "close" : "expand"),
+              h("span", { text: isFullscreen ? "Close · Esc" : "Full screen" }),
+            );
+            fullscreenButton.setAttribute(
+              "aria-label",
+              isFullscreen ? "Close full screen" : "Full screen",
+            );
+          };
+          return panel;
+        }
+        function lineSample(blocking) {
+          const sample = svgEl("svg", { class: "ln", viewBox: "0 0 26 8", "aria-hidden": "true" });
+          sample.append(
+            svgEl("path", { d: "M0 4H26", class: `gedge${blocking ? " blocking" : ""}` }),
+          );
+          return sample;
+        }
+
+        let fullscreenPanel = null;
+        let teardown = [];
+
+        function buildTicket() {
+          const ticket = DATA.ticket;
+          const byId = Object.fromEntries(DATA.graph.map((node) => [node.id, node]));
+          const band = h("div", { class: "band" });
+          const graph = buildGraph(() => toggleFullscreen(graph, band));
+          band.append(graph);
+
+          const prose = [
+            { id: "sec-problem", label: "Problem", markdown: ticket.sections.problem },
+            { id: "sec-change", label: "Change", markdown: ticket.sections.change },
+            { id: "sec-evidence", label: "Evidence", markdown: ticket.sections.evidence },
+          ];
+          const rawBlock = (text) =>
+            codeBlock(text, "markdown", { wrap: true, label: "markdown source" });
+          const body = h(
+            "div",
+            { class: "kbody" },
+            prose.map((section) =>
+              h(
+                "section",
+                { class: "ksec", id: section.id },
+                h("h2", { text: section.label }),
+                state.ticketRaw ? rawBlock(section.markdown) : renderMarkdown(section.markdown),
+              ),
+            ),
+          );
+
+          // sticky chips: prose sections (left column) | acceptance criteria (right column) | Rendered/Raw
+          const chipLinks = new Map();
+          const jump = (id, className, ...children) => {
+            const link = h(
+              "a",
+              {
+                class: className,
+                href: `#${id}`,
+                onclick: (event) => {
+                  event.preventDefault();
+                  document.getElementById(id).scrollIntoView({ block: "start" });
+                },
+              },
+              ...children,
+            );
+            chipLinks.set(id, link);
+            return link;
+          };
+          const bar = h(
+            "nav",
+            { class: "kbar", "aria-label": "Ticket outline" },
+            prose.map((section) => jump(section.id, "", section.label)),
+            h("span", { class: "ksep", role: "separator" }),
+            jump(
+              "sec-criteria",
+              "",
+              "Acceptance criteria",
+              h("span", { class: "count", text: ticket.criteria.length }),
+            ),
+            ticket.criteria.map((criterion) => jump(`ac-${criterion.id}`, "ac-chip", criterion.id)),
+            h(
+              "span",
+              { class: "seg", role: "group", "aria-label": "Rendered or raw" },
+              h("button", {
+                type: "button",
+                "aria-pressed": String(!state.ticketRaw),
+                text: "Rendered",
+                onclick: () => {
+                  state.ticketRaw = false;
+                  renderApp();
+                },
+              }),
+              h("button", {
+                type: "button",
+                "aria-pressed": String(state.ticketRaw),
+                text: "Raw",
+                onclick: () => {
+                  state.ticketRaw = true;
+                  renderApp();
+                },
+              }),
+            ),
+          );
+
+          const dependsOn = ticket.depends_on;
+          const unblocks = DATA.graph.filter((node) => node.depends_on.includes(ticket.id));
+          const dependencyRow = (node) =>
+            h(
+              "div",
+              { class: "dep" },
+              h(
+                "div",
+                { class: "top2" },
+                h("span", { class: "did", text: node.id }),
+                h("span", {
+                  class: `pill ${STATUS_PILL[node.status]}`,
+                  text: STATUS_LABEL[node.status],
+                }),
+              ),
+              h("div", { class: "dt", text: node.title }),
+            );
+          const run = ticket.run;
+          const side = h(
+            "aside",
+            { class: "side", "aria-label": "Dependencies and acceptance criteria" },
+            (() => {
+              const relation = (title, list) =>
+                list.length
+                  ? h(
+                      "section",
+                      { class: "panel" },
+                      h(
+                        "header",
+                        null,
+                        h("h2", { text: title }),
+                        h("span", { class: "count", text: list.length }),
+                      ),
+                      list.map(dependencyRow),
+                    )
+                  : h("div", { class: "relnone" }, h("b", { text: title }), "· none");
+              const relations = [
+                relation(
+                  "Depends on",
+                  dependsOn.map((id) => byId[id]),
+                ),
+                relation("Unblocks", unblocks),
+              ];
+              return h(
+                "div",
+                {
+                  class: "rels",
+                  style: `--cols:${Math.max(1, [dependsOn, unblocks].filter((list) => list.length).length)}`,
+                },
+                ...relations.sort(
+                  (a, b) => (a.className === "relnone") - (b.className === "relnone"),
+                ),
+              );
+            })(),
+            h(
+              "section",
+              { class: "panel", id: "sec-criteria" },
+              h(
+                "header",
+                null,
+                h("h2", { text: "Acceptance criteria" }),
+                h("span", { class: "count", text: ticket.criteria.length }),
+              ),
+              h(
+                "div",
+                { class: "aclist" },
+                ticket.criteria.map((criterion) =>
+                  h(
+                    "article",
+                    { class: "ac", id: `ac-${criterion.id}` },
+                    h("div", { class: "acid", text: criterion.id }),
+                    h(
+                      "div",
+                      null,
+                      state.ticketRaw ? rawBlock(criterion.text) : renderMarkdown(criterion.text),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+
+          const view = h(
+            "div",
+            { class: "kview" },
+            h(
+              "div",
+              { class: "khead" },
+              h("span", { class: "id", text: ticket.id }),
+              h("span", { class: "pill build", text: run.phase }),
+              h("span", { class: "pill", text: ticket.milestone }),
+              h("span", { class: "pill", text: ticket.status }),
+              h(
+                "span",
+                { class: "mut", text: "Project " },
+                h("span", { class: "mono", text: "ark" }),
+              ),
+            ),
+            h("h1", { class: "ktitle", text: ticket.title }),
+            h(
+              "div",
+              { class: "kactions" },
+              h("a", { class: "btn primary", href: "#transcript", text: "Open run" }),
+              h("span", { class: "mono", text: run.run }),
+              h(
+                "span",
+                null,
+                h(
+                  "span",
+                  { class: "steps", "aria-hidden": "true" },
+                  Array.from({ length: run.steps_total }, (_, i) =>
+                    h("i", { class: i < run.steps_done ? "on" : "" }),
+                  ),
+                ),
+                `${run.steps_done} / ${run.steps_total} steps`,
+              ),
+              h("a", { href: "#transcript", text: DATA.transcript.step }),
+              "running in Orca, open it from its chat tab",
+            ),
+            band,
+            bar,
+            h("div", { class: "kgrid" }, body, side),
+          );
+
+          // scroll-spy: prose sections and acceptance criteria scroll side by side, so each column gets its own active chip
+          const proseIds = prose.map((section) => section.id);
+          const acIds = ticket.criteria.map((criterion) => `ac-${criterion.id}`);
+          const passed = (id) => document.getElementById(id).getBoundingClientRect().top <= 106; // bar bottom + scroll margin
+          let frame = 0;
+          const spy = () => {
+            frame = 0;
+            const atBottom =
+              window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+            const activeProse = atBottom
+              ? proseIds[proseIds.length - 1]
+              : proseIds.filter(passed).pop() || proseIds[0];
+            const activeAc = acIds.filter(passed).pop() || null;
+            for (const [id, link] of chipLinks) {
+              const current =
+                id === activeProse || id === activeAc || (id === "sec-criteria" && activeAc);
+              if (current) link.setAttribute("aria-current", "location");
+              else link.removeAttribute("aria-current");
+            }
+          };
+          const onScroll = () => {
+            if (!frame) frame = requestAnimationFrame(spy);
+          };
+          window.addEventListener("scroll", onScroll, { passive: true });
+          window.addEventListener("resize", onScroll);
+          teardown.push(() => {
+            window.removeEventListener("scroll", onScroll);
+            window.removeEventListener("resize", onScroll);
+          });
+          requestAnimationFrame(spy);
+          return view;
+        }
+
+        function toggleFullscreen(panel, band) {
+          const entering = !panel.classList.contains("fs");
+          if (entering) {
+            band.style.height = `${band.offsetHeight}px`;
+            panel.classList.add("fs");
+            document.body.style.overflow = "hidden";
+            fullscreenPanel = { panel, band };
+          } else {
+            panel.classList.remove("fs");
+            band.style.height = "";
+            document.body.style.overflow = "";
+            fullscreenPanel = null;
+          }
+          panel.setFullscreenLabel(entering);
+          panel.refit();
+          panel.fullscreenButton.focus();
+        }
+
+        /* ====================================================================== app shell */
+        function parseHash() {
+          const [view, kind, ...rest] = location.hash.replace(/^#/, "").split("/");
+          if (view === "ticket") return { view: "ticket" };
+          const selection =
+            kind === "e" && entries[Number(rest[0])]
+              ? { type: "entry", key: Number(rest[0]) }
+              : kind === "f" && DATA.run_files[rest.join("/")]
+                ? { type: "file", key: rest.join("/") }
+                : null;
+          return { view: "transcript", selection };
+        }
+        function renderApp() {
+          if (fullscreenPanel) toggleFullscreen(fullscreenPanel.panel, fullscreenPanel.band);
+          teardown.forEach((fn) => fn());
+          teardown = [];
+          const route = parseHash();
+          const keepScroll = state.view === route.view ? window.scrollY : 0;
+          state.view = route.view;
+          document
+            .getElementById("tab-transcript")
+            .setAttribute("aria-current", route.view === "transcript" ? "page" : "false");
+          document
+            .getElementById("tab-ticket")
+            .setAttribute("aria-current", route.view === "ticket" ? "page" : "false");
+          const view = document.getElementById("view");
+          if (route.view === "ticket") {
+            view.replaceChildren(buildTicket());
+            window.scrollTo(0, keepScroll);
+          } else {
+            view.replaceChildren(buildTranscript());
+            if (route.selection) state.selected = route.selection;
+            select(state.selected, { updateHash: false });
+            window.scrollTo(0, 0);
+          }
+        }
+        window.addEventListener("hashchange", renderApp);
+
+        document.addEventListener("keydown", (event) => {
+          if (event.metaKey || event.ctrlKey || event.altKey) return;
+          if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
+          if (event.key === "Escape" && fullscreenPanel) {
+            toggleFullscreen(fullscreenPanel.panel, fullscreenPanel.band);
+            return;
+          }
+          if (state.view !== "transcript") return;
+          if (event.key === "j") move(1);
+          else if (event.key === "k") move(-1);
+          else if (event.key === "r") setRaw(!state.raw);
+        });
+
+        document.getElementById("theme").addEventListener("click", (event) => {
+          const button = event.target.closest("button[data-theme]");
+          if (!button) return;
+          const root = document.documentElement;
+          if (button.dataset.theme === "auto") root.removeAttribute("data-theme");
+          else root.dataset.theme = button.dataset.theme;
+          for (const other of event.currentTarget.children)
+            other.setAttribute("aria-pressed", String(other === button));
+        });
+
+        if (!location.hash) history.replaceState(null, "", "#transcript");
+        renderApp();
+      })();
+    </script>
+  </body>
+</html>

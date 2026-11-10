@@ -99,7 +99,14 @@ export function timelineOf(events: ArkEvent[]): TimelineEntry[] {
 }
 
 /** Documents at the top of a run folder, in reading order, then the folders whose direct files are shown. */
-const documents = ["ticket.md", "evaluation.md", "strategies.md", "plan.md", "retro.md"];
+const documents = [
+  "ticket.md",
+  "evaluation.md",
+  "strategies.md",
+  "plan.md",
+  "retro.md",
+  "state.json",
+];
 const folders = ["findings", "results"];
 const shownPattern = /^(findings|results)\/[^/]+$/;
 

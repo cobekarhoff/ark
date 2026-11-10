@@ -148,13 +148,15 @@ export const retiredTarget = (hash: string): string | null =>
 export function parseRoute(hash: string): Route {
   const [path, query = ""] = hash.split("?");
   const project = new URLSearchParams(query).get("project");
-  const [, view, part, kind, subArg] = path.split("/");
+  const [, view, part, kind, ...argumentSegments] = path.split("/");
   const arg = part ? decode(part) : null;
   const none = { run: null, sub: null, arg: null, project };
   if (view === "run" && arg !== null) {
     const subKinds = ["step", "lead", "session", "file"] as const;
     const subKind = subKinds.find((candidate) => candidate === kind);
-    const sub = subKind ? { kind: subKind, arg: subArg ? decode(subArg) : null } : null;
+    // A file path may hold plain slashes (`/file/findings/a.md`) or encoded ones; both name the same path.
+    const subArg = argumentSegments.map(decode).join("/");
+    const sub = subKind ? { kind: subKind, arg: subArg || null } : null;
     return { ...none, view, run: arg, sub };
   }
   if (view === "runs" || view === "run" || view === "map") return { ...none, view: "runs" };

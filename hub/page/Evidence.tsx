@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Markdown } from "./Markdown.tsx";
 import { ticketHref } from "./store.tsx";
 import type {
   AcEvidence,
@@ -167,10 +168,12 @@ export function Criteria({
   project,
   ticket,
   criteria,
+  raw = false,
 }: {
   project: string;
   ticket: string;
   criteria: TicketCriterionView[];
+  raw?: boolean;
 }) {
   const read = useRead<TicketCases>(
     `/api/ticket/${encodeURIComponent(project)}/${encodeURIComponent(ticket)}/cases`,
@@ -207,7 +210,7 @@ export function Criteria({
                 method: {criterion.method}
               </span>
             </div>
-            <p className="crit-text">{criterion.text}</p>
+            <Markdown text={criterion.text} raw={raw} />
             {criterion.verified_by.length > 0 ? (
               <ul className="case-list" aria-label={`Test cases of ${criterion.id}`}>
                 {criterion.verified_by.map((id) => {
@@ -418,7 +421,7 @@ function Section({
   return (
     <section className="ev-section" data-testid="evidence-section" data-title={section.title}>
       {section.title === "" ? null : <Heading>{section.title}</Heading>}
-      {section.text === "" ? null : <p className="ev-text">{section.text}</p>}
+      {section.text === "" ? null : <Markdown text={section.text} />}
       {section.images.map((path) => (
         <figure key={path} className="ev-shot">
           <a href={imageUrl(run, path)} target="_blank" rel="noreferrer">
