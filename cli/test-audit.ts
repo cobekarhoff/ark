@@ -19,6 +19,7 @@ import {
   isNoSubstitutionTemplateLiteral,
   isPropertyAccessExpression,
   isStringLiteral,
+  isTemplateExpression,
   isTaggedTemplateExpression,
   isVariableStatement,
   type CallExpression,
@@ -174,6 +175,12 @@ function declarationsOf(sourceFile: SourceFile, text: string): Declaration[] {
           rows = isArrayLiteralExpression(shape.table) ? shape.table.elements.length : null;
           if (rows === null && isIdentifier(shape.table))
             rows = arrayRows.get(shape.table.text) ?? null;
+          // tagged table: the head text is the header row, each row holds one `${}` per column
+          if (isNoSubstitutionTemplateLiteral(shape.table)) rows = 0;
+          else if (isTemplateExpression(shape.table)) {
+            const columns = shape.table.head.text.split("|").length;
+            rows = shape.table.templateSpans.length / columns;
+          }
         }
         found.push({
           line: lineAt(node.getStart()),
