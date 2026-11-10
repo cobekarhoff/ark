@@ -5613,3 +5613,137 @@ async function settledBoxes(page: Page, selectors: string[]): Promise<Box[]> {
     }
   }, selectors);
 }
+
+// ---------------------------------------------------------------- ARK-355 time split
+
+const runStart = new Date("2026-11-02T10:00:00Z");
+const minutesAfterStart = (minutes: number) => minutes * 60;
+const partMinutes = (page: Page, ids: string[]) =>
+  Promise.all(ids.map((id) => page.getByTestId(`time-${id}`).locator("b").textContent()));
+
+test("ARK-T180 the run page shows the four time parts as one bar, in the closed band without metrics.json and at the top of an open run", async ({
+  page,
+}) => {
+  isolate();
+  const seconds = minutesAfterStart;
+  const closedId = closedRunId("ARK-821");
+  const closedDirectory = writeRun({
+    project: "p",
+    run: closedId,
+    ticket: closedTicket("ARK-821"),
+    phase: "closed",
+    outcome: "merged",
+    startedAt: runStart,
+    criteria: ["A1"],
+  });
+  // Step a 6 to 30 min overlaps the plan gate 20 to 40 min; step b 50 to 56; MRs at 60 and 70; close at 90.
+  const planStart = { step: "a", role: "implementer", repo: ".", round: 1 };
+  writeEventLog(closedDirectory, runStart, [
+    {
+      after: 0,
+      type: "run.started",
+      data: {
+        run: closedId,
+        project: "p",
+        ticket: closedTicket("ARK-821"),
+        criteria: ["A1"],
+        round_budget: 3,
+      },
+    },
+    { after: seconds(6), type: "step.started", data: planStart },
+    {
+      after: seconds(20),
+      type: "plan.checked",
+      data: { valid: true, problems: [], plan_hash: "a", steps: [] },
+    },
+    { after: seconds(30), type: "step.finished", data: { step: "a", outcome: "succeeded" } },
+    { after: seconds(40), type: "gate.answered", data: { gate: "plan", answer: "approve" } },
+    { after: seconds(50), type: "step.started", data: { ...planStart, step: "b" } },
+    { after: seconds(56), type: "step.finished", data: { step: "b", outcome: "succeeded" } },
+    {
+      after: seconds(60),
+      type: "merge_request.opened",
+      data: { repo: ".", url: "https://x/1", number: 1 },
+    },
+    {
+      after: seconds(70),
+      type: "merge_request.opened",
+      data: { repo: ".", url: "https://x/2", number: 2 },
+    },
+    { after: seconds(90), type: "run.closed", data: { outcome: "merged" } },
+  ]);
+  expect(existsSync(join(closedDirectory, "metrics.json"))).toBe(false);
+
+  // Open run: plan gate 5 to 15 min, step running from 15 min, no MR; the hub clock reads 45 min.
+  const openId = runId("ARK-822");
+  const openDirectory = writeRun({
+    project: "p",
+    run: openId,
+    ticket: { id: "ARK-822", title: "Title of ARK-822" },
+    phase: "building",
+    startedAt: runStart,
+  });
+  writeEventLog(openDirectory, runStart, [
+    {
+      after: 0,
+      type: "run.started",
+      data: {
+        run: openId,
+        project: "p",
+        ticket: { id: "ARK-822", title: "t" },
+        criteria: ["A1"],
+        round_budget: 3,
+      },
+    },
+    {
+      after: seconds(5),
+      type: "plan.checked",
+      data: { valid: true, problems: [], plan_hash: "a", steps: [] },
+    },
+    { after: seconds(15), type: "gate.answered", data: { gate: "plan", answer: "approve" } },
+    { after: seconds(15), type: "step.started", data: planStart },
+  ]);
+  installFakeTools({});
+  process.env.ARK_NOW = new Date(runStart.getTime() + seconds(45) * 1000).toISOString();
+  let baseUrl: string;
+  try {
+    baseUrl = await launch();
+  } finally {
+    delete process.env.ARK_NOW;
+  }
+  const ids = ["you", "work", "merge", "idle"];
+
+  await open(page, baseUrl, `run/${closedId}`);
+  const bar = bandOf(page).getByTestId("time-bar");
+  await expect(bar).toBeVisible();
+  await expect(page.getByTestId("time-bar")).toHaveCount(1);
+  expect(await partMinutes(page, ids)).toEqual(["20m", "20m", "30m", "20m"]);
+  await expect(bar.locator(".parts li .name")).toHaveText([
+    "Waiting on you",
+    "Working",
+    "Waiting to merge",
+    "Idle",
+  ]);
+  const widths = await bar
+    .locator(".bar span")
+    .evaluateAll((all) => all.map((segment) => segment.getBoundingClientRect().width));
+  expect(widths).toHaveLength(4);
+  expect(widths[2] / widths[0]).toBeCloseTo(1.5, 1);
+  expect(widths[1] / widths[0]).toBeCloseTo(1, 1);
+  await checkpoint(page, "closed-no-metrics-bar");
+
+  await open(page, baseUrl, `run/${openId}`);
+  await expect(page.getByTestId("closed-band")).toHaveCount(0);
+  await expect(page.getByTestId("time-bar")).toHaveCount(1);
+  expect(await partMinutes(page, ids)).toEqual(["10m", "30m", "0m", "5m"]);
+  const openWidths = await page
+    .getByTestId("time-bar")
+    .locator(".bar span")
+    .evaluateAll((all) => all.map((segment) => segment.getBoundingClientRect().width));
+  expect(openWidths).toHaveLength(3); // no merge segment for 0 minutes
+  expect(openWidths[1] / openWidths[0]).toBeCloseTo(3, 1);
+  const barBox = (await page.getByTestId("time-bar").boundingBox())!;
+  const planBox = (await page.locator(".plan-panel").boundingBox())!;
+  expect(barBox.y + barBox.height).toBeLessThanOrEqual(planBox.y);
+  await checkpoint(page, "open-run-top-bar");
+});
