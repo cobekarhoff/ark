@@ -6,7 +6,7 @@ status: accepted
 
 An AC belongs to its ticket: a ticket writes its ACs as `AC1`, `AC2`, and another ticket names one as `ARK-243/AC1`. The old form `ARK-243-AC1` is the same AC. A done ticket's ACs never change, and no field replaces an AC.
 
-A test case is a lasting statement of what the product does. It is one entry `test/cases/<KEY>-T<n>.md`, made with `ark test-case new <KEY>`, and its ID starts the title of the test that runs it. An AC links to its test cases through `verified_by` in the ticket, many to many: one case can serve two ACs and one AC can need two cases. Each AC has a `method`: `test` (the default), `demonstration`, `inspection` or `analysis`. The key `test_case_source` in `ark.yml` says where entries live; only `local` exists.
+A test case is a lasting statement of what the product does. It is one entry `test/cases/<KEY>-T<n>.md`, made with `ark test-case new <KEY> --run <run>`, and its ID starts the title of the test that runs it. An AC links to its test cases through `verified_by` in the ticket, many to many: one case can serve two ACs and one AC can need two cases. Each AC has a `method`: `test` (the default), `demonstration`, `inspection` or `analysis`. The key `test_case_source` in `ark.yml` says where entries live; only `local` exists.
 
 This replaces the rule of [ADR 0006](0006-integration-and-e2e-proof-only.md). Any level can be a test case, but every AC with `method: test` needs at least one integration or E2E test case in `verified_by`. Prefer integration and E2E: a unit case must earn its place. `ark test` decides an AC from the results of its `verified_by` cases at every level. An old-scheme AC with no `verified_by` keeps the old tag path, and only integration and E2E results count for it.
 
