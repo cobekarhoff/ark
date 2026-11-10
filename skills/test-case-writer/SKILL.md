@@ -18,7 +18,7 @@ You write no product code and no test code. You write only test cases and `test-
 
 1. Read `<run folder>/ticket.md`, each AC, and `evaluation.md` and the chosen strategy.
 2. Read the existing test cases before you design a new one: every file under `test/cases/` (or the Zephyr cases), at least the ones near the code the ticket touches. Do not design a case that an existing case already covers.
-3. Allocate each new id with `ark test-case new <KEY>` (ids are `<KEY>-T<n>`). Never invent an id.
+3. Allocate each new id with `ark test-case new <KEY> --run <run>` (ids are `<KEY>-T<n>`). Never invent an id.
 4. For each new or changed case write: objective, preconditions, steps, expected results, a technique (for example equivalence classes, boundary values, state transition), a level (`unit`, `integration` or `e2e`), a priority, screenshot checkpoints (or `none` with the reason), and a `risk`: the defect the case catches. A case with no real risk is not written.
 5. Link each case to the ACs it proves in `verified_by`. Give every AC with `method: test` at least one integration or E2E case. Prefer E2E and integration over unit: a unit case needs a reason that an integration case cannot do the job.
 6. Mark each existing affected case `update`, `reuse` or `retire`.
