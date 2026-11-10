@@ -232,6 +232,9 @@ afterEach(() => {
     join(fixtures, `fail-${runA}`),
     join(fixtures, "fail-cli"),
     join(fixtures, "slowterm"),
+    // the suites read files of the fixture folder, so a stored result of an earlier test would answer for them
+    join(arkHome, "projects", projectA, "test-cache"),
+    join(arkHome, "projects", "lock-two", "test-cache"),
   ])
     rmSync(path, { recursive: true, force: true });
   mkdirSync(budgetDirectory(), { recursive: true }); // waitFor watches it
@@ -255,7 +258,22 @@ const startedTests: Subprocess[] = [];
  */
 function killStarted(): void {
   for (const child of startedTests.splice(0)) child.kill("SIGKILL");
-  Bun.spawnSync(["pkill", "-9", "-f", fixtures]);
+  // The detached runners outlive their callers: find them by their run id. A caller killed while it spawns its
+  // runner leaves a runner that appears after the first pass, so the second pass comes after a pause.
+  for (let pass = 0; pass < 2; pass++) {
+    for (const run of [runA, runB]) Bun.spawnSync(["pkill", "-9", "-f", `test-runner ${run} `]);
+    Bun.spawnSync(["pkill", "-9", "-f", fixtures]);
+    if (pass === 0) Bun.sleepSync(300);
+  }
+}
+
+/** The pid in the ticket of a run: the detached runner that holds the budget, not the caller. */
+function runnerPid(run: string): number {
+  for (const name of tickets()) {
+    const ticket = JSON.parse(readFileSync(join(budgetDirectory(), name), "utf8"));
+    if (ticket.run === run) return ticket.pid;
+  }
+  throw new Error(`no ticket of ${run}`);
 }
 
 /** Starts `ark test <run>` as a child process of the temp ARK_HOME with its stdout collected. */
@@ -361,8 +379,8 @@ describe("ark test budget", () => {
     test(`ARK-T59 the tickets are gone right after ${signal} ends ark test`, async () => {
       const first = startTest(runA);
       await waitFor(started(runA));
-      first.process.kill(signal);
-      await first.process.exited;
+      process.kill(runnerPid(runA), signal);
+      expect(await first.process.exited).toBe(128 + (signal === "SIGINT" ? 2 : 15));
       await first.stdout;
       await expectCleanRunOfB();
     });
@@ -376,7 +394,7 @@ describe("ark test budget", () => {
       await waitFor(started(runA));
       const second = startTest(runB);
       await second.until("waiting:");
-      first.process.kill(signal);
+      process.kill(runnerPid(runA), signal);
       await first.process.exited;
       writeFileSync(join(fixtures, "release"), "");
       await second.process.exited;
@@ -428,10 +446,10 @@ describe("ark test budget", () => {
       .find((part) => part.startsWith("ark test budget"));
     expect(section).toBeDefined();
     expect(section).toMatch(
-      new RegExp(`running: ${runA} \\(pid ${first.process.pid}\\), 6 cores, running \\d+(s|m)`),
+      new RegExp(`running: ${runA} \\(pid ${runnerPid(runA)}\\), 6 cores, running \\d+(s|m)`),
     );
     expect(section).toMatch(
-      new RegExp(`waiting: ${runB} \\(pid ${second.process.pid}\\), 6 cores, waited \\d+(s|m)`),
+      new RegExp(`waiting: ${runB} \\(pid ${runnerPid(runB)}\\), 6 cores, waited \\d+(s|m)`),
     );
 
     const dead = Bun.spawn(["true"]);
@@ -563,7 +581,7 @@ mock.module("node:fs", () => ({
   },
 }));
 const { openTestBudget } = await import(${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))});
-const budget = openTestBudget(name, 6, async () => {}, {
+const budget = openTestBudget(name, 6, {
   print: (line) => fs.appendFileSync(home + "/" + name + "-lines", line + "\\n"),
 });
 await budget.take(6);
@@ -760,6 +778,11 @@ describe("ark test suite TMPDIR and cores", () => {
 
     // A suite that fails still has its folder deleted.
     rmSync(recordFile());
+    // the passed suites of the first run are stored: the failing variant must run
+    rmSync(join(arkHome, "projects", "tmpdir-project", "test-cache"), {
+      recursive: true,
+      force: true,
+    });
     writeFileSync(join(fixtures, "fail-cli"), "");
     const failed = await runWithCallerTmpdir(run);
     expect(failed.exitCode).not.toBe(0);

@@ -110,6 +110,8 @@ export type Ledger = {
   hasReviewerStep: boolean;
   /** Each `checks` entry of `ark.yml` with the outcome of the last `test.completed`; `not run` when that event has a `checks` list without it, `unknown` when the event has no `checks` list (an old run). */
   checks: { name: string; state: "passed" | "failed" | "not run" | "unknown" }[];
+  /** Test files the last `test.completed` lists as flaky: they failed once and passed on retry. */
+  flaky: { suite: string; file: string }[];
   /** The block of the latest findings file; `null` when the file has none, or there is no file. */
   reviewer: ReviewerBlock | null;
   mergeOrder: string[];
@@ -601,6 +603,7 @@ function gitLedger(source: { directory: string; base?: string; prWriting?: PrWri
     findings: [],
     hasReviewerStep: false,
     checks: [],
+    flaky: [],
     reviewer: null,
     mergeOrder: ["."],
     repos: [repo],
@@ -850,6 +853,7 @@ function runLedger(source: {
     findings: openFindings(findingsFiles),
     hasReviewerStep: (plan?.steps ?? []).some((step) => step.role === "reviewer"),
     checks,
+    flaky: lastTest?.data.flaky ?? [],
     reviewer,
     mergeOrder: order,
     repos,

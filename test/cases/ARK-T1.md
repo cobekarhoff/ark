@@ -6,7 +6,7 @@ technique: state transition (base fail / head pass) plus equivalence classes of 
 priority: high
 risk: ark test skips base for non-refactor kinds, copies no head test files into base, or lets a base failure fail a feature run; or a head failure stops failing the run
 status: active
-changed_by: 2026-11-08-ARK-389-1
+changed_by: 2026-11-09-ARK-366-1
 ---
 
 ## Objective
@@ -39,7 +39,7 @@ Prove that `ark test` runs at the `worktree.created` base commit, for a `feature
 - When a new test fails at base and passes at head in a `feature`, `bug` or `perf` run, the system shall exit 0 from `ark test`.
 - When `ark test` runs, the system shall run every suite that selects a changed test file (every suite for a `refactor` run) of every touched repo at that repo's own recorded base SHA. A suite with no changed file is skipped on purpose (ARK-T119), not a failure.
 - When `ark test` runs, the system shall copy head's added, changed and renamed-to files under any `test`, `tests` or `features` folder (any depth, including non-root folders such as `packages/app/test`, helpers, fixtures and `test/cases/`) into the base checkout, and shall not delete a base file deleted or renamed at head, and shall not copy production files.
-- When `ark test` runs a full (not `--quick`) `feature`, `bug`, `perf` or `refactor` run, the system shall run the suites at base on every invocation and shall not reuse an earlier base result.
+- When `ark test` runs a full (not `--quick`) `feature`, `bug`, `perf` or `refactor` run, the system shall run the suites at base on the first invocation for a given base commit and copied-test-file hash, and shall run them again whenever either changes (steps 7 and 10 change the head test file, so the copied hash changes). Reuse of an unchanged passed base result is owned by ARK-T163; a failed base result is never reused. The copying, base-SHA and outcome assertions of this case hold on every run that executes base.
 - When the suites fail at base in a `refactor` run with at least one `method: test` AC, the system shall exit non-zero. A `refactor` run with no `method: test` AC is not refused for this (ARK-T63).
 - When a suite fails at head, the system shall exit non-zero for every kind, including `bug`, `perf` and `refactor` runs whose base passes.
 

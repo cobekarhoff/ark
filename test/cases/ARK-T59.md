@@ -4,16 +4,16 @@ title: ARK-T59 two ark test processes of two runs never run their suites at the 
 level: integration
 technique: state transition (free, held, released), plus signal and failure exits
 priority: high
-risk: two `ark test` runs on one host run their suites together, so the load average rises and timing-sensitive tests fail at random; or the budget tickets stay after a failed suite, SIGINT or SIGTERM and hold cores until the stale-pid check clears them; or a signal frees the cores while the suite still runs
+risk: two `ark test` runs on one host run their suites together, so the load average rises and timing-sensitive tests fail at random; or the budget tickets stay after a failed suite, SIGINT or SIGTERM sent to the detached runner and hold cores until the stale-pid check clears them; or a signal frees the cores while the suite still runs
 status: active
 changed_by: 2026-11-09-ARK-390-1
 ---
 
 ## Objective
 
-Prove that two `ark test` processes whose suites each ask for the whole budget run them one at a time, print their place while they wait, and remove every ticket on every exit. Serves ARK-390/AC1.
+Prove that two `ark test` processes whose suites each ask for the whole budget run them one at a time, print their place while they wait, and remove every ticket on every exit of the detached runner that holds them (ARK-366). Serves ARK-390/AC1. A signal to the caller does not stop the suites (ARK-T161 owns that).
 
-Expected: When two suites each take the whole budget, the system shall run them one at a time; the waiting `ark test` shall print `waiting: place <n> of <m>; running: <run> <cores> cores`; the system shall remove the tickets of `ark test` when it ends by pass, suite failure, SIGINT or SIGTERM, and shall keep the cores until the suite of a signalled `ark test` has ended.
+Expected: When two suites each take the whole budget, the system shall run them one at a time; the waiting `ark test` shall print `waiting: place <n> of <m>; running: <run> <cores> cores`; the system shall remove the tickets of the runner when it ends by pass, suite failure, SIGINT or SIGTERM, and shall keep the cores until the suite of a signalled runner has ended.
 
 ## Preconditions
 
@@ -24,8 +24,8 @@ Expected: When two suites each take the whole budget, the system shall run them 
 1. Start `ark test A`. Wait until the log holds `start A`. Start `ark test B` and collect its stdout. Wait for both to exit.
 2. Read the log, the stdout of B and the `test-budget` folder.
 3. Failing suite: run `ark test A` with the failing script to the end. Straight after A exits, check the `test-budget` folder. Then run `ark test B` and collect its stdout.
-4. Signals, for SIGINT and again for SIGTERM: start `ark test A`, wait for `start A`, send the signal to its pid, wait for exit. Straight after, check the `test-budget` folder, then run `ark test B`.
-5. Slow end: with the holding and slow-ending suite, start A, then B until B prints `waiting:`. Signal A and wait for it to exit. Create the `release` file and wait for B.
+4. Signals to the runner, for SIGINT and again for SIGTERM: start `ark test A`, wait for `start A`, read the runner pid from its ticket (not the caller pid) and send the signal to that pid, wait for A to exit with 128 plus the signal number. Straight after, check the `test-budget` folder, then run `ark test B`.
+5. Slow end: with the holding and slow-ending suite, start A, then B until B prints `waiting:`. Signal the runner of A and wait for it to exit. Create the `release` file and wait for B.
 
 ## Expected results
 

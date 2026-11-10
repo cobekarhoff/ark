@@ -68,6 +68,8 @@ export type RunState = {
     heads: Record<string, string>;
     mode: "quick" | "full";
     duration?: number;
+    /** Test files that failed once and passed on retry, with their suite. */
+    flaky?: { suite: string; file: string }[];
   } | null;
   /** Some test.completed had every non-manual criterion failing: the bug run's proof that the tests fail before the fix. */
   red_test: boolean;
@@ -285,6 +287,7 @@ export function deriveState(events: ArkEvent[]): RunState {
           heads: data.heads,
           mode: data.mode === "quick" ? "quick" : "full",
           ...(typeof data.duration === "number" ? { duration: data.duration } : {}),
+          ...(Array.isArray(data.flaky) ? { flaky: data.flaky } : {}),
         };
         basePassed = data.base_passed ?? basePassed;
         testRuns.push(criteriaStatus);

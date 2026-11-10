@@ -120,7 +120,7 @@ function waitingLine(place: number, total: number, running: Ticket[], now: numbe
 export type TestBudget = {
   /** Waits for admission of one suite and returns its release. Cores above the budget, or none, take the whole budget. */
   take(cores: number | undefined): Promise<{ cores: number; release: () => void }>;
-  /** Removes the signal handlers and every ticket of this process. */
+  /** Removes every ticket of this process. */
   close(): void;
 };
 
@@ -132,14 +132,13 @@ type Options = {
 };
 
 /**
- * Opens the budget for one `ark test`. SIGINT, SIGTERM and SIGHUP call `onSignal` (it stops child processes and
- * resolves when they have ended), then remove every ticket of this process and exit 128+signal: cores stay taken
- * until the work under them has stopped.
+ * Opens the budget for one `ark test`, held by its detached runner. The runner stops the suites on a signal and
+ * exits, so the tickets stay until the work under them has stopped; the exit handler then removes every ticket
+ * of this process, and a runner that was killed leaves tickets that count as ended pids.
  */
 export function openTestBudget(
   runId: string,
   budget: number,
-  onSignal: () => Promise<void>,
   { now = Date.now, print = console.log }: Options = {},
 ): TestBudget {
   const files = new Set<string>();
@@ -147,27 +146,10 @@ export function openTestBudget(
     for (const file of files) rmSync(file, { force: true });
     files.clear();
   };
-  const signals = { SIGINT: 2, SIGTERM: 15, SIGHUP: 1 } as const;
-  let shuttingDown = false;
-  const handlers = Object.entries(signals).map(([name, number]) => {
-    const handler = async () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      try {
-        await onSignal();
-      } finally {
-        cleanup();
-        process.exit(128 + number);
-      }
-    };
-    process.on(name as NodeJS.Signals, handler);
-    return [name as NodeJS.Signals, handler] as const;
-  });
   process.on("exit", cleanup);
 
   return {
     close() {
-      for (const [name, handler] of handlers) process.off(name, handler);
       process.off("exit", cleanup);
       cleanup();
     },

@@ -51,7 +51,7 @@ describe("ark test budget admission", () => {
     let time = Date.now();
     const client = (run: string) => {
       const sink = lineSink();
-      const budget = openTestBudget(run, 6, async () => {}, {
+      const budget = openTestBudget(run, 6, {
         now: () => (time += 31_000),
         print: sink.print,
       });
@@ -170,7 +170,7 @@ console.log(validateConfig({ workspace: "/tmp", ticket_source: "local", suites: 
     const readWatchers: { count: number; done: () => void }[] = [];
     const sink = lineSink();
     const printedAt: number[] = [];
-    const budget = openTestBudget("R", 6, async () => {}, {
+    const budget = openTestBudget("R", 6, {
       now: () => {
         reads += 1;
         for (const watcher of readWatchers.filter((entry) => entry.count <= reads)) watcher.done();
