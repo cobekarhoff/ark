@@ -1,6 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
-import { isUnknownProject, scoped, ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
+import {
+  isUnknownProject,
+  scoped,
+  ticketEntries,
+  ticketKey,
+  type Lane,
+  type TicketEntry,
+} from "./derive.ts";
 import { Ring, Unknown, UnknownProject, dollars, known } from "./format.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { ticketHref, useLive, useProject } from "./store.tsx";
@@ -35,7 +42,7 @@ const lanes = [
   ["Needs me", "gate or escalation", "p-gate"],
   ["Awaiting merge", "MR in the review queue", "p-review"],
   ["Closed", "newest first", "p-done"],
-] as const;
+] as const satisfies readonly (readonly [Lane, string, string])[];
 
 const closedPage = 20;
 const filters = ["Active", "Queued", "Old"] as const;

@@ -8,22 +8,30 @@ import {
 } from "react";
 import type { Snapshot, SourceName } from "../types.ts";
 
+/** `connecting` until the first snapshot; `reconnecting` when the stream dropped after one, which stays on screen. */
+type Connection = "connecting" | "live" | "reconnecting";
+
 type Live = {
   snapshot: Snapshot | null;
   /** Browser clock at the last message: the age of a source adds the time since this. */
   receivedAt: number;
-  connected: boolean;
+  connection: Connection;
 };
 
-const Context = createContext<Live>({ snapshot: null, receivedAt: 0, connected: false });
+const initial: Live = { snapshot: null, receivedAt: 0, connection: "connecting" };
+const Context = createContext<Live>(initial);
 
 export function LiveProvider({ children }: { children: ReactNode }) {
-  const [live, setLive] = useState<Live>({ snapshot: null, receivedAt: 0, connected: false });
+  const [live, setLive] = useState<Live>(initial);
   useEffect(() => {
     const source = new EventSource("/events");
     source.onmessage = (message) =>
-      setLive({ snapshot: JSON.parse(message.data), receivedAt: Date.now(), connected: true });
-    source.onerror = () => setLive((previous) => ({ ...previous, connected: false }));
+      setLive({ snapshot: JSON.parse(message.data), receivedAt: Date.now(), connection: "live" });
+    source.onerror = () =>
+      setLive((previous) => ({
+        ...previous,
+        connection: previous.snapshot ? "reconnecting" : "connecting",
+      }));
     return () => source.close();
   }, []);
   return <Context value={live}>{children}</Context>;

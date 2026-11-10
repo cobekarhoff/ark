@@ -5,15 +5,7 @@ import { canonicalCriterion } from "./criterion-id.ts";
 import { evidenceFile, frontmatter, manualCriteria, parseCriteria, runCriteria } from "./ticket.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
-
-// The strategy gate has no fixed answers: the transition table checks the card ids of the run.
-const gateAnswers: Record<string, string[]> = {
-  criteria: ["accept", "edit", "abort"],
-  strategy: [],
-  plan: ["approve", "change", "abort"],
-  escalation: ["one_more_round", "take_over", "abort"],
-  manual: ["ok", "problem"],
-};
+import { type Gate, gateAnswers, gates } from "./lifecycle.ts";
 
 // Reads the ticket file named in run.started, so edits made at the criteria gate are picked up.
 function acceptCriteria(runDirectory: string): void {
@@ -59,13 +51,13 @@ export function gateRecord(
         : `gate ${gate} needs an answer`,
     );
   }
-  if (!Object.hasOwn(gateAnswers, gate)) {
-    throw new ArkError(`unknown gate "${gate}": use ${Object.keys(gateAnswers).join(", ")}`);
+  if (!(gates as readonly string[]).includes(gate)) {
+    throw new ArkError(`unknown gate "${gate}": use ${gates.join(", ")}`);
   }
-  if (gate !== "strategy" && !gateAnswers[gate].includes(answer)) {
-    throw new ArkError(
-      `unknown answer "${answer}" for gate ${gate}: use ${gateAnswers[gate].join(", ")}`,
-    );
+  // The strategy gate has no fixed answers: the transition table checks the card ids of the run.
+  const answers = gate === "strategy" ? undefined : gateAnswers[gate as Exclude<Gate, "strategy">];
+  if (answers && !answers.includes(answer)) {
+    throw new ArkError(`unknown answer "${answer}" for gate ${gate}: use ${answers.join(", ")}`);
   }
   const { directory } = findRun(runId, inProject);
   const criterion =
