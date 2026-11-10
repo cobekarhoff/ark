@@ -22,6 +22,7 @@ import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts
 import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
+import { oldIdsTouched } from "./test-audit.ts";
 import { findRun } from "./paths.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
 import { openTestBudget, type TestBudget } from "./test-lock.ts";
@@ -760,6 +761,30 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
       if (outcome.code !== 0) {
         console.log(`check ${check.name} failed`);
         console.log(output.trimEnd().split("\n").slice(-20).join("\n"));
+      }
+    }
+    // ARK-384: once per bun suite, on the diff from the run's base; reads git objects, so the cache keys are unchanged.
+    for (const suite of config.suites) {
+      const label = `old id    suite ${suite.name} (${suite.parser})`;
+      if (suite.parser !== "bun") {
+        console.log(`${label}  skipped  (parser ${suite.parser} has no old-id check)`);
+        continue;
+      }
+      const base = state.worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+      if (base === undefined) {
+        console.log(`${label}  skipped  (no base commit)`);
+        continue;
+      }
+      const touched = await oldIdsTouched(join(mirror, suite.repo), base, suite, config.suites);
+      writeFileSync(join(resultsDirectory, `check-old-id-${suite.name}.log`), touched.join("\n"));
+      checks.push({ name: `old-id ${suite.name}`, passed: touched.length === 0 });
+      if (touched.length === 0) console.log(`${label}  passed  (0 old-id declarations touched)`);
+      else {
+        console.log(`${label}  failed`);
+        console.log(touched.join("\n"));
+        console.log(
+          "fix       write a test case (ark test-case new <KEY>), start the title with its id, name it in the plan",
+        );
       }
     }
     const repos = discoverRepos(config.workspace);
