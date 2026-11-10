@@ -5,8 +5,13 @@ import { ArkError } from "./errors.ts";
 import { deriveState, readEvents, type RunState } from "./events.ts";
 import { exec, execJson } from "./exec.ts";
 import { findLiveChief, orcaPages, orcaRead, orcaTimeout, readTerminals } from "./orca.ts";
+import { cpus } from "node:os";
+import { readHost, memoryReasons } from "./host.ts";
 import { readTestLock } from "./test-lock.ts";
 import { listProjects, projectDirectory, runsDirectory } from "./paths.ts";
+
+/** Master Chief starts no run while free disk is under this many GB. */
+const minimumFreeDiskGigabytes = 10;
 
 /** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for a one-off command. */
 const orcaTimeoutMilliseconds = orcaTimeout(10_000);
@@ -191,13 +196,28 @@ export async function chiefState(inProject?: string): Promise<void> {
     `- Closed runs since the last interview: ${sinceInterview}${sinceInterview >= 10 ? " (due)" : ""}`,
   );
 
-  const df = await exec(["df", "-k", "/"]);
-  const availableKilobytes = Number(df?.trim().split("\n")[1]?.trim().split(/\s+/)[3]);
+  const host = await readHost();
+  const memory = memoryReasons(host, config.test_min_free_memory_percent, config.test_max_swap_gb);
+  const coreCount = cpus().length;
+  const holdReasons = [...memory.reasons];
+  if (host.load !== null && host.load > coreCount)
+    holdReasons.push(`load ${host.load.toFixed(1)} is above the ${coreCount} cores`);
+  if (host.freeDiskGigabytes !== null && host.freeDiskGigabytes < minimumFreeDiskGigabytes)
+    holdReasons.push(
+      `free disk ${host.freeDiskGigabytes} GB is below the ${minimumFreeDiskGigabytes} GB floor`,
+    );
+  const reading = <value>(value: value | null, show: (value: value) => string) =>
+    value === null ? "unavailable" : show(value);
   sections.push(
-    "## Disk",
-    Number.isFinite(availableKilobytes)
-      ? `- Free: ${Math.floor(availableKilobytes / 1024 / 1024)} GiB on \`/\``
-      : "unavailable: `df -k /` failed",
+    "## Host",
+    [
+      `free memory: ${reading(host.freeMemoryPercent, (percent) => `${percent}%`)}`,
+      `swap used: ${reading(host.swapUsedGigabytes, (used) => `${used.toFixed(1)} GB of ${host.swapTotalGigabytes?.toFixed(1) ?? "unavailable"} GB`)}`,
+      `load (5 min): ${reading(host.load, (load) => load.toFixed(1))}`,
+      `free disk: ${reading(host.freeDiskGigabytes, (gigabytes) => `${gigabytes} GB`)}`,
+      `tests: running ${running.length}, waiting ${waiting.length}`,
+      `hold new runs: ${holdReasons.length === 0 ? "no" : holdReasons.join("; ")}`,
+    ].join("\n"),
   );
 
   console.log(sections.join("\n\n"));
