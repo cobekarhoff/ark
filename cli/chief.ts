@@ -6,12 +6,9 @@ import { deriveState, readEvents, type RunState } from "./events.ts";
 import { exec, execJson } from "./exec.ts";
 import { findLiveChief, orcaPages, orcaRead, orcaTimeout, readTerminals } from "./orca.ts";
 import { cpus } from "node:os";
-import { readHost, memoryReasons } from "./host.ts";
+import { holdReasons, readHost } from "./host.ts";
 import { readTestLock } from "./test-lock.ts";
 import { listProjects, projectDirectory, runsDirectory } from "./paths.ts";
-
-/** Master Chief starts no run while free disk is under this many GB. */
-const minimumFreeDiskGigabytes = 10;
 
 /** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for a one-off command. */
 const orcaTimeoutMilliseconds = orcaTimeout(10_000);
@@ -197,15 +194,11 @@ export async function chiefState(inProject?: string): Promise<void> {
   );
 
   const host = await readHost();
-  const memory = memoryReasons(host, config.test_min_free_memory_percent, config.test_max_swap_gb);
-  const coreCount = cpus().length;
-  const holdReasons = [...memory.reasons];
-  if (host.load !== null && host.load > coreCount)
-    holdReasons.push(`load ${host.load.toFixed(1)} is above the ${coreCount} cores`);
-  if (host.freeDiskGigabytes !== null && host.freeDiskGigabytes < minimumFreeDiskGigabytes)
-    holdReasons.push(
-      `free disk ${host.freeDiskGigabytes} GB is below the ${minimumFreeDiskGigabytes} GB floor`,
-    );
+  const reasons = holdReasons(host, {
+    minimumFreePercent: config.test_min_free_memory_percent,
+    maximumSwapGigabytes: config.test_max_swap_gb,
+    cores: cpus().length,
+  });
   const reading = <value>(value: value | null, show: (value: value) => string) =>
     value === null ? "unavailable" : show(value);
   sections.push(
@@ -216,7 +209,7 @@ export async function chiefState(inProject?: string): Promise<void> {
       `load (5 min): ${reading(host.load, (load) => load.toFixed(1))}`,
       `free disk: ${reading(host.freeDiskGigabytes, (gigabytes) => `${gigabytes} GB`)}`,
       `tests: running ${running.length}, waiting ${waiting.length}`,
-      `hold new runs: ${holdReasons.length === 0 ? "no" : holdReasons.join("; ")}`,
+      `hold new runs: ${reasons.length === 0 ? "no" : reasons.join("; ")}`,
     ].join("\n"),
   );
 

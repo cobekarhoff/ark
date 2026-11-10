@@ -93,3 +93,29 @@ export function memoryReasons(
     reasons.push(`swap ${swapUsedGigabytes} GB is above the ${maximumSwapGigabytes} GB ceiling`);
   return { reasons, unchecked: freeMemoryPercent === null || swapUsedGigabytes === null };
 }
+
+/** Master Chief starts no run while free disk is under this many GB. */
+export const minimumFreeDiskGigabytes = 10;
+
+/**
+ * Every reason `ark chief state` holds new runs, in the order free memory, swap, load, disk. Load is over `cores`;
+ * disk is under `minimumFreeDiskGigabytes`. A missing reading never holds.
+ */
+export function holdReasons(
+  reading: HostReading,
+  limits: { minimumFreePercent: number; maximumSwapGigabytes: number; cores: number },
+): string[] {
+  const reasons = memoryReasons(
+    reading,
+    limits.minimumFreePercent,
+    limits.maximumSwapGigabytes,
+  ).reasons;
+  const { load, freeDiskGigabytes } = reading;
+  if (load !== null && load > limits.cores)
+    reasons.push(`load ${load.toFixed(1)} is above the ${limits.cores} cores`);
+  if (freeDiskGigabytes !== null && freeDiskGigabytes < minimumFreeDiskGigabytes)
+    reasons.push(
+      `free disk ${freeDiskGigabytes} GB is below the ${minimumFreeDiskGigabytes} GB floor`,
+    );
+  return reasons;
+}

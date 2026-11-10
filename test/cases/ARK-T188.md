@@ -33,13 +33,13 @@ Prove `ark chief state` prints the Host readings and one `hold new runs:` line t
 ## Expected results
 
 - Step 1: a `## Host` section with free memory in percent, swap used, the 5-minute load, free disk and `tests: running 0, waiting 0` (the section prints when no test is queued), and the line `hold new runs: no`.
-- Step 2: `hold new runs: free memory 19% below 20%`.
-- Step 3: the line names swap and its numbers, for example `hold new runs: swap 8.1 GB above 8 GB`.
+- Step 2: `hold new runs: free 19% is below the 20% floor`.
+- Step 3: the line names swap and its numbers, for example `hold new runs: swap 8.1 GB is above the 8 GB ceiling`.
 - Step 4: the line names the load and the limit; Step 5: the line names the disk and the limit.
 - Step 6: `hold new runs: no` (a limit is crossed only beyond its value, as in ARK-T187).
 - Step 7: one `hold new runs:` line with the four reasons joined in the fixed order free memory, swap, load, disk. There is exactly one such line.
 - Step 8: the Host section says `running 1, waiting 1`, and the `## ark test budget` section still lists both.
-- Step 9: the other readings print, the unreadable one prints `unchecked`, and it never causes a hold.
+- Step 9: the other readings print, the unreadable one prints `swap used: unavailable`, and it never causes a hold.
 
 ## Screenshot checkpoints
 
