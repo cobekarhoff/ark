@@ -253,6 +253,8 @@ repos: # only for repos where step 3 got a base; key is the repo path, exactly
 merge_requests: none # only when the human says the project must not push; omit otherwise
 compose: <compose command> # omit when the project has no compose file
 test_budget_cores: <cores all ark test runs of the host share; omit for floor(0.6 x cores)>
+test_min_free_memory_percent: <percent of memory that must be free before ark test starts a suite; omit for 20>
+test_max_swap_gb: <GB of swap used above which ark test starts no suite; omit for 8>
 suites:
   - name: <unique name>
     level: <integration | e2e>

@@ -5,6 +5,8 @@ import { ArkError } from "./errors.ts";
 import { deriveState, readEvents, type RunState } from "./events.ts";
 import { exec, execJson } from "./exec.ts";
 import { findLiveChief, orcaPages, orcaRead, orcaTimeout, readTerminals } from "./orca.ts";
+import { cpus } from "node:os";
+import { holdReasons, readHost } from "./host.ts";
 import { readTestLock } from "./test-lock.ts";
 import { listProjects, projectDirectory, runsDirectory } from "./paths.ts";
 
@@ -191,13 +193,24 @@ export async function chiefState(inProject?: string): Promise<void> {
     `- Closed runs since the last interview: ${sinceInterview}${sinceInterview >= 10 ? " (due)" : ""}`,
   );
 
-  const df = await exec(["df", "-k", "/"]);
-  const availableKilobytes = Number(df?.trim().split("\n")[1]?.trim().split(/\s+/)[3]);
+  const host = await readHost();
+  const reasons = holdReasons(host, {
+    minimumFreePercent: config.test_min_free_memory_percent,
+    maximumSwapGigabytes: config.test_max_swap_gb,
+    cores: cpus().length,
+  });
+  const reading = <value>(value: value | null, show: (value: value) => string) =>
+    value === null ? "unavailable" : show(value);
   sections.push(
-    "## Disk",
-    Number.isFinite(availableKilobytes)
-      ? `- Free: ${Math.floor(availableKilobytes / 1024 / 1024)} GiB on \`/\``
-      : "unavailable: `df -k /` failed",
+    "## Host",
+    [
+      `free memory: ${reading(host.freeMemoryPercent, (percent) => `${percent}%`)}`,
+      `swap used: ${reading(host.swapUsedGigabytes, (used) => `${used.toFixed(1)} GB of ${host.swapTotalGigabytes?.toFixed(1) ?? "unavailable"} GB`)}`,
+      `load (5 min): ${reading(host.load, (load) => load.toFixed(1))}`,
+      `free disk: ${reading(host.freeDiskGigabytes, (gigabytes) => `${gigabytes} GB`)}`,
+      `tests: running ${running.length}, waiting ${waiting.length}`,
+      `hold new runs: ${reasons.length === 0 ? "no" : reasons.join("; ")}`,
+    ].join("\n"),
   );
 
   console.log(sections.join("\n\n"));

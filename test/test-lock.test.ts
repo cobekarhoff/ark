@@ -23,7 +23,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   ark,
+  healthyHost,
   recordEvaluation,
+  setFakeHost,
   tempArkHome,
   tempGitRepo,
   writeProject,
@@ -223,6 +225,7 @@ afterAll(() => {
 
 afterEach(() => {
   killStarted();
+  setFakeHost(healthyHost);
   for (const path of [
     budgetDirectory(),
     logFile(),
@@ -774,6 +777,224 @@ budget.close();`;
       ).toEqual(["first", "second"]);
     });
   });
+});
+
+const onMac = process.platform === "darwin"; // the fake host reading of test/tmpdir-preload.ts reaches macOS only
+
+describe("ark test memory admission", () => {
+  /** Runs `ark test` with the fake host as given and returns its exit code and output. */
+  async function runToEnd(): Promise<{ code: number; out: string }> {
+    const child = startTest(runA);
+    const out = await child.stdout;
+    return { code: await child.process.exited, out };
+  }
+  const waitLines = (out: string) =>
+    out.split("\n").filter((line) => line.includes("waiting for memory"));
+  const readsFile = () => join(process.env.ARK_FAKE_HOST as string, "reads");
+  const hostReads = () =>
+    existsSync(readsFile()) ? readFileSync(readsFile(), "utf8").split("\n").length - 1 : 0;
+  /** Resolves once the fake host has been read `count` more times: the preload shim logs each memory reading. */
+  function afterHostReads(count: number): Promise<void> {
+    const target = hostReads() + count;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const watcher = watch(process.env.ARK_FAKE_HOST as string, () => {
+      if (hostReads() < target) return;
+      watcher.close();
+      resolve();
+    });
+    return promise;
+  }
+
+  /** Holds the suite under a short fake host: one line while it waits, no start, then a start after recovery. */
+  async function holdsThenStarts(
+    reading: Parameters<typeof setFakeHost>[0],
+    reason: RegExp,
+  ): Promise<void> {
+    setFakeHost(reading);
+    const child = startTest(runA);
+    await child.until("waiting for memory");
+    await afterHostReads(2); // two further readings while held: a line for each poll would show by now
+    expect(waitLines(child.seen())).toHaveLength(1);
+    expect(waitLines(child.seen())[0]).toMatch(reason);
+    expect(logLines()).not.toContain(`start ${runA}`);
+    expect(
+      JSON.stringify(
+        tickets().map((name) => JSON.parse(readFileSync(join(budgetDirectory(), name), "utf8"))),
+      ),
+    ).not.toContain("started");
+    setFakeHost(healthyHost);
+    await child.stdout;
+    expect(await child.process.exited).toBe(0);
+    expect(logLines()).toContain(`start ${runA}`);
+    expect(waitLines(child.seen())).toHaveLength(1);
+  }
+
+  for (const [name, reading] of [
+    ["a healthy host", healthyHost],
+    ["free memory and swap exactly at the limits", { freePercent: 20, swapGigabytes: 8 }],
+  ] as const)
+    test.skipIf(!onMac)(`ARK-T187 starts at once on ${name}`, async () => {
+      setFakeHost(reading);
+      const { code, out } = await runToEnd();
+      expect(code).toBe(0);
+      expect(logLines()).toContain(`start ${runA}`);
+      expect(out).not.toContain("memory");
+    });
+
+  test.skipIf(!onMac)(
+    "ARK-T187 holds on free memory below the floor, one line, and starts after recovery",
+    () => holdsThenStarts({ freePercent: 19, swapGigabytes: 2 }, /free 19% is below the 20% floor/),
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T187 holds on swap above the ceiling, one line, and starts after recovery",
+    () =>
+      holdsThenStarts(
+        { freePercent: 50, swapGigabytes: 8.1 },
+        /swap 8\.1 GB is above the 8 GB ceiling/,
+      ),
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T187 holds on swap just above the ceiling that prints as the ceiling",
+    () =>
+      holdsThenStarts(
+        { freePercent: 50, swapGigabytes: 8.04 }, // 8232.96M: prints 8.0 GB
+        /swap 8\.0 GB is above the 8 GB ceiling/,
+      ),
+  );
+
+  test.skipIf(!onMac)("ARK-T187 names the free memory reason before the swap reason", () =>
+    holdsThenStarts(
+      { freePercent: 19, swapGigabytes: 8.1 },
+      /free 19% is below the 20% floor; swap 8\.1 GB is above the 8 GB ceiling/,
+    ),
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T187 starts when the reading fails and says memory: unchecked once",
+    async () => {
+      setFakeHost({ freePercent: null, swapGigabytes: null });
+      const { code, out } = await runToEnd();
+      expect(code).toBe(0);
+      expect(logLines()).toContain(`start ${runA}`);
+      expect(countOf(out, "memory: unchecked")).toBe(1);
+    },
+  );
+
+  test.skipIf(!onMac)("ARK-T187 uses the ark.yml limits in place of the defaults", async () => {
+    const file = join(arkHome, "projects", projectA, "ark.yml");
+    const original = readFileSync(file, "utf8");
+    try {
+      writeFileSync(
+        file,
+        JSON.stringify({
+          ...JSON.parse(original),
+          test_min_free_memory_percent: 10,
+          test_max_swap_gb: 12,
+        }),
+      );
+      setFakeHost({ freePercent: 15, swapGigabytes: 10 });
+      const { code, out } = await runToEnd();
+      expect(code).toBe(0);
+      expect(logLines()).toContain(`start ${runA}`);
+      expect(out).not.toContain("memory");
+    } finally {
+      writeFileSync(file, original);
+    }
+  });
+});
+
+describe("ark chief state host", () => {
+  const state = () => ark("chief", "state", "--project", projectA).out;
+  const host = () => {
+    const part = state()
+      .split(/^## /m)
+      .find((section) => section.startsWith("Host"));
+    expect(part).toBeDefined();
+    return part!;
+  };
+  const holdLines = (text: string) =>
+    text.split("\n").filter((line) => line.startsWith("hold new runs:"));
+
+  test.skipIf(!onMac)(
+    "ARK-T188 prints the readings and no memory or swap hold on a healthy host",
+    () => {
+      setFakeHost(healthyHost);
+      const text = host();
+      expect(text).toContain("free memory: 50%");
+      expect(text).toContain("swap used: 2.0 GB of 16.0 GB");
+      expect(text).toMatch(/load \(5 min\): \d/);
+      expect(text).toMatch(/free disk: \d+ GB/);
+      expect(text).toContain("tests: running 0, waiting 0");
+      expect(holdLines(text)).toHaveLength(1);
+      // Load and disk are the real host's: the line is `no` only when they are clear.
+      expect(holdLines(text)[0]).not.toMatch(/free \d+%|swap/);
+    },
+  );
+
+  test.skipIf(!onMac)("ARK-T188 limits are crossed only beyond their value", () => {
+    setFakeHost({ freePercent: 20, swapGigabytes: 8 });
+    expect(holdLines(host())[0]).not.toMatch(/free \d+%|swap/);
+  });
+
+  test.skipIf(!onMac)("ARK-T188 names low free memory", () => {
+    setFakeHost({ freePercent: 19, swapGigabytes: 2 });
+    expect(holdLines(host())).toEqual([expect.stringContaining("free 19% is below the 20% floor")]);
+  });
+
+  test.skipIf(!onMac)("ARK-T188 names high swap", () => {
+    setFakeHost({ freePercent: 50, swapGigabytes: 8.1 });
+    const line = holdLines(host())[0]!;
+    expect(line).toContain("swap 8.1 GB is above the 8 GB ceiling");
+    expect(line).not.toMatch(/free \d+%/);
+  });
+
+  test.skipIf(!onMac)(
+    "ARK-T188 joins crossed limits in one line, free memory first, then swap",
+    () => {
+      setFakeHost({ freePercent: 19, swapGigabytes: 8.1 });
+      const lines = holdLines(host());
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(
+        "free 19% is below the 20% floor; swap 8.1 GB is above the 8 GB ceiling",
+      );
+    },
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T188 counts a running and a waiting test beside the budget section",
+    () => {
+      setFakeHost(healthyHost);
+      const arrival = new Date().toISOString();
+      writeTicketFile(`${process.pid}-a-running`, {
+        run: runA,
+        pid: process.pid,
+        cores: 3,
+        arrival,
+        started: arrival,
+      });
+      writeTicketFile(`${process.pid}-b-waiting`, {
+        run: runB,
+        pid: process.pid,
+        cores: 3,
+        arrival,
+      });
+      expect(host()).toContain("tests: running 1, waiting 1");
+      expect(state()).toContain("## ark test budget");
+    },
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T188 prints an unreadable reading as unavailable and never holds on it",
+    () => {
+      setFakeHost({ freePercent: 50, swapGigabytes: null });
+      const text = host();
+      expect(text).toContain("free memory: 50%");
+      expect(text).toContain("swap used: unavailable");
+      expect(holdLines(text)[0]).not.toMatch(/free \d+%|swap/);
+    },
+  );
 });
 
 describe("ark test suite TMPDIR and cores", () => {
