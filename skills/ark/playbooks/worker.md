@@ -49,7 +49,7 @@ You check the ticket before the run lead plans. Your harness and model come from
    - cli_output
    ```
 
-   - A surface is what a person sees when the ticket is done. Use `web_ui`, `cli_output`, `document` or `none`. Use `none` alone when the change shows a person nothing. Any other value makes the run lead start a Designer, so list a surface only when the ticket changes it.
+   - A surface is what a person sees when the ticket is done. Use `web_ui`, `cli_output`, `document` or `none`. Use `none` alone when the change shows a person nothing. Any other value makes the run lead start a Designer, so list a surface only when the ticket changes it. List `cli_output` only when the change adds or changes text that a person reads; a change that leaves that text as it is lists `none`.
    - A blocker is an AC that is not possible, that no integration or E2E test case can prove (a criterion with a method other than `test`, or `manual: true`, is exempt: its proof is the gate `manual` answer `ok`), or that conflicts with other code. Each blocker names the AC ID and the reason, with your evidence.
    - A risk is a problem the plan must handle. It is not a reason to stop.
    - A ticket with no ACs has no AC to block: put your doubts about the ticket in the risks.
