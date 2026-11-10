@@ -27,7 +27,7 @@ export function TimeBar({ split, live }: { split: TimeSplit; live: boolean }) {
   return (
     <div className="time-bar" data-testid="time-bar" role="group" aria-label="Where the time went">
       <div className="time-bar-head">
-        <h2>Where the time went</h2>
+        <span className="title">Where the time went</span>
         <span className="total">
           {wall(total)}
           {live ? <span className="live"> so far</span> : null}
@@ -55,7 +55,7 @@ export function TimeBar({ split, live }: { split: TimeSplit; live: boolean }) {
           >
             <i />
             <span className="name">{name}</span>
-            <b>{minutesOf(split[key])}</b>
+            <span className="mins">{minutesOf(split[key])}</span>
           </li>
         ))}
       </ul>

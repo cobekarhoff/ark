@@ -5619,7 +5619,7 @@ async function settledBoxes(page: Page, selectors: string[]): Promise<Box[]> {
 const runStart = new Date("2026-11-02T10:00:00Z");
 const minutesAfterStart = (minutes: number) => minutes * 60;
 const partMinutes = (page: Page, ids: string[]) =>
-  Promise.all(ids.map((id) => page.getByTestId(`time-${id}`).locator("b").textContent()));
+  Promise.all(ids.map((id) => page.getByTestId(`time-${id}`).locator(".mins").textContent()));
 
 test("ARK-T180 the run page shows the four time parts as one bar, in the closed band without metrics.json and at the top of an open run", async ({
   page,

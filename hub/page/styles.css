@@ -2872,7 +2872,7 @@ a.case-chip:hover {
   gap: 10px;
   margin-bottom: 6px;
 }
-.time-bar-head h2 {
+.time-bar-head .title {
   margin: 0;
   font-size: 12px;
   color: var(--dim);
@@ -2936,14 +2936,15 @@ a.case-chip:hover {
 .time-bar .parts .name {
   color: var(--dim);
 }
-.time-bar .parts b {
+.time-bar .parts .mins {
+  font-weight: 700;
   margin-left: auto;
   font-variant-numeric: tabular-nums;
 }
 .time-bar .parts li.zero {
   color: var(--mute);
 }
-.time-bar .parts li.zero b {
+.time-bar .parts li.zero .mins {
   font-weight: 400;
 }
 .open-top {
