@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -753,4 +754,147 @@ describe("ark test verified_by join", () => {
     expect(result.err).toContain("FAKE-1/AC4 is missing");
     expect(result.err).toContain("FAKE-1/AC7 is missing");
   });
+});
+
+// --- ARK-404: owner file of every ark test temp root, and the missing-base message ---
+
+/** Probe suite file: records, per side, the owner file of each temp root it can see, and the ancestor processes. */
+const ownerProbe = (resultFile: string) =>
+  suiteTests([
+    `test("FAKE-1-AC1 probe", () => {
+      const { readFileSync, writeFileSync, existsSync } = require("node:fs");
+      const { spawnSync } = require("node:child_process");
+      const { basename, dirname, join } = require("node:path");
+      const ps = (field, pid) => spawnSync("ps", ["-o", field + "=", "-p", String(pid)]).stdout.toString().trim();
+      const ancestors = [];
+      for (let pid = process.pid; ; ) {
+        const parent = Number(ps("ppid", pid));
+        if (!(parent > 1)) break;
+        ancestors.push({ pid: parent, command: ps("command", parent) });
+        pid = parent;
+      }
+      const owner = (root) => {
+        const file = join(root, "ark-owner.pid");
+        return existsSync(file) ? readFileSync(file, "utf8") : null;
+      };
+      let base = null;
+      for (let directory = process.cwd(); directory !== dirname(directory); directory = dirname(directory))
+        if (basename(directory).startsWith("ark-base-")) base = directory;
+      const roots = { suite: process.env.TMPDIR, evidence: process.env.ARK_EVIDENCE_DIR };
+      if (base) roots.base = base;
+      const found = {};
+      for (const [kind, root] of Object.entries(roots)) found[kind] = { root, owner: owner(root) };
+      writeFileSync(${JSON.stringify(resultFile)} + "." + (base ? "base" : "head"), JSON.stringify({ found, ancestors }));
+    });`,
+  ]);
+
+describe("ark test temp roots (ARK-404)", () => {
+  test("ARK-T189 ark-base, ark-evidence and ark-suite roots of ark test hold ark-owner.pid with the pid of the ark test runner", () => {
+    const resultFile = join(mkdtempSync(join(tmpdir(), "ark-probe-")), "probe");
+    const { runId } = buildingRun({ criteria: ["FAKE-1-AC1"], e2e: [ownerProbe(resultFile)] });
+    const result = ark("test", runId);
+    expect(result.code, result.err + result.out).toBe(0);
+
+    for (const side of ["head", "base"]) {
+      const { found, ancestors } = JSON.parse(readFileSync(`${resultFile}.${side}`, "utf8"));
+      const runner = ancestors.find((entry: { command: string }) =>
+        entry.command.includes("test-runner"),
+      );
+      expect(
+        runner,
+        `${side}: no test-runner ancestor in ${JSON.stringify(ancestors)}`,
+      ).toBeDefined();
+      const kinds = side === "base" ? ["base", "evidence", "suite"] : ["evidence", "suite"];
+      expect(Object.keys(found).sort()).toEqual(kinds);
+      for (const kind of kinds)
+        expect(found[kind].owner, `${side} ${kind} ${found[kind].root}`).toBe(`${runner.pid}\n`);
+    }
+  });
+
+  /** Runs `ark test` with a suite that deletes its own base checkout. `where` is the suite file that does it. */
+  function runWithVanishingBase(where: "unit" | "e2e", compose?: string) {
+    const marker = join(mkdtempSync(join(tmpdir(), "ark-marker-")), "base-root");
+    const deleter = suiteTests([
+      `test("FAKE-1-AC1 deletes the base checkout", () => {
+        if (!process.cwd().includes("/ark-base-")) return;
+        require("node:fs").writeFileSync(${JSON.stringify(marker)}, process.cwd());
+        require("node:fs").rmSync(process.cwd(), { recursive: true, force: true });
+      });`,
+    ]);
+    const built = buildingRun({
+      criteria: ["FAKE-1-AC1"],
+      unit: where === "unit" ? [deleter] : [passing("FAKE-1-AC1 unit")],
+      e2e: where === "e2e" ? [deleter] : [passing("FAKE-1-AC1 e2e")],
+      compose,
+    });
+    const result = ark("test", built.runId);
+    return { ...built, result, marker };
+  }
+
+  function expectBaseMissing(run: ReturnType<typeof runWithVanishingBase>) {
+    const output = run.result.out + run.result.err;
+    const root = readFileSync(run.marker, "utf8");
+    expect(output).toMatch(new RegExp(`base checkout missing: \\S*${root.split("/").pop()}`));
+    expect(run.result.code, output).toBe(1);
+    expect(output).not.toContain("ENOENT");
+    expect(output).not.toContain("posix_spawn");
+    // the head side ran and its evidence stays
+    expect(existsSync(join(run.runDirectory, "results", "e2e.log"))).toBe(true);
+  }
+
+  test("ARK-T191 ark test exits 1 with base checkout missing when the first of two base suites deletes the base folder", () => {
+    expectBaseMissing(runWithVanishingBase("unit"));
+  }, 120_000);
+
+  test("ARK-T191 ark test exits 1 with base checkout missing when the last base suite deletes the base folder", () => {
+    expectBaseMissing(runWithVanishingBase("e2e"));
+  }, 120_000);
+
+  test("ARK-T191 ark test keeps the base checkout missing message when compose down runs with the folder gone", () => {
+    const composeLog = join(mkdtempSync(join(tmpdir(), "ark-compose-")), "compose.log");
+    process.env.COMPOSE_LOG = composeLog;
+    try {
+      expectBaseMissing(runWithVanishingBase("e2e", `sh ${fakeCompose}`));
+    } finally {
+      delete process.env.COMPOSE_LOG;
+    }
+  }, 120_000);
+
+  test("ARK-T191 ark test with the base folder intact prints no base checkout missing and exits 0", () => {
+    const { runId, runDirectory } = buildingRun({
+      criteria: ["FAKE-1-AC1"],
+      e2e: [passing("FAKE-1-AC1 intact")],
+    });
+    const result = ark("test", runId);
+    expect(result.code, result.err + result.out).toBe(0);
+    expect(result.out + result.err).not.toContain("base checkout missing");
+    expect(existsSync(join(runDirectory, "results", "base-e2e.log"))).toBe(true);
+  }, 120_000);
+
+  test("ARK-T194 the owner file of the evidence scratch folder is in neither the test cache nor the evidence, and a cache hit gives the same statuses", () => {
+    const { runId, runDirectory, arkHome } = buildingRun({
+      criteria: ["FAKE-1-AC1"],
+      e2e: [passing("FAKE-1-AC1 caches")],
+    });
+    const stray = (directory: string) =>
+      existsSync(directory)
+        ? (readdirSync(directory, { recursive: true }) as string[]).filter((entry) =>
+            entry.endsWith("ark-owner.pid"),
+          )
+        : [];
+    for (const attempt of [1, 2]) {
+      const result = ark("test", runId);
+      expect(result.code, result.err + result.out).toBe(0);
+      expect(stray(join(runDirectory, "results", "evidence")), `evidence, run ${attempt}`).toEqual(
+        [],
+      );
+      expect(
+        stray(join(arkHome, "projects", "demo", "test-cache")),
+        `cache, run ${attempt}`,
+      ).toEqual([]);
+    }
+    expect(existsSync(join(arkHome, "projects", "demo", "test-cache"))).toBe(true);
+    const [first, second] = testCompleted(runDirectory);
+    expect(second.criteria).toEqual(first.criteria);
+  }, 120_000);
 });

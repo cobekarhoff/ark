@@ -155,10 +155,11 @@ test("ARK-281-AC6 auto-merger with retro.md and a ready ticket file merges the C
   expect(result.err).not.toContain("HELD:");
 });
 
-test("ARK-244-AC3 temp-cleaner removes only old ark-* directories and prunes the worktree one held", () => {
+test("ARK-T190 temp-cleaner removes only ark-* directories older than 180 minutes with no owner file and prunes the worktree one held", () => {
   const workspace = tempGitRepo();
   const scratch = mkdtempSync(join(tmpdir(), "ark-scratch-tmp-"));
-  const old = new Date(Date.now() - 30 * 60_000);
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+  const old = minutesAgo(200);
   const made = (name: string, when?: Date) => {
     const directory = join(scratch, name);
     mkdirSync(directory);
@@ -169,6 +170,7 @@ test("ARK-244-AC3 temp-cleaner removes only old ark-* directories and prunes the
   Bun.spawnSync(["git", "-C", workspace, "worktree", "add", "-q", "--detach", oldWorktree]);
   utimesSync(oldWorktree, old, old);
   const oldArk = made("ark-old", old);
+  const noOwnerThirtyMinutes = made("ark-thirty", minutesAgo(30));
   const newArk = made("ark-new");
   const oldOther = made("unrelated-old", old);
 
@@ -176,11 +178,137 @@ test("ARK-244-AC3 temp-cleaner removes only old ark-* directories and prunes the
 
   expect(result.code).toBe(0);
   expect(existsSync(oldArk)).toBe(false);
+  expect(existsSync(noOwnerThirtyMinutes)).toBe(true);
   expect(existsSync(newArk)).toBe(true);
   expect(existsSync(oldOther)).toBe(true);
   expect(existsSync(oldWorktree)).toBe(false);
   const worktrees = Bun.spawnSync(["git", "-C", workspace, "worktree", "list", "--porcelain"]);
   expect(worktrees.stdout.toString()).not.toContain("ark-base-old");
+});
+
+// --- ARK-404: the cleaner keeps a folder whose owner file names a live process ---
+
+/** A scratch TMPDIR for the cleaner, and a maker of folders with an owner file aged to `minutes`. */
+function cleanerScratch() {
+  const workspace = tempGitRepo();
+  const scratch = mkdtempSync(join(tmpdir(), "ark-scratch-tmp-"));
+  const age = (directory: string, minutes: number) => {
+    const when = new Date(Date.now() - minutes * 60_000);
+    utimesSync(directory, when, when);
+  };
+  // Writing the owner file changes the folder mtime, so the age is set last.
+  const made = (name: string, minutes: number, owner?: string) => {
+    const directory = join(scratch, name);
+    mkdirSync(directory);
+    if (owner !== undefined) writeFileSync(join(directory, "ark-owner.pid"), owner);
+    age(directory, minutes);
+    return directory;
+  };
+  const clean = () => runScript("temp-cleaner.sh", [workspace, "1", "--once"], { TMPDIR: scratch });
+  return { scratch, age, made, clean };
+}
+
+/** A pid that was alive and has ended, so `kill -0` fails. */
+async function endedPid(): Promise<number> {
+  const child = Bun.spawn(["true"]);
+  await child.exited;
+  return child.pid;
+}
+
+// One folder per temp root kind of ARK-T189, plus plannotator-data-*.
+const rootKinds = [
+  "ark-base-a",
+  "ark-evidence-a",
+  "ark-suite-a",
+  "bun-test-a",
+  "ark-home-a",
+  "ark-repo-a",
+  "plannotator-data-a",
+];
+
+test("ARK-T190 temp-cleaner keeps every folder with a live owner at any age and removes it after the owner ends", async () => {
+  const { age, made, clean } = cleanerScratch();
+  const owner = Bun.spawn(["sleep", "300"]);
+  try {
+    const live = rootKinds.map((name) => made(name, 60, `${owner.pid}\n`));
+    const unrelated = made("unrelated-old", 1000);
+
+    expect(clean().code).toBe(0);
+    for (const directory of live) expect(existsSync(directory), directory).toBe(true);
+    expect(existsSync(unrelated)).toBe(true);
+
+    age(live[0]!, 1000);
+    expect(clean().code).toBe(0);
+    expect(existsSync(live[0]!)).toBe(true);
+
+    owner.kill();
+    await owner.exited;
+    expect(clean().code).toBe(0);
+    for (const directory of live) expect(existsSync(directory), directory).toBe(false);
+    expect(existsSync(unrelated)).toBe(true);
+  } finally {
+    owner.kill();
+  }
+});
+
+test("ARK-T190 temp-cleaner removes an ended-owner folder after 12 minutes and a no-owner folder after 180 minutes", async () => {
+  const { made, clean } = cleanerScratch();
+  const ended = `${await endedPid()}\n`;
+  const endedYoung = made("ark-ended-11", 11, ended);
+  const endedOld = made("ark-ended-13", 13, ended);
+  const noOwnerYoung = made("ark-none-179", 179);
+  const noOwnerYoungBun = made("bun-test-none-179", 179);
+  const noOwnerOld = made("ark-none-181", 181);
+  const noOwnerOldBun = made("bun-test-none-181", 181);
+
+  expect(clean().code).toBe(0);
+  expect(existsSync(endedYoung)).toBe(true);
+  expect(existsSync(endedOld)).toBe(false);
+  expect(existsSync(noOwnerYoung)).toBe(true);
+  expect(existsSync(noOwnerYoungBun)).toBe(true);
+  expect(existsSync(noOwnerOld)).toBe(false);
+  expect(existsSync(noOwnerOldBun)).toBe(false);
+});
+
+test("ARK-T193 temp-cleaner treats an empty, non-numeric or unreadable owner file as no owner file and a pid of another user as alive", async () => {
+  const { age, made, clean } = cleanerScratch();
+  const owner = Bun.spawn(["sleep", "300"]);
+  try {
+    const invalid = {
+      empty: made("ark-empty", 60, ""),
+      text: made("ark-text", 60, "abc\n"),
+      zero: made("ark-zero", 60, "0\n"),
+      negative: made("ark-negative", 60, "-5\n"),
+    } as Record<string, string>;
+    // Pid 1 is alive and belongs to another user: kill -0 gives EPERM.
+    const otherUser = made("ark-pid-one", 60, "1\n");
+    const unreadable = made("ark-unreadable", 60, `${owner.pid}\n`);
+    const unreadableFile = join(unreadable, "ark-owner.pid");
+    chmodSync(unreadableFile, 0o000);
+    let canReadIt = true;
+    try {
+      readFileSync(unreadableFile);
+    } catch {
+      canReadIt = false;
+    }
+    if (canReadIt) {
+      // Running as root: the fixture is not valid, so it is skipped, not passed.
+      console.warn("ARK-T193: unreadable owner file skipped, the suite can read mode 000 files");
+      rmSync(unreadable, { recursive: true, force: true });
+    } else invalid.unreadable = unreadable;
+
+    expect(clean().code).toBe(0);
+    for (const directory of [...Object.values(invalid), otherUser])
+      expect(existsSync(directory), directory).toBe(true);
+
+    for (const directory of Object.values(invalid)) age(directory, 200);
+    expect(clean().code).toBe(0);
+    for (const directory of Object.values(invalid))
+      expect(existsSync(directory), directory).toBe(false);
+    expect(existsSync(otherUser)).toBe(true);
+  } finally {
+    owner.kill();
+  }
 });
 
 // --- ARK-281: the auto-merger waits for retro.md and skips a PR whose ticket is not live ---
