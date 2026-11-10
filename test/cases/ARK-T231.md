@@ -4,7 +4,7 @@ title: ARK-T231 After a `--verified-by` amend, `ark test` proves the criterion w
 level: integration
 technique: state transition (renumber after the plan is approved) with a real `ark test` run; the old id's test is absent and the new id's test present
 priority: high
-risk: `ark test` still reads the old ids (from plan.yml or the approved plan) and reports the criterion missing or proved by a case that no longer exists, so a renumbered run cannot reach merge or shows false proof
+risk: "`ark test` still reads the old ids (from plan.yml or the approved plan) and reports the criterion missing or proved by a case that no longer exists, so a renumbered run cannot reach merge or shows false proof"
 status: active
 changed_by: 2026-11-10-ARK-361-1
 ---
