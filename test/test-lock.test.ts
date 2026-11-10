@@ -793,7 +793,7 @@ describe("ark test memory admission", () => {
   const readsFile = () => join(process.env.ARK_FAKE_HOST as string, "reads");
   const hostReads = () =>
     existsSync(readsFile()) ? readFileSync(readsFile(), "utf8").split("\n").length - 1 : 0;
-  /** Resolves once the fake host has been read `count` more times: the preload shim logs each memory reading. */
+  /** Resolves once the fake host has been read `count` more times: the sysctl shim logs one after the last call of a reading, so a test never writes mid-reading. */
   function afterHostReads(count: number): Promise<void> {
     const target = hostReads() + count;
     const { promise, resolve } = Promise.withResolvers<void>();
