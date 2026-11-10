@@ -28,6 +28,7 @@
   --green-bg: light-dark(#e6f3ec, #10241a);
   --blue-bg: light-dark(#e6edfb, #121f38);
   --sel: light-dark(#eaf0fd, #162136);
+  --code-bg: light-dark(#f3f0e8, #0b0e13);
   --link: light-dark(#2553c7, #9cc3ff);
   --on-red: light-dark(#ffffff, #1a0907);
   --primary: light-dark(#1d1c1a, #2d6cdf);
@@ -2123,17 +2124,6 @@ a.rm-id:hover {
   flex-wrap: wrap;
   gap: 8px;
 }
-.prose {
-  max-width: 72ch;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--text);
-}
-.prose p {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.prose ul,
 .criteria {
   padding-left: 22px;
   margin: 0 0 8px;
@@ -2457,18 +2447,6 @@ details.think p {
   align-items: center;
   margin-top: 12px;
 }
-pre.file {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px 14px;
-  overflow: auto;
-  font: 13px/1.5 var(--mono);
-  margin: 0;
-  max-width: 100%;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .btn[aria-pressed="true"] {
   background: var(--primary);
   border-color: var(--primary);
@@ -2503,10 +2481,6 @@ pre.file {
   gap: 8px;
   align-items: center;
   margin-bottom: 4px;
-}
-.crit-text {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 .case-list {
   list-style: none;
@@ -2717,11 +2691,6 @@ a.case-chip:hover {
 .ev-section .ev-section {
   margin-left: 12px;
 }
-.ev-text {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 @media (hover: hover) and (pointer: fine) {
   .pair figure a {
     transition: transform 160ms var(--ease);
@@ -2859,4 +2828,248 @@ a.case-chip:hover {
   gap: 8px;
   padding: 3px 0;
   overflow-wrap: anywhere;
+}
+
+/* Markdown, code and JSON (hybrid-2) */
+.view-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+.md {
+  font-size: 14px;
+  line-height: 1.62;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p,
+.md ul,
+.md ol,
+.md blockquote,
+.md h1,
+.md h2,
+.md h3 {
+  max-width: 76ch;
+}
+.md p {
+  margin: 0 0 12px;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  line-height: 1.3;
+  margin: 22px 0 8px;
+  font-weight: 650;
+  text-wrap: balance;
+}
+.md h1 {
+  font-size: 20px;
+}
+.md h2 {
+  font-size: 16.5px;
+}
+.md h3,
+.md h4 {
+  font-size: 14.5px;
+}
+.md ul,
+.md ol {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+.md li + li {
+  margin-top: 4px;
+}
+.md li > ul,
+.md li > ol {
+  margin: 4px 0 0;
+}
+.md li::marker {
+  color: var(--mute);
+}
+.md blockquote {
+  margin: 0 0 12px;
+  padding: 8px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--dim);
+}
+.md blockquote > :last-child {
+  margin-bottom: 0;
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--line-2);
+  margin: 16px 0;
+}
+.md a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+  text-underline-offset: 2px;
+}
+.md strong {
+  font-weight: 650;
+}
+code.ic {
+  font: 0.88em var(--mono);
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.5px 5px;
+  overflow-wrap: break-word;
+}
+.tablewrap {
+  overflow-x: auto;
+  max-width: 100%;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  margin: 4px 0 14px;
+  background: var(--panel);
+}
+.md table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.md th,
+.md td {
+  padding: 7px 12px;
+  min-width: 5.5em;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+.md th {
+  background: var(--panel-2);
+  color: var(--dim);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.md tr:last-child td {
+  border-bottom: 0;
+}
+.md td + td,
+.md th + th {
+  border-left: 1px solid var(--line);
+}
+.raw {
+  margin: 0;
+  font: 12.5px/1.55 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.code {
+  margin: 4px 0 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--code-bg);
+  overflow: hidden;
+  max-width: 100%;
+}
+.code > figcaption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 3px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--mute);
+  font: 11px var(--mono);
+}
+.code > figcaption .lang {
+  margin-right: auto;
+}
+.code pre,
+pre.code-plain {
+  margin: 0;
+  padding: 10px 14px;
+  overflow: auto;
+  tab-size: 2;
+  font: 12.5px/1.55 var(--mono);
+  color: var(--text);
+}
+pre.code-plain {
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--code-bg);
+}
+.code pre code {
+  font: inherit;
+}
+.code.folded pre {
+  max-height: calc(12 * 1.55em + 20px);
+  overflow: hidden;
+  mask-image: linear-gradient(#000 calc(100% - 34px), transparent);
+}
+.code .show-all {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 12px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--dim);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  transition:
+    color 120ms var(--ease),
+    background-color 120ms var(--ease);
+}
+.copy {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--mute);
+  cursor: pointer;
+  font: 11px var(--sans);
+  transition:
+    color 120ms var(--ease),
+    background-color 120ms var(--ease),
+    transform 120ms var(--ease);
+}
+.copy:active {
+  transform: scale(0.96);
+}
+.copy.done {
+  color: var(--green-t);
+}
+@media (hover: hover) and (pointer: fine) {
+  .code .show-all:hover {
+    color: var(--text);
+    background: var(--panel-3);
+  }
+  .copy:hover {
+    background: var(--panel-3);
+    color: var(--text);
+  }
+}
+.shiki-token {
+  color: light-dark(var(--shiki-light), var(--shiki-dark));
+}
+.tk-key {
+  color: var(--blue-t);
+}
+.tk-str {
+  color: var(--green-t);
+}
+.tk-num {
+  color: var(--amber-t);
+}
+.tk-lit {
+  color: var(--violet-t);
 }

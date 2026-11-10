@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Code, Json } from "./Code.tsx";
+import { Markdown, ViewSwitch } from "./Markdown.tsx";
 import { Clock, runHref, sessionName } from "./RunDetail.tsx";
 import type { SessionFile, TranscriptEntry, TranscriptPage } from "../types.ts";
 
@@ -197,13 +199,14 @@ export function Transcript({
   );
 }
 
-/** A run file as plain text: React escapes it, so nothing in it is markup. */
+/** A run file: .md through Markdown, .json through Json, any other file through Code as plain text. Raw shows the source as written. */
 export function FileView({ run, ticket, path }: { run: string; ticket: string; path: string }) {
   const [state, setState] = useState<
     { status: "loading" | "missing" | "failed" } | { status: "ok"; text: string }
   >({
     status: "loading",
   });
+  const [raw, setRaw] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     fetch(`/api/run/${encodeURIComponent(run)}/file?path=${encodeURIComponent(path)}`, {
@@ -235,16 +238,31 @@ export function FileView({ run, ticket, path }: { run: string; ticket: string; p
       )}
       {state.status === "failed" && <p className="bad-text">The hub could not read this file.</p>}
       {state.status === "ok" && (
-        <pre
-          className="file"
-          tabIndex={0}
-          aria-label={`${path}, plain text`}
-          data-testid="run-file-text"
-        >
-          {state.text}
-        </pre>
+        <>
+          {(path.endsWith(".md") || path.endsWith(".json")) && (
+            <div className="view-bar">
+              <ViewSwitch raw={raw} onChange={setRaw} />
+            </div>
+          )}
+          {raw ? (
+            <pre
+              className="raw"
+              tabIndex={0}
+              aria-label={`${path}, source`}
+              data-testid="run-file-text"
+            >
+              {state.text}
+            </pre>
+          ) : path.endsWith(".md") ? (
+            <Markdown text={state.text} testId="run-file-text" />
+          ) : path.endsWith(".json") ? (
+            <Json text={state.text} />
+          ) : (
+            <Code code={state.text} />
+          )}
+        </>
       )}
-      <p className="note">Plain text, no Markdown render. Only files inside the run folder.</p>
+      <p className="note">Only files inside the run folder.</p>
     </>
   );
 }

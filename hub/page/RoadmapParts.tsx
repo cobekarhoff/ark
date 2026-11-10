@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { TicketEntry } from "./derive.ts";
 
 import { phaseLabel } from "./format.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { ticketHref } from "./store.tsx";
 import type { RoadmapItem, RoadmapMilestone, RoadmapWarning } from "../roadmap.ts";
@@ -555,12 +556,12 @@ export function Notices({ warnings }: { warnings: RoadmapWarning[] }) {
         {warnings.map((warning, at) => (
           <li key={at} data-testid="roadmap-warning" data-kind={warning.kind}>
             <span className="mono">{warning.kind}</span>
-            <span>
-              {warning.message}{" "}
+            <div>
+              <Markdown text={warning.message} />
               <span className="mono" data-testid="warning-ids">
                 {warning.ids.join(", ")}
               </span>
-            </span>
+            </div>
           </li>
         ))}
       </ul>

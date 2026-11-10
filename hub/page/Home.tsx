@@ -1,3 +1,4 @@
+import { Markdown } from "./Markdown.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import {
   costByDay,
@@ -118,7 +119,7 @@ function NeedsMe({ gates, waiting }: { gates: Gate[] | "unknown"; waiting: Waiti
                   <Since time={gate.since} />
                 </span>
               </div>
-              <p>{gate.question}</p>
+              <Markdown text={gate.question} />
               <div className="actions">
                 {gate.review_url ? (
                   <ExternalLink
