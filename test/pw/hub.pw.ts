@@ -5775,7 +5775,10 @@ test("ARK-T173 Markdown makes no HTML from text: script and img onerror show as 
     await open(page, baseUrl, hash);
     const area = page.getByTestId(testId);
     await expect(area).toContainText("[e](data:text/html,x)");
-    await page.waitForTimeout(300);
+    // Settled: two frames after the text shows, any element or script the page made has run.
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
     await checkpoint(page, `raw-html-as-text-${name.replace(" ", "-")}`);
     // The tags show as text, in every position, and make no element.
     await expect(area).toContainText("<script>window.__xss = 1</script>");
@@ -5946,7 +5949,7 @@ test("ARK-T177 Code loads shiki in its own chunk on the first code block: Home's
   // The first load of Home: markdown shows, and the entry bundle is the only script.
   await open(page, baseUrl, "");
   await expect(page.getByTestId("gate").locator("strong")).toHaveText("markdown");
-  await page.waitForTimeout(500);
+  await page.waitForLoadState("networkidle");
   // Home's scripts: the entry and the chunks it shares with the page. None holds shiki.
   const homeScripts = scriptRequests(requests);
   for (const path of homeScripts)
