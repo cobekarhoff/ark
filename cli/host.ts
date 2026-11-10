@@ -10,7 +10,7 @@ export const defaultMaximumSwapGigabytes = 8;
 export type HostReading = {
   /** Whole percent of memory that is free. */
   freeMemoryPercent: number | null;
-  /** Gigabytes with one decimal. */
+  /** Gigabytes, unrounded: limits compare these; only printing rounds. */
   swapUsedGigabytes: number | null;
   swapTotalGigabytes: number | null;
   /** The 5-minute load average. */
@@ -18,8 +18,6 @@ export type HostReading = {
   /** Gigabytes with no decimal. */
   freeDiskGigabytes: number | null;
 };
-
-const oneDecimal = (value: number) => Math.round(value * 10) / 10;
 
 /** macOS: `memory_pressure` and `sysctl vm.swapusage`. Linux: /proc/meminfo. */
 async function readMemory(): Promise<
@@ -34,8 +32,8 @@ async function readMemory(): Promise<
     );
     return {
       freeMemoryPercent: percent === undefined ? null : Number(percent),
-      swapUsedGigabytes: swap ? oneDecimal(Number(swap[2]) / 1024) : null,
-      swapTotalGigabytes: swap ? oneDecimal(Number(swap[1]) / 1024) : null,
+      swapUsedGigabytes: swap ? Number(swap[2]) / 1024 : null,
+      swapTotalGigabytes: swap ? Number(swap[1]) / 1024 : null,
     };
   }
   try {
@@ -54,10 +52,8 @@ async function readMemory(): Promise<
           ? null
           : Math.floor((available / total) * 100),
       swapUsedGigabytes:
-        swapTotal === null || swapFree === null
-          ? null
-          : oneDecimal((swapTotal - swapFree) / 1024 ** 2),
-      swapTotalGigabytes: swapTotal === null ? null : oneDecimal(swapTotal / 1024 ** 2),
+        swapTotal === null || swapFree === null ? null : (swapTotal - swapFree) / 1024 ** 2,
+      swapTotalGigabytes: swapTotal === null ? null : swapTotal / 1024 ** 2,
     };
   } catch {
     return unread;
@@ -90,7 +86,9 @@ export function memoryReasons(
   if (freeMemoryPercent !== null && freeMemoryPercent < minimumFreePercent)
     reasons.push(`free ${freeMemoryPercent}% is below the ${minimumFreePercent}% floor`);
   if (swapUsedGigabytes !== null && swapUsedGigabytes > maximumSwapGigabytes)
-    reasons.push(`swap ${swapUsedGigabytes} GB is above the ${maximumSwapGigabytes} GB ceiling`);
+    reasons.push(
+      `swap ${swapUsedGigabytes.toFixed(1)} GB is above the ${maximumSwapGigabytes} GB ceiling`,
+    );
   return { reasons, unchecked: freeMemoryPercent === null || swapUsedGigabytes === null };
 }
 

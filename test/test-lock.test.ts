@@ -855,6 +855,15 @@ describe("ark test memory admission", () => {
       ),
   );
 
+  test.skipIf(!onMac)(
+    "ARK-T187 holds on swap just above the ceiling that prints as the ceiling",
+    () =>
+      holdsThenStarts(
+        { freePercent: 50, swapGigabytes: 8.04 }, // 8232.96M: prints 8.0 GB
+        /swap 8\.0 GB is above the 8 GB ceiling/,
+      ),
+  );
+
   test.skipIf(!onMac)("ARK-T187 names the free memory reason before the swap reason", () =>
     holdsThenStarts(
       { freePercent: 19, swapGigabytes: 8.1 },
