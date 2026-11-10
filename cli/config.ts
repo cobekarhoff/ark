@@ -9,6 +9,7 @@ const testCaseSources = ["local"];
 const levels = ["unit", "integration", "e2e"];
 const parserNames = ["bun", "pytest", "behave"];
 export const gateNames = ["criteria", "strategy", "plan", "escalation"] as const;
+export const HARNESSES = ["claude", "codex", "omp", "pi"] as const;
 const roleNames = ["implementer", "validator", "reviewer"] as const;
 
 type Role = (typeof roleNames)[number];
@@ -207,8 +208,11 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     if ((optionalRoles as readonly string[]).includes(role) && rolesField[role] === undefined)
       continue;
     const entry = asObject(rolesField[role] ?? fail(`roles.${role} is required`), `roles.${role}`);
+    const harness = text(entry, "harness", `roles.${role}.harness`);
+    if (!(HARNESSES as readonly string[]).includes(harness))
+      fail(`roles.${role}.harness must be claude, codex, omp or pi (got ${harness})`);
     roles[role] = {
-      harness: text(entry, "harness", `roles.${role}.harness`),
+      harness,
       model: text(entry, "model", `roles.${role}.model`),
     };
   }
