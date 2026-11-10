@@ -33,6 +33,7 @@ import { assertShippable, staleHeads } from "./merge-request.ts";
 import { runnerStatusLines } from "./test-runner.ts";
 import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, submoduleLines, worktreeCleanup } from "./worktree.ts";
+import { repoBase, targetBranch } from "./workspace.ts";
 import { loadPlan, repoGraph, type Plan, type PlanStep } from "./plan.ts";
 import { hasTestCriterion, manualCriteria, readTicket, setTicketStatus } from "./ticket.ts";
 
@@ -183,7 +184,11 @@ async function markInterrupted(
     throw new ArkError(
       `step.finished refused: ${stepId} is ${status ?? "not in the plan"}, not running`,
     );
-  const worker = lastWorker(events, stepId);
+  // Only a worker recorded by the latest start of the step counts; an earlier start's terminal says nothing about this one.
+  const lastStart = events.findLastIndex(
+    (event) => event.type === "step.started" && event.data.step === stepId,
+  );
+  const worker = lastWorker(events.slice(lastStart + 1), stepId);
   if (worker === null) {
     // No worker record: only an Orca that answers and lists no terminal of the step's worktree proves it gone.
     const repo = state.steps.find((step) => step.id === stepId)?.repo;
@@ -297,7 +302,7 @@ async function launchWorker(
     step: planStep,
     interrupted: takeover,
     ...(start.merge
-      ? { mergeBase: state.worktrees.find((entry) => entry.repo === planStep.repo)?.base }
+      ? { mergeBase: targetBranch(worktree, repoBase(loadConfig(project), planStep.repo)) }
       : {}),
   });
 

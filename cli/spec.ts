@@ -68,7 +68,7 @@ export function buildSpec(options: {
   state: RunState;
   step: PlanStep;
   interrupted: boolean;
-  /** The branch to merge from origin into the worktree: this start only resolves that merge. */
+  /** The target branch (not a commit) to merge from origin into the worktree: this start only resolves that merge. */
   mergeBase?: string;
 }): string {
   const { run, directory, state, step, interrupted, mergeBase } = options;

@@ -244,13 +244,20 @@ test("ARK-T210 a --merge start launches a worker briefed to merge the target bra
   const run = buildRun();
   started(run, "a");
   expect(ark("run", "step", run.runId, "a", "finish").code).toBe(0);
+  // The creation base is "main"; the brief must name the target branch origin/HEAD resolves to.
+  Bun.spawnSync(
+    ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"],
+    { cwd: run.worktree },
+  );
   appendEvent(run.directory, "worktree.synced", { repo: ".", conflict: true });
   const before = workerStarts().length;
   const merged = ark("run", "step", run.runId, "a", "start", "--merge");
   expect(merged.err).toBe("");
   expect(merged.code).toBe(0);
   expect(workerStarts()).toHaveLength(before + 1);
-  expect(orca.workers().at(-1)!.spec).toMatch(/merge origin\//i);
+  const brief = orca.workers().at(-1)!.spec;
+  expect(brief).toContain("git merge origin/develop");
+  expect(brief).not.toContain("origin/main");
   expect(
     eventsOf(run.directory).findLast((event) => event.type === "step.started")!.data,
   ).toMatchObject({
@@ -321,6 +328,24 @@ test("ARK-T211 a running step with no worker record is interrupted once Orca ans
   orca.configure({ terminals: { elsewhere: { connected: true, worktreePath: "/nowhere" } } });
   expect(interrupt(run, "a").code).toBe(0);
   expect(stepStatus(run, "a")).toBe("interrupted");
+});
+
+test("ARK-T211 a restart that records no worker is judged by Orca's list, not by the terminal of an earlier start", () => {
+  const run = buildRun();
+  const old = runningWorker(run, "a");
+  expect(ark("run", "step", run.runId, "a", "finish").code).toBe(0);
+  appendEvent(run.directory, "step.started", {
+    step: "a",
+    role: "implementer",
+    repo: ".",
+    round: 2,
+  });
+  expect(old).toMatch(/^term_/);
+  orca.configure({ terminals: { term_current: { connected: true, worktreePath: run.worktree } } });
+  const refused = interrupt(run, "a");
+  expect(refused.code).not.toBe(0);
+  expect(refused.err).toContain("term_current");
+  expect(stepStatus(run, "a")).toBe("running");
 });
 
 /** Starts step `step` and returns the terminal handle of its worker. */
