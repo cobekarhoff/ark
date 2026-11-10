@@ -218,7 +218,50 @@ test("ARK-T210 a worker whose session file never shows records the session as un
   expect(stepStatus(run, "b")).toBe("running");
 });
 
-test("ARK-T210 a run with a step.started and no worker event still derives and its step can be marked interrupted", () => {
+test("ARK-T210 a start records the string terminal of the real worker-start receipt, and the older effects shape too", () => {
+  const run = buildRun();
+  started(run, "a");
+  expect(workerOf(run.directory, "a").terminal).toMatch(/^term_/);
+  orca.configure({ effectsReceipt: true });
+  started(run, "b");
+  expect(workerOf(run.directory, "b").terminal).toMatch(/^term_/);
+});
+
+test("ARK-T210 a start launches the plan step's harness and model, and a pair ark.yml roles lacks is refused before Orca", () => {
+  const run = buildRun();
+  const plan = readFileSync(join(run.directory, "plan.yml"), "utf8");
+  writeFileSync(
+    join(run.directory, "plan.yml"),
+    plan.replace(`"model":"${model}"`, '"model":"gone/model"'),
+  );
+  const calls = orca.calls().length;
+  const refused = start(run, "a");
+  expect(refused.code).not.toBe(0);
+  expect(refused.err).toContain("repair the plan");
+  expect(orca.calls()).toHaveLength(calls);
+  expect(stepStatus(run, "a")).not.toBe("running");
+});
+
+test("ARK-T210 a --merge start launches a worker briefed to merge the target branch and spends no round", () => {
+  const run = buildRun();
+  started(run, "a");
+  expect(ark("run", "step", run.runId, "a", "finish").code).toBe(0);
+  appendEvent(run.directory, "worktree.synced", { repo: ".", conflict: true });
+  const before = workerStarts().length;
+  const merged = ark("run", "step", run.runId, "a", "start", "--merge");
+  expect(merged.err).toBe("");
+  expect(merged.code).toBe(0);
+  expect(workerStarts()).toHaveLength(before + 1);
+  expect(orca.workers().at(-1)!.spec).toMatch(/merge origin\//i);
+  expect(
+    eventsOf(run.directory).findLast((event) => event.type === "step.started")!.data,
+  ).toMatchObject({
+    merge: true,
+  });
+  expect(eventsOf(run.directory).at(-1)!.type).toBe("worker.started");
+});
+
+test("ARK-T210 a step started with no worker event still derives", () => {
   const run = buildRun();
   appendEvent(run.directory, "step.started", {
     step: "a",
@@ -226,9 +269,58 @@ test("ARK-T210 a run with a step.started and no worker event still derives and i
     repo: ".",
     round: 1,
   });
-  const status = ark("status", run.runId);
-  expect(status.code).toBe(0);
+  expect(ark("status", run.runId).code).toBe(0);
   expect(stepStatus(run, "a")).toBe("running");
+});
+
+test("ARK-T210 a start of a human implementer (take_over) records the start and launches no worker", () => {
+  const run = buildRun();
+  for (let round = 0; round < 2; round++) {
+    started(run, "a");
+    expect(ark("run", "step", run.runId, "a", "finish", "--failed").code).toBe(0);
+  }
+  const escalated = ark("escalate", run.runId, "--reason", "stuck");
+  expect(escalated.err).toBe("");
+  expect(ark("gate", "record", run.runId, "escalation", "take_over").code).toBe(0);
+  const calls = orca.calls().length;
+  const result = start(run, "b");
+  expect(result.err).toBe("");
+  expect(result.code).toBe(0);
+  expect(orca.calls()).toHaveLength(calls);
+  expect(stepStatus(run, "b")).toBe("running");
+});
+
+test("ARK-T211 a running step with no worker record is refused when Orca fails to answer or lists a terminal of its worktree", () => {
+  const run = buildRun();
+  appendEvent(run.directory, "step.started", {
+    step: "a",
+    role: "implementer",
+    repo: ".",
+    round: 1,
+  });
+  orca.configure({ failList: true });
+  const failed = interrupt(run, "a");
+  expect(failed.code).not.toBe(0);
+  expect(failed.err).toContain("list failed");
+  orca.configure({
+    failList: false,
+    terminals: { term_x: { connected: true, worktreePath: run.worktree } },
+  });
+  const listed = interrupt(run, "a");
+  expect(listed.code).not.toBe(0);
+  expect(listed.err).toContain("term_x");
+  expect(stepStatus(run, "a")).toBe("running");
+});
+
+test("ARK-T211 a running step with no worker record is interrupted once Orca answers and lists no terminal of its worktree", () => {
+  const run = buildRun();
+  appendEvent(run.directory, "step.started", {
+    step: "a",
+    role: "implementer",
+    repo: ".",
+    round: 1,
+  });
+  orca.configure({ terminals: { elsewhere: { connected: true, worktreePath: "/nowhere" } } });
   expect(interrupt(run, "a").code).toBe(0);
   expect(stepStatus(run, "a")).toBe("interrupted");
 });

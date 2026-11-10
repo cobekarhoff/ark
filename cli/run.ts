@@ -184,7 +184,27 @@ async function markInterrupted(
       `step.finished refused: ${stepId} is ${status ?? "not in the plan"}, not running`,
     );
   const worker = lastWorker(events, stepId);
-  if (worker !== null) {
+  if (worker === null) {
+    // No worker record: only an Orca that answers and lists no terminal of the step's worktree proves it gone.
+    const repo = state.steps.find((step) => step.id === stepId)?.repo;
+    const worktree = state.worktrees.find((entry) => entry.repo === repo)?.path;
+    const snapshot = await readTerminals();
+    if (snapshot === null)
+      throw new ArkError(
+        `step.finished refused: ${stepId} has no worker record and Orca did not answer (orca terminal list failed), so ark cannot tell if its worker is live`,
+      );
+    const there = worktree
+      ? snapshot.terminals.find(
+          (terminal) =>
+            terminal.worktreePath !== undefined &&
+            resolve(terminal.worktreePath) === resolve(worktree),
+        )
+      : undefined;
+    if (there)
+      throw new ArkError(
+        `step.finished refused: Orca lists terminal ${there.handle} in the worktree of ${stepId}, so its worker may be live`,
+      );
+  } else {
     if (!worker.terminal || worker.terminal === "unknown")
       throw new ArkError(
         `step.finished refused: no worker terminal is recorded for ${stepId}, so ark cannot tell if its worker is live`,
@@ -259,13 +279,27 @@ async function launchWorker(
     throw new ArkError(
       `step.started refused: no worktree for repo ${planStep.repo} (create it with ark worktree create)`,
     );
-  // The pair `roles` holds now, not the copy in plan.yml, which a model rename leaves stale.
-  const role = loadConfig(project).roles[planStep.role as "implementer" | "validator" | "reviewer"];
-  const harness = role?.harness ?? planStep.harness;
-  const model = role?.model ?? planStep.model;
+  // The plan step's pair, which `ark plan check` validated against roles; a pair roles lacks needs a plan repair.
+  const { harness, model } = planStep;
+  const allowed = Object.values(loadConfig(project).roles).some(
+    (role) => role.harness === harness && role.model === model,
+  );
+  if (!allowed)
+    throw new ArkError(
+      `step.started refused: plan step ${planStep.id} uses ${harness}/${model}, which is not in ark.yml roles; repair the plan (ark plan check) before the start`,
+    );
   const title = `${planStep.id} (${planStep.role}, ${planStep.repo})`;
-  const takeover = takesOverFromDeadWorker(events, planStep.id);
-  const spec = buildSpec({ run: runId, directory, state, step: planStep, interrupted: takeover });
+  const takeover = !start.merge && takesOverFromDeadWorker(events, planStep.id);
+  const spec = buildSpec({
+    run: runId,
+    directory,
+    state,
+    step: planStep,
+    interrupted: takeover,
+    ...(start.merge
+      ? { mergeBase: state.worktrees.find((entry) => entry.repo === planStep.repo)?.base }
+      : {}),
+  });
 
   let worker: StartedWorker | undefined;
   let workerHarness = harness;
@@ -330,7 +364,7 @@ async function launchWorker(
     session: session ?? "unknown",
   });
   return [
-    `${runId} ${planStep.id} started (round ${start.round}/${deriveState(readEvents(directory)).round_budget})`,
+    `${runId} ${planStep.id} started (${start.merge ? "merge, " : ""}round ${start.round}/${deriveState(readEvents(directory)).round_budget})`,
     `  worker: ${how}, ${how === "restored" ? `${workerHarness} --restore` : `${harness} ${model}`}, terminal ${worker.terminal}, dispatch ${worker.dispatch}`,
     `  session: ${sessionLine}`,
     ...(takeover && how !== "restored"
@@ -418,14 +452,15 @@ export async function runStep(
     const line = answerEscalationByAuto(directory, events, state, start);
     if (line) console.log(line);
   }
-  const planStep = merge
-    ? undefined
-    : readablePlan(directory, state.ticket.id)?.steps.find((step) => step.id === stepId);
-  if (!planStep) {
-    // A merge start, or a step plan.yml does not hold, has no harness or model to launch: it is only recorded.
+  const planStep = readablePlan(directory, state.ticket.id)?.steps.find(
+    (step) => step.id === stepId,
+  );
+  const human = planned.role === "implementer" && state.implementer === "human";
+  if (!planStep || human) {
+    // A human implementer (take_over) or a step plan.yml does not hold has no worker to launch: it is only recorded.
     appendEvent(directory, "step.started", start);
     console.log(
-      `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${deriveState(readEvents(directory)).round_budget})`,
+      `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${deriveState(readEvents(directory)).round_budget})${human ? ", human implementer: no worker launched" : ""}`,
     );
     return;
   }

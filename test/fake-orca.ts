@@ -64,7 +64,11 @@ if (group === "orchestration" && verb === "worker-start") {
         JSON.stringify({ type: "session", id: session, timestamp: new Date().toISOString(), cwd: worktree }) + "\\n",
       );
     }
-    reply({ dispatchId: "ctx_" + state.next++, effects: [{ kind: "terminal", id: handle }] });
+    reply(
+      state.effectsReceipt
+        ? { dispatchId: "ctx_" + state.next++, effects: [{ kind: "terminal", id: handle }] }
+        : { dispatchId: "ctx_" + state.next++, taskId: "task_1", runId: "run_1", state: "ready", agent: flag("--agent"), model: flag("--model"), mode: "structured", terminal: handle, workspace: worktree },
+    );
   }
   save();
 } else if (group === "terminal" && verb === "create") {
@@ -94,7 +98,7 @@ export type FakeOrca = {
   workers(): FakeWorkerStart[];
   /** Handles the fake holds now, with their `connected` flag. */
   terminals(): Record<string, { connected: boolean }>;
-  /** Merges `patch` into the state the fake reads: failWorkerStart, failTerminalCreate, failBind, failList, writeSession, terminals. */
+  /** Merges `patch` into the state the fake reads: failWorkerStart, failTerminalCreate, failBind, failList, effectsReceipt (the older receipt shape), writeSession, terminals. */
   configure(patch: Record<string, unknown>): void;
 };
 

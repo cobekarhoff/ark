@@ -68,8 +68,10 @@ export function buildSpec(options: {
   state: RunState;
   step: PlanStep;
   interrupted: boolean;
+  /** The branch to merge from origin into the worktree: this start only resolves that merge. */
+  mergeBase?: string;
 }): string {
-  const { run, directory, state, step, interrupted } = options;
+  const { run, directory, state, step, interrupted, mergeBase } = options;
   const lines = [
     `/skill:ark worker ${run} ${step.id}`,
     `You are the ${step.role.toUpperCase()} for step ${step.id} of run ${run}.`,
@@ -77,6 +79,10 @@ export function buildSpec(options: {
   if (interrupted)
     lines.push(
       "An earlier worker of this step was interrupted. Its changes are still in the worktree. Before you go on, read `git status` and `git diff`, and keep the work that is there.",
+    );
+  if (mergeBase)
+    lines.push(
+      `This start is a merge, not a new round. Merge origin/${mergeBase} into the worktree branch (git fetch origin, then git merge origin/${mergeBase}), fix the conflict and keep the work of the step. Do not rebase.`,
     );
   const evaluation = join(directory, "evaluation.md");
   const risks = existsSync(evaluation)

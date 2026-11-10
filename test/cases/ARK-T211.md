@@ -33,6 +33,7 @@ Prove that `interrupted` is refused unless Orca answers and does not list the st
 ## Expected results
 
 - Fixtures A, B and C: the system shall refuse with a nonzero exit, name the reason (terminal listed with its state, or Orca list failed), append no event, and the step shall stay `running`. A terminal listed in any state, live or `disconnected`, is never treated as dead, and an Orca failure is never treated as dead (unverifiable liveness does not prove exit).
+- A running step with no worker event (fixture E): the system shall refuse when the Orca list fails or lists a terminal in the step's worktree, and accept (`step.finished` interrupted) only when Orca answers and lists none.
 - Fixture D (Orca answers and the terminal is not listed): the system shall append `step.finished` with the interrupted outcome, exit 0, and `ark status` shall show the step `interrupted`.
 - In fixture D the round shall be given back: the next start takes round 1 again, not round 2, and is not refused for the round budget.
 - In fixture D `git status --porcelain` and the content of both files shall be byte-identical to the saved copies.

@@ -126,13 +126,18 @@ export type StartedWorker = { dispatch: string; terminal: string };
 type Receipt = {
   dispatchId?: string;
   dispatch?: { id?: string };
+  /** The real receipt holds the handle as a string; an older shape lists it in `effects`. */
+  terminal?: string;
   effects?: { kind?: string; id?: string }[];
 };
 
 const receiptOf = (receipt: Receipt, terminal?: string): StartedWorker => ({
   dispatch: receipt.dispatchId ?? receipt.dispatch?.id ?? "unknown",
   terminal:
-    terminal ?? receipt.effects?.find((effect) => effect.kind === "terminal")?.id ?? "unknown",
+    terminal ??
+    (typeof receipt.terminal === "string" ? receipt.terminal : undefined) ??
+    receipt.effects?.find((effect) => effect.kind === "terminal")?.id ??
+    "unknown",
 });
 
 /** `worker-start --agent`: a fresh supervised worker in `worktree`. */

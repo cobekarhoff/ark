@@ -22,6 +22,7 @@ Prove that `ark run step <run> <step> start` starts the plan step's worker throu
 - Case A: the fake Orca writes a session file for the worktree cwd into the fake session folder soon after `worker-start`.
 - Case B: the fake Orca writes no session file. The ark clock (`cli/clock.ts`) is the test clock, so 60 s pass without a real sleep.
 - An old run folder with a `step.started` and no worker event, for the last step.
+- The fake `worker-start --json` answers the real receipt: `{"ok":true,"result":{"dispatchId":"ctx_..","taskId":"..","runId":"..","state":"ready","agent":"omp","model":"..","mode":"structured","terminal":"<handle>","workspace":".."}}` (a string `result.terminal`); a second case answers the older `effects[]` shape.
 
 ## Steps
 
@@ -37,6 +38,10 @@ Prove that `ark run step <run> <step> start` starts the plan step's worker throu
 - When the step starts, the system shall call the fake Orca `worker-start` once, with the worktree of the step, the harness and the model of the plan step, and exit 0.
 - Case A: the run events shall hold the `step.started` and a worker event with the dispatch id, the terminal handle and the session file path of the fake session folder. `ark status` shall show the step `running`.
 - Case B: after 60 s on the test clock the run events shall record the session as `unknown`, the step shall show `running`, and the case shall use no real 60 s wait.
+- The worker event shall hold the terminal handle of the string `result.terminal` of the receipt (else the `effects[]` terminal).
+- The start shall launch the harness and model of the plan step; a pair `ark.yml` roles lacks is refused before any Orca call with an error that asks for plan repair.
+- `start --merge` (after a failed sync) shall launch a worker briefed to merge origin's target branch, at no round cost.
+- A start of a human implementer (after a `take_over` answer) shall record the start and call no Orca.
 - The old run without a worker event shall still derive its steps without an error.
 
 ## Screenshot checkpoints
