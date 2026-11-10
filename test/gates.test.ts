@@ -248,8 +248,8 @@ function buildingRun(gates: Record<string, unknown>) {
   recordEvaluation(run.directory);
   expect(checkPlan(run.runId, run.directory).code).toBe(0);
   expect(deriveState(eventsOf(run.directory)).phase).toBe("building");
-  addWorktree(run.directory);
-  return run;
+  const worktree = addWorktree(run.directory);
+  return { ...run, worktree };
 }
 
 const start = (runId: string, ...flags: string[]) =>
@@ -368,9 +368,13 @@ test("ARK-288-AC2 the third spent budget is refused and the phase is escalation"
   expect(ark("status", runId).out).toContain("phase: escalation");
 });
 
-// ARK-288-AC3 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC3`
-test("ARK-288-AC3 after the MRs open, 3 merge starts are answered and not counted, 2 repair starts are counted and the next is refused", () => {
-  const { runId, directory } = buildingRun({ escalation: "auto" });
+// ARK-T224 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T224`
+test("ARK-T224 after the MRs open, 3 merge starts are answered and not counted, 2 repair starts are counted and the next is refused", () => {
+  const { runId, directory, worktree } = buildingRun({ escalation: "auto" });
+  // A --merge start briefs the worker with the target branch, which origin/HEAD names.
+  Bun.spawnSync(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], {
+    cwd: worktree,
+  });
   expect(start(runId).code).toBe(0);
   expect(finish(runId).code).toBe(0);
   openMergeRequest(directory);
