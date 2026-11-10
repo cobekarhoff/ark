@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { cpus } from "node:os";
+import { defaultMaximumSwapGigabytes, defaultMinimumFreeMemoryPercent } from "./host.ts";
 import { join } from "node:path";
 import { ArkError, yamlQuoteHint } from "./errors.ts";
 import { projectDirectory } from "./paths.ts";
@@ -53,6 +54,10 @@ export type ProjectConfig = {
   checks: { name: string; repo: string; command: string; cores: number }[];
   /** CPU cores that the suites and checks of all `ark test` runs of the host share. Default floor(0.6 x cores). */
   test_budget_cores: number;
+  /** `ark test` starts no suite while free memory is below this percent. Inclusive: equal admits. Default 20. */
+  test_min_free_memory_percent: number;
+  /** `ark test` starts no suite while swap used is above this many GB. Inclusive: equal admits. Default 8. */
+  test_max_swap_gb: number;
   roles: Record<Role, RoleConfig> & {
     evaluator?: RoleConfig;
     designer?: RoleConfig;
@@ -284,6 +289,13 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       1,
       Math.max(1, Math.floor(0.6 * cpus().length)),
     ),
+    test_min_free_memory_percent: integer(
+      fields,
+      "test_min_free_memory_percent",
+      0,
+      defaultMinimumFreeMemoryPercent,
+    ),
+    test_max_swap_gb: integer(fields, "test_max_swap_gb", 0, defaultMaximumSwapGigabytes),
     concurrency: integer(fields, "concurrency", 1, 2),
     round_budget: integer(fields, "round_budget", 0, 2),
     pr_writing: prWriting,
