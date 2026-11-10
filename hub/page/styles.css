@@ -2959,8 +2959,3 @@ a.case-chip:hover {
   border: 0;
   padding: 0;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .time-bar .bar span {
-    transition: flex-grow 200ms var(--ease);
-  }
-}

@@ -169,6 +169,16 @@ describe("time split of ark retro", () => {
         closed(500),
       ];
       expect(waited(twice)).toBe(110 + 130);
+      // A step that fails after merge requests are open escalates: the unanswered wait runs from the failure to the close.
+      const afterMergeRequest = [
+        started(),
+        mergeOpened(10),
+        row(15, "gate.answered", { gate: "escalation", answer: "one_more_round" }),
+        stepStarted(20, "fix"),
+        stepFinished(30, "fix", "failed"),
+        closed(100),
+      ];
+      expect(waited(afterMergeRequest)).toBe(70);
     });
   });
 

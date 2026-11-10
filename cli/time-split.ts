@@ -73,8 +73,14 @@ export function gateWaits(events: ArkEvent[]): GateWait[] {
       for (const [criterion, status] of Object.entries(event.data.criteria ?? {}))
         if (status === "manual pending") ask(`manual:${criterion}`, event.time);
     // ponytail: O(n²) replay; fold with a step function if logs reach thousands of events
-    const gate = waitingGate(deriveState(events.slice(0, index + 1)));
-    if (gate === "escalation") ask(gate, escalationStart(events, index));
+    const state = deriveState(events.slice(0, index + 1));
+    const gate = waitingGate(state);
+    const failedAfterMergeRequest =
+      state.phase === "merge_requests_open" &&
+      event.type === "step.finished" &&
+      event.data.outcome === "failed";
+    if (gate === "escalation" || failedAfterMergeRequest)
+      ask("escalation", escalationStart(events, index));
     else if (gate !== "none") ask(gate, event.time);
   });
   return waits;
