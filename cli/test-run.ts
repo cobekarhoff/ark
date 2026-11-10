@@ -23,7 +23,7 @@ import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
 import { findRun } from "./paths.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
-import { takeTestLock } from "./test-lock.ts";
+import { openTestBudget, type TestBudget } from "./test-lock.ts";
 import { callTest, runnerMain } from "./test-runner.ts";
 import { discoverRepos, mirrorRoot, submodulesOf } from "./workspace.ts";
 import { initSubmodule, linkUntouched } from "./worktree.ts";
@@ -294,6 +294,8 @@ async function retryFailedFiles(
   reportBase: string,
   scratch: string,
   results: TestResult[],
+  tmp: string,
+  cores: number,
 ): Promise<{ results: TestResult[]; flaky: string[]; allPassed: boolean; log: string } | null> {
   const failed = results.filter((result) => result.status === "failed");
   if (failed.length === 0 || suite.base_command === undefined) return null;
@@ -309,8 +311,12 @@ async function retryFailedFiles(
     const reportPath = `${reportBase}.retry-${index}`;
     const command = suite.base_command
       .replaceAll("{files}", shellQuote(file))
-      .replaceAll("{report}", reportPath);
-    const outcome = await run(["sh", "-c", command], cwd, { ARK_EVIDENCE_DIR: scratch });
+      .replaceAll("{report}", reportPath)
+      .replaceAll("<cores>", String(cores));
+    const outcome = await run(["sh", "-c", command], cwd, {
+      ARK_EVIDENCE_DIR: scratch,
+      TMPDIR: tmp,
+    });
     const output = outcome.stdout + outcome.stderr;
     const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
     const again = parsers[suite.parser]({ report, stdout: outcome.stdout });
@@ -337,6 +343,8 @@ async function retryFailedFiles(
  * `command.log` is the whole suite output, so every case of the suite shares it. Passed also needs no failed test,
  * after the retry of each failed file. A passed result is stored under `cache`.
  */
+let budget: TestBudget | null = null;
+
 async function runSuite(
   suite: Suite,
   cwd: string,
@@ -350,8 +358,10 @@ async function runSuite(
 ) {
   const prefix = sideRun.side === "base" ? "base-" : "";
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
-  const command = template.replaceAll("{report}", reportPath);
   const scratch = mkdtempSync(join(tmpdir(), "ark-evidence-"));
+  // ARK-390: a private TMPDIR per suite, so two suites or two runs never share temp files.
+  const suiteTmpdir = mkdtempSync(join(tmpdir(), "ark-suite-"));
+  let taken: { cores: number; release: () => void } | null = null;
   try {
     const cached = cache ? loadCached(cache.project, cache.key, scratch) : null;
     if (cached !== null) {
@@ -370,7 +380,15 @@ async function runSuite(
       for (const file of cached.flaky) sideRun.flaky.push({ suite: suite.name, file });
       return { results: cached.results, passed: true, flaky: cached.flaky, reused: true };
     }
-    const outcome = await run(["sh", "-c", command], cwd, { ARK_EVIDENCE_DIR: scratch });
+    // ARK-390: a cached suite takes no cores; a suite that runs waits for its cores in the host budget.
+    taken = await budget!.take(suite.cores);
+    const command = template
+      .replaceAll("{report}", reportPath)
+      .replaceAll("<cores>", String(taken.cores));
+    const outcome = await run(["sh", "-c", command], cwd, {
+      ARK_EVIDENCE_DIR: scratch,
+      TMPDIR: suiteTmpdir,
+    });
     let output = outcome.stdout + outcome.stderr;
     const separator = output === "" || output.endsWith("\n") ? "" : "\n";
     let log = `${command}\n${output}${separator}exit ${outcome.code}\n`;
@@ -379,7 +397,7 @@ async function runSuite(
     // A failure at base is data, so only the head side retries.
     const retried =
       sideRun.side === "head"
-        ? await retryFailedFiles(suite, cwd, reportPath, scratch, results)
+        ? await retryFailedFiles(suite, cwd, reportPath, scratch, results, suiteTmpdir, taken.cores)
         : null;
     if (retried !== null) {
       results = retried.results;
@@ -408,6 +426,8 @@ async function runSuite(
     return { results, passed, flaky, reused: false };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
+    rmSync(suiteTmpdir, { recursive: true, force: true });
+    taken?.release();
   }
 }
 
@@ -712,14 +732,18 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
   if (entryProblems.length > 0)
     throw new ArkError(entryProblems.map((problem) => `test case entry ${problem}`).join("; "));
 
-  // One ark test at a time per host: the checks, compose and suites all load the machine.
-  const releaseLock = await takeTestLock(runId);
+  // The checks and suites of every ark test on the host share one CPU budget, held by this runner until it exits.
+  budget = openTestBudget(runId, config.test_budget_cores);
   const started = Date.now();
   try {
     const composeBase = composeFor(config, mirror, runId);
     const checks: { name: string; passed: boolean }[] = [];
     for (const check of config.checks) {
-      const outcome = await run(["sh", "-c", check.command], join(mirror, check.repo));
+      const taken = await budget.take(check.cores);
+      const outcome = await run(
+        ["sh", "-c", check.command.replaceAll("<cores>", String(taken.cores))],
+        join(mirror, check.repo),
+      ).finally(taken.release);
       const output = outcome.stdout + outcome.stderr;
       writeFileSync(join(resultsDirectory, `check-${check.name}.log`), output);
       checks.push({ name: check.name, passed: outcome.code === 0 });
@@ -926,6 +950,7 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     if (problems.length > 0)
       throw new ArkError(`tests did not prove every criterion: ${problems.join("; ")}`);
   } finally {
-    releaseLock();
+    budget.close();
+    budget = null;
   }
 }

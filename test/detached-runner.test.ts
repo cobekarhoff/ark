@@ -328,11 +328,16 @@ const gateSuite = (directory: string): Suite[] => [
   },
 ];
 
+const budgetFolder = (fixture: Fixture) => join(fixture.home, "test-budget");
+/** The pid in the budget ticket of the running suite: the runner holds the ticket for its life. */
 const lockHolder = (fixture: Fixture): number => {
-  const lock = join(fixture.home, "test.lock");
-  const name = readdirSync(lock).find((entry) => entry.startsWith("holder-"))!;
-  return readJson(join(lock, name)).pid;
+  const folder = budgetFolder(fixture);
+  const name = readdirSync(folder).find((entry) => entry.endsWith(".json"))!;
+  return readJson(join(folder, name)).pid;
 };
+const noTickets = (fixture: Fixture) =>
+  !existsSync(budgetFolder(fixture)) ||
+  readdirSync(budgetFolder(fixture)).filter((entry) => entry.endsWith(".json")).length === 0;
 const runnerRecord = (fixture: Fixture, runDirectory = fixture.runDirectory) =>
   readJson(join(runDirectory, "results", "runner.json"));
 const openGate = (fixture: Fixture) => Bun.write(join(fixture.directory, "gate"), "go\n");
@@ -377,7 +382,7 @@ describe("detached ark test runner", () => {
       readFileSync(join(fixture.runDirectory, "results", "runner.out"), "utf8"),
     );
     expect(waitDone.out).toContain("suite      gated (integration)  passed");
-    expect(existsSync(join(fixture.home, "test.lock"))).toBe(false);
+    expect(noTickets(fixture)).toBe(true);
     expect(runnerRecord(fixture)).toMatchObject({ state: "done", exit_code: 0 });
   });
 
@@ -478,7 +483,7 @@ describe("detached ark test runner", () => {
     expect(stopped.code).toBe(0);
     expect(stopped.out).toContain(`stopped the ark test of ${fixture.runId} (pid ${runnerPid})`);
     expect([runnerPid, ...suitePids].map(alive)).toEqual([false, false, false, false]);
-    expect(existsSync(join(fixture.home, "test.lock"))).toBe(false);
+    expect(noTickets(fixture)).toBe(true);
     expect(runnerRecord(fixture).state).toBe("stopped");
     expect((await caller.finished()).code).toBe(128 + 15);
 

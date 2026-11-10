@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { cpus } from "node:os";
 import { join } from "node:path";
 import { ArkError, yamlQuoteHint } from "./errors.ts";
 import { projectDirectory } from "./paths.ts";
@@ -39,6 +40,8 @@ export type ProjectConfig = {
     repo: string;
     command: string;
     parser: string;
+    /** CPU cores the suite takes from `test_budget_cores`, and the value of `<cores>` in its commands. Omitted: the whole budget. */
+    cores?: number;
     /** Glob of the repo's test files that `base_command` runs at the base (own-commit files only). */
     base_files?: string;
     /** The command for a list of files at the base: `{files}` is the shell-quoted list, `{report}` as in `command`. */
@@ -47,7 +50,9 @@ export type ProjectConfig = {
     paths?: string[];
   }[];
   /** Commands `ark test` runs in the repo's worktree before the suites. They must not write files. */
-  checks: { name: string; repo: string; command: string }[];
+  checks: { name: string; repo: string; command: string; cores: number }[];
+  /** CPU cores that the suites and checks of all `ark test` runs of the host share. Default floor(0.6 x cores). */
+  test_budget_cores: number;
   roles: Record<Role, RoleConfig> & {
     evaluator?: RoleConfig;
     designer?: RoleConfig;
@@ -174,6 +179,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       repo: text(suite, "repo", `suites[${i}].repo`),
       command: text(suite, "command", `suites[${i}].command`),
       parser: oneOf(suite, "parser", `suites[${i}].parser`, parserNames),
+      ...(suite.cores !== undefined ? { cores: integer(suite, "cores", 1, 1) } : {}),
       ...(baseFiles !== undefined ? { base_files: baseFiles, base_command: baseCommand } : {}),
       ...(paths !== undefined ? { paths: paths as string[] } : {}),
     };
@@ -197,6 +203,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       name,
       repo,
       command: text(check, "command", `checks[${i}].command`),
+      cores: integer(check, "cores", 1, 1),
     };
   });
 
@@ -271,6 +278,12 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     suites,
     checks,
     roles,
+    test_budget_cores: integer(
+      fields,
+      "test_budget_cores",
+      1,
+      Math.max(1, Math.floor(0.6 * cpus().length)),
+    ),
     concurrency: integer(fields, "concurrency", 1, 2),
     round_budget: integer(fields, "round_budget", 0, 2),
     pr_writing: prWriting,
