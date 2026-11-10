@@ -1792,7 +1792,8 @@ test("ARK-T152 Runs shows every run on one board and graph with filters, rings o
     page.locator(`[data-testid="graph-filter"][data-filter="${name}"]`);
   await expect(filter("Active")).toHaveText(/Active\s*3/);
   await expect(filter("Queued")).toHaveText(/Queued\s*1/);
-  await expect(filter("Old")).toHaveText(/Old\s*6/);
+  // The Old count is of tickets, labelled apart from the Closed run count (ARK-T226).
+  await expect(filter("Old")).toHaveText(/Old\s*6\s*tickets/);
   await expect(filter("Active")).toHaveAttribute("aria-pressed", "true");
   const nodes = page.getByTestId("graph-node");
   const ids = async () =>
@@ -5590,6 +5591,321 @@ test("ARK-T149 the Closed lane shows 20 closed runs with outcome and cost and Sh
     page.locator('[data-testid="lane"][data-lane="Building"]').getByTestId("run-card"),
   ).toHaveCount(2);
   await checkpoint(page, "closed-lane-45");
+});
+
+// ---------------------------------------------------------------- ARK-375
+
+/** The outcome icon inside a card or graph node. */
+const outcomeIcon = (scope: Locator) => scope.getByTestId("outcome-icon");
+
+test("ARK-T225 every closed run card and graph node shows its outcome as its own icon and text for merged, aborted and handed_off", async ({
+  page,
+}) => {
+  isolate();
+  const outcomes = ["merged", "aborted", "handed_off"] as const;
+  const closed = { merged: "ARK-701", aborted: "ARK-702", handed_off: "ARK-703" } as const;
+  for (const [index, outcome] of outcomes.entries()) {
+    const id = closed[outcome];
+    writeBacklogTicket({
+      project: "p",
+      id,
+      title: `Title of ${id}`,
+      status: "done",
+      ...(index > 0 ? { dependsOn: ["ARK-701"] } : {}),
+    });
+    writeRun({
+      project: "p",
+      run: runId(id),
+      ticket: { id, title: `Title of ${id}` },
+      phase: "closed",
+      outcome,
+      startedAt: ago(86_400 - index * 600),
+    });
+  }
+  // The open ticket: ARK-704 is queued and waits on ARK-705, which builds, so Active shows both.
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-704",
+    title: "Title of ARK-704",
+    status: "ready",
+    dependsOn: ["ARK-705"],
+  });
+  writeBacklogTicket({ project: "p", id: "ARK-705", title: "Title of ARK-705", status: "ready" });
+  writeRun({
+    project: "p",
+    run: runId("ARK-705"),
+    ticket: { id: "ARK-705", title: "Title of ARK-705" },
+    phase: "building",
+    steps: [{ id: "only", role: "implementer", harness: "omp", model: "m", needs: [] }],
+  });
+  installFakeTools({});
+  const baseUrl = await launch();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await open(page, baseUrl, "runs");
+
+  // The Closed lane: text and icon on each card, three different icons, no green check but on merged.
+  const lane = page.locator('[data-testid="lane"][data-lane="Closed"]');
+  const card = (outcome: keyof typeof closed) =>
+    lane.locator(`[data-run="${runId(closed[outcome])}"]`);
+  await expect(lane.getByTestId("run-card")).toHaveCount(3);
+  await checkpoint(page, "outcomes-lane");
+  const cardIcons: string[] = [];
+  for (const outcome of outcomes) {
+    await expect(card(outcome).getByTestId("card-outcome")).toContainText(outcome);
+    await expect(outcomeIcon(card(outcome))).toHaveCount(1);
+    cardIcons.push(await outcomeIcon(card(outcome)).evaluate((node) => node.outerHTML));
+  }
+  expect(cardIcons.every((icon) => icon.length > 0)).toBe(true);
+  expect(new Set(cardIcons).size).toBe(3);
+  for (const outcome of ["aborted", "handed_off"] as const) {
+    await expect(card(outcome).getByTestId("ring")).not.toHaveText("✓");
+    await expect(card(outcome)).not.toContainText("✓");
+  }
+
+  // The graph, Old filter: the three closed nodes with text and icon; Active is pressed on load.
+  await page.locator('[data-testid="graph-filter"][data-filter="Old"]').click();
+  const nodes = page.getByTestId("graph-node");
+  await expect(nodes).toHaveCount(3);
+  await checkpoint(page, "outcomes-graph");
+  const node = (outcome: keyof typeof closed) =>
+    page.locator(`[data-testid="graph-node"][data-ticket="${closed[outcome]}"]`);
+  const nodeIcons: string[] = [];
+  for (const outcome of outcomes) {
+    await expect(node(outcome).getByTestId("graph-outcome")).toContainText(outcome);
+    await expect(outcomeIcon(node(outcome))).toHaveCount(1);
+    nodeIcons.push(await outcomeIcon(node(outcome)).evaluate((element) => element.outerHTML));
+  }
+  expect(nodeIcons.every((icon) => icon.length > 0)).toBe(true);
+  expect(new Set(nodeIcons).size).toBe(3);
+  for (const outcome of ["aborted", "handed_off"] as const) {
+    await expect(node(outcome).getByTestId("ring")).not.toHaveText("✓");
+    await expect(node(outcome)).not.toContainText("✓");
+  }
+
+  // The open tickets show no outcome.
+  await page.locator('[data-testid="graph-filter"][data-filter="Active"]').click();
+  await expect(nodes).toHaveCount(2);
+  for (const id of ["ARK-704", "ARK-705"]) {
+    const open = page.locator(`[data-testid="graph-node"][data-ticket="${id}"]`);
+    await expect(open).toHaveCount(1);
+    await expect(open.getByTestId("graph-outcome")).toHaveCount(0);
+    await expect(outcomeIcon(open)).toHaveCount(0);
+  }
+});
+
+test("ARK-T226 the closed-run count in the page header equals the Closed lane count with 45 closed runs", async ({
+  page,
+}) => {
+  isolate();
+  const project = "p";
+  const closedRun = (ticket: string, number: number, secondsAgo: number) =>
+    writeRun({
+      project,
+      run: runId(ticket, number),
+      ticket: { id: ticket, title: `Title of ${ticket}` },
+      phase: "closed",
+      outcome: "merged",
+      startedAt: ago(secondsAgo),
+    });
+  const backlog = (id: string, status: string) =>
+    writeBacklogTicket({ project, id, title: `Title of ${id}`, status });
+  // 40 single-run tickets.
+  for (let number = 1; number <= 40; number++) {
+    const id = `ARK-${1000 + number}`;
+    backlog(id, "done");
+    closedRun(id, 1, 200_000 - number * 100);
+  }
+  // 2 closed runs of one done ticket.
+  backlog("ARK-1041", "done");
+  closedRun("ARK-1041", 1, 100_000);
+  closedRun("ARK-1041", 2, 90_000);
+  // 1 closed run of a ticket whose newer run builds: the ticket is open.
+  backlog("ARK-1042", "ready");
+  closedRun("ARK-1042", 1, 80_000);
+  writeRun({
+    project,
+    run: runId("ARK-1042", 2),
+    ticket: { id: "ARK-1042", title: "Title of ARK-1042" },
+    phase: "building",
+    steps: [{ id: "only", role: "implementer", harness: "omp", model: "m", needs: [] }],
+  });
+  // 2 closed runs of tickets that are not in the backlog.
+  closedRun("ARK-1050", 1, 70_000);
+  closedRun("ARK-1051", 1, 60_000);
+  installFakeTools({});
+  const baseUrl = await launch();
+  await open(page, baseUrl, "runs");
+
+  const lane = page.locator('[data-testid="lane"][data-lane="Closed"]');
+  await expect(lane.getByTestId("run-card")).toHaveCount(20);
+  await lane.getByTestId("show-more").click();
+  await lane.getByTestId("show-more").click();
+  await expect(lane.getByTestId("run-card")).toHaveCount(45);
+  await checkpoint(page, "closed-count-45");
+  await expect(lane.locator("header .count")).toHaveText("45");
+  await expect(page.locator("main h1")).toContainText(/\b45 closed\b/);
+  // The graph filter counts tickets, not runs: 41 closed tickets, labelled apart from the 45 runs.
+  await expect(page.locator('[data-testid="graph-filter"][data-filter="Old"]')).toHaveText(
+    /Old\s*41\s*tickets/,
+  );
+});
+
+/** The one-word-per-line, clipping and wrapping problems of Home, read from real text boxes. */
+async function homeFitProblems(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const problems: string[] = [];
+    type Word = { text: string; rects: DOMRect[] };
+    const wordsOf = (element: Element): Word[] => {
+      const found: Word[] = [];
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        for (const match of (text as Text).data.matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(text, match.index);
+          range.setEnd(text, match.index + match[0].length);
+          found.push({ text: match[0], rects: [...range.getClientRects()] });
+        }
+      }
+      return found;
+    };
+    const linesOf = (words: Word[]) => {
+      const tops = new Map<number, number>();
+      for (const word of words)
+        for (const rect of word.rects)
+          tops.set(Math.round(rect.top), (tops.get(Math.round(rect.top)) ?? 0) + 1);
+      return [...tops.values()];
+    };
+    const label = (element: Element) =>
+      `${element.getAttribute("data-testid") ?? element.className} "${element.textContent?.trim().slice(0, 40)}"`;
+
+    // Tile text: no tile lets its text fall one word per line, and no word leaves its tile.
+    for (const tile of document.querySelectorAll('[data-testid="tile"]')) {
+      const box = tile.getBoundingClientRect();
+      if (tile.scrollWidth > tile.clientWidth + 1) problems.push(`tile overflows: ${label(tile)}`);
+      for (const text of tile.querySelectorAll(".tile-label, .tile-note")) {
+        const words = wordsOf(text);
+        const lines = linesOf(words);
+        if (words.length >= 3 && lines.every((count) => count === 1))
+          problems.push(`one word per line: ${label(text)}`);
+        if (lines.length > 3) problems.push(`${lines.length} lines: ${label(text)}`);
+        if (words.some((word) => word.rects.length > 1))
+          problems.push(`word broken: ${label(text)}`);
+        if (words.some((word) => word.rects.some((rect) => rect.right > box.right + 0.5)))
+          problems.push(`text leaves its tile: ${label(text)}`);
+      }
+    }
+    // Dates: a tile note that holds a time, and the age, idle and waited times of the rows.
+    const dates = [
+      ...document.querySelectorAll(
+        '[data-testid="run-age"], [data-testid="run-idle"], [data-testid="waited"]',
+      ),
+      ...[...document.querySelectorAll(".tile-note")].filter((note) =>
+        /yesterday|ago|resets/.test(note.textContent ?? ""),
+      ),
+    ];
+    if (dates.length < 4) problems.push(`only ${dates.length} dates on the page`);
+    for (const date of dates) {
+      const parent = date.closest(".tile, .panel")!.getBoundingClientRect();
+      if (date.scrollWidth > date.clientWidth + 1) problems.push(`date clipped: ${label(date)}`);
+      if (wordsOf(date).some((word) => word.rects.some((rect) => rect.right > parent.right + 0.5)))
+        problems.push(`date outside its box: ${label(date)}`);
+    }
+    // Ticket ids: one line, in one piece.
+    const ids = [
+      ...document.querySelectorAll(
+        '[data-testid="gate"] .item-head a.mono, [data-testid="run"] .item-head a.mono, [data-testid="review"] .item-head a.mono',
+      ),
+      document.querySelector('[data-tile="needs-me"] .tile-note')!,
+    ];
+    if (ids.length < 4) problems.push(`only ${ids.length} ticket ids on the page`);
+    for (const id of ids) {
+      const words = wordsOf(id);
+      if (words.length !== 1 || words[0].rects.length !== 1)
+        problems.push(`id wraps: ${label(id)}`);
+    }
+    return problems;
+  });
+}
+
+test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a date or wrap a ticket id", async ({
+  page,
+}) => {
+  isolate();
+  const local = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const gate = "ARK-12345-LONG";
+  writeRun({
+    project: "p",
+    run: `${local(new Date())}-${gate}-1`,
+    ticket: { id: gate, title: "Run at a gate with a title that is rather long" },
+    phase: "awaiting_criteria",
+  });
+  const building = "ARK-12346-LONG";
+  writeRun({
+    project: "p",
+    run: `${local(new Date())}-${building}-1`,
+    ticket: { id: building, title: "Run that builds with a title that is rather long" },
+    phase: "building",
+    steps: [
+      { id: "only", role: "implementer", harness: "omp", model: "m", needs: [], startedAfter: 120 },
+    ],
+  });
+  const review = reviewRun({
+    ticket: "ARK-12347-LONG",
+    title: "Ready to merge with a title that is rather long",
+    number: 91,
+    criteria: [["ARK-12347-LONG-AC1", "passing"]],
+    createdAgo: 10_800,
+    conclusion: "SUCCESS",
+    size: { additions: 312, deletions: 41, changedFiles: 6 },
+    findings: "### P1: a\n",
+  });
+  // Multi-digit KPI values: $34.52 today against $12.34 yesterday, and a limit at 82%.
+  for (const [day, ticket, cost] of [
+    [local(new Date()), "ARK-12348-LONG", 34.52],
+    [local(yesterday), "ARK-12349-LONG", 12.34],
+  ] as const) {
+    writeBacklogTicket({ project: "p", id: ticket, title: `Title of ${ticket}`, status: "done" });
+    writeRun({
+      project: "p",
+      run: `${day}-${ticket}-1`,
+      ticket: { id: ticket, title: `Title of ${ticket}` },
+      phase: "closed",
+      outcome: "merged",
+      metricsCostUsd: cost,
+    });
+  }
+  installFakeTools({
+    mergeRequestViews: { [review.url]: review.view },
+    ompUsage: usageAt(0.82),
+  });
+  const baseUrl = await launch();
+  const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"]`);
+  const ready = async () => {
+    await open(page, baseUrl, "");
+    await expect(page.getByTestId("tile")).toHaveCount(6);
+    await expect(tile("usage").locator(".big")).toHaveText("82%", { timeout: 20_000 });
+    await expect(tile("cost").locator(".big")).toHaveText("$34.52");
+    await expect(tile("cost").locator(".tile-note")).toContainText("yesterday");
+    await expect(tile("needs-me").locator(".tile-note")).toHaveText(gate);
+    await expect(page.getByTestId("run")).toHaveCount(3);
+    await expect(page.getByTestId("review")).toHaveCount(1);
+    await expect(page.getByTestId("run-age")).toHaveCount(3);
+    await expect(page.getByTestId("waited")).toHaveCount(1);
+  };
+
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await ready();
+  await checkpoint(page, "home-1024");
+  await tile("cost").scrollIntoViewIfNeeded();
+  expect(await homeFitProblems(page)).toEqual([]);
+
+  // The same checks at 1280 px: the fix does not move the break.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await ready();
+  expect(await homeFitProblems(page)).toEqual([]);
 });
 
 type Box = { x: number; y: number; width: number; height: number };
