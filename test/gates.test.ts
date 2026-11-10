@@ -7,6 +7,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  withFakeHarnesses,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -107,9 +108,11 @@ test("ARK-234-AC1 an unknown gates key exits 1 and names the field", () => {
   expect(result.out).toContain("gates.setup");
 });
 
-test("ARK-234-AC1 a gates map with only plan set loads, and the other keys stay human", () => {
+test("ARK-T168 a gates map with only plan set loads, and the other keys stay human", () => {
   const { runId, directory } = startRun({ plan: "auto" });
-  expect(ark("status").code).toBe(0);
+  withFakeHarnesses(["pi/task", "pi/validate", "pi/design"], () =>
+    expect(ark("status").code).toBe(0),
+  );
   // gates.strategy is missing, so two cards must still wait for the human.
   expect(recordTwoCards(runId, directory, "yes", "no").code).toBe(0);
   expect(deriveState(eventsOf(directory)).phase).toBe("awaiting_strategy");
@@ -404,6 +407,17 @@ test("ARK-288-AC4 a requested escalation is never answered by auto and the phase
 
   expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
   expect(start(runId).code).toBe(0);
+});
+
+test("an event refused outside a gate phase names the phases that allow it", () => {
+  const { runId, directory } = buildingRun({});
+  spendRounds(runId, directory, false);
+  expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
+  const again = ark("escalate", runId, "--reason", "still open");
+  expect(again.code).toBe(1);
+  expect(again.err).toContain(
+    "escalation.requested refused: run is in phase escalation; allowed in building",
+  );
 });
 
 for (const [label, gates] of [

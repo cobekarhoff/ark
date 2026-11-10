@@ -132,7 +132,7 @@ Do these steps in order for one ready ticket.
    orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree path:<printed path> --agent <harness> --model <model> --json
    ```
 
-   Use the `harness` and `model` of the `chief` role in `ark.yml` unless the human names others. If `roles.chief` is missing, do not start the run lead and do not edit `ark.yml`. Tell the human: "Prerequisite missing: `roles.chief` (harness and model) is not set in `<project>/ark.yml`. Add it, for example `chief: { harness: claude, model: claude-opus }`, then ask me again." If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.
+   Use the `harness` and `model` of the `chief` role in `ark.yml` unless the human names others. If `roles.chief` is missing, do not start the run lead and do not edit `ark.yml`. Tell the human: "Prerequisite missing: `roles.chief` (harness and model) is not set in `<project>/ark.yml`. Add it, for example `chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }`, then ask me again." If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.
 
    If `worker-start` exits non-zero, do not start it again. Read `failedStage` and `residualResources` in the output, tell the human, and decide with them.
 

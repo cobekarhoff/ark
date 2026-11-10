@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../cli/config.ts";
-import { appendEvent } from "../cli/events.ts";
+import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
 import { timelineOf } from "../hub/run-detail.ts";
 import {
@@ -349,27 +349,39 @@ test("ARK-152-AC5 a failed step stays the current step", () => {
   expect(ark("status", runId).out).toContain("current step: build (failed)");
 });
 
-test("ARK-152-AC6 status without a run lists every open run with phase and current step, across projects", () => {
-  const first = startRun("demo", "ARK-900");
-  approvePlan(first.directory);
-  ark("run", "step", first.runId, "build", "start");
-  writeProject("other", validConfig());
-  const second = startRun("other", "ARK-910");
-  const closed = startRun("demo", "ARK-920");
-  ark("run", "close", closed.runId, "aborted");
+test("ARK-T165 status without a run lists every open run with phase and current step, across projects", () => {
+  withControlledPath(
+    "ok",
+    () => {
+      const first = startRun("demo", "ARK-900");
+      approvePlan(first.directory);
+      ark("run", "step", first.runId, "build", "start");
+      writeProject("other", validConfig());
+      const second = startRun("other", "ARK-910");
+      const closed = startRun("demo", "ARK-920");
+      ark("run", "close", closed.runId, "aborted");
 
-  const listing = ark("status");
-  expect(listing.code).toBe(0);
-  const lines = listing.out.trim().split("\n");
-  expect(lines).toContain(`${first.runId}  building  build  0m`);
-  expect(lines).toContain(`${second.runId}  awaiting_criteria  -  0m`);
-  expect(listing.out).not.toContain(closed.runId);
+      const listing = ark("status");
+      expect(listing.code).toBe(0);
+      const lines = listing.out.trim().split("\n");
+      expect(lines).toContain(`${first.runId}  building  build  0m`);
+      expect(lines).toContain(`${second.runId}  awaiting_criteria  -  0m`);
+      expect(listing.out).not.toContain(closed.runId);
+    },
+    ["claude", "codex"],
+  );
 });
 
-test("ARK-152-AC2 status passes when every project config is valid", () => {
-  const result = ark("status");
-  expect(result.code).toBe(0);
-  expect(result.out).not.toContain("config error");
+test("ARK-T166 status passes when every project config is valid", () => {
+  withControlledPath(
+    "ok",
+    () => {
+      const result = ark("status");
+      expect(result.code).toBe(0);
+      expect(result.out).not.toContain("config error");
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-152-AC2 status exits 1 and names the bad field and project of an invalid config", () => {
@@ -382,37 +394,49 @@ test("ARK-152-AC2 status exits 1 and names the bad field and project of an inval
   expect(result.err).toContain("1 project config(s) invalid");
 });
 
-test("ARK-152-AC2 ARK_PROJECT limits the status config check to one project", () => {
-  writeProject("broken", validConfig({ ticket_source: "trello" }));
-  try {
-    process.env.ARK_PROJECT = "demo";
-    expect(ark("status").code).toBe(0);
-    process.env.ARK_PROJECT = "broken";
-    expect(ark("status").code).toBe(1);
-    process.env.ARK_PROJECT = "ghost";
-    const missing = ark("status");
-    expect(missing.code).toBe(1);
-    expect(missing.err).toContain("ghost");
-  } finally {
-    delete process.env.ARK_PROJECT;
-  }
+test("ARK-T167 ARK_PROJECT limits the status config check to one project", () => {
+  withControlledPath(
+    "ok",
+    () => {
+      writeProject("broken", validConfig({ ticket_source: "trello" }));
+      try {
+        process.env.ARK_PROJECT = "demo";
+        expect(ark("status").code).toBe(0);
+        process.env.ARK_PROJECT = "broken";
+        expect(ark("status").code).toBe(1);
+        process.env.ARK_PROJECT = "ghost";
+        const missing = ark("status");
+        expect(missing.code).toBe(1);
+        expect(missing.err).toContain("ghost");
+      } finally {
+        delete process.env.ARK_PROJECT;
+      }
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-T18 ARK-321/AC1 ark status skips a project folder that holds no run", () => {
-  const home = tempArkHome();
-  writeProject("good", validConfig());
-  mkdirSync(join(home, "projects/empty-runs/runs"), { recursive: true });
-  mkdirSync(join(home, "projects/no-runs"), { recursive: true });
-  mkdirSync(join(home, "projects/stray-file/runs"), { recursive: true });
-  writeFileSync(join(home, "projects/stray-file/runs/notes.txt"), "stray\n");
+  withControlledPath(
+    "ok",
+    () => {
+      const home = tempArkHome();
+      writeProject("good", validConfig());
+      mkdirSync(join(home, "projects/empty-runs/runs"), { recursive: true });
+      mkdirSync(join(home, "projects/no-runs"), { recursive: true });
+      mkdirSync(join(home, "projects/stray-file/runs"), { recursive: true });
+      writeFileSync(join(home, "projects/stray-file/runs/notes.txt"), "stray\n");
 
-  const result = ark("status");
-  expect(result.code).toBe(0);
-  expect(result.out + result.err).not.toContain("has no ark.yml");
-  expect(result.out + result.err).not.toContain("config(s) invalid");
-  for (const name of ["empty-runs", "no-runs", "stray-file"]) {
-    expect(result.out + result.err).not.toContain(name);
-  }
+      const result = ark("status");
+      expect(result.code).toBe(0);
+      expect(result.out + result.err).not.toContain("has no ark.yml");
+      expect(result.out + result.err).not.toContain("config(s) invalid");
+      for (const name of ["empty-runs", "no-runs", "stray-file"]) {
+        expect(result.out + result.err).not.toContain(name);
+      }
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-T19 ARK-321/AC2 ark status reports a folder with a run and no ark.yml", () => {
@@ -426,21 +450,27 @@ test("ARK-T19 ARK-321/AC2 ark status reports a folder with a run and no ark.yml"
   expect(result.out + result.err).not.toContain("empty-sibling");
   expect(result.err).toContain("project config(s) invalid");
 });
-test("ARK-164-AC2 status accepts --project for config checks and run state", () => {
-  writeProject("broken", validConfig({ ticket_source: "trello" }));
+test("ARK-T167 status accepts --project for config checks and run state", () => {
+  withControlledPath(
+    "ok",
+    () => {
+      writeProject("broken", validConfig({ ticket_source: "trello" }));
 
-  const configCheck = ark("status", "--project", "demo");
-  expect(configCheck.code).toBe(0);
-  expect(configCheck.out).not.toContain("config error");
+      const configCheck = ark("status", "--project", "demo");
+      expect(configCheck.code).toBe(0);
+      expect(configCheck.out).not.toContain("config error");
 
-  const { runId } = startRun();
-  const runStatus = ark("status", runId, "--project", "demo");
-  expect(runStatus.code).toBe(0);
-  expect(runStatus.out).toContain("phase: awaiting_criteria");
+      const { runId } = startRun();
+      const runStatus = ark("status", runId, "--project", "demo");
+      expect(runStatus.code).toBe(0);
+      expect(runStatus.out).toContain("phase: awaiting_criteria");
 
-  const missingProject = ark("status", "--project", "missing");
-  expect(missingProject.code).toBe(1);
-  expect(missingProject.err).toContain("missing");
+      const missingProject = ark("status", "--project", "missing");
+      expect(missingProject.code).toBe(1);
+      expect(missingProject.err).toContain("missing");
+    },
+    ["claude", "codex"],
+  );
 });
 
 test("ARK-152-AC6 status for one run shows phase, round, waiting gate and cost", () => {
@@ -1316,7 +1346,9 @@ test("ARK-T116 a none project lists each branch with commits beyond its base, be
  * a repo in `unchanged`), the tests passed at the heads, and impl-core and bump-platform done. `repos: false` gives the
  * old plan with no repos block and no reviewer step.
  */
-function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
+function claraRun(
+  options: { repos?: boolean; unchanged?: string[]; submoduleBump?: boolean } = {},
+) {
   writeProject(
     "demo",
     validConfig({
@@ -1328,6 +1360,9 @@ function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
   const { runId, directory } = startRun();
   recordEvaluation(directory);
   const parts = claraPlan(["ARK-900-AC1"]);
+  // submoduleBump: platform holds core as a submodule, and its bump step is not done.
+  if (options.submoduleBump)
+    Object.assign(parts.repos[1].depends_on[0], { kind: "submodule", pin: "libs/core" });
   const withRepos = options.repos !== false;
   writeFileSync(
     join(directory, "plan.yml"),
@@ -1375,7 +1410,7 @@ function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
   for (const { repo, path } of created)
     if (!options.unchanged?.includes(repo))
       for (let i = 0; i < commits[repo]; i++) commitIn(path, `change-${i}`);
-  for (const step of ["impl-core", "bump-platform"])
+  for (const step of options.submoduleBump ? ["impl-core"] : ["impl-core", "bump-platform"])
     for (const action of ["start", "finish"]) run("run", "step", runId, step, action);
   appendEvent(directory, "test.completed", {
     passed: true,
@@ -1396,7 +1431,7 @@ function claraRun(options: { repos?: boolean; unchanged?: string[] } = {}) {
   return { runId, directory, branchLine, run };
 }
 
-const pendingBump = `           pending bump: bump-reports (package ${clara.core}, clara-core>=0.0.6rc1)`;
+const pendingBump = `           pending bump: bump-reports (package ${clara.core}, clara-core>=0.0.6rc1) needs <published version>`;
 const handOffLines = (out: string) =>
   out.split("\n").filter((line) => /^branch |pending bump|^order:/.test(line));
 
@@ -1414,6 +1449,25 @@ test("ARK-T108 hand-off and status list the branches in repo order and the pendi
   expect(closed.code, closed.err).toBe(0);
   expect(handOffLines(closed.out)).toEqual(expected);
   expect(handOffLines(ark("status", runId).out)).toEqual(expected);
+});
+
+test("ARK-T143 the hand-off report lists a submodule and a package bump with their needed values in repo order", () => {
+  const { runId, directory, branchLine } = claraRun({ submoduleBump: true });
+  const core = deriveState(readEvents(directory)).worktrees.find(
+    (worktree) => worktree.repo === clara.core,
+  )!;
+  const coreHead = Bun.spawnSync(["git", "-C", core.path, "rev-parse", "HEAD"])
+    .stdout.toString()
+    .trim();
+  const closed = ark("run", "close", runId, "handed_off");
+  expect(closed.code, closed.err).toBe(0);
+  expect(handOffLines(closed.out)).toEqual([
+    branchLine(clara.core),
+    branchLine(clara.platform),
+    `           pending bump: bump-platform (submodule ${clara.core}, libs/core) needs ${coreHead.slice(0, 8)}`,
+    branchLine(clara.reports),
+    pendingBump,
+  ]);
 });
 
 test("ARK-T108 status prints no pending bump once every bump step is done", () => {
@@ -2091,3 +2145,227 @@ for (const [name, criteria, message] of [
     );
   });
 }
+
+// --- ARK-T157, ARK-T158: harness names and role availability (ARK-340) --------------------------
+
+const ompModel = "anthropic/claude-sonnet-5-5";
+const roleNames = [
+  "implementer",
+  "validator",
+  "reviewer",
+  "evaluator",
+  "designer",
+  "chief",
+  "test_writer",
+  "test_reviewer",
+];
+
+function ompRoles(
+  overrides: Record<string, { harness: string; model: string }> = {},
+): Record<string, { harness: string; model: string }> {
+  const roles = Object.fromEntries(
+    roleNames.map((role) => [role, { harness: "omp", model: ompModel }]),
+  );
+  return { ...roles, ...overrides };
+}
+
+const loadError = (project: string): string => {
+  try {
+    loadConfig(project);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  return "";
+};
+
+test("ARK-T157 config load refuses a role whose harness is not claude, codex, omp or pi, and names the role and the four harnesses", () => {
+  tempArkHome();
+  writeProject("base", validConfig({ roles: ompRoles() }));
+  expect(loadError("base")).toBe("");
+  for (const harness of ["claude", "codex", "omp", "pi"]) {
+    writeProject(
+      `with-${harness}`,
+      validConfig({ roles: ompRoles({ implementer: { harness, model: ompModel } }) }),
+    );
+    expect(loadError(`with-${harness}`)).toBe("");
+  }
+
+  writeProject(
+    "typo",
+    validConfig({ roles: ompRoles({ reviewer: { harness: "ompp", model: ompModel } }) }),
+  );
+  const typo = loadError("typo");
+  expect(typo).toContain("reviewer");
+  expect(typo).toContain("ompp");
+  for (const harness of ["claude", "codex", "omp", "pi"]) expect(typo).toContain(harness);
+
+  writeProject(
+    "case",
+    validConfig({ roles: ompRoles({ designer: { harness: "Claude", model: ompModel } }) }),
+  );
+  const wrongCase = loadError("case");
+  expect(wrongCase).toContain("designer");
+  for (const harness of ["claude", "codex", "omp", "pi"]) expect(wrongCase).toContain(harness);
+});
+
+type FakeOmp = { path: string; calls: () => number };
+
+/** A PATH of a fake omp, bun and the system folders; it has no codex. The caller restores PATH. */
+function controlledPath(list: "ok" | "fail", extraCommands: string[] = []): FakeOmp {
+  const directory = mkdtempSync(join(tmpdir(), "ark-role-path-"));
+  const counter = join(directory, "models-calls");
+  writeFileSync(counter, "");
+  const omp = join(directory, "omp");
+  writeFileSync(
+    omp,
+    list === "ok"
+      ? `#!/bin/sh\necho "$@" >> '${counter}'\nprintf '%s' '{"models":[{"selector":"${ompModel}"}]}'\n`
+      : `#!/bin/sh\necho "$@" >> '${counter}'\necho "no credentials" >&2\nexit 1\n`,
+  );
+  chmodSync(omp, 0o755);
+  for (const name of extraCommands) {
+    writeFileSync(join(directory, name), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(directory, name), 0o755);
+  }
+  symlinkBun(directory);
+  process.env.PATH = `${directory}:/usr/bin:/bin`;
+  return {
+    path: directory,
+    calls: () => readFileSync(counter, "utf8").split("\n").filter(Boolean).length,
+  };
+}
+
+const statusProject = (name: string, overrides = {}): void => {
+  writeProject(name, validConfig({ roles: ompRoles(overrides) }));
+};
+
+const failingRoles = {
+  reviewer: { harness: "omp", model: "openai-codex/gpt-6.1-solx" },
+  validator: { harness: "codex", model: "gpt-6.1-sol" },
+};
+
+const withControlledPath = (
+  list: "ok" | "fail",
+  body: (fake: FakeOmp) => void,
+  extraCommands: string[] = [],
+): void => {
+  const outer = process.env.PATH;
+  try {
+    body(controlledPath(list, extraCommands));
+  } finally {
+    process.env.PATH = outer;
+  }
+};
+
+const lineWith = (text: string, ...needles: string[]): string | undefined =>
+  text.split("\n").find((line) => needles.every((needle) => line.includes(needle)));
+
+test("ARK-T158 ark status prints one line per failing role and runs omp models once", () => {
+  tempArkHome();
+  statusProject("a", failingRoles);
+  statusProject("b");
+  withControlledPath("ok", (fake) => {
+    const result = ark("status");
+    const text = result.out + result.err;
+    expect(result.code).toBe(1);
+    expect(
+      lineWith(text, "reviewer", "openai-codex/gpt-6.1-solx", "model not found by omp"),
+    ).toBeDefined();
+    expect(lineWith(text, "validator", "harness codex not installed")).toBeDefined();
+    expect(text).not.toContain("role models: unchecked");
+    expect(text.split("\n").filter((line) => line.includes("role "))).toHaveLength(2);
+    expect(fake.calls()).toBe(1);
+  });
+});
+
+test("ARK-T158 ark status exits 0 and prints no role line when every role can run", () => {
+  tempArkHome();
+  statusProject("a-ok");
+  statusProject("b");
+  withControlledPath("ok", (fake) => {
+    const result = ark("status");
+    expect(result.code).toBe(0);
+    expect(result.out + result.err).not.toContain("role ");
+    expect(fake.calls()).toBe(1);
+  });
+});
+
+test("ARK-T158 ark status prints role models unchecked and still exits 0 when omp models fails and no role fails", () => {
+  tempArkHome();
+  statusProject("a-codex", { validator: { harness: "claude", model: "claude-sonnet-5-5" } });
+  withControlledPath(
+    "fail",
+    (fake) => {
+      const result = ark("status");
+      expect(result.code).toBe(0);
+      expect(result.out + result.err).toContain("role models: unchecked (");
+      expect(result.out + result.err).not.toContain("not found by omp");
+      expect(fake.calls()).toBe(1);
+    },
+    ["claude"],
+  );
+});
+
+test("ARK-T158 ark status exits 1 for a missing harness when omp models fails, and prints no model line", () => {
+  tempArkHome();
+  statusProject("a", failingRoles);
+  withControlledPath("fail", () => {
+    const result = ark("status");
+    const text = result.out + result.err;
+    expect(result.code).toBe(1);
+    expect(text).toContain("role models: unchecked (");
+    expect(lineWith(text, "validator", "harness codex not installed")).toBeDefined();
+    expect(text).not.toContain("model not found by omp");
+  });
+});
+
+test("ARK-T158 ark status leaves a project with no ark.yml to the existing check and adds no role line", () => {
+  const home = tempArkHome();
+  statusProject("a-ok");
+  mkdirSync(join(home, "projects/nocfg/runs/2026-01-01-X-1"), { recursive: true });
+  withControlledPath("ok", () => {
+    const result = ark("status");
+    const text = result.out + result.err;
+    expect(result.code).toBe(1);
+    expect(text).toContain("project nocfg has no ark.yml");
+    expect(text).toContain("project config(s) invalid");
+    expect(text).not.toContain("role ");
+  });
+
+  rmSync(join(home, "projects/nocfg"), { recursive: true });
+  mkdirSync(join(home, "projects/nocfg/runs"), { recursive: true });
+  withControlledPath("ok", () => {
+    const result = ark("status");
+    expect(result.code).toBe(0);
+    expect(result.out + result.err).not.toContain("nocfg");
+    expect(result.out + result.err).not.toContain("role ");
+  });
+});
+
+test("ARK-T158 ark status keeps the config error of an invalid ark.yml and prints no role line for it", () => {
+  tempArkHome();
+  statusProject("a-ok");
+  writeProject("badcfg", validConfig({ ticket_source: "trello", roles: ompRoles(failingRoles) }));
+  withControlledPath("ok", () => {
+    const result = ark("status");
+    const text = result.out + result.err;
+    expect(result.code).toBe(1);
+    expect(text).toContain("config error: badcfg:");
+    expect(text).toContain("1 project config(s) invalid");
+    expect(text).not.toContain("role ");
+  });
+});
+
+test("ARK-T158 ark status for a run and other commands print no role line and never call omp", () => {
+  tempArkHome();
+  statusProject("a", failingRoles);
+  const { runId } = startRun("a");
+  withControlledPath("ok", (fake) => {
+    const run = ark("status", runId, "--project", "a");
+    expect(run.code).toBe(0);
+    expect(run.out + run.err).not.toContain("role ");
+    const other = ark("ui-skills", runId, "--project", "a");
+    expect(other.out + other.err).not.toContain("role ");
+    expect(fake.calls()).toBe(0);
+  });
+});

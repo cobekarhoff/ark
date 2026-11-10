@@ -202,6 +202,7 @@ For a project app, start `portless <project> --app-port <port> <command>` and st
    - Read the ticket and each AC. Decide which repos the ticket changes.
    - For a ticket that touches 2 or more repos, find each repo edge from the workspace before you write the plan. A repo edge says that one repo builds against another. Look in `.gitmodules` for submodules, in the package manifests (`package.json`, `pyproject.toml`, `go.mod`) for package pins, in the compose file for services, and in schemas or clients for APIs. ark does not parse manifests: you read them. Write each edge with its evidence, the file and line that show it.
    - For each submodule or package edge that the ticket changes upstream, add one bump step in the downstream repo. A bump step is an implementer step that moves the pin to the new upstream commit or version.
+     - Tell the bump step what to write. Submodule edge: point the submodule at the upstream branch head, and the MR body says "the pointer moves after !N merges". Package edge: keep the old pin, and the MR body says "the pin moves after !N merges and publishes". `!N` is the upstream MR number.
 2. Read `$ARK_HOME/projects/<project>/learnings.md` if it exists. It holds lessons from earlier runs. Apply each one that fits this ticket: for example, a step layout to avoid, a test case to add, or a model to choose. Note each one you apply, and each one you decide does not fit and why, for section 4.
 3. Look for work that overlaps this ticket in the project's recent MRs, open and merged: `gh pr list --state all --limit 10` (`glab mr list` on GitLab). When `ark.yml` says `merge_requests: none`, skip `gh pr list` and `glab mr list`: the project has no MRs to read. Note each overlapping file or concept in the plan `summary`, so that two runs do not build the same thing.
 
@@ -216,8 +217,8 @@ steps:
   - id: core-package
     role: implementer
     repo: shared/packages
-    harness: claude
-    model: claude-sonnet
+    harness: omp
+    model: anthropic/claude-sonnet-5-5
     needs: []
     criteria: [CLARA-512/AC1]
 design:
@@ -267,7 +268,7 @@ Rules for the plan:
 - Conversion on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. When the run's diff touches such a test, plan a test case for it: the implementer or validator writes the entry with `ark test-case new <KEY>`, renames the test title to start with the test case ID, and the plan names the case (`add`, or `update` for an existing entry). The reviewer rejects a diff that touches such a test and leaves its title unchanged. Do not migrate old tests in bulk.
 - `design` is required. `ark plan check` rejects a plan with no `design.interfaces`, or with an interface that has no `callers`. `interfaces` lists each interface the change touches: a command, a playbook section, an event, a file format or an exported function. Find the callers of each one before you write it: search the repo, and read the playbooks and docs that name it. A removed or changed interface with a caller you did not list is how earlier runs broke. `approach` (the method, in a few sentences) and `example` (a sample of new or changed output) are optional, but give both. Plan.md shows "No approach given." or "No example given." for a missing part, and the human can ask for it with `change` at the plan gate.
 - `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
-- Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the validator and the reviewer use a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
+- Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the reviewer uses a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
 - When `Surfaces` includes `web_ui`, give a `skills` list (the UI skills of `ark ui-skills <run>`) to every implementer, validator and reviewer step that touches the UI. Add the React skill that command lists to a step that touches React code. You decide which steps touch the UI and React code.
 - Keep each step small enough for one worker. Do not put two repos in one step.
 - Read `kind` in `ticket.md` (`ark status <run>` shows it; a missing `kind` is `feature`). It sets the first and last steps. `steps` may have an optional `goal` text; `ark plan check` reads it for `perf`.
@@ -363,6 +364,8 @@ ark worktree sync <run>
 ```
 
 It merges origin's target branch into each worktree and pushes the branch of every repo with an open MR. It syncs every repo even when one conflicts, then exits 1 and names each conflicting repo. It records each conflict. Start one implementer step with `--merge` for each repo it names, and tell the worker to merge origin's target branch into the worktree and fix the conflict. A merge step costs no round, and the command refuses `--merge` unless the last sync of that repo conflicted. Do not escalate to Master Chief for a merge-only conflict that the implementer can fix. After the MRs open, a merge start still needs the escalation answer, like any implementer start. With `gates.escalation: auto`, `start --merge` is answered by Ark (`escalation one_more_round by auto (merge, not counted)`) and does not count toward the 2; send the `status` of section 9.
+
+If the `status` message says an upstream MR merged, also refresh each waiting bump, as the "Upstream merged" item of section 10a says.
 
 Work through the steps in the order `needs` allows. Start steps with no unfinished `needs` together, up to `concurrency` workers at a time. For each step:
 
@@ -536,6 +539,10 @@ Do this after section 10 when an MR check fails, and again each time Master Chie
 - **CI failure.** Read the log of every failed check and write the evidence into `<run folder>/findings/round-<round>.md`. Run an MR round: the validator step for a test-only fix, the implementer step for a product fix, through the logged steps of section 7. Then re-run `ark test <run>` and the reviewer steps, and run `ark worktree sync <run>` to push the repair to the same branch. Recheck `ark merge-request status <run>` and repeat until `ci: passed`. Never open a new MR for it. Do not report success while CI is failing, running, or unknown.
 - **Comment.** Judge each one. A change request starts an MR round, as for CI. A question gets a reply on the MR with no commit. A note gets nothing. After a fix, the reply names the commit (its short hash). Never resolve the thread: the human resolves it.
 - **Conflict.** Run `ark worktree sync <run>`, which merges the target branch into each worktree and pushes the branch of every repo with an open MR; this merge is the rebase the ticket asks for. A repo that conflicts goes back to an implementer: `ark run step <run> <implementer step> start --merge` for that repo, and the implementer resolves it and finishes. Run `ark test <run>` after every sync that changed a branch, and again after an implementer `--merge` step. If it fails, run an MR round. When it passes after a `--merge` step, run `ark worktree sync <run>` to push the branch; if that sync merged a newer target head, run `ark test <run>` again. You never write product code or resolve a conflict yourself.
+- **Upstream merged.** Do this when Master Chief synced the run after an upstream MR merged (the `status` message of section 7). Run `ark merge-request status <run>` and read each `waits for !N (<state>)` line and each bump line. Refresh each waiting bump:
+  - Submodule (`points at upstream branch <8 characters>`): pick it when its wait line shows `(merged)`. Run `ark bump refresh <run> <step>`. It moves the pointer to the merged commit, not the branch head, and records `refreshed to <pin>`.
+  - Package (`waits for upstream publish`): only when the upstream MR is merged and the version exists. Check that with the registry tool that the project's `AGENTS.md` or knowledge names; ark has no registry code. Then start the bump step as a post-MR implementer round to move the pin, and run `ark bump refresh <run> <step> --to <version>`. Otherwise the bump stays `waits for upstream publish`, and you do not loop on it.
+  - For both kinds, after the refresh: run `ark test <run>`, run `ark worktree sync <run>` to push the branch, and run `ark merge-request open <run>` to refresh the MR body.
 
 Before an implementer MR round, ask the human for the escalation gate answer through Master Chief, as in section 9: `ark run step ... start` refuses without it (a `--merge` start is not counted). With `gates.escalation: auto`, `ark run step ... start` records it by auto (the first 2 count) and you send Master Chief the `status` of section 9, with no `ask`; otherwise ask the human through Master Chief and record the answer. Do not bypass the round budget. A validator or reviewer step needs no gate.
 
@@ -547,7 +554,7 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 
 1. Run `ark retro <run>`. It writes `<run folder>/metrics.json`.
 2. Write `<run folder>/retro.md` on top of those numbers. Read `playbooks/retro.md` and follow "Part 1: Write retro.md", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
-3. Send your final report to Master Chief. For a `none` project, list the branches from `ark status <run>` in place of MR links. Use the exact `worker_done` command in your Orca preamble. Use `--outcome succeeded`, and write three sentences: what changed, the MR links in the order to merge them (for a `none` project, the branches from `ark status <run>` in place of MR links), and what remains for the human. Use `--outcome failed` if the human aborted or you could not finish, and say why.
+3. Send your final report to Master Chief. For a `none` project, list the branches from `ark status <run>` in place of MR links, and list each pending bump with the value it needs (the `pending bump` lines). Use the exact `worker_done` command in your Orca preamble. Use `--outcome succeeded`, and write three sentences: what changed, the MR links in the order to merge them (for a `none` project, the branches from `ark status <run>` in place of MR links, and each pending bump with its needed value), and what remains for the human. Use `--outcome failed` if the human aborted or you could not finish, and say why.
 4. End your turn and idle.
 
 ## Rules

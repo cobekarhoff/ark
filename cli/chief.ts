@@ -212,7 +212,7 @@ export async function chiefHandover(inProject?: string): Promise<void> {
   const chief = loadConfig(project).roles.chief;
   if (!chief)
     throw new ArkError(
-      `Prerequisite missing: \`roles.chief\` (harness and model) is not set in \`${project}/ark.yml\`. Add it, for example \`chief: { harness: claude, model: claude-opus }\`, then run \`ark chief handover\` again.`,
+      `Prerequisite missing: \`roles.chief\` (harness and model) is not set in \`${project}/ark.yml\`. Add it, for example \`chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }\`, then run \`ark chief handover\` again.`,
     );
   const workspace = resolve(loadConfig(project).workspace);
   const snapshot = await readTerminals();

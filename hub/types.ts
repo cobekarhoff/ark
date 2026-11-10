@@ -12,7 +12,7 @@
  * or the usage index has not finished its first build). Times are ISO strings.
  */
 
-import type { Phase, StepStatus } from "../cli/lifecycle.ts";
+import type { Phase, PhaseGate, StepStatus } from "../cli/lifecycle.ts";
 import type { Roadmap } from "./roadmap.ts";
 
 export type SourceName =
@@ -168,7 +168,7 @@ export type MergeRequestView = {
   created_at: string | null;
 };
 
-export type GateKind = "criteria" | "strategy" | "plan" | "escalation";
+export type GateKind = PhaseGate;
 
 export type Gate = {
   id: string;

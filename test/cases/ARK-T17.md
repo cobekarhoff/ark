@@ -5,8 +5,9 @@ level: integration
 technique: equivalence classes (vendor of each role) over the block that a human copies
 priority: medium
 risk: the default block that bootstrap shows has a typo or a role on one vendor, so a bootstrapped project fails to load or has a reviewer that shares the writer's blind spots
-status: active
-changed_by: 2026-11-06-ARK-313-1
+status: retired
+retired_reason: ARK-340 removes the literal roles block from bootstrap.md, so the extraction contract is obsolete; role config loading is owned by ARK-T16 and role availability by ARK-T158, and playbook wording is proved by inspection
+changed_by: 2026-11-09-ARK-340-1
 ---
 
 ## Objective

@@ -28,7 +28,7 @@ Prove that `ark run close <run> handed_off` and `ark status <run>` list the bran
 ## Expected results
 
 - Both commands shall print the `branch` lines in the order 1, 2, 3 with the order number.
-- Under the reports branch, a `pending bump: bump-reports (package repos/shared/clara-core, clara-core>=0.0.6rc1)` line shall print, and nothing shall print for the done `bump-platform`.
+- Under the reports branch, a `pending bump: bump-reports (package repos/shared/clara-core, clara-core>=0.0.6rc1) needs <published version>` line shall print, and nothing shall print for the done `bump-platform`.
 - When all bumps are done, no `pending bump` line shall print.
 - When a repo has no commits ahead, its `branch` line shall be missing and its pending bump shall still print after the last branch line.
 - When the plan has no `repos` list, the line `order: from step needs (no repos list)` shall print once above the branches.

@@ -1,18 +1,20 @@
 import { ArkError } from "./errors.ts";
 import type { EventData, RunState } from "./events.ts";
-import { buildPhases, outcomes } from "./lifecycle.ts";
-import { planHash } from "./plan.ts";
+import {
+  type EventType,
+  type Gate,
+  type Phase,
+  eventPhases,
+  gateAnswerPhases,
+  gateAnswers,
+  gates,
+  outcomes,
+} from "./lifecycle.ts";
+import { loadPlan, planHash } from "./plan.ts";
 import { hasTestCriterion } from "./ticket.ts";
 
-const gateAnswers: Record<string, string[]> = {
-  criteria: ["accept", "edit", "abort"],
-  plan: ["approve", "change", "abort"],
-  escalation: ["one_more_round", "take_over", "abort"],
-  manual: ["ok", "problem"],
-};
-
-/** The event that moves a run out of `phase`, named in refusals. */
-function missingEvent(state: RunState): string {
+/** The event that moves a run out of a waiting phase, named in refusals; undefined for the other phases. */
+function missingEvent(state: RunState): string | undefined {
   if (state.phase === "awaiting_criteria")
     return state.evaluation?.blockers.length
       ? "gate.answered criteria accept (the evaluation has blockers)"
@@ -23,13 +25,14 @@ function missingEvent(state: RunState): string {
     return state.plan?.valid
       ? "gate.answered plan approve"
       : "plan.checked valid, then gate.answered plan approve";
-  return `a run in phase ${state.phase}`;
+  return undefined;
 }
 
-function requirePhase(state: RunState, type: string, phases: readonly string[]): void {
+function requirePhase(state: RunState, type: string, phases: readonly Phase[]): void {
   if (phases.includes(state.phase)) return;
+  const missing = missingEvent(state);
   throw new ArkError(
-    `${type} refused: run is in phase ${state.phase}; missing ${missingEvent(state)}`,
+    `${type} refused: run is in phase ${state.phase}; ${missing ? `missing ${missing}` : `allowed in ${phases.join(", ")}`}`,
   );
 }
 
@@ -47,20 +50,15 @@ export function assertAllowed(
   if (state.events === 0) throw new ArkError(`${type} refused: the run has no run.started event`);
   if (state.phase === "closed")
     throw new ArkError(`${type} refused: run is closed (${state.outcome})`);
+  if (!Object.hasOwn(eventPhases, type)) throw new ArkError(`unknown event type: ${type}`);
+  requirePhase(state, type, eventPhases[type as EventType]);
 
   switch (type) {
     case "criteria.updated":
-      requirePhase(state, type, ["awaiting_criteria"]);
       if (!Array.isArray(data.criteria) || data.criteria.length === 0)
         throw new ArkError("criteria.updated refused: the ticket has no criteria");
       return;
     case "criteria.amended": {
-      // In awaiting_criteria the backlog file is the source: name the gate that moves the run on.
-      if (state.phase === "awaiting_criteria") requirePhase(state, type, []);
-      if (state.phase === "merge_requests_open")
-        throw new ArkError(
-          `${type} refused: run is in phase ${state.phase}; allowed before merge_requests_open`,
-        );
       if (typeof data.reason !== "string" || data.reason.trim() === "")
         throw new ArkError(
           `${type} refused: --reason is required (the human's reason for the new text)`,
@@ -72,13 +70,11 @@ export function assertAllowed(
       return;
     }
     case "evaluation.recorded":
-      requirePhase(state, type, ["awaiting_criteria", "planning"]);
       for (const list of ["blockers", "risks", "surfaces"])
         if (!Array.isArray(data[list]) || !data[list].every((line) => typeof line === "string"))
           throw new ArkError(`evaluation.recorded refused: ${list} must be a list of strings`);
       return;
     case "strategy.recorded":
-      requirePhase(state, type, ["planning", "awaiting_strategy"]);
       if (!state.evaluation)
         throw new ArkError(
           "strategy.recorded refused: missing evaluation.recorded (ark evaluation record)",
@@ -98,7 +94,6 @@ export function assertAllowed(
         );
       return;
     case "plan.checked":
-      requirePhase(state, type, ["planning", "building", "escalation"]);
       if (!state.evaluation)
         throw new ArkError(
           "plan.checked refused: missing evaluation.recorded (ark evaluation record)",
@@ -108,13 +103,7 @@ export function assertAllowed(
       return;
     case "gate.answered":
       return assertGateAllowed(state, data, runDirectory);
-    case "worktree.created":
-      return; // every open phase: closed is refused above
-    case "worktree.synced":
-      requirePhase(state, type, ["planning", ...buildPhases]);
-      return;
     case "step.started":
-      requirePhase(state, type, buildPhases);
       if (state.steps.find((step) => step.id === data.step)?.status === "running")
         throw new ArkError(`step.started refused: step ${data.step} is already running`);
       if (
@@ -160,7 +149,6 @@ export function assertAllowed(
       }
       return;
     case "step.finished":
-      requirePhase(state, type, buildPhases);
       if (!["succeeded", "failed"].includes(data.outcome))
         throw new ArkError(
           `step.finished refused: outcome must be succeeded or failed, not ${data.outcome}`,
@@ -169,7 +157,6 @@ export function assertAllowed(
         throw new ArkError(`step.finished refused: missing step.started for ${data.step}`);
       return;
     case "escalation.requested":
-      requirePhase(state, type, ["building"]);
       if (typeof data.reason !== "string" || data.reason.trim() === "")
         throw new ArkError("escalation.requested refused: a reason is required");
       if (state.round < state.round_budget)
@@ -177,11 +164,7 @@ export function assertAllowed(
           `escalation.requested refused: the round budget is not spent (round ${state.round} of ${state.round_budget}); reason given: ${data.reason}`,
         );
       return;
-    case "test.completed":
-      requirePhase(state, type, buildPhases);
-      return;
     case "merge_request.opened":
-      requirePhase(state, type, ["building", "merge_requests_open"]);
       if (data.order !== undefined && !(Number.isInteger(data.order) && data.order >= 1))
         throw new ArkError(`${type} refused: order must be a whole number from 1`);
       if (
@@ -190,47 +173,44 @@ export function assertAllowed(
       )
         throw new ArkError(`${type} refused: waits_for must be a list of MR numbers`);
       return;
+    case "bump.refreshed": {
+      if (typeof data.value !== "string" || data.value.trim() === "")
+        throw new ArkError(`${type} refused: value is required`);
+      const isBump = loadPlan(runDirectory, state.ticket.id).repos.some((entry) =>
+        entry.depends_on.some((edge) => edge.bump === data.step),
+      );
+      if (!isBump)
+        throw new ArkError(`${type} refused: ${data.step} is not a bump step of the plan`);
+      return;
+    }
     case "run.closed":
       return assertCloseAllowed(state, data);
-    default:
-      throw new ArkError(`unknown event type: ${type}`);
   }
 }
 
-// Not in config.ts gateNames on purpose: the manual gate is always the human's.
-export const gateNames = ["criteria", "strategy", "plan", "escalation", "manual"];
-
 function assertGateAllowed(state: RunState, data: EventData, runDirectory: string): void {
-  if (!gateNames.includes(data.gate))
-    throw new ArkError(`unknown gate "${data.gate}": use ${gateNames.join(", ")}`);
+  if (!gates.includes(data.gate))
+    throw new ArkError(`unknown gate "${data.gate}": use ${gates.join(", ")}`);
+  const gate = data.gate as Gate;
   // The strategy gate takes the id of a card in the latest strategy.recorded, or abort.
   const answers =
-    data.gate === "strategy" ? [...(state.strategy?.cards ?? []), "abort"] : gateAnswers[data.gate];
+    gate === "strategy" ? [...(state.strategy?.cards ?? []), "abort"] : gateAnswers[gate];
   if (!answers.includes(data.answer)) {
     throw new ArkError(
-      `unknown answer "${data.answer}" for gate ${data.gate}: use ${answers.join(", ")}`,
+      `unknown answer "${data.answer}" for gate ${gate}: use ${answers.join(", ")}`,
     );
   }
-  if (data.gate === "manual" && !state.criteria.some((c) => c.id === data.criterion))
+  if (gate === "manual" && !state.criteria.some((c) => c.id === data.criterion))
     throw new ArkError(
       `gate.answered manual refused: criterion ${data.criterion} is not in the ticket`,
     );
-  const phaseOfGate = {
-    criteria: "awaiting_criteria",
-    strategy: "awaiting_strategy",
-    plan: "planning",
-    escalation: "escalation",
-    manual: "building",
-  }[data.gate as "criteria" | "strategy" | "plan" | "escalation" | "manual"];
+  const phases = gateAnswerPhases[gate];
   if (
-    state.phase !== phaseOfGate &&
-    !(data.gate === "escalation" && state.phase === "merge_requests_open") &&
-    // A spent budget at step start in building: only the auto path answers there.
-    !(data.gate === "escalation" && state.phase === "building" && data.by === "auto") &&
-    !(data.gate === "manual" && state.phase === "escalation")
+    !phases.includes(state.phase) ||
+    (gate === "escalation" && state.phase === "building" && data.by !== "auto")
   ) {
     throw new ArkError(
-      `gate.answered ${data.gate} ${data.answer} refused: run is in phase ${state.phase}, the ${data.gate} gate opens in phase ${phaseOfGate}`,
+      `gate.answered ${gate} ${data.answer} refused: run is in phase ${state.phase}, the ${gate} gate opens in phase ${phases[0]}`,
     );
   }
   if (data.gate === "criteria" && data.answer === "accept" && state.criteria.length === 0) {

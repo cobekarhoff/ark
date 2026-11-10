@@ -24,7 +24,10 @@ export type RoadmapItem = {
   proposed?: true;
 };
 
-export type MilestoneState = "done" | "active" | "later";
+const milestoneStates = ["done", "active", "later"] as const;
+export type MilestoneState = (typeof milestoneStates)[number];
+const isMilestoneState = (state: string): state is MilestoneState =>
+  (milestoneStates as readonly string[]).includes(state);
 
 export type RoadmapMilestone = {
   id: string;
@@ -59,7 +62,6 @@ export type Roadmap = {
 export type RoadmapError = { line: number; message: string };
 export type RoadmapResult = { ok: true; roadmap: Roadmap } | { ok: false; errors: RoadmapError[] };
 
-const states: readonly string[] = ["done", "active", "later"];
 const horizons = ["now", "next", "later"] as const;
 const toItem = (ticket: RoadmapTicket): RoadmapItem => ({
   id: ticket.id,
@@ -100,7 +102,7 @@ export function readRoadmap(markdown: string, tickets: RoadmapTicket[]): Roadmap
       .map((cell) => cell.trim());
     if (/^-+$/.test(cells[0].replace(/:/g, "")) || cells[0].toLowerCase() === "id") continue;
     const [id, name = "", outcome = "", state = ""] = cells;
-    if (!states.includes(state)) {
+    if (!isMilestoneState(state)) {
       errors.push({
         line: line.number,
         message: `Milestone ${id} has state "${state}". Use done, active or later.`,
@@ -111,7 +113,7 @@ export function readRoadmap(markdown: string, tickets: RoadmapTicket[]): Roadmap
       id,
       name,
       outcome,
-      state: state as MilestoneState,
+      state,
       done: 0,
       superseded: 0,
       open: 0,

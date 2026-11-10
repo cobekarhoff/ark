@@ -129,7 +129,7 @@ The company whose model runs a worker, such as Anthropic or OpenAI.
 _Avoid_: Provider, model family
 
 **Cross-vendor review**:
-The default that validators and reviewers use a different vendor from the implementers. The plan sets it per step, and you can change it at the plan gate.
+The default that reviewers use a different vendor from the implementers. The plan sets it per step, and you can change it at the plan gate.
 _Avoid_: Vendor rule
 
 ## Planning and proof
@@ -187,7 +187,7 @@ A fact that one repo builds against another: a submodule, a package pin, a compo
 _Avoid_: Dependency, link
 
 **Bump step**:
-An implementer step in the downstream repo that moves a submodule or package pin to the upstream change of the ticket. The plan names it in the `bump` field of the repo edge.
+An implementer step in the downstream repo that moves a submodule or package pin to the upstream change of the ticket. The plan names it in the `bump` field of the repo edge. `ark merge-request status` shows its state: `points at upstream branch <8 characters>` (submodule not yet refreshed), `waits for upstream merge` and `waits for upstream publish` (package), or `refreshed to <pin>` once `ark bump refresh` recorded the `bump.refreshed` event.
 _Avoid_: Update step, pin step
 
 **Worktree**:
