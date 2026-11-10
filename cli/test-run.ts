@@ -150,7 +150,8 @@ const quickStatus = (status: Status, quick: boolean): Status =>
 
 type Suite = ProjectConfig["suites"][number];
 
-type Side = "base" | "head";
+/** `census`: the whole suites at the pristine base commit, run only to list and count their tests. */
+type Side = "base" | "head" | "census";
 /** What one side knows of a case: the winning result of every suite that carries it, and the suites that did. */
 type CaseEntry = {
   name: string;
@@ -174,7 +175,12 @@ type SideRun = {
   reused: string[];
   /** Test files that failed once and passed on retry. */
   flaky: { suite: string; file: string }[];
+  /** Every result of each suite that ran (the census side only). */
+  listed: Map<string, TestResult[]>;
 };
+
+/** A test that the base has and the head lacks. `file` is absent when the report names none. */
+type DeletedTest = { file?: string; name: string };
 const statusRank = { "not run": -1, skipped: 0, passed: 1, failed: 2 };
 
 const newSide = (side: Side): SideRun => ({
@@ -184,7 +190,37 @@ const newSide = (side: Side): SideRun => ({
   skipped: new Map(),
   reused: [],
   flaky: [],
+  listed: new Map(),
 });
+
+const countStatus = (results: TestResult[], status: TestResult["status"]) =>
+  results.filter((result) => result.status === status).length;
+
+/**
+ * The tests of the base that the head lacks, suite by suite: a multiset diff on file plus name (name alone when the
+ * report names no file), so a duplicate title counts once per copy. A renamed test is deleted.
+ * Sorted by file, then name.
+ */
+function deletedTests(
+  base: Map<string, TestResult[]>,
+  head: Map<string, TestResult[]>,
+): DeletedTest[] {
+  const deleted: DeletedTest[] = [];
+  for (const [suite, results] of base) {
+    const left = new Map<string, number>();
+    for (const result of head.get(suite) ?? []) {
+      const key = JSON.stringify([result.file, result.name]);
+      left.set(key, (left.get(key) ?? 0) + 1);
+    }
+    for (const { file, name } of results) {
+      const key = JSON.stringify([file, name]);
+      if ((left.get(key) ?? 0) > 0) left.set(key, left.get(key)! - 1);
+      else deleted.push({ ...(file ? { file } : {}), name });
+    }
+  }
+  const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return deleted.sort((a, b) => order(a.file ?? "", b.file ?? "") || order(a.name, b.name));
+}
 
 /** Merges the results of one suite into the side. A failed test wins over a passed one, a passed over a skipped one, across suites too. */
 function addSuite(
@@ -358,6 +394,7 @@ async function runSuite(
   cache?: SuiteCache,
 ) {
   const prefix = sideRun.side === "base" ? "base-" : "";
+  const census = sideRun.side === "census";
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
   const scratch = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-evidence-")));
   // ARK-390: a private TMPDIR per suite, so two suites or two runs never share temp files.
@@ -367,16 +404,18 @@ async function runSuite(
     const cached = cache ? loadCached(cache.project, cache.key, scratch) : null;
     if (cached !== null) {
       writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), cached.output);
-      addSuite(
-        sideRun,
-        suite,
-        sha,
-        cached.log,
-        cached.results,
-        scratch,
-        join(resultsDirectory, "evidence"),
-        selected,
-      );
+      if (!census)
+        addSuite(
+          sideRun,
+          suite,
+          sha,
+          cached.log,
+          cached.results,
+          scratch,
+          join(resultsDirectory, "evidence"),
+          selected,
+        );
+      if (census) sideRun.listed.set(suite.name, cached.results);
       sideRun.reused.push(suite.name);
       for (const file of cached.flaky) sideRun.flaky.push({ suite: suite.name, file });
       return { results: cached.results, passed: true, flaky: cached.flaky, reused: true };
@@ -406,22 +445,24 @@ async function runSuite(
       log += retried.log;
     }
     writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
-    addSuite(
-      sideRun,
-      suite,
-      sha,
-      log,
-      results,
-      scratch,
-      join(resultsDirectory, "evidence"),
-      selected,
-    );
+    if (!census)
+      addSuite(
+        sideRun,
+        suite,
+        sha,
+        log,
+        results,
+        scratch,
+        join(resultsDirectory, "evidence"),
+        selected,
+      );
     const flaky = retried?.flaky ?? [];
     for (const file of flaky) sideRun.flaky.push({ suite: suite.name, file });
     // A non-zero exit is the failed tests only when every failed file passed on retry.
     const passed =
       (outcome.code === 0 || retried?.allPassed === true) &&
       results.every((result) => result.status !== "failed");
+    if (census) sideRun.listed.set(suite.name, results);
     if (passed && cache)
       storeCached(cache.project, cache.key, { results, output, log, flaky }, scratch);
     return { results, passed, flaky, reused: false };
@@ -532,9 +573,10 @@ async function baseSuitesPassed(
   mirror: string,
   worktrees: RunState["worktrees"],
   baseRun: SideRun,
+  censusRun: SideRun,
   refactor: boolean,
 ): Promise<boolean> {
-  const plan: { suite: Suite; command: string; files?: string[] }[] = [];
+  const plan: PlanEntry[] = [];
   for (const suite of config.suites) {
     if (refactor || suite.base_files === undefined) {
       // A refactor runs whole, but its added test files still need to reach base.
@@ -558,8 +600,36 @@ async function baseSuitesPassed(
         files,
       });
   }
-  if (plan.length === 0) return true;
+  // The census lists the tests of the pristine base, which the base run cannot: it holds the head's test files.
+  const census: PlanEntry[] =
+    worktrees.length === 0 ? [] : config.suites.map((suite) => ({ suite, command: suite.command }));
+  if (plan.length === 0 && census.length === 0) return true;
+  const censusDirectory = join(resultsDirectory, "census");
+  mkdirSync(censusDirectory, { recursive: true });
+  return runAtBase(config, project, runId, mirror, worktrees, [
+    { run: censusRun, plan: census, directory: censusDirectory },
+    { run: baseRun, plan, directory: resultsDirectory, copyHead: true },
+  ]);
+}
+
+type PlanEntry = { suite: Suite; command: string; files?: string[] };
+type BasePhase = { run: SideRun; plan: PlanEntry[]; directory: string; copyHead?: boolean };
+
+/**
+ * Runs the phases in order on one throwaway checkout of each touched repo at its base commit. A phase with
+ * `copyHead` first copies the head's test files in (the base run); the others see the pristine base (the census).
+ * Returns whether the plan of the copyHead phase passed.
+ */
+async function runAtBase(
+  config: ProjectConfig,
+  project: string,
+  runId: string,
+  mirror: string,
+  worktrees: RunState["worktrees"],
+  phases: BasePhase[],
+): Promise<boolean> {
   // What gets copied into the base checkout, per repo, and what the plan's keys hash.
+  const plan = phases.find((phase) => phase.copyHead)!.plan;
   const copied = new Map<string, string[]>();
   for (const { repo, base } of worktrees) {
     if (base === undefined) throw new ArkError(`worktree.created of ${repo} has no base commit`);
@@ -588,28 +658,33 @@ async function baseSuitesPassed(
       paths.map((path) => ({ path: `${repo}/${path}`, absolute: join(mirror, repo, path) })),
     ),
   );
-  const keyed = plan.map((entry) => ({
-    ...entry,
-    cache: {
-      project,
-      key: cacheKey({
-        side: "base",
-        bases,
-        untouchedHeads,
-        testFiles,
-        suite: [
-          entry.suite.name,
-          entry.suite.repo,
-          entry.suite.parser,
-          entry.suite.base_command,
-          entry.command,
-        ],
-        setup: config.setup,
-        compose: config.compose,
-      }),
-    },
-  }));
-  const allCached = keyed.every((entry) => hasCached(project, entry.cache.key));
+  const keyed = phases.map((phase) =>
+    phase.plan.map((entry) => ({
+      ...entry,
+      cache: {
+        project,
+        key: cacheKey({
+          side: phase.run.side,
+          bases,
+          untouchedHeads,
+          // the census runs the pristine base: no head file is in its key
+          testFiles: phase.copyHead ? testFiles : "",
+          suite: [
+            entry.suite.name,
+            entry.suite.repo,
+            entry.suite.parser,
+            entry.suite.base_command,
+            entry.command,
+          ],
+          setup: config.setup,
+          compose: config.compose,
+        }),
+      },
+    })),
+  );
+  const allCached = keyed.every((entries) =>
+    entries.every((entry) => hasCached(project, entry.cache.key)),
+  );
   const root = allCached ? null : mkdtempSync(join(tmpdir(), "ark-base-"));
   const compose = root === null ? null : composeFor(config, root, `${runId}-base`);
   try {
@@ -644,7 +719,6 @@ async function baseSuitesPassed(
             throw new ArkError(`base submodules of ${repo} failed: ${err.message}`);
           }
         }
-        copyHeadTests(join(mirror, repo), path, copied.get(repo)!);
       }
     if (root !== null) {
       linkUntouched(config.workspace, root, discoverRepos(config.workspace));
@@ -668,22 +742,27 @@ async function baseSuitesPassed(
     const checkBase = () => {
       if (root !== null && !existsSync(root)) throw new ArkError(`base checkout missing: ${root}`);
     };
-    for (const { suite, command, files, cache } of keyed) {
-      checkBase();
-      const { passed, reused } = await runSuite(
-        suite,
-        join(root ?? "", suite.repo),
-        resultsDirectory,
-        baseRun,
-        worktrees.find((worktree) => worktree.repo === suite.repo)?.base ??
-          (await headOf(suite.repo, config.workspace, mirror)),
-        command,
-        files,
-        cache,
-      );
-      if (reused)
-        console.log(`suite      ${suite.name} base  reused  base key ${cache.key.slice(0, 6)}`);
-      allPassed &&= passed;
+    for (const [index, phase] of phases.entries()) {
+      if (phase.copyHead && root !== null)
+        for (const { repo } of worktrees)
+          copyHeadTests(join(mirror, repo), join(root, repo), copied.get(repo)!);
+      for (const { suite, command, files, cache } of keyed[index]!) {
+        checkBase();
+        const { passed, reused } = await runSuite(
+          suite,
+          join(root ?? "", suite.repo),
+          phase.directory,
+          phase.run,
+          worktrees.find((worktree) => worktree.repo === suite.repo)?.base ??
+            (await headOf(suite.repo, config.workspace, mirror)),
+          command,
+          files,
+          cache,
+        );
+        if (reused && phase.copyHead)
+          console.log(`suite      ${suite.name} base  reused  base key ${cache.key.slice(0, 6)}`);
+        if (phase.copyHead) allPassed &&= passed;
+      }
     }
     checkBase();
     return allPassed;
@@ -797,8 +876,10 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     // The join through `verified_by` counts every level; the old tag path only integration and e2e.
     const allResults: TestResult[] = [];
     const provingResults: TestResult[] = [];
+    const headResults = new Map<string, TestResult[]>();
     const headRun = newSide("head");
     const baseRun = newSide("base");
+    const censusRun = newSide("census");
 
     try {
       if (composeBase) {
@@ -852,6 +933,7 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
           dirty ? undefined : { project, key },
         );
         allResults.push(...results);
+        headResults.set(suite.name, results);
         if (suite.level !== "unit") provingResults.push(...results);
         suites.push({
           name: suite.name,
@@ -904,8 +986,18 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
           ? state.worktrees
           : state.worktrees.filter((worktree) => worktree.base !== undefined),
         baseRun,
+        censusRun,
         state.kind === "refactor",
       ));
+    // Every worktree has a base here, except in an old run, whose census is skipped.
+    const counted = !quick && censusRun.listed.size > 0;
+    const passedCount = countStatus(allResults, "passed");
+    const skippedCount = countStatus(allResults, "skipped");
+    const baseSkipped = [...censusRun.listed.values()].reduce(
+      (sum, results) => sum + countStatus(results, "skipped"),
+      0,
+    );
+    const deleted = counted ? deletedTests(censusRun.listed, headResults) : [];
     if (!quick) {
       addMissing(baseRun, headRun, evidenceDirectory);
       addMissing(headRun, baseRun, evidenceDirectory);
@@ -931,6 +1023,9 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
       ...(headRun.flaky.length > 0 ? { flaky: headRun.flaky } : {}),
       ...(reused.length > 0 ? { reused } : {}),
       criteria: criterionStatuses,
+      passed_count: passedCount,
+      skipped: skippedCount,
+      ...(counted ? { base_skipped: baseSkipped, deleted } : {}),
       ...(state.kind === "refactor" && !quick ? { base_passed: basePassed } : {}),
       mode: quick ? "quick" : "full",
       duration: Math.round((Date.now() - started) / 1000),
@@ -941,6 +1036,11 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
       console.log(
         `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}${suite.reused ? `  reused  head key ${headKeys.get(suite.name)}` : ""}${suite.flaky ? `  flaky: ${suite.flaky.join(", ")} (failed once, passed on retry)` : ""}`,
       );
+    console.log(
+      `tests      ${passedCount} passed, ${skippedCount} skipped${counted ? ` (base ${baseSkipped}), ${deleted.length} deleted` : ""}`,
+    );
+    for (const { file, name } of deleted)
+      console.log(`deleted    ${file === undefined ? "" : `${file}  `}${name}`);
     for (const [criterion, status] of Object.entries(criterionStatuses))
       console.log(`criterion  ${criterion}  ${status.padEnd(14)}  ${via[criterion]}`);
     for (const id of [...new Set([...headRun.cases.keys(), ...baseRun.cases.keys()])].sort())

@@ -112,6 +112,13 @@ export type Ledger = {
   checks: { name: string; state: "passed" | "failed" | "not run" | "unknown" }[];
   /** Test files the last `test.completed` lists as flaky: they failed once and passed on retry. */
   flaky: { suite: string; file: string }[];
+  /** Test counts of the last `test.completed`; `null` when it has none (an old run) or there is no such event. A quick run has no `baseSkipped` and no `deleted`. */
+  tests: {
+    passed: number;
+    skipped: number;
+    baseSkipped?: number;
+    deleted?: { file?: string; name: string }[];
+  } | null;
   /** The block of the latest findings file; `null` when the file has none, or there is no file. */
   reviewer: ReviewerBlock | null;
   mergeOrder: string[];
@@ -604,6 +611,7 @@ function gitLedger(source: { directory: string; base?: string; prWriting?: PrWri
     hasReviewerStep: false,
     checks: [],
     flaky: [],
+    tests: null,
     reviewer: null,
     mergeOrder: ["."],
     repos: [repo],
@@ -854,6 +862,17 @@ function runLedger(source: {
     hasReviewerStep: (plan?.steps ?? []).some((step) => step.role === "reviewer"),
     checks,
     flaky: lastTest?.data.flaky ?? [],
+    tests:
+      typeof lastTest?.data.passed_count === "number"
+        ? {
+            passed: lastTest.data.passed_count,
+            skipped: lastTest.data.skipped ?? 0,
+            ...(typeof lastTest.data.base_skipped === "number"
+              ? { baseSkipped: lastTest.data.base_skipped }
+              : {}),
+            ...(Array.isArray(lastTest.data.deleted) ? { deleted: lastTest.data.deleted } : {}),
+          }
+        : null,
     reviewer,
     mergeOrder: order,
     repos,
