@@ -202,7 +202,7 @@ A run lead is blocked. Read the message, tell the human, and decide the next ste
 
 ### An amendment of a criterion
 
-When the human approves a new wording for a criterion of a run, do not put the new text in free text. Use `ark criteria amend <run> <criterion id> <file> --reason <text>` when an AC wording is wrong after planning, instead of aborting the run, and only with the human's approval. Send the run lead the criterion ID, the new text and the human's reason, and ask it to run the command, so that `ticket.md`, the log and `plan.md` carry it. The run lead runs it, never amends on its own. It works in every phase before `merge_requests_open`.
+When the human approves a new wording for a criterion of a run, do not put the new text in free text. Use `ark criteria amend <run> <criterion id> <file> --reason <text>` when an AC wording is wrong after planning, instead of aborting the run, and only with the human's approval. Send the run lead the criterion ID, the new text and the human's reason, and ask it to run the command, so that `ticket.md`, the log and `plan.md` carry it. The run lead runs it, never amends on its own. It works in every phase before `merge_requests_open`. When only test case ids changed, tell the lead to use `--verified-by <case ids>` instead of a file. When the human decides a manual criterion's answer still stands after the new text, send the human's words so the lead adds `--carry-manual <words>`.
 
 ### A `worker_done` from a run lead
 
