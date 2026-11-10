@@ -2,7 +2,7 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { openTestBudget, readTestLock, type TestBudget } from "../cli/test-lock.ts";
-import { tempArkHome } from "./helpers.ts";
+import { tempArkHome, tempGitRepo } from "./helpers.ts";
 
 setDefaultTimeout(30_000);
 
@@ -130,7 +130,7 @@ mock.module("node:os", () => ({ ...os, cpus: () => Array(${hostCores}).fill({}) 
 const { validateConfig } = await import(${JSON.stringify(configModule)});
 const roles = { implementer: { harness: "claude", model: "m" }, validator: { harness: "codex", model: "m" }, reviewer: { harness: "codex", model: "m" } };
 const suite = { name: "s", level: "unit", repo: ".", command: "true", parser: "bun" };
-console.log(validateConfig({ workspace: "/tmp", ticket_source: "local", suites: [suite], roles }, "ark.yml").test_budget_cores);`;
+console.log(validateConfig({ workspace: ${JSON.stringify(tempGitRepo())}, ticket_source: "local", suites: [suite], roles }, "ark.yml").test_budget_cores);`;
       const result = Bun.spawnSync(["bun", "-e", script]);
       expect(result.stderr.toString()).toBe("");
       expect(result.stdout.toString().trim()).toBe(String(expected));
