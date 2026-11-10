@@ -166,7 +166,7 @@ describe("gate record", () => {
     expect(eventsOf(directory).length).toBe(before);
   });
 
-  test("ARK-153-AC6 plan approve after a valid check starts the first build step", () => {
+  test("ARK-T217 plan approve after a valid check starts the first build step", () => {
     const { runId, directory } = startRun(criteria);
     writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
 
@@ -238,7 +238,7 @@ describe("plan approval survives only an unchanged valid recheck", () => {
     return { runId, directory };
   }
 
-  test("ARK-187-AC1 a recheck of an unchanged plan keeps approval and the step starts", () => {
+  test("ARK-T218 a recheck of an unchanged plan keeps approval and the step starts", () => {
     const { runId, directory } = approvedRun();
     expect(ark("plan", "check", runId).code).toBe(0);
     addWorktree(directory);
@@ -478,7 +478,7 @@ describe("criteria gate on every run", () => {
   });
 });
 
-test("ARK-T102 ARK-334/AC2 a spent round budget names ark escalate in building and ark gate record in escalation", () => {
+test("ARK-T102 a spent round budget names ark escalate in building and ark gate record in escalation", () => {
   const { runId, directory } = startRun(criteria);
   writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
   expect(ark("plan", "check", runId).code).toBe(0);

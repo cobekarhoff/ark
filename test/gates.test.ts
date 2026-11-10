@@ -122,7 +122,7 @@ test("ARK-T168 a gates map with only plan set loads, and the other keys stay hum
   expect(deriveState(eventsOf(directory)).phase).toBe("awaiting_strategy");
 });
 
-test("ARK-234-AC2 gates.plan auto approves a valid plan with no open decision by auto", () => {
+test("ARK-T219 gates.plan auto approves a valid plan with no open decision by auto", () => {
   const { runId, directory } = startRun({ plan: "auto" });
   recordEvaluation(directory);
   const result = checkPlan(runId, directory);
@@ -288,8 +288,8 @@ function openMergeRequest(directory: string) {
 const conflictSync = (directory: string) =>
   appendEvent(directory, "worktree.synced", { repo: ".", conflict: true });
 
-// ARK-288-AC1 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC1`
-test("ARK-288-AC1 a spent budget with gates.escalation auto records the answer by auto before step.started and starts the step", () => {
+// ARK-T220 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T220`
+test("ARK-T220 a spent budget with gates.escalation auto records the answer by auto before step.started and starts the step", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   spendRounds(runId, directory);
   const before = eventsOf(directory).length;

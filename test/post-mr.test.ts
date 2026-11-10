@@ -85,7 +85,7 @@ function openRun(withMergeRequest = true) {
   return { runId, directory, workspace };
 }
 
-test("ARK-208-AC1 post-MR validator and reviewer steps persist starts, finishes and real suite results", () => {
+test("ARK-T221 post-MR validator and reviewer steps persist starts, finishes and real suite results", () => {
   const { runId, directory } = openRun();
   for (const role of ["validator", "reviewer"]) {
     expect(ark("run", "step", runId, role, "start").code).toBe(0);
@@ -108,7 +108,7 @@ test("ARK-208-AC1 post-MR validator and reviewer steps persist starts, finishes 
   expect(ark("status", runId).out).toContain("phase: merge_requests_open");
 });
 
-test("ARK-208-AC2 every post-MR implementer round needs a fresh escalation answer, including beyond budget", () => {
+test("ARK-T222 every post-MR implementer round needs a fresh escalation answer, including beyond budget", () => {
   const { runId, directory } = openRun();
   for (const round of [2, 3]) {
     const before = readEvents(directory);
@@ -126,7 +126,7 @@ test("ARK-208-AC2 every post-MR implementer round needs a fresh escalation answe
   }
 });
 
-test("ARK-287-AC1 an escalation answer survives ark test after an MR is open and the next implementer start uses it up", () => {
+test("ARK-T223 an escalation answer survives ark test after an MR is open and the next implementer start uses it up", () => {
   const { runId, directory } = openRun();
   expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
   expect(ark("test", runId).code).toBe(0);
