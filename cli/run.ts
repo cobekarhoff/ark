@@ -4,6 +4,7 @@ import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
+import { checkRoles } from "./role-check.ts";
 import {
   appendEvent,
   deriveState,
@@ -309,9 +310,10 @@ export function status(runId?: string, project?: string): void {
     throw new ArkError(`project ${requested} does not exist under ${arkHome()}/projects`);
   if (runId !== undefined) return printRun(runId, project);
   let invalidCount = 0;
+  const configs: Record<string, ProjectConfig> = {};
   for (const project of requested ? [requested] : projects) {
     try {
-      loadConfig(project);
+      configs[project] = loadConfig(project);
     } catch (err) {
       if (!(err instanceof ArkError)) throw err;
       console.log(`config error: ${project}: ${err.message}`);
@@ -335,7 +337,10 @@ export function status(runId?: string, project?: string): void {
     }
   }
   console.log(lines.length > 0 ? lines.join("\n") : "no open runs");
+  const roleCheck = checkRoles(configs);
+  if (roleCheck.lines.length > 0) console.log(roleCheck.lines.join("\n"));
   if (invalidCount > 0) throw new ArkError(`${invalidCount} project config(s) invalid`);
+  if (roleCheck.failures > 0) throw new ArkError(`${roleCheck.failures} role(s) cannot run`);
 }
 
 function testHeadLines(directory: string): string[] {

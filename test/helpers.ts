@@ -91,6 +91,19 @@ export function ark(...args: string[]): { code: number; out: string; err: string
   };
 }
 
+/** Runs `body` with fake `claude`, `codex` and `omp` on PATH; `omp models --json` lists `selectors`. `ark status` checks roles against them, never the real omp. */
+export function withFakeHarnesses(selectors: string[], body: () => void): void {
+  const outer = process.env.PATH;
+  try {
+    for (const name of ["claude", "codex"]) writeFakeCommand(name, "exit 0");
+    const list = JSON.stringify({ models: selectors.map((selector) => ({ selector })) });
+    writeFakeCommand("omp", `printf '%s' '${list}'`);
+    body();
+  } finally {
+    process.env.PATH = outer;
+  }
+}
+
 /** Writes an executable `<name>` with the given shell script and puts it first on PATH. Callers restore PATH. */
 export function writeFakeCommand(name: string, script: string): string {
   const directory = mkdtempSync(join(tmpdir(), `ark-${name}-`));

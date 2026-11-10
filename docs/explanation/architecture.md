@@ -34,7 +34,7 @@ flowchart TB
 | Validator    | Turns the plan's test cases into tagged integration and E2E tests and makes them pass; audits each against `rules/test-audit.md` | Mocks the thing a test proves                                          |
 | Reviewer     | Reads the diff and its callers; reports P0 to P3 findings with a repro command and evidence                                      | Edits; reports style the linter owns                                   |
 
-Default models today: every role runs OMP with `claude-sonnet-5-5`, except the reviewer on `openai-codex/gpt-6.1-sol`. A plan sets harness and model per step and you can change them at the plan gate.
+Default models today: every role runs OMP with `claude-sonnet-5-5`, except the reviewer and test reviewer on `openai-codex/gpt-6.1-sol`. A plan sets harness and model per step and you can change them at the plan gate.
 
 ## Where each concern lives
 
