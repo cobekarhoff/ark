@@ -188,7 +188,7 @@ function writeScripts(directory: string): void {
   writeFileSync(
     join(directory, "gate.sh"),
     `#!/bin/sh
-case "$PWD" in *ark-base-*) bun test "$1/passing.test.ts" --reporter=junit --reporter-outfile="$2"; exit;; esac
+case "$PWD$2" in *ark-base-*|*/census/*) bun test "$1/passing.test.ts" --reporter=junit --reporter-outfile="$2"; exit;; esac
 echo start >> "$1/starts"
 exec 3<> "$1/gate"
 : > "$1/started"
@@ -215,6 +215,7 @@ bun test "$1/passing.test.ts" --reporter=junit --reporter-outfile="$2"
     `#!/bin/sh
 side=head
 case "$PWD" in *ark-base-*) side=base;; esac
+case "$2" in */census/*) side=census;; esac
 echo $side >> "$1/count"
 bun test "$3" --reporter=junit --reporter-outfile="$2"
 `,
@@ -858,7 +859,7 @@ describe("ark test flaky retry", () => {
     writeFileSync(
       join(fixture.directory, "nofile.sh"),
       `#!/bin/sh
-echo start >> "$1/starts"
+case "$2" in */census/*) ;; *) echo start >> "$1/starts";; esac
 cat > "$2" <<'XML'
 <testsuites><testsuite name="s"><testcase name="t" classname="c"><failure message="x"/></testcase></testsuite></testsuites>
 XML
