@@ -705,6 +705,7 @@ describe("ark retro", () => {
       stalled_workers: 0,
       dead_dispatches: 0,
       tool_errors: 2,
+      tool_error_list: [{ tool: "unknown", word: "", count: 2, first_error: "" }],
       context_overflows: 3,
       idle_gaps: 1,
       master_chief_and_run_lead_cost: { usd: 0.144001, tokens: 66960, includes_unknown: true },

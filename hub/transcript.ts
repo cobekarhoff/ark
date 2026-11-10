@@ -115,7 +115,7 @@ function claudeItems(record: Record<string, any>): Item[] {
 }
 
 /** The exit status a Codex tool output reports, or "ok" when it reports none. */
-function codexResult(id: unknown, output: unknown): Item {
+export function codexResult(id: unknown, output: unknown): Item {
   let text = textOf(output);
   let failed = isRecord(output) && !Array.isArray(output) && output.success === false;
   if (typeof output === "string") {

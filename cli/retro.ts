@@ -61,6 +61,32 @@ function groupBy(
   return sortedObject([...groups].map(([key, members]) => [key, summarize(members)]));
 }
 
+/** Failed tool calls of every session by tool and first command word: count desc, tool asc, word asc. */
+function toolErrorList(sessions: SessionWithKey[]) {
+  const pairs = new Map<
+    string,
+    { tool: string; word: string; count: number; first_error: string }
+  >();
+  for (const call of sessions.flatMap((session) => session.failedCalls)) {
+    const key = JSON.stringify([call.tool, call.word]);
+    const entry = pairs.get(key);
+    if (entry) entry.count += 1;
+    else {
+      const line = call.error.split("\n").find((text) => text.trim() !== "") ?? "";
+      pairs.set(key, {
+        tool: call.tool,
+        word: call.word,
+        count: 1,
+        first_error: line.trim().slice(0, 120),
+      });
+    }
+  }
+  const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  return [...pairs.values()].sort(
+    (a, b) => b.count - a.count || compare(a.tool, b.tool) || compare(a.word, b.word),
+  );
+}
+
 /** Every session message of the run, oldest first, so sums are always added in the same order. */
 export function collectMessages(runDirectory: string): {
   messages: Message[];
@@ -615,6 +641,7 @@ export function retro(runId: string, inProject?: string): void {
         : 0,
       dead_dispatches: stepIds.filter((id) => !stepSessions.has(id)).length,
       tool_errors: messages.filter((message) => message.toolError).length,
+      tool_error_list: toolErrorList(sessions),
       context_overflows: sessions.reduce((sum, session) => sum + session.contextOverflows, 0),
       idle_gaps: idleGaps,
       master_chief_and_run_lead_cost: summarize(orchestrationMessages),
@@ -635,6 +662,12 @@ export function retro(runId: string, inProject?: string): void {
       `time: ${Math.round(wallSeconds)}s wall: ${Math.round(timeSplit.waiting_on_you_seconds)}s waiting on you, ${Math.round(timeSplit.working_seconds)}s working, ${Math.round(timeSplit.waiting_to_merge_seconds)}s waiting to merge, ${Math.round(timeSplit.idle_seconds)}s idle`,
       `rework: ${metrics.rework.rounds} rounds, ${metrics.rework.escalations} escalations, ${metrics.rework.findings_sent_back} findings sent back, ${metrics.rework.merge_steps} merge steps`,
       `orchestration: ${metrics.orchestration.restarts} restarts, ${metrics.orchestration.tool_errors} tool errors, ${metrics.orchestration.context_overflows} context overflows, ${metrics.orchestration.idle_gaps} idle gaps`,
+      ...metrics.orchestration.tool_error_list
+        .slice(0, 5)
+        .map(
+          (entry) =>
+            `tool error: ${entry.tool}${entry.word === "" ? "" : ` ${entry.word}`} x${entry.count}: ${entry.first_error}`,
+        ),
       `gate answers: ${metrics.gates.auto_answers} auto, ${metrics.gates.human_answers} human`,
       ...gateAnswers
         .filter((event) => event.data.gate === "escalation")
