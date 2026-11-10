@@ -190,8 +190,9 @@ function writeScripts(directory: string): void {
     `#!/bin/sh
 case "$PWD" in *ark-base-*) bun test "$1/passing.test.ts" --reporter=junit --reporter-outfile="$2"; exit;; esac
 echo start >> "$1/starts"
+exec 3<> "$1/gate"
 : > "$1/started"
-read opened < "$1/gate"
+read opened <&3
 if [ -e "$1/fail" ]; then test=failing; else test=passing; fi
 bun test "$1/$test.test.ts" --reporter=junit --reporter-outfile="$2"
 `,
