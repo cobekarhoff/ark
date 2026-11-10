@@ -75,7 +75,14 @@ afterEach(() => {
           // already gone
         }
     }
-    Bun.spawnSync(["pkill", "-9", "-f", `test-runner ${fixture.runId} `]);
+    // By the pid in runner.json: a pkill by run id would kill the runners of any other copy of this file on the host.
+    const record = join(fixture.runDirectory, "results", "runner.json");
+    if (existsSync(record))
+      try {
+        process.kill(JSON.parse(readFileSync(record, "utf8")).pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
     Bun.spawnSync(["pkill", "-9", "-f", fixture.directory]);
     rmSync(fixture.directory, { recursive: true, force: true });
   }

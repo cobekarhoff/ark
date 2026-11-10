@@ -215,8 +215,20 @@ const startedTests: Subprocess[] = [];
  */
 function killStarted(): void {
   for (const child of startedTests.splice(0)) child.kill("SIGKILL");
-  // The detached runners outlive their callers: find them by their run id.
-  for (const run of [runA, runB]) Bun.spawnSync(["pkill", "-9", "-f", `test-runner ${run} `]);
+  // The detached runners outlive their callers: kill the pid in each run's runner.json. A pkill by run id would also
+  // kill the runners of any other copy of this test file on the host, which uses the same run ids.
+  for (const [project, run] of [
+    [projectA, runA],
+    ["lock-two", runB],
+  ]) {
+    const record = join(arkHome, "projects", project, "runs", run, "results", "runner.json");
+    if (!existsSync(record)) continue;
+    try {
+      process.kill(JSON.parse(readFileSync(record, "utf8")).pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+  }
   Bun.spawnSync(["pkill", "-9", "-f", fixtures]);
 }
 
@@ -564,7 +576,17 @@ rmdirSync(home+'/inside');release();`,
     live.kill("SIGKILL");
     await live.exited;
     const [out, exitCode] = await Promise.all([newer.stdout, newer.process.exited]);
-    expect(exitCode).toBe(0);
+    if (exitCode !== 0) {
+      const stderr = await new Response(newer.process.stderr).text();
+      const resultsDirectory = join(arkHome, "projects", "lock-two", "runs", runB, "results");
+      const read = (name: string) => {
+        const file = join(resultsDirectory, name);
+        return existsSync(file) ? readFileSync(file, "utf8") : "(missing)";
+      };
+      throw new Error(
+        `ark test exited ${exitCode}\nstdout: ${out}\nstderr: ${stderr}\nrunner.out: ${read("runner.out")}\nrunner.err: ${read("runner.err")}\nrunner.json: ${read("runner.json")}`,
+      );
+    }
     expect(logLines()).toContain(`start ${runB}`);
     expect(out).toContain(`waiting for ark test of ${runA}`);
     expect(out).not.toContain("GHOST-1");
