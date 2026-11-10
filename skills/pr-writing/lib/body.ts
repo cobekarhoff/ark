@@ -129,9 +129,7 @@ function testLines({ tests }: Ledger): string[] {
   if (tests === null) return [];
   const { passed, skipped, baseSkipped, deleted } = tests;
   if (baseSkipped === undefined || deleted === undefined)
-    return [
-      `- Tests: ${passed} passed, ${skipped} skipped (quick run: no base, deleted not counted)`,
-    ];
+    return [`- Tests: ${passed} passed, ${skipped} skipped (no base count, deleted not counted)`];
   const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   return [
     `- Tests: ${passed} passed, ${skipped} skipped (base ${baseSkipped}), ${deleted.length} deleted`,

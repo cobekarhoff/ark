@@ -31,7 +31,7 @@ Prove that the Tests line and the deleted bullets in the Evidence block come fro
 - (a) The Evidence block shall hold `- Tests: 42 passed, 3 skipped (base 2), 1 deleted` and one bullet `  - Deleted: \`<file>\` <title>` below it.
 - (b) The line shall read `- Tests: 42 passed, 0 skipped (base 0), 0 deleted` with no Deleted bullet.
 - (c) The line shall say `3 deleted` and list 3 bullets sorted by file then title, the duplicate title once per copy, backticks and the pipe escaped so the markdown renders the literal title.
-- (d) The line shall read `- Tests: 42 passed, 3 skipped (quick run: no base, deleted not counted)`, with no base count and no Deleted bullet.
+- (d) The line shall read `- Tests: 42 passed, 3 skipped (no base count, deleted not counted)`, with no base count and no Deleted bullet.
 - (e) The posted body shall have no Tests line: no `n/a` and no empty line. The rest of the Evidence block shall be unchanged.
 - (f) The body shall have no Tests line and the existing no-evidence text shall be unchanged.
 - Two builds from the same events shall give identical bodies, so the STALE01 body hash holds.

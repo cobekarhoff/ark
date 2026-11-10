@@ -611,11 +611,16 @@ async function baseSuitesPassed(
       });
   }
   // The base run holds the head's copy of each changed test file, so it cannot list a test the head removed from
-  // one. The census runs those same files as the base has them: only the run's own files, never the whole suite.
+  // one. The census runs the pristine base: a whole-suite configuration runs the whole suite, any other the
+  // run's own files as the base has them.
   const census: PlanEntry[] = [];
   for (const suite of config.suites) {
     const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
-    if (suite.base_files === undefined || base === undefined) continue;
+    if (base === undefined) continue;
+    if (refactor || suite.base_files === undefined) {
+      census.push({ suite, command: suite.command });
+      continue;
+    }
     const files = await ownBaseFiles(suite, base, mirror);
     if (files.length > 0)
       census.push({
@@ -1011,10 +1016,11 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
         censusRun,
         state.kind === "refactor",
       ));
-    // What the base lists, per suite: the census of the own files when there is one, else the base run itself.
-    // A suite with no base result (no changed test file, a quick run) contributes nothing.
-    const baseListed = new Map([...baseRun.listed, ...censusRun.listed]);
-    const counted = !quick && baseListed.size > 0;
+    // What the base lists comes from the pristine census alone, never from the base run, which holds the head's
+    // copy of the test files. A suite with no census (only added test files, no changed test file, a quick run)
+    // contributes nothing.
+    const baseListed = censusRun.listed;
+    const counted = !quick && (baseListed.size > 0 || baseRun.listed.size > 0);
     const passedCount = countStatus(allResults, "passed");
     const skippedCount = countStatus(allResults, "skipped");
     const baseSkipped = [...baseListed.values()].reduce(

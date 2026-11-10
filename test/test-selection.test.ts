@@ -327,7 +327,7 @@ describe("ark test base selection", () => {
 
     const result = ark("test", run.runId);
     expect(result.code, result.err + result.out).toBe(0);
-    expect(fixture.ran().filter((line) => line.startsWith("base "))).toEqual([
+    expect([...new Set(fixture.ran().filter((line) => line.startsWith("base ")))].sort()).toEqual([
       "base e2e/new.test.ts",
       "base e2e/old.test.ts",
     ]);
@@ -594,6 +594,20 @@ describe("ark test skipped and deleted tests", () => {
       base_skipped: 1,
       deleted: [{ file: "test/a.test.ts", name: "to delete" }],
     });
+  });
+
+  test("ARK-T199 a suite with no base_files counts base skips and deleted tests from the pristine base, not from the head files copied into the base run", () => {
+    const workspace = tempGitRepo({ "test/a.test.ts": aBase, "test/b.test.ts": bFile });
+    const run = startRun({
+      workspace,
+      suites: [suiteOf("cli", "test", { base_files: undefined, base_command: undefined })],
+      cases: ["FAKE-T1"],
+    });
+    commit(run.mirror, "skip one, delete one", { "test/a.test.ts": aHead });
+    const result = ark("test", run.runId);
+    expect(result.code, result.err + result.out).toBe(0);
+    expect(result.out).toContain("tests      2 passed, 3 skipped (base 2), 1 deleted");
+    expect(result.out).toContain("deleted    test/a.test.ts  to delete");
   });
 
   test("ARK-T199 a run with no changed test file prints no base fields and no deleted line, and a deleted file lists each of its tests sorted", () => {

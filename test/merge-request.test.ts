@@ -1569,7 +1569,7 @@ test(
     writeFileSync(events, readFileSync(events, "utf8").replace('"mode":"full"', '"mode":"quick"'));
     const d = body();
     expect(testsLines(d)).toEqual([
-      "- Tests: 42 passed, 3 skipped (quick run: no base, deleted not counted)",
+      "- Tests: 42 passed, 3 skipped (no base count, deleted not counted)",
     ]);
     expect(body()).toBe(d);
 
