@@ -518,157 +518,178 @@ describe("ark test budget", () => {
 });
 
 describe("ark test budget admission", () => {
-  // Two real processes use the real scheduler. Hooks only pause them at fixed points; they supply no data.
-  // `older` pauses inside its first ticket write, `newer` pauses just before its admission rename. Without a
-  // host-wide critical section, `newer` publishes during the pause and both start (12 cores against 6).
-  const child = (home: string, name: "older" | "newer") => `
+  // Real processes run the real scheduler against one ARK_HOME. Hooks only pause a process at a fixed point
+  // (`publish`: inside its first ticket write, `start`: just before it writes `started`, `unlink`: before it removes a
+  // stale ticket) until the test marks `<name>-go-<point>`; they supply no data. A process marks `<name>-running` when
+  // `take` returns. The invariant: no two running processes ever hold more cores than the budget (6).
+  const child = (home: string, name: string, pauses: string[]) => `
 import { mock } from "bun:test";
 import * as real from "node:fs";
 const fs = { ...real };
 const home = ${JSON.stringify(home)};
 const name = ${JSON.stringify(name)};
+const pauses = ${JSON.stringify(pauses)};
 const mark = (file) => fs.writeFileSync(home + "/" + file, "");
-const until = (file) => { while (!fs.existsSync(home + "/" + file)) Bun.sleepSync(10); };
-let writes = 0;
+const pause = (point) => {
+  if (!pauses.includes(point)) return;
+  mark(name + "-at-" + point);
+  while (!fs.existsSync(home + "/" + name + "-go-" + point)) Bun.sleepSync(5);
+};
 let renames = 0;
-if (name === "newer") {
-  const wait = Atomics.wait;
-  Atomics.wait = (...args) => { mark("newer-blocked"); return wait(...args); };
-}
+let polls = 0;
 mock.module("node:fs", () => ({
   ...fs,
   writeFileSync: (file, ...args) => {
-    if (name === "older" && String(file).endsWith(".json.tmp") && ++writes === 1) {
-      mark("older-ready");
-      until("release-older");
-    }
+    if (String(file).endsWith(".json.tmp") && renames === 0) pause("publish");
     return fs.writeFileSync(file, ...args);
   },
   renameSync: (from, to) => {
-    if (name === "newer" && String(to).endsWith(".json") && ++renames === 2) {
-      mark("newer-ready");
-      until("older-admitted");
+    const ticket = String(to).endsWith(".json");
+    if (ticket && renames === 1) pause("start");
+    fs.renameSync(from, to);
+    if (ticket) {
+      renames++;
+      polls = 0;
+      mark(name + "-after-" + renames);
     }
-    return fs.renameSync(from, to);
   },
-}));
-const { openTestBudget } = await import(${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))});
-const budget = openTestBudget(name, 6, async () => {}, { print: () => mark("newer-waiting") });
-await budget.take(6);
-mark(name + "-admitted");
-await new Promise((done) => process.stdin.once("data", done));
-budget.close();`;
-
-  test("ARK-T155 two requests of the whole budget never run together, whatever the interleaving of their publication", async () => {
-    const home = mkdtempSync(join(tmpdir(), "ark-admission-"));
-    const children: Subprocess[] = [];
-    const spawn = (name: "older" | "newer") => {
-      const process = Bun.spawn(["bun", "-e", child(home, name)], {
-        env: { ...Bun.env, ARK_HOME: home },
-        stdin: "pipe",
-        stdout: "ignore",
-        stderr: "inherit",
-      });
-      children.push(process);
-    };
-    const waitFor = async (...names: string[]) => {
-      while (!names.some((name) => existsSync(join(home, name)))) await Bun.sleep(10);
-    };
-    try {
-      spawn("older");
-      await waitFor("older-ready");
-      spawn("newer");
-      // With the mutex `newer` blocks on it; without, it publishes and reaches its admission rename.
-      await waitFor("newer-blocked", "newer-ready");
-      writeFileSync(join(home, "release-older"), "");
-      await waitFor("older-admitted");
-      await waitFor("newer-waiting", "newer-admitted");
-      const started = readdirSync(join(home, "test-budget"))
-        .filter((name) => name.endsWith(".json"))
-        .map((name) => JSON.parse(readFileSync(join(home, "test-budget", name), "utf8")))
-        .filter((ticket) => ticket.started !== undefined);
-      expect(started.map((ticket) => ticket.run)).toEqual(["older"]);
-    } finally {
-      for (const process of children) {
-        process.kill("SIGKILL");
-        await process.exited;
-      }
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  test("ARK-T155 a contender that observed a stale mutex never removes the live mutex of the contender that replaced it", async () => {
-    const home = mkdtempSync(join(tmpdir(), "ark-stale-mutex-"));
-    const children: Subprocess[] = [];
-    const mark = (name: string) => writeFileSync(join(home, name), "");
-    // `first` pauses right before it removes the mutex it observed as stale; `second` pauses inside its critical section.
-    const stale = (name: string) => `
-import { mock } from "bun:test";
-import * as real from "node:fs";
-const fs = { ...real };
-const home = ${JSON.stringify(home)}, name = ${JSON.stringify(name)};
-const mark = (file) => fs.writeFileSync(home + "/" + file, "");
-const until = (file) => { while (!fs.existsSync(home + "/" + file)) Bun.sleepSync(5); };
-let paused = false;
-const pauseOnMutex = (path) => {
-  if (name === "first" && !paused && String(path).endsWith("mutex.lock")) { paused = true; mark("first-observed"); until("second-ready"); }
-};
-mock.module("node:fs", () => ({
-  ...fs,
-  rmSync: (path, ...rest) => { pauseOnMutex(path); const done = fs.rmSync(path, ...rest); if (name === "first" && String(path).endsWith("mutex.lock")) mark("first-removed"); return done; },
-  renameSync: (from, to) => { pauseOnMutex(from); const done = fs.renameSync(from, to); if (name === "first" && String(from).endsWith("mutex.lock")) mark("first-removed"); return done; },
-  writeFileSync: (path, ...rest) => {
-    if (name === "second" && String(path).endsWith(".json.tmp")) { mark("second-publishing"); until("release-second"); }
-    return fs.writeFileSync(path, ...rest);
+  readdirSync: (...args) => {
+    if (renames > 0 && polls < 3) mark(name + "-r" + renames + "-poll-" + ++polls);
+    return fs.readdirSync(...args);
+  },
+  unlinkSync: (file) => {
+    pause("unlink");
+    return fs.unlinkSync(file);
   },
 }));
 const { openTestBudget } = await import(${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))});
 const budget = openTestBudget(name, 6, async () => {}, { print: () => {} });
 await budget.take(6);
+mark(name + "-running");
 await new Promise((done) => process.stdin.once("data", done));
 budget.close();`;
-    const spawn = (name: "first" | "second") => {
-      children.push(
-        Bun.spawn(["bun", "-e", stale(name)], {
-          env: { ...Bun.env, ARK_HOME: home },
-          stdin: "pipe",
-          stdout: "ignore",
-          stderr: "inherit",
-        }),
-      );
-    };
-    const waitFor = async (name: string) => {
-      while (!existsSync(join(home, name))) await Bun.sleep(10);
-    };
+
+  /** Runs `steps` against fresh processes of one temp ARK_HOME, and kills them all after. */
+  async function scenario(
+    steps: (api: {
+      home: string;
+      spawn: (name: string, ...pauses: string[]) => void;
+      waitFor: (...names: string[]) => Promise<void>;
+      has: (name: string) => boolean;
+      go: (name: string, point: string) => void;
+      stop: (name: string) => void;
+    }) => Promise<void>,
+  ): Promise<void> {
+    const home = mkdtempSync(join(tmpdir(), "ark-admission-"));
+    const children = new Map<string, Subprocess<"pipe", "ignore", "inherit">>();
+    const has = (name: string) => existsSync(join(home, name));
     try {
-      mkdirSync(join(home, "test-budget"));
-      const dead = Bun.spawn(["true"]);
-      await dead.exited;
-      writeFileSync(join(home, "test-budget", "mutex.lock"), String(dead.pid));
-      spawn("first");
-      await waitFor("first-observed");
-      spawn("second");
-      await waitFor("second-publishing");
-      mark("second-ready");
-      await waitFor("first-removed");
-      const mutex = join(home, "test-budget", "mutex.lock");
-      while (!existsSync(mutex)) await Bun.sleep(10);
-      expect(readFileSync(mutex, "utf8").startsWith(`${children[1]!.pid}:`)).toBe(true);
-      const tickets = readdirSync(join(home, "test-budget")).filter((name) =>
-        name.endsWith(".json"),
-      );
-      expect(
-        tickets.map(
-          (name) => JSON.parse(readFileSync(join(home, "test-budget", name), "utf8")).run,
-        ),
-      ).not.toContain("first");
+      await steps({
+        home,
+        spawn: (name, ...pauses) => {
+          children.set(
+            name,
+            Bun.spawn(["bun", "-e", child(home, name, pauses)], {
+              env: { ...Bun.env, ARK_HOME: home },
+              stdin: "pipe",
+              stdout: "ignore",
+              stderr: "inherit",
+            }),
+          );
+        },
+        waitFor: async (...names) => {
+          while (!names.every(has)) await Bun.sleep(10);
+        },
+        has,
+        go: (name, point) => writeFileSync(join(home, `${name}-go-${point}`), ""),
+        stop: (name) => {
+          void children.get(name)!.stdin.write("x");
+          void children.get(name)!.stdin.flush();
+        },
+      });
     } finally {
-      for (const process of children) {
+      for (const process of children.values()) {
         process.kill("SIGKILL");
         await process.exited;
       }
       rmSync(home, { recursive: true, force: true });
     }
+  }
+
+  test("ARK-T155 an older ticket published after a newer one already runs waits for it instead of running with it", async () => {
+    await scenario(async ({ spawn, waitFor, has, go, stop }) => {
+      spawn("older", "publish");
+      await waitFor("older-at-publish");
+      spawn("newer");
+      await waitFor("newer-running");
+      go("older", "publish");
+      await waitFor("older-r1-poll-3");
+      expect(has("older-running")).toBe(false);
+      stop("newer");
+      await waitFor("older-running");
+    });
+  });
+
+  test("ARK-T155 two tickets that both passed the admission check never run together: the later one revokes", async () => {
+    await scenario(async ({ spawn, waitFor, has, go, stop }) => {
+      spawn("older", "publish");
+      await waitFor("older-at-publish");
+      spawn("newer", "start"); // the newer ticket checked while the older one was not published yet
+      await waitFor("newer-at-start");
+      go("older", "publish");
+      await waitFor("older-running");
+      go("newer", "start");
+      await waitFor("newer-after-3"); // its third ticket write is the revocation
+      expect(has("newer-running")).toBe(false);
+      stop("older");
+      await waitFor("newer-running");
+    });
+  });
+
+  test("ARK-T155 an older started ticket waits while a newer one that missed it runs", async () => {
+    await scenario(async ({ spawn, waitFor, has, go, stop }) => {
+      spawn("older", "publish", "start");
+      await waitFor("older-at-publish");
+      spawn("newer", "start");
+      await waitFor("newer-at-start");
+      go("older", "publish");
+      await waitFor("older-at-start");
+      go("newer", "start");
+      await waitFor("newer-running"); // it read the older ticket as not started
+      go("older", "start");
+      await waitFor("older-r2-poll-3");
+      expect(has("older-running")).toBe(false);
+      stop("newer");
+      await waitFor("older-running");
+    });
+  });
+
+  test("ARK-T155 two contenders that see the same stale ticket remove only that file and run one suite", async () => {
+    await scenario(async ({ home, spawn, waitFor, has, go }) => {
+      const dead = Bun.spawn(["true"]);
+      await dead.exited;
+      const arrival = new Date(Date.now() - 60_000).toISOString();
+      mkdirSync(join(home, "test-budget"));
+      const stale = join(home, "test-budget", `${dead.pid}-dead.json`);
+      writeFileSync(
+        stale,
+        JSON.stringify({ run: "dead", pid: dead.pid, cores: 6, arrival, started: arrival }),
+      );
+      spawn("first", "unlink");
+      await waitFor("first-at-unlink");
+      spawn("second");
+      await waitFor("second-r1-poll-3"); // the second removed the stale file and waits behind the first
+      expect(existsSync(stale)).toBe(false);
+      go("first", "unlink"); // its unlink finds the file gone
+      await waitFor("first-running");
+      expect(has("second-running")).toBe(false);
+      expect(
+        readdirSync(join(home, "test-budget"))
+          .filter((name) => name.endsWith(".json"))
+          .map((name) => JSON.parse(readFileSync(join(home, "test-budget", name), "utf8")).run)
+          .sort((a, b) => a.localeCompare(b)),
+      ).toEqual(["first", "second"]);
+    });
   });
 });
 

@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
-  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -16,10 +14,13 @@ import { arkHome } from "./paths.ts";
 /**
  * A CPU budget per host instead of one `ark test` at a time. The folder `test-budget` under $ARK_HOME holds one
  * ticket file per suite (or check) of every `ark test`: run, pid, cores and arrival, plus `started` once admitted.
- * A ticket is admitted in arrival order, with no overtaking, when the cores of the running tickets plus its own fit
- * the budget. Ticket publication (arrival time and file) and the admission
- * read/check/start run one at a time under a host-wide mutex file, so a newly published older ticket cannot be
- * missed by a snapshot that is already taken. A ticket of an ended pid is deleted by whoever sees it.
+ * There is no lock. Arrival (time, pid, file name) is a total order, and a process writes only its own ticket:
+ * 1. The first waiting ticket marks itself `started` when the started cores plus its own fit the budget.
+ * 2. It reads all tickets again. If the started tickets up to its own arrival exceed the budget it revokes itself
+ *    (removes `started`) and waits again; the earliest ticket never revokes.
+ * 3. It runs only when all started tickets, later ones included, fit the budget. A later ticket that missed this one
+ *    revokes on its own re-read or runs and ends first, so two overflowing suites never run at the same time.
+ * A ticket is removed by its owner, or by a reader that sees its pid ended.
  */
 export type Ticket = { run: string; pid: number; cores: number; arrival: string; started?: string };
 
@@ -27,71 +28,6 @@ const pollMilliseconds = 100;
 const lineWindowMilliseconds = 30_000;
 
 const ticketDirectory = () => join(arkHome(), "test-budget");
-
-const mutexStaleMilliseconds = 5_000;
-
-/**
- * Runs `action` while holding the host-wide mutex: an exclusive-create file with the owner pid and a unique token. It
- * is held for one short synchronous step only. A mutex of an ended pid (or an unreadable one older than a few
- * seconds) is taken over by `reclaim`; release removes the file only while it still holds this owner's token.
- */
-function withMutex<T>(action: () => T): T {
-  mkdirSync(ticketDirectory(), { recursive: true });
-  const file = join(ticketDirectory(), "mutex.lock");
-  const token = `${process.pid}:${randomUUID()}`;
-  for (;;) {
-    try {
-      writeFileSync(file, token, { flag: "wx" });
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      let observed: string | undefined;
-      try {
-        const content = readFileSync(file, "utf8");
-        const owner = Number.parseInt(content, 10);
-        const stale = Number.isInteger(owner)
-          ? !alive(owner)
-          : Date.now() - statSync(file).mtimeMs > mutexStaleMilliseconds;
-        if (stale) observed = content;
-      } catch {
-        // released between the two calls: try to create it again
-      }
-      if (observed !== undefined) reclaim(file, observed);
-      else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-    }
-  }
-  try {
-    return action();
-  } finally {
-    try {
-      if (readFileSync(file, "utf8") === token) rmSync(file, { force: true });
-    } catch {
-      // already gone
-    }
-  }
-}
-
-/**
- * Removes the stale mutex whose content was `observed`. The file is first renamed to a name of its own, which only
- * one contender can win, and deleted only when it still holds the observed content. When a replacement owner took the
- * pathname after the observation, the rename caught that live file: it is linked back, never deleted.
- * ponytail: another contender can create the mutex in the instant between that rename and the link back; it needs a
- * crashed owner and three contenders, use a per-owner lock directory if it ever shows.
- */
-function reclaim(file: string, observed: string): void {
-  const moved = `${file}.stale.${randomUUID()}`;
-  try {
-    renameSync(file, moved);
-  } catch {
-    return; // another contender took it first
-  }
-  try {
-    if (readFileSync(moved, "utf8") !== observed) linkSync(moved, file);
-  } catch {
-    // the replacement is already back or gone
-  }
-  rmSync(moved, { force: true });
-}
 
 /** A pid is alive when signal 0 reaches it; EPERM means it exists under another user. */
 function alive(pid: number): boolean {
@@ -131,7 +67,8 @@ function readTickets(): { file: string; ticket: Ticket }[] {
     const ticket = readTicket(file);
     if (ticket === null) continue;
     if (alive(ticket.pid)) tickets.push({ file, ticket });
-    else {
+    else if (JSON.stringify(readTicket(file)) === JSON.stringify(ticket)) {
+      // Only this stale file is removed, and only while it still holds what was read: a dead owner never writes.
       try {
         unlinkSync(file);
         console.log(`took over a stale ark test lock of pid ${ticket.pid}`);
@@ -237,43 +174,51 @@ export function openTestBudget(
     async take(requested) {
       const cores = requested === undefined || requested > budget ? budget : Math.max(1, requested);
       const file = join(ticketDirectory(), `${process.pid}-${randomUUID()}.json`);
-      withMutex(() => {
-        writeTicket(file, {
-          run: runId,
-          pid: process.pid,
-          cores,
-          arrival: new Date().toISOString(),
-        });
-        files.add(file);
+      mkdirSync(ticketDirectory(), { recursive: true });
+      writeTicket(file, {
+        run: runId,
+        pid: process.pid,
+        cores,
+        arrival: new Date().toISOString(),
       });
+      files.add(file);
       let printedKey: string | null = null;
       let printedAt = 0;
       try {
         for (;;) {
-          const { tickets, admitted } = withMutex(() => {
-            const snapshot = readTickets();
-            const mine = snapshot.findIndex((entry) => entry.file === file);
-            const used = snapshot
-              .filter((entry) => entry.ticket.started !== undefined)
-              .reduce((sum, entry) => sum + entry.ticket.cores, 0);
-            const fits =
-              mine >= 0 &&
-              snapshot.slice(0, mine).every((entry) => entry.ticket.started !== undefined) &&
-              used + cores <= budget;
-            if (fits)
-              writeTicket(file, { ...snapshot[mine]!.ticket, started: new Date().toISOString() });
-            return { tickets: snapshot, admitted: fits };
-          });
-          const running = tickets.filter((entry) => entry.ticket.started !== undefined);
-          if (admitted) {
-            return {
-              cores,
-              release: () => {
-                files.delete(file);
-                rmSync(file, { force: true });
-              },
-            };
+          const tickets = readTickets();
+          const mine = tickets.findIndex((entry) => entry.file === file);
+          const startedTickets = tickets.filter((entry) => entry.ticket.started !== undefined);
+          const sumOf = (entries: typeof tickets) =>
+            entries.reduce((sum, entry) => sum + entry.ticket.cores, 0);
+          if (mine >= 0 && tickets[mine]!.ticket.started !== undefined) {
+            // Verification after my own `started` write. Only tickets up to mine in arrival order can revoke me;
+            // an earlier ticket never gives way, so the earliest one always progresses.
+            if (sumOf(startedTickets.filter((entry) => tickets.indexOf(entry) <= mine)) > budget) {
+              writeTicket(file, { ...tickets[mine]!.ticket, started: undefined });
+              await Bun.sleep(pollMilliseconds);
+              continue;
+            }
+            // Fits among the earlier tickets. A later started ticket may not have seen mine yet: wait for it to
+            // revoke or end, so that two suites never run together.
+            if (sumOf(startedTickets) <= budget) {
+              return {
+                cores,
+                release: () => {
+                  files.delete(file);
+                  rmSync(file, { force: true });
+                },
+              };
+            }
+            await Bun.sleep(pollMilliseconds);
+            continue;
           }
+          const firstWaiting = tickets.find((entry) => entry.ticket.started === undefined);
+          if (mine >= 0 && firstWaiting?.file === file && sumOf(startedTickets) + cores <= budget) {
+            writeTicket(file, { ...tickets[mine]!.ticket, started: new Date().toISOString() });
+            continue; // read everything again before running
+          }
+          const running = startedTickets;
           const waiting = tickets.filter((entry) => entry.ticket.started === undefined);
           const place = waiting.findIndex((entry) => entry.file === file) + 1;
           const holders = running.map((entry) => entry.ticket);
