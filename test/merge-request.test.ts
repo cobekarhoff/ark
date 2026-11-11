@@ -718,7 +718,7 @@ function testedRun() {
 }
 
 test(
-  "ARK-287-AC4 refuses a head that changed since the test with the run id in the next command, then opens after a passing ark test",
+  "ARK-T246 merge-request open refuses a head that changed since the test, with the run id in the next command, then opens after a passing ark test",
   () => {
     const { runId, runDirectory, bare, worktree } = testedRun();
     const tested = git(worktree, "rev-parse", "HEAD");
@@ -1236,7 +1236,7 @@ test(
 );
 
 test(
-  "ARK-296-AC4 a repo with no base keeps the origin/HEAD target while a configured repo uses its base",
+  "ARK-T247 a repo with no base keeps the origin/HEAD target while a configured repo uses its base",
   () => {
     const { worktrees } = scenario({ core: "github", app: "gitlab" }, true, [], {
       repos: { "repos/app": { base: "release/9" } },
