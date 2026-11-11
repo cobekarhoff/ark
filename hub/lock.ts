@@ -1,13 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  linkSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  rmdirSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { arkHome } from "../cli/paths.ts";
 
@@ -50,11 +42,43 @@ function inspect(): HubLock | "stale" | "absent" {
   return runningHub() ?? "stale";
 }
 
+/** The pid written in a mutex or lock file, or null. */
+function ownerOf(path: string): number | null {
+  try {
+    const pid = (JSON.parse(readFileSync(path, "utf8")) as HubLock).pid;
+    return Number.isInteger(pid) ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes a mutex whose owner is dead; never one whose owner lives (however long it has held it).
+ * Contenders claim the dead owner by an exclusive link, and re-read the owner after claiming, so a
+ * successor's mutex is never removed. ponytail: a claimer killed inside this window leaves its
+ * claim file and that dead pid's mutex stays; delete `<lock>.reclaim.dead-<pid>` by hand.
+ */
+function reclaimDeadMutex(mutex: string): void {
+  const owner = ownerOf(mutex);
+  if (owner === null || isAlive(owner)) return;
+  const claim = `${mutex}.dead-${owner}`;
+  try {
+    linkSync(mutex, claim);
+  } catch {
+    return;
+  }
+  try {
+    if (ownerOf(mutex) === owner) rmSync(mutex, { force: true });
+  } finally {
+    rmSync(claim, { force: true });
+  }
+}
+
 /**
  * Takes the lock for this process and `port`. Returns the holder when another live hub has it.
  * The content is written to a private file and linked into place, so the create is atomic and a
  * reader never sees a half-written lock. A stale lock is removed only under a reclaim mutex
- * (`mkdir`), so an old observation can never unlink a replacement another hub installed meanwhile:
+ * (a file linked into place holding the owner's pid), so an old observation can never unlink a replacement another hub installed meanwhile:
  * only mutex holders remove the lock file, and only the owner removes its own live lock.
  */
 export function acquireLock(port: number): HubLock | null {
@@ -75,15 +99,10 @@ export function acquireLock(port: number): HubLock | null {
       if (seen === "absent") continue;
       if (seen !== "stale") return seen;
       try {
-        mkdirSync(mutex);
+        linkSync(mine, mutex);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        // ponytail: a hub killed inside the reclaim window leaves the mutex; older than 5 s is reclaimed.
-        try {
-          if (Date.now() - statSync(mutex).mtimeMs > 5000) rmdirSync(mutex);
-        } catch {
-          // Released meanwhile.
-        }
+        reclaimDeadMutex(mutex);
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
         continue;
       }
@@ -91,7 +110,7 @@ export function acquireLock(port: number): HubLock | null {
         // Under the mutex nobody else removes the lock, so a stale observation still holds.
         if (inspect() === "stale") rmSync(path, { force: true });
       } finally {
-        rmdirSync(mutex);
+        if (ownerOf(mutex) === process.pid) rmSync(mutex, { force: true });
       }
     }
   } finally {

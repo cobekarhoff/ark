@@ -15,6 +15,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -783,6 +784,39 @@ test("ARK-T249 Hubs that start at once on a lock left by a dead pid give the loc
       await child.exited;
     }
   }
+
+  // A reclaim-mutex holder that is suspended, not dead, keeps the mutex however old it is: a
+  // contender waits, and takes the lock only once the holder dies.
+  rmSync(go, { force: true });
+  writeFileSync(lockPath, JSON.stringify({ pid: 2147483647, port: 1234 }));
+  const holder = Bun.spawn(["sleep", "600"]);
+  processes.push(holder);
+  process.kill(holder.pid, "SIGSTOP");
+  writeFileSync(`${lockPath}.reclaim`, JSON.stringify({ pid: holder.pid, port: 1234 }));
+  utimesSync(`${lockPath}.reclaim`, 0, 0);
+  const contender = Bun.spawn(["bun", "-e", code], {
+    env: process.env,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  processes.push(contender);
+  const output: string[] = [];
+  void (async () => {
+    let text = "";
+    for await (const chunk of contender.stdout) {
+      text += new TextDecoder().decode(chunk);
+      output.splice(0, output.length, ...text.split("\n").filter(Boolean));
+    }
+  })();
+  await until("the contender to be ready", () => output.length >= 1);
+  writeFileSync(go, "");
+  expect(output).toHaveLength(1);
+  process.kill(holder.pid, "SIGKILL");
+  await until("the contender to answer", () => output.length >= 2);
+  expect(JSON.parse(output[1]).holder).toBeNull();
+  expect(JSON.parse(readFileSync(lockPath, "utf8")).pid).toBe(contender.pid);
+  expect(existsSync(`${lockPath}.reclaim`)).toBe(false);
 });
 
 // ---------------------------------------------------------------- ARK-T250
