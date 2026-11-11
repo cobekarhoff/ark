@@ -2,6 +2,7 @@
 // per Ark repo, and reads Plannotator only while a gate is open. Real `hub/main.ts` processes with
 // fake `orca`, `plannotator`, `gh` and `omp` on PATH; every source interval comes from ARK_HUB_INTERVAL_MS.
 import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Subprocess } from "bun";
 import { spawnSync } from "node:child_process";
 import {
@@ -45,7 +46,7 @@ afterAll(() => {
 });
 
 // Real time is the thing under test here: idle periods and read rates are counted on the platform clock.
-const sleep = (milliseconds: number) => Bun.sleep(milliseconds);
+const sleep = (milliseconds: number) => delay(milliseconds);
 
 async function until<Value>(
   what: string,
@@ -699,14 +700,12 @@ test("ARK-T243 The hub reads Plannotator only while a run has an open gate, read
   const slowClient = connect(slow);
   await until("the first push", () => slowClient.pushes.length > 0);
   await until("the first reads", () => okOf(slowClient.pushes.at(-1)!, "ark"));
-  const appendedAt = Date.now();
   openGate(opening);
   await until(
     "the review link, not 60 s later",
     () => slowClient.pushes.some((push) => reviewUrlOf(push, opening) === url(opening)),
     5000,
   );
-  expect(Date.now() - appendedAt).toBeLessThan(5000);
   slowClient.close();
   slow.child.kill("SIGTERM");
   await slow.exited;
