@@ -63,11 +63,13 @@ function buildingRun(options: {
     "unit.test.ts": suiteTests(options.unit ?? []),
   });
   if (options.forge) {
-    const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
+    const bare = join(mkdtempSync(join(tmpdir(), "ark-origin-")), "github.com", "org", "core.git");
+    mkdirSync(bare, { recursive: true });
     for (const args of [
       ["-C", bare, "init", "--bare", "-q"],
-      ["-C", workspace, "remote", "add", "origin", "https://github.com/org/core.git"],
-      ["-C", workspace, "config", "remote.origin.pushurl", bare],
+      ["-C", workspace, "remote", "add", "origin", bare],
+      ["-C", workspace, "push", "origin", "HEAD:refs/heads/main"],
+      ["-C", workspace, "remote", "set-head", "origin", "main"],
     ])
       Bun.spawnSync(["git", ...args]);
   }
@@ -229,6 +231,10 @@ describe("ark test", () => {
       suites: [
         { name: "unit", level: "unit", passed: true },
         { name: "e2e", level: "e2e", passed: true },
+      ],
+      checks: [
+        { name: "old-id unit", passed: true },
+        { name: "old-id e2e", passed: true },
       ],
       criteria: { "FAKE-1/AC1": "passing", "FAKE-1/AC2": "passing" },
       mode: "full",
@@ -491,9 +497,9 @@ describe("ark test checks", () => {
 });
 
 describe("ark test on a refactor run", () => {
-  const fixHead = (runDirectory: string) => {
+  const fixHead = (runDirectory: string, title = "FAKE-1-AC1 works") => {
     const mirror = join(runDirectory, "workspace");
-    writeFileSync(join(mirror, "e2e.test.ts"), suiteTests([passing("FAKE-1-AC1 works")]));
+    writeFileSync(join(mirror, "e2e.test.ts"), suiteTests([passing(title)]));
     Bun.spawnSync(["git", "-C", mirror, "add", "-A"]);
     Bun.spawnSync(["git", "-C", mirror, "commit", "-q", "-m", "fix"]);
   };
@@ -559,9 +565,10 @@ describe("ark test on a refactor run", () => {
         criteria: ["FAKE-1-AC1"],
         ticketCriteria: [{ id: "FAKE-1-AC1", method: "inspection" }],
         testCases: [],
-        e2e: [failing("FAKE-1-AC1 works")],
+        e2e: [failing("ARK-T1 works")],
       });
-      fixHead(runDirectory);
+      // A case-id title: touching an old-id test title fails `ark test`.
+      fixHead(runDirectory, "ARK-T1 works");
       writeEvidenceFile(runDirectory, "FAKE-1-AC1", "inspection");
       expect(ark("gate", "record", runId, "manual", "FAKE-1-AC1", "ok").code).toBe(0);
 

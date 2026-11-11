@@ -333,10 +333,12 @@ function shipRun(criteria: ShipCriterion[], proven: string[]) {
   mkdirSync(dirname(source), { recursive: true });
   renameSync(tempGitRepo(), source);
   const base = git(source, "branch", "--show-current");
-  const bare = mkdtempSync(join(tmpdir(), "fixture-bare-"));
+  const bare = join(mkdtempSync(join(tmpdir(), "fixture-bare-")), "github.com", "org", "core.git");
+  mkdirSync(bare, { recursive: true });
   git(bare, "init", "--bare", "-q");
-  git(source, "remote", "add", "origin", "https://github.com/org/core.git");
-  git(source, "config", "remote.origin.pushurl", bare);
+  git(source, "remote", "add", "origin", bare);
+  git(source, "push", "origin", `HEAD:refs/heads/${base}`);
+  git(source, "remote", "set-head", "origin", base);
   const worktree = join(mkdtempSync(join(tmpdir(), "fixture-worktree-")), "core");
   git(source, "worktree", "add", "-q", "-b", `ark/${runId}`, worktree, base);
   writeFileSync(join(worktree, "core.txt"), "core");
