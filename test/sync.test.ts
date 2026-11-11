@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   renameSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -733,4 +734,205 @@ test(
     expect(readFileSync(join(scenario.worktreePath(), "m.txt"), "utf8")).toBe("main\n");
   },
   { timeout: 30_000 },
+);
+
+// ARK-407: real bun installs of `file:` packages need no network. Setup runs in every worktree of the run.
+const dependencySetup = (logVariable: string) =>
+  `bun install --frozen-lockfile && echo "$(basename "$PWD") $(git ls-remote --heads origin 'ark/*' | wc -l | tr -d ' ')" >> "$${logVariable}"`;
+
+/** A package folder inside the repo: bun rewrites an absolute `file:` path relative to the repo, which breaks in a worktree and a clone. */
+function writeLocalPackage(repoPath: string, name: string, marker: string): string {
+  const folder = join(repoPath, "vendor", name);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(
+    join(folder, "package.json"),
+    JSON.stringify({ name, version: "1.0.0", main: "index.js" }),
+  );
+  writeFileSync(join(folder, "index.js"), `module.exports = ${JSON.stringify(marker)};\n`);
+  return `file:./vendor/${name}`;
+}
+
+function bunInstall(directory: string): void {
+  const installed = Bun.spawnSync(["bun", "install"], { cwd: directory });
+  if (installed.exitCode !== 0)
+    throw new Error(`bun install failed: ${installed.stderr.toString()}`);
+}
+
+/** Commits a package.json that depends on a vendored package and the bun.lock bun made for it, and pushes it to origin. */
+function seedDependencies(repoPath: string): void {
+  writeFileSync(
+    join(repoPath, "package.json"),
+    JSON.stringify(
+      {
+        name: "fixture-app",
+        version: "1.0.0",
+        description: "base",
+        dependencies: { "base-dependency": writeLocalPackage(repoPath, "base-dependency", "base") },
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(join(repoPath, ".gitignore"), "node_modules\n.omp\n");
+  bunInstall(repoPath);
+  git(repoPath, "add", "-A");
+  git(repoPath, "commit", "-m", "fixture dependencies");
+  git(repoPath, "push", "origin", "main");
+}
+
+type DependencyChange = "both" | "package-only" | "lockfile-only" | "source-only";
+
+/** Pushes one commit to origin's main that changes the dependency files named by `change`. */
+function changeDependencies(workspace: string, repoName: string, change: DependencyChange): void {
+  const repoPath = repoName === "." ? workspace : join(workspace, repoName);
+  const clone = mkdtempSync(join(tmpdir(), "ark-sync-clone-"));
+  git(clone, "clone", git(repoPath, "remote", "get-url", "origin"), ".");
+  git(clone, "config", "user.name", "Ark Test");
+  git(clone, "config", "user.email", "ark@example.com");
+  const manifestPath = join(clone, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (change === "both") {
+    manifest.dependencies["fixture-dependency"] = writeLocalPackage(
+      clone,
+      "fixture-dependency",
+      "fixture-marker-407",
+    );
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    bunInstall(clone);
+  } else if (change === "package-only") {
+    manifest.description = "changed";
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  } else if (change === "lockfile-only") {
+    // a trailing newline: a lockfile bun still accepts under --frozen-lockfile, with a different blob
+    writeFileSync(join(clone, "bun.lock"), `${readFileSync(join(clone, "bun.lock"), "utf8")}\n`);
+  } else {
+    writeFileSync(join(clone, "source.txt"), "source\n");
+  }
+  git(clone, "add", "-A");
+  git(clone, "commit", "-m", `change ${change}`);
+  git(clone, "push", "origin", "main");
+}
+
+function startDependencyRun(repoNames: string[], setup?: string) {
+  const scenario = startRun(repoNames, false, {}, (workspace) => {
+    for (const repoName of repoNames)
+      seedDependencies(repoName === "." ? workspace : join(workspace, repoName));
+  });
+  // set after worktree create, so create runs no setup and the worktree starts without node_modules
+  if (setup !== undefined) {
+    const configFile = join(scenario.runDirectory, "..", "..", "ark.yml");
+    writeFileSync(
+      configFile,
+      JSON.stringify({ ...JSON.parse(readFileSync(configFile, "utf8")), setup }),
+    );
+  }
+  for (const repoName of repoNames)
+    appendEvent(scenario.runDirectory, "merge_request.opened", {
+      repo: repoName,
+      url: `https://github.com/acme/${repoName}/pull/1`,
+      number: 1,
+    });
+  return scenario;
+}
+
+/** The line `git ls-remote` prints for the worktree branch on origin: empty when origin lacks it. */
+const originBranch = (path: string) =>
+  git(
+    path,
+    "ls-remote",
+    "--heads",
+    "origin",
+    `refs/heads/${git(path, "branch", "--show-current")}`,
+  );
+
+test(
+  "ARK-T237 ark worktree sync runs setup after a merge that changes package.json or bun.lock, before any push, and a dependency the merge added loads in the worktree",
+  () => {
+    const log = join(mkdtempSync(join(tmpdir(), "ark-setup-log-")), "setup.log");
+    process.env.SETUP_LOG = log;
+    const readLog = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+
+    // both files change in one repo; the control repo changes only a source file
+    const scenario = startDependencyRun(
+      ["repos/dep", "repos/control"],
+      dependencySetup("SETUP_LOG"),
+    );
+    changeDependencies(scenario.workspace, "repos/dep", "both");
+    changeDependencies(scenario.workspace, "repos/control", "source-only");
+    const dependencyWorktree = scenario.worktreePath("repos/dep");
+    expect(existsSync(join(dependencyWorktree, "node_modules", "fixture-dependency"))).toBe(false);
+    const synced = ark("worktree", "sync", scenario.runId);
+    expect(synced.code, synced.err).toBe(0);
+    // the origin held no run branch when setup finished, and the control repo ran no setup
+    expect(readLog()).toEqual(["dep 0"]);
+    expect(originBranch(dependencyWorktree)).not.toBe("");
+    expect(existsSync(join(dependencyWorktree, ".omp", "setup-pending"))).toBe(false);
+    const loaded = Bun.spawnSync(["bun", "-e", "console.log(require('fixture-dependency'))"], {
+      cwd: dependencyWorktree,
+    });
+    expect(loaded.stderr.toString()).toBe("");
+    expect(loaded.stdout.toString().trim()).toBe("fixture-marker-407");
+    expect(loaded.exitCode).toBe(0);
+
+    for (const change of ["package-only", "lockfile-only"] as const) {
+      rmSync(log, { force: true });
+      const single = startDependencyRun(["."], dependencySetup("SETUP_LOG"));
+      changeDependencies(single.workspace, ".", change);
+      const result = ark("worktree", "sync", single.runId);
+      expect(result.code, `${change}: ${result.err}`).toBe(0);
+      expect(readLog(), change).toEqual(["workspace 0"]);
+      expect(existsSync(join(single.worktreePath(), ".omp", "setup-pending")), change).toBe(false);
+    }
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T238 a failed setup after a clean merge exits 1, names the repo, pushes nothing and leaves .omp/setup-pending, and the next sync retries setup even with nothing to merge",
+  () => {
+    const counters = mkdtempSync(join(tmpdir(), "ark-setup-counters-"));
+    process.env.SETUP_COUNTERS = counters;
+    // repos/a fails its first setup and passes later; repos/b always passes
+    const setup = `name=$(basename "$PWD"); echo run >> "$SETUP_COUNTERS/$name"; if [ "$name" = a ]; then [ "$(wc -l < "$SETUP_COUNTERS/$name")" -gt 1 ]; fi`;
+    const runs = (name: string) =>
+      existsSync(join(counters, name))
+        ? readFileSync(join(counters, name), "utf8").trim().split("\n").length
+        : 0;
+
+    const scenario = startDependencyRun(["repos/a", "repos/b"], setup);
+    changeDependencies(scenario.workspace, "repos/a", "package-only");
+    changeDependencies(scenario.workspace, "repos/b", "package-only");
+    const failing = scenario.worktreePath("repos/a");
+    const marker = join(failing, ".omp", "setup-pending");
+
+    const first = ark("worktree", "sync", scenario.runId);
+    expect(first.code).toBe(1);
+    expect(first.err).toContain("repos/a");
+    expect(originBranch(failing)).toBe("");
+    expect(originBranch(scenario.worktreePath("repos/b"))).not.toBe("");
+    expect(existsSync(marker)).toBe(true);
+    expect(
+      readEventLines(scenario.runDirectory).filter(
+        (event) => event.type === "worktree.synced" && event.data.conflict === true,
+      ),
+    ).toEqual([]);
+    expect([runs("a"), runs("b")]).toEqual([1, 1]);
+
+    // origin has not moved: nothing to merge, setup still reruns
+    const second = ark("worktree", "sync", scenario.runId);
+    expect(second.code, second.err).toBe(0);
+    expect([runs("a"), runs("b")]).toEqual([2, 1]);
+    expect(originBranch(failing)).not.toBe("");
+    expect(existsSync(marker)).toBe(false);
+
+    expect(ark("worktree", "sync", scenario.runId).code).toBe(0);
+    expect([runs("a"), runs("b")]).toEqual([2, 1]);
+
+    // no setup configured: a package.json merge leaves no marker
+    const unconfigured = startDependencyRun(["."]);
+    changeDependencies(unconfigured.workspace, ".", "package-only");
+    expect(ark("worktree", "sync", unconfigured.runId).code).toBe(0);
+    expect(existsSync(join(unconfigured.worktreePath(), ".omp", "setup-pending"))).toBe(false);
+  },
+  { timeout: 120_000 },
 );

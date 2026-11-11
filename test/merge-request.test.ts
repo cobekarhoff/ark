@@ -1585,3 +1585,138 @@ test(
   },
   { timeout: 120_000 },
 );
+
+/**
+ * A two-repo scenario whose origins are local bare repos with `github.com` in their path: `git fetch` and `git push`
+ * both work offline and the host still reads as GitHub. The plain `scenario` pushes to a bare repo but its fetch URL
+ * is not reachable.
+ */
+function fetchableScenario() {
+  const shape: Shape = {
+    names: ["core", "app"],
+    steps: [
+      planStep("core-impl", "repos/core", [], ["ARK-900-AC1"]),
+      planStep("app-impl", "repos/app", ["core-impl"], ["ARK-900-AC2"]),
+    ],
+    noCommits: [],
+  };
+  const built = scenario({ core: "github", app: "github" }, true, [], {}, shape);
+  for (const name of shape.names) {
+    const source = join(built.workspace, "repos", name);
+    const bare = join(
+      mkdtempSync(join(tmpdir(), "ark-origin-")),
+      "github.com",
+      "org",
+      `${name}.git`,
+    );
+    mkdirSync(bare, { recursive: true });
+    git(bare, "init", "--bare");
+    git(bare, "symbolic-ref", "HEAD", "refs/heads/main");
+    git(source, "config", "remote.origin.url", bare);
+    git(source, "config", "remote.origin.pushurl", bare);
+    git(source, "push", "origin", "main");
+    git(source, "remote", "set-head", "origin", "main");
+    built.bares[name] = bare;
+  }
+  return built;
+}
+
+/** One commit on origin's main that changes `file`, as another contributor would push it. */
+function advanceTarget(bare: string, file: string, content: string) {
+  const clone = mkdtempSync(join(tmpdir(), "ark-target-clone-"));
+  git(clone, "clone", bare, ".");
+  git(clone, "config", "user.name", "Ark Test");
+  git(clone, "config", "user.email", "ark@example.com");
+  writeFileSync(join(clone, file), content);
+  git(clone, "add", "-A");
+  git(clone, "commit", "-m", `target ${file}`);
+  git(clone, "push", "origin", "main");
+}
+
+/** Records the current worktree heads as the tested heads, as a passing `ark test` after the last commit would. */
+function testedAtHead(runDirectory: string, worktrees: Record<string, string>) {
+  rewriteEvents(runDirectory, (event) => {
+    if (event.type === "test.completed")
+      event.data.heads = Object.fromEntries(
+        Object.entries(worktrees).map(([name, path]) => [
+          `repos/${name}`,
+          git(path, "rev-parse", "HEAD"),
+        ]),
+      );
+    return event;
+  });
+}
+
+/** HEAD, status and every local ref but the fetched `origin/*`. */
+const worktreeSnapshot = (worktree: string) => ({
+  head: git(worktree, "rev-parse", "HEAD"),
+  status: git(worktree, "status", "--porcelain"),
+  refs: git(worktree, "for-each-ref", "--format=%(refname) %(objectname)")
+    .split("\n")
+    .filter((line) => !line.startsWith("refs/remotes/origin/")),
+});
+
+const pushedBranches = (bare: string) => git(bare, "for-each-ref", "refs/heads/ark");
+
+test(
+  "ARK-T239 ark merge-request open refuses a repo whose head conflicts with origin's target after a fetch, changes no file or ref, and passes the same branch once a merge commit repairs it",
+  () => {
+    // core: the branch and origin's main change the same line. app: origin's main moved on a different file.
+    const { runDirectory, worktrees, bares } = fetchableScenario();
+    writeFileSync(join(worktrees.core, "README.md"), "branch\n");
+    git(worktrees.core, "commit", "-am", "branch edit");
+    advanceTarget(bares.core, "README.md", "target\n");
+    advanceTarget(bares.app, "target.txt", "target\n");
+    testedAtHead(runDirectory, worktrees);
+    const before = worktreeSnapshot(worktrees.core);
+
+    // the check is a merge of the head into origin/main that changes no file and no ref (git merge-tree)
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).not.toBe(0);
+    expect(refused.err).toContain("repos/core");
+    expect(refused.err).toContain("--merge");
+    expect(pushedBranches(bares.core)).toBe("");
+    expect(pushedBranches(bares.app)).toBe("");
+    expect(created()).toHaveLength(0);
+    expect(worktreeSnapshot(worktrees.core)).toEqual(before);
+
+    // the merge step: no `ark worktree sync`, the fetch of the failed open already holds origin/main
+    git(worktrees.core, "fetch", "origin");
+    Bun.spawnSync(["git", "merge", "origin/main"], { cwd: worktrees.core });
+    writeFileSync(join(worktrees.core, "README.md"), "merged\n");
+    git(worktrees.core, "commit", "-am", "merge origin/main");
+    testedAtHead(runDirectory, worktrees);
+
+    const opened = ark("merge-request", "open", run);
+    expect(opened.code, opened.err).toBe(0);
+    expect(pushedBranches(bares.core)).toContain(`refs/heads/ark/${run}`);
+    expect(pushedBranches(bares.app)).toContain(`refs/heads/ark/${run}`);
+    expect(created()).toHaveLength(2);
+  },
+  { timeout: 60_000 },
+);
+
+test(
+  "ARK-T239 merge-request open refuses when the merge check itself errors, shows git's text and pushes nothing",
+  () => {
+    // a branch with no common ancestor with origin/main: git merge-tree fails with an error that is not a conflict
+    const { runDirectory, worktrees, bares } = fetchableScenario();
+    const root = git(
+      worktrees.core,
+      "commit-tree",
+      "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "-m",
+      "unrelated",
+    );
+    git(worktrees.core, "reset", "--hard", root);
+    testedAtHead(runDirectory, worktrees);
+
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).not.toBe(0);
+    expect(refused.err).toContain("unrelated histories");
+    expect(pushedBranches(bares.core)).toBe("");
+    expect(pushedBranches(bares.app)).toBe("");
+    expect(created()).toHaveLength(0);
+  },
+  { timeout: 60_000 },
+);
