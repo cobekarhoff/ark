@@ -29,6 +29,7 @@ type Row = {
   acs: string[];
   durationMs: number | null;
   rows: number | null;
+  parameterized: boolean;
   modifier: string | null;
 };
 
@@ -295,6 +296,23 @@ describe("ark test-audit inventory", () => {
     expect(summary.out).toContain("total test lines    4");
     expect([snapshot(workspace), snapshot(arkHome)]).toEqual(before);
   });
+
+  test("ARK-T205 a one-row parameter table keeps its table marker and matches its expanded title in a real Bun report", () => {
+    const { arkHome, workspace } = fixture({
+      "test/one.test.ts": source(`test.each([[1]])("ARK-T1 one row %i", () => {});`),
+    });
+    const report = join(arkHome, "projects", "fx", "runs", "r1", "results", "unit.report");
+    mkdirSync(dirname(report), { recursive: true });
+    const bunRun = Bun.spawnSync(
+      ["bun", "test", "--reporter=junit", `--reporter-outfile=${report}`, "./test/one.test.ts"],
+      { cwd: workspace },
+    );
+    expect(bunRun.exitCode, bunRun.stderr.toString()).toBe(0);
+    const [row] = inventoryRows();
+    expect([row.rows, row.parameterized]).toEqual([1, true]);
+    expect(row.durationMs).not.toBeNull();
+    expect(ark("test-audit", "inventory", "--project", "fx").out).toContain("[table x1]");
+  });
 });
 
 describe("ark test-audit inventory --changed", () => {
@@ -343,6 +361,22 @@ describe("ark test-audit inventory --changed", () => {
       `test("ARK-9-AC10 helper only", () => {});`,
     ),
     "test/mixed.test.ts": source(`test("ARK-9-AC11 stays old", () => {});`),
+    "test/named.test.ts": source(
+      `const table = [`,
+      `  [1],`,
+      `  [2],`,
+      `];`,
+      `test.each(table)("ARK-9-AC12 named %i", () => {});`,
+    ),
+    "test/gap.test.ts": source(
+      `const before = 1;`,
+      `const after = 1;`,
+      `test("ARK-9-AC13 gap", () => {`,
+      `  const inside = 1;`,
+      `  const kept = 1;`,
+      `});`,
+      `const tail = 1;`,
+    ),
   };
 
   test("ARK-T206 --changed <base> lists only the declarations that the diff changes, with their id kind, and prints old id touched for each old AC id title", () => {
@@ -352,6 +386,7 @@ describe("ark test-audit inventory --changed", () => {
       (base as Record<string, string>)[name].replace(from, to);
     commitAll(workspace, {
       "test/each.test.ts": edit("test/each.test.ts", "[2],", "[22],"),
+      "test/named.test.ts": edit("test/named.test.ts", "[2],", "[22],"),
       "test/skip.test.ts": edit("test/skip.test.ts", "const x = 1;", "const x = 2;"),
       "test/nested.test.ts": edit("test/nested.test.ts", "const x = 1;", "const x = 2;"),
       "test/string.test.ts": edit("test/string.test.ts", "{ one }", "{ two }"),
@@ -373,6 +408,7 @@ describe("ark test-audit inventory --changed", () => {
         "test/convert.test.ts case ARK-T1 to convert",
         "test/each.test.ts old ARK-9-AC1 table %i",
         "test/mixed.test.ts none brand new",
+        "test/named.test.ts old ARK-9-AC12 named %i",
         "test/nested.test.ts old ARK-9-AC3 deep",
         "test/skip.test.ts old ARK-9-AC2 skipped",
         "test/string.test.ts old ARK-9-AC5 holds text",
@@ -386,12 +422,31 @@ describe("ark test-audit inventory --changed", () => {
       [
         "old id touched: test/after.test.ts:2 ARK-9-AC7 renamed and edited",
         "old id touched: test/each.test.ts:2 ARK-9-AC1 table %i",
+        "old id touched: test/named.test.ts:6 ARK-9-AC12 named %i",
         "old id touched: test/nested.test.ts:4 ARK-9-AC3 deep",
         "old id touched: test/skip.test.ts:2 ARK-9-AC2 skipped",
         "old id touched: test/string.test.ts:2 ARK-9-AC5 holds text",
       ].toSorted(),
     );
     expect(out).toContain(`${rows.length} declarations changed since ${at}`);
+  });
+
+  test("ARK-T206 a removal right before or right after a test is no change of it, a removal inside it is", () => {
+    const { workspace } = fixture(base);
+    const at = git(workspace, "rev-parse", "HEAD");
+    const gap = base["test/gap.test.ts"]
+      .replace("const before = 1;\n", "")
+      .replace("const tail = 1;\n", "");
+    commitAll(workspace, { "test/gap.test.ts": gap });
+    expect(inventoryRows("--changed", at).filter((row) => row.file === "test/gap.test.ts")).toEqual(
+      [],
+    );
+    commitAll(workspace, { "test/gap.test.ts": gap.replace("  const inside = 1;\n", "") });
+    expect(
+      inventoryRows("--changed", at)
+        .filter((row) => row.file === "test/gap.test.ts")
+        .map((row) => row.title),
+    ).toEqual(["ARK-9-AC13 gap"]);
   });
 
   test("ARK-T206 a diff that changes only a helper lists no declaration and no old-id line", () => {
@@ -417,6 +472,8 @@ describe("ark test old-id gate", () => {
     `  const x = 1;`,
     `});`,
     `test("ARK-9-AC3 untouched", () => {});`,
+    `const table = [[1], [2]];`,
+    `test.each(table)("ARK-9-AC4 named %i", () => {});`,
   );
 
   const pytestCommand = `printf '<testsuites><testsuite><testcase classname="x" name="t"/></testsuite></testsuites>' > {report}`;
@@ -504,6 +561,8 @@ describe("ark test old-id gate", () => {
       converted: baseSource.replace("ARK-9-AC2 target", "ARK-T1 target"),
       added: `${baseSource}test("a new test", () => {});\n`,
       outside: baseSource.replace("// helper area", "// helper area, edited"),
+      removed: baseSource.replace("// helper area\n", ""),
+      named: baseSource.replace("[2]]", "[3]]"),
     };
     const gate = (name: string) => {
       git(mirror, "reset", "-q", "--hard", base);
@@ -517,7 +576,11 @@ describe("ark test old-id gate", () => {
     expect(touched.out).not.toContain("ARK-9-AC3");
     expect(touched.out).toMatch(/suite py \(pytest\)\s+skipped/);
 
-    for (const name of ["converted", "added", "outside"]) {
+    const named = gate("named");
+    expect(named.code).not.toBe(0);
+    expect(named.out).toContain("old id touched: e2e.test.ts:9 ARK-9-AC4 named %i");
+
+    for (const name of ["converted", "added", "outside", "removed"]) {
       const result = gate(name);
       expect(result.out, name).not.toContain("old id touched");
       expect(result.out, name).toMatch(/suite e2e \(bun\)\s+passed/);

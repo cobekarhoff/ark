@@ -46,11 +46,18 @@ export type Row = {
   durationMs: number | null;
   /** The row count of a `test.each` table, 1 for a plain test, null when the table is not a literal. */
   rows: number | null;
+  /** True for a `test.each` declaration, also when its table has one row. */
+  parameterized: boolean;
   modifier: string | null;
 };
 
 /** A declaration as the scanner sees it: `endLine` closes the title, the table and the body. */
-type Declaration = Omit<Row, "file" | "acs" | "durationMs"> & { endLine: number; cases: string[] };
+type Declaration = Omit<Row, "file" | "acs" | "durationMs"> & {
+  endLine: number;
+  cases: string[];
+  /** Source lines of a named table that the declaration reads. */
+  tableLines?: { from: number; to: number };
+};
 
 const defaultGlob = "**/*.{test,spec}.{ts,tsx,js,jsx}";
 const allowedModifiers = new Set([
@@ -138,7 +145,7 @@ function declarationsOf(sourceFile: SourceFile, text: string): Declaration[] {
     return low + 1;
   };
   // top-level `const name = [...]` tables, for `test.each(name)`
-  const arrayRows = new Map<string, number>();
+  const arrayTables = new Map<string, { rows: number; from: number; to: number }>();
   for (const statement of sourceFile.statements)
     if (isVariableStatement(statement))
       for (const declaration of statement.declarationList.declarations)
@@ -147,7 +154,11 @@ function declarationsOf(sourceFile: SourceFile, text: string): Declaration[] {
           declaration.initializer !== undefined &&
           isArrayLiteralExpression(declaration.initializer)
         )
-          arrayRows.set(declaration.name.text, declaration.initializer.elements.length);
+          arrayTables.set(declaration.name.text, {
+            rows: declaration.initializer.elements.length,
+            from: lineAt(statement.getStart()),
+            to: lineAt(statement.end - 1),
+          });
   const found: Declaration[] = [];
   const titleOf = (node: Node): string => {
     if (isStringLiteral(node) || isNoSubstitutionTemplateLiteral(node)) return node.text;
@@ -171,10 +182,14 @@ function declarationsOf(sourceFile: SourceFile, text: string): Declaration[] {
           return;
         }
         let rows: number | null = 1;
+        let tableLines: { from: number; to: number } | undefined;
         if (shape.table !== undefined) {
           rows = isArrayLiteralExpression(shape.table) ? shape.table.elements.length : null;
-          if (rows === null && isIdentifier(shape.table))
-            rows = arrayRows.get(shape.table.text) ?? null;
+          if (rows === null && isIdentifier(shape.table)) {
+            const named = arrayTables.get(shape.table.text);
+            rows = named?.rows ?? null;
+            tableLines = named && { from: named.from, to: named.to };
+          }
           // tagged table: the head text is the header row, each row holds one `${}` per column
           if (isNoSubstitutionTemplateLiteral(shape.table)) rows = 0;
           else if (isTemplateExpression(shape.table)) {
@@ -187,6 +202,8 @@ function declarationsOf(sourceFile: SourceFile, text: string): Declaration[] {
           endLine: lineAt(node.end - 1),
           title,
           rows,
+          parameterized: shape.table !== undefined,
+          tableLines,
           modifier: shape.modifier,
           ...kindOf([...describes, title].join(" ")),
         });
@@ -265,9 +282,9 @@ function changedLines(repoPath: string, base: string): Map<string, { from: numbe
       if (!match || !current) continue;
       const start = Number(match[1]);
       const count = match[2] === undefined ? 1 : Number(match[2]);
-      // A removal has no new line: it sits after line `start`, so it touches the two lines around it.
+      // A removal has no new line: it is the gap after line `start`, an empty range (`to < from`).
       current.push(
-        count === 0 ? { from: start, to: start + 1 } : { from: start, to: start + count - 1 },
+        count === 0 ? { from: start + 1, to: start } : { from: start, to: start + count - 1 },
       );
     }
   }
@@ -295,10 +312,20 @@ async function changedDeclarations(
       extension: extname(path),
     })),
   );
+  // A range holds the lines it covers; an empty range is the gap after line `from - 1`, inside a span when lines on both sides belong to it.
+  const hits = (range: { from: number; to: number }, from: number, to: number): boolean =>
+    range.to >= range.from
+      ? range.from <= to && range.to >= from
+      : from < range.from && range.from <= to;
   return files.flatMap(([path, lines], i) =>
     found[i]
       .filter((declaration) =>
-        lines.some((range) => range.from <= declaration.endLine && range.to >= declaration.line),
+        lines.some(
+          (range) =>
+            hits(range, declaration.line, declaration.endLine) ||
+            (declaration.tableLines !== undefined &&
+              hits(range, declaration.tableLines.from, declaration.tableLines.to)),
+        ),
       )
       .map((declaration) => ({ path, declaration })),
   );
@@ -420,7 +447,7 @@ export async function inventory(
     }
     const timed = newestReport(project, suite);
     for (const { path, declaration } of found) {
-      const pattern = titlePattern(declaration.title, declaration.rows !== 1);
+      const pattern = titlePattern(declaration.title, declaration.parameterized);
       const matches = timed.filter(
         (entry) =>
           (entry.file === path || path.endsWith(`/${entry.file}`)) && pattern.test(entry.name),
@@ -437,6 +464,7 @@ export async function inventory(
             ? null
             : Math.round(matches.reduce((sum, entry) => sum + entry.seconds, 0) * 1000),
         rows: declaration.rows,
+        parameterized: declaration.parameterized,
         modifier: declaration.modifier,
       });
     }
@@ -455,7 +483,7 @@ function tableText(rows: Row[]): string[] {
         row.file,
         row.line,
         row.title +
-          (row.rows !== 1 ? ` [table x${row.rows ?? "?"}]` : "") +
+          (row.parameterized ? ` [table x${row.rows ?? "?"}]` : "") +
           (row.modifier ? ` [${row.modifier}]` : ""),
         row.kind,
         row.id ?? "-",
