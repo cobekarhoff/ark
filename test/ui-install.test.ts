@@ -21,7 +21,7 @@ function writeCommand(directory: string, name: string, contents: string): string
   return command;
 }
 
-test("ARK-178-AC1 install writes a restarting LaunchAgent and loads it", () => {
+test("ARK-T245 ark ui install writes the dev.ark.hub LaunchAgent that restarts after a crash and not after exit 0, and loads it", () => {
   const temporaryHome = mkdtempSync(join(tmpdir(), "ark-install-home-"));
   const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-install-state-"));
   const commandDirectory = mkdtempSync(join(tmpdir(), "ark-install-bin-"));
