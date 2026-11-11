@@ -87,7 +87,7 @@ function startBuildingRun(options: {
   suites: Suite[];
   repos: string[];
   kind?: string;
-  /** Adds the AC FAKE-1-AC2 with `method: test`, proven by a test whose name starts with its id. */
+  /** Adds the AC FAKE-1-AC2 with `method: test`, proven by a test whose name starts with the case id ARK-T1 (an old-id title fails ark test when touched). */
   testCriterion?: boolean;
 }): {
   runId: string;
@@ -107,7 +107,7 @@ function startBuildingRun(options: {
     [
       { id: "FAKE-1-AC1", text: "A person checks it", manual: true },
       ...(options.testCriterion
-        ? [{ id: "FAKE-1-AC2", text: "A test checks it", method: "test" }]
+        ? [{ id: "FAKE-1-AC2", text: "A test checks it", method: "test", verified_by: ["ARK-T1"] }]
         : []),
     ],
     "Ticket FAKE-1",
@@ -244,6 +244,7 @@ const baseFiles = (name: string): Record<string, string> => ({
   "tests/nested/a.test.ts": "// nested\n",
   "features/x.feature": "v1\n",
   "test/cases/ARK-X.md": caseEntry("ARK-X"),
+  "test/cases/ARK-T1.md": caseEntry("ARK-T1"),
   "packages/app/test/helpers/h.ts": "v1\n",
   "packages/app/features/z.feature": "v1\n",
   "packages/app/tests/a.test.ts": "// app nested\n",
@@ -269,7 +270,7 @@ function applyHeadChanges(repository: string, mode: NewTest, testCriterion = fal
       mode === "head-marker"
         ? "export const base = true;\n// head-only\n"
         : "export const base = true;\nexport function feature() { return 1; }\n",
-    "test/new.test.ts": newTestContent(mode, testCriterion ? "FAKE-1-AC2 " : ""),
+    "test/new.test.ts": newTestContent(mode, testCriterion ? "ARK-T1 " : ""),
     "tests/nested/deep/b.test.ts": "// deep\n",
     "features/y.feature": "y\n",
     "test/fixtures/data.json": "{}\n",
@@ -470,7 +471,7 @@ describe("ark test base run", () => {
 
     for (const name of repoNames) {
       writeFiles(join(run.mirror, name), {
-        "test/new.test.ts": newTestContent("passes", "FAKE-1-AC2 "),
+        "test/new.test.ts": newTestContent("passes", "ARK-T1 "),
       });
       commitAll(join(run.mirror, name), "make the new test pass");
     }

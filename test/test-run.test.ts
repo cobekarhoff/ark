@@ -232,6 +232,10 @@ describe("ark test", () => {
         { name: "unit", level: "unit", passed: true },
         { name: "e2e", level: "e2e", passed: true },
       ],
+      checks: [
+        { name: "old-id unit", passed: true },
+        { name: "old-id e2e", passed: true },
+      ],
       criteria: { "FAKE-1/AC1": "passing", "FAKE-1/AC2": "passing" },
       mode: "full",
       duration: expect.any(Number),
@@ -493,9 +497,9 @@ describe("ark test checks", () => {
 });
 
 describe("ark test on a refactor run", () => {
-  const fixHead = (runDirectory: string) => {
+  const fixHead = (runDirectory: string, title = "FAKE-1-AC1 works") => {
     const mirror = join(runDirectory, "workspace");
-    writeFileSync(join(mirror, "e2e.test.ts"), suiteTests([passing("FAKE-1-AC1 works")]));
+    writeFileSync(join(mirror, "e2e.test.ts"), suiteTests([passing(title)]));
     Bun.spawnSync(["git", "-C", mirror, "add", "-A"]);
     Bun.spawnSync(["git", "-C", mirror, "commit", "-q", "-m", "fix"]);
   };
@@ -561,9 +565,10 @@ describe("ark test on a refactor run", () => {
         criteria: ["FAKE-1-AC1"],
         ticketCriteria: [{ id: "FAKE-1-AC1", method: "inspection" }],
         testCases: [],
-        e2e: [failing("FAKE-1-AC1 works")],
+        e2e: [failing("ARK-T1 works")],
       });
-      fixHead(runDirectory);
+      // A case-id title: touching an old-id test title fails `ark test`.
+      fixHead(runDirectory, "ARK-T1 works");
       writeEvidenceFile(runDirectory, "FAKE-1-AC1", "inspection");
       expect(ark("gate", "record", runId, "manual", "FAKE-1-AC1", "ok").code).toBe(0);
 
