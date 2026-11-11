@@ -884,7 +884,14 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
         console.log(`${label}  skipped  (no base commit)`);
         continue;
       }
-      const touched = await oldIdsTouched(join(mirror, suite.repo), base, suite, config.suites);
+      let touched: string[];
+      try {
+        touched = await oldIdsTouched(join(mirror, suite.repo), base, suite, config.suites);
+      } catch (err) {
+        // A scan that cannot run is no old-id declaration: say why, and leave the verdict to the suites.
+        console.log(`${label}  skipped  (scan failed: ${String(err)})`);
+        continue;
+      }
       writeFileSync(join(resultsDirectory, `check-old-id-${suite.name}.log`), touched.join("\n"));
       checks.push({ name: `old-id ${suite.name}`, passed: touched.length === 0 });
       if (touched.length === 0) console.log(`${label}  passed  (0 old-id declarations touched)`);

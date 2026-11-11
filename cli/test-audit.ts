@@ -299,6 +299,8 @@ function changedLines(repoPath: string, base: string): Map<string, { from: numbe
 /**
  * The declarations that the diff from `base` to HEAD changes, read from git objects: hunks from `git diff`,
  * file content from `git show HEAD:<path>`. Neither the working tree nor a checkout is read. A deleted file has none.
+ * With `oldIdsOnly`, a file whose text holds no old AC id is not parsed: it has no `old` declaration, and the
+ * TypeScript server (a child process, slow and fragile on a loaded host) never starts for a diff with none.
  */
 async function changedDeclarations(
   repoPath: string,
@@ -306,16 +308,20 @@ async function changedDeclarations(
   base: string,
   suites: Suite[],
   only?: Suite,
+  oldIdsOnly = false,
 ): Promise<{ path: string; declaration: Declaration }[]> {
-  const files = [...changedLines(repoPath, base)].filter(([path]) => {
-    const owner = ownerOf(suites, repo, path);
-    return owner !== undefined && owner.parser === "bun" && (only === undefined || owner === only);
-  });
+  const files = [...changedLines(repoPath, base)]
+    .filter(([path]) => {
+      const owner = ownerOf(suites, repo, path);
+      return (
+        owner !== undefined && owner.parser === "bun" && (only === undefined || owner === only)
+      );
+    })
+    .map(([path, lines]) => ({ path, lines, text: git(repoPath, ["show", `HEAD:${path}`]) }))
+    .filter(({ text }) => !oldIdsOnly || text.match(criterionPattern) !== null)
+    .map(({ path, lines, text }) => [path, lines, text] as const);
   const found = await scanSources(
-    files.map(([path]) => ({
-      text: git(repoPath, ["show", `HEAD:${path}`]),
-      extension: extname(path),
-    })),
+    files.map(([path, , text]) => ({ text, extension: extname(path) })),
   );
   // A range holds the lines it covers; an empty range is the gap after line `from - 1`, inside a span when lines on both sides belong to it.
   const hits = (range: { from: number; to: number }, from: number, to: number): boolean =>
@@ -346,7 +352,7 @@ export async function oldIdsTouched(
   suite: Suite,
   suites: Suite[],
 ): Promise<string[]> {
-  const changed = await changedDeclarations(repoPath, suite.repo, base, suites, suite);
+  const changed = await changedDeclarations(repoPath, suite.repo, base, suites, suite, true);
   return changed
     .filter(({ declaration }) => declaration.kind === "old")
     .map(({ path, declaration }) => oldIdLine(path, declaration));
