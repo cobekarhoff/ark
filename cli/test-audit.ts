@@ -78,9 +78,14 @@ const modifierLabels = ["skipIf", "only", "skip", "todo", "fixme", "failing", "f
 
 const globOf = (suite: Suite): Bun.Glob => new Bun.Glob(suite.base_files ?? defaultGlob);
 
-/** The first suite whose files include `path` owns it, so no file is counted twice. */
+/**
+ * The first suite whose files include `path` owns it, so no file is counted twice. Only scripts have an owner:
+ * a `base_files` glob can match a `.feature` or other file, and the TypeScript API never answers for one.
+ */
 const ownerOf = (suites: Suite[], repo: string, path: string): Suite | undefined =>
-  suites.find((suite) => suite.repo === repo && globOf(suite).match(path));
+  /\.[cm]?[jt]sx?$/.test(path)
+    ? suites.find((suite) => suite.repo === repo && globOf(suite).match(path))
+    : undefined;
 
 function analyze(call: CallExpression): {
   group: boolean;
