@@ -1893,6 +1893,13 @@ test("ARK-T117 Esc from a ticket page returns the Roadmap to the scroll position
 }) => {
   isolate();
   roadmapOf44();
+  // A run at a gate: Plannotator is read (and held) only while a gate is open.
+  writeRun({
+    project: "p",
+    run: runId("ARK-707"),
+    ticket: { id: "ARK-707", title: "Gate" },
+    phase: "awaiting_criteria",
+  });
   const release = holdFakeTools();
   installFakeTools({});
   const baseUrl = await launch();
@@ -1923,6 +1930,13 @@ test("ARK-T118 The hub header has the same height with 4 or more stale source la
 }) => {
   isolate();
   roadmapOf44();
+  // A run at a gate: Plannotator is read (and held) only while a gate is open.
+  writeRun({
+    project: "p",
+    run: runId("ARK-707"),
+    ticket: { id: "ARK-707", title: "Gate" },
+    phase: "awaiting_criteria",
+  });
   const release = holdFakeTools();
   installFakeTools({});
   const baseUrl = await launch();
@@ -2474,10 +2488,12 @@ test("ARK-T123 every test runs on its own worker slot with its own ARK_HOME and 
   expect(test.info().config.workers).toBeGreaterThanOrEqual(2);
   // Two tests of one run would collide on these three if they were shared.
   const firstHome = tempArkHome();
+  installFakeTools({});
+  const firstHub = await launch();
+  // One hub per ARK_HOME: the second hub gets its own.
   const secondHome = tempArkHome();
   expect(firstHome).not.toBe(secondHome);
   installFakeTools({});
-  const firstHub = await launch();
   const secondHub = await launch();
   expect(new URL(firstHub).port).not.toBe("0");
   expect(new URL(firstHub).port).not.toBe(new URL(secondHub).port);
@@ -5377,11 +5393,11 @@ test("ARK-T146 the MR card of a closed run takes its state from the run outcome 
   const state = installFakeTools({});
   const baseUrl = await launch();
 
-  // One refresh finished: gh was asked about the open run.
+  // The hub reads only for a connected page: open one, then one refresh has finished once gh was asked about the open run.
+  await open(page, baseUrl, "");
   const log = () =>
     existsSync(join(state, "gh.log")) ? readFileSync(join(state, "gh.log"), "utf8") : "";
   await expect.poll(log).toContain(url(9));
-  await open(page, baseUrl, "");
   await expect(page.getByTestId("mr")).toHaveAttribute("data-state", "open");
 
   const expected = ["merged", "closed", "closed", null];

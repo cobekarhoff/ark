@@ -49,16 +49,17 @@ import { escapedDefects } from "../cli/retro.ts";
 import { isProved, listRunFiles, timelineOf } from "./run-detail.ts";
 import { UsageIndex, readMetricsCost, readMetricsRounds, type RunCost } from "./usage.ts";
 
+// ARK_HUB_INTERVAL_MS sets every source interval in ms (tests); ARK_PROVIDER_LIMITS_MS, when set, wins for providerLimits.
+const allIntervalMilliseconds = Number(process.env.ARK_HUB_INTERVAL_MS) || 0;
 export const intervalMilliseconds: Record<SourceName, number> = {
-  ark: 2000, // also woken by fs watchers; Orca (0.3 to 0.5 s a call) is never the trigger
-  orca: 3000,
-  plannotator: 5000,
-  github: 15_000,
-  usage: 5000,
-  // ARK_PROVIDER_LIMITS_MS shortens the refresh for tests; unset keeps 60 s.
-  providerLimits: Number(process.env.ARK_PROVIDER_LIMITS_MS) || 60_000,
-  agentWait: 3000,
-  evidence: 5000,
+  ark: allIntervalMilliseconds || 2000, // also woken by fs watchers; Orca (0.3 to 0.5 s a call) is never the trigger
+  orca: allIntervalMilliseconds || 3000,
+  plannotator: allIntervalMilliseconds || 5000,
+  github: allIntervalMilliseconds || 15_000,
+  usage: allIntervalMilliseconds || 5000,
+  providerLimits: Number(process.env.ARK_PROVIDER_LIMITS_MS) || allIntervalMilliseconds || 60_000,
+  agentWait: allIntervalMilliseconds || 3000,
+  evidence: allIntervalMilliseconds || 5000,
 };
 
 const usageTimeoutMilliseconds = 30_000;
@@ -79,8 +80,13 @@ function roleConfig(
 const configRole = (role: string): "chief" | "evaluator" | "designer" =>
   role === "evaluator" || role === "designer" ? role : "chief";
 
-type Slot<T> = { ok: boolean; readAt: string | null; value: T | null };
-const emptySlot = <T>(): Slot<T> => ({ ok: false, readAt: null, value: null });
+/**
+ * `since` is the start of the healthy period (shown as `read_at` while `ok`); `readAt` is the last
+ * good read. A failing source shows `readAt`, so `Stale` keeps "as of N s ago". Neither moves on a
+ * read that changes nothing, so an unchanged read is not a push.
+ */
+type Slot<T> = { ok: boolean; since: string | null; readAt: string | null; value: T | null };
+const emptySlot = <T>(): Slot<T> => ({ ok: false, since: null, readAt: null, value: null });
 
 const questions: Record<GateKind, (title: string) => string> = {
   criteria: (title) => `Approve the acceptance criteria for "${title}"?`,
@@ -122,6 +128,9 @@ export function createSnapshotReader() {
   const watchers = new Map<string, FSWatcher>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let stopped = false;
+  let running = false; // at least one /events client: loops, Ark timer and watchers run
+  let armed = false; // the loops are started (an Ark read that sees a gate may wake Plannotator)
+  let generation = 0; // changes on every pause and resume: a read from an older one is dropped
   let publishPending = false;
   let lastBody = "";
   let lastJson = "";
@@ -361,7 +370,10 @@ export function createSnapshotReader() {
 
   function compose(): Omit<Snapshot, "generated_at"> {
     const sources = Object.fromEntries(
-      Object.entries(slots).map(([name, slot]) => [name, { ok: slot.ok, read_at: slot.readAt }]),
+      Object.entries(slots).map(([name, slot]) => [
+        name,
+        { ok: slot.ok, read_at: slot.ok ? slot.since : slot.readAt },
+      ]),
     ) as Snapshot["sources"];
     const ark = slots.ark.value;
     if (!ark)
@@ -463,16 +475,21 @@ export function createSnapshotReader() {
     reader: () => Promise<(typeof slots)[Name]["value"]> | (typeof slots)[Name]["value"],
   ): Promise<void> {
     const slot = slots[name] as Slot<unknown>;
+    const started = generation;
+    let value: unknown = null;
     try {
-      const value = await reader();
-      if (value === null) slot.ok = false;
-      else {
-        slot.value = value;
-        slot.readAt = new Date().toISOString();
-        slot.ok = true;
-      }
+      value = await reader();
     } catch {
-      slot.ok = false;
+      // A failed read leaves the slot's value and shows its last good read time.
+    }
+    if (started !== generation) return;
+    if (value === null) slot.ok = false;
+    else {
+      const time = new Date().toISOString();
+      if (!slot.ok || slot.since === null) slot.since = time;
+      slot.value = value;
+      slot.readAt = time;
+      slot.ok = true;
     }
     publish();
   }
@@ -480,22 +497,32 @@ export function createSnapshotReader() {
   const openRunsOf = () =>
     (slots.ark.value?.runs ?? []).filter((run) => run.state.phase !== "closed");
 
+  const gateOpen = () => openRunsOf().some((run) => waitingGate(run.state) !== "none");
+  let gateWasOpen = false;
+
   const readers: Record<SourceName, () => Promise<void>> = {
-    ark: () => {
-      const result = read("ark", () => arkReader.read());
+    ark: async () => {
+      await read("ark", () => arkReader.read());
+      if (!running) return;
       syncWatchers();
-      return result;
+      // A gate that this read saw wakes the Plannotator read at once, not at its next tick.
+      const open = gateOpen();
+      if (armed && open && !gateWasOpen) void readers.plannotator();
+      gateWasOpen = open;
     },
     orca: () =>
       read("orca", () =>
         readOrca(openRunsOf().map(({ state }) => ({ run: state.run, project: state.project }))),
       ),
-    plannotator: () => read("plannotator", () => readPlannotator()),
+    // With no open gate nothing is reviewed: no call, and an empty list (not a failure) so review_url goes away.
+    plannotator: () => read("plannotator", () => (gateOpen() ? readPlannotator() : [])),
     github: () =>
       read("github", async () => {
+        const started = generation;
         const urls = openRunsOf().flatMap((run) => run.state.merge_requests.map((mr) => mr.url));
         const { facts, ok } = await readGithub(urls, githubFacts);
-        githubFacts = facts;
+        // A read from a paused generation is discarded whole, shared facts included.
+        if (started === generation) githubFacts = facts;
         return ok ? true : null;
       }),
     usage: () =>
@@ -556,42 +583,70 @@ export function createSnapshotReader() {
     }
   }
 
-  function loop(name: SourceName): void {
+  function loop(name: SourceName, started: number): void {
     const tick = async () => {
       await readers[name]();
-      if (!stopped) {
-        const timer = setTimeout(() => {
-          timers.delete(timer);
-          void tick();
-        }, intervalMilliseconds[name]);
-        timers.add(timer);
-      }
+      if (generation !== started) return;
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        void tick();
+      }, intervalMilliseconds[name]);
+      timers.add(timer);
     };
     void tick();
   }
 
+  let firstArkRead: Promise<void> | undefined;
+
+  /** Idempotent. Reads Ark first, so the other sources know which runs are open, then starts every other loop and the Ark timer. */
+  async function resume(): Promise<void> {
+    if (running) return;
+    running = true;
+    const started = ++generation;
+    firstArkRead = readers.ark();
+    await firstArkRead;
+    if (generation !== started) return;
+    armed = true;
+    const arkTimer = setInterval(() => void readers.ark(), intervalMilliseconds.ark);
+    timers.add(arkTimer as unknown as ReturnType<typeof setTimeout>);
+    for (const name of [
+      "orca",
+      "plannotator",
+      "github",
+      "usage",
+      "providerLimits",
+      "agentWait",
+      "evidence",
+    ] as const)
+      loop(name, started);
+  }
+
+  /** Idempotent. A read in flight finishes into nothing: `generation` changed, so it neither publishes nor re-arms. */
+  function pause(): void {
+    if (!running) return;
+    running = false;
+    armed = false;
+    generation++;
+    for (const timer of timers) clearTimeout(timer);
+    timers.clear();
+    clearTimeout(arkSoon);
+    for (const watcher of watchers.values()) watcher.close();
+    watchers.clear();
+  }
+
   return {
-    /** Reads Ark first, so the other sources know which runs are open, then starts every loop. */
-    async start(): Promise<void> {
+    /**
+     * Resolves once Ark has been read, for a request that arrives before any page is connected (or
+     * before the first read of the page that is connecting) and needs the runs and tickets.
+     */
+    async ready(): Promise<void> {
+      if (slots.ark.value) return;
       await readers.ark();
-      const timer = setInterval(() => void readers.ark(), intervalMilliseconds.ark);
-      timers.add(timer as unknown as ReturnType<typeof setTimeout>);
-      for (const name of [
-        "orca",
-        "plannotator",
-        "github",
-        "usage",
-        "providerLimits",
-        "agentWait",
-        "evidence",
-      ] as const)
-        loop(name);
+      if (!slots.ark.value && firstArkRead) await firstArkRead;
     },
     stop(): void {
       stopped = true;
-      for (const timer of timers) clearTimeout(timer);
-      clearTimeout(arkSoon);
-      for (const watcher of watchers.values()) watcher.close();
+      pause();
       usage.close();
     },
     /** The serialized snapshot: what `/api/snapshot` sends and what a new `/events` client gets first. */
@@ -605,9 +660,16 @@ export function createSnapshotReader() {
       }
       return lastJson;
     },
+    /**
+     * The first subscriber resumes the reader (Ark first, then every other source); the last one to
+     * leave pauses it. With no subscriber the hub runs no read, timer or file watcher.
+     */
     subscribe(listener: (json: string) => void): () => void {
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      if (listeners.size === 1 && !stopped) void resume();
+      return () => {
+        if (listeners.delete(listener) && listeners.size === 0) pause();
+      };
     },
     usage,
     /** Run folder of a run the hub knows (open or closed), or null. The URL names a run, never a path. */
