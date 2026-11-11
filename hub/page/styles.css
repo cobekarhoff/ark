@@ -27,6 +27,7 @@
   --amber-bg: light-dark(#fbf0dc, #2a2010);
   --green-bg: light-dark(#e6f3ec, #10241a);
   --blue-bg: light-dark(#e6edfb, #121f38);
+  --violet-bg: light-dark(#efe9fb, #1e1838);
   --sel: light-dark(#eaf0fd, #162136);
   --code-bg: light-dark(#f3f0e8, #0b0e13);
   --link: light-dark(#2553c7, #9cc3ff);
@@ -910,7 +911,7 @@ button:not(:disabled):active {
 .depgraph {
   position: relative;
 }
-.depgraph svg {
+.depgraph > svg {
   position: absolute;
   inset: 0;
 }
@@ -3180,4 +3181,104 @@ pre.code-plain {
   margin: 0;
   border: 0;
   padding: 0;
+}
+
+/* ---------- outcome of a closed run ---------- */
+.outcome {
+  --o: var(--mute);
+  --o-t: var(--mute);
+  --o-bg: var(--panel-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px 0 3px;
+  border: 1px solid var(--o);
+  border-radius: 99px;
+  background: var(--o-bg);
+  color: var(--o-t);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.outcome-icon {
+  display: inline-grid;
+  place-items: center;
+}
+.oglyph {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.o-none .outcome,
+.outcome.o-none {
+  border-style: dashed;
+}
+.o-merged {
+  --o: var(--green);
+  --o-t: var(--green-t);
+  --o-bg: var(--green-bg);
+}
+.o-aborted {
+  --o: var(--red);
+  --o-t: var(--red-t);
+  --o-bg: var(--red-bg);
+}
+.o-handed_off {
+  --o: var(--violet);
+  --o-t: var(--violet-t);
+  --o-bg: var(--violet-bg);
+}
+.gnode.o-merged,
+.gnode.o-aborted,
+.gnode.o-handed_off {
+  --c: var(--o);
+}
+.gnode[class*="o-"] .ring > span {
+  color: var(--o-t);
+}
+.gnode[class*="o-"] .ring .oglyph {
+  width: 14px;
+  height: 14px;
+}
+.ghead > * {
+  white-space: nowrap;
+}
+.ghead > b {
+  flex: none;
+}
+.ghead > .mut {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card .outcome {
+  margin-right: 6px;
+}
+
+/* Home at 1024 px: 3 tiles a row; words stay whole, ids and dates stay on one line. */
+@media (max-width: 1100px) {
+  .tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.tile-label,
+.tile-note {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.tile-label {
+  text-wrap: balance;
+}
+.tile-note {
+  text-wrap: pretty;
+}
+[data-testid="run-age"],
+[data-testid="run-idle"],
+[data-testid="waited"],
+.item-head a.mono {
+  white-space: nowrap;
 }

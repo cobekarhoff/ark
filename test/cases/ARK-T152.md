@@ -30,7 +30,7 @@ Prove that the Runs page shows every run on one board and one graph, with the Ac
 - When the Runs page opens, the system shall show no run picker and the five lanes Queued, Building, Needs me, Awaiting merge, Closed in that order, with 1, 2, 0, 1 and 6 cards.
 - When the Closed lane holds fewer closed runs than one page, the system shall show all of them and no older-runs control.
 - When a run has steps, the system shall show a ring with the steps done and the steps total (1 of 3 for ARK-601), and a long title wraps to 2 lines.
-- When the page opens, the Active filter shall be pressed with count 3, Queued shall show 1 and Old shall show 6, and the graph shall show ARK-601 to ARK-604.
+- When the page opens, the Active filter shall be pressed with count 3, Queued shall show 1 and Old shall show 6 tickets (labelled apart from the Closed run count, see ARK-T226), and the graph shall show ARK-601 to ARK-604.
 - When a ticket depends on one that is not done, the system shall draw a dashed edge (ARK-601 to ARK-603), and each run shall list what it unblocks.
 
 ## Screenshot checkpoints
