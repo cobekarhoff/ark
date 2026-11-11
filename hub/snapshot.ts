@@ -594,12 +594,15 @@ export function createSnapshotReader() {
     void tick();
   }
 
+  let firstArkRead: Promise<void> | undefined;
+
   /** Idempotent. Reads Ark first, so the other sources know which runs are open, then starts every other loop and the Ark timer. */
   async function resume(): Promise<void> {
     if (running) return;
     running = true;
     const started = ++generation;
-    await readers.ark();
+    firstArkRead = readers.ark();
+    await firstArkRead;
     if (generation !== started) return;
     armed = true;
     const arkTimer = setInterval(() => void readers.ark(), intervalMilliseconds.ark);
@@ -630,6 +633,15 @@ export function createSnapshotReader() {
   }
 
   return {
+    /**
+     * Resolves once Ark has been read, for a request that arrives before any page is connected (or
+     * before the first read of the page that is connecting) and needs the runs and tickets.
+     */
+    async ready(): Promise<void> {
+      if (slots.ark.value) return;
+      await readers.ark();
+      if (!slots.ark.value && firstArkRead) await firstArkRead;
+    },
     stop(): void {
       stopped = true;
       pause();
