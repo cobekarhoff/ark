@@ -145,6 +145,10 @@ export type TicketEntry = {
   satisfied: boolean;
 };
 
+/** How the newest run of a closed ticket ended; `undefined` while the ticket is not closed. */
+export const outcomeOf = (entry: TicketEntry): string | null | undefined =>
+  entry.lane === "Closed" ? (entry.newest?.all[0]?.outcome ?? null) : undefined;
+
 function ticketState(
   snapshot: Snapshot,
   run: RunView | null,
