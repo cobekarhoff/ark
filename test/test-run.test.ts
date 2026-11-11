@@ -708,7 +708,7 @@ describe("ark test on a refactor run", () => {
     return { runId, runDirectory };
   }
 
-  test("ARK-302-AC7 the base suites of a touched repo can read an untouched sibling repo", () => {
+  test("ARK-T244 the base suites of a touched repo can read an untouched sibling repo", () => {
     const { runId, runDirectory } = siblingRun();
     const result = ark("test", runId);
     expect(result.code).toBe(0);
