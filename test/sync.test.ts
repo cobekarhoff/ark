@@ -1,4 +1,4 @@
-import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -19,6 +19,7 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import { installFakeOrca, removeFakeOrca } from "./fake-orca.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -76,6 +77,7 @@ function startRun(
   config: Record<string, unknown> = {},
   prepareWorkspace: (workspace: string) => void = () => {},
 ) {
+  installFakeOrca(); // a step in plan.yml starts its worker through Orca (ARK-359)
   const workspace = makeWorkspace(repoNames);
   prepareWorkspace(workspace);
   tempArkHome();
@@ -193,6 +195,8 @@ beforeEach(() => {
   chmodSync(fakeGh, 0o755);
   process.env.PATH = `${fakeGhDirectory}:${process.env.PATH ?? ""}`;
 });
+
+afterEach(removeFakeOrca);
 
 test(
   "ARK-165-AC1 status reports every merged MR and allows closing, while an open MR stays open",

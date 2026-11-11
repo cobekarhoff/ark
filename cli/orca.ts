@@ -61,16 +61,10 @@ export function orcaTimeout(fallbackMilliseconds: number): number {
   return forced > 0 ? forced : fallbackMilliseconds;
 }
 
-/** One `orca orchestration <args> --json` call: its `result`, or why it failed. */
-export async function orcaRead<T>(
-  args: string[],
-  timeoutMilliseconds = readerTimeoutMilliseconds,
-): Promise<OrcaRead<T>> {
+/** One `orca <words> --json` call: its `result`, or why it failed. */
+async function orcaCommand<T>(words: string[], timeoutMilliseconds: number): Promise<OrcaRead<T>> {
   if (!Bun.which("orca")) return { ok: false, reason: "orca not found on PATH" };
-  const answer = await execResult(
-    ["orca", "orchestration", ...args, "--json"],
-    timeoutMilliseconds,
-  );
+  const answer = await execResult(["orca", ...words, "--json"], timeoutMilliseconds);
   if (answer.timedOut || answer.code !== 0)
     return { ok: false, reason: failureReason(answer, timeoutMilliseconds) };
   try {
@@ -81,6 +75,12 @@ export async function orcaRead<T>(
   }
   return { ok: false, reason: "answer was not JSON with a result" };
 }
+
+/** One `orca orchestration <args> --json` call: its `result`, or why it failed. */
+export const orcaRead = <T>(
+  args: string[],
+  timeoutMilliseconds = readerTimeoutMilliseconds,
+): Promise<OrcaRead<T>> => orcaCommand<T>(["orchestration", ...args], timeoutMilliseconds);
 
 /**
  * The one reader of paged Orca lists: `--limit 100`, then `--cursor <nextCursor>` until it is
@@ -111,3 +111,102 @@ export const orcaOrchestration = async <T>(...args: string[]): Promise<T | null>
   const answer = await orcaRead<T>(args);
   return answer.ok ? answer.value : null;
 };
+
+// Orca actions of `ark run step start`. Each returns the value or the reason it failed; none throws.
+// The run lead's terminal env (ORCA_AGENT_SESSION_ID) names the coordinator, so `worker_done` reaches the lead.
+const actionTimeout = () => orcaTimeout(120_000);
+const coordinator = (): string[] =>
+  process.env.ORCA_AGENT_SESSION_ID
+    ? ["--from", `orca_session_id:${process.env.ORCA_AGENT_SESSION_ID}`]
+    : [];
+
+/** A started worker. A field the receipt lacks is `unknown`: the worker runs, so it is never a failed start. */
+export type StartedWorker = { dispatch: string; terminal: string };
+
+type Receipt = {
+  dispatchId?: string;
+  dispatch?: { id?: string };
+  /** The real receipt holds the handle as a string; an older shape lists it in `effects`. */
+  terminal?: string;
+  effects?: { kind?: string; id?: string }[];
+};
+
+const receiptOf = (receipt: Receipt, terminal?: string): StartedWorker => ({
+  dispatch: receipt.dispatchId ?? receipt.dispatch?.id ?? "unknown",
+  terminal:
+    terminal ??
+    (typeof receipt.terminal === "string" ? receipt.terminal : undefined) ??
+    receipt.effects?.find((effect) => effect.kind === "terminal")?.id ??
+    "unknown",
+});
+
+/** `worker-start --agent`: a fresh supervised worker in `worktree`. */
+export async function startWorker(options: {
+  spec: string;
+  title: string;
+  worktree: string;
+  harness: string;
+  model: string;
+}): Promise<OrcaRead<StartedWorker>> {
+  const started = await orcaCommand<Receipt>(
+    [
+      "orchestration",
+      "worker-start",
+      ...coordinator(),
+      "--spec",
+      options.spec,
+      "--task-title",
+      options.title,
+      "--worktree",
+      `path:${options.worktree}`,
+      "--agent",
+      options.harness,
+      "--model",
+      options.model,
+    ],
+    actionTimeout(),
+  );
+  return started.ok ? { ok: true, value: receiptOf(started.value) } : started;
+}
+
+/** `terminal create` running `command` in `worktree`: the terminal handle. */
+export async function createTerminal(worktree: string, command: string): Promise<OrcaRead<string>> {
+  const created = await orcaCommand<{ terminal?: { handle?: string }; handle?: string }>(
+    ["terminal", "create", "--worktree", `path:${worktree}`, "--command", command],
+    actionTimeout(),
+  );
+  if (!created.ok) return created;
+  const handle = created.value.terminal?.handle ?? created.value.handle;
+  return handle ? { ok: true, value: handle } : { ok: false, reason: "no terminal handle" };
+}
+
+/** `worker-start --terminal`: binds a running terminal as a supervised worker (no --model with it). */
+export async function bindTerminal(options: {
+  terminal: string;
+  spec: string;
+  title: string;
+  worktree: string;
+}): Promise<OrcaRead<StartedWorker>> {
+  const bound = await orcaCommand<Receipt>(
+    [
+      "orchestration",
+      "worker-start",
+      ...coordinator(),
+      "--terminal",
+      options.terminal,
+      "--worktree",
+      `path:${options.worktree}`,
+      "--spec",
+      options.spec,
+      "--task-title",
+      options.title,
+    ],
+    actionTimeout(),
+  );
+  return bound.ok ? { ok: true, value: receiptOf(bound.value, options.terminal) } : bound;
+}
+
+/** Closes a terminal. Best effort: the caller already has its answer. */
+export async function closeTerminal(handle: string): Promise<void> {
+  await orcaCommand(["terminal", "close", "--terminal", handle], actionTimeout());
+}

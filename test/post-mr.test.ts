@@ -14,17 +14,21 @@ import {
   workspaceWithRepos,
   writeTicket,
 } from "./helpers.ts";
+import { installFakeOrca, removeFakeOrca } from "./fake-orca.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
 
 const originalPath = process.env.PATH;
 afterEach(() => {
+  removeFakeOrca();
   process.env.PATH = originalPath;
 });
 
+/** A building run; every step in plan.yml starts its worker through the fake Orca (ARK-359). */
 function openRun(withMergeRequest = true) {
   tempArkHome();
+  installFakeOrca();
   const workspace = tempGitRepo({
     "contract.test.ts":
       'import { expect, test } from "bun:test"; test("ARK-900-AC1 fixture", () => expect(2 + 2).toBe(4));\n',
@@ -56,6 +60,8 @@ function openRun(withMergeRequest = true) {
   const steps = ["implementer", "validator", "reviewer"].map((role) => ({
     id: role,
     role,
+    harness: "omp",
+    model: "test",
     repo: ".",
     needs: [],
     criteria: ["ARK-900-AC1"],
@@ -81,11 +87,11 @@ function openRun(withMergeRequest = true) {
   return { runId, directory, workspace };
 }
 
-test("ARK-208-AC1 post-MR validator and reviewer steps persist starts, finishes and real suite results", () => {
+test("ARK-T221 post-MR validator and reviewer steps persist starts, finishes and real suite results", () => {
   const { runId, directory } = openRun();
   for (const role of ["validator", "reviewer"]) {
     expect(ark("run", "step", runId, role, "start").code).toBe(0);
-    expect(readEvents(directory).at(-1)).toMatchObject({
+    expect(readEvents(directory).at(-2)).toMatchObject({
       type: "step.started",
       data: { step: role, role },
     });
@@ -104,7 +110,7 @@ test("ARK-208-AC1 post-MR validator and reviewer steps persist starts, finishes 
   expect(ark("status", runId).out).toContain("phase: merge_requests_open");
 });
 
-test("ARK-208-AC2 every post-MR implementer round needs a fresh escalation answer, including beyond budget", () => {
+test("ARK-T222 every post-MR implementer round needs a fresh escalation answer, including beyond budget", () => {
   const { runId, directory } = openRun();
   for (const round of [2, 3]) {
     const before = readEvents(directory);
@@ -114,7 +120,7 @@ test("ARK-208-AC2 every post-MR implementer round needs a fresh escalation answe
     expect(readEvents(directory)).toEqual(before);
     expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
     expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
-    expect(readEvents(directory).at(-1)).toMatchObject({
+    expect(readEvents(directory).at(-2)).toMatchObject({
       type: "step.started",
       data: { step: "implementer", round },
     });
@@ -122,7 +128,7 @@ test("ARK-208-AC2 every post-MR implementer round needs a fresh escalation answe
   }
 });
 
-test("ARK-287-AC1 an escalation answer survives ark test after an MR is open and the next implementer start uses it up", () => {
+test("ARK-T223 an escalation answer survives ark test after an MR is open and the next implementer start uses it up", () => {
   const { runId, directory } = openRun();
   expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
   expect(ark("test", runId).code).toBe(0);
@@ -132,7 +138,7 @@ test("ARK-287-AC1 an escalation answer survives ark test after an MR is open and
 
   expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
   expect(answers()).toHaveLength(answered);
-  expect(readEvents(directory).at(-1)).toMatchObject({
+  expect(readEvents(directory).at(-2)).toMatchObject({
     type: "step.started",
     data: { step: "implementer", round: 2 },
   });
@@ -263,6 +269,7 @@ function git(directory: string, ...args: string[]): string {
  */
 function submoduleRun() {
   tempArkHome();
+  installFakeOrca(); // each plan step starts its worker through Orca (ARK-359)
   const workspace = workspaceWithRepos(["app", "lib"]);
   const root = mkdtempSync(join(tmpdir(), "ark-remotes-"));
   const libRemote = join(root, "lib.git");
@@ -309,6 +316,8 @@ function submoduleRun() {
   const step = (id: string, role: string, repo: string, needs: string[]) => ({
     id,
     role,
+    harness: "omp",
+    model: "test",
     repo,
     needs,
     criteria: ["ARK-900-AC1"],

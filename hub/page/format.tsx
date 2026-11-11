@@ -70,6 +70,7 @@ const stepLabel: Record<PlanStepView["status"], string> = {
   running: "running",
   succeeded: "done",
   failed: "failed",
+  interrupted: "interrupted",
   stopped: "stopped",
 };
 
