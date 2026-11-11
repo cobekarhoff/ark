@@ -1,4 +1,5 @@
-import { ArrowMarker, Ring } from "./format.tsx";
+import type { ReactNode } from "react";
+import { ArrowMarker, Outcome, Ring, outcomeClass } from "./format.tsx";
 import { edgePath, layout } from "./layout.ts";
 
 export type GraphTicket = {
@@ -12,7 +13,9 @@ export type GraphTicket = {
   /** Phase class for the dot and border (`p-build`, `p-gate`, ...). */
   tone: string;
   href: string;
-  ring: { done: number; total: number; label?: string };
+  ring: { done: number; total: number; label?: ReactNode };
+  /** How the newest run of a closed ticket ended; `undefined` for a ticket that is not closed. */
+  outcome?: string | null;
   /** Keys of the tickets this one depends on. */
   needs: string[];
   /** Done or superseded: an edge from it is solid, any other edge is dashed (still blocking). */
@@ -20,8 +23,8 @@ export type GraphTicket = {
 };
 
 const sizes = {
-  wide: { width: 300, height: 66, gapX: 96, gapY: 14 },
-  compact: { width: 176, height: 58, gapX: 44, gapY: 12 },
+  wide: { width: 300, height: 80, gapX: 96, gapY: 14 },
+  compact: { width: 176, height: 80, gapX: 44, gapY: 12 },
 };
 const pad = 10;
 
@@ -87,7 +90,7 @@ export function DepGraph({
           <a
             key={ticket.key}
             href={ticket.href}
-            className={`gnode ${ticket.tone}${ticket.key === focus ? " focus" : ""}`}
+            className={`gnode ${ticket.tone}${ticket.outcome === undefined ? "" : ` ${outcomeClass(ticket.outcome)}`}${ticket.key === focus ? " focus" : ""}`}
             style={{ left: x, top: y, width: cardWidth, height: cardHeight }}
             data-testid="graph-node"
             data-ticket={ticket.id}
@@ -98,9 +101,14 @@ export function DepGraph({
             <span className="gtext">
               <span className="ghead">
                 <b className="mono">{ticket.id}</b>
-                <span className="mut small">{ticket.state}</span>
+                {ticket.outcome === undefined ? (
+                  <span className="mut small">{ticket.state}</span>
+                ) : null}
               </span>
               <span className="title2">{ticket.title}</span>
+              {ticket.outcome === undefined ? null : (
+                <Outcome outcome={ticket.outcome} testId="graph-outcome" />
+              )}
             </span>
           </a>
         );
