@@ -257,7 +257,12 @@ describe("ark retro", () => {
       message: body,
     });
     const records: unknown[] = [
-      { type: "session", id: name, timestamp: day("14:30:00.000"), cwd: runDirectory },
+      {
+        type: "session",
+        id: name,
+        timestamp: day("14:30:00.000"),
+        cwd: runDirectory,
+      },
       message("a", {
         role: "assistant",
         model: "claude-haiku-4-5",
@@ -267,7 +272,13 @@ describe("ark retro", () => {
           name: call.tool,
           arguments: call.args,
         })),
-        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } },
+        usage: {
+          input: 1,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: { total: 0.001 },
+        },
       }),
       ...calls.map((call, index) =>
         message(`r${index}`, {
@@ -292,17 +303,42 @@ describe("ark retro", () => {
     // Codex shell calls fail three ways: a non-zero exit, an object success:false and a serialized success:false.
     // The count-2 tie and the count-1 tie sort by tool, plain string comparison: uppercase first.
     expect(orchestration.tool_error_list).toEqual([
-      { tool: "shell", word: "orca", count: 3, first_error: "orca: no such run" },
-      { tool: "Bash", word: "orca", count: 2, first_error: "orca: command failed" },
-      { tool: "bash", word: "orca", count: 2, first_error: "usage: orca run list" },
-      { tool: "Edit", word: "", count: 1, first_error: longError.slice(0, 120) },
+      {
+        tool: "shell",
+        word: "orca",
+        count: 3,
+        first_error: "orca: no such run",
+      },
+      {
+        tool: "Bash",
+        word: "orca",
+        count: 2,
+        first_error: "orca: command failed",
+      },
+      {
+        tool: "bash",
+        word: "orca",
+        count: 2,
+        first_error: "usage: orca run list",
+      },
+      {
+        tool: "Edit",
+        word: "",
+        count: 1,
+        first_error: longError.slice(0, 120),
+      },
       {
         tool: "apply_patch",
         word: "",
         count: 1,
         first_error: "patch failed: hunk 1 does not apply",
       },
-      { tool: "edit", word: "", count: 1, first_error: "Stale tag: file changed since last read" },
+      {
+        tool: "edit",
+        word: "",
+        count: 1,
+        first_error: "Stale tag: file changed since last read",
+      },
     ]);
     expect(longError.length).toBeGreaterThan(120);
     // The list counts failed calls (10); tool_errors counts the messages that hold them (omp 1, claude 1, codex 0).
@@ -386,14 +422,22 @@ describe("ark retro", () => {
         },
         {
           type: "response_item",
-          payload: { type: "function_call", name: "shell", call_id: "u1", arguments: "{not json" },
+          payload: {
+            type: "function_call",
+            name: "shell",
+            call_id: "u1",
+            arguments: "{not json",
+          },
         },
         {
           type: "response_item",
           payload: {
             type: "function_call_output",
             call_id: "u1",
-            output: JSON.stringify({ output: "boom", metadata: { exit_code: 1 } }),
+            output: JSON.stringify({
+              output: "boom",
+              metadata: { exit_code: 1 },
+            }),
           },
         },
         {
@@ -410,7 +454,10 @@ describe("ark retro", () => {
           payload: {
             type: "function_call_output",
             call_id: "u2",
-            output: JSON.stringify({ output: "not a repo", metadata: { exit_code: 128 } }),
+            output: JSON.stringify({
+              output: "not a repo",
+              metadata: { exit_code: 128 },
+            }),
           },
         },
       ]
@@ -431,7 +478,12 @@ describe("ark retro", () => {
       [
         "14:20:00.000",
         "run.started",
-        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
+        {
+          run: runId,
+          project: "demo",
+          ticket: { id: "ARK-901" },
+          criteria: ["ARK-901-AC1"],
+        },
       ],
       [evaluationTime, "evaluation.recorded", { blockers: ["blocked"], risks: [] }],
       ["14:21:30.000", "gate.answered", { gate: "criteria", answer: "accept" }],
@@ -456,7 +508,13 @@ describe("ark retro", () => {
               cacheRead: 0,
               cacheWrite: 0,
               totalTokens: 15,
-              cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
+              cost: {
+                input: 0.001,
+                output: 0.002,
+                cacheRead: 0,
+                cacheWrite: 0,
+                total: 0.003,
+              },
             },
           },
         },
@@ -479,7 +537,10 @@ describe("ark retro", () => {
       ]);
       writeFileSync(
         join(directory, "metrics.json"),
-        JSON.stringify({ cost: { total_usd: cost }, time: { wall_seconds: wallSeconds } }),
+        JSON.stringify({
+          cost: { total_usd: cost },
+          time: { wall_seconds: wallSeconds },
+        }),
       );
     };
     closed("2026-10-01-ARK-900-1", 1, 10);
@@ -500,9 +561,15 @@ describe("ark retro", () => {
     const { cost } = readMetrics();
     expect(cost.tokens).toBe(156255);
     expect(cost.total_usd).toBeCloseTo(0.3615345, 5);
-    expect(cost.by_step.build).toMatchObject({ tokens: 32120, includes_unknown: false });
+    expect(cost.by_step.build).toMatchObject({
+      tokens: 32120,
+      includes_unknown: false,
+    });
     expect(cost.by_step.build.usd).toBeCloseTo(0.0354143, 5);
-    expect(cost.by_step.review).toMatchObject({ tokens: 57175, includes_unknown: false });
+    expect(cost.by_step.review).toMatchObject({
+      tokens: 57175,
+      includes_unknown: false,
+    });
     expect(cost.by_step.review.usd).toBeCloseTo(0.1821188, 5);
     expect(cost.by_role.implementer.usd).toBeCloseTo(0.0354143, 5);
     expect(cost.by_role.reviewer.usd).toBeCloseTo(0.1821188, 5);
@@ -548,7 +615,11 @@ describe("ark retro", () => {
       includes_unknown: true,
       review_to_build_ratio: "unknown",
     });
-    expect(cost.by_step.build).toEqual({ usd: "unknown", tokens: 0, includes_unknown: true });
+    expect(cost.by_step.build).toEqual({
+      usd: "unknown",
+      tokens: 0,
+      includes_unknown: true,
+    });
     expect(orchestration.dead_dispatches).toBe(2);
     expect(runningCost(runDirectory)).toEqual({ usd: "unknown", tokens: 0 });
   });
@@ -570,7 +641,12 @@ describe("ark retro", () => {
       [
         "14:20:00.000",
         "run.started",
-        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
+        {
+          run: runId,
+          project: "demo",
+          ticket: { id: "ARK-901" },
+          criteria: ["ARK-901-AC1"],
+        },
       ],
       ["14:20:30.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
       ["14:21:00.000", "gate.answered", { gate: "plan", answer: "change" }],
@@ -591,7 +667,12 @@ describe("ark retro", () => {
       [
         "14:00:00.000",
         "run.started",
-        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
+        {
+          run: runId,
+          project: "demo",
+          ticket: { id: "ARK-901" },
+          criteria: ["ARK-901-AC1"],
+        },
       ],
       ["14:00:00.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
       ["15:00:00.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
@@ -640,7 +721,12 @@ describe("ark retro", () => {
       [
         "14:20:00.000",
         "run.started",
-        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
+        {
+          run: runId,
+          project: "demo",
+          ticket: { id: "ARK-901" },
+          criteria: ["ARK-901-AC1"],
+        },
       ],
       ...answers.map((answer, index): EventRow => {
         const minute = String(21 + index).padStart(2, "0");
@@ -716,6 +802,8 @@ describe("ark retro", () => {
       plan_changes: 1,
       mr_comments: 0,
       mr_commits_after_open: 0,
+      mr_sync_commits: 0,
+      mr_fix_commits: 0,
     });
     expect(metrics.escaped_defects).toEqual([
       {
@@ -809,12 +897,21 @@ describe("ark retro", () => {
       [
         "14:58:00.000",
         "step.started",
-        { step: "ghost", role: "implementer", repo: "repos/platform", round: 3 },
+        {
+          step: "ghost",
+          role: "implementer",
+          repo: "repos/platform",
+          round: 3,
+        },
       ],
       [
         "14:58:30.000",
         "step.finished",
-        { step: "ghost", outcome: "failed", ...(notStarted ? { not_started: true } : {}) },
+        {
+          step: "ghost",
+          outcome: "failed",
+          ...(notStarted ? { not_started: true } : {}),
+        },
       ],
       scenario.at(-1) as EventRow,
     ];
@@ -837,7 +934,13 @@ describe("ark retro", () => {
       [
         "14:58:00.000",
         "step.started",
-        { step: "build", role: "implementer", repo: "repos/platform", round: 2, merge: true },
+        {
+          step: "build",
+          role: "implementer",
+          repo: "repos/platform",
+          round: 2,
+          merge: true,
+        },
       ],
       [
         "14:58:30.000",
@@ -852,53 +955,213 @@ describe("ark retro", () => {
 
   describe("merge request activity", () => {
     const originalPath = process.env.PATH;
-    const withMergeRequest: EventRow[] = [
-      ...scenario.slice(0, -1),
-      [
-        "14:56:30.000",
-        "merge_request.opened",
-        { repo: "repos/platform", url: "https://github.com/acme/platform/pull/7", number: 7 },
-      ],
-      scenario[scenario.length - 1],
-    ];
+    const originalCwd = process.cwd();
+    const before = day("14:40:00.000");
+    const after = day("14:58:00.000");
 
-    beforeEach(() => {
-      writeEvents(runDirectory, withMergeRequest);
-      mkdirSync(join(runDirectory, "workspace", "repos", "platform"), { recursive: true });
+    type GithubCommit = {
+      sha: string;
+      parents: string[];
+      date: string;
+      message: string;
+    };
+    type GitlabCommit = {
+      id: string;
+      parent_ids: string[];
+      committed_date: string;
+      title: string;
+    };
+    type Forges = {
+      github?: GithubCommit[];
+      gitlab?: GitlabCommit[];
+      failing?: boolean;
+    };
+
+    const github = (sha: string, parents: string[], date: string, message = "work") => ({
+      sha,
+      parents,
+      date,
+      message,
+    });
+    const gitlab = (id: string, parent_ids: string[], committed_date: string, title = "work") => ({
+      id,
+      parent_ids,
+      committed_date,
+      title,
     });
 
-    test("ARK-160-AC5 counts MR comments and commits after open from gh", () => {
-      const bin = mkdtempSync(join(tmpdir(), "ark-fake-gh-"));
-      const answer = {
-        comments: [{}, {}],
-        reviews: [{ body: "please change" }, { body: "" }],
-        commits: [{ committedDate: day("14:40:00.000") }, { committedDate: day("14:58:00.000") }],
-      };
-      writeFileSync(join(bin, "gh"), `#!/bin/sh\ncat <<'JSON'\n${JSON.stringify(answer)}\nJSON\n`);
-      chmodSync(join(bin, "gh"), 0o755);
-      process.env.PATH = `${bin}:${originalPath}`;
+    const githubUrl = "https://github.com/acme/web/pull/7";
+    const gitlabUrl = "https://gitlab.com/acme/api/-/merge_requests/9";
+
+    // The run worktree folder is never created: `ark run close` deletes it before retro runs.
+    function writeMergeRequestRun(forges: Forges): void {
+      const rows: EventRow[] = scenario.slice(0, -1);
+      if (forges.github)
+        rows.push([
+          "14:56:30.000",
+          "merge_request.opened",
+          { repo: "repos/web", url: githubUrl, number: 7 },
+        ]);
+      if (forges.gitlab)
+        rows.push([
+          "14:56:30.000",
+          "merge_request.opened",
+          { repo: "repos/api", url: gitlabUrl, number: 9 },
+        ]);
+      writeEvents(runDirectory, [...rows, scenario[scenario.length - 1]]);
+    }
+
+    /** Fake gh and glab: each answers only a call that names the MR by its URL-derived path. */
+    function installForges(forges: Forges): string {
+      const binDirectory = mkdtempSync(join(tmpdir(), "ark-fake-forges-"));
+      const data = JSON.stringify({
+        github: forges.github ?? [],
+        gitlab: forges.gitlab ?? [],
+        failing: forges.failing === true,
+      });
+      const common = `#!/usr/bin/env bun
+const data = ${data};
+const callArguments = process.argv.slice(2);
+const reject = () => process.exit(1);
+if (data.failing) reject();
+const answer = (value) => { process.stdout.write(JSON.stringify(value)); process.exit(0); };
+const endpoint = callArguments[0] === "api" ? callArguments.slice(1).find((candidate) => !candidate.startsWith("-")) ?? "" : "";
+const [path, query = ""] = endpoint.split("?");
+const page = Number(/(?:^|&)page=(\\d+)/.exec(query)?.[1] ?? 1);
+if (page > 1) answer([]);
+`;
+      const gh = `${common}
+const history = [{ sha: "aaa111" }, { sha: "aaa222" }, { sha: "aaa333" }];
+const reviews = [{ body: "please change" }, { body: "" }];
+if (callArguments[0] === "pr" && callArguments[1] === "view") {
+  if (callArguments[2] !== ${JSON.stringify(githubUrl)}) reject();
+  answer({
+    baseRefName: "main",
+    comments: [{}, {}],
+    reviews,
+    commits: data.github.map((commit) => ({ oid: commit.sha, messageHeadline: commit.message, committedDate: commit.date })),
+  });
+}
+if (callArguments[0] !== "api") reject();
+if (path === "repos/acme/web/pulls/7") answer({ base: { ref: "main" }, number: 7 });
+if (path === "repos/acme/web/pulls/7/commits")
+  answer(data.github.map((commit) => ({
+    sha: commit.sha,
+    commit: { message: commit.message, committer: { date: commit.date } },
+    parents: commit.parents.map((sha) => ({ sha })),
+  })));
+if (path === "repos/acme/web/issues/7/comments") answer([{}, {}]);
+if (path === "repos/acme/web/pulls/7/reviews") answer(reviews);
+if (path === "repos/acme/web/pulls/7/comments") answer([]);
+if (path === "repos/acme/web/commits" && /(?:^|&)sha=main(?:&|$)/.test(query)) answer(history);
+reject();
+`;
+      const glab = `${common}
+const hostIndex = callArguments.indexOf("--hostname");
+const host = hostIndex >= 0 ? callArguments[hostIndex + 1] : process.env.GITLAB_HOST;
+if (!host || !host.includes("gitlab.com")) reject();
+if (callArguments[0] !== "api") reject();
+const history = [{ id: "aaa111" }, { id: "aaa222" }, { id: "aaa333" }];
+const base = "projects/acme%2Fapi";
+if (path === base + "/merge_requests/9") answer({ target_branch: "main" });
+if (path === base + "/merge_requests/9/notes")
+  answer([{ system: false }, { system: false }, { system: true }]);
+if (path === base + "/merge_requests/9/commits") answer(data.gitlab);
+if (path === base + "/repository/commits" && /(?:^|&)ref_name=main(?:&|$)/.test(query)) answer(history);
+reject();
+`;
+      writeFileSync(join(binDirectory, "gh"), gh);
+      writeFileSync(join(binDirectory, "glab"), glab);
+      chmodSync(join(binDirectory, "gh"), 0o755);
+      chmodSync(join(binDirectory, "glab"), 0o755);
+      return binDirectory;
+    }
+
+    /** Runs retro from a folder that is not the run worktree, with the fake forges first in PATH. */
+    function retroWithForges(forges: Forges): void {
+      writeMergeRequestRun(forges);
+      const binDirectory = installForges(forges);
+      const elsewhere = mkdtempSync(join(tmpdir(), "ark-elsewhere-"));
+      process.env.PATH = `${binDirectory}:${originalPath}`;
+      process.chdir(elsewhere);
       try {
         retro(runId);
       } finally {
+        process.chdir(originalCwd);
         process.env.PATH = originalPath;
       }
+    }
+
+    test("ARK-T251 counts MR comments and commits after open by MR URL, with no run worktree and from another folder", () => {
+      retroWithForges({
+        github: [
+          github("g0", ["g00"], before),
+          github("g1", ["g0", "aaa222"], after, "bring in latest"),
+          github("g3", ["g1"], after),
+        ],
+        gitlab: [
+          gitlab("l0", ["l00"], before),
+          gitlab("l1", ["l0", "aaa333"], after),
+          gitlab("l2", ["l1"], after),
+          gitlab("l3", ["l2"], after),
+        ],
+      });
+      // 2 comments + 1 review body on GitHub, 2 non-system notes on GitLab; 2 + 3 commits after open.
       expect(readMetrics().human_intervention).toMatchObject({
-        mr_comments: 3,
-        mr_commits_after_open: 1,
+        mr_comments: 5,
+        mr_commits_after_open: 5,
       });
     });
 
-    test("ARK-160-AC5 reports unknown MR activity when gh cannot answer", () => {
-      const emptyBin = mkdtempSync(join(tmpdir(), "ark-no-gh-"));
-      process.env.PATH = emptyBin;
-      try {
-        retro(runId);
-      } finally {
-        process.env.PATH = originalPath;
-      }
+    test("ARK-T251 reports every MR number as unknown when gh or glab cannot answer", () => {
+      retroWithForges({
+        github: [github("g0", ["g00"], after)],
+        gitlab: [gitlab("l0", ["l00"], after)],
+        failing: true,
+      });
       expect(readMetrics().human_intervention).toMatchObject({
         mr_comments: "unknown",
         mr_commits_after_open: "unknown",
+        mr_sync_commits: "unknown",
+        mr_fix_commits: "unknown",
+      });
+    });
+
+    test("ARK-T252 lists merges from the base branch as sync commits and every other commit after open as fix commits", () => {
+      retroWithForges({
+        github: [
+          github("g0", ["g00"], before),
+          github("g1", ["g0", "aaa222"], after, "bring in latest"),
+          github("g2", ["g1", "bbb111"], after, "Merge feature/x"),
+          github("g3", ["g2"], after),
+          github("g4", ["g3"], after),
+        ],
+        gitlab: [
+          gitlab("l0", ["l00"], before),
+          gitlab("l1", ["l0", "aaa333"], after, "Merge branch 'main' into topic"),
+          gitlab("l2", ["l1"], after),
+          gitlab("l3", ["l2", "ccc111"], after, "Merge branch 'main' into topic"),
+        ],
+      });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_sync_commits: 2,
+        mr_fix_commits: 5,
+        mr_commits_after_open: 7,
+      });
+    });
+
+    test("ARK-T252 counts no fix commits when every commit after open is a merge from the base branch", () => {
+      retroWithForges({
+        github: [
+          github("g0", ["g00"], before),
+          github("g1", ["g0", "aaa111"], after),
+          github("g2", ["g1", "aaa222"], after),
+        ],
+      });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_sync_commits: 2,
+        mr_fix_commits: 0,
+        mr_commits_after_open: 2,
       });
     });
   });
@@ -916,7 +1179,11 @@ describe("ark retro", () => {
       tool_error_list: [{ tool: "unknown", word: "", count: 2, first_error: "" }],
       context_overflows: 3,
       idle_gaps: 1,
-      master_chief_and_run_lead_cost: { usd: 0.144001, tokens: 66960, includes_unknown: true },
+      master_chief_and_run_lead_cost: {
+        usd: 0.144001,
+        tokens: 66960,
+        includes_unknown: true,
+      },
     });
   });
 
@@ -924,11 +1191,17 @@ describe("ark retro", () => {
     installAllSessions();
     installSession(ompRoot, "platform/session-build/Helper.jsonl", "omp/build.jsonl");
     retro(runId);
-    expect(readMetrics().orchestration).toMatchObject({ sessions: 3, restarts: 0 });
+    expect(readMetrics().orchestration).toMatchObject({
+      sessions: 3,
+      restarts: 0,
+    });
 
     installSession(ompRoot, "platform/session-build-again.jsonl", "omp/build.jsonl");
     retro(runId);
-    expect(readMetrics().orchestration).toMatchObject({ sessions: 4, restarts: 1 });
+    expect(readMetrics().orchestration).toMatchObject({
+      sessions: 4,
+      restarts: 1,
+    });
   });
 
   test("ARK-160-AC6 reports a started step that never finished once the run is closed as a stalled worker", () => {
@@ -1003,7 +1276,10 @@ describe("ark retro", () => {
   test("ARK-T185 two manual criteria keep separate waits but count elapsed time once", () => {
     writeEvents(runDirectory, [
       started,
-      testRun("14:10:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
+      testRun("14:10:00.000", {
+        "ARK-901-AC1": "manual pending",
+        "ARK-901-AC2": "manual pending",
+      }),
       manualAnswer("14:11:00.000", "ARK-901-AC1"),
       manualAnswer("14:15:00.000", "ARK-901-AC2"),
       ["14:30:00.000", "run.closed", { outcome: "aborted" }],
@@ -1016,7 +1292,10 @@ describe("ark retro", () => {
   test("ARK-T185 overlapping manual waits leave no idle time when they span the whole run", () => {
     writeEvents(runDirectory, [
       started,
-      testRun("14:00:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
+      testRun("14:00:00.000", {
+        "ARK-901-AC1": "manual pending",
+        "ARK-901-AC2": "manual pending",
+      }),
       manualAnswer("14:10:00.000", "ARK-901-AC1"),
       manualAnswer("14:10:00.000", "ARK-901-AC2"),
       ["14:10:00.000", "run.closed", { outcome: "aborted" }],
@@ -1233,7 +1512,9 @@ describe("ark retro models and vendors", () => {
       : "";
     writeFileSync(join(ompRoot, "platform", "session-review.jsonl"), text(main) + helper);
     if (sub) {
-      mkdirSync(join(ompRoot, "platform", "session-review"), { recursive: true });
+      mkdirSync(join(ompRoot, "platform", "session-review"), {
+        recursive: true,
+      });
       writeFileSync(join(ompRoot, "platform", "session-review", "Helper.jsonl"), text(sub));
     }
     writePlan([
@@ -1440,9 +1721,20 @@ describe("ark retro models and vendors", () => {
     writeImplementer();
     writeOwnedSession("reviewer", "14:28:30.000", [
       openAiReply("14:29:00.000", 0.1),
-      { ...openAiReply("14:30:00.000", 0.001), model: "gpt-6-luna", purpose: "job-widget" },
-      { ...openAiReply("14:31:00.000", 0.002), model: "typesafe/jev-1.14", purpose: "find" },
-      { ...anthropicReply("14:32:00.000", 0.003, "claude-haiku-4-5"), purpose: "job-caption" },
+      {
+        ...openAiReply("14:30:00.000", 0.001),
+        model: "gpt-6-luna",
+        purpose: "job-widget",
+      },
+      {
+        ...openAiReply("14:31:00.000", 0.002),
+        model: "typesafe/jev-1.14",
+        purpose: "find",
+      },
+      {
+        ...anthropicReply("14:32:00.000", 0.003, "claude-haiku-4-5"),
+        purpose: "job-caption",
+      },
     ]);
     // An earlier closed run from before the change: its metrics.json has no helper_models.
     const earlier = join(arkHome, "projects", "demo", "runs", "2026-10-28-ARK-900-1");
