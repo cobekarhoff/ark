@@ -188,6 +188,8 @@ The event log is the record. `state.json` is derived from it, so you can rebuild
 
 The run stays in `merge_requests_open` while any MR is open. Master Chief polls `ark merge-request status`. A failed check, a human comment or a conflict starts the run lead again for an MR round: fix, `ark test`, `ark worktree sync` to push the same branch, until the MR is clean. A change request in a comment starts a round; a question gets a reply; a note gets nothing. You resolve the threads and merge. `scripts/auto-merger.sh` can merge a CLEAN MR once `retro.md` exists; tell Master Chief to hold it if you want an MR round to finish first.
 
+`ark worktree sync` runs the project `setup` in a worktree after a clean merge that changed `package.json` or `bun.lock`, before the push. It writes `.omp/setup-pending` first and removes it when setup succeeds. A failed setup keeps the marker, skips that repo's push and exits 1 naming the repo; the next sync runs setup again, even when it merges nothing.
+
 ## Self-improvement loop
 
 ```mermaid
