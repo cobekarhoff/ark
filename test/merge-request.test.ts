@@ -1703,3 +1703,33 @@ test(
   },
   { timeout: 60_000 },
 );
+
+test(
+  "ARK-T248 merge-request open refuses to refresh an open merge request whose branch conflicts with the fetched target, pushes nothing, and allows --merge",
+  () => {
+    const { runDirectory, worktrees, bares } = fetchableScenario();
+    writeFileSync(join(worktrees.core, "README.md"), "branch\n");
+    git(worktrees.core, "commit", "-am", "branch edit");
+    testedAtHead(runDirectory, worktrees);
+    expect(ark("merge-request", "open", run).code).toBe(0);
+    expect(created()).toHaveLength(2);
+    const pushed = git(bares.core, "rev-parse", `refs/heads/ark/${run}`);
+
+    // the target moves on after the MR opened; the pushed branch is now in conflict with it
+    advanceTarget(bares.core, "README.md", "target\n");
+    git(worktrees.core, "commit", "--allow-empty", "-m", "new head");
+    testedAtHead(runDirectory, worktrees);
+
+    const refused = ark("merge-request", "open", run);
+    expect(refused.code).not.toBe(0);
+    expect(refused.err).toContain("repos/core");
+    expect(refused.err).toContain("head does not merge cleanly");
+    expect(refused.err).toContain("--merge");
+    expect(git(bares.core, "rev-parse", `refs/heads/ark/${run}`)).toBe(pushed);
+    expect(edited()).toHaveLength(0);
+    expect(readFileSync(join(runDirectory, "events.ndjson"), "utf8")).toMatch(
+      /"type":"worktree\.synced"[^\n]*"conflict":true/,
+    );
+  },
+  { timeout: 60_000 },
+);

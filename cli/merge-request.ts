@@ -402,10 +402,17 @@ export function mergeRequestOpen(
     const worktree = worktrees.get(repo);
     return worktree !== undefined && !opened.has(repo) && ahead(worktree) > 0;
   };
-  // Every repo that needs an MR is checked before the first push, with a fetch and `git merge-tree`, which change
-  // no file and no ref. A conflict also records worktree.synced so that `--merge` is allowed without a sync.
+  // Every repo this call pushes (a new MR, or an open MR it refreshes) is checked before the first push, with a fetch
+  // and `git merge-tree`, which change no file and no ref. A conflict also records worktree.synced so that `--merge`
+  // is allowed without a sync.
+  const pushesRepo = (repo: string) => {
+    const existing = opened.get(repo);
+    return existing === undefined
+      ? needsMergeRequest(repo)
+      : worktrees.has(repo) && mergeRequestState(existing, worktrees.get(repo)!.path) === "open";
+  };
   const refusals: string[] = [];
-  for (const repo of repos.filter(needsMergeRequest)) {
+  for (const repo of repos.filter(pushesRepo)) {
     const worktree = worktrees.get(repo)!;
     const target = targetBranch(worktree.path, repoBase(loadConfig(project), repo));
     run(["git", "fetch", "origin"], worktree.path);
