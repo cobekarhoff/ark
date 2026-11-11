@@ -193,8 +193,7 @@ function Board({ snapshot, entries }: { snapshot: Snapshot; entries: Map<string,
                   href={runHref(run.run)}
                   note={
                     <>
-                      <Outcome outcome={run.outcome} testId="card-outcome" />
-                      {" · "}
+                      <Outcome outcome={run.outcome} testId="card-outcome" />{" "}
                       <span
                         data-testid="card-cost"
                         className={run.cost_usd === null ? "nr" : undefined}

@@ -23,8 +23,8 @@ export type GraphTicket = {
 };
 
 const sizes = {
-  wide: { width: 300, height: 66, gapX: 96, gapY: 14 },
-  compact: { width: 176, height: 58, gapX: 44, gapY: 12 },
+  wide: { width: 300, height: 80, gapX: 96, gapY: 14 },
+  compact: { width: 176, height: 80, gapX: 44, gapY: 12 },
 };
 const pad = 10;
 

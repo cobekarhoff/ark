@@ -5682,6 +5682,33 @@ test("ARK-T225 every closed run card and graph node shows its outcome as its own
     await expect(node(outcome)).not.toContainText("✓");
   }
 
+  // Every glyph and outcome pill sits inside its node, and no node's content overflows it, at both widths.
+  for (const width of [1280, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const outcome of outcomes) {
+      const nodeBox = await node(outcome).boundingBox();
+      expect(nodeBox).not.toBeNull();
+      for (const inner of [
+        outcomeIcon(node(outcome)),
+        node(outcome).getByTestId("ring").locator(".oglyph"),
+        node(outcome).getByTestId("graph-outcome"),
+      ]) {
+        const innerBox = await inner.boundingBox();
+        expect(innerBox).not.toBeNull();
+        expect(innerBox!.x).toBeGreaterThanOrEqual(nodeBox!.x);
+        expect(innerBox!.y).toBeGreaterThanOrEqual(nodeBox!.y);
+        expect(innerBox!.x + innerBox!.width).toBeLessThanOrEqual(nodeBox!.x + nodeBox!.width);
+        expect(innerBox!.y + innerBox!.height).toBeLessThanOrEqual(nodeBox!.y + nodeBox!.height);
+      }
+      const overflow = await node(outcome).evaluate((element) => ({
+        vertical: element.scrollHeight - element.clientHeight,
+        horizontal: element.scrollWidth - element.clientWidth,
+      }));
+      expect(overflow.vertical).toBeLessThanOrEqual(0);
+      expect(overflow.horizontal).toBeLessThanOrEqual(0);
+    }
+  }
+
   // The open tickets show no outcome.
   await page.locator('[data-testid="graph-filter"][data-filter="Active"]').click();
   await expect(nodes).toHaveCount(2);

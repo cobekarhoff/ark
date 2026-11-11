@@ -911,7 +911,7 @@ button:not(:disabled):active {
 .depgraph {
   position: relative;
 }
-.depgraph svg {
+.depgraph > svg {
   position: absolute;
   inset: 0;
 }
@@ -3248,9 +3248,15 @@ pre.code-plain {
   white-space: nowrap;
 }
 .ghead > b {
+  flex: none;
+}
+.ghead > .mut {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.card .outcome {
+  margin-right: 6px;
 }
 
 /* Home at 1024 px: 3 tiles a row; words stay whole, ids and dates stay on one line. */
