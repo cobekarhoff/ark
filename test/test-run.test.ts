@@ -63,11 +63,13 @@ function buildingRun(options: {
     "unit.test.ts": suiteTests(options.unit ?? []),
   });
   if (options.forge) {
-    const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
+    const bare = join(mkdtempSync(join(tmpdir(), "ark-origin-")), "github.com", "org", "core.git");
+    mkdirSync(bare, { recursive: true });
     for (const args of [
       ["-C", bare, "init", "--bare", "-q"],
-      ["-C", workspace, "remote", "add", "origin", "https://github.com/org/core.git"],
-      ["-C", workspace, "config", "remote.origin.pushurl", bare],
+      ["-C", workspace, "remote", "add", "origin", bare],
+      ["-C", workspace, "push", "origin", "HEAD:refs/heads/main"],
+      ["-C", workspace, "remote", "set-head", "origin", "main"],
     ])
       Bun.spawnSync(["git", ...args]);
   }

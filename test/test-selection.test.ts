@@ -130,10 +130,12 @@ function startRun(options: {
 }): { runId: string; runDirectory: string; mirror: string } {
   const arkHome = tempArkHome();
   if (options.forge) {
-    const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
+    const bare = join(mkdtempSync(join(tmpdir(), "ark-origin-")), "github.com", "org", "core.git");
+    mkdirSync(bare, { recursive: true });
     git(bare, "init", "--bare", "-q");
-    git(options.workspace, "remote", "add", "origin", "https://github.com/org/core.git");
-    git(options.workspace, "config", "remote.origin.pushurl", bare);
+    git(options.workspace, "remote", "add", "origin", bare);
+    git(options.workspace, "push", "origin", "HEAD:refs/heads/main");
+    git(options.workspace, "remote", "set-head", "origin", "main");
   }
   writeProject("demo", {
     workspace: options.workspace,
