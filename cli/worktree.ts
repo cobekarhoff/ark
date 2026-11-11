@@ -474,6 +474,40 @@ function takenCaseIds(path: string, target: string): string[] {
     .map((file) => file.slice("test/cases/".length, -".md".length));
 }
 
+const setupMarker = join(".omp", "setup-pending");
+const setupTriggerFiles = ["package.json", "bun.lock"];
+
+/** Runs the project's `setup` in a worktree after a clean sync merge when the merge changed package.json or bun.lock, or when a failed setup left the marker. Returns the error text on failure, with the marker kept. */
+function syncSetup(
+  setup: string,
+  worktree: { repo: string; path: string },
+  headBefore: string,
+  target: string,
+  runId: string,
+): string | undefined {
+  const { repo, path } = worktree;
+  const changedFiles = git(path, "diff", "--name-only", `${headBefore}..HEAD`).split("\n");
+  const changed = setupTriggerFiles.filter((file) => changedFiles.includes(file));
+  const markerPath = join(path, setupMarker);
+  const markerFound = pathExists(markerPath);
+  if (changed.length === 0 && !markerFound) return undefined;
+  const reason = changed.length > 0 ? `${changed.join(", ")} changed` : `${setupMarker} found`;
+  console.error(`${repo}  setup: ${reason}, running \`${setup}\``);
+  mkdirSync(dirname(markerPath), { recursive: true });
+  writeFileSync(markerPath, "");
+  const result = Bun.spawnSync(["sh", "-c", setup], { cwd: path });
+  const output = `${result.stdout.toString()}${result.stderr.toString()}`.trim();
+  if (result.exitCode !== 0) {
+    if (output) console.error(output.split("\n").slice(-10).join("\n"));
+    console.error(`${repo}  setup: failed (exit ${result.exitCode}), push skipped`);
+    return `setup failed after merging origin/${target} (exit ${result.exitCode}): push skipped, marker ${setupMarker} kept: run \`ark worktree sync ${runId}\` again after fixing it`;
+  }
+  if (output) console.error(output);
+  rmSync(markerPath, { force: true });
+  console.error(`${repo}  setup: done${markerFound ? ", marker removed" : ""}`);
+  return undefined;
+}
+
 /** Merges origin/<target> into every worktree and pushes the branch of each repo with an open MR. A conflicting repo is recorded and skipped; after the last repo one error names every conflicting repo. */
 export function worktreeSync(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
@@ -503,6 +537,7 @@ export function worktreeSync(runId: string, inProject?: string): void {
     // a library head left in a submodule makes the merge see a changed pointer: put the recorded commit back first
     if (submodulesOf(worktree.path).length > 0)
       git(worktree.path, "-c", submoduleFlag, "submodule", "update", "--init");
+    const headBefore = git(worktree.path, "rev-parse", "HEAD");
     const merged = Bun.spawnSync([
       "git",
       "-C",
@@ -521,6 +556,13 @@ export function worktreeSync(runId: string, inProject?: string): void {
         `repo ${worktree.repo}: merging origin/${target} failed, worktree left unchanged: ${merged.stdout.toString().trim()}${merged.stderr.toString().trim()}`,
       );
       continue;
+    }
+    if (config.setup) {
+      const failure = syncSetup(config.setup, worktree, headBefore, target, runId);
+      if (failure) {
+        conflicts.push(`repo ${worktree.repo}: ${failure}`);
+        continue;
+      }
     }
     const pushed = mayPush && state.merge_requests.some((merge) => merge.repo === worktree.repo);
     if (pushed) git(worktree.path, "push", "origin", worktree.branch);
