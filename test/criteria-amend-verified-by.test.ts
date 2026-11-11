@@ -201,9 +201,10 @@ function textFile(run: Run, text: string): string {
 }
 
 /** Asserts a refused call exits 1, names `mention`, and leaves ticket.md and the event log byte-identical. */
-function expectRefused(run: Run, result: ArkResult, mention: string): void {
+function expectRefused(run: Run, call: () => ArkResult, mention: string): void {
   const ticket = read(run, "ticket.md");
   const log = read(run, "events.ndjson");
+  const result = call();
   expect(result.code, result.out).toBe(1);
   expect(result.err).toContain(mention);
   expect(read(run, "ticket.md")).toBe(ticket);
@@ -280,6 +281,34 @@ test("ARK-T228 --verified-by replaces the list in ticket.md and records the old 
   }
 });
 
+test("ARK-T228 --verified-by replaces a block list that a comment or blank line interrupts and leaves ticket.md parseable", () => {
+  const project = startProject();
+  const run = buildingRun(project, "ARK-505", [
+    {
+      id: "AC1",
+      lines: [
+        method,
+        "    verified_by:",
+        "      - ARK-T1",
+        "      # why the next case",
+        "",
+        "      - ARK-T2",
+      ],
+    },
+    { id: "AC2", lines: [method, listed("ARK-T3")] },
+  ]);
+  commitCase(run.workspace, "ARK-T300");
+
+  const result = amendIds(run, "AC1", "ARK-T300", ...withReason);
+
+  expect(result.code, result.err).toBe(0);
+  const [amended, untouched] = runCriteria(run.runDirectory);
+  expect(amended.verified_by).toEqual(["ARK-T300"]);
+  expect(untouched.verified_by).toEqual(["ARK-T3"]);
+  expect(read(run, "ticket.md")).not.toContain("ARK-T2\n");
+  expect(amendments(run).at(-1)!.data).toMatchObject({ verified_by_old: ["ARK-T1", "ARK-T2"] });
+});
+
 test("ARK-T229 --verified-by refuses a test case id with no active file at HEAD and changes nothing", () => {
   const project = startProject();
   const run = buildingRun(project, "ARK-510", [{ id: "AC1", lines: [method, listed("ARK-T1")] }]);
@@ -293,12 +322,12 @@ test("ARK-T229 --verified-by refuses a test case id with no active file at HEAD 
   writeCase(run.workspace, "ARK-T8"); // staged, not committed
   git(run.workspace, "add", "test/cases/ARK-T8.md");
 
-  expectRefused(run, amendIds(run, "AC1", "ARK-T1,ARK-T9", ...withReason), "ARK-T9");
-  expectRefused(run, amendIds(run, "AC1", "ARK-T3", ...withReason), "ARK-T3");
-  expectRefused(run, amendIds(run, "AC1", "ARK-T7", ...withReason), "ARK-T7");
-  expectRefused(run, amendIds(run, "AC1", "ARK-T8", ...withReason), "ARK-T8");
-  expectRefused(run, amendIds(run, "AC1", "", ...withReason), "empty entry");
-  expectRefused(run, amendIds(run, "AC1", "ARK-T2,,ARK-T1", ...withReason), "empty entry");
+  expectRefused(run, () => amendIds(run, "AC1", "ARK-T1,ARK-T9", ...withReason), "ARK-T9");
+  expectRefused(run, () => amendIds(run, "AC1", "ARK-T3", ...withReason), "ARK-T3");
+  expectRefused(run, () => amendIds(run, "AC1", "ARK-T7", ...withReason), "ARK-T7");
+  expectRefused(run, () => amendIds(run, "AC1", "ARK-T8", ...withReason), "ARK-T8");
+  expectRefused(run, () => amendIds(run, "AC1", "", ...withReason), "empty entry");
+  expectRefused(run, () => amendIds(run, "AC1", "ARK-T2,,ARK-T1", ...withReason), "empty entry");
   expect(amendments(run)).toEqual([]);
 
   // An id committed in any repo worktree counts.
@@ -319,10 +348,10 @@ test("ARK-T230 --verified-by is refused in merge_requests_open and closed, and w
   };
 
   const building = make("ARK-521");
-  expectRefused(building, amendIds(building, "AC9", "ARK-T2", ...withReason), "AC9");
+  expectRefused(building, () => amendIds(building, "AC9", "ARK-T2", ...withReason), "AC9");
   expect(amendIds(building, "AC9", "ARK-T2", ...withReason).err).toContain("AC1");
-  expectRefused(building, amendIds(building, "AC1", "ARK-T2"), "--reason");
-  expectRefused(building, amendIds(building, "AC1", "ARK-T2", "--reason", "  "), "--reason");
+  expectRefused(building, () => amendIds(building, "AC1", "ARK-T2"), "--reason");
+  expectRefused(building, () => amendIds(building, "AC1", "ARK-T2", "--reason", "  "), "--reason");
   expect(amendIds(building, "AC1", "ARK-T2", ...withReason).code).toBe(0);
   expect(read(building, "ticket.md")).toContain(listed("ARK-T2"));
 
@@ -344,12 +373,12 @@ test("ARK-T230 --verified-by is refused in merge_requests_open and closed, and w
 
   const open = make("ARK-523");
   appendEvent(open.runDirectory, "merge_request.opened", { repo: ".", url: "u" });
-  expectRefused(open, amendIds(open, "AC1", "ARK-T2", ...withReason), "merge_requests_open");
+  expectRefused(open, () => amendIds(open, "AC1", "ARK-T2", ...withReason), "merge_requests_open");
 
   const closed = make("ARK-524");
   appendEvent(closed.runDirectory, "merge_request.opened", { repo: ".", url: "u" });
   appendEvent(closed.runDirectory, "run.closed", { outcome: "abandoned" });
-  expectRefused(closed, amendIds(closed, "AC1", "ARK-T2", ...withReason), "closed");
+  expectRefused(closed, () => amendIds(closed, "AC1", "ARK-T2", ...withReason), "closed");
 });
 
 test("ARK-T231 after a --verified-by amend, ark test proves the criterion with the renumbered case ids", () => {
@@ -427,12 +456,20 @@ test("ARK-T233 a text amend of a manual criterion with no --carry-manual clears 
   const amendText = (criterion: string, ...rest: string[]) =>
     ark("criteria", "amend", run.runId, criterion, file, ...rest);
 
-  expectRefused(run, amendText("AC1", ...withReason, "--carry-manual", ""), "--carry-manual");
-  expectRefused(run, amendText("AC1", ...withReason, "--carry-manual", "  "), "--carry-manual");
-  expectRefused(run, amendText("AC2", ...withReason, "--carry-manual", "words"), "--carry-manual");
+  expectRefused(run, () => amendText("AC1", ...withReason, "--carry-manual", ""), "--carry-manual");
   expectRefused(
     run,
-    amendIds(run, "AC1", "ARK-T2", ...withReason, "--carry-manual", "words"),
+    () => amendText("AC1", ...withReason, "--carry-manual", "  "),
+    "--carry-manual",
+  );
+  expectRefused(
+    run,
+    () => amendText("AC2", ...withReason, "--carry-manual", "words"),
+    "--carry-manual",
+  );
+  expectRefused(
+    run,
+    () => amendIds(run, "AC1", "ARK-T2", ...withReason, "--carry-manual", "words"),
     "--carry-manual",
   );
   expect(gate(run, "ARK-551/AC1")).toBe("ok");
