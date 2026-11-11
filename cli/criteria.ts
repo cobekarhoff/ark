@@ -6,7 +6,7 @@ import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 import { isCaseId } from "./criterion-id.ts";
-import { frontmatter, manualCriteria, runCriteria } from "./ticket.ts";
+import { frontmatter, manualCriteria, parseCriteria, runCriteria } from "./ticket.ts";
 import { discoverRepos, mirrorRoot } from "./workspace.ts";
 
 /** Replaces the `text:` line of one criterion in the frontmatter and its `| ID | ... |` table row.
@@ -93,13 +93,20 @@ function rewriteVerifiedBy(
   }
   const [, indent, value] = lines[keyLine].match(/^(\s*)verified_by:\s*(.*)$/) as RegExpMatchArray;
   let count = 1;
-  if (value === "" || value.startsWith("#"))
-    while (
-      keyLine + count < end &&
-      /^\s*-\s/.test(lines[keyLine + count]) &&
-      (lines[keyLine + count].match(/^\s*/) as RegExpMatchArray)[0].length >= indent.length
-    )
-      count++;
+  if (value === "" || value.startsWith("#")) {
+    // The block list runs over its items, deeper continuation lines, comments and blank lines;
+    // trailing comments and blanks belong to whatever follows, so the span ends at the last item.
+    let spanEnd = keyLine;
+    for (let i = keyLine + 1; i < end; i++) {
+      const line = lines[i];
+      const lineIndent = (line.match(/^\s*/) as RegExpMatchArray)[0].length;
+      if (/^\s*-(\s|$)/.test(line) && lineIndent >= indent.length) spanEnd = i;
+      else if (line.trim() !== "" && !line.trim().startsWith("#") && lineIndent > indent.length)
+        spanEnd = i;
+      else if (line.trim() !== "" && !line.trim().startsWith("#")) break;
+    }
+    count = spanEnd - keyLine + 1;
+  }
   lines.splice(keyLine, count, `${indent}verified_by: ${list}`);
   return lines.join("\n");
 }
@@ -181,6 +188,21 @@ export function criteriaAmend(
     assertCasesAtHead(directory, ids);
     const oldIds = runCriteria(directory).find((c) => c.id === criterionId)?.verified_by ?? [];
     const ticket = rewriteVerifiedBy(readFileSync(ticketFile, "utf8"), criterionId, ids, ticketId);
+    // A rewrite that does not parse back to the new list is refused before anything is written.
+    let written: string[] | undefined;
+    try {
+      written = parseCriteria(frontmatter(ticket).fields ?? {}, ticketFile).find(
+        (criterion) => criterion.id === criterionId,
+      )?.verified_by;
+    } catch (error) {
+      throw new ArkError(
+        `criteria.amended refused: the rewritten ticket.md does not parse (${(error as Error).message}); nothing changed`,
+      );
+    }
+    if (written?.join(",") !== ids.join(","))
+      throw new ArkError(
+        "criteria.amended refused: the rewritten ticket.md does not hold the new verified_by; nothing changed",
+      );
     // The event goes first: it re-checks the phase, and a refusal must leave ticket.md untouched.
     appendEvent(directory, "criteria.amended", {
       criterion: criterionId,
