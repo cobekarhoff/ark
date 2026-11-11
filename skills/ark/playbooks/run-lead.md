@@ -532,6 +532,8 @@ Run `ark merge-request open <run>` again after each post-MR round of section 10a
 
 If `ark merge-request open <run>` refuses with `changed since the last test run`, a commit followed the last test. Run `ark test <run>` and open again. This needs no gate and no escalation answer.
 
+If `ark merge-request open <run>` refuses with `head does not merge cleanly into origin/<target>`, the branch of that repo conflicts with the target. Nothing was pushed for any repo, and the refusal has recorded the conflict. Start an implementer step for that repo with `ark run step <run> <step> start --merge`, let it merge origin/<target> and fix the conflict, run `ark test <run>`, and open again: the check reads git, so it needs no new `ark worktree sync`. A refusal `cannot check the merge into origin/<target>` shows git's own error (for example `unrelated histories`, no origin/<target>, or git older than 2.38); fix its cause, there is no `--merge` for it.
+
 After the MRs open, run `ark merge-request status <run>` and read every MR. Read `ci:` (`passed`, `failed`, `running`, `none`, `unknown`), `conflict` and `conflict: unknown`. Only `ci: passed` with no `conflict` is a pass: treat `running`, `none` and `unknown` as not passed, and an error retrieving checks is not a pass. Wait for `running`. For `failed` or a `conflict`, follow section 10a before you report.
 
 ## 10a. Work on the open MRs

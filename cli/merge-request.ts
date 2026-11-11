@@ -16,7 +16,7 @@ import {
   runCriteria,
 } from "./ticket.ts";
 import { manualStatus } from "./lifecycle.ts";
-import { discoverRepos } from "./workspace.ts";
+import { discoverRepos, repoBase, targetBranch } from "./workspace.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import {
   buildLedger,
@@ -402,6 +402,43 @@ export function mergeRequestOpen(
     const worktree = worktrees.get(repo);
     return worktree !== undefined && !opened.has(repo) && ahead(worktree) > 0;
   };
+  // Every repo that needs an MR is checked before the first push, with a fetch and `git merge-tree`, which change
+  // no file and no ref. A conflict also records worktree.synced so that `--merge` is allowed without a sync.
+  const refusals: string[] = [];
+  for (const repo of repos.filter(needsMergeRequest)) {
+    const worktree = worktrees.get(repo)!;
+    const target = targetBranch(worktree.path, repoBase(loadConfig(project), repo));
+    run(["git", "fetch", "origin"], worktree.path);
+    const check = Bun.spawnSync(["git", "merge-tree", "--write-tree", "HEAD", `origin/${target}`], {
+      cwd: worktree.path,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (check.exitCode === 0) continue;
+    const output = check.stdout.toString().trim();
+    if (check.exitCode === 1) {
+      const paths = [
+        ...new Set(
+          output
+            .split("\n")
+            .filter((line) => line.includes("\t"))
+            .map((line) => line.split("\t")[1]),
+        ),
+      ];
+      appendEvent(directory, "worktree.synced", { repo, conflict: true });
+      refusals.push(
+        `repo ${repo}: head does not merge cleanly into origin/${target}` +
+          (paths.length > 0 ? ` (conflict in ${paths.slice(0, 5).join(", ")})` : "") +
+          `: nothing pushed: start an implementer step with \`ark run step ${runId} <implementer step> start --merge\` to merge origin/${target} and fix the conflict`,
+      );
+    } else {
+      refusals.push(
+        `repo ${repo}: cannot check the merge into origin/${target} with \`git merge-tree\`: ${check.stderr.toString().trim() || output}`,
+      );
+    }
+  }
+  if (refusals.length > 0) throw new ArkError(refusals.join("\n"));
+
   // The title of the MRs this call creates, before any push: a title the rule refuses must not leave a pushed
   // branch. An open MR keeps its title, so a refresh needs none.
   const title = repos.some(needsMergeRequest) ? buildTitle(ledger, options.summary) : "";

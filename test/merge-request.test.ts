@@ -1,8 +1,6 @@
 import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
-  appendFileSync,
   copyFileSync,
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -40,19 +38,6 @@ function git(cwd: string, ...args: string[]): string {
   const result = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr.toString()}`);
   return result.stdout.toString().trim();
-}
-
-let bareTemplate: string | undefined;
-
-/** A fresh empty bare repo, copied from one `git init --bare` made per process. */
-function bareRepo(): string {
-  if (bareTemplate === undefined) {
-    bareTemplate = mkdtempSync(join(tmpdir(), "ark-bare-template-"));
-    git(bareTemplate, "init", "--bare");
-  }
-  const directory = mkdtempSync(join(tmpdir(), "ark-bare-"));
-  cpSync(bareTemplate, directory, { recursive: true });
-  return directory;
 }
 
 function commit(worktree: string, name: string) {
@@ -254,13 +239,24 @@ function scenario(
     mkdirSync(join(workspace, "repos"), { recursive: true });
     renameSync(tempGitRepo(), source);
     const base = "main"; // tempGitRepo inits on main
-    const bare = bareRepo();
     const host: Host = name === "app" ? hosts.app : hosts.core;
-    // `remote get-url` reports the host URL; pushes go to the local bare repo.
-    appendFileSync(
-      join(source, ".git", "config"),
-      `[remote "origin"]\n\turl = https://${host === "github" ? "github.com" : "gitlab.com"}/org/${name}.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tpushurl = ${bare}\n`,
+    // A local bare repo whose path names the host: `git fetch` and `git push` work offline and `remote get-url` still reads as the host.
+    const bare = join(
+      mkdtempSync(join(tmpdir(), "ark-origin-")),
+      host === "github" ? "github.com" : "gitlab.com",
+      "org",
+      `${name}.git`,
     );
+    mkdirSync(bare, { recursive: true });
+    git(bare, "init", "--bare");
+    git(bare, "symbolic-ref", "HEAD", "refs/heads/main");
+    git(source, "remote", "add", "origin", bare);
+    git(source, "push", "origin", "main");
+    git(source, "remote", "set-head", "origin", "main");
+    const configured = (config.repos as Record<string, { base?: string }> | undefined)?.[
+      `repos/${name}`
+    ]?.base;
+    if (configured !== undefined) git(source, "push", "origin", `main:refs/heads/${configured}`);
     const worktree = join(mkdtempSync(join(tmpdir(), "ark-worktree-")), name);
     git(source, "worktree", "add", "-b", `ark/${run}`, worktree, base);
     if (!shape.noCommits.includes(name)) commit(worktree, name);
@@ -647,9 +643,13 @@ function testedRun() {
   const workspace = tempGitRepo({
     "ac.test.ts": `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
   });
-  const bare = bareRepo();
-  git(workspace, "remote", "add", "origin", "https://github.com/org/core.git");
-  git(workspace, "config", "remote.origin.pushurl", bare);
+  const bare = join(mkdtempSync(join(tmpdir(), "ark-origin-")), "github.com", "org", "core.git");
+  mkdirSync(bare, { recursive: true });
+  git(bare, "init", "--bare");
+  git(bare, "symbolic-ref", "HEAD", "refs/heads/main");
+  git(workspace, "remote", "add", "origin", bare);
+  git(workspace, "push", "origin", "main");
+  git(workspace, "remote", "set-head", "origin", "main");
   writeProject("demo", {
     workspace,
     ticket_source: "local",
@@ -739,7 +739,7 @@ test(
         cwd: bare,
       }).exitCode,
     ).not.toBe(0);
-    expect(git(bare, "branch", "--list")).toBe("");
+    expect(git(bare, "branch", "--list", "ark/*")).toBe("");
 
     expect(ark("test", runId).code).toBe(0);
     const reopened = ark("merge-request", "open", runId);
@@ -1241,6 +1241,8 @@ test(
     const { worktrees } = scenario({ core: "github", app: "gitlab" }, true, [], {
       repos: { "repos/app": { base: "release/9" } },
     });
+    git(worktrees.core, "push", "origin", "main:refs/heads/develop");
+    git(worktrees.core, "fetch", "origin");
     git(worktrees.core, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop");
     expect(ark("merge-request", "open", run).code).toBe(0);
     const [gh, glab] = created();
@@ -1587,9 +1589,8 @@ test(
 );
 
 /**
- * A two-repo scenario whose origins are local bare repos with `github.com` in their path: `git fetch` and `git push`
- * both work offline and the host still reads as GitHub. The plain `scenario` pushes to a bare repo but its fetch URL
- * is not reachable.
+ * A two-repo GitHub scenario with `app` after `core`. Every scenario origin is a local bare repo with the host in its
+ * path, so `git fetch` and `git push` work offline.
  */
 function fetchableScenario() {
   const shape: Shape = {
@@ -1600,25 +1601,7 @@ function fetchableScenario() {
     ],
     noCommits: [],
   };
-  const built = scenario({ core: "github", app: "github" }, true, [], {}, shape);
-  for (const name of shape.names) {
-    const source = join(built.workspace, "repos", name);
-    const bare = join(
-      mkdtempSync(join(tmpdir(), "ark-origin-")),
-      "github.com",
-      "org",
-      `${name}.git`,
-    );
-    mkdirSync(bare, { recursive: true });
-    git(bare, "init", "--bare");
-    git(bare, "symbolic-ref", "HEAD", "refs/heads/main");
-    git(source, "config", "remote.origin.url", bare);
-    git(source, "config", "remote.origin.pushurl", bare);
-    git(source, "push", "origin", "main");
-    git(source, "remote", "set-head", "origin", "main");
-    built.bares[name] = bare;
-  }
-  return built;
+  return scenario({ core: "github", app: "github" }, true, [], {}, shape);
 }
 
 /** One commit on origin's main that changes `file`, as another contributor would push it. */

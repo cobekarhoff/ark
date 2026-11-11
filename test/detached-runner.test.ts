@@ -239,10 +239,12 @@ function makeFixture(options: {
     ARK_HOME: home,
   };
   if (options.forge) {
-    const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
+    const bare = join(mkdtempSync(join(tmpdir(), "ark-origin-")), "github.com", "org", "core.git");
+    mkdirSync(bare, { recursive: true });
     git(bare, "init", "--bare", "-q");
-    git(workspace, "remote", "add", "origin", "https://github.com/org/core.git");
-    git(workspace, "config", "remote.origin.pushurl", bare);
+    git(workspace, "remote", "add", "origin", bare);
+    git(workspace, "push", "origin", "HEAD:refs/heads/main");
+    git(workspace, "remote", "set-head", "origin", "main");
     environment.FAKE_LOG = join(directory, "host-calls.ndjson");
     environment.PATH = `${hostFixtures}:${process.env.PATH}`;
   }
