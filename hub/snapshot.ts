@@ -518,9 +518,11 @@ export function createSnapshotReader() {
     plannotator: () => read("plannotator", () => (gateOpen() ? readPlannotator() : [])),
     github: () =>
       read("github", async () => {
+        const started = generation;
         const urls = openRunsOf().flatMap((run) => run.state.merge_requests.map((mr) => mr.url));
         const { facts, ok } = await readGithub(urls, githubFacts);
-        githubFacts = facts;
+        // A read from a paused generation is discarded whole, shared facts included.
+        if (started === generation) githubFacts = facts;
         return ok ? true : null;
       }),
     usage: () =>

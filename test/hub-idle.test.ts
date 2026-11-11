@@ -2,6 +2,7 @@
 // per Ark repo, and reads Plannotator only while a gate is open. Real `hub/main.ts` processes with
 // fake `orca`, `plannotator`, `gh` and `omp` on PATH; every source interval comes from ARK_HUB_INTERVAL_MS.
 import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Subprocess } from "bun";
 import { spawnSync } from "node:child_process";
@@ -36,7 +37,8 @@ beforeAll(() => {
 afterEach(async () => {
   for (const client of clients.splice(0)) client.close();
   for (const child of processes.splice(0)) child.kill("SIGKILL");
-  rmSync(join(process.env.ARK_FAKE_STATE ?? tmpdir(), "orca.hold"), { force: true });
+  for (const hold of ["orca.hold", "gh.hold"])
+    rmSync(join(process.env.ARK_FAKE_STATE ?? tmpdir(), hold), { force: true });
 });
 
 afterAll(() => {
@@ -136,6 +138,8 @@ cat "$S/plannotator.sessions"`,
   script(
     "gh",
     `echo "$*" >> "$S/gh.log"
+waited=0
+while [ -e "$S/gh.hold" ] && [ "$waited" -lt 1500 ]; do sleep 0.02; waited=$((waited + 1)); done
 [ -e "$S/gh.fail" ] && exit 1
 cat "$S/gh.view"`,
   );
@@ -722,4 +726,104 @@ test("ARK-T243 The hub reads Plannotator only while a run has an open gate, read
     5000,
   );
   expect(fake.reads("plannotator")).toBe(1);
+});
+
+// ---------------------------------------------------------------- ARK-T244
+
+test("ARK-T244 Hubs that start at once on a lock left by a dead pid give the lock to exactly one, and every other one names it", async () => {
+  fixture();
+  const lockPath = join(
+    process.env.ARK_HOME!,
+    `hub-${createHash("sha1").update(root).digest("hex").slice(0, 12)}.lock`,
+  );
+  const go = join(process.env.ARK_FAKE_STATE!, "go");
+  const code = `
+    import { existsSync } from "node:fs";
+    import { acquireLock } from ${JSON.stringify(join(root, "hub", "lock.ts"))};
+    console.log("ready");
+    while (!existsSync(${JSON.stringify(go)})) {}
+    console.log(JSON.stringify({ pid: process.pid, holder: acquireLock(1234) }));
+    setInterval(() => {}, 1000);`;
+  const racers = 12;
+  for (let round = 0; round < 12; round++) {
+    rmSync(go, { force: true });
+    writeFileSync(lockPath, JSON.stringify({ pid: 2147483647, port: 1234 }));
+    const children = Array.from({ length: racers }, () => {
+      const child = Bun.spawn(["bun", "-e", code], {
+        env: process.env,
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      processes.push(child);
+      const lines: string[] = [];
+      void (async () => {
+        let text = "";
+        for await (const chunk of child.stdout) {
+          text += new TextDecoder().decode(chunk);
+          lines.splice(0, lines.length, ...text.split("\n").filter(Boolean));
+        }
+      })();
+      return lines;
+    });
+    await until("every racer to be ready", () => children.every((lines) => lines.length >= 1));
+    writeFileSync(go, "");
+    await until("every racer to answer", () => children.every((lines) => lines.length >= 2));
+    const answers = children.map(
+      (lines) => JSON.parse(lines[1]) as { pid: number; holder: unknown },
+    );
+    const winners = answers.filter((answer) => answer.holder === null);
+    expect(winners).toHaveLength(1);
+    expect(JSON.parse(readFileSync(lockPath, "utf8")).pid).toBe(winners[0].pid);
+    for (const answer of answers) {
+      if (answer.holder !== null) expect(answer.holder).toMatchObject({ pid: winners[0].pid });
+    }
+    for (const child of processes.splice(0)) {
+      child.kill("SIGKILL");
+      await child.exited;
+    }
+  }
+});
+
+// ---------------------------------------------------------------- ARK-T245
+
+test("ARK-T245 A GitHub read released after the last page left changes nothing the next page sees, and the next page's own read shows the new answer", async () => {
+  const fake = fixture();
+  const run = buildingRun(3);
+  const hub = await startHub({ interval: 100 });
+  const stateOf = (snapshot: Snapshot) =>
+    snapshot.runs === "unknown"
+      ? null
+      : (snapshot.runs.find((view) => view.run === run)?.merge_requests[0]?.state ?? null);
+  const closedView = JSON.stringify({ state: "CLOSED", statusCheckRollup: [] });
+
+  let client = connect(hub);
+  await until("an open merge request", () =>
+    client.pushes.some((push) => stateOf(push) === "open"),
+  );
+
+  // Hold the next GitHub read, drop the last page, then let the read answer "closed".
+  fake.control("gh.hold", true);
+  const target = fake.reads("gh") + 1;
+  await until("a GitHub read in flight", () => fake.reads("gh") >= target);
+  client.close();
+  await sleep(200); // the hub sees the disconnect
+  writeFileSync(join(fake.state, "gh.view"), closedView);
+  fake.control("gh.hold", false);
+  await until("the late read to end", () => {
+    const children = spawnSync("pgrep", ["-P", String(hub.child.pid)]);
+    return children.stdout.toString().trim() === "";
+  });
+  await snapshotOf(hub);
+
+  // The next page: its Ark read must not publish the discarded answer.
+  fake.control("gh.hold", true);
+  const resumed = fake.reads("gh") + 1;
+  client = connect(hub);
+  await until("the next GitHub read in flight", () => fake.reads("gh") >= resumed);
+  await until("the first push", () => client.pushes.length > 0);
+  expect(client.pushes.map(stateOf)).not.toContain("closed");
+
+  fake.control("gh.hold", false);
+  await until("the new answer", () => client.pushes.some((push) => stateOf(push) === "closed"));
 });

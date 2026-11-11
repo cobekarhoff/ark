@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  rmdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { arkHome } from "../cli/paths.ts";
 
@@ -32,30 +40,60 @@ export function runningHub(): HubLock | null {
   }
 }
 
+/** A lock file that no live hub holds is `stale`; a missing one is `absent`. */
+function inspect(): HubLock | "stale" | "absent" {
+  try {
+    readFileSync(lockPath(), "utf8");
+  } catch {
+    return "absent";
+  }
+  return runningHub() ?? "stale";
+}
+
 /**
  * Takes the lock for this process and `port`. Returns the holder when another live hub has it.
  * The content is written to a private file and linked into place, so the create is atomic and a
- * reader never sees a half-written lock. A lock of a dead pid is taken over.
+ * reader never sees a half-written lock. A stale lock is removed only under a reclaim mutex
+ * (`mkdir`), so an old observation can never unlink a replacement another hub installed meanwhile:
+ * only mutex holders remove the lock file, and only the owner removes its own live lock.
  */
 export function acquireLock(port: number): HubLock | null {
   const path = lockPath();
+  const mutex = `${path}.reclaim`;
   mkdirSync(arkHome(), { recursive: true });
   const mine = `${path}.${process.pid}`;
   writeFileSync(mine, JSON.stringify({ pid: process.pid, port }));
   try {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (;;) {
       try {
         linkSync(mine, path);
         return null;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       }
-      const holder = runningHub();
-      if (holder) return holder;
-      rmSync(path, { force: true });
+      const seen = inspect();
+      if (seen === "absent") continue;
+      if (seen !== "stale") return seen;
+      try {
+        mkdirSync(mutex);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        // ponytail: a hub killed inside the reclaim window leaves the mutex; older than 5 s is reclaimed.
+        try {
+          if (Date.now() - statSync(mutex).mtimeMs > 5000) rmdirSync(mutex);
+        } catch {
+          // Released meanwhile.
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+        continue;
+      }
+      try {
+        // Under the mutex nobody else removes the lock, so a stale observation still holds.
+        if (inspect() === "stale") rmSync(path, { force: true });
+      } finally {
+        rmdirSync(mutex);
+      }
     }
-    // Two hubs took over a dead lock at once and the other one won the link.
-    return runningHub();
   } finally {
     rmSync(mine, { force: true });
   }
