@@ -172,7 +172,12 @@ export type StartedHub = {
   baseUrl: string;
 };
 
-/** Starts `bun hub/main.ts --port 0` and resolves once it prints its address. The caller stops it with `stopHub`. */
+const pages = new WeakMap<object, AbortController>();
+
+/**
+ * Starts `bun hub/main.ts --port 0` and resolves once it prints its address. The hub reads only
+ * while a page is connected, so a page (an open `/events` stream) stays connected until `stopHub`.
+ */
 export async function startHub(): Promise<StartedHub> {
   const hub = Bun.spawn(["bun", join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
     env: process.env,
@@ -184,12 +189,19 @@ export async function startHub(): Promise<StartedHub> {
   for await (const chunk of hub.stdout) {
     output += new TextDecoder().decode(chunk);
     const port = output.match(/127\.0\.0\.1:(\d+)/)?.[1];
-    if (port) return { process: hub, baseUrl: `http://127.0.0.1:${port}` };
+    if (port) {
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const page = new AbortController();
+      pages.set(hub, page);
+      fetch(`${baseUrl}/events`, { signal: page.signal }).catch(() => {});
+      return { process: hub, baseUrl };
+    }
   }
   throw new Error(`the hub exited before serving: ${output}`);
 }
 
 export async function stopHub(hub: { kill(): void; exited: Promise<number> }): Promise<void> {
+  pages.get(hub)?.abort();
   hub.kill();
   await hub.exited;
 }

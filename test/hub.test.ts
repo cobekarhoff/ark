@@ -978,22 +978,38 @@ const openRunOf = (snapshot: Snapshot, run: string): RunView => {
   return found;
 };
 
-test("ARK-T125 the provider-limits interval is the value of ARK_PROVIDER_LIMITS_MS and 60 s when it is unset", async () => {
-  const intervalWith = async (value: string | undefined, tag: string) => {
-    const saved = process.env.ARK_PROVIDER_LIMITS_MS;
-    if (value === undefined) delete process.env.ARK_PROVIDER_LIMITS_MS;
-    else process.env.ARK_PROVIDER_LIMITS_MS = value;
+test("ARK-T125 the provider-limits interval is the value of ARK_HUB_INTERVAL_MS, ARK_PROVIDER_LIMITS_MS wins over it, and 60 s when both are unset", async () => {
+  const intervalWith = async (
+    variables: Record<string, string | undefined>,
+    tag: string,
+  ): Promise<Record<string, number>> => {
+    const names = ["ARK_HUB_INTERVAL_MS", "ARK_PROVIDER_LIMITS_MS"];
+    const saved = names.map((name) => process.env[name]);
+    for (const name of names) {
+      if (variables[name] === undefined) delete process.env[name];
+      else process.env[name] = variables[name];
+    }
     try {
-      // The variable is read when the module loads: a fresh load per value is the boundary under test.
+      // The variables are read when the module loads: a fresh load per value is the boundary under test.
       const loaded = await import(`../hub/snapshot.ts?interval=${tag}`);
-      return (loaded.intervalMilliseconds as Record<string, number>).providerLimits;
+      return loaded.intervalMilliseconds as Record<string, number>;
     } finally {
-      if (saved === undefined) delete process.env.ARK_PROVIDER_LIMITS_MS;
-      else process.env.ARK_PROVIDER_LIMITS_MS = saved;
+      names.forEach((name, index) => {
+        if (saved[index] === undefined) delete process.env[name];
+        else process.env[name] = saved[index];
+      });
     }
   };
-  expect(await intervalWith("500", "set")).toBe(500);
-  expect(await intervalWith(undefined, "unset")).toBe(60_000);
+  const all = await intervalWith({ ARK_HUB_INTERVAL_MS: "100" }, "all");
+  expect(Object.values(all).every((milliseconds) => milliseconds === 100)).toBe(true);
+  expect(
+    (await intervalWith({ ARK_HUB_INTERVAL_MS: "100", ARK_PROVIDER_LIMITS_MS: "500" }, "own"))
+      .providerLimits,
+  ).toBe(500);
+  expect((await intervalWith({ ARK_PROVIDER_LIMITS_MS: "500" }, "limits")).providerLimits).toBe(
+    500,
+  );
+  expect((await intervalWith({}, "unset")).providerLimits).toBe(60_000);
 });
 
 test("ARK-T125 ARK-285-AC2 omp usage is read in the background at the interval of ARK_PROVIDER_LIMITS_MS for each provider and window, and a failed read keeps the last value with its age", async () => {
