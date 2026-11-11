@@ -728,9 +728,9 @@ test("ARK-T243 The hub reads Plannotator only while a run has an open gate, read
   expect(fake.reads("plannotator")).toBe(1);
 });
 
-// ---------------------------------------------------------------- ARK-T244
+// ---------------------------------------------------------------- ARK-T249
 
-test("ARK-T244 Hubs that start at once on a lock left by a dead pid give the lock to exactly one, and every other one names it", async () => {
+test("ARK-T249 Hubs that start at once on a lock left by a dead pid give the lock to exactly one, and every other one names it", async () => {
   fixture();
   const lockPath = join(
     process.env.ARK_HOME!,
@@ -785,9 +785,9 @@ test("ARK-T244 Hubs that start at once on a lock left by a dead pid give the loc
   }
 });
 
-// ---------------------------------------------------------------- ARK-T245
+// ---------------------------------------------------------------- ARK-T250
 
-test("ARK-T245 A GitHub read released after the last page left changes nothing the next page sees, and the next page's own read shows the new answer", async () => {
+test("ARK-T250 A GitHub read released after the last page left changes nothing the next page sees, and the next page's own read shows the new answer", async () => {
   const fake = fixture();
   const run = buildingRun(3);
   const hub = await startHub({ interval: 100 });
