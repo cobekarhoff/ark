@@ -451,6 +451,8 @@ describe("detached ark test runner", () => {
     await Promise.race(
       callers.map((caller) => caller.errorHas("attaching to the full ark test of")),
     );
+    // The suite opens the pipe read-write before it writes `started`; opening it earlier fails with ENXIO on macOS.
+    await appears(join(fixture.directory, "started"));
     await openGate(fixture);
     const done = await Promise.all(callers.map((caller) => caller.finished()));
 
