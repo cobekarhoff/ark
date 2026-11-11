@@ -257,12 +257,7 @@ describe("ark retro", () => {
       message: body,
     });
     const records: unknown[] = [
-      {
-        type: "session",
-        id: name,
-        timestamp: day("14:30:00.000"),
-        cwd: runDirectory,
-      },
+      { type: "session", id: name, timestamp: day("14:30:00.000"), cwd: runDirectory },
       message("a", {
         role: "assistant",
         model: "claude-haiku-4-5",
@@ -272,13 +267,7 @@ describe("ark retro", () => {
           name: call.tool,
           arguments: call.args,
         })),
-        usage: {
-          input: 1,
-          output: 1,
-          cacheRead: 0,
-          cacheWrite: 0,
-          cost: { total: 0.001 },
-        },
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } },
       }),
       ...calls.map((call, index) =>
         message(`r${index}`, {
@@ -303,42 +292,17 @@ describe("ark retro", () => {
     // Codex shell calls fail three ways: a non-zero exit, an object success:false and a serialized success:false.
     // The count-2 tie and the count-1 tie sort by tool, plain string comparison: uppercase first.
     expect(orchestration.tool_error_list).toEqual([
-      {
-        tool: "shell",
-        word: "orca",
-        count: 3,
-        first_error: "orca: no such run",
-      },
-      {
-        tool: "Bash",
-        word: "orca",
-        count: 2,
-        first_error: "orca: command failed",
-      },
-      {
-        tool: "bash",
-        word: "orca",
-        count: 2,
-        first_error: "usage: orca run list",
-      },
-      {
-        tool: "Edit",
-        word: "",
-        count: 1,
-        first_error: longError.slice(0, 120),
-      },
+      { tool: "shell", word: "orca", count: 3, first_error: "orca: no such run" },
+      { tool: "Bash", word: "orca", count: 2, first_error: "orca: command failed" },
+      { tool: "bash", word: "orca", count: 2, first_error: "usage: orca run list" },
+      { tool: "Edit", word: "", count: 1, first_error: longError.slice(0, 120) },
       {
         tool: "apply_patch",
         word: "",
         count: 1,
         first_error: "patch failed: hunk 1 does not apply",
       },
-      {
-        tool: "edit",
-        word: "",
-        count: 1,
-        first_error: "Stale tag: file changed since last read",
-      },
+      { tool: "edit", word: "", count: 1, first_error: "Stale tag: file changed since last read" },
     ]);
     expect(longError.length).toBeGreaterThan(120);
     // The list counts failed calls (10); tool_errors counts the messages that hold them (omp 1, claude 1, codex 0).
@@ -422,22 +386,14 @@ describe("ark retro", () => {
         },
         {
           type: "response_item",
-          payload: {
-            type: "function_call",
-            name: "shell",
-            call_id: "u1",
-            arguments: "{not json",
-          },
+          payload: { type: "function_call", name: "shell", call_id: "u1", arguments: "{not json" },
         },
         {
           type: "response_item",
           payload: {
             type: "function_call_output",
             call_id: "u1",
-            output: JSON.stringify({
-              output: "boom",
-              metadata: { exit_code: 1 },
-            }),
+            output: JSON.stringify({ output: "boom", metadata: { exit_code: 1 } }),
           },
         },
         {
@@ -454,10 +410,7 @@ describe("ark retro", () => {
           payload: {
             type: "function_call_output",
             call_id: "u2",
-            output: JSON.stringify({
-              output: "not a repo",
-              metadata: { exit_code: 128 },
-            }),
+            output: JSON.stringify({ output: "not a repo", metadata: { exit_code: 128 } }),
           },
         },
       ]
@@ -478,12 +431,7 @@ describe("ark retro", () => {
       [
         "14:20:00.000",
         "run.started",
-        {
-          run: runId,
-          project: "demo",
-          ticket: { id: "ARK-901" },
-          criteria: ["ARK-901-AC1"],
-        },
+        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
       ],
       [evaluationTime, "evaluation.recorded", { blockers: ["blocked"], risks: [] }],
       ["14:21:30.000", "gate.answered", { gate: "criteria", answer: "accept" }],
@@ -508,13 +456,7 @@ describe("ark retro", () => {
               cacheRead: 0,
               cacheWrite: 0,
               totalTokens: 15,
-              cost: {
-                input: 0.001,
-                output: 0.002,
-                cacheRead: 0,
-                cacheWrite: 0,
-                total: 0.003,
-              },
+              cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
             },
           },
         },
@@ -537,10 +479,7 @@ describe("ark retro", () => {
       ]);
       writeFileSync(
         join(directory, "metrics.json"),
-        JSON.stringify({
-          cost: { total_usd: cost },
-          time: { wall_seconds: wallSeconds },
-        }),
+        JSON.stringify({ cost: { total_usd: cost }, time: { wall_seconds: wallSeconds } }),
       );
     };
     closed("2026-10-01-ARK-900-1", 1, 10);
@@ -561,15 +500,9 @@ describe("ark retro", () => {
     const { cost } = readMetrics();
     expect(cost.tokens).toBe(156255);
     expect(cost.total_usd).toBeCloseTo(0.3615345, 5);
-    expect(cost.by_step.build).toMatchObject({
-      tokens: 32120,
-      includes_unknown: false,
-    });
+    expect(cost.by_step.build).toMatchObject({ tokens: 32120, includes_unknown: false });
     expect(cost.by_step.build.usd).toBeCloseTo(0.0354143, 5);
-    expect(cost.by_step.review).toMatchObject({
-      tokens: 57175,
-      includes_unknown: false,
-    });
+    expect(cost.by_step.review).toMatchObject({ tokens: 57175, includes_unknown: false });
     expect(cost.by_step.review.usd).toBeCloseTo(0.1821188, 5);
     expect(cost.by_role.implementer.usd).toBeCloseTo(0.0354143, 5);
     expect(cost.by_role.reviewer.usd).toBeCloseTo(0.1821188, 5);
@@ -615,11 +548,7 @@ describe("ark retro", () => {
       includes_unknown: true,
       review_to_build_ratio: "unknown",
     });
-    expect(cost.by_step.build).toEqual({
-      usd: "unknown",
-      tokens: 0,
-      includes_unknown: true,
-    });
+    expect(cost.by_step.build).toEqual({ usd: "unknown", tokens: 0, includes_unknown: true });
     expect(orchestration.dead_dispatches).toBe(2);
     expect(runningCost(runDirectory)).toEqual({ usd: "unknown", tokens: 0 });
   });
@@ -641,12 +570,7 @@ describe("ark retro", () => {
       [
         "14:20:00.000",
         "run.started",
-        {
-          run: runId,
-          project: "demo",
-          ticket: { id: "ARK-901" },
-          criteria: ["ARK-901-AC1"],
-        },
+        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
       ],
       ["14:20:30.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
       ["14:21:00.000", "gate.answered", { gate: "plan", answer: "change" }],
@@ -667,12 +591,7 @@ describe("ark retro", () => {
       [
         "14:00:00.000",
         "run.started",
-        {
-          run: runId,
-          project: "demo",
-          ticket: { id: "ARK-901" },
-          criteria: ["ARK-901-AC1"],
-        },
+        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
       ],
       ["14:00:00.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
       ["15:00:00.000", "plan.checked", { valid: true, problems: [], plan_hash: "a", steps: [] }],
@@ -721,12 +640,7 @@ describe("ark retro", () => {
       [
         "14:20:00.000",
         "run.started",
-        {
-          run: runId,
-          project: "demo",
-          ticket: { id: "ARK-901" },
-          criteria: ["ARK-901-AC1"],
-        },
+        { run: runId, project: "demo", ticket: { id: "ARK-901" }, criteria: ["ARK-901-AC1"] },
       ],
       ...answers.map((answer, index): EventRow => {
         const minute = String(21 + index).padStart(2, "0");
@@ -897,21 +811,12 @@ describe("ark retro", () => {
       [
         "14:58:00.000",
         "step.started",
-        {
-          step: "ghost",
-          role: "implementer",
-          repo: "repos/platform",
-          round: 3,
-        },
+        { step: "ghost", role: "implementer", repo: "repos/platform", round: 3 },
       ],
       [
         "14:58:30.000",
         "step.finished",
-        {
-          step: "ghost",
-          outcome: "failed",
-          ...(notStarted ? { not_started: true } : {}),
-        },
+        { step: "ghost", outcome: "failed", ...(notStarted ? { not_started: true } : {}) },
       ],
       scenario.at(-1) as EventRow,
     ];
@@ -934,13 +839,7 @@ describe("ark retro", () => {
       [
         "14:58:00.000",
         "step.started",
-        {
-          step: "build",
-          role: "implementer",
-          repo: "repos/platform",
-          round: 2,
-          merge: true,
-        },
+        { step: "build", role: "implementer", repo: "repos/platform", round: 2, merge: true },
       ],
       [
         "14:58:30.000",
@@ -1179,11 +1078,7 @@ reject();
       tool_error_list: [{ tool: "unknown", word: "", count: 2, first_error: "" }],
       context_overflows: 3,
       idle_gaps: 1,
-      master_chief_and_run_lead_cost: {
-        usd: 0.144001,
-        tokens: 66960,
-        includes_unknown: true,
-      },
+      master_chief_and_run_lead_cost: { usd: 0.144001, tokens: 66960, includes_unknown: true },
     });
   });
 
@@ -1191,17 +1086,11 @@ reject();
     installAllSessions();
     installSession(ompRoot, "platform/session-build/Helper.jsonl", "omp/build.jsonl");
     retro(runId);
-    expect(readMetrics().orchestration).toMatchObject({
-      sessions: 3,
-      restarts: 0,
-    });
+    expect(readMetrics().orchestration).toMatchObject({ sessions: 3, restarts: 0 });
 
     installSession(ompRoot, "platform/session-build-again.jsonl", "omp/build.jsonl");
     retro(runId);
-    expect(readMetrics().orchestration).toMatchObject({
-      sessions: 4,
-      restarts: 1,
-    });
+    expect(readMetrics().orchestration).toMatchObject({ sessions: 4, restarts: 1 });
   });
 
   test("ARK-160-AC6 reports a started step that never finished once the run is closed as a stalled worker", () => {
@@ -1276,10 +1165,7 @@ reject();
   test("ARK-T185 two manual criteria keep separate waits but count elapsed time once", () => {
     writeEvents(runDirectory, [
       started,
-      testRun("14:10:00.000", {
-        "ARK-901-AC1": "manual pending",
-        "ARK-901-AC2": "manual pending",
-      }),
+      testRun("14:10:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
       manualAnswer("14:11:00.000", "ARK-901-AC1"),
       manualAnswer("14:15:00.000", "ARK-901-AC2"),
       ["14:30:00.000", "run.closed", { outcome: "aborted" }],
@@ -1292,10 +1178,7 @@ reject();
   test("ARK-T185 overlapping manual waits leave no idle time when they span the whole run", () => {
     writeEvents(runDirectory, [
       started,
-      testRun("14:00:00.000", {
-        "ARK-901-AC1": "manual pending",
-        "ARK-901-AC2": "manual pending",
-      }),
+      testRun("14:00:00.000", { "ARK-901-AC1": "manual pending", "ARK-901-AC2": "manual pending" }),
       manualAnswer("14:10:00.000", "ARK-901-AC1"),
       manualAnswer("14:10:00.000", "ARK-901-AC2"),
       ["14:10:00.000", "run.closed", { outcome: "aborted" }],
@@ -1512,9 +1395,7 @@ describe("ark retro models and vendors", () => {
       : "";
     writeFileSync(join(ompRoot, "platform", "session-review.jsonl"), text(main) + helper);
     if (sub) {
-      mkdirSync(join(ompRoot, "platform", "session-review"), {
-        recursive: true,
-      });
+      mkdirSync(join(ompRoot, "platform", "session-review"), { recursive: true });
       writeFileSync(join(ompRoot, "platform", "session-review", "Helper.jsonl"), text(sub));
     }
     writePlan([
@@ -1721,20 +1602,9 @@ describe("ark retro models and vendors", () => {
     writeImplementer();
     writeOwnedSession("reviewer", "14:28:30.000", [
       openAiReply("14:29:00.000", 0.1),
-      {
-        ...openAiReply("14:30:00.000", 0.001),
-        model: "gpt-6-luna",
-        purpose: "job-widget",
-      },
-      {
-        ...openAiReply("14:31:00.000", 0.002),
-        model: "typesafe/jev-1.14",
-        purpose: "find",
-      },
-      {
-        ...anthropicReply("14:32:00.000", 0.003, "claude-haiku-4-5"),
-        purpose: "job-caption",
-      },
+      { ...openAiReply("14:30:00.000", 0.001), model: "gpt-6-luna", purpose: "job-widget" },
+      { ...openAiReply("14:31:00.000", 0.002), model: "typesafe/jev-1.14", purpose: "find" },
+      { ...anthropicReply("14:32:00.000", 0.003, "claude-haiku-4-5"), purpose: "job-caption" },
     ]);
     // An earlier closed run from before the change: its metrics.json has no helper_models.
     const earlier = join(arkHome, "projects", "demo", "runs", "2026-10-28-ARK-900-1");
