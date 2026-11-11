@@ -1,7 +1,17 @@
-import { now as hubNow } from "./clock.ts";
+import { now as hubNow, waitFor } from "./clock.ts";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
+import {
+  bindTerminal,
+  closeTerminal,
+  createTerminal,
+  readTerminals,
+  startWorker,
+  type StartedWorker,
+} from "./orca.ts";
+import { buildSpec } from "./spec.ts";
+import { watchSession } from "./usage/index.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { checkRoles } from "./role-check.ts";
@@ -11,6 +21,7 @@ import {
   readEvents,
   waitingGate,
   writeState,
+  lastWorker,
   type ArkEvent,
   type EventData,
   type RunState,
@@ -22,7 +33,8 @@ import { assertShippable, staleHeads } from "./merge-request.ts";
 import { runnerStatusLines } from "./test-runner.ts";
 import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, submoduleLines, worktreeCleanup } from "./worktree.ts";
-import { loadPlan, repoGraph, type Plan } from "./plan.ts";
+import { repoBase, targetBranch } from "./workspace.ts";
+import { loadPlan, repoGraph, type Plan, type PlanStep } from "./plan.ts";
 import { hasTestCriterion, manualCriteria, readTicket, setTicketStatus } from "./ticket.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
@@ -155,7 +167,218 @@ function answerEscalationByAuto(
   return `escalation one_more_round by auto (${start.merge ? "merge, not counted" : `${used + 1} of ${autoEscalationCap}`})`;
 }
 
-export function runStep(
+/**
+ * Records a running step as interrupted once Orca shows its worker terminal gone. It never guesses:
+ * a terminal Orca lists in any state (disconnected too) or an Orca that does not answer refuses it.
+ * It runs no git command, so the worktree keeps every file.
+ */
+async function markInterrupted(
+  runId: string,
+  directory: string,
+  events: ArkEvent[],
+  state: RunState,
+  stepId: string,
+): Promise<void> {
+  const status = state.steps.find((step) => step.id === stepId)?.status;
+  if (status !== "running")
+    throw new ArkError(
+      `step.finished refused: ${stepId} is ${status ?? "not in the plan"}, not running`,
+    );
+  // Only a worker recorded by the latest start of the step counts; an earlier start's terminal says nothing about this one.
+  const lastStart = events.findLastIndex(
+    (event) => event.type === "step.started" && event.data.step === stepId,
+  );
+  const worker = lastWorker(events.slice(lastStart + 1), stepId);
+  if (worker === null) {
+    // No worker record: only an Orca that answers and lists no terminal of the step's worktree proves it gone.
+    const repo = state.steps.find((step) => step.id === stepId)?.repo;
+    const worktree = state.worktrees.find((entry) => entry.repo === repo)?.path;
+    const snapshot = await readTerminals();
+    if (snapshot === null)
+      throw new ArkError(
+        `step.finished refused: ${stepId} has no worker record and Orca did not answer (orca terminal list failed), so ark cannot tell if its worker is live`,
+      );
+    const there = worktree
+      ? snapshot.terminals.find(
+          (terminal) =>
+            terminal.worktreePath !== undefined &&
+            resolve(terminal.worktreePath) === resolve(worktree),
+        )
+      : undefined;
+    if (there)
+      throw new ArkError(
+        `step.finished refused: Orca lists terminal ${there.handle} in the worktree of ${stepId}, so its worker may be live`,
+      );
+  } else {
+    if (!worker.terminal || worker.terminal === "unknown")
+      throw new ArkError(
+        `step.finished refused: no worker terminal is recorded for ${stepId}, so ark cannot tell if its worker is live`,
+      );
+    const snapshot = await readTerminals();
+    if (snapshot === null)
+      throw new ArkError(
+        `step.finished refused: cannot tell if the worker of ${stepId} is live (orca terminal list failed)`,
+      );
+    const listed = snapshot.terminals.find((terminal) => terminal.handle === worker.terminal);
+    if (listed)
+      throw new ArkError(
+        `step.finished refused: the worker of ${stepId} is live (terminal ${worker.terminal}, ${listed.connected === false ? "disconnected" : "running"})`,
+      );
+  }
+  const started = events.findLast(
+    (event) => event.type === "step.started" && event.data.step === stepId,
+  );
+  appendEvent(directory, "step.finished", {
+    step: stepId,
+    outcome: "interrupted",
+    ...(started?.data.merge ? { merge: true } : {}),
+  });
+  console.log(
+    `${runId} ${stepId} interrupted (round ${started?.data.round ?? state.round} given back, worktree untouched)`,
+  );
+}
+
+/** How long `start` waits for the worker's session file before it records the session as unknown. */
+const sessionWaitMilliseconds = 60_000;
+
+/** The command that restores a worker session, by harness. Others start fresh. */
+const restoreCommands: Record<string, (session: string) => string> = {
+  omp: (session) => `omp --restore ${shellQuote(session)}`,
+};
+
+const shellQuote = (text: string): string =>
+  /^[\w./:@%+=,-]+$/.test(text) ? text : `'${text.replaceAll("'", `'\\''`)}'`;
+
+/** True when the last real finish of the step was an interrupt and no worker has started since. */
+function takesOverFromDeadWorker(events: ArkEvent[], stepId: string): boolean {
+  const last = events.findLastIndex(
+    (event) =>
+      event.type === "step.finished" && event.data.step === stepId && !event.data.not_started,
+  );
+  return (
+    last >= 0 &&
+    events[last].data.outcome === "interrupted" &&
+    !events
+      .slice(last + 1)
+      .some((event) => event.type === "worker.started" && event.data.step === stepId)
+  );
+}
+
+/**
+ * Starts the worker of a plan step through Orca and records `step.started` and `worker.started`.
+ * The caller has validated the start. A step that was interrupted restores its recorded session, or starts
+ * a fresh worker whose spec says to read `git status` and `git diff` first. When Orca starts no worker, the
+ * start is recorded as not_started (the round goes back) and this throws. Returns the lines to print.
+ */
+async function launchWorker(
+  runId: string,
+  project: string,
+  directory: string,
+  planStep: PlanStep,
+  start: EventData,
+): Promise<string[]> {
+  const events = readEvents(directory);
+  const state = deriveState(events);
+  const worktree = state.worktrees.find((entry) => entry.repo === planStep.repo)?.path;
+  if (!worktree)
+    throw new ArkError(
+      `step.started refused: no worktree for repo ${planStep.repo} (create it with ark worktree create)`,
+    );
+  // The plan step's pair, which `ark plan check` validated against roles; a pair roles lacks needs a plan repair.
+  const { harness, model } = planStep;
+  const allowed = Object.values(loadConfig(project).roles).some(
+    (role) => role.harness === harness && role.model === model,
+  );
+  if (!allowed)
+    throw new ArkError(
+      `step.started refused: plan step ${planStep.id} uses ${harness}/${model}, which is not in ark.yml roles; repair the plan (ark plan check) before the start`,
+    );
+  const title = `${planStep.id} (${planStep.role}, ${planStep.repo})`;
+  const takeover = !start.merge && takesOverFromDeadWorker(events, planStep.id);
+  const spec = buildSpec({
+    run: runId,
+    directory,
+    state,
+    step: planStep,
+    interrupted: takeover,
+    ...(start.merge
+      ? { mergeBase: targetBranch(worktree, repoBase(loadConfig(project), planStep.repo)) }
+      : {}),
+  });
+
+  let worker: StartedWorker | undefined;
+  let workerHarness = harness;
+  let session: string | undefined;
+  let how = "fresh";
+  let reason = "";
+  if (takeover) {
+    const previous = lastWorker(events, planStep.id);
+    const restore =
+      previous && Object.hasOwn(restoreCommands, previous.harness)
+        ? restoreCommands[previous.harness]
+        : undefined;
+    if (!previous || !previous.session || previous.session === "unknown")
+      reason = "no session recorded";
+    else if (!restore) reason = `harness ${previous.harness} has no restore command`;
+    else {
+      const terminal = await createTerminal(worktree, restore(previous.session));
+      if (!terminal.ok) reason = `restore failed: ${terminal.reason}`;
+      else {
+        const bound = await bindTerminal({ terminal: terminal.value, spec, title, worktree });
+        if (bound.ok) {
+          worker = bound.value;
+          session = previous.session;
+          workerHarness = previous.harness;
+          how = "restored";
+        } else {
+          await closeTerminal(terminal.value);
+          reason = `restore failed: terminal did not bind: ${bound.reason}`;
+        }
+      }
+    }
+    if (!worker) how = `fresh after interrupt (${reason})`;
+  }
+
+  const watch = worker ? null : watchSession(harness, worktree);
+  if (!worker) {
+    const started = await startWorker({ spec, title, worktree, harness, model });
+    if (!started.ok) {
+      appendEvent(directory, "step.started", start);
+      appendEvent(directory, "step.finished", {
+        step: planStep.id,
+        outcome: "failed",
+        not_started: true,
+      });
+      throw new ArkError(`${planStep.id} not started: orca worker-start failed: ${started.reason}`);
+    }
+    worker = started.value;
+  }
+  appendEvent(directory, "step.started", start);
+  let sessionLine = session;
+  if (!session) {
+    session = watch ? await waitFor(watch, sessionWaitMilliseconds, 1000) : undefined;
+    sessionLine =
+      session ??
+      `unknown (${watch ? `no session file in ${sessionWaitMilliseconds / 1000} s` : `${harness} keeps no session files`})`;
+  }
+  appendEvent(directory, "worker.started", {
+    step: planStep.id,
+    dispatch: worker.dispatch,
+    terminal: worker.terminal,
+    harness: workerHarness,
+    session: session ?? "unknown",
+  });
+  return [
+    `${runId} ${planStep.id} started (${start.merge ? "merge, " : ""}round ${start.round}/${deriveState(readEvents(directory)).round_budget})`,
+    `  worker: ${how}, ${how === "restored" ? `${workerHarness} --restore` : `${harness} ${model}`}, terminal ${worker.terminal}, dispatch ${worker.dispatch}`,
+    `  session: ${sessionLine}`,
+    ...(takeover && how !== "restored"
+      ? ["  brief: an earlier worker was interrupted; it reads `git status` and `git diff` first"]
+      : []),
+  ];
+}
+
+export async function runStep(
   runId: string,
   stepId: string,
   action: string,
@@ -163,17 +386,22 @@ export function runStep(
   merge = false,
   notStarted = false,
   inProject?: string,
-): void {
-  if (action !== "start" && action !== "finish")
-    throw new ArkError(`unknown step action "${action}": use start or finish`);
-  if (failed && action === "start") throw new ArkError("--failed only applies to finish");
-  if (merge && action === "finish") throw new ArkError("--merge only applies to start");
-  if (notStarted && action === "start") throw new ArkError("--not-started only applies to finish");
+): Promise<void> {
+  if (action !== "start" && action !== "finish" && action !== "interrupted")
+    throw new ArkError(`unknown step action "${action}": use start, finish or interrupted`);
+  if (failed && action !== "finish") throw new ArkError("--failed only applies to finish");
+  if (merge && action !== "start") throw new ArkError("--merge only applies to start");
+  if (notStarted && action !== "finish") throw new ArkError("--not-started only applies to finish");
   if (notStarted && !failed) throw new ArkError("--not-started needs --failed");
   if (notStarted && merge) throw new ArkError("--not-started cannot be used with --merge");
   const { project, directory } = findRun(runId, inProject);
   const events = readEvents(directory);
   const state = deriveState(events);
+
+  if (action === "interrupted") {
+    await markInterrupted(runId, directory, events, state, stepId);
+    return;
+  }
 
   if (action === "finish") {
     const outcome = failed ? "failed" : "succeeded";
@@ -214,7 +442,8 @@ export function runStep(
       event.type === "step.finished" &&
       event.data.step === stepId &&
       !event.data.merge &&
-      !event.data.not_started,
+      !event.data.not_started &&
+      event.data.outcome !== "interrupted",
   ).length;
   const round = planned.role === "implementer" && !merge ? finishes + 1 : state.round;
   const start: EventData = {
@@ -228,10 +457,22 @@ export function runStep(
     const line = answerEscalationByAuto(directory, events, state, start);
     if (line) console.log(line);
   }
-  appendEvent(directory, "step.started", start);
-  console.log(
-    `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${deriveState(readEvents(directory)).round_budget})`,
+  const planStep = readablePlan(directory, state.ticket.id)?.steps.find(
+    (step) => step.id === stepId,
   );
+  const human = planned.role === "implementer" && state.implementer === "human";
+  if (!planStep || human) {
+    // A human implementer (take_over) or a step plan.yml does not hold has no worker to launch: it is only recorded.
+    appendEvent(directory, "step.started", start);
+    console.log(
+      `${runId} ${stepId} started (${merge ? "merge, " : ""}round ${round}/${deriveState(readEvents(directory)).round_budget})${human ? ", human implementer: no worker launched" : ""}`,
+    );
+    return;
+  }
+  // The refusals come before the Orca call, so a refused start launches no worker.
+  assertAllowed(deriveState(readEvents(directory)), "step.started", start, directory);
+  const lines = await launchWorker(runId, project, directory, planStep, start);
+  console.log(lines.join("\n"));
 }
 
 /** Sets a local ticket's status. A failure only warns: the run is already recorded. */

@@ -55,11 +55,11 @@ mkdirSync(hostBin);
 const realSysctl = Bun.which("sysctl") ?? "/usr/sbin/sysctl";
 writeFileSync(
   join(hostBin, "memory_pressure"),
-  '#!/bin/sh\necho >> "$ARK_FAKE_HOST/reads"\ncat "$ARK_FAKE_HOST/memory_pressure" 2>/dev/null\n',
+  '#!/bin/sh\ncat "$ARK_FAKE_HOST/memory_pressure" 2>/dev/null\n',
 );
 writeFileSync(
   join(hostBin, "sysctl"),
-  `#!/bin/sh\nif [ "$1" = vm.swapusage ]; then cat "$ARK_FAKE_HOST/swapusage" 2>/dev/null; exit $?; fi\nexec ${realSysctl} "$@"\n`,
+  `#!/bin/sh\nif [ "$1" = vm.swapusage ]; then cat "$ARK_FAKE_HOST/swapusage" 2>/dev/null; status=$?; echo >> "$ARK_FAKE_HOST/reads"; exit $status; fi\nexec ${realSysctl} "$@"\n`,
 );
 chmodSync(join(hostBin, "memory_pressure"), 0o755);
 chmodSync(join(hostBin, "sysctl"), 0o755);

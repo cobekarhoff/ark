@@ -11,7 +11,7 @@ import {
 } from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
 import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
-import { splitRunTime, withoutNotStarted } from "./time-split.ts";
+import { splitRunTime, withoutInterrupted, withoutNotStarted } from "./time-split.ts";
 import { type SessionWithKey, type UsageMessage, readUsage } from "./usage/index.ts";
 import { type Owner, ownersOf, stageOf } from "./usage/owners.ts";
 
@@ -607,7 +607,7 @@ export function retro(runId: string, inProject?: string): void {
     rework: {
       rounds: Math.max(
         1,
-        ...events
+        ...withoutInterrupted(events)
           .filter((event) => event.type === "step.started" && !event.data.merge)
           .map((event) => event.data.round ?? 1),
       ),
@@ -616,8 +616,9 @@ export function retro(runId: string, inProject?: string): void {
       ).length,
       findings_sent_back: findingsSentBack,
       findings_left_p0p1: countFindingsLeftP0P1(runDirectory),
-      merge_steps: events.filter((event) => event.type === "step.started" && event.data.merge)
-        .length,
+      merge_steps: withoutInterrupted(events).filter(
+        (event) => event.type === "step.started" && event.data.merge,
+      ).length,
     },
     tests: testMetrics(events),
     design_rounds: designRounds,

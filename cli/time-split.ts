@@ -26,10 +26,20 @@ export function escalationStart(events: ArkEvent[], index: number): string {
 }
 
 /** A step that finished with not_started never ran: drop its last start and that finish. */
-export function withoutNotStarted(events: ArkEvent[]): ArkEvent[] {
+export const withoutNotStarted = (events: ArkEvent[]): ArkEvent[] =>
+  withoutFinishes(events, (finish) => finish.data.not_started === true);
+
+/**
+ * An interrupted start gave its round back: drop it and its finish for round counts. The time split
+ * does not use this: the work before an interrupt is working time.
+ */
+export const withoutInterrupted = (events: ArkEvent[]): ArkEvent[] =>
+  withoutFinishes(events, (finish) => finish.data.outcome === "interrupted");
+
+function withoutFinishes(events: ArkEvent[], drop: (finish: ArkEvent) => boolean): ArkEvent[] {
   const dropped = new Set<ArkEvent>();
   events.forEach((event, index) => {
-    if (event.type !== "step.finished" || !event.data.not_started) return;
+    if (event.type !== "step.finished" || !drop(event)) return;
     dropped.add(event);
     const started = events
       .slice(0, index)
