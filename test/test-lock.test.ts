@@ -826,7 +826,8 @@ describe("ark test memory admission", () => {
     await child.stdout;
     expect(await child.process.exited).toBe(0);
     expect(logLines()).toContain(`start ${runA}`);
-    expect(waitLines(child.seen())).toHaveLength(1);
+    // setFakeHost rewrites two files in turn, so a poll can land on a half-recovered host and print a shrunken reason: only the held reason must not repeat.
+    expect(waitLines(child.seen()).filter((line) => reason.test(line))).toHaveLength(1);
   }
 
   for (const [name, reading] of [

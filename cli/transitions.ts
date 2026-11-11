@@ -61,7 +61,7 @@ export function assertAllowed(
     case "criteria.amended": {
       if (typeof data.reason !== "string" || data.reason.trim() === "")
         throw new ArkError(
-          `${type} refused: --reason is required (the human's reason for the new text)`,
+          `${type} refused: --reason is required (the human's reason for the amendment)`,
         );
       if (!state.criteria.some((criterion) => criterion.id === data.criterion))
         throw new ArkError(

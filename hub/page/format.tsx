@@ -219,7 +219,7 @@ export const isSlow = (current: NonNullable<RunProgress["current"]>, elapsedMs: 
   current.slow_above_seconds !== null && elapsedMs / 1000 > current.slow_above_seconds;
 
 /** A ring of steps done: the conic fill is the fraction, the label sits inside. */
-export function Ring({ done, total, label }: { done: number; total: number; label?: string }) {
+export function Ring({ done, total, label }: { done: number; total: number; label?: ReactNode }) {
   return (
     <span
       className="ring"
@@ -231,6 +231,45 @@ export function Ring({ done, total, label }: { done: number; total: number; labe
       style={{ "--p": total === 0 ? 0 : done / total } as CSSProperties}
     >
       <span>{label ?? `${done}/${total}`}</span>
+    </span>
+  );
+}
+
+/** One glyph per outcome, so the outcome is never told by colour alone. */
+const outcomePaths: Record<string, string> = {
+  merged: "M3 8.5l3.2 3L13 4.5",
+  aborted: "M4 4l8 8M12 4l-8 8",
+  handed_off: "M3 8h9M8.5 4.5L12 8l-3.5 3.5",
+  abandoned: "M4 8h8",
+};
+
+/** The class of an outcome: the colour of its ring, border and pill. `null` and unknown values stay neutral. */
+export const outcomeClass = (outcome: string | null): string =>
+  `o-${outcome && outcome in outcomePaths ? outcome : "none"}`;
+
+export function OutcomeGlyph({ outcome }: { outcome: string | null }) {
+  return (
+    <svg className="oglyph" viewBox="0 0 16 16" aria-hidden="true">
+      <path d={outcomePaths[outcome ?? ""] ?? "M5 8h6"} />
+    </svg>
+  );
+}
+
+/** The ring of a closed run or ticket: the outcome glyph, not a check. */
+export const outcomeRing = (outcome: string | null) => ({
+  done: 1,
+  total: 1,
+  label: <OutcomeGlyph outcome={outcome} />,
+});
+
+/** Icon and word of an outcome. `testId` marks the word; the icon is `outcome-icon`. */
+export function Outcome({ outcome, testId }: { outcome: string | null; testId: string }) {
+  return (
+    <span className={`outcome ${outcomeClass(outcome)}`} data-testid={testId}>
+      <span className="outcome-icon" data-testid="outcome-icon">
+        <OutcomeGlyph outcome={outcome} />
+      </span>
+      {outcome ?? "not recorded"}
     </span>
   );
 }

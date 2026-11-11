@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
-import { ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
+import { outcomeOf, ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
 import { Criteria } from "./Evidence.tsx";
-import { OutsideNote, ProjectValue, Unknown, known } from "./format.tsx";
+import { OutsideNote, outcomeRing, ProjectValue, Unknown, known } from "./format.tsx";
 import { Markdown, ViewSwitch } from "./Markdown.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import { runHref } from "./RunDetail.tsx";
@@ -16,11 +16,14 @@ const node = (entry: TicketEntry, base: TicketEntry["ticket"]): GraphTicket => (
   state: entry.state,
   tone: entry.tone,
   href: ticketHref(entry.ticket.id),
+  outcome: outcomeOf(entry),
   ring: entry.open?.progress
     ? { done: entry.open.progress.steps_done, total: entry.open.progress.steps_total }
-    : entry.satisfied || entry.lane === "Closed"
-      ? { done: 1, total: 1, label: "✓" }
-      : { done: 0, total: 1, label: "–" },
+    : outcomeOf(entry) !== undefined
+      ? outcomeRing(outcomeOf(entry)!)
+      : entry.satisfied || entry.lane === "Closed"
+        ? { done: 1, total: 1, label: "✓" }
+        : { done: 0, total: 1, label: "–" },
   needs: entry.ticket.depends_on
     .filter((id) => entry.ticket.id === base.id || id === base.id)
     .map((id) => ticketKey(entry.ticket.project, id)),

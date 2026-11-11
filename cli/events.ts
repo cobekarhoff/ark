@@ -194,16 +194,20 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "criteria.amended": {
         const id = alias(data.criterion);
-        const first = amendments.get(id);
-        amendments.set(id, {
-          id,
-          old: first?.old ?? data.old,
-          new: data.new,
-          by: data.by ?? "human",
-          reason: data.reason ?? "",
-        });
-        // New text needs a new human decision: an earlier manual answer no longer stands.
-        delete gates[`manual:${id}`];
+        // A verified_by amend changes no text: no text amendment and the manual answers stand.
+        // Old events have no verified_by_new and keep today's behaviour.
+        if (data.verified_by_new === undefined) {
+          const first = amendments.get(id);
+          amendments.set(id, {
+            id,
+            old: first?.old ?? data.old,
+            new: data.new,
+            by: data.by ?? "human",
+            reason: data.reason ?? "",
+          });
+          // New text needs a new human decision, unless the human gave carry_manual words.
+          if (!data.carry_manual) delete gates[`manual:${id}`];
+        }
         // The amendment changes what plan.md must show, so the plan needs a new check.
         if (!approval) plan = null;
         break;
