@@ -216,28 +216,34 @@ function runCommand(command: string[]): unknown {
 const PAGE_SIZE = 100;
 const MAX_PAGES = 10;
 
-/** Every item of a paged list API; null when a page cannot be read. ponytail: capped at 1000 items, raise MAX_PAGES if needed. */
+/** Every item of a paged list API; null when a page cannot be read or the cap cuts the list short. ponytail: capped at 1000 items, raise MAX_PAGES if needed. */
 function pagedList(call: (page: number) => string[]): Record<string, any>[] | null {
   const items: Record<string, any>[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
     const batch = runCommand(call(page));
     if (!Array.isArray(batch)) return null;
     items.push(...batch);
-    if (batch.length < PAGE_SIZE) break;
+    if (batch.length < PAGE_SIZE) return items;
   }
-  return items;
+  return null; // the last allowed page was full: the list may continue, so no number is real
 }
 
 type MergeRequestFacts = { comments: number; syncCommits: number; fixCommits: number };
 type CommitAfterOpen = { secondParent: string | undefined };
 
-/** Sync commits are merges whose second parent is in the base branch history; every other commit is a fix. */
+/**
+ * Sync commits are merges whose second parent is in the base branch history and is not one of the
+ * merge request's own commits (after the merge, its side branches are in the base history too).
+ * Every other commit is a fix.
+ */
 function splitCommits(
+  ownCommits: Set<string>,
   commits: CommitAfterOpen[],
   baseHistory: () => Set<string> | null,
 ): { syncCommits: number; fixCommits: number } | null {
-  const merges = commits.filter((commit) => commit.secondParent);
-  // ponytail: history is the base branch as of now; a merged MR's own side branches are in it too.
+  const merges = commits.filter(
+    (commit) => commit.secondParent && !ownCommits.has(commit.secondParent),
+  );
   const history = merges.length > 0 ? baseHistory() : new Set<string>();
   if (!history) return null;
   const syncCommits = merges.filter((commit) => history.has(commit.secondParent as string)).length;
@@ -264,10 +270,14 @@ function queryGithubMergeRequest(url: string, openedAt: number): MergeRequestFac
   } | null;
   const inlineComments = pagedList(api(`${repository}/pulls/${number}/comments`));
   const commits = pagedList(api(`${repository}/pulls/${number}/commits`));
-  if (!view || !view.baseRefName || !inlineComments || !commits) return null;
+  // The commits endpoint returns at most 250 commits: a full answer may be cut short.
+  if (!view || !view.baseRefName || !inlineComments || !commits || commits.length >= 250) {
+    return null;
+  }
   const base = view.baseRefName;
 
   const split = splitCommits(
+    new Set(commits.map((commit) => commit.sha)),
     commits
       .filter((commit) => toMilliseconds(commit.commit.committer.date) > openedAt)
       .map((commit) => ({ secondParent: commit.parents[1]?.sha })),
@@ -310,6 +320,7 @@ function queryGitlabMergeRequest(url: string, openedAt: number): MergeRequestFac
   const base = details.target_branch;
 
   const split = splitCommits(
+    new Set(commits.map((commit) => commit.id)),
     commits
       .filter((commit) => toMilliseconds(commit.committed_date) > openedAt)
       .map((commit) => ({ secondParent: commit.parent_ids[1] })),

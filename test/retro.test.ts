@@ -874,6 +874,10 @@ describe("ark retro", () => {
       github?: GithubCommit[];
       gitlab?: GitlabCommit[];
       failing?: boolean;
+      /** Extra commits in the base history, as after the MR merged: its side branches are in it. */
+      mergedHistory?: string[];
+      /** Every page of comments and notes is full, so the 1000-item cap hides further items. */
+      fullPages?: boolean;
     };
 
     const github = (sha: string, parents: string[], date: string, message = "work") => ({
@@ -917,6 +921,8 @@ describe("ark retro", () => {
         github: forges.github ?? [],
         gitlab: forges.gitlab ?? [],
         failing: forges.failing === true,
+        mergedHistory: forges.mergedHistory ?? [],
+        fullPages: forges.fullPages === true,
       });
       const common = `#!/usr/bin/env bun
 const data = ${data};
@@ -927,10 +933,12 @@ const answer = (value) => { process.stdout.write(JSON.stringify(value)); process
 const endpoint = callArguments[0] === "api" ? callArguments.slice(1).find((candidate) => !candidate.startsWith("-")) ?? "" : "";
 const [path, query = ""] = endpoint.split("?");
 const page = Number(/(?:^|&)page=(\\d+)/.exec(query)?.[1] ?? 1);
+if (data.fullPages && (path.endsWith("/comments") || path.endsWith("/notes")))
+  answer(Array.from({ length: 100 }, () => ({ system: false })));
 if (page > 1) answer([]);
 `;
       const gh = `${common}
-const history = [{ sha: "aaa111" }, { sha: "aaa222" }, { sha: "aaa333" }];
+const history = [{ sha: "aaa111" }, { sha: "aaa222" }, { sha: "aaa333" }, ...data.mergedHistory.map((sha) => ({ sha }))];
 const reviews = [{ body: "please change" }, { body: "" }];
 if (callArguments[0] === "pr" && callArguments[1] === "view") {
   if (callArguments[2] !== ${JSON.stringify(githubUrl)}) reject();
@@ -960,7 +968,7 @@ const hostIndex = callArguments.indexOf("--hostname");
 const host = hostIndex >= 0 ? callArguments[hostIndex + 1] : process.env.GITLAB_HOST;
 if (!host || !host.includes("gitlab.com")) reject();
 if (callArguments[0] !== "api") reject();
-const history = [{ id: "aaa111" }, { id: "aaa222" }, { id: "aaa333" }];
+const history = [{ id: "aaa111" }, { id: "aaa222" }, { id: "aaa333" }, ...data.mergedHistory.map((id) => ({ id }))];
 const base = "projects/acme%2Fapi";
 if (path === base + "/merge_requests/9") answer({ target_branch: "main" });
 if (path === base + "/merge_requests/9/notes")
@@ -1061,6 +1069,43 @@ reject();
         mr_sync_commits: 2,
         mr_fix_commits: 0,
         mr_commits_after_open: 2,
+      });
+    });
+
+    test("ARK-T252 counts a merged side branch of the MR as a fix commit, not a sync commit", () => {
+      retroWithForges({
+        github: [
+          github("g0", ["g00"], before),
+          github("gside", ["g0"], after),
+          github("g1", ["g0", "gside"], after, "Merge feature/x"),
+          github("g2", ["g1", "aaa222"], after, "Merge main"),
+        ],
+        gitlab: [
+          gitlab("l0", ["l00"], before),
+          gitlab("lside", ["l0"], after),
+          gitlab("l1", ["l0", "lside"], after, "Merge branch 'feature/x'"),
+          gitlab("l2", ["l1", "aaa333"], after, "Merge branch 'main'"),
+        ],
+        mergedHistory: ["gside", "lside"],
+      });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_sync_commits: 2,
+        mr_fix_commits: 4,
+        mr_commits_after_open: 6,
+      });
+    });
+
+    test("ARK-T251 reports every MR number as unknown when a list hits the page cap", () => {
+      retroWithForges({
+        github: [github("g0", ["g00"], after)],
+        gitlab: [gitlab("l0", ["l00"], after)],
+        fullPages: true,
+      });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_comments: "unknown",
+        mr_commits_after_open: "unknown",
+        mr_sync_commits: "unknown",
+        mr_fix_commits: "unknown",
       });
     });
   });
