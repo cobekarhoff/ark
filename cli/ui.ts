@@ -74,7 +74,7 @@ function plistFor(agent: Agent): string {
 ${agent.arguments_.map((argument) => `    <string>${xml(argument)}</string>`).join("\n")}
   </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><${agent.keepAlive}/>
+  <key>KeepAlive</key>${agent.keepAlive ? "<dict><key>SuccessfulExit</key><false/></dict>" : "<false/>"}
   <key>EnvironmentVariables</key>
   <dict>
 ${entries.join("\n")}

@@ -21,7 +21,7 @@ function writeCommand(directory: string, name: string, contents: string): string
   return command;
 }
 
-test("ARK-178-AC1 install writes a restarting LaunchAgent and loads it", () => {
+test("ARK-T245 ark ui install writes the dev.ark.hub LaunchAgent that restarts after a crash and not after exit 0, and loads it", () => {
   const temporaryHome = mkdtempSync(join(tmpdir(), "ark-install-home-"));
   const arkHomeDirectory = mkdtempSync(join(tmpdir(), "ark-install-state-"));
   const commandDirectory = mkdtempSync(join(tmpdir(), "ark-install-bin-"));
@@ -42,7 +42,7 @@ test("ARK-178-AC1 install writes a restarting LaunchAgent and loads it", () => {
   const contents = readFileSync(plist, "utf8");
   expect(result.exitCode).toBe(0);
   expect(contents).toContain("<key>RunAtLoad</key><true/>");
-  expect(contents).toContain("<key>KeepAlive</key><true/>");
+  expect(contents).toContain("<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>");
   expect(contents).toContain(`<string>${join(repositoryRoot, "cli", "ark.ts")}</string>`);
   expect(contents).toContain(`<string>${process.execPath}</string>`);
   expect(contents).toContain("<string>ui</string>");

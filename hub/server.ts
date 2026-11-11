@@ -122,6 +122,7 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
   }
 
   async function runRoute(url: URL, runName: string, rest: string): Promise<Response> {
+    await reader.ready();
     const directory = reader.runDirectory(runName);
     if (directory === null) return text("no such run", 404);
     if (rest === "") return json(reader.runDetail(runName));
@@ -176,6 +177,7 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       const cases = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)\/cases$/);
       if (cases) {
         try {
+          await reader.ready();
           const result = await reader.ticketCases(
             decodeURIComponent(cases[1]),
             decodeURIComponent(cases[2]),
@@ -189,6 +191,7 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       const ticket = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)$/);
       if (ticket) {
         try {
+          await reader.ready();
           // The id only selects a listed ticket: the file is the one the hub listed, never a path built from the URL.
           const result = reader.ticketDocument(
             decodeURIComponent(ticket[1]),
