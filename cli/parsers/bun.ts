@@ -1,7 +1,7 @@
 import { caseIdsIn } from "./case.ts";
 import type { Parser, TestResult } from "./index.ts";
 
-const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+[-/]AC\d+\b/g;
+export const criterionPattern = /\b[A-Z][A-Z0-9]+-\d+[-/]AC\d+\b/g;
 const entities: Record<string, string> = { lt: "<", gt: ">", quot: '"', apos: "'", amp: "&" };
 
 function unescapeXml(text: string): string {
@@ -12,7 +12,7 @@ function unescapeXml(text: string): string {
   );
 }
 
-function attributesOf(text: string): Record<string, string> {
+export function attributesOf(text: string): Record<string, string> {
   const attributes: Record<string, string> = {};
   for (const [, key, value] of text.matchAll(/([\w:-]+)="([^"]*)"/g))
     attributes[key] = unescapeXml(value);
