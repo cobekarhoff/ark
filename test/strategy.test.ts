@@ -312,21 +312,56 @@ test("ARK-173-AC8 evaluation record requires known surfaces and persists them", 
   ]);
 });
 
-test("ARK-173-AC9 a visible surface requires every strategy card to link a mockup", () => {
-  expect(evaluation(["cli_output"]).code).toBe(0);
-  strategies(card("S1", "Reason: only.\n"));
-  const result = ark("strategy", "record", runId);
-  expect(result.code).toBe(1);
-  expect(result.err).toContain("S1");
-  mkdirSync(join(runDirectory, "mockups"), { recursive: true });
-  writeFileSync(join(runDirectory, "mockups", "s1.html"), "<h1>CLI output</h1>");
+test("ARK-T208 a web_ui card whose Mockup link is not a file is refused until the file exists", () => {
+  expect(evaluation(["web_ui"]).code).toBe(0);
   strategies(
     card(
       "S1",
       "Mockup: mockups/s1.html\nSkills: impeccable, emil-design-eng, web-design-guidelines\nReason: only.\n",
     ),
   );
+  const result = ark("strategy", "record", runId);
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("S1");
+  mkdirSync(join(runDirectory, "mockups"), { recursive: true });
+  writeFileSync(join(runDirectory, "mockups", "s1.html"), "<h1>Sketch</h1>");
   expect(ark("strategy", "record", runId).code).toBe(0);
+});
+
+test("ARK-T202 a one-card cli_output strategy needs no Mockup line; two cards or a web_ui card still do", () => {
+  const strategyRecorded = () =>
+    events().filter((event) => event.type === "strategy.recorded").length;
+  withoutDesigner();
+  expect(evaluation(["cli_output"]).code).toBe(0);
+  strategies(card("S1", "Reason: only.\n"));
+  const accepted = ark("strategy", "record", runId);
+  expect(accepted.code).toBe(0);
+  expect(accepted.err).not.toContain("Mockup");
+  expect(accepted.err).not.toContain("roles.designer");
+  expect(phase()).toBe("planning");
+  const recordedBefore = strategyRecorded();
+
+  // Configure the Designer so a refusal below comes from the card check, not the role check.
+  const config = JSON.parse(readFileSync(join(projectDirectory, "ark.yml"), "utf8"));
+  writeProject("demo", {
+    ...config,
+    roles: { ...config.roles, designer: { harness: "omp", model: "pi/design" } },
+  });
+  const phaseBefore = phase();
+  const refuse = () => {
+    const refused = ark("strategy", "record", runId);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("S1");
+    expect(refused.err).toContain("mockup");
+    expect(refused.err).not.toContain("roles.designer");
+    expect(strategyRecorded()).toBe(recordedBefore);
+    expect(phase()).toBe(phaseBefore);
+  };
+  strategies(card("S1", "Reason: one.\n"), card("S2", "Reason: two.\n"));
+  refuse();
+  expect(evaluation(["web_ui"]).code).toBe(0);
+  strategies(card("S1", "Reason: only.\n"));
+  refuse();
 });
 
 test("ARK-T91 old config loads but visible work requires a configured Designer", () => {
