@@ -377,6 +377,14 @@ describe("ark test-audit inventory --changed", () => {
       `});`,
       `const tail = 1;`,
     ),
+    "test/sibling.test.ts": source(
+      `const cases = [`,
+      `    [1],`,
+      `    [2],`,
+      `  ],`,
+      `  helper = 1;`,
+      `test.each(cases)("ARK-9-AC14 sibling %i", () => {});`,
+    ),
   };
 
   test("ARK-T206 --changed <base> lists only the declarations that the diff changes, with their id kind, and prints old id touched for each old AC id title", () => {
@@ -449,11 +457,12 @@ describe("ark test-audit inventory --changed", () => {
     ).toEqual(["ARK-9-AC13 gap"]);
   });
 
-  test("ARK-T206 a diff that changes only a helper lists no declaration and no old-id line", () => {
+  test("ARK-T206 a diff that changes only a helper, or a sibling declarator of a named table, lists no declaration and no old-id line", () => {
     const { workspace } = fixture(base);
     const at = git(workspace, "rev-parse", "HEAD");
     commitAll(workspace, {
       "test/helper.test.ts": base["test/helper.test.ts"].replace("return 1;", "return 2;"),
+      "test/sibling.test.ts": base["test/sibling.test.ts"].replace("helper = 1", "helper = 2"),
     });
     const out = ark("test-audit", "inventory", "--project", "fx", "--changed", at);
     expect(out.code).toBe(0);

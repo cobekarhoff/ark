@@ -156,8 +156,8 @@ function declarationsOf(sourceFile: SourceFile, text: string): Declaration[] {
         )
           arrayTables.set(declaration.name.text, {
             rows: declaration.initializer.elements.length,
-            from: lineAt(statement.getStart()),
-            to: lineAt(statement.end - 1),
+            from: lineAt(declaration.getStart()),
+            to: lineAt(declaration.end - 1),
           });
   const found: Declaration[] = [];
   const titleOf = (node: Node): string => {
