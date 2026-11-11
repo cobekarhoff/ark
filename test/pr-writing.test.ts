@@ -608,10 +608,17 @@ function cliRun(
   const source = join(workspace, "repos", "core");
   mkdirSync(join(workspace, "repos"), { recursive: true });
   Bun.spawnSync(["mv", tempGitRepo(), source]);
-  const bare = mkdtempSync(join(tmpdir(), "pr-writing-bare-"));
+  const bare = join(
+    mkdtempSync(join(tmpdir(), "pr-writing-bare-")),
+    "github.com",
+    "org",
+    "core.git",
+  );
+  mkdirSync(bare, { recursive: true });
   git(bare, "init", "--bare");
-  git(source, "remote", "add", "origin", "https://github.com/org/core.git");
-  git(source, "config", "remote.origin.pushurl", bare);
+  git(source, "remote", "add", "origin", bare);
+  git(source, "push", "origin", "HEAD:refs/heads/main");
+  git(source, "remote", "set-head", "origin", "main");
   const runId = "2026-11-06-ARK-316-1";
   const projectDirectory = writeProject("demo", {
     workspace,
@@ -699,7 +706,7 @@ function cliRun(
       .map((event, i) => JSON.stringify({ seq: i + 1, time: "2026-11-06T10:00:00.000Z", ...event }))
       .join("\n") + "\n",
   );
-  const pushed = () => git(bare, "branch", "--list");
+  const pushed = () => git(bare, "branch", "--list", "ark/*");
   return { runId, pushed };
 }
 

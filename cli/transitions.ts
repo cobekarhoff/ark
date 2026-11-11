@@ -149,9 +149,9 @@ export function assertAllowed(
       }
       return;
     case "step.finished":
-      if (!["succeeded", "failed"].includes(data.outcome))
+      if (!["succeeded", "failed", "interrupted"].includes(data.outcome))
         throw new ArkError(
-          `step.finished refused: outcome must be succeeded or failed, not ${data.outcome}`,
+          `step.finished refused: outcome must be succeeded, failed or interrupted, not ${data.outcome}`,
         );
       if (state.steps.find((step) => step.id === data.step)?.status !== "running")
         throw new ArkError(`step.finished refused: missing step.started for ${data.step}`);

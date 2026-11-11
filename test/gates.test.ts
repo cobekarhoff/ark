@@ -11,6 +11,10 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import { addWorktree, useFakeOrca } from "./fake-orca.ts";
+
+// A step in plan.yml starts its worker through Orca (ARK-359): a fake `orca` answers, in a scratch worktree.
+useFakeOrca();
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -118,7 +122,7 @@ test("ARK-T168 a gates map with only plan set loads, and the other keys stay hum
   expect(deriveState(eventsOf(directory)).phase).toBe("awaiting_strategy");
 });
 
-test("ARK-234-AC2 gates.plan auto approves a valid plan with no open decision by auto", () => {
+test("ARK-T219 gates.plan auto approves a valid plan with no open decision by auto", () => {
   const { runId, directory } = startRun({ plan: "auto" });
   recordEvaluation(directory);
   const result = checkPlan(runId, directory);
@@ -127,6 +131,7 @@ test("ARK-234-AC2 gates.plan auto approves a valid plan with no open decision by
   expect(plan).toHaveLength(1);
   expect(plan[0].data).toEqual({ gate: "plan", answer: "approve", by: "auto" });
   expect(deriveState(eventsOf(directory)).phase).toBe("building");
+  addWorktree(directory);
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
 });
 
@@ -243,7 +248,8 @@ function buildingRun(gates: Record<string, unknown>) {
   recordEvaluation(run.directory);
   expect(checkPlan(run.runId, run.directory).code).toBe(0);
   expect(deriveState(eventsOf(run.directory)).phase).toBe("building");
-  return run;
+  const worktree = addWorktree(run.directory);
+  return { ...run, worktree };
 }
 
 const start = (runId: string, ...flags: string[]) =>
@@ -282,8 +288,8 @@ function openMergeRequest(directory: string) {
 const conflictSync = (directory: string) =>
   appendEvent(directory, "worktree.synced", { repo: ".", conflict: true });
 
-// ARK-288-AC1 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC1`
-test("ARK-288-AC1 a spent budget with gates.escalation auto records the answer by auto before step.started and starts the step", () => {
+// ARK-T220 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T220`
+test("ARK-T220 a spent budget with gates.escalation auto records the answer by auto before step.started and starts the step", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   spendRounds(runId, directory);
   const before = eventsOf(directory).length;
@@ -291,7 +297,11 @@ test("ARK-288-AC1 a spent budget with gates.escalation auto records the answer b
   expect(result.code).toBe(0);
   expect(result.out).toContain("escalation one_more_round by auto (1 of 2)");
   const added = eventsOf(directory).slice(before);
-  expect(added.map((event) => event.type)).toEqual(["gate.answered", "step.started"]);
+  expect(added.map((event) => event.type)).toEqual([
+    "gate.answered",
+    "step.started",
+    "worker.started",
+  ]);
   expect(added[0].data).toEqual({ gate: "escalation", answer: "one_more_round", by: "auto" });
   expect(deriveState(eventsOf(directory)).steps[0].status).toBe("running");
 });
@@ -358,9 +368,13 @@ test("ARK-288-AC2 the third spent budget is refused and the phase is escalation"
   expect(ark("status", runId).out).toContain("phase: escalation");
 });
 
-// ARK-288-AC3 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC3`
-test("ARK-288-AC3 after the MRs open, 3 merge starts are answered and not counted, 2 repair starts are counted and the next is refused", () => {
-  const { runId, directory } = buildingRun({ escalation: "auto" });
+// ARK-T224 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T224`
+test("ARK-T224 after the MRs open, 3 merge starts are answered and not counted, 2 repair starts are counted and the next is refused", () => {
+  const { runId, directory, worktree } = buildingRun({ escalation: "auto" });
+  // A --merge start briefs the worker with the target branch, which origin/HEAD names.
+  Bun.spawnSync(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], {
+    cwd: worktree,
+  });
   expect(start(runId).code).toBe(0);
   expect(finish(runId).code).toBe(0);
   openMergeRequest(directory);

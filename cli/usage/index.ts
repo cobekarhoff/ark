@@ -186,3 +186,37 @@ export function readUsage(runDirectory: string): SessionWithKey[] {
   realpathSync(runDirectory);
   return readUsageIn([runDirectory]).get(runDirectory)!;
 }
+
+/**
+ * Watches for the session file of a worker that has not started yet. The files that exist now are
+ * ignored; each call returns the first new top-level file whose cwd is the worktree or below it.
+ * Null when `harness` has no session folder (so there is nothing to wait for).
+ */
+export function watchSession(harness: string, worktree: string): (() => string | undefined) | null {
+  const source = sessionRoots().find((candidate) => candidate.harness === harness);
+  if (!source) return null;
+  const parents = [resolve(worktree), ...(existsSync(worktree) ? [realpathSync(worktree)] : [])];
+  const list = () =>
+    existsSync(source.root)
+      ? [...new Bun.Glob(source.pattern).scanSync({ cwd: source.root, dot: true })].sort()
+      : [];
+  const seen = new Set(list());
+  return () => {
+    for (const relativeFile of list()) {
+      if (seen.has(relativeFile)) continue;
+      // A subagent transcript sits one folder deeper than its parent session.
+      if (harness !== "codex" && relativeFile.split(sep).length !== 2) continue;
+      const file = join(source.root, relativeFile);
+      let cwd: string | null;
+      try {
+        cwd = readHead(file).cwd;
+      } catch {
+        continue; // the worker is still writing it: look again on the next call
+      }
+      if (cwd === null) continue;
+      seen.add(relativeFile);
+      if (parents.some((parent) => isInside(cwd, parent))) return file;
+    }
+    return undefined;
+  };
+}
