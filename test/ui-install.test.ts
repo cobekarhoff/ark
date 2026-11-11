@@ -42,7 +42,7 @@ test("ARK-178-AC1 install writes a restarting LaunchAgent and loads it", () => {
   const contents = readFileSync(plist, "utf8");
   expect(result.exitCode).toBe(0);
   expect(contents).toContain("<key>RunAtLoad</key><true/>");
-  expect(contents).toContain("<key>KeepAlive</key><true/>");
+  expect(contents).toContain("<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>");
   expect(contents).toContain(`<string>${join(repositoryRoot, "cli", "ark.ts")}</string>`);
   expect(contents).toContain(`<string>${process.execPath}</string>`);
   expect(contents).toContain("<string>ui</string>");

@@ -3,7 +3,9 @@
  * handlers only send the last serialized copy.
  *
  * Each source (ark files, Orca, Plannotator, GitHub, usage) publishes when its own read returns.
- * A source keeps its last good value. `sources.<name>.read_at` is the server time of that last
+ * A source keeps its last good value. `sources.<name>.read_at` is, while `ok`, the start of the
+ * healthy period (the time of the first good read, or of the first one after a failure), so an
+ * unchanged read changes nothing and sends no push; while not `ok` it is the time of the last
  * good read. A source with `ok: false` and `read_at: null` has never answered: its data is
  * `"unknown"` (or `null` for a single value), never an empty list. With `ok: false` and a
  * `read_at`, the data is the last good value and the page shows "as of N s ago".
