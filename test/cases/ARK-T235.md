@@ -17,7 +17,7 @@ Prove the demo project that the fixture writers of `test/test-run.test.ts`, `tes
 
 - Temp `ARK_HOME`, temp git repo, a fake run `FAKE-1` with one cheap suite whose command writes a marker file.
 - Fake host reading at the real boundary: `memory_pressure` and `sysctl vm.swapusage` on a temp `PATH` (macOS), through the `setFakeHost` helper of `test/helpers.ts`. No hook in product code. The case skips off macOS.
-- Fake reading: 15 percent free (under the default floor 20), 9 GB swap (over the default ceiling 8).
+- Fake reading: 15 percent free (under the default floor 20), 12 GB swap (over the default ceiling 8 and over 10).
 
 ## Steps
 
@@ -30,7 +30,7 @@ Prove the demo project that the fixture writers of `test/test-run.test.ts`, `tes
 - Step 1: the output names the memory wait and the marker is absent: the fake reading holds a run with the default limits, so the test of steps 2 and 3 can fail.
 - Step 2: no memory-wait line, the suite starts at once, the run finishes, exit 0, the marker is written, for each of the three writers.
 - Step 3: same as step 2.
-- The fixture holds `test_min_free_memory_percent: 0` and a high `test_max_swap_gb` in `ark.yml` of the demo project.
+- The fixture holds `test_min_free_memory_percent: 0` and `test_max_swap_gb: 1000` in `ark.yml` of the demo project.
 
 ## Screenshot checkpoints
 

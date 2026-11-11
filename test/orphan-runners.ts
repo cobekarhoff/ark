@@ -90,11 +90,11 @@ const markerBody = (directory: string) =>
   `require("node:fs").writeFileSync(${JSON.stringify(directory)} + "/" + process.pid, "");`;
 
 /**
- * ARK-T235. With the host at 15 percent free and 9 GB of swap, the demo project of the suite's fixture writer runs a
+ * ARK-T235. With the host at 15 percent free and 12 GB of swap, the demo project of the suite's fixture writer runs a
  * fake `ark test` to its end, and the same project without the two keys waits for memory (the control).
  */
 export async function proveFixtureSkipsMemoryWait(fixture: SuiteFixture): Promise<void> {
-  setFakeHost({ freePercent: 15, swapGigabytes: 9 });
+  setFakeHost({ freePercent: 15, swapGigabytes: 12 });
   const markers = mkdtempSync(join(tmpdir(), "ark-marker-"));
   let started: StartedRun | undefined;
   try {
@@ -146,7 +146,7 @@ export async function proveFixtureSkipsMemoryWait(fixture: SuiteFixture): Promis
     expect(readdirSync(markers).length, "the suite wrote no marker").toBeGreaterThan(0);
     const config = JSON.parse(fixtureConfig);
     expect(config.test_min_free_memory_percent).toBe(0);
-    expect(config.test_max_swap_gb).toBeGreaterThan(9);
+    expect(config.test_max_swap_gb).toBeGreaterThanOrEqual(1000);
   } finally {
     setFakeHost(healthyHost);
     for (const runner of started === undefined ? [] : runnersOf(started)) forceKill(runner.pid);

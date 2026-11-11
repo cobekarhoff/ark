@@ -87,7 +87,7 @@ function buildingRun(options: {
     workspace,
     ticket_source: "local",
     test_min_free_memory_percent: 0,
-    test_max_swap_gb: 10,
+    test_max_swap_gb: 1000,
     compose: options.compose,
     ...(options.checks === undefined ? {} : { checks: options.checks }),
     ...(options.roundBudget === undefined ? {} : { round_budget: options.roundBudget }),
@@ -643,7 +643,7 @@ describe("ark test on a refactor run", () => {
       workspace,
       ticket_source: "local",
       test_min_free_memory_percent: 0,
-      test_max_swap_gb: 10,
+      test_max_swap_gb: 1000,
       suites: [
         {
           name: "e2e",

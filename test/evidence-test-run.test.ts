@@ -111,7 +111,7 @@ function startBuildingRun(options: {
     workspace: options.workspace,
     ticket_source: "local",
     test_min_free_memory_percent: 0,
-    test_max_swap_gb: 10,
+    test_max_swap_gb: 1000,
     suites: options.suites,
     roles,
   });
