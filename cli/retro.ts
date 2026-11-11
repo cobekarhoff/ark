@@ -197,11 +197,11 @@ function testMetrics(events: ArkEvent[]) {
   return { runs: completed.length, reused_suites: reused, flaky_files: [...flaky].sort() };
 }
 
-function runCommand(command: string[], cwd: string): unknown {
+function runCommand(command: string[]): unknown {
   try {
     // Bun resolves the command against the PATH of its startup snapshot unless env is passed.
+    // No cwd: the tools read each merge request by its URL, so no run folder has to exist.
     const result = Bun.spawnSync(command, {
-      cwd,
       env: process.env,
       stdout: "pipe",
       stderr: "pipe",
@@ -209,63 +209,150 @@ function runCommand(command: string[], cwd: string): unknown {
     });
     return result.exitCode === 0 ? JSON.parse(result.stdout.toString()) : null;
   } catch {
-    return null; // tool missing, directory gone, timeout or unparsable output
+    return null; // tool missing, timeout or unparsable output
   }
 }
 
-type MergeRequestFacts = { comments: number; commitTimes: string[] };
+const PAGE_SIZE = 100;
+const MAX_PAGES = 10;
 
-function queryMergeRequest(url: string, number: number, cwd: string): MergeRequestFacts | null {
-  if (url.includes("github.com")) {
-    const answer = runCommand(
-      ["gh", "pr", "view", String(number), "--json", "comments,reviews,commits"],
-      cwd,
-    ) as {
-      comments: unknown[];
-      reviews: { body?: string }[];
-      commits: { committedDate: string }[];
-    } | null;
-    if (!answer) return null;
-    return {
-      comments: answer.comments.length + answer.reviews.filter((review) => review.body).length,
-      commitTimes: answer.commits.map((commit) => commit.committedDate),
-    };
+/** Every item of a paged list API; null when a page cannot be read. ponytail: capped at 1000 items, raise MAX_PAGES if needed. */
+function pagedList(call: (page: number) => string[]): Record<string, any>[] | null {
+  const items: Record<string, any>[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const batch = runCommand(call(page));
+    if (!Array.isArray(batch)) return null;
+    items.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
   }
-  const notes = runCommand(
-    ["glab", "api", `projects/:fullpath/merge_requests/${number}/notes?per_page=100`],
-    cwd,
-  ) as { system: boolean }[] | null;
-  const commits = runCommand(
-    ["glab", "api", `projects/:fullpath/merge_requests/${number}/commits?per_page=100`],
-    cwd,
-  ) as { committed_date: string }[] | null;
-  if (!notes || !commits) return null;
+  return items;
+}
+
+type MergeRequestFacts = { comments: number; syncCommits: number; fixCommits: number };
+type CommitAfterOpen = { secondParent: string | undefined };
+
+/** Sync commits are merges whose second parent is in the base branch history; every other commit is a fix. */
+function splitCommits(
+  commits: CommitAfterOpen[],
+  baseHistory: () => Set<string> | null,
+): { syncCommits: number; fixCommits: number } | null {
+  const merges = commits.filter((commit) => commit.secondParent);
+  // ponytail: history is the base branch as of now; a merged MR's own side branches are in it too.
+  const history = merges.length > 0 ? baseHistory() : new Set<string>();
+  if (!history) return null;
+  const syncCommits = merges.filter((commit) => history.has(commit.secondParent as string)).length;
+  return { syncCommits, fixCommits: commits.length - syncCommits };
+}
+
+function queryGithubMergeRequest(url: string, openedAt: number): MergeRequestFacts | null {
+  const match = /^https?:\/\/([^/]+)\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(url);
+  if (!match) return null;
+  const [, host, owner, repo, number] = match;
+  const repository = `repos/${owner}/${repo}`;
+  const hostArguments = host === "github.com" ? [] : ["--hostname", host];
+  const api = (path: string) => (page: number) => [
+    "gh",
+    "api",
+    ...hostArguments,
+    `${path}${path.includes("?") ? "&" : "?"}per_page=${PAGE_SIZE}&page=${page}`,
+  ];
+
+  const view = runCommand(["gh", "pr", "view", url, "--json", "baseRefName,comments,reviews"]) as {
+    baseRefName?: string;
+    comments: unknown[];
+    reviews: { body?: string }[];
+  } | null;
+  const inlineComments = pagedList(api(`${repository}/pulls/${number}/comments`));
+  const commits = pagedList(api(`${repository}/pulls/${number}/commits`));
+  if (!view || !view.baseRefName || !inlineComments || !commits) return null;
+  const base = view.baseRefName;
+
+  const split = splitCommits(
+    commits
+      .filter((commit) => toMilliseconds(commit.commit.committer.date) > openedAt)
+      .map((commit) => ({ secondParent: commit.parents[1]?.sha })),
+    () => {
+      const history = pagedList(api(`${repository}/commits?sha=${encodeURIComponent(base)}`));
+      return history && new Set(history.map((commit) => commit.sha));
+    },
+  );
+  if (!split) return null;
   return {
-    comments: notes.filter((note) => !note.system).length,
-    commitTimes: commits.map((commit) => commit.committed_date),
+    comments:
+      view.comments.length +
+      view.reviews.filter((review) => review.body).length +
+      inlineComments.length,
+    ...split,
   };
 }
 
-/** Comments and commits after the merge request opened; "unknown" when gh or glab cannot answer. */
-function mergeRequestActivity(
-  runDirectory: string,
-  events: ArkEvent[],
-): { comments: Unknowable; commits: Unknowable } {
+function queryGitlabMergeRequest(url: string, openedAt: number): MergeRequestFacts | null {
+  const match = /^https?:\/\/([^/]+)\/(.+?)(?:\/-)?\/merge_requests\/(\d+)/.exec(url);
+  if (!match) return null;
+  const [, host, projectPath, number] = match;
+  // The endpoint comes before --hostname: glab reads the first bare word after "api" as the path.
+  const api = (path: string) => (page: number) => [
+    "glab",
+    "api",
+    `${path}${path.includes("?") ? "&" : "?"}per_page=${PAGE_SIZE}&page=${page}`,
+    "--hostname",
+    host,
+  ];
+  const project = `projects/${encodeURIComponent(projectPath)}`;
+  const mergeRequest = `${project}/merge_requests/${number}`;
+
+  const details = runCommand(["glab", "api", mergeRequest, "--hostname", host]) as {
+    target_branch?: string;
+  } | null;
+  const notes = pagedList(api(`${mergeRequest}/notes`));
+  const commits = pagedList(api(`${mergeRequest}/commits`));
+  if (!details || !details.target_branch || !notes || !commits) return null;
+  const base = details.target_branch;
+
+  const split = splitCommits(
+    commits
+      .filter((commit) => toMilliseconds(commit.committed_date) > openedAt)
+      .map((commit) => ({ secondParent: commit.parent_ids[1] })),
+    () => {
+      const history = pagedList(
+        api(`${project}/repository/commits?ref_name=${encodeURIComponent(base)}`),
+      );
+      return history && new Set(history.map((commit) => commit.id));
+    },
+  );
+  if (!split) return null;
+  return { comments: notes.filter((note) => !note.system).length, ...split };
+}
+
+/** Comments and commits after each merge request opened; every count is "unknown" when gh or glab cannot answer. */
+function mergeRequestActivity(events: ArkEvent[]): {
+  comments: Unknowable;
+  commits: Unknowable;
+  syncCommits: Unknowable;
+  fixCommits: Unknowable;
+} {
   let comments = 0;
-  let commits = 0;
+  let syncCommits = 0;
+  let fixCommits = 0;
   for (const event of events.filter((candidate) => candidate.type === "merge_request.opened")) {
-    const facts = queryMergeRequest(
-      event.data.url,
-      event.data.number,
-      join(runDirectory, "workspace", event.data.repo),
-    );
-    if (!facts) return { comments: "unknown", commits: "unknown" };
+    const url: string = event.data.url;
+    const openedAt = toMilliseconds(event.time);
+    const facts = url.includes("github.com")
+      ? queryGithubMergeRequest(url, openedAt)
+      : queryGitlabMergeRequest(url, openedAt);
+    if (!facts) {
+      return {
+        comments: "unknown",
+        commits: "unknown",
+        syncCommits: "unknown",
+        fixCommits: "unknown",
+      };
+    }
     comments += facts.comments;
-    commits += facts.commitTimes.filter(
-      (time) => toMilliseconds(time) > toMilliseconds(event.time),
-    ).length;
+    syncCommits += facts.syncCommits;
+    fixCommits += facts.fixCommits;
   }
-  return { comments, commits };
+  return { comments, commits: syncCommits + fixCommits, syncCommits, fixCommits };
 }
 
 export function escapedDefects(
@@ -570,7 +657,7 @@ export function retro(runId: string, inProject?: string): void {
   }
   const closed = events.some((event) => event.type === "run.closed");
   const findingsSentBack = countFindingsSentBack(runDirectory);
-  const mergeRequests = mergeRequestActivity(runDirectory, events);
+  const mergeRequests = mergeRequestActivity(events);
 
   let idleGaps = 0;
   for (const session of sessions) {
@@ -627,6 +714,8 @@ export function retro(runId: string, inProject?: string): void {
       plan_changes: planChanges(events),
       mr_comments: mergeRequests.comments,
       mr_commits_after_open: mergeRequests.commits,
+      mr_sync_commits: mergeRequests.syncCommits,
+      mr_fix_commits: mergeRequests.fixCommits,
     },
     gates: {
       auto_answers: gateAnswers.filter((event) => event.data.by === "auto").length,
