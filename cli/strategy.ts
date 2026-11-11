@@ -76,13 +76,15 @@ export function strategyRecord(runId: string, inProject?: string): void {
     throw new ArkError(
       'strategies.md has no cards: add one "## <id> <title>" heading for each card',
     );
-  // No surface needs a mockup, and one card with only a document is not compared by the human.
+  // No surface needs a mockup, and one card with only a document or CLI output is not compared by the human.
   const surfaces = state.evaluation.surfaces;
   const needsMockups =
     surfaces.some((surface) => surface !== "none") &&
     !(
       cards.length === 1 &&
-      surfaces.every((surface) => surface === "document" || surface === "none")
+      surfaces.every(
+        (surface) => surface === "document" || surface === "cli_output" || surface === "none",
+      )
     );
   if (needsMockups && !loadConfig(project).roles.designer) {
     throw new ArkError(
