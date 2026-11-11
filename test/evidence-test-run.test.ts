@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -24,13 +24,18 @@ import {
   expectHookEndedOnlyItsRuns,
   holdRunners,
   macOnly,
+  recordStartedRun,
   proveFixtureSkipsMemoryWait,
   stopHeld,
+  stopStartedRuns,
 } from "./orphan-runners.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it. Every test here runs real suites,
 // some of them in Chromium, at base and at head.
 setDefaultTimeout(180_000);
+
+// ARK-419: no test-runner of a run this file started outlives its test.
+afterEach(stopStartedRuns);
 
 const repositoryRoot = resolve(import.meta.dir, "..");
 const playwrightModule = join(repositoryRoot, "node_modules/@playwright/test/index.mjs");
@@ -105,6 +110,8 @@ function startBuildingRun(options: {
   writeProject("demo", {
     workspace: options.workspace,
     ticket_source: "local",
+    test_min_free_memory_percent: 0,
+    test_max_swap_gb: 10,
     suites: options.suites,
     roles,
   });
@@ -124,6 +131,7 @@ function startBuildingRun(options: {
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
   )![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+  recordStartedRun({ runId, runDirectory });
   recordEvaluation(runDirectory);
   writeFileSync(
     join(runDirectory, "plan.yml"),

@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -25,12 +25,17 @@ import {
   expectHookEndedOnlyItsRuns,
   holdRunners,
   macOnly,
+  recordStartedRun,
   proveFixtureSkipsMemoryWait,
   stopHeld,
+  stopStartedRuns,
 } from "./orphan-runners.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
+
+// ARK-419: no test-runner of a run this file started outlives its test.
+afterEach(stopStartedRuns);
 
 const fakeCompose = join(import.meta.dir, "fixtures/worktree/fake-compose.sh");
 const roles = {
@@ -81,6 +86,8 @@ function buildingRun(options: {
   writeProject("demo", {
     workspace,
     ticket_source: "local",
+    test_min_free_memory_percent: 0,
+    test_max_swap_gb: 10,
     compose: options.compose,
     ...(options.checks === undefined ? {} : { checks: options.checks }),
     ...(options.roundBudget === undefined ? {} : { round_budget: options.roundBudget }),
@@ -109,6 +116,7 @@ function buildingRun(options: {
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
   )![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+  recordStartedRun({ runId, runDirectory });
   recordEvaluation(runDirectory);
   const plan = {
     design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
@@ -634,6 +642,8 @@ describe("ark test on a refactor run", () => {
     writeProject("demo", {
       workspace,
       ticket_source: "local",
+      test_min_free_memory_percent: 0,
+      test_max_swap_gb: 10,
       suites: [
         {
           name: "e2e",
@@ -653,6 +663,7 @@ describe("ark test on a refactor run", () => {
       "demo",
     ).out.match(/\d{4}-\d{2}-\d{2}-FAKE-1-\d+/)![0];
     const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+    recordStartedRun({ runId, runDirectory });
     recordEvaluation(runDirectory);
     writeFileSync(
       join(runDirectory, "plan.yml"),

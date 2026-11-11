@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -22,12 +22,17 @@ import {
   expectHookEndedOnlyItsRuns,
   holdRunners,
   macOnly,
+  recordStartedRun,
   proveFixtureSkipsMemoryWait,
   stopHeld,
+  stopStartedRuns,
 } from "./orphan-runners.ts";
 
 // ARK-389: every test runs real `ark test` calls on real git repos and real `bun test` suites, at base and at head.
 setDefaultTimeout(120_000);
+
+// ARK-419: no test-runner of a run this file started outlives its test.
+afterEach(stopStartedRuns);
 
 const reportFlags = "--reporter=junit --reporter-outfile={report}";
 const roles = {
@@ -145,6 +150,8 @@ function startRun(options: {
   writeProject("demo", {
     workspace: options.workspace,
     ticket_source: "local",
+    test_min_free_memory_percent: 0,
+    test_max_swap_gb: 10,
     ...(options.setup === undefined ? {} : { setup: options.setup }),
     suites: options.suites,
     roles,
@@ -160,6 +167,7 @@ function startRun(options: {
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
   )![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+  recordStartedRun({ runId, runDirectory });
   recordEvaluation(runDirectory);
   writeFileSync(
     join(runDirectory, "plan.yml"),

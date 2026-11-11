@@ -299,3 +299,22 @@ export function stopHeld(): void {
     for (const runner of run === undefined ? [] : runnersOf(run)) forceKill(runner.pid);
   held = undefined;
 }
+
+const startedRuns: StartedRun[] = [];
+
+/** Records a run the fixture just created, for `stopStartedRuns`. */
+export function recordStartedRun(run: StartedRun): void {
+  startedRuns.push(run);
+}
+
+/**
+ * The file-level `afterEach` of a suite: `ark test --stop` for each recorded run, then SIGKILL of the runner pid of its
+ * results/runner.json, whatever `--stop` did. Never by run id alone and never every `test-runner`.
+ */
+export function stopStartedRuns(): void {
+  for (const run of startedRuns.splice(0)) {
+    const runners = runnersOf(run);
+    ark("test", run.runId, "--stop", "--project", "demo");
+    for (const runner of runners) forceKill(runner.pid);
+  }
+}
