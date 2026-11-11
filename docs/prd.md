@@ -72,14 +72,14 @@ Written in EARS. The patterns: **ubiquitous** (the system shall), **event-driven
 
 ### R3 · Run leads and workers on Orca
 
-|         |                                                                                                                                                                                                       |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R3.1    | The system shall run Master Chief, run leads and workers as Orca agents with a nesting depth of two: Master Chief starts run leads, run leads start workers, and a worker shall never start an agent. |
-| R3.2    | **When** a run lead starts a worker, it shall name the worker's role and step in words and shall read `roles` in `ark.yml` for the harness and model at that moment, not from an earlier copy.        |
-| R3.3    | **Where** a ticket changes something a person sees, the run lead shall start a Designer unless the surface is only `none`, or there is one card and the surface is only `document`.                   |
-| R3.4    | **If** a worker hits a provider usage limit, **then** the run lead shall not change models itself and shall ask Master Chief, which asks you.                                                         |
-| Tickets | ARK-151, ARK-156, ARK-173, ARK-174, ARK-217, ARK-239, ARK-282                                                                                                                                         |
-| Held by | `ark plan check` roles refusal (ARK-282); `learnings.md` 2026-11-01 and 2026-11-03                                                                                                                    |
+|         |                                                                                                                                                                                                             |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R3.1    | The system shall run Master Chief, run leads and workers as Orca agents with a nesting depth of two: Master Chief starts run leads, run leads start workers, and a worker shall never start an agent.       |
+| R3.2    | **When** a run lead starts a worker, it shall name the worker's role and step in words and shall read `roles` in `ark.yml` for the harness and model at that moment, not from an earlier copy.              |
+| R3.3    | **Where** a ticket changes something a person sees, the run lead shall start a Designer unless the surface is only `none`, or there is one card and the surface is only `document`, `cli_output` or `none`. |
+| R3.4    | **If** a worker hits a provider usage limit, **then** the run lead shall not change models itself and shall ask Master Chief, which asks you.                                                               |
+| Tickets | ARK-151, ARK-156, ARK-173, ARK-174, ARK-217, ARK-239, ARK-282                                                                                                                                               |
+| Held by | `ark plan check` roles refusal (ARK-282); `learnings.md` 2026-11-01 and 2026-11-03                                                                                                                          |
 
 ### R4 · Strategy and plan gates
 
