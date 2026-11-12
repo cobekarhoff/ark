@@ -116,6 +116,15 @@ Master Chief runs a deep interview in two cases:
 
 Read every `retro.md` and `metrics.json` of the closed runs counted by `ark chief state`, newest first, and the project's `learnings.md`. List the open improvement proposals (`Status: proposed`) of those runs, grouped by symptom and sorted by the number of runs that show it. Each group needs its evidence: run ids and the lines or numbers. Also note patterns that repeat in at least two retros without a proposal. Examples: the same problem under "What went wrong" in several runs, the same step that cost the most, the same escalation reason, the same human change at the plan gate. Each pattern needs its evidence: run ids and the lines or numbers.
 
+For each repeated problem (a group or a pattern):
+
+- Read the matching learning in `learnings.md`.
+- Name the check that stops the problem, or say that no check exists.
+- Try that check against one real past case.
+- When the check does not stop that case, propose the strongest fix, in this order: structure, types, a lint whose message names the fix, a test, and a prompt rule only when nothing stronger can work.
+- Propose no rule that an existing check already enforces.
+- When a proposal makes a learning enforceable, the learning gets an `Enforced by:` line, written as the last line of its entry in `learnings.md`. It names the check, for example `Enforced by: lint rule <name>`.
+
 ### 2. Ask one question at a time
 
 Ask about one group or pattern at a time, the group with most runs first. Each question names it, shows its evidence in one or two lines, and gives a recommended answer:
