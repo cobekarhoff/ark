@@ -42,7 +42,7 @@ The proxy starts at login. The hub starts at login and restarts after a crash. B
 Remove them with: ark ui uninstall
 ```
 
-The hub restarts only after a crash, not after a clean exit. One hub runs per Ark repo: a second hub, on any port, prints `Ark hub already runs on http://127.0.0.1:<port>` and exits 0, so launchd does not restart it. The lock is a file in `ARK_HOME`; a lock left by a killed hub is taken over.
+The hub restarts only after a crash, not after a clean exit. One hub runs per Ark repo: a second hub, on any port, prints `Ark hub already runs on http://127.0.0.1:<port>` and exits 0, so launchd does not restart it. The operating system holds the lock on a file in `ARK_HOME`, and releases it when the hub dies, however it dies, so a killed hub never blocks the next one.
 
 If portless is not found, install writes only the plain hub agent, prints this line and exits 0:
 
