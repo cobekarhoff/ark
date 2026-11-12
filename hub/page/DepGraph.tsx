@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { ArrowMarker, Outcome, Ring, outcomeClass } from "./format.tsx";
 import { GraphViewport } from "./GraphViewport.tsx";
-import { edgePath, layout } from "./layout.ts";
+import { detourPath, edgePath, layout } from "./layout.ts";
 
 export type GraphTicket = {
   /** Unique inside the graph. */
@@ -28,6 +28,8 @@ const sizes = {
   compact: { width: 176, height: 80, gapX: 44, gapY: 12 },
 };
 const pad = 10;
+/** A skip edge runs in its own lane above the cards: lanes are this far apart. */
+const laneGap = 9;
 
 /**
  * Ticket cards in columns by longest dependency path, with an arrow from each dependency to its
@@ -48,16 +50,20 @@ export function DepGraph({
   const { width: cardWidth, height: cardHeight, gapX, gapY } = sizes[size];
   const { placed, edges } = layout(tickets.map(({ key, needs }) => ({ id: key, needs })));
   const byKey = new Map(tickets.map((ticket) => [ticket.key, ticket]));
+  const columnOf = new Map(placed.map(({ id, col }) => [id, col]));
+  const skips = edges.filter(({ from, to }) => columnOf.get(to)! - columnOf.get(from)! > 1);
+  // Room above the first row for one lane to each skip edge.
+  const top = pad + (skips.length > 0 ? skips.length * laneGap + 6 : 0);
   const at = new Map(
     placed.map(({ id, col, row }) => [
       id,
-      { x: pad + col * (cardWidth + gapX), y: pad + row * (cardHeight + gapY) },
+      { x: pad + col * (cardWidth + gapX), y: top + row * (cardHeight + gapY) },
     ]),
   );
   const width =
     Math.max(...placed.map((spot) => spot.col), 0) * (cardWidth + gapX) + cardWidth + 2 * pad;
   const height =
-    Math.max(...placed.map((spot) => spot.row), 0) * (cardHeight + gapY) + cardHeight + 2 * pad;
+    Math.max(...placed.map((spot) => spot.row), 0) * (cardHeight + gapY) + cardHeight + top + pad;
   return (
     <GraphViewport width={width} height={height} label={label} scrollClass="graph-scroll">
       <div className="depgraph" style={{ width, height }} role="group" aria-label={label}>
@@ -67,6 +73,10 @@ export function DepGraph({
             const start = at.get(from)!;
             const end = at.get(to)!;
             const blocking = !byKey.get(from)!.satisfied;
+            const x1 = start.x + cardWidth;
+            const y1 = start.y + cardHeight / 2;
+            const y2 = end.y + cardHeight / 2;
+            const skip = skips.findIndex((other) => other.from === from && other.to === to);
             return (
               <path
                 key={`${from}>${to}`}
@@ -76,12 +86,11 @@ export function DepGraph({
                 data-to={byKey.get(to)!.id}
                 data-blocking={blocking}
                 markerEnd={`url(#arrow-${size})`}
-                d={edgePath(
-                  start.x + cardWidth,
-                  start.y + cardHeight / 2,
-                  end.x,
-                  end.y + cardHeight / 2,
-                )}
+                d={
+                  skip < 0
+                    ? edgePath(x1, y1, end.x, y2)
+                    : detourPath(x1, y1, end.x, y2, pad + skip * laneGap, 8 + (skip % 4) * 8)
+                }
               />
             );
           })}

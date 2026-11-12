@@ -4613,6 +4613,8 @@ test("ARK-T28 ticket page shows method, case links and the no-integration warnin
   const warning = (id: string) => criterionOf(page, id).getByTestId("criterion-warning");
   for (const id of ["AC1", "AC2"]) {
     await expect(warning(id)).toBeVisible();
+    // The criteria sit in the right column under the graph band: scroll to them first.
+    await warning(id).scrollIntoViewIfNeeded();
     await expect(warning(id)).toBeInViewport();
     await expect(warning(id)).toContainText("No integration or E2E case");
     await expect(warning(id)).toContainText("method: test");
@@ -4995,7 +4997,7 @@ test("ARK-T21 run page shows non-test AC evidence in its shape or no evidence", 
 /**
  * Tabs from the page start. Returns the targets that have no focus target of their own (not a link,
  * button or tabindex >= 0, or the same one as another target) and the targets no Tab reached within
- * `targets + 20` presses.
+ * `targets + 40` presses (the ticket page holds the nav, the graph controls and the outline bar first).
  */
 async function tabReach(
   page: Page,
@@ -5017,7 +5019,7 @@ async function tabReach(
   const count = await targets.count();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   const reached = new Set<string>();
-  for (let press = 0; press < count + 20; press++) {
+  for (let press = 0; press < count + 40; press++) {
     await page.keyboard.press("Tab");
     const tag = await page.evaluate(() => document.activeElement?.getAttribute("data-tab-target"));
     if (tag) reached.add(tag);
