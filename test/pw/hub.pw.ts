@@ -7088,3 +7088,787 @@ test("ARK-T257 An unreadable queue marks no ready ticket as approved, not queued
   await open(page, baseUrl, "roadmap/ARK-852");
   await expect(pageState(page)).not.toHaveText("approved, not queued");
 });
+
+// ---------- ARK-325: ticket page band and chips, graphs that fit, Full screen, skip edges ----------
+
+/** Ticket of project `p` with the title `Title of <id>`. */
+const graphTicket = (
+  id: string,
+  dependsOn: string[] = [],
+  extra: Partial<Parameters<typeof writeBacklogTicket>[0]> = {},
+) =>
+  writeBacklogTicket({
+    project: "p",
+    id,
+    title: `Title of ${id}`,
+    status: "ready",
+    dependsOn,
+    ...extra,
+  });
+
+/** Adds an `## Evidence` section to a ticket file. */
+const addEvidence = (file: string, text: string) =>
+  writeFileSync(file, `${readFileSync(file, "utf8")}\n## Evidence\n\n${text}\n`);
+
+const longText = (word: string, paragraphs: number) =>
+  Array.from({ length: paragraphs }, (_, index) => `${word} ${index} `.repeat(70).trim()).join(
+    "\n\n",
+  );
+
+/** One chain of `length` tickets, each depending on the one before: the ids are `<prefix>1` ... `<prefix><length>`. */
+const chainOf = (prefix: string, length: number): string[] => {
+  const ids = Array.from({ length }, (_, index) => `${prefix}${index + 1}`);
+  ids.forEach((id, index) => graphTicket(id, index === 0 ? [] : [ids[index - 1]!]));
+  return ids;
+};
+
+/**
+ * ARK-901 has 10 tickets in its graph and 8 columns: a chain of 6 that it depends on, and 3 tickets
+ * that depend on it. ARK-902 has no relation. ARK-903 holds long text, ARK-904 has no Evidence.
+ */
+function bandWorld(): void {
+  isolate();
+  const chain = chainOf("ARK-81", 6);
+  const file = graphTicket("ARK-901", chain, {
+    problem: longText("problem", 3),
+    change: longText("change", 3),
+    criteria: [1, 2, 3].map((number) => ({
+      id: `AC${number}`,
+      text: `Criterion ${number}.`,
+    })),
+  });
+  addEvidence(file, longText("evidence", 3));
+  for (const id of ["ARK-821", "ARK-822", "ARK-823"]) graphTicket(id, ["ARK-901"]);
+  graphTicket("ARK-902");
+  installFakeTools({});
+}
+
+test("ARK-T278 the ticket page puts a 10-ticket graph in a full-width band with no horizontal scroll at 1440 px, prose and relations in two columns under it, and an empty relation as one line", async ({
+  page,
+}) => {
+  bandWorld();
+  const baseUrl = await launch();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, baseUrl, "ticket/ARK-901");
+  await expect(page.getByTestId("ticket-problem")).toBeVisible();
+  await checkpoint(page, "ticket-band-1440");
+  const graph = page.getByTestId("ticket-graph");
+  await expect(graph.getByTestId("graph-node")).toHaveCount(10);
+
+  // The graph is 8 columns, wider than the box at full size: it fits by scale, not by scrolling.
+  const view = await geometryOf(page);
+  expect(view.natural).toBeGreaterThan(view.inner);
+  expect(view.scrollWidth).toBeLessThanOrEqual(view.clientWidth);
+
+  const boxes = await page.evaluate(() => {
+    const rect = (element: Element | null) => {
+      const box = element!.getBoundingClientRect();
+      return {
+        left: box.left,
+        right: box.right,
+        top: box.top,
+        bottom: box.bottom,
+      };
+    };
+    const main = document.querySelector("main")!;
+    const style = getComputedStyle(main);
+    const content = rect(main);
+    content.left += parseFloat(style.paddingLeft);
+    content.right -= parseFloat(style.paddingRight);
+    const band = rect(document.querySelector('[data-testid="ticket-graph"]')!.closest("section"));
+    const title = rect(document.querySelector("h1.ticket-title"));
+    const left = rect(document.querySelector(".ticket-prose"));
+    const right = rect(document.querySelector("aside.side"));
+    const paragraph = document.querySelector('[data-testid="ticket-problem"] p') as HTMLElement;
+    const probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+    probe.textContent = "0".repeat(100);
+    paragraph.append(probe);
+    const zero = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+    return {
+      content,
+      band,
+      title,
+      left,
+      right,
+      measure: paragraph.getBoundingClientRect().width / zero,
+    };
+  });
+  // The band is as wide as the page content, under the title and above both columns.
+  expect(Math.abs(boxes.band.left - boxes.content.left)).toBeLessThanOrEqual(2);
+  expect(Math.abs(boxes.band.right - boxes.content.right)).toBeLessThanOrEqual(2);
+  expect(boxes.band.top).toBeGreaterThanOrEqual(boxes.title.bottom);
+  expect(boxes.left.top).toBeGreaterThanOrEqual(boxes.band.bottom);
+  expect(boxes.right.top).toBeGreaterThanOrEqual(boxes.band.bottom);
+  // No empty right side: the right column reaches the band's right edge, and sits right of the prose.
+  expect(Math.abs(boxes.right.right - boxes.band.right)).toBeLessThanOrEqual(2);
+  expect(boxes.left.right).toBeLessThanOrEqual(boxes.right.left);
+  // The prose keeps a reading measure of about 72 characters.
+  expect(boxes.measure).toBeGreaterThan(60);
+  expect(boxes.measure).toBeLessThan(85);
+  // The sections are left, the relations and the criteria right.
+  const prose = page.locator(".ticket-prose");
+  const side = page.locator("aside.side");
+  for (const id of ["sec-problem", "sec-change", "sec-evidence"])
+    await expect(prose.locator(`#${id}`)).toHaveCount(1);
+  await expect(side.getByTestId("depends-on")).toHaveCount(1);
+  await expect(side.getByTestId("unblocks-list")).toHaveCount(1);
+  await expect(side.getByTestId("ticket-criterion")).toHaveCount(3);
+  await expect(prose.getByTestId("ticket-criterion")).toHaveCount(0);
+
+  // An empty relation is one short line.
+  await open(page, baseUrl, "ticket/ARK-902");
+  for (const [testId, text] of [
+    ["depends-on", "Depends on · none"],
+    ["unblocks-list", "Unblocks · none"],
+  ] as const) {
+    const relation = page.getByTestId(testId);
+    await expect(relation).toHaveText(text);
+    expect((await relation.boundingBox())!.height).toBeLessThan(40);
+  }
+
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await open(page, baseUrl, "ticket/ARK-901");
+  await expect(page.getByTestId("ticket-problem")).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+    "no horizontal scroll of the page at 1000 px",
+  ).toBe(true);
+});
+
+test("ARK-T279 the sticky bar holds the part chips and the Rendered and Raw switch, a click scrolls its part under the bar without a route change, and the chip of the part in view is marked", async ({
+  page,
+}) => {
+  isolate();
+  const text = {
+    problem: longText("problem", 8),
+    change: longText("change", 8),
+    criteria: [1, 2, 3].map((number) => ({
+      id: `AC${number}`,
+      text: `Criterion ${number}.`,
+    })),
+  };
+  addEvidence(graphTicket("ARK-903", [], text), longText("evidence", 8));
+  graphTicket("ARK-904", [], text);
+  installFakeTools({});
+  const baseUrl = await launch();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/ticket/p/ARK-903", async (route) => {
+    await held;
+    await route.continue();
+  });
+
+  await open(page, baseUrl, "ticket/ARK-903");
+  const bar = page.getByTestId("outline-bar");
+  await expect(page.getByText("Loading the ticket text…")).toBeVisible();
+  await expect(bar).toHaveCount(0);
+  release();
+  await expect(bar).toBeVisible();
+  await expect(bar.getByRole("button")).toHaveText([
+    /^Problem$/,
+    /^Change$/,
+    /^Evidence$/,
+    /^Acceptance criteria\s*3$/,
+    /^AC1$/,
+    /^AC2$/,
+    /^AC3$/,
+    /^Rendered$/,
+    /^Raw$/,
+  ]);
+
+  const chip = (name: string) => bar.getByRole("button", { name, exact: true });
+  const hash = await page.evaluate(() => location.hash);
+  await chip("AC2").click();
+  await expect(chip("AC2")).toHaveAttribute("aria-current", "location");
+  const gap = await page.evaluate(() => {
+    const bottom = document
+      .querySelector('[data-testid="outline-bar"]')!
+      .getBoundingClientRect().bottom;
+    const top = document.querySelector("#crit-AC2")!.getBoundingClientRect().top;
+    return top - bottom;
+  });
+  expect(gap, "AC2 starts under the bar, not behind it").toBeGreaterThanOrEqual(0);
+  expect(gap).toBeLessThan(120);
+  expect(await page.evaluate(() => location.hash)).toBe(hash);
+  await checkpoint(page, "ticket-chip-ac2");
+
+  const marked = () =>
+    Promise.all(
+      ["Problem", "Change", "Evidence"].map(async (name) =>
+        (await chip(name).getAttribute("aria-current")) === "location" ? name : "",
+      ),
+    ).then((names) => names.filter(Boolean));
+  const scrollTo = (script: string) => page.evaluate(`window.scrollTo(0, ${script})`);
+  const top = (id: string) =>
+    `document.getElementById("${id}").getBoundingClientRect().top + scrollY`;
+  await scrollTo(`${top("sec-change")} - 70`);
+  await expect.poll(marked).toEqual(["Change"]);
+  await scrollTo("0");
+  await expect.poll(marked).toEqual(["Problem"]);
+  await scrollTo("document.documentElement.scrollHeight");
+  await expect.poll(marked).toEqual(["Evidence"]);
+  // At every scroll the bar keeps its place at the top of the window.
+  const sticky = await bar.evaluate((node) => ({
+    position: getComputedStyle(node).position,
+    offset: parseFloat(getComputedStyle(node).top),
+    top: node.getBoundingClientRect().top,
+  }));
+  expect(sticky.position).toBe("sticky");
+  expect(Math.abs(sticky.top - sticky.offset)).toBeLessThanOrEqual(1);
+  // One criterion chip at most is marked.
+  expect(await bar.locator(".outline-chip.mono[aria-current]").count()).toBeLessThanOrEqual(1);
+
+  // The Raw choice survives a chip click.
+  await bar.getByRole("button", { name: "Raw", exact: true }).click();
+  await chip("Problem").click();
+  await expect(bar.getByRole("button", { name: "Raw", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(await page.evaluate(() => location.hash)).toBe(hash);
+
+  // A part with no text keeps its chip, and the chip scrolls to the line that says so.
+  await open(page, baseUrl, "ticket/ARK-904");
+  await expect(bar).toBeVisible();
+  await expect(chip("Evidence")).toBeVisible();
+  await chip("Evidence").click();
+  const evidence = page.locator("#sec-evidence");
+  await expect(evidence).toContainText("Not written in the ticket.");
+  await expect(evidence).toBeInViewport();
+});
+
+type Geometry = {
+  /** The width the graph may use: the scroll box without its padding. */
+  inner: number;
+  clientWidth: number;
+  clientHeight: number;
+  scrollWidth: number;
+  scrollHeight: number;
+  /** Layout size of the graph, before any scale. */
+  natural: number;
+  naturalHeight: number;
+  renderedWidth: number;
+  boxHeight: number;
+  dataScale: number;
+};
+
+const minimumScale = 0.6;
+const padding = 8;
+
+/** The geometry of the one graph viewport (or overlay) of the page, as the browser laid it out. */
+const geometryOf = (page: Page): Promise<Geometry> =>
+  page.getByTestId("graph-viewport").evaluate((view) => {
+    const scroller = view.querySelector(".gv-scroll") as HTMLElement;
+    const graph = view.querySelector(".gv-graph") as HTMLElement;
+    const style = getComputedStyle(scroller);
+    return {
+      inner: scroller.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      clientWidth: scroller.clientWidth,
+      clientHeight: scroller.clientHeight,
+      scrollWidth: scroller.scrollWidth,
+      scrollHeight: scroller.scrollHeight,
+      natural: graph.offsetWidth,
+      naturalHeight: graph.offsetHeight,
+      renderedWidth: graph.getBoundingClientRect().width,
+      boxHeight: (view.querySelector(".gv-box") as HTMLElement).getBoundingClientRect().height,
+      dataScale: Number(view.getAttribute("data-scale")),
+    };
+  });
+
+/** The fit scale of the AC: the width of the box over the width of the graph, from 60% to 100%. */
+const fitScaleOf = (view: Geometry) =>
+  Math.min(1, Math.max(minimumScale, view.inner / view.natural));
+
+/** The graph is at its fit scale as drawn, and its box scrolls sideways only below the 60% floor. */
+async function expectFit(page: Page, label: string): Promise<Geometry> {
+  await expect
+    .poll(
+      async () => {
+        const view = await geometryOf(page);
+        const want = fitScaleOf(view);
+        return {
+          data: Math.abs(view.dataScale - want) < 0.01,
+          rendered: Math.abs(view.renderedWidth / view.natural - want) < 0.01,
+          height: Math.abs(view.boxHeight - view.naturalHeight * want) < 1.5,
+        };
+      },
+      { message: label },
+    )
+    .toEqual({ data: true, rendered: true, height: true });
+  const view = await geometryOf(page);
+  const drawn = fitScaleOf(view) * view.natural;
+  if (drawn > view.inner + 1) expect(view.scrollWidth, label).toBeGreaterThan(view.clientWidth);
+  else if (drawn <= view.inner)
+    expect(view.scrollWidth, label).toBeLessThanOrEqual(view.clientWidth);
+  return view;
+}
+
+/**
+ * Sets the viewport width so that the graph box has `target` pixels inside its padding. The box does
+ * not grow one for one with the window on every page (a side column takes a share), so the width
+ * moves by the slope measured between two tries. False when the page cannot reach it.
+ */
+async function widenTo(page: Page, target: number): Promise<boolean> {
+  let slope = 1;
+  let previous: { width: number; inner: number } | undefined;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const { inner } = await geometryOf(page);
+    const size = page.viewportSize()!;
+    if (Math.abs(inner - target) <= 1) return true;
+    if (previous && size.width !== previous.width)
+      slope = Math.max(0.2, (inner - previous.inner) / (size.width - previous.width));
+    previous = { width: size.width, inner };
+    const width = Math.max(320, Math.round(size.width + (target - inner) / slope));
+    if (width === size.width) return false;
+    await page.setViewportSize({ width, height: size.height });
+  }
+  return Math.abs((await geometryOf(page)).inner - target) <= 1;
+}
+
+const viewOf = (page: Page) => page.getByTestId("graph-viewport");
+const controlsOf = (page: Page) => ({
+  fit: viewOf(page).getByRole("button", { name: "Fit", exact: true }),
+  actual: viewOf(page).getByRole("button", { name: "100%", exact: true }),
+  full: viewOf(page).getByRole("button", { name: "Full screen", exact: true }),
+});
+
+/** A chain of 7 milestones with one ticket each, each depending on the one before. */
+function roadmapChain(): void {
+  isolate();
+  const ids = Array.from({ length: 7 }, (_, index) => `ARK-83${index + 1}`);
+  ids.forEach((id, index) =>
+    graphTicket(id, index === 0 ? [] : [ids[index - 1]!], {
+      milestone: `M${index + 1}`,
+    }),
+  );
+  writeRoadmap("p", {
+    milestones: ids.map((_, index) => [
+      `M${index + 1}`,
+      `Milestone ${index + 1}`,
+      `Outcome ${index + 1}.`,
+      index === 0 ? "active" : "later",
+    ]),
+    now: ids,
+  });
+  installFakeTools({});
+}
+
+/** 12 tickets in 4 columns of 3, every ticket depending on the 3 of the column before, each with an open run. */
+function runsColumns(): void {
+  isolate();
+  const column = (number: number) => [1, 2, 3].map((row) => `ARK-84${number}${row}`);
+  for (let number = 1; number <= 4; number++)
+    for (const id of column(number)) {
+      graphTicket(id, number === 1 ? [] : column(number - 1));
+      writeRun({
+        project: "p",
+        run: runId(id),
+        ticket: { id, title: `Title of ${id}` },
+        phase: "building",
+      });
+    }
+  installFakeTools({});
+}
+
+/** The plan run: 4 steps side by side, then 10 steps one below the other, the last of them running. */
+function widePlan(): string {
+  isolate();
+  const side = ["a", "b", "c", "d"].map((name) => `build-${name}`);
+  const down = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((number) => `check-${number}`);
+  const done = {
+    startedAfter: 40,
+    finishedAfter: 60,
+    outcome: "succeeded" as const,
+  };
+  const run = runId("ARK-850");
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-850", title: "A wide and tall plan" },
+    phase: "building",
+    steps: [
+      ...side.map((id) => ({
+        id,
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        ...done,
+      })),
+      ...down.map((id, index) => ({
+        id,
+        role: "validator",
+        harness: "omp",
+        model: "m",
+        needs: index === 0 ? side : [down[index - 1]!],
+        ...(index === down.length - 1 ? { startedAfter: 100 } : done),
+      })),
+    ],
+  });
+  installFakeTools({});
+  return run;
+}
+
+type GraphPage = {
+  key: "ticket" | "roadmap" | "runs" | "plan";
+  name: string;
+  /** Writes the fixture and returns the route that shows the graph. */
+  build: () => string;
+  /** What to do on the page to bring the graph up. */
+  prepare?: (page: Page) => Promise<void>;
+  nodes: string;
+  nodeCount: number;
+  /** A node that is a link, as a selector. */
+  link: string;
+};
+
+/** The four graphs of ARK-T280 and ARK-T281, each with its own fixture. */
+const graphPages: GraphPage[] = [
+  {
+    key: "ticket",
+    name: "ticket",
+    build: () => {
+      bandWorld();
+      return "ticket/ARK-901";
+    },
+    nodes: "graph-node",
+    nodeCount: 10,
+    link: 'a[data-testid="graph-node"][data-ticket="ARK-813"]',
+  },
+  {
+    key: "roadmap",
+    name: "Roadmap",
+    build: () => {
+      roadmapChain();
+      return "roadmap";
+    },
+    prepare: async (target) => {
+      await target.getByTestId("view-graph").click();
+      await expect(target.getByTestId("roadmap-graph")).toBeVisible();
+    },
+    nodes: "graph-node",
+    nodeCount: 7,
+    link: 'a[data-testid="graph-node"][data-ticket="ARK-833"]',
+  },
+  {
+    key: "runs",
+    name: "Runs",
+    build: () => {
+      runsColumns();
+      return "runs";
+    },
+    nodes: "graph-node",
+    nodeCount: 12,
+    link: 'a[data-testid="graph-node"][data-ticket="ARK-8421"]',
+  },
+  {
+    key: "plan",
+    name: "plan",
+    build: () => `run/${widePlan()}`,
+    nodes: "step-node",
+    nodeCount: 14,
+    link: '[data-testid="step-node"][data-step="build-b"] a',
+  },
+];
+
+test("ARK-T280 the ticket, Roadmap, Runs and plan graphs fit the width of their box down to 60% and then scroll, with Fit, 100% and Full screen controls, at 1024 px and at 1440 px", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  for (const kind of graphPages) {
+    const hash = kind.build();
+    const baseUrl = await launch();
+    const key = kind.key;
+    const at = async (width: number) => {
+      await page.setViewportSize({ width, height: width === 1024 ? 800 : 900 });
+      await open(page, baseUrl, hash);
+      await kind.prepare?.(page);
+      await expect(page.getByTestId(kind.nodes)).toHaveCount(kind.nodeCount);
+      await expect(viewOf(page)).toHaveCount(1);
+    };
+
+    // 1: each graph at 1024 and at 1440 px has its three controls and its fit scale.
+    for (const width of [1024, 1440]) {
+      await at(width);
+      const { fit, actual, full } = controlsOf(page);
+      for (const control of [fit, actual, full]) await expect(control).toBeVisible();
+      const view = await expectFit(page, `${kind.name} at ${width}`);
+      if (width === 1024 && key === "roadmap") await checkpoint(page, "graph-fit-1024");
+      // The Roadmap is wider than the box at both widths, and the ticket graph at 1024 too.
+      if (key === "roadmap" || (key === "ticket" && width === 1024))
+        expect(view.natural, `${kind.name} natural width at ${width}`).toBeGreaterThan(view.inner);
+    }
+
+    // 2 and 3: the ratio classes below, at and above the floor, reached by the viewport width.
+    await at(1440);
+    const natural = (await geometryOf(page)).natural;
+    const classes: [string, number, (ratio: number) => boolean][] = [
+      ["below the floor", Math.round(0.55 * natural), (ratio) => ratio < minimumScale],
+      ["exactly at the floor", Math.ceil(minimumScale * natural), (ratio) => ratio >= minimumScale],
+      ["above the floor", Math.round(0.8 * natural), (ratio) => ratio > minimumScale && ratio < 1],
+    ];
+    for (const [name, inner, inClass] of classes) {
+      const reached = await widenTo(page, inner);
+      const reachedWith = await geometryOf(page);
+      expect(
+        reached,
+        `${kind.name}: the page reaches ${name} (wanted ${inner}, graph ${natural}, got ${reachedWith.inner})`,
+      ).toBe(true);
+      const view = await geometryOf(page);
+      expect(inClass(view.inner / view.natural), `${kind.name} is ${name}`).toBe(true);
+      const settled = await expectFit(page, `${kind.name} ${name}`);
+      const scale = fitScaleOf(settled);
+      if (name === "below the floor") {
+        expect(scale).toBeCloseTo(minimumScale, 2);
+        expect(settled.scrollWidth).toBeGreaterThan(settled.clientWidth);
+      } else {
+        expect(scale).toBeGreaterThanOrEqual(minimumScale);
+        expect(settled.scrollWidth).toBeLessThanOrEqual(settled.clientWidth);
+      }
+
+      // 4: no empty band under a graph that is not tall enough to scroll.
+      if (key !== "plan")
+        expect(settled.clientHeight).toBeLessThanOrEqual(settled.boxHeight + 2 * padding + 1);
+
+      // 7 and 8: the plan fits its width only, scrolls down, and keeps the running step in view.
+      if (key === "plan") {
+        expect(settled.scrollHeight).toBeGreaterThan(settled.clientHeight);
+        expect(settled.clientHeight).toBeLessThanOrEqual(560);
+        const inside = () =>
+          page.locator('[data-testid="step-node"][data-step="check-10"]').evaluate((step) => {
+            const box = step.getBoundingClientRect();
+            const frame = document.querySelector(".gv-scroll")!.getBoundingClientRect();
+            return box.top >= frame.top - 1 && box.bottom <= frame.bottom + 1;
+          });
+        await expect.poll(inside, { message: `running step in view, ${name}` }).toBe(true);
+      }
+    }
+
+    // 5: 100% draws the graph at its size, Fit brings the fit scale back.
+    await at(1440);
+    const fitted = await expectFit(page, `${kind.name} fit before 100%`);
+    const { fit, actual } = controlsOf(page);
+    await actual.click();
+    await expect.poll(async () => (await geometryOf(page)).dataScale).toBe(1);
+    const sized = await geometryOf(page);
+    expect(sized.renderedWidth).toBeCloseTo(sized.natural, 0);
+    if (fitted.natural > fitted.inner) expect(sized.scrollWidth).toBeGreaterThan(sized.clientWidth);
+    if (key === "plan")
+      await expect
+        .poll(() =>
+          page.locator('[data-testid="step-node"][data-step="check-10"]').evaluate((step) => {
+            const box = step.getBoundingClientRect();
+            const frame = document.querySelector(".gv-scroll")!.getBoundingClientRect();
+            return box.top >= frame.top - 1 && box.bottom <= frame.bottom + 1;
+          }),
+        )
+        .toBe(true);
+    await fit.click();
+    await expect
+      .poll(async () => (await geometryOf(page)).dataScale)
+      .toBeCloseTo(fitScaleOf(fitted), 2);
+  }
+
+  // 6: a graph that fits at full size is not enlarged.
+  isolate();
+  graphTicket("ARK-860", ["ARK-861"]);
+  graphTicket("ARK-861");
+  installFakeTools({});
+  const baseUrl = await launch();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, baseUrl, "ticket/ARK-860");
+  await expect(page.getByTestId("graph-node")).toHaveCount(2);
+  const narrow = await expectFit(page, "narrow ticket graph");
+  expect(narrow.natural).toBeLessThan(narrow.inner);
+  expect(narrow.dataScale).toBe(1);
+});
+
+test("ARK-T281 Full screen shows the one graph in a dialog over the window at fit scale, Esc and Close close it and return the focus, and a node click goes where it goes outside", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const dialog = page.getByRole("dialog");
+  for (const kind of graphPages) {
+    const hash = kind.build();
+    const baseUrl = await launch();
+    const show = async () => {
+      await open(page, baseUrl, hash);
+      await kind.prepare?.(page);
+      await expect(page.getByTestId(kind.nodes)).toHaveCount(kind.nodeCount);
+    };
+    const route = `#/${hash}`;
+    const { full } = controlsOf(page);
+    const openOverlay = async () => {
+      await full.focus();
+      await full.click();
+      await expect(dialog).toBeVisible();
+    };
+
+    await show();
+    await expect(dialog).toHaveCount(0);
+    const pageScale = (await geometryOf(page)).dataScale;
+    await openOverlay();
+    // One graph, not a copy, in a modal dialog that covers the window, with the focus inside.
+    await expect(dialog).toHaveAttribute("aria-modal", "true");
+    await expect(page.getByTestId(kind.nodes)).toHaveCount(kind.nodeCount);
+    expect(
+      await dialog.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return [box.left, box.top, box.width, box.height].map(Math.round);
+      }),
+      `${kind.name}: the dialog is the window`,
+    ).toEqual([0, 0, 1440, 900]);
+    await expect
+      .poll(() => dialog.evaluate((node) => node.contains(document.activeElement)))
+      .toBe(true);
+    if (kind.key === "ticket") await checkpoint(page, "graph-overlay");
+    // The overlay is at its own fit scale: never below the page's, because its box is wider.
+    const overlay = await expectFit(page, `${kind.name} in the overlay`);
+    expect(overlay.dataScale).toBeGreaterThanOrEqual(pageScale - 0.001);
+
+    // Esc closes it, keeps the page, and the focus is back on Full screen.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    expect(await page.evaluate(() => location.hash), `${kind.name}: Esc stays on the page`).toBe(
+      route,
+    );
+    await expect(full).toBeFocused();
+    // Close closes it the same way.
+    await openOverlay();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(await page.evaluate(() => location.hash)).toBe(route);
+    await expect(full).toBeFocused();
+
+    // A node click goes where it goes outside the overlay, and the overlay is gone.
+    const href = await page.locator(kind.link).getAttribute("href");
+    await page.locator(kind.link).click();
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(href);
+    const outside = await page.evaluate(() => location.hash);
+    await show();
+    await openOverlay();
+    await dialog.locator(kind.link).click();
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(outside);
+    await expect(dialog).toHaveCount(0);
+
+    if (kind.key === "ticket") {
+      // The page behind does not scroll under the wheel.
+      await show();
+      await page.evaluate(() => window.scrollTo(0, 120));
+      await openOverlay();
+      await page.mouse.move(720, 450);
+      await page.mouse.wheel(0, 600);
+      expect(await page.evaluate(() => scrollY)).toBe(120);
+      await page.keyboard.press("Escape");
+    }
+    if (kind.key === "roadmap") {
+      // Esc with the search box focused behind the overlay closes the overlay, not the field's focus.
+      await show();
+      await openOverlay();
+      await page.getByTestId("filter-text").evaluate((field) => (field as HTMLElement).focus());
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      expect(await page.evaluate(() => location.hash)).toBe(route);
+    }
+  }
+});
+
+/** The skip edges of ARK-T282: ARK-907 depends on 4 tickets that depend on each other, and 2 tickets depend on it. */
+function skipEdgeWorld(): void {
+  isolate();
+  graphTicket("ARK-961");
+  graphTicket("ARK-962", ["ARK-961"]);
+  graphTicket("ARK-963", ["ARK-962"]);
+  graphTicket("ARK-907", ["ARK-961", "ARK-962", "ARK-963"]);
+  graphTicket("ARK-964", ["ARK-907"]);
+  graphTicket("ARK-965", ["ARK-907", "ARK-961"]);
+  installFakeTools({});
+}
+
+test("ARK-T282 a ticket-graph edge that skips a column runs in a lane above the cards and crosses no node box it does not join", async ({
+  page,
+}) => {
+  skipEdgeWorld();
+  const baseUrl = await launch();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, baseUrl, "ticket/ARK-907");
+  const graph = page.getByTestId("ticket-graph");
+  await expect(graph.getByTestId("graph-node")).toHaveCount(6);
+  // The depends_on pairs among the 6 tickets: 961>962, 962>963, 961>907, 962>907, 963>907, 907>964, 907>965, 961>965.
+  await expect(graph.getByTestId("graph-edge")).toHaveCount(8);
+  await checkpoint(page, "ticket-skip-edges");
+
+  const drawn = await page.evaluate(() => {
+    const rectOf = (box: DOMRect) => ({
+      left: box.left,
+      right: box.right,
+      top: box.top,
+      bottom: box.bottom,
+    });
+    const boxes = new Map(
+      [...document.querySelectorAll('[data-testid="ticket-graph"] [data-testid="graph-node"]')].map(
+        (node) => [node.getAttribute("data-ticket")!, rectOf(node.getBoundingClientRect())],
+      ),
+    );
+    const svg = document.querySelector('[data-testid="ticket-graph"] svg')!;
+    return {
+      svg: rectOf(svg.getBoundingClientRect()),
+      topOfCards: Math.min(...[...boxes.values()].map((box) => box.top)),
+      edges: [...document.querySelectorAll('[data-testid="ticket-graph"] path[data-from]')].map(
+        (path) => {
+          const edge = path as unknown as SVGPathElement;
+          const from = edge.getAttribute("data-from")!;
+          const to = edge.getAttribute("data-to")!;
+          const matrix = edge.getScreenCTM()!;
+          const points: { x: number; y: number }[] = [];
+          const length = edge.getTotalLength();
+          for (let at = 0; at <= length; at += 4) {
+            const point = edge.getPointAtLength(at).matrixTransform(matrix);
+            points.push({ x: point.x, y: point.y });
+          }
+          const end = edge.getPointAtLength(length).matrixTransform(matrix);
+          points.push({ x: end.x, y: end.y });
+          // Between two neighbouring columns the gap is one card gap; a skip edge spans more.
+          const gap = boxes.get(to)!.left - boxes.get(from)!.right;
+          return { from, to, skips: gap > 60, points };
+        },
+      ),
+      boxes: [...boxes].map(([ticket, box]) => ({ ticket, ...box })),
+    };
+  });
+
+  const skips = drawn.edges.filter((edge) => edge.skips);
+  expect(
+    skips.map((edge) => `${edge.from}>${edge.to}`).toSorted(),
+    "the three edges that skip a column",
+  ).toEqual(["ARK-961>ARK-907", "ARK-961>ARK-965", "ARK-962>ARK-907"].toSorted());
+  for (const edge of drawn.edges)
+    for (const point of edge.points) {
+      // Inside the graph's SVG: no part of the detour is cut off.
+      expect(point.x, `${edge.from}>${edge.to} stays in the SVG`).toBeGreaterThanOrEqual(
+        drawn.svg.left - 0.5,
+      );
+      expect(point.x).toBeLessThanOrEqual(drawn.svg.right + 0.5);
+      expect(point.y).toBeGreaterThanOrEqual(drawn.svg.top - 0.5);
+      expect(point.y).toBeLessThanOrEqual(drawn.svg.bottom + 0.5);
+      for (const box of drawn.boxes) {
+        if (box.ticket === edge.from || box.ticket === edge.to) continue;
+        const inside =
+          point.x > box.left && point.x < box.right && point.y > box.top && point.y < box.bottom;
+        expect(inside, `${edge.from}>${edge.to} passes through ${box.ticket}`).toBe(false);
+      }
+    }
+  // A skip edge runs above every card, and each runs in its own lane.
+  const lanes = skips.map((edge) => Math.min(...edge.points.map((point) => point.y)));
+  for (const lane of lanes) {
+    expect(lane).toBeLessThan(drawn.topOfCards);
+    expect(lane).toBeGreaterThanOrEqual(drawn.svg.top - 0.5);
+  }
+  for (const [index, lane] of lanes.entries())
+    for (const other of lanes.slice(index + 1))
+      expect(Math.abs(lane - other), "two skip edges share a lane").toBeGreaterThanOrEqual(4);
+});
