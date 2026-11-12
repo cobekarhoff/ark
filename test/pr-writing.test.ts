@@ -2312,7 +2312,10 @@ test("ARK-T47 the Evidence section has one line for each test case and one scree
   expect(shown).toContain("login-1.png");
   expect(shown).not.toContain("login-2.png");
   expect(shown).not.toContain("search.png");
-  expect(section).toMatch(/kept in the run folder and not uploaded/);
+  expect(section).toMatch(
+    /!\[ARK-T\d+ (base|head)\]\(results\/evidence\/ARK-T\d+\/(base|head)\/screenshots\//,
+  );
+  expect(section).not.toMatch(/not uploaded/);
 
   const threeFlows = evidenceBody(
     evidenceWith(
@@ -2321,7 +2324,9 @@ test("ARK-T47 the Evidence section has one line for each test case and one scree
     ),
   );
   expect(
-    screenshotNames(evidenceSection(threeFlows.body)).map((path) => path.split("/").at(-1)),
+    screenshotNames(evidenceSection(threeFlows.body))
+      .map((path) => path.split("/").at(-1))
+      .sort((a, b) => a!.localeCompare(b!)),
   ).toEqual(["alpha-1.png", "beta-1.png", "gamma-1.png"]);
 });
 
@@ -2341,10 +2346,12 @@ test("ARK-T47 EVID04 passes the complete body, fails with no section, warns past
   });
 
   const naming = (count: number) =>
-    body.replace(
-      /^- Screenshots.*$/m,
-      `- Screenshots, kept in the run folder and not uploaded: ${Array.from({ length: count }, (_, i) => `\`shot-${i}.png\``).join(", ")}`,
-    );
+    body
+      .replace(/^!\[.*$/gm, "")
+      .replace(
+        "## Evidence\n",
+        `## Evidence\n\n${Array.from({ length: count }, (_, i) => `![ARK-T1 head](shot-${i}.png)`).join("\n\n")}\n`,
+      );
   for (const [count, expected] of [
     [5, "pass"],
     [6, "warn"],

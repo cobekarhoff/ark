@@ -58,4 +58,4 @@ The host is read from the `origin` remote. GitHub uses `gh` and makes a Draft PR
 
 ## Not built yet
 
-Captures (screenshots) and structure diagrams are not built: there is no `capture.ts` and no `diagram.ts`. Attach images by hand. The fresh-context self-review is not in `review.ts` either; it runs shell checks only.
+Diagrams: not built (ARK-400), there is no `diagram.ts`. `post_mr.ts` uploads the screenshots and videos of the body on both hosts: GitHub needs `gh` 2.99.0 or newer and write access, and a failed upload exits 2 and posts nothing. Text evidence goes in `<details>` blocks, and evidence is never committed. The fresh-context self-review is not in `review.ts` either; it runs shell checks only.

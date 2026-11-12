@@ -142,12 +142,50 @@ function testLines({ tests }: Ledger): string[] {
   ];
 }
 
+/** A log line that looks like it holds a credential is dropped, never posted. This is the only secret scan of a body. */
+const secretLike =
+  /token|secret|passw(or)?d|api[_-]?key|private[_-]?key|credential|bearer|authorization|\b(ghp|gho|ghs|github_pat|glpat|xox[bap]|sk)[-_][\w-]{8,}|AKIA[0-9A-Z]{12,}/i;
+
+/** Log or AC text as a fenced block that no line of it can close or leave. */
+function fenced(textLines: string[]): string[] {
+  const safeLines = textLines
+    .filter((line) => !secretLike.test(line))
+    .map((line) => line.replace(/`{3,}|~{3,}/g, "'''").replace(/<\/details/gi, "<\\/details"));
+  return safeLines.length === 0 ? [] : ["```", ...safeLines, "```", ""];
+}
+
+/** One collapsed block. The visible summary holds the id and the result (EVID01 and EVID03 read it); the rest is Markdown. */
+const details = (summary: string, inner: string[]) => [
+  `<details><summary>${summary}</summary>`,
+  "",
+  ...inner,
+  "</details>",
+  "",
+];
+
 function evidenceBlock(ledger: Ledger): Block {
   const kind = ledger.ticket?.kind;
-  const lines = (ledger.evidence ?? []).map(
-    (entry) =>
-      `- \`${entry.testCase}\`: base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`,
-  );
+  const { shown } = screenshotFlows(ledger);
+  const lines: string[] = [];
+  for (const entry of ledger.evidence ?? []) {
+    const prefix = `results/evidence/${entry.testCase}/`;
+    lines.push(
+      ...details(
+        `\`${entry.testCase}\`: base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`,
+        [
+          ...shown
+            .filter((path) => path.startsWith(prefix))
+            .flatMap((path) => [
+              `![${entry.testCase} ${path.slice(prefix.length).split("/")[0]}](${path})`,
+              "",
+            ]),
+          ...fenced(entry.log ?? []),
+        ],
+      ),
+    );
+  }
+  for (const { id, text } of ledger.acEvidence ?? [])
+    lines.push(...details(`\`${id}\`: evidence`, fenced(text.split("\n"))));
   if (kind === "perf")
     lines.push(
       "- Perf: `results/baseline.md` and `results/compare.md` in the run folder, not uploaded.",
@@ -157,11 +195,6 @@ function evidenceBlock(ledger: Ledger): Block {
   lines.push(...testLines(ledger));
   for (const { suite, file } of ledger.flaky)
     lines.push(`- Flaky: \`${file}\` in suite \`${suite}\` failed once and passed on retry.`);
-  const { shown, total } = screenshotFlows(ledger);
-  if (shown.length > 0)
-    lines.push(
-      `- Screenshots, ${shown.length} flows of ${total} files, kept in the run folder and not uploaded: ${shown.map((path) => `\`${path}\``).join(", ")}`,
-    );
   return { key: "evidence", title: "Evidence", lines };
 }
 

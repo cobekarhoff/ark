@@ -4,9 +4,9 @@
  * between the two markers. The final body is linted, and a `fail` refuses the post before any write.
  * `buildTitle` is the one place that makes an MR title.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { beginMarker, endMarker } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
@@ -347,6 +347,68 @@ function writeCommand(input: PostInput, existing: Existing | null, bodyFile: str
       ];
 }
 
+const githubBodyLimit = 65_536;
+const imageTarget = /(!\[[^\]]*\]\()([^)\s]+)(\))/g;
+const mediaFile = /\.(png|jpe?g|gif|webp|svg|mp4|mov|webm)$/i;
+
+/** Each distinct local image or video that a Markdown image target of the body names and that exists, as an absolute path. */
+function localMedia(body: string, root: string): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const [, , target] of body.matchAll(imageTarget)) {
+    const file = resolve(root, target);
+    if (
+      !/^[a-z][a-z0-9+.-]*:/i.test(target) &&
+      mediaFile.test(target) &&
+      existsSync(file) &&
+      statSync(file).isFile()
+    )
+      found.set(target, file);
+  }
+  return found;
+}
+
+/** Replaces exactly the Markdown image targets that `replacements` names, so a path in backticks or inside a longer path stays. */
+const replaceTargets = (body: string, replacements: Map<string, string>) =>
+  body.replace(imageTarget, (whole, open, target, close) => {
+    const replacement = replacements.get(target);
+    return replacement === undefined ? whole : `${open}${replacement}${close}`;
+  });
+
+/** `gh pr create --help` or `gh pr edit --help` must list `--attach` (gh 2.99.0 or newer). Read-only, so it runs in a dry run too. */
+function requireGithubAttach(input: PostInput, existing: Existing | null) {
+  const verb = existing === null ? "create" : "edit";
+  const help = host(["gh", "pr", verb, "--help"], input.directory, input);
+  if (!help.ok || !help.output.includes("--attach"))
+    throw new ArkError(
+      `\`gh pr ${verb}\` has no --attach flag: the body names local images, and gh 2.99.0 or newer uploads them. Upgrade gh. Nothing was posted.`,
+    );
+}
+
+/** Uploads each file to the GitLab project and returns the `url` of each answer, keyed by the path the body names. */
+function uploadGitlab(input: PostInput, media: Map<string, string>): Map<string, string> {
+  const urls = new Map<string, string>();
+  for (const [target, file] of media) {
+    const result = host(
+      ["glab", "api", "--method", "POST", "projects/:fullpath/uploads", "-F", `file=@${file}`],
+      input.directory,
+      input,
+      true,
+    );
+    let url: unknown;
+    try {
+      url = (JSON.parse(result.output) as { url?: unknown }).url;
+    } catch {
+      url = undefined;
+    }
+    if (!result.ok || typeof url !== "string" || url === "")
+      throw new ArkError(
+        `upload of ${file} failed: ${result.error || result.output || "no url in the answer"}. Nothing was posted.`,
+      );
+    urls.set(target, url);
+  }
+  return urls;
+}
+
 export function postMergeRequest(input: PostInput): Posted {
   const generated = readFileSync(input.bodyFile, "utf8");
   // First look: refuse early. Second look, just before the write: the host may have changed in between.
@@ -355,8 +417,9 @@ export function postMergeRequest(input: PostInput): Posted {
   const first = probeOpenMergeRequest(input);
   refuseOnFail(input, first, finalBodyOf(generated, first).body, generated, state, false);
   const existing = probeOpenMergeRequest(input);
-  const { body, note } = finalBodyOf(generated, existing);
-  refuseOnFail(input, existing, body, generated, state);
+  const { body: lintedBody, note } = finalBodyOf(generated, existing);
+  refuseOnFail(input, existing, lintedBody, generated, state);
+  let body = lintedBody;
   if (existing !== null && body === existing.body)
     return {
       action: "unchanged",
@@ -365,11 +428,26 @@ export function postMergeRequest(input: PostInput): Posted {
       draft: existing.draft,
     };
 
+  // Uploads come after every refusal and before the write: a failure here posts nothing.
+  const media = localMedia(body, input.ledger.run?.directory ?? input.directory);
+  if (input.host === "github") {
+    if (body.length > githubBodyLimit)
+      throw new ArkError(
+        `the body has ${body.length} characters, GitHub allows ${githubBodyLimit}. Nothing was uploaded or posted.`,
+      );
+    if (media.size > 0) requireGithubAttach(input, existing);
+    // gh finds each --attach file by the path the body names, so name the absolute path.
+    body = replaceTargets(body, media);
+  } else if (media.size > 0 && !input.dryRun)
+    body = replaceTargets(body, uploadGitlab(input, media));
+  const attach =
+    input.host === "github" ? [...media.values()].flatMap((file) => ["--attach", file]) : [];
+
   const directory = mkdtempSync(join(tmpdir(), "ark-pr-writing-"));
   try {
     const bodyFile = join(directory, "body.md");
     writeFileSync(bodyFile, body);
-    const command = writeCommand(input, existing, bodyFile, body);
+    const command = [...writeCommand(input, existing, bodyFile, body), ...attach];
     const result = host(command, input.directory, input, true);
     if (input.dryRun)
       return {
