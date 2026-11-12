@@ -1,10 +1,10 @@
 ---
 id: ARK-T299
-title: ARK-T299 sweep closes only the terminals of released or closed dispatches that still run, lists idle services, and never touches a live dispatch or the Master Chief terminal
+title: "ARK-T299 sweep closes only the terminals of released or closed dispatches that still run, lists idle services, and never touches a live dispatch or the Master Chief terminal"
 level: integration
-technique: equivalence classes on dispatch state (released, closed, active, retained, other project, Master Chief) and boundary values on idle age (23 h, 25 h)
+technique: "equivalence classes on dispatch state (released, closed, active, retained, other project, Master Chief) and boundary values on idle age (23 h, 25 h)"
 priority: high
-risk: the sweep closes a live dispatch, a run lead or the Master Chief terminal (selected by workspace path or by a stale list); it closes a terminal of another project; it closes retained or keep-open terminals; it kills an idle service instead of listing it; it sends no message or several
+risk: "the sweep closes a live dispatch, a run lead or the Master Chief terminal (selected by workspace path or by a stale list); it closes a terminal of another project; it closes retained or keep-open terminals; it kills an idle service instead of listing it; it sends no message or several"
 status: active
 changed_by: 2026-11-12-ARK-358-1
 ---

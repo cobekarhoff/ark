@@ -1,10 +1,10 @@
 ---
 id: ARK-T295
-title: ARK-T295 auto-merger sends one 'Merged: <run> !<number>' message to the Master Chief Run after a merge and keeps looping, and logs the notice when no such Run exists
+title: "ARK-T295 auto-merger sends one 'Merged: <run> !<number>' message to the Master Chief Run after a merge and keeps looping, and logs the notice when no such Run exists"
 level: integration
-technique: equivalence classes (Master Chief Run present on page 2, Run absent) and state transition (merged once, later passes repeat nothing)
+technique: "equivalence classes (Master Chief Run present on page 2, Run absent) and state transition (merged once, later passes repeat nothing)"
 priority: high
-risk: the script still exits after a merge (launchd restarts it and the signal is lost); it sends the same message each pass or after a restart; it sends to the wrong Run or misses the Run on the second run-list page; with no Run it crashes or loses the notice instead of logging; conflict, merge failed and all merged lines repeat every pass
+risk: "the script still exits after a merge (launchd restarts it and the signal is lost); it sends the same message each pass or after a restart; it sends to the wrong Run or misses the Run on the second run-list page; with no Run it crashes or loses the notice instead of logging; conflict, merge failed and all merged lines repeat every pass"
 status: active
 changed_by: 2026-11-12-ARK-358-1
 ---

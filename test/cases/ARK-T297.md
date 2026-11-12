@@ -1,10 +1,10 @@
 ---
 id: ARK-T297
-title: ARK-T297 ark services status and ark chief state show each service as not installed, loaded or running with pid and last log line
+title: "ARK-T297 ark services status and ark chief state show each service as not installed, loaded or running with pid and last log line"
 level: integration
-technique: state transition and equivalence classes (not installed, loaded without pid, running with pid; log empty, log with lines)
+technique: "state transition and equivalence classes (not installed, loaded without pid, running with pid; log empty, log with lines)"
 priority: high
-risk: status calls a loaded-but-not-running service running, or shows no pid; the log tail is missing or from another project; ark chief state and ark services status print different text; a missing service plist is reported as an error
+risk: "status calls a loaded-but-not-running service running, or shows no pid; the log tail is missing or from another project; ark chief state and ark services status print different text; a missing service plist is reported as an error"
 status: active
 changed_by: 2026-11-12-ARK-358-1
 ---

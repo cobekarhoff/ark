@@ -1,10 +1,10 @@
 ---
 id: ARK-T294
-title: ARK-T294 ark services install writes and loads one LaunchAgent per service, a second install leaves one copy, uninstall removes them
+title: "ARK-T294 ark services install writes and loads one LaunchAgent per service, a second install leaves one copy, uninstall removes them"
 level: integration
-technique: state transition (absent, installed, reinstalled unchanged, changed, uninstalled) and equivalence classes (per service, per project)
+technique: "state transition (absent, installed, reinstalled unchanged, changed, uninstalled) and equivalence classes (per service, per project)"
 priority: high
-risk: install writes a plist without RunAtLoad, KeepAlive (that restarts after exit 0) or a project log; a second install loads the same label again (launchctl load fails) or leaves two copies; labels collide with dev.ark.hub/dev.ark.proxy or across projects; uninstall leaves a loaded or written agent
+risk: "install writes a plist without RunAtLoad, KeepAlive (that restarts after exit 0) or a project log; a second install loads the same label again (launchctl load fails) or leaves two copies; labels collide with dev.ark.hub/dev.ark.proxy or across projects; uninstall leaves a loaded or written agent"
 status: active
 changed_by: 2026-11-12-ARK-358-1
 ---

@@ -1,10 +1,10 @@
 ---
 id: ARK-T298
-title: ARK-T298 ark services install installs no auto-merger for merge_requests none and removes one left from an earlier setting
+title: "ARK-T298 ark services install installs no auto-merger for merge_requests none and removes one left from an earlier setting"
 level: integration
-technique: equivalence classes on merge_requests (none, github, gitlab) and state transition (github then none)
+technique: "equivalence classes on merge_requests (none, github, gitlab) and state transition (github then none)"
 priority: medium
-risk: a none project gets an auto-merger that merges nothing or fails each pass; the temp cleaner or sweep is skipped as well; status calls the missing auto-merger an error; a project changed to none keeps a loaded auto-merger
+risk: "a none project gets an auto-merger that merges nothing or fails each pass; the temp cleaner or sweep is skipped as well; status calls the missing auto-merger an error; a project changed to none keeps a loaded auto-merger"
 status: active
 changed_by: 2026-11-12-ARK-358-1
 ---

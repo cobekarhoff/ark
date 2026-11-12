@@ -1,10 +1,10 @@
 ---
 id: ARK-T296
-title: ARK-T296 temp-cleaner sends one 'Disk low: <n> GB free' message per drop below the limit and sends again only after free disk rose above it
+title: "ARK-T296 temp-cleaner sends one 'Disk low: <n> GB free' message per drop below the limit and sends again only after free disk rose above it"
 level: integration
-technique: state transition (above, below, still below, above, below) and boundary values at the limit
+technique: "state transition (above, below, still below, above, below) and boundary values at the limit"
 priority: high
-risk: free disk exactly at the limit resets the state (guard `free >= limit` instead of `free > limit`) so the next below-limit sample repeats the message; the cleaner still exits on low disk; it sends each pass while the disk stays low; it never sends the second drop (state not reset on recovery); a launchd restart while low repeats the message; <n> is wrong or the message goes to the wrong Run
+risk: "free disk exactly at the limit resets the state (guard `free >= limit` instead of `free > limit`) so the next below-limit sample repeats the message; the cleaner still exits on low disk; it sends each pass while the disk stays low; it never sends the second drop (state not reset on recovery); a launchd restart while low repeats the message; <n> is wrong or the message goes to the wrong Run"
 status: active
 changed_by: 2026-11-12-ARK-358-1
 ---
