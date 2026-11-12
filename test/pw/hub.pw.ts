@@ -1970,7 +1970,7 @@ test("ARK-T276 a context entry of 114 lines and a user message of more than 40 l
   await expect(page.getByTestId("run-file-text").locator("h1")).toHaveText("Plan title");
 });
 
-test("ARK-284-AC7 a transcript shows 200 entries a page and Load more adds the next page until the end of the file", async ({
+test("ARK-T300 a transcript shows 200 entries a page and Load more adds the next page, and at the end of a live file it checks for new entries", async ({
   page,
 }) => {
   const { sessions } = isolate();
@@ -2004,6 +2004,20 @@ test("ARK-284-AC7 a transcript shows 200 entries a page and Load more adds the n
   await expect(more).toHaveText("Check for new entries");
   await expect(page.getByText("End of file · 450 entries")).toBeVisible();
   await expect(entries.last()).toContainText("m449");
+
+  // The live file grows after the page loaded: the same control adds the new entry.
+  appendFileSync(
+    join(sessions, "long.jsonl"),
+    `${JSON.stringify({
+      type: "message",
+      id: "live",
+      timestamp: new Date().toISOString(),
+      message: { role: "user", content: [{ type: "text", text: "live arrival" }] },
+    })}\n`,
+  );
+  await more.click();
+  await expect(entries).toHaveCount(451);
+  await expect(entries.last()).toContainText("live arrival");
 });
 
 /** One GET with the path sent as written: a browser or `fetch` would normalize `../` away. */
