@@ -15,7 +15,7 @@ If the `orca` command is missing, say so and stop.
 ## 2. Pick the project
 
 1. List `$ARK_HOME/projects/` (default `~/.ark/projects/`). Each folder with an `ark.yml` is a project.
-2. If the folder you run in is a project's `workspace`, use that project. If only one project exists, use it. Otherwise ask the human which one, with the ask tool.
+2. If the folder you run in is a project's `workspace`, use that project. If only one project exists, use it. Otherwise ask the human which one, in chat text (see "Asking the human" in section 7).
 3. If no project exists, tell the human to run `/skill:ark bootstrap` first, and stop.
 4. Read the project's `ark.yml`. Note `ticket_source`, `concurrency` (default 2) and `round_budget`.
 
@@ -55,7 +55,7 @@ The human names a ticket or several. For each one:
 
 Look in the ticket source for tickets that link to the one you evaluated: blockers, tickets blocked by it, tickets in the same epic or milestone, and tickets that touch the same repos. For each, give the ID, the title and one line on why it relates.
 
-Then ask the human which ones to queue, with the ask tool. Recommend an answer. Include "none". Queue only the tickets the human approves.
+Then ask the human which ones to queue, in chat text (see "Asking the human" in section 7). Recommend an answer. Include "none". Queue only the tickets the human approves.
 
 ## 5. Queue the approved tickets
 
@@ -156,6 +156,16 @@ orca orchestration check --ack <delivery id> --wait --types "worker_done,escalat
 
 An empty wait or a timeout is a checkpoint. Wait again. After three empty waits, run `orca orchestration worker-list --include-remote --json` and read each row's `projection.nextAction`. Do not stop, release or restart a run lead unless a row shows it has exited.
 
+### Asking the human
+
+Never use the `ask` tool (the blocking question tool) to put anything to the human. It blocks this session, so no `check --wait` runs, and a run lead's message waits unseen. Write the question as chat text, with the options and your recommended answer, then end the turn. The human's answer arrives as the next message. Do not wait for it inside the turn.
+
+Keep one list of open items. A run lead's gate or question has a message id: its item is the message id, the run, the ticket and the gate (or "question"). A local question to the human (project pick, queue approval, escaped-defect confirmation, local-only handoff) has no message id: its item is a stable local label, the kind plus the run or ticket (for example `queue-approval ARK-352` or `local-only-handoff <run>`). Show the whole list at the end of every reply you write while it is not empty, so that the human can answer any item. Add an item when you put it to the human. Remove a run lead item only when you have sent its `reply`; remove a local item only after the local action it was waiting for has succeeded. Rebuild the message-id items from `orca orchestration check --types "escalation,question" --json` and `ark chief state` when you do not hold the list.
+
+When the human's message answers a run lead item, send it back unchanged with `orca orchestration reply --id <message id>` (see "A question from a run lead"), then take the item off the list. Use `reply --id` for run lead message ids only. When the message answers a local item, route it to the local action that is suspended on it (queue the approved tickets, pick the project, close the run); never send it to `orca orchestration reply`. When it matches no item, or fits more than one, ask back which one it is. Do not guess.
+
+An ended turn leaves no wait running, so arm the wait before the turn ends. In order: (1) handle the human's message or the mail; (2) before you end the turn, start `orca orchestration check --wait ...` of this section in the background, unless one is already running (one consumer only: never start a second while one runs); (3) end the turn. When that background wait wakes you, handle what it returns, then re-arm it before you end the turn again. A Plannotator review is not in the chat: it stays open outside it, is not on the list, and never gets a `reply` from you.
+
 On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>` for each run in `merge_requests_open`. Take the poll time (now, ISO 8601 UTC) before you run it. Keep `<last poll time>` in `<run folder>/mr-poll.txt` (one ISO 8601 time), not in your memory, so that a replacement Master Chief (`ark chief handover`, `ark chief state`) reads it and does not replay old comments. The run lead writes it before `ark merge-request open <run>`; never fall back to the time `retro.md` was written. Rewrite the file with the poll time taken before the poll only when no MR printed `comments: unknown` (a failed fetch keeps the old time). If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge. Do not treat `running` or `unknown` as passed.
 
 When the status of a run shows `ci: failed` (with its `checks failing:` names), a new human comment, or a `conflict`, the run is not merge-ready: pass each human comment to the human, and give the run lead the items (the failing check names, each comment with its author and URL, the conflicting repo). If the run lead is still live, send it a message. If it has stopped, start it again with the same spec `/skill:ark run-lead <run>` and the dispatch command of section 6, and send the items in its first message; it handles them as "Work on the open MRs" in its playbook. Relay its `ask` for the escalation gate of an implementer MR round to the human like any other `ask`. Its `worker_done` for an MR round is not a new first report: tell the human the outcome, do not repeat the MR-link handoff of "A `worker_done` from a run lead" unless the links changed, and release the run lead again (step 6 there).
@@ -183,7 +193,7 @@ When the agent is still busy after 5 times, tell the human the target, the subje
 Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. The `plan` and `strategy` gates, when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`), are answered by Ark with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, and no `ask` arrives for it. The `escalation` gate with `gates.escalation: auto` is answered by Ark too, up to 2 times in a run: the run lead sends a `status` for each one, which you pass to the human as a notice and never relay as a question. The third spent budget, and any escalation that `ark escalate` requested, still arrive as an `ask` for the human. The `criteria` gate stays with the human even when set to `auto`, because nothing answers it yet. Setting `plan` and `strategy` to `auto` is the Foundry setup; it leaves `criteria` with the human, and `escalation` too unless `gates.escalation` is `auto`.
 
 1. Read the question and its options. Say which run and ticket it is for.
-2. Put it to the human with the ask tool. Keep the run lead's options and recommended answer. If the question points to `plan.md` or a findings file, tell the human the path.
+2. Put it to the human as chat text (see "Asking the human"). Keep the run lead's options and recommended answer. If the question points to `plan.md` or a findings file, tell the human the path. Add it to the open-gate list and end the turn.
 3. Send the human's answer back unchanged:
 
    ```sh
@@ -208,7 +218,7 @@ When the human approves a new wording for a criterion of a run, do not put the n
 
 1. Check that it is from the run lead you started for that run.
 2. Run `ark status <run>`. A run lead that finished its work leaves the run in `merge_requests_open`, or in `closed` if it was aborted.
-3. If the run is in phase `building`, the outcome is not `failed`, and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask whether they took the branches. On their answer run `ark run close <run> handed_off`. `ark run close` applies the refusals of `ark merge-request open`; on a refusal, run `ark test <run>` again or `ark criteria amend`, and tell the human which AC is open. Then go to section 8 after-close steps. Skip steps 4 and 5, then release the run lead as in step 6.
+3. If the run is in phase `building`, the outcome is not `failed`, and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask in chat text whether they took the branches, add the run to the open list under the local label `local-only-handoff <run>` (no message id), and end the turn. On their answer run `ark run close <run> handed_off`, then remove the item. `ark run close` applies the refusals of `ark merge-request open`; on a refusal, run `ark test <run>` again or `ark criteria amend`, and tell the human which AC is open. Then go to section 8 after-close steps. Skip steps 4 and 5, then release the run lead as in step 6.
 4. If the outcome is `failed`, or the run is not in `merge_requests_open`, tell the human what the run lead reported and decide with them.
 5. Otherwise give the human the MR links from `ark status <run>`, in the order they must merge, and tell them: review each MR, merge them in that order, then tell you.
 6. Release the run lead: `orca orchestration worker-release --dispatch <dispatch id> --json`.
@@ -265,7 +275,7 @@ After `ark run close`:
 
 When the human gives you a bug ticket and it traces back to an earlier run, or you see that it does, link them. An escaped defect is a bug found after a run merged and traced back to that run.
 
-1. Ask the human to confirm which run caused the bug, with the ask tool. Offer the runs for the affected ticket from `$ARK_HOME/projects/<project>/runs/`.
+1. Ask the human to confirm which run caused the bug, in chat text (see "Asking the human" in section 7). Offer the runs for the affected ticket from `$ARK_HOME/projects/<project>/runs/`.
 2. Append one entry to `$ARK_HOME/projects/<project>/escaped-defects.yml`. Create the file if it does not exist. Never rewrite other entries.
 
    ```yaml
@@ -309,14 +319,14 @@ The reply has three parts, in this order:
 
 1. **Merged:** each run that merged since the human last heard from you, with its ticket ID and title.
 2. **Failed or aborted:** each run that failed, aborted or was abandoned, with the reason in one line.
-3. **Waiting on the human:** each item that waits on the human, one block for each: the run or ticket, what is asked (a gate, a `manual` check, an escalation, a question), and the options with your recommended one. Write it so that the human can decide from the reply alone, with no need to open the run.
+3. **Waiting on the human:** the open list of section 7, one block for each item: the message id (or local label), the run or ticket, what is asked (a gate, a `manual` check, an escalation, a question), and the options with your recommended one. Write it so that the human can decide from the reply alone, with no need to open the run.
 
 Leave out a part that has no items and say "Nothing waiting" when all three are empty. End the reply after the last item. Do not ask "anything else", do not wait for an answer in that turn, and do not answer a gate yourself: the human's answer comes in the next message, and then you handle it as in section 7.
 
 ## Rules
 
 - Never write product code, edit a worktree, or run a project's tests yourself. Run leads and workers do that.
-- Never answer a gate yourself, and never relay a `plan` or `strategy` gate that `ark.yml` set to `auto`. Every other `ask` goes to the human, and the human's words go back with `reply`.
+- Never answer a gate yourself, and never relay a `plan` or `strategy` gate that `ark.yml` set to `auto`. Every other `ask` from a run lead goes to the human as chat text, and the human's words go back with `orca orchestration reply --id <message id>`. Never use the blocking `ask` tool.
 - Never run `ark gate record`. The run lead records the human's answer.
 - Never queue a ticket the human did not approve.
 - Move a ticket between Now, Next and Later in `ROADMAP.md` only when the human says so. The `status:` field of the ticket file is the only status: edit no README Status cell.
