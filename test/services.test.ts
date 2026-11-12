@@ -59,7 +59,8 @@ case "$1" in
     : > "$d/loaded/$label" ;;
   unload) [ -e "$d/failunload" ] && { echo "Unload failed: 5" >&2; exit 1; }
     rm -f "$d/loaded/$(basename "$2" .plist)" ;;
-  list) [ -e "$d/loaded/$2" ] || { echo "Could not find service \\"$2\\" in domain" >&2; exit 113; }
+  list) [ -e "$d/faillist" ] && { echo "launchctl unavailable" >&2; exit 1; }
+    [ -e "$d/loaded/$2" ] || { echo "Could not find service \\"$2\\" in domain" >&2; exit 113; }
     printf '{\\n\\t"Label" = "%s";\\n' "$2"
     pid=$(cat "$d/loaded/$2")
     [ -n "$pid" ] && printf '\\t"PID" = %s;\\n' "$pid"
@@ -221,6 +222,19 @@ test("ARK-T294 ark services uninstall keeps the plist and exits 1 when launchctl
   const retry = arkServices({}, "services", "uninstall", "--project", "ark");
   expect(retry.code, retry.err).toBe(0);
   expect(installed()).toEqual([]);
+});
+
+test("ARK-T294 ark services uninstall keeps the plist and exits 1 when launchctl unload and launchctl list both fail", () => {
+  writeProject("ark", config("open"));
+  expect(arkServices({}, "services", "install", "--project", "ark").code).toBe(0);
+  writeFileSync(join(commandDirectory, "failunload"), "");
+  writeFileSync(join(commandDirectory, "faillist"), "");
+
+  const result = arkServices({}, "services", "uninstall", "--project", "ark");
+
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("did not say it is unloaded");
+  expect(installed()).toHaveLength(3);
 });
 
 test("ARK-T298 ark services install keeps a loaded auto-merger and exits 1 when its unload fails after the project changed to none", () => {

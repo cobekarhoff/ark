@@ -21,7 +21,7 @@ export const plistPath = (label: string) =>
 
 export const launchctl = (
   ...arguments_: string[]
-): { ok: boolean; output: string; error: string } => {
+): { ok: boolean; code: number; output: string; error: string } => {
   try {
     const result = Bun.spawnSync([process.env.ARK_LAUNCHCTL || "launchctl", ...arguments_], {
       stdout: "pipe",
@@ -29,12 +29,14 @@ export const launchctl = (
     });
     return {
       ok: result.exitCode === 0,
+      code: result.exitCode,
       output: result.stdout.toString(),
       error: result.stderr.toString().trim(),
     };
   } catch (error) {
     return {
       ok: false,
+      code: -1,
       output: "",
       error: error instanceof Error ? error.message : String(error),
     };
@@ -137,15 +139,21 @@ export function installAgent(
 
 /**
  * Unloads and deletes one agent's plist. Returns false when it was not installed. A failed unload keeps the plist
- * (so a retry still finds it) and throws, unless launchd says the label is not loaded.
+ * (so a retry still finds it) and throws, unless `launchctl list` says the label is not loaded (exit 113).
  */
 export function removeAgent(label: string): boolean {
   const path = plistPath(label);
   if (!existsSync(path)) return false;
-  if (!launchctl("unload", path).ok && launchctl("list", label).ok)
-    throw new ArkError(
-      `launchctl unload ${path} failed and ${label} is still loaded. The plist was kept.`,
-    );
+  if (!launchctl("unload", path).ok) {
+    const listed = launchctl("list", label);
+    // launchctl list exits 113 for a label that is not loaded; any other failure proves nothing.
+    if (listed.code !== 113)
+      throw new ArkError(
+        listed.ok
+          ? `launchctl unload ${path} failed and ${label} is still loaded. The plist was kept.`
+          : `launchctl unload ${path} failed and launchctl list ${label} did not say it is unloaded (${listed.error || "no error text"}). The plist was kept.`,
+      );
+  }
   rmSync(path);
   return true;
 }
