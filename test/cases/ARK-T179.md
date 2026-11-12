@@ -6,7 +6,7 @@ technique: equivalence classes of surfaces
 priority: high
 risk: "a surface keeps showing literal markdown (an old Prose or pre path survives), a .json file is not formatted, or another file type is rendered as markdown"
 status: active
-changed_by: 2026-11-09-ARK-323-1
+changed_by: 2026-11-12-ARK-324-1
 ---
 
 ## Objective
@@ -16,7 +16,7 @@ Prove every AC5 surface renders markdown. Expected: The system shall render the 
 ## Preconditions
 
 - Hub playwright fixture: a ticket with `**bold**`, a list and `code` in Problem, Change, Evidence and one AC; a run with `plan.md`, `state.json`, `notes.txt`; a gate question with `**bold**` and a list; a decision event whose text holds markdown; a Roadmap note with markdown.
-- Transcript messages are out of scope (ARK-324).
+- Transcript messages and context render through `Markdown` in the inspector, covered by ARK-T273.
 
 ## Steps
 
