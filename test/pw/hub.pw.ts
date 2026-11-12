@@ -485,7 +485,7 @@ test("ARK-277-AC9 Roadmap lists and filters the tickets, changes none, and copie
 
 // ---------------------------------------------------------------- AC10
 
-test("ARK-277-AC10 Runs draws one node for each ticket and one edge for each depends_on, colored by the newest run's phase", async ({
+test("ARK-T260 Runs draws one node for each ticket and one edge for each depends_on, colored by the newest run's phase, and a ready ticket is queued because the Orca queue holds its Task", async ({
   page,
 }) => {
   isolate();
@@ -529,7 +529,9 @@ test("ARK-277-AC10 Runs draws one node for each ticket and one edge for each dep
     ticket: ticketOf("ARK-903"),
     phase: "planning",
   });
+  // The queue holds the Task of ARK-905 only: queued comes from the queue, not from the read's timing.
   installFakeTools({});
+  installChiefOrca({ ready: ["ARK-905 Ticket ARK-905"] });
   const baseUrl = await launch();
   await open(page, baseUrl, "runs");
 
