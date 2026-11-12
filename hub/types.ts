@@ -430,6 +430,8 @@ export type TranscriptEntry =
       status: "ok" | "error" | "unknown";
       /** The first line of the result, cut to 300 characters. The full result comes from the result route. */
       result: string;
+      /** Length in characters of the whole result, before any cut. 0 while the call has no result. */
+      resultSize: number;
     };
 
 /** One page of a transcript: at most 200 entries. `next` is the byte offset of the next page, or null at the end. */

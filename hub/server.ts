@@ -216,7 +216,9 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
         }
       }
 
-      const run = pathname.match(/^\/api\/run\/([^/]+)(\/transcript|\/file|\/evidence|\/image)?$/);
+      const run = pathname.match(
+        /^\/api\/run\/([^/]+)(\/transcript\/result|\/transcript|\/file|\/evidence|\/image)?$/,
+      );
       if (run) {
         try {
           return await runRoute(url, decodeURIComponent(run[1]), run[2] ?? "");

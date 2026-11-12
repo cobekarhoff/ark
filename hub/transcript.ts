@@ -99,6 +99,7 @@ const call = (time: string | null, id: unknown, name: unknown, args: unknown): I
       ...(typeof id === "string" ? { callId: id } : {}),
       status: "unknown",
       result: "",
+      resultSize: 0,
     },
   };
 };
@@ -289,6 +290,7 @@ export function readTranscriptPage(
       if (!tool) return;
       tool.status = status;
       tool.result = firstLine(text);
+      tool.resultSize = text.length;
       pending.delete(id);
     };
     let next = Math.min(Math.max(0, cursor), source.size);

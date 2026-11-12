@@ -75,36 +75,61 @@ function Arguments({ entry }: { entry: Extract<TranscriptEntry, { kind: "tool" }
         <Code code={parsed.content} language={languageOf(path)} />
       </>
     );
+  const before = parsed.old_text ?? parsed.oldText ?? parsed.old_string;
+  const after = parsed.new_text ?? parsed.newText ?? parsed.new_string;
+  if (entry.name === "edit" && typeof path === "string" && typeof after === "string") {
+    const prefixed = (sign: string, text: string) =>
+      text
+        .split("\n")
+        .map((line) => sign + line)
+        .join("\n");
+    return (
+      <>
+        <p className="mono mut">{path}</p>
+        <Code
+          code={
+            (typeof before === "string" ? prefixed("- ", before) + "\n" : "") +
+            prefixed("+ ", after)
+          }
+          language="diff"
+        />
+      </>
+    );
+  }
   return <Json text={entry.args} />;
 }
 
-/** The full result of one call, read on click only. */
-function FullResult({ run, file, callId }: { run: string; file: string; callId: string }) {
-  const [state, setState] = useState<
-    { status: "idle" | "loading" | "missing" | "failed" } | ({ status: "ok" } & TranscriptResult)
-  >({ status: "idle" });
-  const show = async () => {
-    setState({ status: "loading" });
-    try {
-      const response = await fetch(
-        `/api/run/${encodeURIComponent(run)}/transcript/result?file=${encodeURIComponent(file)}&call=${encodeURIComponent(callId)}`,
-      );
-      if (response.status === 404) return setState({ status: "missing" });
-      if (!response.ok) return setState({ status: "failed" });
-      setState({ status: "ok", ...(await response.json()) });
-    } catch {
-      setState({ status: "failed" });
-    }
-  };
+const parsesAsJson = (text: string) => {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+type ResultState =
+  | { status: "idle" | "loading" | "missing" | "failed" }
+  | ({ status: "ok" } & TranscriptResult);
+
+/** The full result of one call, read on click only. The state lives above the inspector, so a loaded result survives a move of the selection. */
+function FullResult({
+  state,
+  size,
+  onShow,
+}: {
+  state: ResultState;
+  size: number;
+  onShow: () => void;
+}) {
   if (state.status === "ok") {
-    const structured = /^\s*[[{]/.test(state.text);
     return (
       <div data-testid="full-result">
         <p className="mut">
           {state.size.toLocaleString()} characters
           {state.cut && " · cut at 64,000 characters"}
         </p>
-        {structured ? <Json text={state.text} /> : <Code code={state.text} />}
+        {parsesAsJson(state.text) ? <Json text={state.text} /> : <Code code={state.text} />}
       </div>
     );
   }
@@ -115,9 +140,11 @@ function FullResult({ run, file, callId }: { run: string; file: string; callId: 
         className="btn"
         data-testid="show-result"
         disabled={state.status === "loading"}
-        onClick={() => void show()}
+        onClick={onShow}
       >
-        {state.status === "loading" ? "Reading…" : "Show result"}
+        {state.status === "loading"
+          ? "Reading…"
+          : `Show result${size > 0 ? ` · ${size < 1000 ? `${size} characters` : `${Math.round(size / 1000)} KB`}` : ""}`}
       </button>
       {state.status === "missing" && (
         <p className="mut" role="status" data-testid="result-missing">
@@ -134,16 +161,17 @@ function FullResult({ run, file, callId }: { run: string; file: string; callId: 
 }
 
 function Inspector({
-  run,
-  file,
   entry,
   raw,
+  results,
+  onShowResult,
 }: {
-  run: string;
-  file: string;
   entry: TranscriptEntry;
   raw: boolean;
+  results: Record<string, ResultState>;
+  onShowResult: (callId: string) => void;
 }) {
+  const callId = entry.kind === "tool" ? entry.callId : undefined;
   if (entry.kind === "tool")
     return (
       <>
@@ -167,8 +195,12 @@ function Inspector({
             {entry.result}
           </p>
         )}
-        {entry.callId !== undefined && (
-          <FullResult key={entry.callId} run={run} file={file} callId={entry.callId} />
+        {callId !== undefined && (
+          <FullResult
+            state={results[callId] ?? { status: "idle" }}
+            size={entry.resultSize}
+            onShow={() => onShowResult(callId)}
+          />
         )}
       </>
     );
@@ -204,6 +236,21 @@ function SessionPages({
   const [on, setOn] = useState<Set<Chip>>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
   const [raw, setRaw] = useState(false);
+  const [results, setResults] = useState<Record<string, ResultState>>({});
+  const showResult = async (callId: string) => {
+    const set = (state: ResultState) => setResults((current) => ({ ...current, [callId]: state }));
+    set({ status: "loading" });
+    try {
+      const response = await fetch(
+        `/api/run/${encodeURIComponent(run)}/transcript/result?file=${encodeURIComponent(session.file)}&call=${encodeURIComponent(callId)}`,
+      );
+      if (response.status === 404) return set({ status: "missing" });
+      if (!response.ok) return set({ status: "failed" });
+      set({ status: "ok", ...(await response.json()) });
+    } catch {
+      set({ status: "failed" });
+    }
+  };
   const list = useRef<HTMLDivElement>(null);
   const load = async (cursor: number, previous: TranscriptEntry[], signal?: AbortSignal) => {
     setPages((current) => ({ ...current, status: cursor === 0 ? "loading" : "more" }));
@@ -377,10 +424,10 @@ function SessionPages({
           ) : entry ? (
             <Inspector
               key={selected?.kind === "entry" ? selected.index : 0}
-              run={run}
-              file={session.file}
               entry={entry}
               raw={raw}
+              results={results}
+              onShowResult={(callId) => void showResult(callId)}
             />
           ) : (
             <p className="mut">Select an entry. j and k move, r switches Rendered and Raw.</p>
