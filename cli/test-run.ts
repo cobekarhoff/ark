@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -310,6 +311,26 @@ function addMissing(run: SideRun, other: SideRun, evidenceDirectory: string): vo
   }
 }
 
+/** Where a run writes evidence until it ends. */
+const STAGING = "evidence.next";
+
+/**
+ * A full run replaces `results/evidence` with its staging folder as a whole, so a case that no longer exists loses its
+ * folder; files of the old folder that are not folders (the manual evidence files) stay. A quick run discards its staging.
+ */
+function publishEvidence(resultsDirectory: string, full: boolean): void {
+  const staging = join(resultsDirectory, STAGING);
+  const evidence = join(resultsDirectory, "evidence");
+  if (full) {
+    mkdirSync(staging, { recursive: true });
+    if (existsSync(evidence))
+      for (const entry of readdirSync(evidence, { withFileTypes: true }))
+        if (!entry.isDirectory()) cpSync(join(evidence, entry.name), join(staging, entry.name));
+    rmSync(evidence, { recursive: true, force: true });
+    renameSync(staging, evidence);
+  } else rmSync(staging, { recursive: true, force: true });
+}
+
 function writeResults(run: SideRun, evidenceDirectory: string): void {
   for (const [id, { name, status, repo, sha }] of run.cases)
     writeFileSync(
@@ -411,7 +432,7 @@ async function runSuite(
         cached.log,
         cached.results,
         scratch,
-        join(resultsDirectory, "evidence"),
+        join(resultsDirectory, STAGING),
         selected,
       );
       sideRun.reused.push(suite.name);
@@ -443,16 +464,7 @@ async function runSuite(
       log += retried.log;
     }
     writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
-    addSuite(
-      sideRun,
-      suite,
-      sha,
-      log,
-      results,
-      scratch,
-      join(resultsDirectory, "evidence"),
-      selected,
-    );
+    addSuite(sideRun, suite, sha, log, results, scratch, join(resultsDirectory, STAGING), selected);
     const flaky = retried?.flaky ?? [];
     for (const file of flaky) sideRun.flaky.push({ suite: suite.name, file });
     // A non-zero exit is the failed tests only when every failed file passed on retry.
@@ -826,11 +838,10 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     throw new ArkError(`${runId} has no workspace mirror: run ark worktree create first`);
   const resultsDirectory = join(directory, "results");
   mkdirSync(resultsDirectory, { recursive: true });
-  // The folders of the cases this run finds are written again below; a case that no longer appears loses its folder.
-  const evidenceDirectory = join(resultsDirectory, "evidence");
-  if (existsSync(evidenceDirectory))
-    for (const entry of readdirSync(evidenceDirectory, { withFileTypes: true }))
-      if (entry.isDirectory()) rmSync(join(evidenceDirectory, entry.name), { recursive: true });
+  // ARK-422: every run writes to a staging folder; only a full run replaces `results/evidence` with it (see below).
+  // A stopped run leaves its staging folder behind: remove it first.
+  const evidenceDirectory = join(resultsDirectory, STAGING);
+  rmSync(evidenceDirectory, { recursive: true, force: true });
   const state = deriveState(readEvents(directory));
   const criteria = state.criteria.map((criterion) => criterion.id);
   const ticketCriteria = new Map(
@@ -1066,6 +1077,7 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     }
     writeResults(headRun, evidenceDirectory);
     writeResults(baseRun, evidenceDirectory);
+    publishEvidence(resultsDirectory, !quick);
     const passed =
       checks.every((check) => check.passed) &&
       suites.every((suite) => suite.passed) &&

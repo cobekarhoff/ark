@@ -5,8 +5,9 @@ level: integration
 technique: state transition (dead-pid lock, 12 simultaneous claimants), repeated 12 rounds
 priority: high
 risk: Two hubs both see the dead pid, both take over the lock, and two hubs serve one Ark repo
-status: active
-changed_by: 2026-11-11-ARK-365-1
+status: retired
+retired_reason: the dead-pid lock and its recovery are deleted; ARK-T267 covers simultaneous starts
+changed_by: 2026-11-11-ARK-420-1
 ---
 
 ## Objective

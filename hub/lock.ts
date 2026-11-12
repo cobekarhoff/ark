@@ -1,5 +1,14 @@
+import { dlopen } from "bun:ffi";
+import {
+  closeSync,
+  constants,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeSync,
+} from "node:fs";
 import { createHash } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { arkHome } from "../cli/paths.ts";
 
@@ -11,6 +20,33 @@ const repository = resolve(import.meta.dir, "..");
 const lockPath = () =>
   join(arkHome(), `hub-${createHash("sha1").update(repository).digest("hex").slice(0, 12)}.lock`);
 
+// The operating system holds the lock: an flock on the open file, released when the process dies, however it dies.
+// `LOCK_EX | LOCK_NB` are 2 and 4 on macOS and Linux. Bun's `openSync` does NOT set close-on-exec (`fcntl(F_GETFD)` reads 0),
+// so the descriptor is not protected by the flag. No leak was seen through `Bun.spawn` (ARK-T266 K5 and a live
+// `git cat-file --batch` child both left the lock free after the hub was killed); a spawn path other than `Bun.spawn` must be checked again.
+const LOCK_EXCLUSIVE_NONBLOCKING = 2 | 4;
+const { symbols } = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
+  flock: { args: ["i32", "i32"], returns: "i32" },
+});
+
+/** The lock file, opened for read and write and never truncated. It is never removed: a removed file would split the lock across two inodes. */
+export function openLockFile(): number {
+  mkdirSync(arkHome(), { recursive: true });
+  return openSync(lockPath(), constants.O_RDWR | constants.O_CREAT, 0o600);
+}
+
+/** Takes the exclusive flock without waiting. False when another process holds it. */
+export function tryFlock(descriptor: number): boolean {
+  return symbols.flock(descriptor, LOCK_EXCLUSIVE_NONBLOCKING) === 0;
+}
+
+/** Writes this process and `port` into the lock file in one write. */
+export function writeHolder(descriptor: number, port: number): void {
+  ftruncateSync(descriptor, 0);
+  writeSync(descriptor, JSON.stringify({ pid: process.pid, port }), 0);
+}
+
+/** True when `pid` is a live process. EPERM means it exists and belongs to another user. */
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -20,8 +56,9 @@ function isAlive(pid: number): boolean {
   }
 }
 
-/** The live hub that holds the lock, or null (no lock, damaged lock or a dead pid). Read-only. */
-export function runningHub(): HubLock | null {
+// ponytail: a previous hub's JSON stays in the file until the new holder truncates it. A dead pid marks it stale, so the
+// contender waits for the new holder's write. A reused pid of a dead hub still passes; a generation token needs a second lock.
+function readHolder(): HubLock | null {
   try {
     const held = JSON.parse(readFileSync(lockPath(), "utf8")) as HubLock;
     return Number.isInteger(held.pid) && Number.isInteger(held.port) && isAlive(held.pid)
@@ -32,100 +69,40 @@ export function runningHub(): HubLock | null {
   }
 }
 
-/** A lock file that no live hub holds is `stale`; a missing one is `absent`. */
-function inspect(): HubLock | "stale" | "absent" {
-  try {
-    readFileSync(lockPath(), "utf8");
-  } catch {
-    return "absent";
-  }
-  return runningHub() ?? "stale";
-}
-
-/** The pid written in a mutex or lock file, or null. */
-function ownerOf(path: string): number | null {
-  try {
-    const pid = (JSON.parse(readFileSync(path, "utf8")) as HubLock).pid;
-    return Number.isInteger(pid) ? pid : null;
-  } catch {
-    return null;
-  }
-}
+// Kept for the life of the process: closing it, or losing it to the garbage collector, drops the lock.
+let heldDescriptor: number | undefined;
 
 /**
- * Removes a mutex whose owner is dead; never one whose owner lives (however long it has held it).
- * Contenders claim the dead owner by an exclusive link, and re-read the owner after claiming, so a
- * successor's mutex is never removed. ponytail: a claimer killed inside this window leaves its
- * claim file and that dead pid's mutex stays; delete `<lock>.reclaim.dead-<pid>` by hand.
+ * Takes the lock for this process. Returns the holder when another live hub has it, null when this
+ * process now holds it. The holder writes its port only after it listens, so a contender that finds
+ * the file empty or half written retries, and takes the lock itself if the holder died before writing.
  */
-function reclaimDeadMutex(mutex: string): void {
-  const owner = ownerOf(mutex);
-  if (owner === null || isAlive(owner)) return;
-  const claim = `${mutex}.dead-${owner}`;
-  try {
-    linkSync(mutex, claim);
-  } catch {
-    return;
-  }
-  try {
-    if (ownerOf(mutex) === owner) rmSync(mutex, { force: true });
-  } finally {
-    rmSync(claim, { force: true });
-  }
-}
-
-/**
- * Takes the lock for this process and `port`. Returns the holder when another live hub has it.
- * The content is written to a private file and linked into place, so the create is atomic and a
- * reader never sees a half-written lock. A stale lock is removed only under a reclaim mutex
- * (a file linked into place holding the owner's pid), so an old observation can never unlink a replacement another hub installed meanwhile:
- * only mutex holders remove the lock file, and only the owner removes its own live lock.
- */
-export function acquireLock(port: number): HubLock | null {
-  const path = lockPath();
-  const mutex = `${path}.reclaim`;
-  mkdirSync(arkHome(), { recursive: true });
-  const mine = `${path}.${process.pid}`;
-  writeFileSync(mine, JSON.stringify({ pid: process.pid, port }));
-  try {
-    for (;;) {
-      try {
-        linkSync(mine, path);
-        return null;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-      const seen = inspect();
-      if (seen === "absent") continue;
-      if (seen !== "stale") return seen;
-      try {
-        linkSync(mine, mutex);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        reclaimDeadMutex(mutex);
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-        continue;
-      }
-      try {
-        // Under the mutex nobody else removes the lock, so a stale observation still holds.
-        if (inspect() === "stale") rmSync(path, { force: true });
-      } finally {
-        if (ownerOf(mutex) === process.pid) rmSync(mutex, { force: true });
-      }
+export function acquireLock(): HubLock | null {
+  const descriptor = openLockFile();
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    if (tryFlock(descriptor)) {
+      ftruncateSync(descriptor, 0); // A dead holder's JSON must not read as ours.
+      heldDescriptor = descriptor;
+      return null;
     }
-  } finally {
-    rmSync(mine, { force: true });
+    const holder = readHolder();
+    if (holder) {
+      closeSync(descriptor);
+      return holder;
+    }
+    if (Date.now() > deadline) {
+      closeSync(descriptor);
+      throw new Error("another hub holds the lock but has not published its port");
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   }
 }
 
-/** Removes the lock when this process holds it. */
-export function releaseLock(): void {
-  try {
-    if ((JSON.parse(readFileSync(lockPath(), "utf8")) as HubLock).pid === process.pid)
-      rmSync(lockPath(), { force: true });
-  } catch {
-    // No lock, or not readable: nothing of ours to remove.
-  }
+/** Publishes the port of the hub that holds the lock. Call after `acquireLock` returned null. */
+export function recordPort(port: number): void {
+  if (heldDescriptor === undefined) throw new Error("recordPort needs the lock");
+  writeHolder(heldDescriptor, port);
 }
 
 export const refusal = (holder: HubLock) =>

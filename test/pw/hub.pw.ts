@@ -5878,25 +5878,23 @@ async function homeFitProblems(page: Page): Promise<string[]> {
   });
 }
 
-test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a date or wrap a ticket id", async ({
-  page,
-}) => {
+/** The page clock is fixed at `instant` in UTC. The fixture dates (usage reset, run names, yesterday) must come from that same instant: the page reads "today" and "yesterday" from its own clock. */
+async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
+  await page.clock.setFixedTime(instant);
   isolate();
-  const local = (date: Date) =>
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
+  const day = new Date(instant).toISOString().slice(0, 10);
+  const yesterday = new Date(instant - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const gate = "ARK-12345-LONG";
   writeRun({
     project: "p",
-    run: `${local(new Date())}-${gate}-1`,
+    run: `${day}-${gate}-1`,
     ticket: { id: gate, title: "Run at a gate with a title that is rather long" },
     phase: "awaiting_criteria",
   });
   const building = "ARK-12346-LONG";
   writeRun({
     project: "p",
-    run: `${local(new Date())}-${building}-1`,
+    run: `${day}-${building}-1`,
     ticket: { id: building, title: "Run that builds with a title that is rather long" },
     phase: "building",
     steps: [
@@ -5914,14 +5912,14 @@ test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a 
     findings: "### P1: a\n",
   });
   // Multi-digit KPI values: $34.52 today against $12.34 yesterday, and a limit at 82%.
-  for (const [day, ticket, cost] of [
-    [local(new Date()), "ARK-12348-LONG", 34.52],
-    [local(yesterday), "ARK-12349-LONG", 12.34],
+  for (const [runDay, ticket, cost] of [
+    [day, "ARK-12348-LONG", 34.52],
+    [yesterday, "ARK-12349-LONG", 12.34],
   ] as const) {
     writeBacklogTicket({ project: "p", id: ticket, title: `Title of ${ticket}`, status: "done" });
     writeRun({
       project: "p",
-      run: `${day}-${ticket}-1`,
+      run: `${runDay}-${ticket}-1`,
       ticket: { id: ticket, title: `Title of ${ticket}` },
       phase: "closed",
       outcome: "merged",
@@ -5930,7 +5928,7 @@ test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a 
   }
   installFakeTools({
     mergeRequestViews: { [review.url]: review.view },
-    ompUsage: usageAt(0.82),
+    ompUsage: usageAt(0.82, instant),
   });
   const baseUrl = await launch();
   const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"]`);
@@ -5938,6 +5936,7 @@ test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a 
     await open(page, baseUrl, "");
     await expect(page.getByTestId("tile")).toHaveCount(6);
     await expect(tile("usage").locator(".big")).toHaveText("82%", { timeout: 20_000 });
+    await expect(tile("usage").locator(".tile-note")).toContainText(reset);
     await expect(tile("cost").locator(".big")).toHaveText("$34.52");
     await expect(tile("cost").locator(".tile-note")).toContainText("yesterday");
     await expect(tile("needs-me").locator(".tile-note")).toHaveText(gate);
@@ -5957,6 +5956,23 @@ test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a 
   await page.setViewportSize({ width: 1280, height: 800 });
   await ready();
   expect(await homeFitProblems(page)).toEqual([]);
+}
+
+test.describe("Home at 1024 px on a fixed clock", () => {
+  test.use({ timezoneId: "UTC" });
+  const at = (time: string) => Date.parse(`${new Date().toISOString().slice(0, 10)}T${time}:00Z`);
+
+  test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a date or wrap a ticket id", async ({
+    page,
+  }) => {
+    await checkHomeFits(page, at("12:00"), /resets 13:\d\d/);
+  });
+
+  test("ARK-T262 at 1024 px and 23:30 UTC the usage reset shows its date and the Home tiles still fit", async ({
+    page,
+  }) => {
+    await checkHomeFits(page, at("23:30"), /resets \d\d \w{3} 00:\d\d/);
+  });
 });
 
 type Box = { x: number; y: number; width: number; height: number };
