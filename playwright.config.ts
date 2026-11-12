@@ -2,6 +2,14 @@ import { defineConfig, devices } from "@playwright/test";
 
 // Browser specs run under Node (Playwright does not support Bun). `bun test` never sees them: the
 // suffix is .pw.ts and bunfig.toml ignores test/pw.
+// ARK-423: no background git maintenance or gc in any git process a spec or the hub starts.
+Object.assign(process.env, {
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "maintenance.auto",
+  GIT_CONFIG_VALUE_0: "false",
+  GIT_CONFIG_KEY_1: "gc.auto",
+  GIT_CONFIG_VALUE_1: "0",
+});
 export default defineConfig({
   testDir: "test/pw",
   testMatch: "**/*.pw.ts",

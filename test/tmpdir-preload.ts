@@ -27,6 +27,16 @@ for (const tool of ["orca", "gh", "glab", "omp", "plannotator", "launchctl", "po
 }
 process.env.PATH = `${shimDirectory}:${process.env.PATH}`;
 
+// ARK-423: background `git maintenance` and `gc --auto` race the template copy and the tests' own commits.
+// Every git process of a test inherits these through process.env.
+Object.assign(process.env, {
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "maintenance.auto",
+  GIT_CONFIG_VALUE_0: "false",
+  GIT_CONFIG_KEY_1: "gc.auto",
+  GIT_CONFIG_VALUE_1: "0",
+});
+
 // Removing the root after a full run can outlast bun's 5s default hook timeout.
 const cleanupTimeoutMilliseconds = 60_000;
 
