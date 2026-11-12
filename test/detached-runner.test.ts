@@ -565,6 +565,127 @@ const treeOf = (directory: string): Record<string, string> =>
       )
     : {};
 
+// ARK-422: the evidence of the last full run is what `ark merge-request open` ships; only a finished full run replaces it.
+describe("ark test evidence of the last full run", () => {
+  const fastTest = (label: string) =>
+    `import { test } from "bun:test";\ntest("DET-T1 fast", () => { console.log("${label}"); });\n`;
+
+  /** A run whose first suite finishes at once with case DET-T1; the optional second suite blocks until `pass` exists or a signal ends it. */
+  function evidenceFixture(withBlockingSuite: boolean): Fixture {
+    const fixture = makeFixture({
+      suites: (directory) => [
+        {
+          name: "fast",
+          level: "integration",
+          repo: ".",
+          command: "bun test test/fast.test.ts --reporter=junit --reporter-outfile={report}",
+          parser: "bun",
+        },
+        ...(withBlockingSuite
+          ? ([
+              {
+                name: "blocking",
+                level: "integration",
+                repo: ".",
+                command: `sh ${directory}/stop.sh ${directory} {report}`,
+                parser: "bun",
+              },
+            ] as Suite[])
+          : []),
+      ],
+    });
+    commitFiles(fixture.workspace, { "test/fast.test.ts": fastTest("full") });
+    Object.assign(fixture, fixture.startRun("DET-2"));
+    return fixture;
+  }
+
+  const evidenceDirectoryOf = (fixture: Fixture) =>
+    join(fixture.runDirectory, "results", "evidence");
+  /** Anything next to `results/evidence` whose name starts with `evidence` is a staging folder a run left behind. */
+  const evidenceEntriesOf = (fixture: Fixture) =>
+    readdirSync(join(fixture.runDirectory, "results")).filter((entry) =>
+      entry.startsWith("evidence"),
+    );
+
+  test("ARK-T263 a quick ark test leaves every evidence file of the last full run unchanged", async () => {
+    const fixture = evidenceFixture(false);
+    const full = await arkDone(fixture, "test", fixture.runId);
+    expect(full.code, full.err + full.out).toBe(0);
+    const before = treeOf(evidenceDirectoryOf(fixture));
+    expect(Object.keys(before)).toContain("/DET-T1/head/command.log");
+
+    commitFiles(fixture.mirrorOf("."), { "test/fast.test.ts": fastTest("quick") });
+    const quick = await arkDone(fixture, "test", fixture.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    expect(quick.out).toContain("mode: quick");
+
+    expect(treeOf(evidenceDirectoryOf(fixture))).toEqual(before);
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+  });
+
+  test("ARK-T264 a stopped full ark test leaves the evidence of the previous full run in place", async () => {
+    const fixture = evidenceFixture(true);
+    writeFileSync(join(fixture.directory, "pass"), "");
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    const before = treeOf(evidenceDirectoryOf(fixture));
+    expect(Object.keys(before)).toContain("/DET-T1/head/command.log");
+
+    // A new head commit keeps the cache from reusing the first run: both suites run, and the fast one writes new evidence.
+    // The second suite then blocks.
+    commitFiles(fixture.mirrorOf("."), { "src/second.txt": "second\n" });
+    rmSync(join(fixture.directory, "pass"));
+    const second = spawnArk(fixture, ["test", fixture.runId]);
+    await appears(join(fixture.directory, "ready"));
+    const stopped = await arkDone(fixture, "test", fixture.runId, "--stop");
+    expect(stopped.code).toBe(0);
+    await second.finished();
+
+    expect(treeOf(evidenceDirectoryOf(fixture))).toEqual(before);
+
+    // A staging folder the stopped run left does not block the next full run.
+    writeFileSync(join(fixture.directory, "pass"), "");
+    const next = await arkDone(fixture, "test", fixture.runId);
+    expect(next.code, next.err + next.out).toBe(0);
+    expect(Object.keys(treeOf(evidenceDirectoryOf(fixture))).sort()).toEqual(
+      Object.keys(before).sort(),
+    );
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+  });
+
+  test("ARK-T269 after a stopped full ark test the next full run removes the evidence folders of renamed cases and writes the new ones", async () => {
+    const fixture = evidenceFixture(true);
+    writeFileSync(join(fixture.directory, "pass"), "");
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    const before = treeOf(evidenceDirectoryOf(fixture));
+    expect(Object.keys(before)).toContain("/DET-T1/head/command.log");
+
+    // The stopped run finishes the fast suite, then blocks in the second one.
+    commitFiles(fixture.mirrorOf("."), { "src/second.txt": "second\n" });
+    rmSync(join(fixture.directory, "pass"));
+    const second = spawnArk(fixture, ["test", fixture.runId]);
+    await appears(join(fixture.directory, "ready"));
+    const stopped = await arkDone(fixture, "test", fixture.runId, "--stop");
+    expect(stopped.code).toBe(0);
+    await second.finished();
+    expect(treeOf(evidenceDirectoryOf(fixture))).toEqual(before);
+
+    // Case DET-T1 is renamed to DET-T3; the next full run keeps only the folder of the case it has.
+    commitFiles(fixture.mirrorOf("."), {
+      "test/fast.test.ts": fastTest("renamed").replace("DET-T1", "DET-T3"),
+    });
+    writeFileSync(join(fixture.directory, "pass"), "");
+    const next = await arkDone(fixture, "test", fixture.runId);
+    expect(next.code, next.err + next.out).toBe(0);
+    const folders = readdirSync(evidenceDirectoryOf(fixture)).sort();
+    expect(folders).toContain("DET-T3");
+    expect(folders).not.toContain("DET-T1");
+    expect(Object.keys(treeOf(evidenceDirectoryOf(fixture)))).toContain("/DET-T3/head/command.log");
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+  });
+});
+
 describe("ark test result cache", () => {
   test("ARK-T163 a passed head and base result is reused with a message and the same evidence, and each key change runs the suite again", async () => {
     const fixture = makeFixture({
