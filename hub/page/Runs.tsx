@@ -334,12 +334,7 @@ export function Runs() {
           </span>
         </header>
         <div className="graph-split">
-          <div
-            className="graph-scroll"
-            tabIndex={0}
-            role="region"
-            aria-label="Ticket graph, scrollable"
-          >
+          <div>
             {graph.length === 0 ? (
               <p className="mut empty">No ticket in this filter.</p>
             ) : (

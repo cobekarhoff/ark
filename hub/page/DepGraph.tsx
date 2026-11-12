@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowMarker, Outcome, Ring, outcomeClass } from "./format.tsx";
+import { GraphViewport } from "./GraphViewport.tsx";
 import { edgePath, layout } from "./layout.ts";
 
 export type GraphTicket = {
@@ -58,61 +59,63 @@ export function DepGraph({
   const height =
     Math.max(...placed.map((spot) => spot.row), 0) * (cardHeight + gapY) + cardHeight + 2 * pad;
   return (
-    <div className="depgraph" style={{ width, height }} role="group" aria-label={label}>
-      <svg width={width} height={height} aria-hidden="true">
-        <ArrowMarker id={`arrow-${size}`} />
-        {edges.map(({ from, to }) => {
-          const start = at.get(from)!;
-          const end = at.get(to)!;
-          const blocking = !byKey.get(from)!.satisfied;
+    <GraphViewport width={width} height={height} label={label} scrollClass="graph-scroll">
+      <div className="depgraph" style={{ width, height }} role="group" aria-label={label}>
+        <svg width={width} height={height} aria-hidden="true">
+          <ArrowMarker id={`arrow-${size}`} />
+          {edges.map(({ from, to }) => {
+            const start = at.get(from)!;
+            const end = at.get(to)!;
+            const blocking = !byKey.get(from)!.satisfied;
+            return (
+              <path
+                key={`${from}>${to}`}
+                className={blocking ? "gedge blocking" : "gedge"}
+                data-testid="graph-edge"
+                data-from={byKey.get(from)!.id}
+                data-to={byKey.get(to)!.id}
+                data-blocking={blocking}
+                markerEnd={`url(#arrow-${size})`}
+                d={edgePath(
+                  start.x + cardWidth,
+                  start.y + cardHeight / 2,
+                  end.x,
+                  end.y + cardHeight / 2,
+                )}
+              />
+            );
+          })}
+        </svg>
+        {tickets.map((ticket) => {
+          const { x, y } = at.get(ticket.key)!;
           return (
-            <path
-              key={`${from}>${to}`}
-              className={blocking ? "gedge blocking" : "gedge"}
-              data-testid="graph-edge"
-              data-from={byKey.get(from)!.id}
-              data-to={byKey.get(to)!.id}
-              data-blocking={blocking}
-              markerEnd={`url(#arrow-${size})`}
-              d={edgePath(
-                start.x + cardWidth,
-                start.y + cardHeight / 2,
-                end.x,
-                end.y + cardHeight / 2,
-              )}
-            />
+            <a
+              key={ticket.key}
+              href={ticket.href}
+              className={`gnode ${ticket.tone}${ticket.outcome === undefined ? "" : ` ${outcomeClass(ticket.outcome)}`}${ticket.key === focus ? " focus" : ""}`}
+              style={{ left: x, top: y, width: cardWidth, height: cardHeight }}
+              data-testid="graph-node"
+              data-ticket={ticket.id}
+              data-state={ticket.state}
+              title={`${ticket.id} ${ticket.title}`}
+            >
+              <Ring {...ticket.ring} />
+              <span className="gtext">
+                <span className="ghead">
+                  <b className="mono">{ticket.id}</b>
+                  {ticket.outcome === undefined ? (
+                    <span className="mut small">{ticket.state}</span>
+                  ) : null}
+                </span>
+                <span className="title2">{ticket.title}</span>
+                {ticket.outcome === undefined ? null : (
+                  <Outcome outcome={ticket.outcome} testId="graph-outcome" />
+                )}
+              </span>
+            </a>
           );
         })}
-      </svg>
-      {tickets.map((ticket) => {
-        const { x, y } = at.get(ticket.key)!;
-        return (
-          <a
-            key={ticket.key}
-            href={ticket.href}
-            className={`gnode ${ticket.tone}${ticket.outcome === undefined ? "" : ` ${outcomeClass(ticket.outcome)}`}${ticket.key === focus ? " focus" : ""}`}
-            style={{ left: x, top: y, width: cardWidth, height: cardHeight }}
-            data-testid="graph-node"
-            data-ticket={ticket.id}
-            data-state={ticket.state}
-            title={`${ticket.id} ${ticket.title}`}
-          >
-            <Ring {...ticket.ring} />
-            <span className="gtext">
-              <span className="ghead">
-                <b className="mono">{ticket.id}</b>
-                {ticket.outcome === undefined ? (
-                  <span className="mut small">{ticket.state}</span>
-                ) : null}
-              </span>
-              <span className="title2">{ticket.title}</span>
-              {ticket.outcome === undefined ? null : (
-                <Outcome outcome={ticket.outcome} testId="graph-outcome" />
-              )}
-            </span>
-          </a>
-        );
-      })}
-    </div>
+      </div>
+    </GraphViewport>
   );
 }

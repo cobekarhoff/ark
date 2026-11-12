@@ -3289,3 +3289,42 @@ pre.code-plain {
 .item-head a.mono {
   white-space: nowrap;
 }
+
+/* ---------- graph viewport: Fit, 100% and Full screen ---------- */
+.gv-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 4px 8px 0;
+}
+.gv-scale {
+  color: var(--dim);
+  min-width: 4ch;
+  text-align: right;
+}
+.gv-scroll {
+  overflow: auto;
+  padding: 8px;
+  scrollbar-gutter: stable;
+}
+.gv-box {
+  margin: 0 auto;
+}
+.gv-graph {
+  position: relative;
+}
+.gv.full {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding: 8px 0 0;
+}
+.gv.full .gv-scroll {
+  flex: 1;
+  max-height: none;
+  min-height: 0;
+}

@@ -204,7 +204,7 @@ export function TicketPage({ id }: { id: string }) {
             <header>
               <h2>Dependency graph</h2>
             </header>
-            <div className="body graph-scroll" data-testid="ticket-graph">
+            <div className="body" data-testid="ticket-graph">
               <DepGraph
                 size="compact"
                 label={`Dependency graph of ${ticket.id}`}

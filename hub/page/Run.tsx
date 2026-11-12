@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { GraphViewport } from "./GraphViewport.tsx";
 import { Agents } from "./Agents.tsx";
 import { ClosedBand } from "./ClosedBand.tsx";
 import { TimeBar } from "./TimeBar.tsx";
@@ -54,7 +54,6 @@ function Dag({
   attention: Attention[];
 }) {
   const age = useAge();
-  const box = useRef<HTMLDivElement>(null);
   const { placed, edges } = layout(plan.map((step) => ({ id: step.id, needs: step.needs })));
   const level = new Map(placed.map(({ id, col }) => [id, col]));
   const skips = edges.filter(({ from, to }) => level.get(to)! - level.get(from)! > 1);
@@ -70,17 +69,17 @@ function Dag({
     left + Math.max(...placed.map((p) => p.row), 0) * (nodeWidth + gapX) + nodeWidth + pad;
   const height =
     pad + Math.max(...placed.map((p) => p.col), 0) * (nodeHeight + gapY) + nodeHeight + pad;
-  // The page opens on the work in progress: the running step scrolled into the middle of the panel.
   const running = plan.find((step) => step.status === "running");
-  const runningY = running ? at.get(running.id)!.y : null;
-  useEffect(() => {
-    const view = box.current;
-    if (!view || runningY === null) return;
-    view.scrollTop = Math.max(0, runningY + nodeHeight / 2 - view.clientHeight / 2);
-    // Re-run only when the running step moves, never on each snapshot: the reader may have scrolled.
-  }, [runningY]);
+  // The page opens on the work in progress: the viewport scrolls the running step into the middle.
+  const runningY = running ? at.get(running.id)!.y + nodeHeight / 2 : null;
   return (
-    <div ref={box} className="graph" tabIndex={0} role="region" aria-label="Plan DAG, scrollable">
+    <GraphViewport
+      width={width}
+      height={height}
+      label="Plan DAG"
+      scrollClass="graph"
+      focusY={runningY}
+    >
       <svg role="group" aria-label="Plan dependency graph" width={width} height={height}>
         <ArrowMarker id="arrow-dag" />
         {edges.map(({ from, to }) => {
@@ -154,7 +153,7 @@ function Dag({
           );
         })}
       </svg>
-    </div>
+    </GraphViewport>
   );
 }
 
