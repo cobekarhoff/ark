@@ -8,7 +8,7 @@ import {
   findChiefRun,
   findLiveChief,
   orcaPages,
-  orcaTimeout,
+  orcaTimeoutMilliseconds,
   readChiefTasks,
   readTerminals,
 } from "./orca.ts";
@@ -16,9 +16,6 @@ import { cpus } from "node:os";
 import { holdReasons, readHost } from "./host.ts";
 import { readTestLock } from "./test-lock.ts";
 import { listProjects, projectDirectory, runsDirectory } from "./paths.ts";
-
-/** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for a one-off command. */
-const orcaTimeoutMilliseconds = orcaTimeout(10_000);
 
 type OrcaRunRow = { id: string; objective?: string; coordinator_handle?: string };
 /** A `worker-list --json` row. A structured worker has `liveness: "unverifiable"` and no terminal handle; its `workspace` is `<host>::<run folder>/workspace`. */

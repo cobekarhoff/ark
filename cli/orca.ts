@@ -61,6 +61,9 @@ export function orcaTimeout(fallbackMilliseconds: number): number {
   return forced > 0 ? forced : fallbackMilliseconds;
 }
 
+/** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for the queue and for a one-off command. */
+export const orcaTimeoutMilliseconds = orcaTimeout(10_000);
+
 /** One `orca <words> --json` call: its `result`, or why it failed. */
 async function orcaCommand<T>(words: string[], timeoutMilliseconds: number): Promise<OrcaRead<T>> {
   if (!Bun.which("orca")) return { ok: false, reason: "orca not found on PATH" };
