@@ -19,6 +19,15 @@ export function isInside(directory: string, parent: string): boolean {
   return directory === parent || directory.startsWith(parent + sep);
 }
 
+/** The project of `--project`, else ARK_PROJECT; refuses an unknown one. */
+export function resolveProject(project: string | undefined): string {
+  const chosen = project ?? process.env.ARK_PROJECT;
+  if (!chosen)
+    throw new ArkError("cannot tell the project: pass --project <name> or set ARK_PROJECT");
+  if (!listProjects().includes(chosen)) throw new ArkError(`project ${chosen} does not exist`);
+  return chosen;
+}
+
 export function listProjects(): string[] {
   const projectsDirectory = join(arkHome(), "projects");
   if (!existsSync(projectsDirectory)) return [];
