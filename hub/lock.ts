@@ -21,7 +21,9 @@ const lockPath = () =>
   join(arkHome(), `hub-${createHash("sha1").update(repository).digest("hex").slice(0, 12)}.lock`);
 
 // The operating system holds the lock: an flock on the open file, released when the process dies, however it dies.
-// `LOCK_EX | LOCK_NB` are 2 and 4 on macOS and Linux. Node's `openSync` opens close-on-exec, so no child keeps the lock.
+// `LOCK_EX | LOCK_NB` are 2 and 4 on macOS and Linux. Bun's `openSync` does NOT set close-on-exec (`fcntl(F_GETFD)` reads 0),
+// so the descriptor is not protected by the flag. No leak was seen through `Bun.spawn` (ARK-T266 K5 and a live
+// `git cat-file --batch` child both left the lock free after the hub was killed); a spawn path other than `Bun.spawn` must be checked again.
 const LOCK_EXCLUSIVE_NONBLOCKING = 2 | 4;
 const { symbols } = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
   flock: { args: ["i32", "i32"], returns: "i32" },
@@ -44,10 +46,24 @@ export function writeHolder(descriptor: number, port: number): void {
   writeSync(descriptor, JSON.stringify({ pid: process.pid, port }), 0);
 }
 
+/** True when `pid` is a live process. EPERM means it exists and belongs to another user. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+// ponytail: a previous hub's JSON stays in the file until the new holder truncates it. A dead pid marks it stale, so the
+// contender waits for the new holder's write. A reused pid of a dead hub still passes; a generation token needs a second lock.
 function readHolder(): HubLock | null {
   try {
     const held = JSON.parse(readFileSync(lockPath(), "utf8")) as HubLock;
-    return Number.isInteger(held.pid) && Number.isInteger(held.port) ? held : null;
+    return Number.isInteger(held.pid) && Number.isInteger(held.port) && isAlive(held.pid)
+      ? held
+      : null;
   } catch {
     return null;
   }

@@ -749,7 +749,10 @@ async function lockChild(stage: "open" | "flock" | "write", afterStage = "") {
 async function nextHubServes(context: string) {
   const hub = spawnHub();
   await until(`the next hub to start (${context})`, () => hub.port(), 5000);
-  expect((await fetch(`${hub.baseUrl()}/api/snapshot`)).status).toBe(200);
+  const response = await fetch(`${hub.baseUrl()}/api/snapshot`, {
+    signal: AbortSignal.timeout(5000),
+  });
+  expect(response.status).toBe(200);
   hub.child.kill("SIGTERM");
   await hub.exited;
 }
@@ -796,6 +799,26 @@ test(
     processes.push(unrelated);
     writeFileSync(lockFilePath(), JSON.stringify({ pid: unrelated.pid, port: 1234 }));
     await nextHubServes("a live pid in the file");
+
+    // K7: a holder that has the flock but has not rewritten the file yet. The previous hub's JSON in the file
+    // names a dead pid, and the contender must wait for the holder's own port.
+    writeFileSync(lockFilePath(), JSON.stringify({ pid: 2147483647, port: 1234 }));
+    const publishing = await lockChild(
+      "flock",
+      `setTimeout(() => writeHolder(descriptor, 5678), 1500);`,
+    );
+    const contender = spawnHub();
+    await until(
+      "the contender to refuse",
+      () => contender.output().includes("did not start"),
+      5000,
+    );
+    expect(contender.output()).toContain(
+      `Ark hub already runs on http://127.0.0.1:5678 (pid ${publishing.child.pid})`,
+    );
+    expect(await contender.exited).toBe(0);
+    publishing.child.kill("SIGKILL");
+    await publishing.child.exited;
 
     // Part B: a real hub killed at a seeded random moment of its start. The kill moment is real time.
     const seed = Date.now() % 2 ** 31;
