@@ -2678,7 +2678,7 @@ test("ARK-291-AC1 the nav shows Roadmap and not Backlog, and #/backlog and #/bac
   await expect(links.nth(2)).toHaveAttribute("href", "#/roadmap");
 });
 
-test("ARK-291-AC3 Now shows cards and Next, Later and Unranked rows in rank order with rank, ID, title, why, milestone, phase or status, Blocked by and Unblocks, and a finished ticket is in no list", async ({
+test("ARK-T259 Roadmap Now shows cards and Next, Later and Unranked rows in rank order with the derived ticket state", async ({
   page,
 }) => {
   isolate();

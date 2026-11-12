@@ -1,6 +1,6 @@
 ---
 id: ARK-T256
-title: ARK-T256 An unreadable queue shows 'Queue unavailable: <reason>' with no ticket, for a missing Run and for a failed orca call
+title: "ARK-T256 An unreadable queue shows 'Queue unavailable: <reason>' with no ticket, for a missing Run and for a failed orca call"
 level: e2e
 technique: error guessing over failure classes (no Run, run-list fails, task-list fails, call times out)
 priority: high

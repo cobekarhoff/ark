@@ -593,7 +593,7 @@ test("ARK-277-AC12 the old hub is gone and no file imports it", () => {
   expect(importers).toEqual([]);
 });
 
-test("ARK-277-AC12 ark ui serves the hub in hub/", async () => {
+test("ARK-T258 ark ui serves the hub from hub/", async () => {
   isolatedEnvironment();
   installFakeTools({});
   const child = Bun.spawn(["bun", join(root, "cli", "ark.ts"), "ui", "--port", "0"], {
