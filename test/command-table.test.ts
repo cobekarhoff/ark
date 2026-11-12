@@ -89,7 +89,9 @@ async function describe(line: string): Promise<Row> {
   const words = line.match(/^[a-z][a-z-]*(?: [a-z][a-z-]*)*/)![0].split(" ");
   const command = words.join(" ");
   const help = (await ark(...words, "--help")).out;
-  const [usageLine, description] = help.trim().split("\n\n");
+  const separator = help.trim().indexOf("\n\n");
+  const usageLine = help.trim().slice(0, separator);
+  const description = help.trim().slice(separator + 2);
   expect(usageLine).toBe(`ark ${line}`);
   expect((await ark(...words, "--zz-first")).err).toContain("unknown flag --zz-first");
   const flags: Row["flags"] = {};
