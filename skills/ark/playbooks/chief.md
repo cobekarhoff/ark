@@ -148,17 +148,15 @@ Wait for messages from every run lead:
 orca orchestration check --wait --types "worker_done,escalation,question,status" --timeout-ms 900000 --json 2>/dev/null
 ```
 
-Handle every message in the batch before you acknowledge it:
-
-```sh
-orca orchestration check --ack <delivery id> --wait --types "worker_done,escalation,question,status" --timeout-ms 900000 --json 2>/dev/null
-```
+A consuming check marks the batch handled, so handle every message in it and wait again.
 
 An empty wait or a timeout is a checkpoint. Wait again. After three empty waits, run `orca orchestration worker-list --include-remote --json` and read each row's `projection.nextAction`. Do not stop, release or restart a run lead unless a row shows it has exited.
 
-On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>` for each run in `merge_requests_open`. Take the poll time (now, ISO 8601 UTC) before you run it. Keep `<last poll time>` in `<run folder>/mr-poll.txt` (one ISO 8601 time), not in your memory, so that a replacement Master Chief (`ark chief handover`, `ark chief state`) reads it and does not replay old comments. The run lead writes it before `ark merge-request open <run>`; never fall back to the time `retro.md` was written. Rewrite the file with the poll time taken before the poll only when no MR printed `comments: unknown` (a failed fetch keeps the old time). If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge. Do not treat `running` or `unknown` as passed.
+On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>` for each run in `merge_requests_open`. Take the poll time (now, ISO 8601 UTC) before you run it. Keep `<last poll time>` in `<run folder>/mr-poll.txt` (one ISO 8601 time), not in your memory, so that a replacement Master Chief (`ark chief handover`, `ark chief state`) reads it and does not replay old comments. The run lead writes it before `ark merge-request open <run>`; never fall back to the time `retro.md` was written.
+Rewrite the file with the poll time taken before the poll only when no MR printed `comments: unknown` (a failed fetch keeps the old time). If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge. Do not treat `running` or `unknown` as passed.
 
-When the status of a run shows `ci: failed` (with its `checks failing:` names), a new human comment, or a `conflict`, the run is not merge-ready: pass each human comment to the human, and give the run lead the items (the failing check names, each comment with its author and URL, the conflicting repo). If the run lead is still live, send it a message. If it has stopped, start it again with the same spec `/skill:ark run-lead <run>` and the dispatch command of section 6, and send the items in its first message; it handles them as "Work on the open MRs" in its playbook. Relay its `ask` for the escalation gate of an implementer MR round to the human like any other `ask`. Its `worker_done` for an MR round is not a new first report: tell the human the outcome, do not repeat the MR-link handoff of "A `worker_done` from a run lead" unless the links changed, and release the run lead again (step 6 there).
+When the status of a run shows `ci: failed` (with its `checks failing:` names), a new human comment, or a `conflict`, the run is not merge-ready: pass each human comment to the human, and give the run lead the items (the failing check names, each comment with its author and URL, the conflicting repo). If the run lead is still live, send it a message. If it has stopped, start it again with the same spec `/skill:ark run-lead <run>` and the dispatch command of section 6, and send the items in its first message; it handles them as "Work on the open MRs" in its playbook.
+Relay its `ask` for the escalation gate of an implementer MR round to the human like any other `ask`. Its `worker_done` for an MR round is not a new first report: tell the human the outcome, do not repeat the MR-link handoff of "A `worker_done` from a run lead" unless the links changed, and release the run lead again (step 6 there).
 
 `scripts/auto-merger.sh` (section 12) can merge a CLEAN MR while MR work is open: it checks only CLEAN and `retro.md`, not the run lead's work. A comment that no commit answers yet, or a fix that is still being pushed, does not hold the merge, and no rule holds it. Tell the human when a run has MR work open, so that they do not merge early.
 
@@ -180,7 +178,8 @@ When the agent is still busy after 5 times, tell the human the target, the subje
 
 ### A `question` from a run lead
 
-Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. The `plan` and `strategy` gates, when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`), are answered by Ark with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, and no `ask` arrives for it. The `escalation` gate with `gates.escalation: auto` is answered by Ark too, up to 2 times in a run: the run lead sends a `status` for each one, which you pass to the human as a notice and never relay as a question. The third spent budget, and any escalation that `ark escalate` requested, still arrive as an `ask` for the human. The `criteria` gate stays with the human even when set to `auto`, because nothing answers it yet. Setting `plan` and `strategy` to `auto` is the Foundry setup; it leaves `criteria` with the human, and `escalation` too unless `gates.escalation` is `auto`.
+Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. The `plan` and `strategy` gates, when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`), are answered by Ark with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, and no `ask` arrives for it. The `escalation` gate with `gates.escalation: auto` is answered by Ark too, up to 2 times in a run: the run lead sends a `status` for each one, which you pass to the human as a notice and never relay as a question.
+The third spent budget, and any escalation that `ark escalate` requested, still arrive as an `ask` for the human. The `criteria` gate stays with the human even when set to `auto`, because nothing answers it yet. Setting `plan` and `strategy` to `auto` is the Foundry setup; it leaves `criteria` with the human, and `escalation` too unless `gates.escalation` is `auto`.
 
 1. Read the question and its options. Say which run and ticket it is for.
 2. Put it to the human with the ask tool. Keep the run lead's options and recommended answer. If the question points to `plan.md` or a findings file, tell the human the path.
@@ -202,16 +201,17 @@ A run lead is blocked. Read the message, tell the human, and decide the next ste
 
 ### An amendment of a criterion
 
-When the human approves a new wording for a criterion of a run, do not put the new text in free text. Use `ark criteria amend <run> <criterion id> <file> --reason <text>` when an AC wording is wrong after planning, instead of aborting the run, and only with the human's approval. Send the run lead the criterion ID, the new text and the human's reason, and ask it to run the command, so that `ticket.md`, the log and `plan.md` carry it. The run lead runs it, never amends on its own. It works in every phase before `merge_requests_open`. When only test case ids changed, tell the lead to use `--verified-by <case ids>` instead of a file. When the human decides a manual criterion's answer still stands after the new text, send the human's words so the lead adds `--carry-manual <words>`.
+When the human approves a new wording for a criterion of a run, do not put the new text in free text. Use `ark criteria amend <run> <criterion id> <file> --reason <text>` when an AC wording is wrong after planning, instead of aborting the run, and only with the human's approval. Send the run lead the criterion ID, the new text and the human's reason, and ask it to run the command, so that `ticket.md`, the log and `plan.md` carry it. The run lead runs it, never amends on its own. It works in every phase before `merge_requests_open`.
+When only test case ids changed, tell the lead to use `--verified-by <case ids>` instead of a file. When the human decides a manual criterion's answer still stands after the new text, send the human's words so the lead adds `--carry-manual <words>`.
 
 ### A `worker_done` from a run lead
 
 1. Check that it is from the run lead you started for that run.
 2. Run `ark status <run>`. A run lead that finished its work leaves the run in `merge_requests_open`, or in `closed` if it was aborted.
-3. If the run is in phase `building`, the outcome is not `failed`, and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask whether they took the branches. On their answer run `ark run close <run> handed_off`. `ark run close` applies the refusals of `ark merge-request open`; on a refusal, run `ark test <run>` again or `ark criteria amend`, and tell the human which AC is open. Then go to section 8 after-close steps. Skip steps 4 and 5, then release the run lead as in step 6.
+3. If the run is in phase `building`, the outcome is not `failed`, and the project's `ark.yml` says `merge_requests: none`, it is local-only. Tell the human the branches from `ark status <run>` and, for each, `git -C <repo> log --oneline <base>..<branch>` (`<base>` is in the `worktree.created` event). Ask whether they took the branches. On their answer run `ark run close <run> handed_off`. `ark run close` applies the refusals of `ark merge-request open`; on a refusal, run `ark test <run>` again or `ark criteria amend`, and tell the human which AC is open. Then go to section 8 after-close steps. Skip steps 4 and 5; step 6 applies.
 4. If the outcome is `failed`, or the run is not in `merge_requests_open`, tell the human what the run lead reported and decide with them.
 5. Otherwise give the human the MR links from `ark status <run>`, in the order they must merge, and tell them: review each MR, merge them in that order, then tell you.
-6. Release the run lead: `orca orchestration worker-release --dispatch <dispatch id> --json`.
+6. Leave the run lead to `ark run close`, which releases it now that it has reported.
 
 ## 8. Close the run
 
@@ -223,10 +223,10 @@ ark merge-request status <run>
 
 It prints `<repo>  merged|open|closed  <url>` for each MR, then `ci:`, `conflict` and `checks failing:` as in `docs/reference/cli.md`.
 
-Release the run lead before you close the run, so that the removal of its worktree does not end a live agent. Do it when it is not yet released: its row in `orca orchestration worker-list --include-remote --json` is still listed as running, and section 7 (`worker_done` from a run lead, step 5) has not released it. If it was released there, skip this.
+Stop a live run lead before you close the run, so that the removal of its worktree does not end a running agent. Do it only when its row in `orca orchestration worker-list --include-remote --json` is still listed as running and it sent no `worker_done`. A run lead that reported is settled: `ark run close` releases it, so skip this.
 
 ```sh
-orca orchestration worker-release --dispatch <dispatch id> --json
+orca orchestration worker-stop --dispatch <dispatch id> --json
 ```
 
 Choose the outcome:
@@ -246,7 +246,7 @@ Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.m
 
 A `HELD: <run> #<number> ticket superseded` line from the auto-merger (section 12) means nobody wants the PR. Tell the human. With the human, close the run `aborted` or `abandoned` (table above) and close the PR with `gh pr close <url>`. Never merge it. `no final report` needs nothing: the PR merges when `retro.md` exists. `ticket done`: check the run and the PR with the human.
 
-`ark run close` also releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each. It leaves an active dispatch and says `<dispatch id> still active, not released`. An Orca failure prints one `orca: workers not released: <reason>` line and the close still exits 0. After the ARK-278 ticket merges, run `ark run close --sweep` once to release the workers of runs closed earlier (it records no event; a second run prints nothing; it never releases a `release_unknown` row).
+`ark run close` also releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each. It leaves an active dispatch and says `<dispatch id> still active, not released`. An Orca failure prints one `orca: workers not released: <reason>` line and the close still exits 0. Run `ark run close --sweep` once to release the workers of runs closed earlier (it records no event; a second run prints nothing; it never releases a `release_unknown` row).
 
 After `ark run close`:
 
@@ -298,7 +298,8 @@ At 70% or more context use, as your status line shows, do these steps in order. 
 
 Two loops run in the Ark repo's `scripts/` folder. Start each one in its own background job in a terminal, with the workspace and the interval in seconds as arguments:
 
-- `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN and 3 rules hold: it merges only after `retro.md` exists in the run folder (the run lead sent its final report), it skips a run whose ticket is `superseded` or `done`, and it re-reads `ark status <run>` right before `gh pr merge`. It prints `HELD: <run> #<number> <reason>` lines to stderr, once for each held PR. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again. Do not start `scripts/auto-merger.sh` for a project whose `ark.yml` says `merge_requests: none`: its runs never reach `merge_requests_open`.
+- `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN and 3 rules hold: it merges only after `retro.md` exists in the run folder (the run lead sent its final report), it skips a run whose ticket is `superseded` or `done`, and it re-reads `ark status <run>` right before `gh pr merge`. It prints `HELD: <run> #<number> <reason>` lines to stderr, once for each held PR. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again.
+  Do not start `scripts/auto-merger.sh` for a project whose `ark.yml` says `merge_requests: none`: its runs never reach `merge_requests_open`.
 - `scripts/temp-cleaner.sh <workspace> 300` removes Ark test temp directories from `$TMPDIR`, then runs `git worktree prune` in the workspace so no removed folder stays listed as a worktree. It prints `LOW DISK` and exits when `/` has less than 15 GB free. The cleaner keeps a temp root whose `<root>/ark-owner.pid` names a live process, at any age. It removes a root 12 minutes after that process ended, and a root with no usable owner file after 180 minutes. Master Chief starts the cleaner again only after this ticket (ARK-404) is merged: an older cleaner removes a live suite's temp root by age.
 
 ## 13. Catch the human up
@@ -315,7 +316,7 @@ Leave out a part that has no items and say "Nothing waiting" when all three are 
 
 ## Rules
 
-- Never write product code, edit a worktree, or run a project's tests yourself. Run leads and workers do that.
+- Never write product code, edit a worktree, or run a project's own test suite by hand. `ark test` and `ark run close` run the tests. Run leads and workers write the code.
 - Never answer a gate yourself, and never relay a `plan` or `strategy` gate that `ark.yml` set to `auto`. Every other `ask` goes to the human, and the human's words go back with `reply`.
 - Never run `ark gate record`. The run lead records the human's answer.
 - Never queue a ticket the human did not approve.
