@@ -731,7 +731,7 @@ async function lockChild(stage: "open" | "flock" | "write", afterStage = "") {
     setInterval(() => {}, 1000);`;
   const child = Bun.spawn(["bun", "-e", code], {
     env: process.env,
-    stdin: "ignore",
+    stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -801,13 +801,17 @@ test(
     await nextHubServes("a live pid in the file");
 
     // K7: a holder that has the flock but has not rewritten the file yet. The previous hub's JSON in the file
-    // names a dead pid, and the contender must wait for the holder's own port.
+    // names a dead pid, and the contender must wait for the holder's own port. The holder publishes when it reads stdin,
+    // sent right after the contender spawns: no signal says the contender is polling, so the hub's bun start
+    // (hundreds of ms) is what leaves it waiting on the stale content first.
     writeFileSync(lockFilePath(), JSON.stringify({ pid: 2147483647, port: 1234 }));
     const publishing = await lockChild(
       "flock",
-      `setTimeout(() => writeHolder(descriptor, 5678), 1500);`,
+      `void (async () => { for await (const _ of Bun.stdin.stream()) { writeHolder(descriptor, 5678); break; } })();`,
     );
     const contender = spawnHub();
+    void publishing.child.stdin.write("publish");
+    void publishing.child.stdin.flush();
     await until(
       "the contender to refuse",
       () => contender.output().includes("did not start"),
