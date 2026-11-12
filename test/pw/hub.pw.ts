@@ -7614,6 +7614,7 @@ test("ARK-T280 the ticket, Roadmap, Runs and plan graphs fit the width of their 
       ["below the floor", Math.round(0.55 * natural), (ratio) => ratio < minimumScale],
       ["exactly at the floor", Math.ceil(minimumScale * natural), (ratio) => ratio >= minimumScale],
       ["above the floor", Math.round(0.8 * natural), (ratio) => ratio > minimumScale && ratio < 1],
+      ["close to a full fit", Math.round(0.85 * natural), (ratio) => ratio > 0.8 && ratio < 1],
     ];
     for (const [name, inner, inClass] of classes) {
       const reached = await widenTo(page, inner);
