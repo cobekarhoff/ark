@@ -12,10 +12,8 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
   symlinkSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -259,19 +257,35 @@ type Hub = {
 
 /** `bun <repository>/hub/main.ts --port <port>`. The hub has its own copy of the environment. */
 function spawnHub(
-  options: { interval?: number; repository?: string; port?: number | string } = {},
+  options: {
+    interval?: number;
+    repository?: string;
+    port?: number | string;
+    /** A file the hub waits for before it starts, so that two hubs start at the same moment. */
+    start?: string;
+  } = {},
 ): Hub {
   const environment: Record<string, string | undefined> = { ...process.env };
   if (options.interval) environment.ARK_HUB_INTERVAL_MS = String(options.interval);
-  const child = Bun.spawn(
-    [
-      "bun",
-      join(options.repository ?? root, "hub", "main.ts"),
-      "--port",
-      String(options.port ?? 0),
-    ],
-    { env: environment, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
-  );
+  const main = join(options.repository ?? root, "hub", "main.ts");
+  const portArgument = String(options.port ?? 0);
+  // The start file wrapper sets the `--port` argument itself and loads `hub/main.ts` once the file exists.
+  const command = options.start
+    ? [
+        "bun",
+        "-e",
+        `import { existsSync } from "node:fs";
+         while (!existsSync(${JSON.stringify(options.start)})) {}
+         process.argv.push("--port", ${JSON.stringify(portArgument)});
+         await import(${JSON.stringify(main)});`,
+      ]
+    : ["bun", main, "--port", portArgument];
+  const child = Bun.spawn(command, {
+    env: environment,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   processes.push(child);
   let text = "";
   void (async () => {
@@ -564,11 +578,9 @@ function copyOfRepository(): string {
   return copy;
 }
 
-const lockFiles = () =>
-  readdirSync(process.env.ARK_HOME!).filter((file) => /^hub-.*\.lock$/.test(file));
 const refusalOf = (port: number) => `Ark hub already runs on http://127.0.0.1:${port}`;
 
-test("ARK-T242 A second hub on the same Ark repo refuses to start, exits 0, names the port of the running hub, and takes over a lock left by a dead pid", async () => {
+test("ARK-T242 A second hub on the same Ark repo refuses to start, exits 0, and names the port of the running hub", async () => {
   fixture();
   const a = await startHub();
   const portA = a.port()!;
@@ -588,43 +600,6 @@ test("ARK-T242 A second hub on the same Ark repo refuses to start, exits 0, name
   const otherRepository = copyOfRepository();
   const d = await startHub({ repository: otherRepository });
   expect(d.port()).not.toBe(portA);
-
-  // Step 5: two hubs of a fresh repo at once: one stays up, the other exits 0 and names it.
-  const racedRepository = copyOfRepository();
-  const first = spawnHub({ repository: racedRepository });
-  const second = spawnHub({ repository: racedRepository });
-  await Promise.race([first.exited, second.exited]);
-  const [loser, winner] = first.child.exitCode === null ? [second, first] : [first, second];
-  expect(await loser.exited).toBe(0);
-  await until("the surviving hub to print its port", () => winner.port());
-  expect(winner.child.exitCode).toBeNull();
-  expect(loser.output()).toContain(refusalOf(winner.port()!));
-
-  for (const hub of [d, winner]) {
-    hub.child.kill("SIGTERM");
-    await hub.exited;
-  }
-  expect(lockFiles()).toHaveLength(1); // hub A's
-
-  // Step 6: a lock left by a killed hub does not block a start.
-  a.child.kill("SIGKILL");
-  await a.exited;
-  expect(lockFiles()).toHaveLength(1);
-  const e = await startHub();
-  expect(e.port()).not.toBeUndefined();
-  expect(e.output()).not.toContain("already runs");
-  expect((await fetch(`${e.baseUrl()}/api/snapshot`)).status).toBe(200);
-  // The lock now names hub E: a second start names E's port.
-  const refused = spawnHub();
-  expect(await refused.exited).toBe(0);
-  expect(refused.output()).toContain(refusalOf(e.port()!));
-
-  // Step 7: SIGTERM removes the lock and a new hub starts.
-  e.child.kill("SIGTERM");
-  expect(await e.exited).toBe(0);
-  expect(lockFiles()).toHaveLength(0);
-  const f = await startHub();
-  expect(f.port()).not.toBeUndefined();
 });
 
 // ---------------------------------------------------------------- ARK-T243
@@ -729,94 +704,198 @@ test("ARK-T243 The hub reads Plannotator only while a run has an open gate, read
   expect(fake.reads("plannotator")).toBe(1);
 });
 
-// ---------------------------------------------------------------- ARK-T249
+// ---------------------------------------------------------------- ARK-T266
 
-test("ARK-T249 Hubs that start at once on a lock left by a dead pid give the lock to exactly one, and every other one names it", async () => {
-  fixture();
-  const lockPath = join(
+const lockModule = JSON.stringify(join(root, "hub", "lock.ts"));
+const lockFilePath = () =>
+  join(
     process.env.ARK_HOME!,
     `hub-${createHash("sha1").update(root).digest("hex").slice(0, 12)}.lock`,
   );
-  const go = join(process.env.ARK_FAKE_STATE!, "go");
-  const code = `
-    import { existsSync } from "node:fs";
-    import { acquireLock } from ${JSON.stringify(join(root, "hub", "lock.ts"))};
-    console.log("ready");
-    while (!existsSync(${JSON.stringify(go)})) {}
-    console.log(JSON.stringify({ pid: process.pid, holder: acquireLock(1234) }));
-    setInterval(() => {}, 1000);`;
-  const racers = 12;
-  for (let round = 0; round < 12; round++) {
-    rmSync(go, { force: true });
-    writeFileSync(lockPath, JSON.stringify({ pid: 2147483647, port: 1234 }));
-    const children = Array.from({ length: racers }, () => {
-      const child = Bun.spawn(["bun", "-e", code], {
-        env: process.env,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      processes.push(child);
-      const lines: string[] = [];
-      void (async () => {
-        let text = "";
-        for await (const chunk of child.stdout) {
-          text += new TextDecoder().decode(chunk);
-          lines.splice(0, lines.length, ...text.split("\n").filter(Boolean));
-        }
-      })();
-      return lines;
-    });
-    await until("every racer to be ready", () => children.every((lines) => lines.length >= 1));
-    writeFileSync(go, "");
-    await until("every racer to answer", () => children.every((lines) => lines.length >= 2));
-    const answers = children.map(
-      (lines) => JSON.parse(lines[1]) as { pid: number; holder: unknown },
-    );
-    const winners = answers.filter((answer) => answer.holder === null);
-    expect(winners).toHaveLength(1);
-    expect(JSON.parse(readFileSync(lockPath, "utf8")).pid).toBe(winners[0].pid);
-    for (const answer of answers) {
-      if (answer.holder !== null) expect(answer.holder).toMatchObject({ pid: winners[0].pid });
-    }
-    for (const child of processes.splice(0)) {
-      child.kill("SIGKILL");
-      await child.exited;
-    }
-  }
 
-  // A reclaim-mutex holder that is suspended, not dead, keeps the mutex however old it is: a
-  // contender waits, and takes the lock only once the holder dies.
-  rmSync(go, { force: true });
-  writeFileSync(lockPath, JSON.stringify({ pid: 2147483647, port: 1234 }));
-  const holder = Bun.spawn(["sleep", "600"]);
-  processes.push(holder);
-  process.kill(holder.pid, "SIGSTOP");
-  writeFileSync(`${lockPath}.reclaim`, JSON.stringify({ pid: holder.pid, port: 1234 }));
-  utimesSync(`${lockPath}.reclaim`, 0, 0);
-  const contender = Bun.spawn(["bun", "-e", code], {
+/**
+ * A child that runs the real lock stages of `hub/lock.ts` up to `stage` and prints `ready`, or
+ * `busy` when the flock is already held. `afterStage` is extra child code that runs before `ready`.
+ */
+async function lockChild(stage: "open" | "flock" | "write", afterStage = "") {
+  const code = `
+    import { openLockFile, tryFlock, writeHolder } from ${lockModule};
+    const descriptor = openLockFile();
+    if (${JSON.stringify(stage)} !== "open" && !tryFlock(descriptor)) {
+      console.log("busy");
+      process.exit(0);
+    }
+    if (${JSON.stringify(stage)} === "write") writeHolder(descriptor, 1234);
+    ${afterStage}
+    console.log("ready");
+    setInterval(() => {}, 1000);`;
+  const child = Bun.spawn(["bun", "-e", code], {
     env: process.env,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
   });
-  processes.push(contender);
-  const output: string[] = [];
+  processes.push(child);
+  let text = "";
   void (async () => {
-    let text = "";
-    for await (const chunk of contender.stdout) {
-      text += new TextDecoder().decode(chunk);
-      output.splice(0, output.length, ...text.split("\n").filter(Boolean));
-    }
+    for await (const chunk of child.stdout) text += new TextDecoder().decode(chunk);
   })();
-  await until("the contender to be ready", () => output.length >= 1);
-  writeFileSync(go, "");
-  expect(output).toHaveLength(1);
-  process.kill(holder.pid, "SIGKILL");
-  await until("the contender to answer", () => output.length >= 2);
-  expect(JSON.parse(output[1]).holder).toBeNull();
-  expect(JSON.parse(readFileSync(lockPath, "utf8")).pid).toBe(contender.pid);
-  expect(existsSync(`${lockPath}.reclaim`)).toBe(false);
+  await until(`the lock child to reach ${stage}`, () => /ready|busy/.test(text), 10_000);
+  expect(text).toContain("ready");
+  return { child, output: () => text };
+}
+
+/** Starts a real hub for the repo, checks it serves within 5 s, and stops it. */
+async function nextHubServes(context: string) {
+  const hub = spawnHub();
+  await until(`the next hub to start (${context})`, () => hub.port(), 5000);
+  expect((await fetch(`${hub.baseUrl()}/api/snapshot`)).status).toBe(200);
+  hub.child.kill("SIGTERM");
+  await hub.exited;
+}
+
+test(
+  "ARK-T266 A hub killed with SIGKILL at any point of taking the lock never blocks the next hub",
+  async () => {
+    fixture();
+
+    // Part A, K1 to K3: killed after each real stage.
+    for (const stage of ["open", "flock", "write"] as const) {
+      const { child } = await lockChild(stage);
+      child.kill("SIGKILL");
+      await child.exited;
+      await nextHubServes(`killed after ${stage}`);
+    }
+
+    // K4: a takeover of a dead holder's lock is killed as well.
+    const dead = await lockChild("write");
+    dead.child.kill("SIGKILL");
+    await dead.child.exited;
+    const taker = await lockChild("flock"); // `ready`, not `busy`: the dead holder's lock is free
+    taker.child.kill("SIGKILL");
+    await taker.child.exited;
+    await nextHubServes("killed during a takeover");
+
+    // K5: a process the killed one spawned stays alive and must not hold the lock.
+    const parent = await lockChild(
+      "flock",
+      `const sleeper = Bun.spawn(["sleep", "600"]); console.log("sleeper " + sleeper.pid);`,
+    );
+    const sleeperPid = Number(parent.output().match(/sleeper (\d+)/)![1]);
+    try {
+      parent.child.kill("SIGKILL");
+      await parent.child.exited;
+      process.kill(sleeperPid, 0); // still alive
+      await nextHubServes("a child of the killed hub is alive");
+    } finally {
+      process.kill(sleeperPid, "SIGKILL");
+    }
+
+    // K6: a live, unrelated pid in the file is not a lock.
+    const unrelated = Bun.spawn(["sleep", "600"]);
+    processes.push(unrelated);
+    writeFileSync(lockFilePath(), JSON.stringify({ pid: unrelated.pid, port: 1234 }));
+    await nextHubServes("a live pid in the file");
+
+    // Part B: a real hub killed at a seeded random moment of its start. The kill moment is real time.
+    const seed = Date.now() % 2 ** 31;
+    let state = seed;
+    const random = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 2 ** 32;
+    };
+    for (let round = 0; round < 30; round++) {
+      const hub = spawnHub();
+      await sleep(random() * 150);
+      hub.child.kill("SIGKILL");
+      await hub.exited;
+      await nextHubServes(`seed ${seed}, round ${round}`);
+    }
+  },
+  { timeout: 180_000 },
+);
+
+// ---------------------------------------------------------------- ARK-T267
+
+/** A port that is free now. */
+function freePort(): number {
+  const probe = Bun.serve({ port: 0, fetch: () => new Response("") });
+  const port = probe.port as number;
+  void probe.stop(true);
+  return port;
+}
+
+test(
+  "ARK-T267 Two hubs for the same repo that start together give the lock to exactly one, and the other refuses and names its port",
+  async () => {
+    fixture();
+    const startFile = join(process.env.ARK_FAKE_STATE!, "go");
+    for (let round = 0; round < 20; round++) {
+      process.env.ARK_HOME = mkdtempSync(join(tmpdir(), "ark-hub-race-"));
+      rmSync(startFile, { force: true });
+      const port = round % 2 === 0 ? 0 : freePort();
+      const first = spawnHub({ port, start: startFile });
+      const second = spawnHub({ port, start: startFile });
+      await sleep(400); // Real processes: no signal says that both are loaded and waiting.
+      writeFileSync(startFile, "");
+      await until(
+        `one hub to exit (round ${round})`,
+        () => first.child.exitCode !== null || second.child.exitCode !== null,
+        5000,
+      );
+      const [loser, winner] = first.child.exitCode !== null ? [first, second] : [second, first];
+      const winnerPort = await until(`the winner to print its port (round ${round})`, () =>
+        winner.port(),
+      );
+      await until(`the refusal naming ${winnerPort} (round ${round})`, () =>
+        loser.output().includes(refusalOf(winnerPort)),
+      );
+      expect(await loser.exited).toBe(0);
+      expect(winner.child.exitCode).toBeNull();
+      expect((await fetch(`${winner.baseUrl()}/api/snapshot`)).status).toBe(200);
+      winner.child.kill("SIGTERM");
+      await winner.exited;
+    }
+  },
+  { timeout: 180_000 },
+);
+
+// ---------------------------------------------------------------- ARK-T268
+
+test("ARK-T268 A live hub that is stopped with SIGSTOP keeps its lock, and serves again after SIGCONT", async () => {
+  fixture();
+  const a = await startHub();
+  const portA = a.port()!;
+
+  process.kill(a.child.pid, "SIGSTOP"); // Bun's `child.kill("SIGSTOP")` does not stop the process
+  await until("hub A to be stopped", () =>
+    spawnSync("ps", ["-o", "stat=", "-p", String(a.child.pid)])
+      .stdout.toString()
+      .startsWith("T"),
+  );
+  const stopped = await fetch(`${a.baseUrl()}/api/snapshot`, {
+    signal: AbortSignal.timeout(500),
+  }).then(
+    () => "answered",
+    () => "timed out",
+  );
+  expect(stopped).toBe("timed out");
+
+  // The second hub refuses by itself; it neither waits for the stopped hub nor takes over.
+  const b = spawnHub();
+  const bExit = await Promise.race([b.exited, sleep(5000).then(() => "hung")]);
+  expect(bExit).toBe(0);
+  expect(b.output()).toContain(refusalOf(portA));
+  expect(b.output()).not.toContain("Ark hub on http");
+
+  process.kill(a.child.pid, "SIGCONT");
+  expect((await fetch(`${a.baseUrl()}/api/snapshot`)).status).toBe(200);
+
+  const c = spawnHub();
+  expect(await c.exited).toBe(0);
+  expect(c.output()).toContain(refusalOf(portA));
+  a.child.kill("SIGTERM");
+  await a.exited;
 });
 
 // ---------------------------------------------------------------- ARK-T250
