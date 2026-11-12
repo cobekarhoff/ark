@@ -194,13 +194,15 @@ test("ARK-T291 ark test writes the peak memory, CPU seconds, wall time and wait 
   expect(first.broken).toBeNull();
   expect(first.reads).toBeGreaterThan(0);
 
-  // A second run replays both suites from the cache: no process starts, so no figure is claimed.
+  // A second run replays both suites from the cache: no process starts, so the measured figures stay and say cached.
   await arkTestWatching(runId, runDirectory);
   const cached = resourcesFile(runDirectory);
-  expect(cached.suites).toEqual({
-    unit: { head: { cached: true }, base: { cached: true } },
-    e2e: { head: { cached: true }, base: { cached: true } },
-  });
+  for (const [name, sides] of Object.entries(file.suites!))
+    for (const side of ["head", "base"] as const)
+      expect(cached.suites![name]![side], `${name} ${side}`).toEqual({
+        ...sides[side],
+        cached: true,
+      });
   expect(cached.agents).toEqual(hubKeys.agents);
   expect(cached.gaps).toEqual(hubKeys.gaps);
 

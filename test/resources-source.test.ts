@@ -588,6 +588,14 @@ test("ARK-T292 the hub records the maximum memory and the last cumulative CPU of
   expect(read().gaps).toHaveLength(2);
   expect(read().agents.H1.cpu_s).toBe(27);
   expect(JSON.stringify(read())).not.toContain(secrets.token);
+  // The hub dies with no flush (SIGKILL): the stamp each sample left still lets the next hub record the span.
+  const third = createResourcesReader();
+  await sample(third, 1000, { H1: [350, 28], H2: [150, 12] });
+  const crashGap = read().gaps.at(-1);
+  expect(read().gaps).toHaveLength(3);
+  expect(crashGap.to).toBe(new Date(start + 1_000_000).toISOString());
+  expect(Date.parse(crashGap.from)).toBeGreaterThanOrEqual(start + 430_000 - 60_000);
+  expect(Date.parse(crashGap.from)).toBeLessThanOrEqual(start + 430_000);
 });
 
 test("ARK-T292 closing the last hub page writes the time of the last sample, so the next sample records the gap", async () => {

@@ -410,11 +410,13 @@ function recordSide(
   resultsDirectory: string,
   suite: string,
   side: "head" | "base",
-  use: SideUse,
+  use: SideUse | "cached",
 ): void {
   updateResources(dirname(resultsDirectory), (file) => {
     file.suites ??= {};
-    file.suites[suite] = { ...file.suites[suite], [side]: use };
+    // A cached suite starts no process: keep the last measured figures and mark them cached.
+    const next = use === "cached" ? { ...file.suites[suite]?.[side], cached: true as const } : use;
+    file.suites[suite] = { ...file.suites[suite], [side]: next };
   });
 }
 
@@ -460,7 +462,7 @@ async function runSuite(
       );
       sideRun.reused.push(suite.name);
       if (sideRun.side !== "census")
-        recordSide(resultsDirectory, suite.name, sideRun.side, { cached: true });
+        recordSide(resultsDirectory, suite.name, sideRun.side, "cached");
       for (const file of cached.flaky) sideRun.flaky.push({ suite: suite.name, file });
       return { results: cached.results, passed: true, flaky: cached.flaky, reused: true };
     }

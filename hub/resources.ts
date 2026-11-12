@@ -20,6 +20,7 @@ const lsofCommand = () => process.env.ARK_LSOF || "lsof";
 const historyMilliseconds = 24 * 3600 * 1000;
 /** A span longer than this between two samples of a run is a gap: the hub had no page open, or was not running. */
 const gapMilliseconds = 30_000;
+const stampMilliseconds = 60_000;
 const otherLimit = 10;
 const commandLimit = 200;
 /** The route sends at most this many points of a signal: a longer history keeps every few-th point and the last. */
@@ -104,6 +105,7 @@ export function createResourcesReader() {
   /** Per open run: when it was last sampled, and what the file already holds for each agent. */
   const lastSampled = new Map<string, { at: number; directory: string }>();
   const written = new Map<string, Map<string, { peak_mb: number; cpu_s: number }>>();
+  const stamped = new Map<string, number>();
 
   function recordHistory(at: number, host: HostView): void {
     const values: Record<Signal, number | null> = {
@@ -154,7 +156,7 @@ export function createResourcesReader() {
         const old = known.get(handle) ?? file?.agents?.[handle];
         return old === undefined || use.peak_mb > old.peak_mb || use.cpu_s > old.cpu_s;
       });
-      if (!gap && !changed && file?.sampled_until === undefined) continue;
+      if (!gap && !changed && at - (stamped.get(run) ?? 0) < stampMilliseconds) continue;
       updateResources(directory, (current) => {
         current.agents ??= {};
         for (const [handle, use] of seen) {
@@ -169,7 +171,9 @@ export function createResourcesReader() {
             ...(current.gaps ?? []),
             { from: new Date(before).toISOString(), to: new Date(at).toISOString() },
           ];
-        delete current.sampled_until;
+        // A hub that dies without `flush` still leaves the time of a sample at most a minute old, so the next sample sees the gap.
+        current.sampled_until = new Date(at).toISOString();
+        stamped.set(run, at);
         written.set(run, new Map(Object.entries(current.agents)));
       });
     }
@@ -307,6 +311,7 @@ export function createResourcesReader() {
           current.sampled_until = new Date(at).toISOString();
         });
       lastSampled.clear();
+      stamped.clear();
     },
   };
 }

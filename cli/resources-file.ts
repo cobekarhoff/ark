@@ -4,8 +4,8 @@ import { readProcessTable } from "./process-table.ts";
 
 /** What one side of a suite used: peak memory of its process group, CPU seconds, wall time, and the wait for admission. */
 export type SuiteUse = { peak_mb: number; cpu_s: number; wall_s: number; wait_s: number };
-/** A cached suite starts no process, so it has no figures. */
-export type SideUse = SuiteUse | { cached: true };
+/** A cached suite starts no process: it keeps the figures of its last measured run beside `cached: true`, or only the flag when it was never measured. */
+export type SideUse = (SuiteUse & { cached?: true }) | { cached: true };
 
 /**
  * `results/resources.json` of a run. `ark test` owns `suites`; the hub owns `agents` and `gaps`. Each writer changes
@@ -17,7 +17,7 @@ export type ResourcesFile = {
   agents?: Record<string, { peak_mb: number; cpu_s: number }>;
   /** Spans of an open run with no hub sample. */
   gaps?: { from: string; to: string }[];
-  /** The hub's last sample time, written when it pauses or stops, so the next sample can record the gap. */
+  /** The hub's last sample time, written every minute of sampling and when it pauses or stops, so the next sample can record the gap. */
   sampled_until?: string;
 };
 

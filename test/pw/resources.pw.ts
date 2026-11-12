@@ -346,7 +346,10 @@ test("ARK-T290 the header strip is on every hub page and the Resources page grou
         .getByRole("navigation", { name: "Views" })
         .getByRole("link", { name, exact: true })
         .evaluate((tab) => getComputedStyle(tab).color);
-    await expect.poll(async () => tabColor("Resources")).toBe(await tabColor("Roadmap"));
+    // Both are read in the poll: a colour transition after the scheme change must not fix one side early.
+    await expect
+      .poll(async () => (await tabColor("Resources")) === (await tabColor("Roadmap")))
+      .toBe(true);
     await checkpoint(page, `strip-home-${scheme}`);
     await page.goto(`${baseUrl}/#/resources`);
     await expect(page.getByTestId("sparkline")).toHaveCount(5);
