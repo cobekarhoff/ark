@@ -1,10 +1,10 @@
 ---
 id: ARK-T286
-title: ARK-T286 post_mr exits 2 and posts nothing when an upload fails or gh has no --attach
+title: "ARK-T286 post_mr exits 2 and posts nothing when an upload fails or gh has no --attach"
 level: integration
-technique: error guessing and state transition: failure on the first and on the last of 2 uploads, and the version probe before any write
+technique: "error guessing and state transition: failure on the first and on the last of 2 uploads, and the version probe before any write"
 priority: high
-risk: a failed upload still creates the MR with a local path in the body, a failure on file 2 posts after file 1 was uploaded, `gh` older than 2.99.0 fails only after `gh pr create` ran or exits 1, the message does not name the file or `2.99.0`
+risk: "a failed upload still creates the MR with a local path in the body, a failure on file 2 posts after file 1 was uploaded, `gh` older than 2.99.0 fails only after `gh pr create` ran or exits 1, the message does not name the file or `2.99.0`"
 status: active
 changed_by: 2026-11-12-ARK-399-1
 ---

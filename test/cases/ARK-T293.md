@@ -1,10 +1,10 @@
 ---
 id: ARK-T293
-title: ARK-T293 a secret-like command.log line is not in the posted body
+title: "ARK-T293 a secret-like command.log line is not in the posted body"
 level: integration
-technique: equivalence classes on the secret kind (token, key, password, bearer, similar) with a clean control line, and boundary values (secret in line 20 of the tail and in line 21, outside the tail)
+technique: "equivalence classes on the secret kind (token, key, password, bearer, similar) with a clean control line, and boundary values (secret in line 20 of the tail and in line 21, outside the tail)"
 priority: high
-risk: the last 20 lines of a head `command.log` go into a public MR body with a token, key, password or bearer value in them; only the line inside the tail matters, and the redaction must not erase the clean lines or the whole log
+risk: "the last 20 lines of a head `command.log` go into a public MR body with a token, key, password or bearer value in them; only the line inside the tail matters, and the redaction must not erase the clean lines or the whole log"
 status: active
 changed_by: 2026-11-12-ARK-399-1
 ---

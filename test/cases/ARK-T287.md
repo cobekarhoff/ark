@@ -1,10 +1,10 @@
 ---
 id: ARK-T287
-title: ARK-T287 Evidence section folds each test case and each non-test AC in a details block, the same on both hosts, and SIZE01 skips it
+title: "ARK-T287 Evidence section folds each test case and each non-test AC in a details block, the same on both hosts, and SIZE01 skips it"
 level: integration
-technique: equivalence classes (test case / non-test AC / no log / old ledger without a log field), boundary values on the log length (0, 20, 25 lines) and a state transition (open and closed details for SIZE01)
+technique: "equivalence classes (test case / non-test AC / no log / old ledger without a log field), boundary values on the log length (0, 20, 25 lines) and a state transition (open and closed details for SIZE01)"
 priority: high
-risk: a case has no `<details>` block or shows its log open, more than the last 20 lines of the head `command.log` are posted, base and head results are missing, a non-test AC evidence file is not read, GitHub and GitLab bodies differ, a log line starting `## ` or `**` cuts the Evidence section so EVID01/EVID03/EVID04 fail, a backtick fence in the log breaks out of its fence, SIZE01 counts the block as prose, or an unclosed `<details>` hides the rest of the body from SIZE01
+risk: "a case has no `<details>` block or shows its log open, more than the last 20 lines of the head `command.log` are posted, base and head results are missing, a non-test AC evidence file is not read, GitHub and GitLab bodies differ, a log line starting `## ` or `**` cuts the Evidence section so EVID01/EVID03/EVID04 fail, a backtick fence in the log breaks out of its fence, SIZE01 counts the block as prose, or an unclosed `<details>` hides the rest of the body from SIZE01"
 status: active
 changed_by: 2026-11-12-ARK-399-1
 ---

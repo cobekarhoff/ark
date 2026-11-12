@@ -1,10 +1,10 @@
 ---
 id: ARK-T47
-title: ARK-T47 evidence section lists 2 test cases and at most 5 screenshots
+title: "ARK-T47 evidence section lists 2 test cases and at most 5 screenshots"
 level: integration
-technique: boundary values on the screenshot count (5, 6, 7) and a run with no evidence folder
+technique: "boundary values on the screenshot count (5, 6, 7) and a run with no evidence folder"
 priority: medium
-risk: the Evidence section is absent or lists 7 screenshots, or EVID04 does not fire and the body ships with no evidence
+risk: "the Evidence section is absent or lists 7 screenshots, or EVID04 does not fire and the body ships with no evidence"
 status: active
 changed_by: 2026-11-12-ARK-399-1
 ---

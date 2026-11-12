@@ -1,10 +1,10 @@
 ---
 id: ARK-T284
-title: ARK-T284 post_mr on GitHub passes one --attach per existing local file, resolved against the run folder
+title: "ARK-T284 post_mr on GitHub passes one --attach per existing local file, resolved against the run folder"
 level: integration
-technique: equivalence classes (path exists / path missing / non-image) and boundary values on the screenshot count (0, 2)
+technique: "equivalence classes (path exists / path missing / non-image) and boundary values on the screenshot count (0, 2)"
 priority: high
-risk: `--attach` is passed 0 or 2x per file, a path that does not exist is attached, a run-folder-relative path is resolved against the repo worktree so no file is found and a body with local paths is posted, or `gh pr edit` (update) gets no `--attach`
+risk: "`--attach` is passed 0 or 2x per file, a path that does not exist is attached, a run-folder-relative path is resolved against the repo worktree so no file is found and a body with local paths is posted, or `gh pr edit` (update) gets no `--attach`"
 status: active
 changed_by: 2026-11-12-ARK-399-1
 ---

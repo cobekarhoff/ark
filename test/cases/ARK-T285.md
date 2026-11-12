@@ -1,10 +1,10 @@
 ---
 id: ARK-T285
-title: ARK-T285 post_mr on GitLab uploads each local screenshot and posts a body with the upload URLs and no local path
+title: "ARK-T285 post_mr on GitLab uploads each local screenshot and posts a body with the upload URLs and no local path"
 level: integration
-technique: equivalence classes (Markdown image target / same path in backticks / path that is a suffix of another path) and state transition (upload before create or update)
+technique: "equivalence classes (Markdown image target / same path in backticks / path that is a suffix of another path) and state transition (upload before create or update)"
 priority: high
-risk: a screenshot is not uploaded, an upload is repeated, the body is posted with a local path a reviewer cannot open, the path is replaced inside a backtick or a longer path (`a.png` inside `x/a.png`), the substitution is done before `finalBodyOf` so old URLs outside the markers survive wrongly, or the upload runs on a dry run
+risk: "a screenshot is not uploaded, an upload is repeated, the body is posted with a local path a reviewer cannot open, the path is replaced inside a backtick or a longer path (`a.png` inside `x/a.png`), the substitution is done before `finalBodyOf` so old URLs outside the markers survive wrongly, or the upload runs on a dry run"
 status: active
 changed_by: 2026-11-12-ARK-399-1
 ---
