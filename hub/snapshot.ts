@@ -44,6 +44,7 @@ import type {
   StepStatus,
   TicketRunView,
   TranscriptPage,
+  TranscriptResult,
 } from "./types.ts";
 import { stageTimes } from "../cli/events.ts";
 import { roleTimesOf } from "./progress.ts";
@@ -817,6 +818,15 @@ export function createSnapshotReader() {
     async transcript(run: string, file: string, cursor: number): Promise<TranscriptPage | null> {
       const session = this.runDetail(run)?.sessions.find((candidate) => candidate.file === file);
       return session ? usage.transcript(file, session.harness, cursor) : null;
+    },
+    /** The full result of one call in a session file of the run, or null for a foreign file, an unknown call or a call with no result yet. */
+    async transcriptResult(
+      run: string,
+      file: string,
+      callId: string,
+    ): Promise<TranscriptResult | null> {
+      const session = this.runDetail(run)?.sessions.find((candidate) => candidate.file === file);
+      return session ? usage.transcriptResult(file, session.harness, callId) : null;
     },
   };
 }

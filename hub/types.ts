@@ -477,11 +477,21 @@ export type TranscriptEntry =
       kind: "tool";
       time: string | null;
       name: string;
+      /** Arguments as JSON: every string field over 20,000 characters is cut with a note inside the field, so the text stays valid JSON. */
       args: string;
+      /** What the call does in one line: its command, file path or pattern, cut to 300 characters. Empty when the arguments name none. */
+      summary: string;
+      /** Id the result route takes. Absent when the record held no string id. */
+      callId?: string;
       status: "ok" | "error" | "unknown";
-      /** The first line of the result, cut to 300 characters. A full result never leaves the worker. */
+      /** The first line of the result, cut to 300 characters. The full result comes from the result route. */
       result: string;
+      /** Length in characters of the whole result, before any cut. 0 while the call has no result. */
+      resultSize: number;
     };
 
 /** One page of a transcript: at most 200 entries. `next` is the byte offset of the next page, or null at the end. */
 export type TranscriptPage = { entries: TranscriptEntry[]; next: number | null; size: number };
+
+/** One full tool result, cut at 64,000 characters. `size` is its length before the cut, `cut` says whether it was cut. */
+export type TranscriptResult = { text: string; size: number; cut: boolean };

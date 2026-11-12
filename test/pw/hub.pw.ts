@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page, type Request, type Route } from "@playwright/test";
 import { readdir } from "node:fs/promises";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -26,6 +27,7 @@ import {
   writeFakeToolState,
   writeOmpSession,
   writeRoadmap,
+  type ExtraEntry,
   writeRun,
   writeSessionFile,
   type FixtureRun,
@@ -1144,52 +1146,50 @@ test("ARK-284-AC4 the run page lists each decision of events.ndjson oldest first
 
 const toolNames: Record<SessionHarness, string> = { omp: "bash", claude: "Bash", codex: "shell" };
 
-/** What a transcript of `transcriptText(harness)` shows: messages, 2 tool calls, folded thinking. */
+/** What a transcript of `transcriptText(harness)` shows: one-line rows for messages, 2 tool calls and thinking, and the inspector of a call and of the folded thinking. */
 async function expectTranscript(page: Page, harness: SessionHarness): Promise<void> {
   const text = transcriptTexts(harness);
-  const entries = page.getByTestId("transcript-entry");
-  await expect(entries).toHaveCount(5);
+  const rows = page.getByTestId("transcript-entry");
+  await expect(rows).toHaveCount(5);
   expect(
-    await entries.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-kind"))),
+    await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-kind"))),
   ).toEqual(["message", "thinking", "message", "tool", "tool"]);
 
-  // Messages: role and time.
-  const messages = page.locator('[data-testid="transcript-entry"][data-kind="message"]');
-  await expect(messages.nth(0).locator(".role")).toHaveText("user");
-  await expect(messages.nth(0)).toContainText(text.user);
-  await expect(messages.nth(1).locator(".role")).toHaveText("assistant");
-  await expect(messages.nth(1)).toContainText(text.assistant);
-  for (const index of [0, 1])
-    await expect(messages.nth(index).locator("time")).toHaveAttribute(
-      "datetime",
-      /^\d{4}-\d\d-\d\dT/,
-    );
+  // Rows: time, kind and the first words.
+  await expect(rows.nth(0).locator(".k")).toHaveText("user");
+  await expect(rows.nth(0).locator(".s")).toHaveText(text.user);
+  await expect(rows.nth(2).locator(".k")).toHaveText("assistant");
+  await expect(rows.nth(2).locator(".s")).toHaveText(text.assistant);
+  for (let index = 0; index < 5; index++)
+    await expect(rows.nth(index).locator("time")).toHaveAttribute("datetime", /^\d{4}-\d\d-\d\dT/);
+  await expect(rows.nth(3)).toHaveAttribute("data-status", "ok");
+  await expect(rows.nth(3).locator(".k")).toHaveText(toolNames[harness]);
+  await expect(rows.nth(3).locator(".s")).toContainText(text.command);
+  await expect(rows.nth(4)).toHaveAttribute("data-status", "error");
+  await expect(rows.nth(4).locator(".e")).toHaveText(text.failFirstLine);
 
-  // Tool calls: name, arguments, ok or error, the first line of the result, never the rest.
-  const tools = page.getByTestId("transcript-tool");
-  await expect(tools).toHaveCount(2);
-  await expect(tools.nth(0)).toHaveAttribute("data-status", "ok");
-  await expect(tools.nth(0).locator(".name")).toHaveText(toolNames[harness]);
-  await expect(tools.nth(0).locator(".args")).toContainText(text.command);
-  await expect(tools.nth(0).locator(".pill")).toHaveText("ok");
-  await expect(tools.nth(0).getByTestId("tool-result")).toHaveText(text.okFirstLine);
-  await expect(tools.nth(1)).toHaveAttribute("data-status", "error");
-  await expect(tools.nth(1).locator(".pill")).toHaveText("error");
-  await expect(tools.nth(1).getByTestId("tool-result")).toHaveText(text.failFirstLine);
+  // A call in the inspector: the first line of its result, never the rest.
+  const inspector = page.getByTestId("inspector");
+  await rows.nth(3).click();
+  await expect(inspector.getByTestId("tool-result")).toHaveText(text.okFirstLine);
+  // The shell command of every harness reads as a bash block, never as argv or a JSON string.
+  await expect(inspector.getByTestId("code-block").locator(".lang")).toHaveText("bash");
+  await expect(inspector.getByTestId("code-block").locator("pre")).toHaveText(text.command);
+  await expect(inspector.getByTestId("show-result")).toBeVisible();
   await expect(page.locator("body")).not.toContainText(text.tail);
   await expect(page.locator("body")).not.toContainText("second line");
 
   // Thinking is folded until a click.
-  const thinking = page.getByTestId("thinking");
+  await rows.nth(1).click();
+  const thinking = inspector.getByTestId("thinking");
   await expect(thinking).toHaveJSProperty("open", false);
-  await expect(thinking.locator("p")).toBeHidden();
   await thinking.locator("summary").click();
   await expect(thinking).toHaveJSProperty("open", true);
-  await expect(thinking.locator("p")).toHaveText(text.thinking);
-  await expect(page.getByTestId("load-more")).toBeDisabled();
+  await expect(inspector.getByTestId("entry-text")).toHaveText(text.thinking);
+  await expect(page.getByTestId("load-more")).toHaveText("Check for new entries");
 }
 
-test("ARK-284-AC6 a DAG node, the run lead and an unassigned file open their transcript for an omp, a Claude and a Codex session file", async ({
+test("ARK-T273 a DAG node, the run lead and an unassigned file open their transcript as a list and an inspector for an omp, a Claude and a Codex session file", async ({
   page,
 }) => {
   const { sessions } = isolate();
@@ -1246,7 +1246,731 @@ test("ARK-284-AC6 a DAG node, the run lead and an unassigned file open their tra
   await expectTranscript(page, "codex");
 });
 
-test("ARK-284-AC7 a transcript shows 200 entries a page and Load more adds the next page until the end of the file", async ({
+/** A closed run whose one omp session file is the run lead's transcript. `files` are written under the run folder. */
+function leadTranscriptRun(
+  ticket: string,
+  extra: ExtraEntry[],
+  files: Record<string, string> = {},
+): { run: string; directory: string; started: Date; sessions: string } {
+  const { sessions } = isolate();
+  const run = runId(ticket);
+  const started = ago(7_200);
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: ticket, title: "Transcript" },
+    phase: "closed",
+    startedAt: started,
+    steps: [
+      {
+        id: "work",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 60,
+        finishedAfter: 6000,
+      },
+    ],
+  });
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(directory, path)), { recursive: true });
+    writeFileSync(join(directory, path), text);
+  }
+  // The session files start inside the step's window, so the step owns them all.
+  const fileStart = new Date(started.getTime() + 100_000);
+  writeSessionFile(
+    sessions,
+    "lead.jsonl",
+    transcriptText("omp", {
+      cwd: join(directory, "workspace"),
+      start: fileStart,
+      tag: "omp",
+      extra,
+    }),
+  );
+  installFakeTools({});
+  return { run, directory, started: fileStart, sessions };
+}
+
+async function openLeadTranscript(page: Page, baseUrl: string, run: string): Promise<void> {
+  await open(page, baseUrl, `run/${run}`);
+  await page.locator('[data-testid="step-node"][data-step="work"] a').click();
+  await expect(page.getByTestId("transcript-entry").first()).toBeVisible();
+}
+
+const rowWith = (page: Page, text: string) =>
+  page.getByTestId("transcript-entry").filter({ hasText: text });
+
+/** A text of exactly `length` characters that starts with `prefix`. */
+const sizedText = (prefix: string, length: number) => prefix + "€".repeat(length - prefix.length);
+
+test("ARK-T273 the transcript opens as a list and an inspector: one-line rows of time, kind and summary, a failed call's row red with its error line, and the inspector showing a message, context, thinking, a bash command, an edit input and other arguments through Markdown, Code and Json", async ({
+  page,
+}) => {
+  const { run } = leadTranscriptRun("ARK-931", [
+    {
+      kind: "user",
+      text: "**bold user**\n\n- user one\n- user two\n\n[x](javascript:alert(1))",
+    },
+    { kind: "context", text: "# Context head\n\n**bold context**\n\n- context one\n- context two" },
+    { kind: "thinking", text: "**bold thinking**\n\n- thinking one\n- thinking two" },
+    { kind: "assistant", text: "**bold assistant**\n\n- assistant one\n- assistant two" },
+    {
+      kind: "call",
+      id: "edit",
+      name: "edit",
+      args: { path: "src/a.ts", old_text: "const a = 1;", new_text: "const a = 2;" },
+      result: "edited",
+    },
+    {
+      kind: "call",
+      id: "write",
+      name: "write",
+      args: { path: "src/b.ts", content: "export const b = 1;\n" },
+      result: "written",
+    },
+    {
+      kind: "call",
+      id: "read",
+      name: "read",
+      args: { path: "src/c.ts", offset: 1, limit: 20 },
+      result: "c",
+    },
+    { kind: "call", id: "long", args: { command: sizedText("L30:", 30_000) }, result: "done" },
+    {
+      kind: "call",
+      id: "multi",
+      args: { command: "multi-fail" },
+      result: "first error line\nsecond error line",
+      failed: true,
+    },
+  ]);
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.message());
+    void dialog.dismiss();
+  });
+  const baseUrl = await launch();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await openLeadTranscript(page, baseUrl, run);
+  const rows = page.getByTestId("transcript-entry");
+  const inspector = page.getByTestId("inspector");
+  await expect(rows).toHaveCount(14);
+  await checkpoint(page, "transcript-list-dark");
+
+  // Every row is one line (a failed row adds its error line) with a time, a kind and a summary.
+  const heights = await rows.evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      error: node.classList.contains("err"),
+      height: node.getBoundingClientRect().height,
+    })),
+  );
+  for (const row of heights) expect(row.height).toBeLessThan(row.error ? 64 : 34);
+  for (let index = 0; index < 14; index++)
+    await expect(rows.nth(index).locator("time")).toHaveAttribute("datetime", /^\d{4}-\d\d-\d\dT/);
+  const cell = async (text: string, part: string) => rowWith(page, text).first().locator(part);
+  await expect(await cell("ls -la /tmp/omp", ".k")).toHaveText("bash");
+  await expect(await cell("ls -la /tmp/omp", ".s")).toHaveText("ls -la /tmp/omp");
+  await expect(await cell("src/a.ts", ".k")).toHaveText("edit");
+  await expect(await cell("src/a.ts", ".s")).toHaveText("src/a.ts");
+  await expect(await cell("src/b.ts", ".s")).toHaveText("src/b.ts");
+  await expect(await cell("src/c.ts", ".k")).toHaveText("read");
+  await expect(await cell("**bold user**", ".k")).toHaveText("user");
+  await expect(await cell("# Context head", ".k")).toHaveText("context");
+  // The 30 KB command: the row shows the start of the command, never the JSON around it.
+  const longSummary = (await rowWith(page, "L30:").first().locator(".s").textContent()) ?? "";
+  expect(longSummary.startsWith("L30:")).toBe(true);
+
+  // A failed call: its row is red and shows the first line of its error, not the second.
+  const failed = page.locator('[data-testid="transcript-entry"][data-status="error"]');
+  await expect(failed).toHaveCount(2);
+  await expect(failed.nth(0).locator(".e")).toHaveText("boom omp");
+  await expect(failed.nth(1).locator(".e")).toHaveText("first error line");
+  await expect(failed.nth(1)).not.toContainText("second error line");
+  const background = (locator: Locator) =>
+    locator.evaluate((node) => getComputedStyle(node).backgroundColor);
+  const [red, green] = ((await background(failed.nth(1))).match(/[\d.]+/g) ?? []).map(Number);
+  expect(red).toBeGreaterThan(green);
+  expect(await background(failed.nth(1))).not.toBe(await background(rows.first()));
+  await failed.nth(1).click();
+  await checkpoint(page, "transcript-failed-row");
+
+  // The inspector shows each kind through its renderer.
+  const renders = async (label: string) => {
+    await expect(inspector.locator(".md strong")).toHaveText(`bold ${label}`);
+    await expect(inspector.locator(".md li")).toHaveText([`${label} one`, `${label} two`]);
+    expect(await inspector.getByTestId("entry-text").innerText()).not.toContain("**");
+  };
+  await rowWith(page, "**bold user**").click();
+  await renders("user");
+  await checkpoint(page, "transcript-inspector-markdown");
+  // A javascript: link in injected text is never live.
+  await expect(inspector.locator('a[href^="javascript:" i]')).toHaveCount(0);
+  for (const link of await inspector.locator(".md a").all()) await link.click();
+  await rowWith(page, "# Context head").click();
+  await expect(inspector.locator(".md h1")).toHaveText("Context head");
+  await renders("context");
+  await rowWith(page, "**bold thinking**").click();
+  await inspector.getByTestId("thinking").locator("summary").click();
+  await renders("thinking");
+  await rowWith(page, "**bold assistant**").click();
+  await renders("assistant");
+
+  const code = inspector.getByTestId("code-block");
+  await rowWith(page, "ls -la /tmp/omp").click();
+  await expect(code.locator(".lang")).toHaveText("bash");
+  expect(await code.locator("pre").textContent()).toBe("ls -la /tmp/omp");
+  await checkpoint(page, "transcript-inspector-bash");
+  await rowWith(page, "src/a.ts").click();
+  await expect(code).toBeVisible();
+  await expect(inspector.getByTestId("json-block")).toHaveCount(0);
+  expect(await code.locator("pre").textContent()).toContain("const a = 2;");
+  await rowWith(page, "src/b.ts").click();
+  await expect(code.locator(".lang")).toHaveText("ts");
+  expect(await code.locator("pre").textContent()).toBe("export const b = 1;\n");
+  await rowWith(page, "src/c.ts").click();
+  await expect(inspector.getByTestId("code-block")).toHaveCount(0);
+  await expect(inspector.getByTestId("json-block").locator(".tk-key")).toHaveText([
+    '"path"',
+    '"offset"',
+    '"limit"',
+  ]);
+  expect(
+    (await inspector.getByTestId("json-block").locator("pre").textContent())!.split("\n"),
+  ).toEqual(["{", '  "path": "src/c.ts",', '  "offset": 1,', '  "limit": 20', "}"]);
+  await checkpoint(page, "transcript-inspector-json");
+  // The 30 KB command shows its cut with the note.
+  await rowWith(page, "L30:").click();
+  const command = (await code.locator("pre").textContent()) ?? "";
+  expect(command.startsWith("L30:")).toBe(true);
+  expect(command).toContain("(+10000 characters cut)");
+  expect(dialogs).toEqual([]);
+
+  // Both themes: the text of the list and the inspector keeps its contrast, measured once a fade has ended.
+  const settled = () =>
+    page.evaluate(() =>
+      Promise.all(document.getAnimations().map((fade) => fade.finished.catch(() => undefined))),
+    );
+  await failed.nth(1).click();
+  await settled();
+  const dark = await weakContrast(page);
+  expect(dark.checked).toBeGreaterThan(20);
+  expect(dark.weak).toEqual([]);
+  const pageBackground = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const darkBackground = await pageBackground();
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect.poll(pageBackground).not.toBe(darkBackground);
+  await settled();
+  await checkpoint(page, "transcript-list-light");
+  const light = await weakContrast(page);
+  expect(light.checked).toBeGreaterThan(20);
+  expect(light.weak).toEqual([]);
+  expect(await background(failed.nth(1))).not.toBe(await background(rows.first()));
+});
+
+test("ARK-T274 a tool call in the inspector shows the first line of its result and a Show result control with the size, which loads the full result only on click and shows a JSON result through Json and a text result through Code", async ({
+  page,
+}) => {
+  const jsonResult = JSON.stringify(
+    Object.fromEntries(Array.from({ length: 40 }, (_, key) => [`key${key}`, "v".repeat(60)])),
+  );
+  const textResult = "# not a heading\nline two\nline three";
+  const bigResult = `# big\n${"b".repeat(100_000)}`;
+  const { run } = leadTranscriptRun("ARK-932", [
+    { kind: "call", id: "j", args: { command: "call-json" }, result: jsonResult },
+    { kind: "call", id: "t", args: { command: "call-text" }, result: textResult },
+    { kind: "call", id: "b", args: { command: "call-big" }, result: bigResult },
+    { kind: "call", id: "x", args: { command: "call-bad" }, result: "{not json at all\nsecond" },
+    { kind: "call", id: "live", args: { command: "call-live" } },
+    { kind: "call", args: { command: "call-noid" } },
+  ]);
+  const baseUrl = await launch();
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    requests.push(url.pathname + url.search);
+  });
+  await openLeadTranscript(page, baseUrl, run);
+  const inspector = page.getByTestId("inspector");
+  const full = inspector.getByTestId("full-result");
+  const resultRequests = () => requests.filter((path) => path.includes("/transcript/result"));
+  // Nothing is fetched on load: the page sent one transcript read and no result read.
+  await expect(page.getByTestId("transcript-entry")).toHaveCount(11);
+  expect(requests.filter((path) => path.includes("/transcript?"))).toHaveLength(1);
+  expect(resultRequests()).toEqual([]);
+
+  // The first line and the control with its size, before any click.
+  await rowWith(page, "call-json").click();
+  await expect(inspector.getByTestId("tool-result")).toContainText('{"key0"');
+  await expect(inspector.getByTestId("show-result")).toHaveText(/Show result.*\b3(\.\d)? ?KB/i);
+  await checkpoint(page, "tool-result-collapsed");
+  expect(resultRequests()).toEqual([]);
+
+  // One click, one request with the file and the call id; JSON shows indented through Json.
+  const sent = page.waitForRequest((request) => request.url().includes("/transcript/result"));
+  await inspector.getByTestId("show-result").click();
+  const url = new URL((await sent).url());
+  expect(url.searchParams.get("call")).toBe("j");
+  expect(url.searchParams.get("file")).toMatch(/lead\.jsonl$/);
+  await expect(full.getByTestId("json-block").locator(".tk-key").first()).toHaveText('"key0"');
+  expect((await full.getByTestId("json-block").locator("pre").textContent())!.split("\n")[1]).toBe(
+    `  "key0": "${"v".repeat(60)}",`,
+  );
+  await checkpoint(page, "tool-result-json");
+  expect(resultRequests()).toHaveLength(1);
+
+  // Text shows in Code as written: `# not a heading` makes no heading.
+  await rowWith(page, "call-text").click();
+  await inspector.getByTestId("show-result").click();
+  await expect(full.getByTestId("code-block").locator("pre")).toHaveText(textResult);
+  await expect(full.locator("h1, h2, h3")).toHaveCount(0);
+  await checkpoint(page, "tool-result-text");
+
+  // 100,006 characters: the size of the whole, the cut at 64,000 and the note.
+  await rowWith(page, "call-big").click();
+  await inspector.getByTestId("show-result").click();
+  await expect(full).toContainText(/100[,.\s]?006 characters/);
+  await expect(full).toContainText("cut at 64,000 characters");
+  expect((await full.getByTestId("code-block").locator("pre").textContent())!.length).toBe(64_000);
+
+  // A result that begins with `{` and does not parse shows in Code, with no error.
+  await rowWith(page, "call-bad").click();
+  await inspector.getByTestId("show-result").click();
+  await expect(full.getByTestId("code-block").locator("pre")).toContainText("{not json at all");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  // A call with no result record: a visible message, and the list stays usable.
+  await rowWith(page, "call-live").click();
+  await inspector.getByTestId("show-result").click();
+  await expect(inspector.getByTestId("result-missing")).toBeVisible();
+  await rowWith(page, "call-noid").click();
+  await expect(inspector.getByTestId("show-result")).toHaveCount(0);
+
+  // Back at a loaded result: shown again with no second request.
+  const before = resultRequests().length;
+  await rowWith(page, "call-json").click();
+  await expect(full.getByTestId("json-block")).toBeVisible();
+  expect(resultRequests()).toHaveLength(before);
+});
+
+test("ARK-T275 the chips filter the list into messages, tools, thinking and errors with counts of the loaded entries, the errors chip shows only failed calls, j and k move through the visible entries only, and r switches Rendered and Raw and the choice stays when the selection moves", async ({
+  page,
+}) => {
+  const { run, directory, started } = leadTranscriptRun("ARK-933", [
+    { kind: "user", text: "**bold** message\n\nsecond paragraph" },
+    { kind: "assistant", text: "extra answer" },
+    { kind: "thinking", text: "extra thinking one" },
+    { kind: "thinking", text: "extra thinking two" },
+    { kind: "call", id: "e1", args: { command: "extra-one" }, result: "ok one" },
+    { kind: "call", id: "e2", args: { command: "extra-two" }, result: "ok two" },
+    { kind: "call", id: "e3", args: { command: "extra-fail" }, result: "bad\nmore", failed: true },
+    { kind: "call", id: "e4", name: "read", args: { path: "a.json", offset: 1 }, result: "{}" },
+  ]);
+  // A second file of 250 entries: 200 messages on page 1; 47 messages and 3 failed calls on page 2.
+  const second = (number: number) =>
+    new Date(started.getTime() + (10 + number) * 1000).toISOString();
+  const big = [
+    JSON.stringify({
+      type: "session",
+      version: 3,
+      timestamp: second(0),
+      cwd: join(directory, "workspace"),
+    }),
+  ];
+  let seconds = 0;
+  const record = (message: unknown) =>
+    JSON.stringify({ type: "message", timestamp: second(++seconds), message });
+  for (let number = 0; number < 247; number++) {
+    big.push(record({ role: "user", content: [{ type: "text", text: `m${number}` }] }));
+    if ([203, 223, 243].includes(number)) {
+      big.push(
+        record({
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: `f${number}`, name: "bash", arguments: { command: "f" } },
+          ],
+        }),
+        record({
+          role: "toolResult",
+          toolCallId: `f${number}`,
+          isError: true,
+          content: [{ type: "text", text: "failed\nmore" }],
+        }),
+      );
+    }
+  }
+  writeSessionFile(process.env.ARK_OMP_SESSIONS as string, "big.jsonl", `${big.join("\n")}\n`);
+  // Count the keydown listeners the page holds, to see that the transcript removes its own.
+  await page.addInitScript(`
+    window.activeKeydown = new Set();
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+    window.addEventListener = (type, listener, ...rest) => {
+      if (type === "keydown") window.activeKeydown.add(listener);
+      return add(type, listener, ...rest);
+    };
+    window.removeEventListener = (type, listener, ...rest) => {
+      if (type === "keydown") window.activeKeydown.delete(listener);
+      return remove(type, listener, ...rest);
+    };
+  `);
+  const baseUrl = await launch();
+  const keydownListeners = () => page.evaluate<number>("window.activeKeydown.size");
+  await open(page, baseUrl, "");
+  const withoutTranscript = await keydownListeners();
+
+  await open(page, baseUrl, `run/${run}`);
+  await page.locator('[data-testid="step-node"][data-step="work"] a').click();
+  await page.locator('[data-testid="transcript-file"][data-file$="lead.jsonl"]').click();
+  const rows = page.getByTestId("transcript-entry");
+  const inspector = page.getByTestId("inspector");
+  const counter = page.getByTestId("transcript-count");
+  await expect(rows).toHaveCount(13);
+  expect(await keydownListeners()).toBeGreaterThan(withoutTranscript);
+  const chip = (name: string) => page.getByTestId(`chip-${name}`);
+  const kinds = () =>
+    rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-kind")));
+  const selected = () =>
+    rows.evaluateAll((nodes) =>
+      nodes.findIndex((node) => node.getAttribute("aria-current") === "true"),
+    );
+
+  // Counts of the loaded entries, and the counter says so.
+  await expect(chip("message")).toHaveText(/Messages\s*4/);
+  await expect(chip("tool")).toHaveText(/Tools\s*6/);
+  await expect(chip("thinking")).toHaveText(/Thinking\s*3/);
+  await expect(chip("errors")).toHaveText(/Errors\s*2/);
+  await expect(counter).toHaveText(/Showing 13 of 13 loaded entries/);
+  await checkpoint(page, "chips-all");
+
+  // Each chip alone shows only its kind.
+  for (const [name, kind, count] of [
+    ["message", "message", 4],
+    ["tool", "tool", 6],
+    ["thinking", "thinking", 3],
+  ] as const) {
+    await chip(name).click();
+    await expect(rows).toHaveCount(count);
+    expect(new Set(await kinds())).toEqual(new Set([kind]));
+    await expect(counter).toHaveText(new RegExp(`Showing ${count} of 13`));
+    await chip(name).click();
+    await expect(rows).toHaveCount(13);
+  }
+  // Kind chips combine.
+  await chip("tool").click();
+  await chip("thinking").click();
+  await expect(rows).toHaveCount(9);
+  await chip("tool").click();
+  await chip("thinking").click();
+
+  // Errors alone, and with any other chip, show exactly the failed calls.
+  const statuses = () =>
+    rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-status")));
+  await chip("errors").click();
+  await expect(rows).toHaveCount(2);
+  expect(await statuses()).toEqual(["error", "error"]);
+  await expect(counter).toHaveText(/Showing 2 of 13/);
+  await checkpoint(page, "chips-errors");
+  for (const other of ["tool", "message", "thinking"]) {
+    await chip(other).click();
+    await expect(rows).toHaveCount(2);
+    expect(await statuses()).toEqual(["error", "error"]);
+    await chip(other).click();
+  }
+  for (const other of ["tool", "message", "thinking"]) await chip(other).click();
+  await expect(rows).toHaveCount(2);
+  for (const other of ["tool", "message", "thinking"]) await chip(other).click();
+  await chip("errors").click();
+  await expect(rows).toHaveCount(13);
+
+  // j and k visit only the visible rows; the first and last stay; no hidden entry is selected.
+  await chip("tool").click();
+  await expect(rows).toHaveCount(6);
+  for (let step = 0; step < 6; step++) {
+    await page.keyboard.press("j");
+    await expect.poll(selected).toBe(step);
+  }
+  await page.keyboard.press("j");
+  await expect.poll(selected).toBe(5);
+  for (let step = 4; step >= 0; step--) {
+    await page.keyboard.press("k");
+    await expect.poll(selected).toBe(step);
+  }
+  await page.keyboard.press("k");
+  await expect.poll(selected).toBe(0);
+  await expect(
+    page.locator('[data-testid="transcript-entry"][aria-current="true"]'),
+  ).toHaveAttribute("data-kind", "tool");
+  await expect(counter).toHaveText(/Showing 6 of 13/);
+  await chip("tool").click();
+  await expect(rows).toHaveCount(13);
+
+  // r switches Rendered and Raw, and the choice stays while the selection moves.
+  const mode = page.locator('.filterbar .seg [aria-pressed="true"]');
+  await rowWith(page, "**bold** message").click();
+  await expect(inspector.locator(".md strong")).toHaveText("bold");
+  await page.keyboard.press("r");
+  await expect(mode).toHaveText("Raw");
+  await expect(inspector.getByTestId("entry-text")).toContainText("**bold** message");
+  await checkpoint(page, "inspector-raw");
+  for (let step = 0; step < 4; step++) await page.keyboard.press("j");
+  await expect(rowWith(page, "extra-one")).toHaveAttribute("aria-current", "true");
+  await expect(inspector.locator("pre.raw")).toContainText('"command":"extra-one"');
+  await expect(mode).toHaveText("Raw");
+  for (let step = 0; step < 4; step++) await page.keyboard.press("k");
+  await expect(inspector.getByTestId("entry-text")).toContainText("**bold** message");
+  await expect(mode).toHaveText("Raw");
+
+  // A key typed into an input, or with ctrl or meta, changes nothing.
+  const current = await selected();
+  await page.evaluate(() => {
+    const input = document.createElement("input");
+    input.id = "probe";
+    document.body.append(input);
+  });
+  await page.locator("#probe").focus();
+  for (const key of ["j", "k", "r"]) await page.keyboard.press(key);
+  await page.evaluate(() => document.getElementById("probe")?.remove());
+  await page.keyboard.press("Control+r");
+  await page.keyboard.press("Meta+j");
+  expect(await selected()).toBe(current);
+  await expect(mode).toHaveText("Raw");
+  await rowWith(page, "**bold** message").click();
+  await page.keyboard.press("r");
+  await expect(mode).toHaveText("Rendered");
+  await expect(inspector.locator(".md strong")).toHaveText("bold");
+
+  // The 250-entry file: counts cover the loaded entries, and say so; Load more adds the rest.
+  await page.locator('[data-testid="transcript-file"][data-file$="big.jsonl"]').click();
+  await expect(rows).toHaveCount(200);
+  await expect(chip("message")).toHaveText(/Messages\s*200/);
+  await expect(chip("errors")).toHaveText(/Errors\s*0/);
+  await expect(page.locator(".more")).toContainText("Chip counts cover the loaded entries only");
+  await page.getByTestId("load-more").click();
+  await expect(rows).toHaveCount(250);
+  await expect(chip("message")).toHaveText(/Messages\s*247/);
+  await expect(chip("errors")).toHaveText(/Errors\s*3/);
+  await chip("errors").click();
+  await expect(rows).toHaveCount(3);
+  await expect(counter).toHaveText(/Showing 3 of 250/);
+
+  // A live file grows: at its end the button re-asks from the end and adds only the new entries.
+  const more = page.getByTestId("load-more");
+  await expect(more).toHaveText("Check for new entries");
+  appendFileSync(
+    join(process.env.ARK_OMP_SESSIONS as string, "big.jsonl"),
+    `${record({ role: "user", content: [{ type: "text", text: "live arrival" }] })}\n`,
+  );
+  await more.click();
+  await expect(counter).toHaveText(/Showing 3 of 251/);
+  await expect(chip("message")).toHaveText(/Messages\s*248/);
+
+  // Leaving the page removes the key handler.
+  await open(page, baseUrl, "");
+  expect(await keydownListeners()).toBe(withoutTranscript);
+});
+
+test("ARK-T276 a context entry of 114 lines and a user message of more than 40 lines are one list row and show in full in the inspector, thinking is folded until a click, and the run files are pinned below the list and open in the same inspector", async ({
+  page,
+}) => {
+  const lines = (count: number) =>
+    Array.from({ length: count }, (_, number) => `line ${number + 1} of ${count}`).join("\n");
+  const context = [
+    "# Injected context",
+    "",
+    ...Array.from({ length: 108 }, (_, number) => `- item ${number + 1}`),
+    "",
+    "```ts",
+    "const last = 114;",
+    "```",
+  ].join("\n");
+  expect(context.split("\n")).toHaveLength(114);
+  const { run, directory, started } = leadTranscriptRun(
+    "ARK-934",
+    [
+      { kind: "context", text: context },
+      { kind: "user", text: "after context" },
+      { kind: "thinking", text: "folded thought" },
+      { kind: "assistant", text: "after answer" },
+      { kind: "call", id: "done", args: { command: "echo done" }, result: "done" },
+    ],
+    {
+      "plan.md": "# Plan title\n\n**bold plan**\n",
+      "results/state.json": JSON.stringify({ phase: "closed", count: 2 }),
+      "results/notes.txt": "**not bold**\n- not a list",
+    },
+  );
+  const longMessages: ExtraEntry[] = [114, 41, 40].map((count) => ({
+    kind: "user",
+    text: lines(count),
+  }));
+  // Claude names its tools Edit and Write and puts the path in file_path.
+  const claudeCalls: ExtraEntry[] = [
+    {
+      kind: "call",
+      id: "ce",
+      name: "Edit",
+      args: { file_path: "src/a.ts", old_string: "const a = 1;", new_string: "const a = 2;" },
+      result: "ok",
+    },
+    {
+      kind: "call",
+      id: "cw",
+      name: "Write",
+      args: { file_path: "src/b.ts", content: "export const b = 3;" },
+      result: "ok",
+    },
+  ];
+  const cwd = join(directory, "workspace");
+  writeSessionFile(
+    process.env.ARK_CLAUDE_SESSIONS as string,
+    "claude.jsonl",
+    transcriptText("claude", {
+      cwd,
+      start: new Date(started.getTime() + 10_000),
+      tag: "claude",
+      extra: [...longMessages, ...claudeCalls],
+    }),
+  );
+  writeSessionFile(
+    process.env.ARK_CODEX_SESSIONS as string,
+    "codex.jsonl",
+    transcriptText("codex", {
+      cwd,
+      start: new Date(started.getTime() + 20_000),
+      tag: "codex",
+      extra: longMessages,
+    }),
+  );
+  const baseUrl = await launch();
+  await openLeadTranscript(page, baseUrl, run);
+  const rows = page.getByTestId("transcript-entry");
+  const inspector = page.getByTestId("inspector");
+  const mode = page.locator('.filterbar .seg [aria-pressed="true"]');
+  const openFile = async (name: string, count: number) => {
+    await page.locator(`[data-testid="transcript-file"][data-file$="${name}"]`).click();
+    await expect(rows).toHaveCount(count);
+  };
+  // The raw text of the inspector holds every line; the rendered text holds the last one.
+  const holdsAllLines = async (count: number) => {
+    await expect(inspector.getByTestId("entry-text")).toContainText(`line ${count} of ${count}`);
+    await page.keyboard.press("r");
+    await expect(mode).toHaveText("Raw");
+    expect((await inspector.getByTestId("entry-text").textContent())!.split("\n")).toHaveLength(
+      count,
+    );
+    await page.keyboard.press("r");
+    await expect(mode).toHaveText("Rendered");
+  };
+
+  // omp: a context of 114 lines is one row, and the turn below it is in view.
+  await openFile("lead.jsonl", 10);
+  const contextRow = rowWith(page, "# Injected context");
+  await expect(contextRow).toHaveCount(1);
+  const contextBox = (await contextRow.boundingBox())!;
+  expect(contextBox.height).toBeLessThan(34);
+  const next = (await rowWith(page, "after context").boundingBox())!;
+  expect(next.y - contextBox.y).toBeLessThan(40);
+  await checkpoint(page, "context-row-dark");
+  await contextRow.click();
+  await expect(inspector.locator(".md h1")).toHaveText("Injected context");
+  await expect(inspector.locator(".md li")).toHaveCount(108);
+  await expect(inspector.locator(".md li").last()).toHaveText("item 108");
+  await expect(inspector.getByTestId("code-block")).toContainText("const last = 114;");
+  await checkpoint(page, "context-inspector-full");
+  await page.keyboard.press("r");
+  await expect(mode).toHaveText("Raw");
+  expect((await inspector.getByTestId("entry-text").textContent())!.split("\n")).toHaveLength(114);
+  await page.keyboard.press("r");
+
+  // Thinking is folded until a click.
+  await rowWith(page, "folded thought").click();
+  const thinking = inspector.getByTestId("thinking");
+  await expect(thinking).toHaveJSProperty("open", false);
+  await expect(inspector.getByTestId("entry-text")).toBeHidden();
+  await checkpoint(page, "thinking-folded");
+  await thinking.locator("summary").click();
+  await expect(inspector.getByTestId("entry-text")).toHaveText("folded thought");
+
+  // Claude and Codex show injected text as a user message: each of 114, 41 and 40 lines is one row.
+  for (const name of ["claude.jsonl", "codex.jsonl"]) {
+    await openFile(name, name === "claude.jsonl" ? 10 : 8);
+    if (name === "claude.jsonl") {
+      await rowWith(page, "src/a.ts").click();
+      await expect(inspector.getByTestId("code-block").locator(".lang")).toHaveText("diff");
+      await expect(inspector.getByTestId("code-block").locator("pre")).toHaveText(
+        "- const a = 1;\n+ const a = 2;",
+      );
+      await expect(inspector).toContainText("src/a.ts");
+      await rowWith(page, "src/b.ts").click();
+      await expect(inspector.getByTestId("code-block").locator(".lang")).toHaveText("ts");
+      await expect(inspector.getByTestId("code-block").locator("pre")).toHaveText(
+        "export const b = 3;",
+      );
+    }
+    for (const count of [114, 41, 40]) {
+      const row = rowWith(page, `line 1 of ${count}`);
+      await expect(row).toHaveCount(1);
+      expect((await row.boundingBox())!.height).toBeLessThan(34);
+      await row.click();
+      await holdsAllLines(count);
+    }
+  }
+
+  // The run files are pinned below the list and open in the same inspector.
+  await openFile("lead.jsonl", 10);
+  const files = page.getByTestId("transcript-run-file");
+  const paths = await files.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute("data-path")),
+  );
+  expect(paths).toEqual(
+    expect.arrayContaining(["plan.md", "results/state.json", "results/notes.txt"]),
+  );
+  expect(paths).not.toContain("strategies.md");
+  expect(paths).not.toContain("retro.md");
+  const listBox = (await page.getByTestId("transcript").boundingBox())!;
+  expect((await files.first().boundingBox())!.y).toBeGreaterThan(listBox.y + listBox.height - 1);
+  const url = page.url();
+  await files.filter({ hasText: /^plan\.md$/ }).click();
+  await expect(inspector.locator("h1")).toHaveText("Plan title");
+  await expect(inspector.locator("strong")).toHaveText("bold plan");
+  await checkpoint(page, "run-file-in-inspector");
+  await files.filter({ hasText: "state.json" }).click();
+  await expect(inspector.getByTestId("json-block").locator(".tk-key")).toHaveText([
+    '"phase"',
+    '"count"',
+  ]);
+  await files.filter({ hasText: "notes.txt" }).click();
+  await expect(inspector.getByTestId("code-block").locator(".lang")).toHaveText("text");
+  await expect(inspector.getByTestId("code-block").locator("pre")).toHaveText(
+    "**not bold**\n- not a list",
+  );
+  expect(page.url()).toBe(url);
+  await expect(rows).toHaveCount(10);
+  await rowWith(page, "after answer").click();
+  await expect(inspector.getByTestId("entry-text")).toHaveText("after answer");
+
+  // Raw is the inspector's: a file selected while Raw is on shows its source, and r switches it.
+  await page.keyboard.press("r");
+  await expect(mode).toHaveText("Raw");
+  await files.filter({ hasText: /^plan\.md$/ }).click();
+  await expect(inspector.locator("pre.raw")).toHaveText("# Plan title\n\n**bold plan**\n");
+  await expect(inspector.getByTestId("run-file-text")).toBeVisible();
+  await page.keyboard.press("r");
+  await expect(mode).toHaveText("Rendered");
+  await expect(inspector.locator("h1")).toHaveText("Plan title");
+  await expect(inspector.locator("pre.raw")).toHaveCount(0);
+
+  // Selecting a file brings the inspector into view even when the list is long.
+  await expect(inspector).toBeInViewport();
+
+  // The full-page file route still works.
+  await open(page, baseUrl, `run/${run}/file/plan.md`);
+  await expect(page.getByTestId("run-file-text").locator("h1")).toHaveText("Plan title");
+});
+
+test("ARK-T300 a transcript shows 200 entries a page and Load more adds the next page, and at the end of a live file it checks for new entries", async ({
   page,
 }) => {
   const { sessions } = isolate();
@@ -1277,9 +2001,23 @@ test("ARK-284-AC7 a transcript shows 200 entries a page and Load more adds the n
   await expect(entries).toHaveCount(400);
   await more.click();
   await expect(entries).toHaveCount(450);
-  await expect(more).toBeDisabled();
+  await expect(more).toHaveText("Check for new entries");
   await expect(page.getByText("End of file · 450 entries")).toBeVisible();
   await expect(entries.last()).toContainText("m449");
+
+  // The live file grows after the page loaded: the same control adds the new entry.
+  appendFileSync(
+    join(sessions, "long.jsonl"),
+    `${JSON.stringify({
+      type: "message",
+      id: "live",
+      timestamp: new Date().toISOString(),
+      message: { role: "user", content: [{ type: "text", text: "live arrival" }] },
+    })}\n`,
+  );
+  await more.click();
+  await expect(entries).toHaveCount(451);
+  await expect(entries.last()).toContainText("live arrival");
 });
 
 /** One GET with the path sent as written: a browser or `fetch` would normalize `../` away. */
@@ -1464,7 +2202,12 @@ const usageAt = (fraction: number, baseInstant = Date.now()) => ({
 });
 
 /** Home with 1 gate, 1 stuck agent (a prompt), 2 MRs in review and the 5h window of anthropic at 82%. The usage reset is `baseInstant` + 74 min: the page compares it with its own clock, every age with the server's. */
-async function homeWithBlockers(baseInstant = Date.now(), holdOrca = false) {
+async function homeWithBlockers(
+  baseInstant = Date.now(),
+  holdOrca = false,
+  /** Runs once the fixture is written and before the hub starts. */
+  beforeLaunch?: (stuckDirectory: string) => void,
+) {
   isolate();
   const gate = writeRun({
     project: "p",
@@ -1544,6 +2287,7 @@ async function homeWithBlockers(baseInstant = Date.now(), holdOrca = false) {
   });
   // Held fake tools make the first snapshot late until `release` runs.
   const release = holdOrca ? holdFakeTools() : () => {};
+  beforeLaunch?.(stuckDirectory);
   return { baseUrl: await launch(), older, newer, stuckRun, release };
 }
 
@@ -2574,7 +3318,22 @@ test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a
   page,
 }) => {
   test.setTimeout(120_000);
-  const { baseUrl, older, stuckRun } = await homeWithBlockers();
+  const { baseUrl, older, stuckRun } = await homeWithBlockers(Date.now(), false, (stuckDirectory) =>
+    writeSessionFile(
+      process.env.ARK_OMP_SESSIONS as string,
+      "t27.jsonl",
+      transcriptText("omp", {
+        cwd: join(stuckDirectory, "workspace"),
+        start: new Date(Date.now() - 3_600_000 + 300_000),
+        extra: Array.from({ length: 195 }, (_, number): ExtraEntry => ({
+          kind: "call",
+          id: `c${number}`,
+          args: { command: `command ${number}` },
+          result: `result ${number}`,
+        })),
+      }),
+    ),
+  );
   writeBacklogTicket({
     project: "p",
     id: "ARK-521",
@@ -2634,6 +3393,24 @@ test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a
   // One read of the test evidence for each of the two run pages (these plans have no image).
   expect(extra.filter((path) => path.endsWith("/evidence"))).toHaveLength(2);
   expect(extra.filter((path) => path.endsWith("/image"))).toEqual([]);
+
+  // A transcript of 200 rows sends one read of its page: no read per row, no result read, no run file read before a click.
+  await open(page, baseUrl, `run/${stuckRun}`);
+  const stepLink = page.locator('[data-testid="step-node"][data-step="hub-server"] a');
+  await expect(stepLink).toBeVisible();
+  requests.splice(0);
+  await stepLink.click();
+  await expect(page.getByTestId("transcript-entry")).toHaveCount(200);
+  await expect(page.getByTestId("transcript-run-file").first()).toBeVisible();
+  // Two frames later every effect of the 200 rows has run and its request is logged.
+  await page.evaluate(() => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    return promise;
+  });
+  expect(requests.filter((path) => path.startsWith("/api/"))).toEqual([
+    `/api/run/${stuckRun}/transcript`,
+  ]);
 });
 
 // ---------------------------------------------------------------- ARK-291
