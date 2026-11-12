@@ -862,6 +862,19 @@ test(
 
 // ---------------------------------------------------------------- ARK-T268
 
+/** Try a non-blocking exclusive flock on the lock file from a separate process, as a contender. */
+function flockProbe(): string {
+  const code = `
+    import { dlopen } from "bun:ffi";
+    import { openSync } from "node:fs";
+    const lib = process.platform === "darwin" ? "libc.dylib" : "libc.so.6";
+    const { symbols } = dlopen(lib, { flock: { args: ["i32", "i32"], returns: "i32" } });
+    const LOCK_EX = 2, LOCK_NB = 4;
+    console.log(symbols.flock(openSync(${JSON.stringify(lockFilePath())}, "r"), LOCK_EX | LOCK_NB) === 0 ? "free" : "held");
+  `;
+  return spawnSync("bun", ["-e", code], { encoding: "utf8" }).stdout.trim();
+}
+
 test("ARK-T268 A live hub that is stopped with SIGSTOP keeps its lock, and serves again after SIGCONT", async () => {
   fixture();
   const a = await startHub();
@@ -880,6 +893,8 @@ test("ARK-T268 A live hub that is stopped with SIGSTOP keeps its lock, and serve
     () => "timed out",
   );
   expect(stopped).toBe("timed out");
+  // The operating system holds the lock for the stopped process: a contender cannot flock the file.
+  expect(flockProbe()).toBe("held");
 
   // The second hub refuses by itself; it neither waits for the stopped hub nor takes over.
   const b = spawnHub();

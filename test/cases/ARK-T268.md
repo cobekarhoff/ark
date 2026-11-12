@@ -19,22 +19,24 @@ Expected: While a hub is stopped with SIGSTOP, the system shall keep its lock so
 
 - A scratch `ARK_HOME` and a repo path used as the lock key.
 - Real `bun hub/main.ts` processes with fake `orca`, `plannotator` and `gh` on `PATH`, port 0.
-- Works the same on macOS and Linux CI: the test uses only signals and the product lock, with no libc name.
+- Works the same on macOS and Linux CI: the test uses only signals and the product lock, with a libc name picked by `process.platform` in the probe only.
 
 ## Steps
 
 1. Start hub A. Read its port P and check it answers a request.
 2. Send SIGSTOP to hub A. Check the process is stopped (a request to P times out).
-3. Start hub B for the same repo with port 0 and a 5 s timeout. Capture output and exit code.
-4. Send SIGCONT to hub A.
-5. Send a request to P.
-6. Start hub C for the same repo and capture its output. Stop hub A with SIGTERM.
+3. From a separate process, try a non-blocking exclusive `flock` on the lock file.
+4. Start hub B for the same repo with port 0 and a 5 s timeout. Capture output and exit code.
+5. Send SIGCONT to hub A.
+6. Send a request to P.
+7. Start hub C for the same repo and capture its output. Stop hub A with SIGTERM.
 
 ## Expected results
 
-- Step 3: hub B exits by itself within 5 s (it is not killed by the timeout) with code 0, and its output names the port P.
-- Step 5: hub A answers on P.
-- Step 6: hub C refuses with P (A kept the lock through the stop and the continue).
+- Step 3: the `flock` try fails (the lock is held while hub A is stopped).
+- Step 4: hub B exits by itself within 5 s (it is not killed by the timeout) with code 0, and its output names the port P.
+- Step 6: hub A answers on P.
+- Step 7: hub C refuses with P (A kept the lock through the stop and the continue).
 - Hub B never listens.
 
 ## Screenshot checkpoints
