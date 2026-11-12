@@ -545,6 +545,155 @@ export const transcriptTexts = (tag: string) => ({
 const iso = (start: Date, second: number) =>
   new Date(start.getTime() + second * 1000).toISOString();
 
+/** One extra entry of a transcript fixture: a long text, or a tool call with its result (none: a call still running; no `id`: a record with no call id). */
+export type ExtraEntry =
+  | { kind: "user" | "assistant" | "thinking" | "context"; text: string }
+  | {
+      kind: "call";
+      id?: string;
+      /** Default: the harness's bash tool. */
+      name?: string;
+      args: Record<string, unknown>;
+      /** Result text; undefined writes no result record. */
+      result?: string;
+      failed?: boolean;
+      /** How a Codex output is written: `{output, metadata}` JSON (default) or the bare string. */
+      codexOutput?: "json" | "plain";
+    };
+
+/** A text entry: omp has a `custom_message` for context, Claude and Codex show injected text as a user message. */
+function extraTextRecord(
+  harness: SessionHarness,
+  timestamp: string,
+  cwd: string,
+  kind: "user" | "assistant" | "thinking" | "context",
+  text: string,
+): unknown {
+  if (harness === "omp") {
+    if (kind === "context") return { type: "custom_message", timestamp, content: text };
+    const content =
+      kind === "thinking" ? [{ type: "thinking", thinking: text }] : [{ type: "text", text }];
+    return {
+      type: "message",
+      timestamp,
+      message: { role: kind === "user" ? "user" : "assistant", content },
+    };
+  }
+  const asUser = kind === "user" || kind === "context";
+  if (harness === "claude")
+    return {
+      type: asUser ? "user" : "assistant",
+      timestamp,
+      cwd,
+      message: {
+        role: asUser ? "user" : "assistant",
+        content: asUser
+          ? text
+          : [kind === "thinking" ? { type: "thinking", thinking: text } : { type: "text", text }],
+      },
+    };
+  const payload =
+    kind === "thinking"
+      ? { type: "reasoning", summary: [{ type: "summary_text", text }] }
+      : {
+          type: "message",
+          role: asUser ? "user" : "assistant",
+          content: [{ type: asUser ? "input_text" : "output_text", text }],
+        };
+  return { timestamp, type: "response_item", payload };
+}
+
+/** The call record and, when the entry has a result, its result record. */
+function extraCallRecords(
+  harness: SessionHarness,
+  callTimestamp: string,
+  resultTimestamp: string,
+  entry: Extract<ExtraEntry, { kind: "call" }>,
+): unknown[] {
+  const { id, args, result, failed } = entry;
+  const hasResult = result !== undefined && id !== undefined;
+  if (harness === "omp")
+    return [
+      {
+        type: "message",
+        timestamp: callTimestamp,
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id, name: entry.name ?? "bash", arguments: args }],
+        },
+      },
+      ...(hasResult
+        ? [
+            {
+              type: "message",
+              timestamp: resultTimestamp,
+              message: {
+                role: "toolResult",
+                toolCallId: id,
+                isError: failed === true,
+                content: [{ type: "text", text: result }],
+              },
+            },
+          ]
+        : []),
+    ];
+  if (harness === "claude")
+    return [
+      {
+        type: "assistant",
+        timestamp: callTimestamp,
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id, name: entry.name ?? "Bash", input: args }],
+        },
+      },
+      ...(hasResult
+        ? [
+            {
+              type: "user",
+              timestamp: resultTimestamp,
+              message: {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: id,
+                    content: result,
+                    is_error: failed === true,
+                  },
+                ],
+              },
+            },
+          ]
+        : []),
+    ];
+  const output =
+    entry.codexOutput === "plain"
+      ? result
+      : JSON.stringify({ output: result, metadata: { exit_code: failed ? 1 : 0 } });
+  return [
+    {
+      timestamp: callTimestamp,
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        name: entry.name ?? "shell",
+        call_id: id,
+        arguments: JSON.stringify(args),
+      },
+    },
+    ...(hasResult
+      ? [
+          {
+            timestamp: resultTimestamp,
+            type: "response_item",
+            payload: { type: "function_call_output", call_id: id, output },
+          },
+        ]
+      : []),
+  ];
+}
+
 /**
  * One session file of the given harness, in the shape the real files have: a user message, a
  * thinking block, an assistant text, one tool call that succeeds and one that fails. Record `n`
@@ -562,6 +711,8 @@ export function transcriptText(
     messagePadding?: number;
     /** Characters of padding appended to the result of the first call, after its tail. */
     resultPadding?: number;
+    /** Entries appended after the standard ones, in the shape of the harness (ARK-324: long texts, results of any size, a call with no id). */
+    extra?: ExtraEntry[];
   },
 ): string {
   const { cwd, start } = options;
@@ -674,6 +825,16 @@ export function transcriptText(
       item(7, { type: "function_call_output", call_id: "c2", output: output(failResult, 1) }),
     );
   }
+  const extraEntries = options.extra ?? [];
+  const firstExtraSecond = 20;
+  extraEntries.forEach((entry, position) => {
+    const second = firstExtraSecond + position * 2;
+    if (entry.kind !== "call") {
+      records.push(extraTextRecord(harness, at(second), cwd, entry.kind, entry.text));
+      return;
+    }
+    records.push(...extraCallRecords(harness, at(second), at(second + 1), entry));
+  });
   return `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
 }
 
