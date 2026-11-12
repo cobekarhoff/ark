@@ -28,7 +28,8 @@ export type SourceName =
   | "providerLimits"
   | "agentWait"
   | "evidence"
-  | "queue";
+  | "queue"
+  | "resources";
 export type SourceStatus = { ok: boolean; read_at: string | null };
 
 export type { StepStatus };
@@ -332,6 +333,59 @@ export type ProjectQueue = { project: string; open: number } & (
   | { unavailable: string }
 );
 
+export type HostLevel = "normal" | "amber" | "red" | "unchecked";
+
+/** Every number is null when it could not be read, and its level is then `unchecked`. */
+export type HostView = {
+  cpu: { percent: number | null; cores: number | null; level: HostLevel };
+  /** `code` is the macOS level: 1 normal, 2 warn, 4 critical. */
+  pressure: { code: number | null; free_percent: number | null; level: HostLevel };
+  swap: { used_gb: number | null; total_gb: number | null; level: HostLevel };
+  disk: { free_gb: number | null; level: HostLevel };
+  load: { one: number | null; five: number | null; fifteen: number | null; level: HostLevel };
+};
+
+export type ProcessKind = "bun test" | "playwright" | "chromium" | "omp" | "git" | "other";
+
+/** Who a process belongs to, in this order of precedence: the agent of its handle, the open run of its cwd, the run of its `ark test` admission, a closed run (leftover), nobody. */
+export type ProcessOwner =
+  | { kind: "agent"; handle: string }
+  | { kind: "run"; run: string }
+  | { kind: "admission"; run: string }
+  | { kind: "leftover"; run: string }
+  | { kind: "other" };
+
+export type ResourceProcess = {
+  pid: number;
+  kind: ProcessKind;
+  /** Since the previous sample; null on the first sight of the process. */
+  cpu_percent: number | null;
+  memory_mb: number;
+  age_seconds: number;
+  /** The command line with its environment cut off and secret-looking values hidden. Text, never markup. */
+  command: string;
+  owner: ProcessOwner;
+};
+
+export type ResourcesView = {
+  host: HostView;
+  /** The `ark test` budget: the runs that hold it and the runs that wait. */
+  admission: {
+    holders: { run: string; cores: number; held_seconds: number }[];
+    waiting: { run: string; cores: number; waited_seconds: number }[];
+  };
+  /** Every process of an agent, run, admission or leftover; of `other` only the 10 largest by memory. */
+  processes: ResourceProcess[];
+  /** `lsof` failed: the working directory is unknown, so only the handle and the admission owner a process. */
+  degraded: boolean;
+};
+
+/** The 24-hour history of each host signal for `GET /api/resources/history`: oldest first. */
+export type ResourcesHistory = Record<
+  "cpu" | "pressure" | "swap" | "disk" | "load",
+  { ts: string; value: number }[]
+>;
+
 export type Snapshot = {
   generated_at: string;
   sources: Record<SourceName, SourceStatus>;
@@ -348,6 +402,8 @@ export type Snapshot = {
   role_times: RoleTimes;
   /** One entry for each project, `"unknown"` until the queue source has answered once. */
   queues: ProjectQueue[] | "unknown";
+  /** The latest host and process reading, or "unknown" until the resources source has answered once. History is not here: `GET /api/resources/history`. */
+  resources: ResourcesView | "unknown";
 };
 
 /** One decision of a run, from `events.ndjson`: `why` is a plain sentence made from the event payload. */

@@ -27,6 +27,8 @@ import {
   type ThemeChoice,
 } from "./store.tsx";
 import { TicketPage } from "./Ticket.tsx";
+import { Resources } from "./Resources.tsx";
+import { ResourcesStrip } from "./ResourcesStrip.tsx";
 import type { SourceName } from "../types.ts";
 
 const sourceNames: SourceName[] = [
@@ -39,12 +41,14 @@ const sourceNames: SourceName[] = [
   "agentWait",
   "evidence",
   "queue",
+  "resources",
 ];
 
 const views = [
   ["home", "#/", "Home"],
   ["runs", "#/runs", "Runs"],
   ["roadmap", "#/roadmap", "Roadmap"],
+  ["resources", "#/resources", "Resources"],
 ] as const;
 
 const themes: [ThemeChoice, string][] = [
@@ -178,12 +182,14 @@ function Shell() {
           ))}
         </span>
       </header>
+      <ResourcesStrip />
       <main id="main" tabIndex={-1}>
         {route.view === "home" ? <Home /> : null}
         {route.view === "runs" ? <Runs /> : null}
         {route.view === "run" ? <Run run={route.run!} sub={route.sub} /> : null}
         {route.view === "roadmap" ? <Roadmap /> : null}
         {route.view === "ticket" ? <TicketPage id={route.arg!} /> : null}
+        {route.view === "resources" ? <Resources /> : null}
       </main>
     </>
   );

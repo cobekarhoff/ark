@@ -10,6 +10,7 @@ import {
   stepWindows,
 } from "./events.ts";
 import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
+import { readResources } from "./resources-file.ts";
 import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
 import { splitRunTime, withoutInterrupted, withoutNotStarted } from "./time-split.ts";
 import { type SessionWithKey, type UsageMessage, readUsage } from "./usage/index.ts";
@@ -388,6 +389,46 @@ export function escapedDefects(
     .sort((left, right) => (left.ticket < right.ticket ? -1 : left.ticket > right.ticket ? 1 : 0));
 }
 
+type ResourceEntry = { kind: "suite" | "agent"; name: string; peak_mb: number; cpu_s: number };
+
+/** The resources of a run: "unknown" when `resources.json` holds no figure. */
+type ResourcesMetrics = "unknown" | { peak_mb: number; cpu_s: number; top: ResourceEntry[] };
+
+/**
+ * The resources of a run from `results/resources.json`: the largest single peak and the CPU seconds of every entry, and the
+ * 3 entries with the largest peak. Suite and agent peaks may overlap in time, so peaks are never added; each suite side
+ * and each agent is a separate process group, so CPU seconds are. A cached suite has no figures.
+ */
+function resourcesMetrics(runDirectory: string): ResourcesMetrics {
+  const file = readResources(runDirectory);
+  const entries: ResourceEntry[] = [];
+  for (const [suite, sides] of Object.entries(file?.suites ?? {}))
+    for (const [side, use] of Object.entries(sides))
+      if ("peak_mb" in use)
+        entries.push({
+          kind: "suite",
+          name: `${suite} ${side}`,
+          peak_mb: use.peak_mb,
+          cpu_s: use.cpu_s,
+        });
+  for (const [handle, use] of Object.entries(file?.agents ?? {}))
+    entries.push({ kind: "agent", name: handle, ...use });
+  if (entries.length === 0) return "unknown";
+  return {
+    peak_mb: Math.max(...entries.map((entry) => entry.peak_mb)),
+    cpu_s: Math.round(entries.reduce((sum, entry) => sum + entry.cpu_s, 0) * 10) / 10,
+    top: [...entries].sort((left, right) => right.peak_mb - left.peak_mb).slice(0, 3),
+  };
+}
+
+function resourcesLine(resources: ResourcesMetrics): string {
+  return resources === "unknown"
+    ? "resources: unknown"
+    : `resources: peak ${resources.peak_mb} MB, ${resources.cpu_s} CPU s; top 3 by memory: ${resources.top
+        .map((entry) => `${entry.kind} ${entry.name} ${entry.peak_mb} MB`)
+        .join(", ")}`;
+}
+
 function median(values: number[]): Unknowable {
   if (values.length === 0) return "unknown";
   const sorted = [...values].sort((left, right) => left - right);
@@ -747,6 +788,7 @@ export function retro(runId: string, inProject?: string): void {
       idle_gaps: idleGaps,
       master_chief_and_run_lead_cost: summarize(orchestrationMessages),
     },
+    resources: resourcesMetrics(runDirectory),
     comparison: compareWithEarlierRuns(project, runId),
   };
 
@@ -770,6 +812,7 @@ export function retro(runId: string, inProject?: string): void {
             `tool error: ${entry.tool}${entry.word === "" ? "" : ` ${entry.word}`} x${entry.count}: ${entry.first_error}`,
         ),
       `gate answers: ${metrics.gates.auto_answers} auto, ${metrics.gates.human_answers} human`,
+      resourcesLine(metrics.resources),
       ...gateAnswers
         .filter((event) => event.data.gate === "escalation")
         .map(

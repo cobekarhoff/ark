@@ -61,7 +61,7 @@ function readTicket(file: string): Ticket | null {
 }
 
 /** Every ticket in arrival order with its file. Tickets of ended pids are deleted and reported once each. */
-function readTickets(): { file: string; ticket: Ticket }[] {
+function readTickets(prune = true): { file: string; ticket: Ticket }[] {
   let names: string[];
   try {
     names = readdirSync(ticketDirectory()).filter((name) => name.endsWith(".json"));
@@ -74,7 +74,7 @@ function readTickets(): { file: string; ticket: Ticket }[] {
     const ticket = readTicket(file);
     if (ticket === null) continue;
     if (alive(ticket.pid)) tickets.push({ file, ticket });
-    else if (JSON.stringify(readTicket(file)) === JSON.stringify(ticket)) {
+    else if (prune && JSON.stringify(readTicket(file)) === JSON.stringify(ticket)) {
       // Only this stale file is removed, and only while it still holds what was read: a dead owner never writes.
       try {
         unlinkSync(file);
@@ -93,8 +93,8 @@ function readTickets(): { file: string; ticket: Ticket }[] {
 }
 
 /** The running and the waiting suites of the host, waiting ones in arrival order. Tickets of ended pids are left out. */
-export function readTestLock(): { running: Ticket[]; waiting: Ticket[] } {
-  const tickets = readTickets().map(({ ticket }) => ticket);
+export function readTestLock(prune = true): { running: Ticket[]; waiting: Ticket[] } {
+  const tickets = readTickets(prune).map(({ ticket }) => ticket);
   return {
     running: tickets.filter((ticket) => ticket.started !== undefined),
     waiting: tickets.filter((ticket) => ticket.started === undefined),
@@ -126,7 +126,9 @@ function waitingLine(place: number, total: number, running: Ticket[], now: numbe
 
 export type TestBudget = {
   /** Waits for admission of one suite and returns its release. Cores above the budget, or none, take the whole budget. */
-  take(cores: number | undefined): Promise<{ cores: number; release: () => void }>;
+  take(
+    cores: number | undefined,
+  ): Promise<{ cores: number; waitMilliseconds: number; release: () => void }>;
   /** Removes every ticket of this process. */
   close(): void;
 };
@@ -203,6 +205,13 @@ export function openTestBudget(
       let printedKey: string | null = null;
       let printedAt = 0;
       let memoryPrinted: string | null = null;
+      // The time spent waiting for others or for memory: the polling sleeps only, so a suite that is admitted at once waits 0.
+      let waitMilliseconds = 0;
+      const nap = async () => {
+        const slept = Date.now();
+        await Bun.sleep(pollMilliseconds);
+        waitMilliseconds += Date.now() - slept;
+      };
       try {
         for (;;) {
           const tickets = readTickets();
@@ -215,7 +224,7 @@ export function openTestBudget(
             // an earlier ticket never gives way, so the earliest one always progresses.
             if (sumOf(startedTickets.filter((entry) => tickets.indexOf(entry) <= mine)) > budget) {
               writeTicket(file, { ...tickets[mine]!.ticket, started: undefined });
-              await Bun.sleep(pollMilliseconds);
+              await nap();
               continue;
             }
             // Fits among the earlier tickets. A later started ticket may not have seen mine yet: wait for it to
@@ -223,6 +232,7 @@ export function openTestBudget(
             if (sumOf(startedTickets) <= budget) {
               return {
                 cores,
+                waitMilliseconds,
                 release: () => {
                   files.delete(file);
                   rmSync(file, { force: true });
@@ -242,7 +252,7 @@ export function openTestBudget(
                 const line = `ark test: waiting for memory: ${held.join("; ")}`;
                 if (line !== memoryPrinted) print(line);
                 memoryPrinted = line;
-                await Bun.sleep(pollMilliseconds);
+                await nap();
                 continue;
               }
               memoryPrinted = null;
@@ -269,7 +279,7 @@ export function openTestBudget(
             printedKey = key;
             printedAt = time;
           }
-          await Bun.sleep(pollMilliseconds);
+          await nap();
         }
       } catch (err) {
         files.delete(file);

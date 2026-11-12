@@ -233,6 +233,7 @@ describe("ark retro", () => {
       "gates",
       "escaped_defects",
       "orchestration",
+      "resources",
       "comparison",
     ]);
   });

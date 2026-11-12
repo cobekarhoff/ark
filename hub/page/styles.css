@@ -3289,3 +3289,153 @@ pre.code-plain {
 .item-head a.mono {
   white-space: nowrap;
 }
+
+/* ---------- resources: header strip on every page, and the Resources page ---------- */
+.host-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  padding: 0 16px;
+  background: var(--nav);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.sig {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 14px 6px 0;
+  margin-right: 14px;
+  border-right: 1px solid var(--line);
+  white-space: nowrap;
+}
+.sig .k {
+  color: var(--mute);
+}
+.sig .v {
+  font-weight: 600;
+  font-family: var(--mono);
+}
+/* A level is a colour, a mark shape and a word, so colour is never the only signal. */
+.lv {
+  --c: var(--green);
+  --t: var(--green-t);
+  --bg: var(--green-bg);
+}
+.lv.amber {
+  --c: var(--amber);
+  --t: var(--amber-t);
+  --bg: var(--amber-bg);
+}
+.lv.red {
+  --c: var(--red);
+  --t: var(--red-t);
+  --bg: var(--red-bg);
+}
+.lv.unchecked {
+  --c: var(--line-3);
+  --t: var(--mute);
+  --bg: transparent;
+}
+.lv .mark {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.lv.amber .mark {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.9);
+}
+.lv.red .mark {
+  width: 11px;
+  height: 10px;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.lv.unchecked .mark {
+  background: none;
+  border: 1.5px dashed var(--c);
+}
+.lv .tag {
+  padding: 0 6px;
+  border: 1px solid var(--c);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--t);
+  font-size: 11px;
+}
+.lv.unchecked .v {
+  color: var(--mute);
+}
+.adm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 0;
+}
+.adm .k {
+  color: var(--mute);
+}
+.host-strip .go {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  min-height: 36px;
+}
+.res-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.res-signal {
+  gap: 10px;
+  padding: 8px 12px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.spark {
+  color: var(--t);
+}
+.res-run {
+  margin-bottom: 12px;
+}
+.res-agent {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.res-agent:first-child {
+  border-top: 0;
+}
+.res-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.res-table th {
+  padding: 4px 10px 4px 0;
+  color: var(--mute);
+  font-weight: 500;
+  text-align: left;
+}
+.res-table td {
+  padding: 4px 10px 4px 0;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+}
+.res-table .num {
+  text-align: right;
+}
+.panel > .res-table {
+  margin: 4px 12px 8px;
+  width: calc(100% - 24px);
+}
+.panel > p.body {
+  padding: 8px 12px;
+}

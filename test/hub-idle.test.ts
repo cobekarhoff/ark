@@ -143,6 +143,9 @@ while [ -e "$S/gh.hold" ] && [ "$waited" -lt 1500 ]; do sleep 0.02; waited=$((wa
 cat "$S/gh.view"`,
   );
   script("omp", `echo '{"reports":[]}'`);
+  // The resources source reads the live CPU and load, which change on every sample and push; this test is about the others.
+  script("fake-ps", "exit 1");
+  process.env.ARK_PS = join(bin, "fake-ps");
   writeFileSync(join(state, "gh.view"), validView);
   writeFileSync(join(state, "plannotator.sessions"), "[]");
   process.env.PATH = `${bin}:${savedEnvironment.PATH}`;
@@ -349,7 +352,7 @@ const snapshotOf = async (hub: Hub): Promise<Snapshot> =>
 const readAtOf = (snapshot: Snapshot, source: SourceName) => snapshot.sources[source].read_at;
 const okOf = (snapshot: Snapshot, source: SourceName) => snapshot.sources[source].ok;
 const allSourcesOk = (snapshot: Snapshot) =>
-  Object.values(snapshot.sources).every((source) => source.ok);
+  Object.entries(snapshot.sources).every(([name, source]) => name === "resources" || source.ok);
 
 const gatesOf = (snapshot: Snapshot) => (snapshot.gates === "unknown" ? [] : snapshot.gates);
 

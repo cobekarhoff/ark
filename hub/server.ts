@@ -64,7 +64,7 @@ const fileLimitBytes = 1 << 20;
 const switchTimeoutMilliseconds = 5000;
 
 /**
- * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /events`
+ * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /api/resources/history` (the 24-hour host history), `GET /events`
  * (Server-Sent Events), and on request `GET /api/run/<run>` (any run, open or closed),
  * `GET /api/run/<run>/transcript?file=&cursor=`, `GET /api/run/<run>/file?path=`,
  * `GET /api/run/<run>/evidence` (plan cases with base and head results, evidence files of non-test
@@ -216,6 +216,8 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
         return new Response(reader.json(), {
           headers: { ...headers, "content-type": "application/json" },
         });
+
+      if (pathname === "/api/resources/history") return json(reader.resourcesHistory());
 
       if (pathname === "/events") {
         let cleanup = () => {};
