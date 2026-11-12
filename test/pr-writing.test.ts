@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { loadConfig, type PrWriting } from "../cli/config.ts";
 import { evidenceProblem } from "../cli/ticket.ts";
-import { buildBody } from "../skills/pr-writing/lib/body.ts";
+import { beginMarker, buildBody, endMarker } from "../skills/pr-writing/lib/body.ts";
 import type { Ledger } from "../skills/pr-writing/lib/ledger.ts";
 import {
   hashBody,
@@ -39,6 +39,8 @@ const hostVariables = [
   "FAKE_RACE_MR",
   "FAKE_EDIT_BODY",
   "FAKE_TOKEN_OWNERS",
+  "FAKE_GH_NO_ATTACH",
+  "FAKE_GLAB_UPLOAD_FAIL",
 ];
 
 // A token made at run time, so no file of the repo holds a string a secret scanner would flag.
@@ -2571,4 +2573,315 @@ test("ARK-T270 the run-lead playbook's analysis evidence example and Not in plan
     result: "fail",
     reason: expect.stringContaining("no reason given"),
   });
+});
+
+// --- ARK-T284, ARK-T285, ARK-T286, ARK-T287, ARK-T293: uploads and folded evidence -------------
+
+// Not valid UTF-8: a copy through a text field would corrupt it.
+const pngBytes = (tag: number) =>
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00, tag]);
+const shotPath = (testCase: string, name = "a.png") =>
+  `results/evidence/${testCase}/head/screenshots/${name}`;
+
+/** A one-repo run with real PNG bytes in 2 screenshots, gathered and linted by the scripts in the repo worktree. */
+function uploadRun(
+  host: HostName,
+  options: { shots?: boolean; log?: string; mutateBody?: (body: string) => string } = {},
+) {
+  const withShots = options.shots !== false;
+  const run = makeRun({
+    host,
+    repos: [{ name: "repos/a", changes: { "cli/a.ts": "from a\n" } }],
+    evidence: {
+      "ARK-T1": { base: "fail", head: "pass", shots: withShots ? ["a.png"] : [] },
+      "ARK-T2": { base: "fail", head: "pass", shots: withShots ? ["b.png"] : [] },
+    },
+  });
+  const repo = realpathSync(run.paths["repos/a"]);
+  if (withShots) {
+    writeFileSync(join(run.directory, shotPath("ARK-T1")), pngBytes(1));
+    writeFileSync(join(run.directory, shotPath("ARK-T2", "b.png")), pngBytes(2));
+  }
+  if (options.log !== undefined)
+    writeFileSync(join(run.directory, "results/evidence/ARK-T1/head/command.log"), options.log);
+  expect(runScript("gather", repo, "--run-dir", run.directory).code).toBe(0);
+  const bodyFile = join(repo, ".pr-writing", "body.md");
+  if (options.mutateBody)
+    writeFileSync(bodyFile, options.mutateBody(readFileSync(bodyFile, "utf8")));
+  const title = "ARK-9: Show units";
+  const linted = runScript("lint_body", repo, "--title", title);
+  expect({ code: linted.code, out: linted.stdout }).toMatchObject({ code: 0 });
+  const post = () => runScript("post_mr", repo, "--confirmed", "--title", title);
+  /** An open MR on the branch, so the post is an update. */
+  const openMergeRequest = (body = "Hand written intro.\n") =>
+    writeFileSync(
+      `${logFile}.state`,
+      JSON.stringify([
+        {
+          number: 9,
+          url: `https://${host}.test/org/a/${host === "github" ? "pull" : "-/merge_requests"}/9`,
+          head: "ark/ARK-9-x",
+          repo: "a",
+          body,
+        },
+      ]),
+    );
+  const shots = [
+    join(run.directory, shotPath("ARK-T1")),
+    join(run.directory, shotPath("ARK-T2", "b.png")),
+  ];
+  return { ...run, repo, bodyFile, post, openMergeRequest, shots, title };
+}
+
+const hostWrites = () => writeCalls().filter((call) => !call.argv.includes("--help"));
+const uploads = () =>
+  loggedCalls().filter((call) => call.argv.includes("projects/:fullpath/uploads"));
+const attachedFiles = (call: LoggedCall) =>
+  call.argv.flatMap((arg, i) => (arg === "--attach" ? [call.argv[i + 1]] : []));
+
+test("ARK-T284 post_mr on GitHub passes one --attach per existing local file, resolved against the run folder", () => {
+  for (const update of [false, true]) {
+    for (const withMissing of [false, true]) {
+      logFile = join(mkdtempSync(join(tmpdir(), "pr-writing-log-")), "calls.ndjson");
+      process.env.FAKE_LOG = logFile;
+      const run = uploadRun("github", {
+        mutateBody: (body) =>
+          withMissing
+            ? body.replace(/^(!\[.*)$/m, `$1\n\n![ARK-T1 head](${shotPath("ARK-T1", "gone.png")})`)
+            : body,
+      });
+      expect(run.repo.startsWith(run.directory)).toBe(false);
+      if (update) run.openMergeRequest();
+      const posted = run.post();
+      expect({ update, withMissing, code: posted.code, err: posted.stderr }).toMatchObject({
+        update,
+        withMissing,
+        code: 0,
+      });
+      const [write] = hostWrites();
+      expect(write.argv.slice(0, 2)).toEqual(["pr", update ? "edit" : "create"]);
+      expect(attachedFiles(write).sort()).toEqual([...run.shots].sort());
+      // gh swaps the path the body names for the URL, so the body must name the attached path.
+      for (const file of run.shots) expect(write.body).toContain(file);
+    }
+  }
+});
+
+test("ARK-T284 a dry run on GitHub writes and attaches nothing", () => {
+  const run = uploadRun("github");
+  const driven = drive<{ action: string }>("post", {
+    host: "github",
+    directory: run.repo,
+    branch: "ark/ARK-9-x",
+    base: "main",
+    title: run.title,
+    bodyFile: run.bodyFile,
+    ledger: run.ledger(),
+    reviewers: [],
+    dryRun: true,
+  });
+  expect(driven.error).toBeUndefined();
+  expect(driven.value!.action).toBe("dry-run");
+  expect(hostWrites().filter((call) => call.argv.includes("--attach"))).toEqual([]);
+});
+
+test("ARK-T285 post_mr on GitLab uploads each local screenshot and posts a body with the upload URLs and no local path", () => {
+  for (const update of [false, true]) {
+    logFile = join(mkdtempSync(join(tmpdir(), "pr-writing-log-")), "calls.ndjson");
+    process.env.FAKE_LOG = logFile;
+    const [one, two] = [shotPath("ARK-T1"), shotPath("ARK-T2", "b.png")];
+    const run = uploadRun("gitlab", {
+      // A path in backticks is not an image target: it stays as it is.
+      mutateBody: (body) => body.replace(/^((?:## |\*\*)Evidence\*{0,2}\n)/m, `$1\n- \`${one}\`\n`),
+    });
+    if (update) run.openMergeRequest(`- [x] Tested locally\n\n${beginMarker}\nold\n${endMarker}\n`);
+    const posted = run.post();
+    expect({ update, code: posted.code, err: posted.stderr }).toMatchObject({ update, code: 0 });
+
+    const upload = uploads();
+    expect(upload.map((call) => call.argv.at(-1)!).toSorted()).toEqual(
+      run.shots.map((file) => `file=@${file}`).toSorted(),
+    );
+    const write = hostWrites()[0];
+    // Every upload is logged before the MR write.
+    const calls = loggedCalls().map((call) => call.argv.join(" "));
+    expect(calls.findLastIndex((call) => call.includes("projects/:fullpath/uploads"))).toBeLessThan(
+      calls.indexOf(write.argv.join(" ")),
+    );
+    expect(write.argv.slice(0, 2)).toEqual(["mr", update ? "update" : "create"]);
+
+    const sha = (file: string) =>
+      new Bun.CryptoHasher("sha256").update(readFileSync(file)).digest("hex").slice(0, 12);
+    const urls = run.shots.map((file) => `/uploads/${sha(file)}/${file.split("/").at(-1)}`);
+    expect(new Set(urls).size).toBe(2);
+    const body = write.argv[write.argv.indexOf("--description") + 1];
+    for (const url of urls) expect(body).toContain(`](${url})`);
+    // No image target keeps a run-folder path; the backticked path is untouched.
+    expect(body).not.toMatch(/!\[[^\]]*\]\(results\//);
+    expect(body).toContain(`\`${one}\``);
+    expect(body).not.toContain(`(${two}`);
+    if (update) expect(body).toContain("- [x] Tested locally");
+  }
+});
+
+test("ARK-T285 a dry run on GitLab uploads nothing", () => {
+  const run = uploadRun("gitlab");
+  const driven = drive<{ action: string }>("post", {
+    host: "gitlab",
+    directory: run.repo,
+    branch: "ark/ARK-9-x",
+    base: "main",
+    title: run.title,
+    bodyFile: run.bodyFile,
+    ledger: run.ledger(),
+    reviewers: [],
+    dryRun: true,
+  });
+  expect(driven.error).toBeUndefined();
+  expect(uploads()).toEqual([]);
+});
+
+test("ARK-T286 post_mr exits 2 and posts nothing when an upload fails", () => {
+  // The second file fails: the first was uploaded, and still nothing is written.
+  process.env.FAKE_GLAB_UPLOAD_FAIL = "2";
+  const run = uploadRun("gitlab");
+  const posted = run.post();
+  expect(posted.code).toBe(2);
+  // The failing file is the second upload, whichever it is.
+  expect(posted.stderr).toContain(uploads()[1].argv.at(-1)!.replace("file=@", ""));
+  expect(uploads()).toHaveLength(2);
+  expect(hostWrites()).toEqual([]);
+});
+
+test("ARK-T286 post_mr exits 2 and posts nothing when gh has no --attach, and only when a local file is named", () => {
+  process.env.FAKE_GH_NO_ATTACH = "1";
+  for (const update of [false, true]) {
+    logFile = join(mkdtempSync(join(tmpdir(), "pr-writing-log-")), "calls.ndjson");
+    process.env.FAKE_LOG = logFile;
+    const run = uploadRun("github");
+    if (update) run.openMergeRequest();
+    const posted = run.post();
+    expect({ update, code: posted.code }).toEqual({ update, code: 2 });
+    expect(posted.stderr).toContain("2.99.0");
+    expect(hostWrites()).toEqual([]);
+  }
+
+  // No local file in the body: an old gh posts as before.
+  logFile = join(mkdtempSync(join(tmpdir(), "pr-writing-log-")), "calls.ndjson");
+  process.env.FAKE_LOG = logFile;
+  const none = uploadRun("github", { shots: false });
+  expect(none.post().code).toBe(0);
+  expect(hostWrites()).toHaveLength(1);
+});
+
+// --- ARK-T287, ARK-T293 -----------------------------------------------------------------------
+
+const detailsBlocks = (body: string) => body.match(/<details>[\s\S]*?<\/details>/g) ?? [];
+
+/** The log of a case: 25 numbered lines, the last 20 hold the lines that would break a naive fold. */
+const trickyLog = [
+  ...Array.from({ length: 5 }, (_, i) => `early ${i + 1}`),
+  ...Array.from({ length: 20 }, (_, i) => `tail ${i + 6}`),
+]
+  .map((line) =>
+    line === "tail 7"
+      ? "## heading"
+      : line === "tail 8"
+        ? "**bold**"
+        : line === "tail 9"
+          ? "`````"
+          : line === "tail 10"
+            ? "</details> after"
+            : line,
+  )
+  .join("\n");
+
+test("ARK-T287 Evidence section folds each test case and each non-test AC in a details block, the same on both hosts, and SIZE01 skips it", () => {
+  const run = makeRun({
+    criteria: [
+      { id: "AC1", status: "passing", verifiedBy: ["ARK-T1"] },
+      { id: "AC5", status: "passing", verifiedBy: [] },
+    ],
+    evidence: {
+      "ARK-T1": { base: "fail", head: "pass", shots: ["a.png"] },
+      "ARK-T2": { base: "fail", head: "pass" },
+    },
+    prWriting: { ...sensitiveConfig, tier_floor: 0 },
+  });
+  const evidenceDirectory = join(run.directory, "results/evidence");
+  writeFileSync(join(evidenceDirectory, "ARK-T1/head/command.log"), `${trickyLog}\n`);
+  writeFileSync(join(evidenceDirectory, "AC5.md"), "Live check: both images shown.\n");
+  const ledger = run.ledger();
+  const body = buildBody(ledger);
+
+  expect(buildBody({ ...ledger, host: "gitlab" })).toBe(body);
+  const blocks = detailsBlocks(body);
+  // ARK-T1, ARK-T2 and AC5: AC1 has a test case, so it gets no block of its own.
+  expect(blocks).toHaveLength(3);
+  expect(body.match(/<details/g)).toHaveLength(3);
+  expect(body).not.toMatch(/<details[^>]*open/);
+  const caseBlock = blocks.find((block) => block.includes("ARK-T1`: base fail, head pass"))!;
+  expect(caseBlock).toBeDefined();
+  expect(blocks.some((block) => block.includes("ARK-T2`: base fail, head pass"))).toBe(true);
+  expect(blocks.find((block) => block.includes("AC5"))).toContain("Live check: both images shown.");
+
+  // Exactly the last 20 lines, in a fence longer than any backtick run inside.
+  expect(caseBlock).not.toContain("early");
+  expect(caseBlock).toContain("tail 25");
+  expect(caseBlock).toContain("tail 6");
+  expect(caseBlock).toContain("## heading");
+  const fence = caseBlock.match(/^(`{3,})$/m)![1];
+  expect(fence.length).toBeGreaterThanOrEqual(3);
+  for (const run of caseBlock.match(/`+/g)!.filter((ticks) => ticks !== fence))
+    expect(run.length).toBeLessThan(fence.length === 3 ? 6 : fence.length);
+
+  const lint = lintBody({ body, title: defaultTitle, ledger });
+  // The log's heading and bold lines sit inside the fold: the Evidence section is not cut.
+  for (const id of ["EVID01", "EVID03", "EVID04"]) expect(result(lint, id).result).not.toBe("fail");
+
+  // No head command.log and an old ledger with no log or acEvidence field still build a block with the results.
+  const old = buildBody({
+    ...ledger,
+    acEvidence: undefined,
+    evidence: ledger.evidence!.map((entry) => ({ ...entry, log: undefined })),
+  });
+  expect(old).toContain("ARK-T1`: base fail, head pass");
+  expect(old).not.toContain("tail 25");
+
+  // SIZE01: prose inside the fold is skipped, the same prose outside counts, and an unclosed fold hides nothing.
+  const prose = Array.from({ length: 30 }, (_, i) => `Sentence number ${i} of long prose.`).join(
+    "\n\n",
+  );
+  const size01 = (text: string) =>
+    result(lintBody({ body: text, title: defaultTitle, ledger }), "SIZE01").result;
+  expect(size01(body)).toBe("pass");
+  expect(size01(`${body}\n<details><summary>x</summary>\n\n${prose}\n\n</details>\n`)).toBe("pass");
+  expect(size01(`${body}\n${prose}\n`)).toBe("fail");
+  expect(size01(`${body}\n<details><summary>x</summary>\n\n${prose}\n`)).toBe("fail");
+});
+
+test("ARK-T293 a secret-like command.log line is not in the built or the posted body, on both hosts", () => {
+  const secrets = [
+    `token=${"s3cr3t".repeat(4)}`,
+    `Authorization: Bearer ${"abc".repeat(8)}.${"def".repeat(8)}`,
+    `DB_PASSWORD=${"hunter2".repeat(3)}`,
+    `API_KEY=${"k".repeat(24)}`,
+    `export GH=${githubToken}`,
+  ];
+  const clean = ["ok 1 renders the page", "ok 2 saves the file"];
+  const log = [...clean.slice(0, 1), ...secrets, ...clean.slice(1)].join("\n");
+  for (const host of ["github", "gitlab"] as HostName[]) {
+    logFile = join(mkdtempSync(join(tmpdir(), "pr-writing-log-")), "calls.ndjson");
+    process.env.FAKE_LOG = logFile;
+    const run = uploadRun(host, { log, shots: false });
+    const built = readFileSync(run.bodyFile, "utf8");
+    for (const line of clean) expect(built).toContain(line);
+    const posted = run.post();
+    expect({ host, code: posted.code, err: posted.stderr }).toMatchObject({ host, code: 0 });
+    const write = hostWrites()[0];
+    const sent = write.body ?? write.argv[write.argv.indexOf("--description") + 1];
+    expect(sent).toContain(clean[0]);
+    for (const line of [built, sent])
+      for (const secret of secrets) expect(line).not.toContain(secret.split(/[=: ]+/).at(-1)!);
+  }
 });
