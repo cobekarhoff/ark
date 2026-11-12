@@ -3,10 +3,10 @@
 # 1. closes (orca terminal close) the terminal of each settled dispatch (state succeeded, failed or stopped) of the
 #    project's Runs "Ark run <run>" whose run folder is under $ARK_HOME/projects/<project>/runs, when that terminal is
 #    still in `orca terminal list` and connected. The dispatch state is read again from a fresh worker-list right
-#    before each close; a terminal that a live dispatch uses is never closed. Retained and release_unknown terminals
+#    before each close; a terminal that a live dispatch of any Run uses is never closed (every Run is read again). Retained and release_unknown terminals
 #    (kept open on purpose) are left. Master Chief's Run, run leads and other projects are never selected: only Runs
 #    "Ark run <run>" of this project are read.
-# 2. lists connected terminals under that runs folder with no output for more than one day (an agent or prototype
+# 2. lists connected terminals under that runs folder or the project workspace with no output for more than one day (an agent or prototype
 #    server). It only lists them; it never stops them.
 # It sends one status message "Sweep: closed <n>, idle <m>" to the Run "Master Chief: <project> tickets"
 # (scripts/mc-send.sh) when it closed something or the idle list changed. An unsent message is kept in
@@ -25,9 +25,20 @@ pending="$stateDir/sweep.pending"
 idleState="$stateDir/sweep.idle"
 settled='["succeeded","failed","stopped"]'
 
+# liveOwner <terminal> <run ids>: fails when a dispatch of any Run that is not settled uses the terminal (a terminal can be
+# reused by worker-start --terminal across Runs), or when a Run's dispatches cannot be read: then nothing is closed.
+liveOwner() {
+  local t=$1 runId rows
+  for runId in $2; do
+    rows=$(orcaRows workers orchestration worker-list --run "$runId" </dev/null) || return 1
+    [ -z "$(jq -r --arg t "$t" --argjson settled "$settled" 'select(.terminal == $t) | select(.state | IN($settled[]) | not) | .dispatchId' <<<"$rows")" ] || return 1
+  done
+}
+
 pass() {
-  local runs terminals connected id name rows candidates dispatch terminal fresh idle idleSignature body count
+  local allRunIds runs terminals connected id name rows candidates dispatch terminal fresh idle idleSignature body count
   runs=$(orcaRows runs orchestration run-list --full) || { echo "sweep: orca run-list failed, retry next pass" >&2; return; }
+  allRunIds=$(jq -r '.id' <<<"$runs")
   terminals=$(orca terminal list --limit 1000 --json) || { echo "sweep: orca terminal list failed, retry next pass" >&2; return; }
   connected=$(jq -c '[.result.terminals[]? | select(.connected) | .handle]' <<<"$terminals") || return
   while IFS=$'\t' read -r id name; do
@@ -40,7 +51,7 @@ pass() {
       fresh=$(orcaRows workers orchestration worker-list --run "$id" </dev/null) || continue
       # Close only when the dispatch is still settled and no dispatch on this terminal is live.
       [ "$(jq -r --arg d "$dispatch" --argjson settled "$settled" 'select(.dispatchId == $d) | select(.state | IN($settled[])) | .dispatchId' <<<"$fresh")" = "$dispatch" ] || continue
-      [ -z "$(jq -r --arg t "$terminal" --argjson settled "$settled" 'select(.terminal == $t) | select(.state | IN($settled[]) | not) | .dispatchId' <<<"$fresh")" ] || continue
+      liveOwner "$terminal" "$allRunIds" || { echo "sweep: $terminal is used by a live dispatch or its owners cannot be read, not closed" >&2; continue; }
       if orca terminal close --terminal "$terminal" --json </dev/null >/dev/null 2>&1; then
         echo "closed $terminal ($dispatch)" >> "$pending"
         connected=$(jq -c --arg t "$terminal" 'map(select(. != $t))' <<<"$connected")
@@ -50,8 +61,8 @@ pass() {
     done <<<"$candidates"
   done < <(jq -r 'select(.objective // "" | startswith("Ark run ")) | [.id, .objective] | @tsv' <<<"$runs")
 
-  idle=$(jq -r --arg root "$runsRoot/" --argjson live "$connected" \
-    '.result.terminals[]? | select(.worktreePath // "" | startswith($root)) | select(.handle as $h | $live | index($h)) | select(.lastOutputAt < (now * 1000 - 86400000)) | [.handle, (.title // "" | .[0:60]), (.lastOutputAt / 1000 | floor | todate)] | @tsv' <<<"$terminals")
+  idle=$(jq -r --arg root "$runsRoot/" --arg ws "${workspace%/}" --argjson live "$connected" \
+    '.result.terminals[]? | select(.worktreePath // "" | . as $p | startswith($root) or $p == $ws or ($ws != "" and ($p | startswith($ws + "/")))) | select(.handle as $h | $live | index($h)) | select(.lastOutputAt < (now * 1000 - 86400000)) | [.handle, (.title // "" | .[0:60]), (.lastOutputAt / 1000 | floor | todate)] | @tsv' <<<"$terminals")
   idleSignature=$(cut -f1 <<<"$idle" | sort | tr '\n' ' ')
   if [ -s "$pending" ] || { [ -n "$idle" ] && [ "$idleSignature" != "$(cat "$idleState" 2>/dev/null)" ]; }; then
     count=$(grep -c . "$pending" 2>/dev/null)

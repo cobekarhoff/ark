@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { ArkError } from "./errors.ts";
 
 /** One LaunchAgent. `keepAlive` "crash" restarts after a failure only; "always" restarts after any exit too. */
 export type Agent = {
@@ -134,11 +135,17 @@ export function installAgent(
   };
 }
 
-/** Unloads and deletes one agent's plist. Returns false when it was not installed. */
+/**
+ * Unloads and deletes one agent's plist. Returns false when it was not installed. A failed unload keeps the plist
+ * (so a retry still finds it) and throws, unless launchd says the label is not loaded.
+ */
 export function removeAgent(label: string): boolean {
   const path = plistPath(label);
   if (!existsSync(path)) return false;
-  launchctl("unload", path);
+  if (!launchctl("unload", path).ok && launchctl("list", label).ok)
+    throw new ArkError(
+      `launchctl unload ${path} failed and ${label} is still loaded. The plist was kept.`,
+    );
   rmSync(path);
   return true;
 }

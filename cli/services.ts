@@ -43,11 +43,16 @@ export function servicesInstall(inProject: string | undefined): void {
   for (const service of services) {
     const agentLabel = label(project, service.name);
     if (service.name === "auto-merger" && mergeRequestsMode(project) === "none") {
-      lines.push(
-        removeAgent(agentLabel)
-          ? `Removed LaunchAgent ${agentLabel}: merge_requests: none, so no MR is merged.`
-          : `${service.name}: not installed, merge_requests: none.`,
-      );
+      try {
+        lines.push(
+          removeAgent(agentLabel)
+            ? `Removed LaunchAgent ${agentLabel}: merge_requests: none, so no MR is merged.`
+            : `${service.name}: not installed, merge_requests: none.`,
+        );
+      } catch (error) {
+        console.error((error as Error).message);
+        failed = true;
+      }
       continue;
     }
     const outcome = installAgent(
@@ -77,7 +82,15 @@ export function servicesInstall(inProject: string | undefined): void {
 /** Unloads and deletes the LaunchAgents of the project. Nothing installed is not an error. */
 export function servicesUninstall(inProject: string | undefined): void {
   const project = resolveProject(inProject);
-  const removed = services.filter((service) => removeAgent(label(project, service.name)));
+  const removed = services.filter((service) => {
+    try {
+      return removeAgent(label(project, service.name));
+    } catch (error) {
+      console.error((error as Error).message);
+      process.exitCode = 1;
+      return false;
+    }
+  });
   console.log(
     removed.length === 0
       ? `No services of project ${project} are installed. Nothing changed.`

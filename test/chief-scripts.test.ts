@@ -530,6 +530,7 @@ case "$1 $2" in
     while [ $# -gt 0 ]; do [ "$1" = --run ] && run=$2; shift; done
     calls=$(($(cat "$d/worker-calls-$run" 2>/dev/null || echo 0) + 1)); echo $calls > "$d/worker-calls-$run"
     file="$d/workers-$run.json"
+    [ -e "$file" ] || { echo '{"result":{"workers":[],"nextCursor":null}}'; exit 0; }
     [ $calls -gt 1 ] && [ -e "$d/workers-$run.after.json" ] && file="$d/workers-$run.after.json"
     cat "$file" ;;
   "terminal list") cat "$d/terminals.json" ;;
@@ -896,4 +897,58 @@ test("ARK-T299 sweep does not close a dispatch that restarted before the close, 
       (entry: { handle: string }) => entry.handle,
     ),
   ).toEqual(["term_first"]);
+});
+
+test("ARK-T299 sweep does not close a terminal that a live dispatch of another Run reuses, and lists an idle terminal in the project workspace", () => {
+  const runName = "2026-11-02-ARK-900-1";
+  const runsRoot = join(process.env.ARK_HOME!, "projects", "demo", "runs");
+  mkdirSync(join(runsRoot, runName), { recursive: true });
+  const workspace = tempGitRepo();
+  const writeWorkers = (name: string, workers: unknown[]) =>
+    writeFileSync(join(bin, name), JSON.stringify({ result: { workers, nextCursor: null } }));
+  writeFileSync(
+    join(bin, "runs.ndjson"),
+    [masterChiefRun, { id: "run_ark", objective: `Ark run ${runName}` }, decoyRun]
+      .map((run) => `${JSON.stringify(run)}\n`)
+      .join(""),
+  );
+  const settled = {
+    dispatchId: "old",
+    state: "succeeded",
+    terminalState: "released",
+    terminal: "term_shared",
+  };
+  writeWorkers("workers-run_ark.json", [settled]);
+  writeWorkers(`workers-${decoyRun.id}.json`, [
+    { dispatchId: "new", state: "running", terminalState: "active", terminal: "term_shared" },
+  ]);
+  const terminal = (handle: string, worktreePath: string, idleHours: number) => ({
+    handle,
+    worktreePath,
+    connected: true,
+    title: handle,
+    lastOutputAt: Date.now() - idleHours * 3_600_000,
+  });
+  writeFileSync(
+    join(bin, "terminals.json"),
+    JSON.stringify({
+      result: {
+        terminals: [
+          terminal("term_shared", join(runsRoot, runName, "workspace"), 0),
+          terminal("term_ws_idle", workspace, 25),
+          terminal("term_ws_sibling", `${workspace}-other`, 25),
+        ],
+      },
+    }),
+  );
+
+  const result = runScript("sweep.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
+
+  expect(result.code).toBe(0);
+  expect(orcaCloses()).toEqual([]);
+  expect(result.err).toContain("term_shared is used by a live dispatch");
+  expect(orcaSends()).toHaveLength(1);
+  const body = flagValue(orcaSends()[0]!, "--body");
+  expect(body).toContain("term_ws_idle");
+  expect(body).not.toContain("term_ws_sibling");
 });

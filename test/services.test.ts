@@ -57,7 +57,8 @@ case "$1" in
     [ -e "$d/failload" ] && { echo "Load failed: 5" >&2; exit 1; }
     [ -e "$d/loaded/$label" ] && { echo "$label: service already loaded" >&2; exit 1; }
     : > "$d/loaded/$label" ;;
-  unload) rm -f "$d/loaded/$(basename "$2" .plist)" ;;
+  unload) [ -e "$d/failunload" ] && { echo "Unload failed: 5" >&2; exit 1; }
+    rm -f "$d/loaded/$(basename "$2" .plist)" ;;
   list) [ -e "$d/loaded/$2" ] || { echo "Could not find service \\"$2\\" in domain" >&2; exit 113; }
     printf '{\\n\\t"Label" = "%s";\\n' "$2"
     pid=$(cat "$d/loaded/$2")
@@ -201,6 +202,39 @@ test("ARK-T294 ark services install exits 1 and leaves no plist when launchctl l
   expect(result.code).toBe(1);
   expect(result.err).toContain("launchctl load failed");
   expect(installed()).toEqual([]);
+});
+
+test("ARK-T294 ark services uninstall keeps the plist and exits 1 when launchctl unload fails and the service is still loaded", () => {
+  writeProject("ark", config("open"));
+  expect(arkServices({}, "services", "install", "--project", "ark").code).toBe(0);
+  writeFileSync(join(commandDirectory, "failunload"), "");
+
+  const result = arkServices({}, "services", "uninstall", "--project", "ark");
+
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("still loaded");
+  expect(result.out).not.toContain("Removed LaunchAgent");
+  expect(installed()).toHaveLength(3);
+
+  // Once the unload works, a retry still finds the plists.
+  Bun.spawnSync(["rm", join(commandDirectory, "failunload")]);
+  const retry = arkServices({}, "services", "uninstall", "--project", "ark");
+  expect(retry.code, retry.err).toBe(0);
+  expect(installed()).toEqual([]);
+});
+
+test("ARK-T298 ark services install keeps a loaded auto-merger and exits 1 when its unload fails after the project changed to none", () => {
+  writeProject("ark", config("open"));
+  expect(arkServices({}, "services", "install", "--project", "ark").code).toBe(0);
+  writeProject("ark", config("none"));
+  writeFileSync(join(commandDirectory, "failunload"), "");
+
+  const result = arkServices({}, "services", "install", "--project", "ark");
+
+  expect(result.code).toBe(1);
+  expect(result.err).toContain("still loaded");
+  expect(result.out).not.toContain("Removed LaunchAgent");
+  expect(existsSync(plist("ark", "auto-merger"))).toBe(true);
 });
 
 test("ARK-T297 ark services status shows each service as not installed, loaded or running with pid and last log line", () => {
