@@ -74,16 +74,25 @@ export function Icon({ name }: { name: "chevron" | "copy" | "list" | "graph" | "
   );
 }
 
-/** The run phase while a run is open, else the ticket status. */
+/** The run phase while a run is open, the derived queue state for a ready ticket, else the ticket status. */
 export function StatusChip({ entry }: { entry: TicketEntry }) {
   const { status } = entry.ticket;
-  const label = entry.open ? phaseLabel(entry.open.phase) : status.replaceAll("_", " ");
+  const showState = status === "ready" && !entry.open;
+  const label = entry.open
+    ? phaseLabel(entry.open.phase)
+    : showState
+      ? entry.state
+      : status.replaceAll("_", " ");
   const tone = entry.open
     ? entry.tone.replace("p-", "")
     : status === "proposed"
       ? "proposed"
-      : status === "ready"
-        ? "ready"
+      : showState
+        ? entry.state === "queued"
+          ? "ready"
+          : entry.state === "approved, not queued"
+            ? "proposed"
+            : "none"
         : status === "in_progress"
           ? "build"
           : "none";

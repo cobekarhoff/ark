@@ -11,6 +11,9 @@ import {
   stuckAgents,
   isUnknownProject,
   scoped,
+  startsNext,
+  type StartRow,
+  type StartsNext,
   type Stuck,
 } from "./derive.ts";
 import {
@@ -27,7 +30,7 @@ import {
   type Attention,
 } from "./format.tsx";
 import { Clock, runHref } from "./RunDetail.tsx";
-import { useAge, useLive, useNow, useProject } from "./store.tsx";
+import { useAge, useLive, useNow, useProject, ticketHref } from "./store.tsx";
 import type {
   CriterionEvidence,
   Gate,
@@ -372,6 +375,94 @@ function ReviewQueue({ runs }: { runs: RunView[] | "unknown" }) {
   );
 }
 
+function QueueRow({ row }: { row: StartRow }) {
+  return (
+    <div className="item" data-testid="starts-next-row" data-ticket={row.ticket}>
+      <div className="item-head">
+        <span className={`pill ${row.status === "ready" ? "ok" : "unk"}`}>{row.status}</span>
+        <a className="mono strong" href={ticketHref(row.ticket)}>
+          {row.ticket}
+        </a>
+        <span className="queue-title">{row.title}</span>
+      </div>
+      <p className={row.status === "ready" ? undefined : "mut"} data-testid="starts-next-reason">
+        {row.reason}
+      </p>
+    </div>
+  );
+}
+
+function StartsNextBlock({ block, single }: { block: StartsNext; single: boolean }) {
+  const label =
+    block.limit === null ? `${block.open} runs open` : `${block.open}/${block.limit} runs open`;
+  if ("unavailable" in block)
+    return (
+      <section className="panel warn-panel" data-testid="starts-next" data-project={block.project}>
+        <header>
+          <h2>Starts next</h2>
+          <span className="hint">{block.project}</span>
+        </header>
+        <div className="body">
+          <p role="status">
+            <span className="strong">Queue unavailable: </span>
+            <span className="mono">{block.unavailable}</span>
+          </p>
+        </div>
+      </section>
+    );
+  return (
+    <>
+      <Panel
+        title={single ? "Starts next" : `Starts next · ${block.project}`}
+        count={block.rows.length}
+        hint={`${label}, by roadmap rank`}
+      >
+        <div data-testid="starts-next" data-project={block.project}>
+          {block.rows.length === 0 ? <p className="mut">Nothing in the queue.</p> : null}
+          {block.rows.map((row) => (
+            <QueueRow key={row.ticket} row={row} />
+          ))}
+        </div>
+      </Panel>
+      <Panel
+        title={single ? "Approved, not queued" : `Approved, not queued · ${block.project}`}
+        count={block.notQueued.length}
+        hint="ready, no Task, no open run"
+      >
+        <div data-testid="not-queued" data-project={block.project}>
+          {block.notQueued.length === 0 ? (
+            <p className="mut">Every ready ticket is queued.</p>
+          ) : null}
+          {block.notQueued.map((ticket) => (
+            <div
+              className="item"
+              key={ticket.id}
+              data-testid="not-queued-row"
+              data-ticket={ticket.id}
+            >
+              <div className="item-head">
+                <span className="pill warn">not queued</span>
+                <a className="mono strong" href={ticketHref(ticket.id)}>
+                  {ticket.id}
+                </a>
+                <span className="queue-title">{ticket.title}</span>
+              </div>
+              <p className="mut">ask Master Chief to queue it</p>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+function StartsNextPanels({ snapshot }: { snapshot: Snapshot }) {
+  const blocks = startsNext(snapshot);
+  return blocks.map((block) => (
+    <StartsNextBlock key={block.project} block={block} single={blocks.length === 1} />
+  ));
+}
+
 function Progress({ run }: { run: RunView }) {
   const age = useAge();
   const progress = run.progress;
@@ -591,7 +682,10 @@ export function Home() {
           <NeedsMe gates={gates} waiting={waiting} />
           <StuckAgents stuck={stuck} />
         </div>
-        <ReviewQueue runs={runs} />
+        <div className="stack">
+          <ReviewQueue runs={runs} />
+          <StartsNextPanels snapshot={snapshot} />
+        </div>
         <div className="stack">
           <Panel
             title="Run progress"
