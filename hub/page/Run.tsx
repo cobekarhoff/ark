@@ -526,6 +526,7 @@ export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
                 : "Session file"
         }
         sessions={sessions}
+        files={detail?.files ?? []}
         empty={
           detail && !detail.sessions_ready
             ? "The session files are not indexed yet. Try again in a few seconds."

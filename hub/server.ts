@@ -66,7 +66,8 @@ const switchTimeoutMilliseconds = 5000;
 /**
  * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /events`
  * (Server-Sent Events), and on request `GET /api/run/<run>` (any run, open or closed),
- * `GET /api/run/<run>/transcript?file=&cursor=`, `GET /api/run/<run>/file?path=`,
+ * `GET /api/run/<run>/transcript?file=&cursor=`, `GET /api/run/<run>/transcript/result?file=&call=`
+ * (one full tool result), `GET /api/run/<run>/file?path=`,
  * `GET /api/run/<run>/evidence` (plan cases with base and head results, evidence files of non-test
  * ACs), `GET /api/run/<run>/image?path=` (an image under `results/evidence/`, ADR 0009) and
  * `GET /api/ticket/<project>/<ticket>` (the document of one ticket) and
@@ -74,7 +75,7 @@ const switchTimeoutMilliseconds = 5000;
  * route is `POST /api/open-in-orca` (ADR 0009): it focuses a live terminal in Orca and does nothing
  * else. Any other method gets 405, any other path 404.
  *
- * A handler reads memory, asks the usage worker thread for one transcript page, or reads one small
+ * A handler reads memory, asks the usage worker thread for one transcript page or one tool result, or reads one small
  * run file the guard allows. It never runs a tool except `orca terminal switch`.
  *
  * The hub renders no Markdown or run text on the server: run and ticket text leaves only as JSON
@@ -132,6 +133,18 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       try {
         const result = await reader.transcript(runName, url.searchParams.get("file") ?? "", cursor);
         return result ? json(result) : text("no such session file in this run", 404);
+      } catch {
+        return text("the usage worker could not read the file", 502);
+      }
+    }
+    if (rest === "/transcript/result") {
+      try {
+        const result = await reader.transcriptResult(
+          runName,
+          url.searchParams.get("file") ?? "",
+          url.searchParams.get("call") ?? "",
+        );
+        return result ? json(result) : text("no such result in this session file", 404);
       } catch {
         return text("the usage worker could not read the file", 502);
       }
@@ -203,7 +216,9 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
         }
       }
 
-      const run = pathname.match(/^\/api\/run\/([^/]+)(\/transcript|\/file|\/evidence|\/image)?$/);
+      const run = pathname.match(
+        /^\/api\/run\/([^/]+)(\/transcript\/result|\/transcript|\/file|\/evidence|\/image)?$/,
+      );
       if (run) {
         try {
           return await runRoute(url, decodeURIComponent(run[1]), run[2] ?? "");

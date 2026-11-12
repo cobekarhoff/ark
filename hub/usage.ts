@@ -4,7 +4,7 @@ import { isInside } from "../cli/paths.ts";
 import { type Harness, sessionRoots } from "../cli/usage/index.ts";
 import type { StageTimes, StepWindow } from "../cli/events.ts";
 import { ownersOf, stageOf } from "../cli/usage/owners.ts";
-import type { SessionFile, TranscriptPage } from "./types.ts";
+import type { SessionFile, TranscriptPage, TranscriptResult } from "./types.ts";
 
 export type CompactMessage = {
   time: number;
@@ -15,11 +15,13 @@ export type CompactMessage = {
 };
 export type WorkerRequest = {
   id: number;
-  kind: "head" | "parse" | "transcript";
+  kind: "head" | "parse" | "transcript" | "result";
   file: string;
   harness: Harness;
   /** Byte offset of the first line of a transcript page. */
   cursor?: number;
+  /** Id of the tool call whose result a `result` request reads. */
+  callId?: string;
 };
 export type WorkerReply = {
   id: number;
@@ -28,6 +30,8 @@ export type WorkerReply = {
   start?: number | null;
   messages?: CompactMessage[];
   page?: TranscriptPage;
+  /** Answer of a `result` request: null when the file holds no result for the call. */
+  result?: TranscriptResult | null;
   error?: string;
 };
 
@@ -318,6 +322,18 @@ export class UsageIndex {
     const reply = await this.#ask({ kind: "transcript", file, harness, cursor }, workerCount);
     if (reply.error !== undefined || !reply.page) throw new Error(reply.error ?? "no page");
     return reply.page;
+  }
+
+  /** The full result of one tool call (cut at 64,000 characters), read in the transcript worker slot. Null when the file has no result for the call. */
+  async transcriptResult(
+    file: string,
+    harness: Harness,
+    callId: string,
+  ): Promise<TranscriptResult | null> {
+    const reply = await this.#ask({ kind: "result", file, harness, callId }, workerCount);
+    if (reply.error !== undefined || reply.result === undefined)
+      throw new Error(reply.error ?? "no result");
+    return reply.result;
   }
 
   /**
