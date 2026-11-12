@@ -61,6 +61,9 @@ export function orcaTimeout(fallbackMilliseconds: number): number {
   return forced > 0 ? forced : fallbackMilliseconds;
 }
 
+/** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for the queue and for a one-off command. */
+export const orcaTimeoutMilliseconds = orcaTimeout(10_000);
+
 /** One `orca <words> --json` call: its `result`, or why it failed. */
 async function orcaCommand<T>(words: string[], timeoutMilliseconds: number): Promise<OrcaRead<T>> {
   if (!Bun.which("orca")) return { ok: false, reason: "orca not found on PATH" };
@@ -104,6 +107,77 @@ export async function orcaPages<Row>(
     cursor = (page.value.nextCursor as string | null | undefined) ?? undefined;
   } while (cursor);
   return { ok: true, value: rows };
+}
+
+/** A Task of Master Chief's Run. `ticket` is the id at the start of `<ticket id> <title>`, or null when the title has none. */
+export type QueueTask = {
+  id: string;
+  title: string;
+  status: "ready" | "pending";
+  ticket: string | null;
+};
+type TaskRow = { id: string; title: string; status?: string };
+
+/** The Orca Run `Master Chief: <project> tickets` among `runs`, or the reason there is none. */
+export function findChiefRun(
+  project: string,
+  runs: { id: string; objective?: string }[],
+): OrcaRead<string> {
+  const found = runs.find((orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`);
+  return found
+    ? { ok: true, value: found.id }
+    : { ok: false, reason: `no Orca Run "Master Chief: ${project} tickets"` };
+}
+
+/** The queue of Master Chief's Run: its ready Tasks, then its pending Tasks. task-list has no cursor. */
+export async function readChiefTasks(
+  chiefRunId: string,
+  timeoutMilliseconds = readerTimeoutMilliseconds,
+): Promise<OrcaRead<QueueTask[]>> {
+  const [ready, pending] = await Promise.all([
+    orcaRead<{ tasks?: TaskRow[] }>(
+      ["task-list", "--run", chiefRunId, "--ready"],
+      timeoutMilliseconds,
+    ),
+    orcaRead<{ tasks?: TaskRow[] }>(
+      ["task-list", "--run", chiefRunId, "--status", "pending"],
+      timeoutMilliseconds,
+    ),
+  ]);
+  if (!ready.ok || !pending.ok)
+    return {
+      ok: false,
+      reason: `orca orchestration task-list failed: ${ready.ok ? (pending as { reason: string }).reason : ready.reason}`,
+    };
+  const queueTask = (row: TaskRow, status: QueueTask["status"]): QueueTask => ({
+    id: row.id,
+    title: row.title,
+    status,
+    ticket: row.title.match(/^([A-Z][A-Z0-9]*-\d+)(?:\s|$)/)?.[1] ?? null,
+  });
+  return {
+    ok: true,
+    value: [
+      ...(ready.value.tasks ?? []).map((row) => queueTask(row, "ready")),
+      ...(pending.value.tasks ?? []).map((row) => queueTask(row, "pending")),
+    ],
+  };
+}
+
+/** The whole queue read for a caller that needs nothing else from Orca: the hub. The reason is text for a person. */
+export async function readChiefQueue(
+  project: string,
+  timeoutMilliseconds = readerTimeoutMilliseconds,
+): Promise<OrcaRead<QueueTask[]>> {
+  const runs = await orcaPages<{ id: string; objective?: string }>(
+    "run-list",
+    "runs",
+    ["--full"],
+    timeoutMilliseconds,
+  );
+  if (!runs.ok) return { ok: false, reason: `orca orchestration run-list failed: ${runs.reason}` };
+  const chiefRun = findChiefRun(project, runs.value);
+  return chiefRun.ok ? readChiefTasks(chiefRun.value, timeoutMilliseconds) : chiefRun;
 }
 
 /** `orcaRead` for callers that only need to know it failed: null on any failure. */

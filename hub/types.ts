@@ -15,6 +15,7 @@
  */
 
 import type { Phase, PhaseGate, StepStatus } from "../cli/lifecycle.ts";
+import type { QueueTask } from "../cli/orca.ts";
 import type { TimeSplit } from "../cli/time-split.ts";
 import type { Roadmap } from "./roadmap.ts";
 
@@ -26,7 +27,8 @@ export type SourceName =
   | "usage"
   | "providerLimits"
   | "agentWait"
-  | "evidence";
+  | "evidence"
+  | "queue";
 export type SourceStatus = { ok: boolean; read_at: string | null };
 
 export type { StepStatus };
@@ -319,6 +321,17 @@ export type TicketRunView = {
   all: { run: string; phase: Phase; outcome: string | null; cost_usd: number | null }[];
 };
 
+/**
+ * Master Chief's queue for one project: the ready Tasks, then the pending Tasks, with the
+ * `concurrency` of `ark.yml` (null when that file does not load). `open` counts the project's open
+ * runs, as `ark chief state` does. `unavailable` is the reason the queue could not be read (never
+ * an empty queue).
+ */
+export type ProjectQueue = { project: string; open: number } & (
+  | { concurrency: number | null; tasks: QueueTask[] }
+  | { unavailable: string }
+);
+
 export type Snapshot = {
   generated_at: string;
   sources: Record<SourceName, SourceStatus>;
@@ -333,6 +346,8 @@ export type Snapshot = {
   provider_limits: ProviderWindow[] | "unknown";
   /** Median and p90 of step time by role, from closed runs. */
   role_times: RoleTimes;
+  /** One entry for each project, `"unknown"` until the queue source has answered once. */
+  queues: ProjectQueue[] | "unknown";
 };
 
 /** One decision of a run, from `events.ndjson`: `why` is a plain sentence made from the event payload. */

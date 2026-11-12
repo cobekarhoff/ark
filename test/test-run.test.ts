@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { deriveState, readEvents } from "../cli/events.ts";
 import {
   ark,
@@ -18,6 +18,7 @@ import {
   tempArkHome,
   tempGitRepo,
   writeEvidenceFile,
+  writeFakeCommand,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -974,3 +975,128 @@ macOnly(
   () => proveFixtureSkipsMemoryWait(orphanFixture),
   120_000,
 );
+
+// ARK-423: a git process of a suite starts background maintenance in a repo (maintenance.lock, gc.pid), and a later
+// cpSync of the template or a git call races it. The config is read where git runs, through a shim on PATH, at every
+// entry point: this process, the `ark` CLI children, `ark test` and a Playwright launch that starts from a clean environment.
+describe("git automatic maintenance in the suites (ARK-423)", () => {
+  const realGit = "/usr/bin/git";
+  const repositoryRoot = join(import.meta.dir, "..");
+  const settings = "maintenance.auto=false gc.auto=0";
+  const shimScript = [
+    `m=$(${realGit} config --get maintenance.auto || echo unset)`,
+    `g=$(${realGit} config --get gc.auto || echo unset)`,
+    `echo "$* maintenance.auto=$m gc.auto=$g" >> "\${ARK_T261_LOG:-/dev/null}"`,
+    `exec ${realGit} "$@"`,
+  ].join("\n");
+  const linesOf = (file: string) => readFileSync(file, "utf8").split("\n").filter(Boolean);
+  const gitDirectories = (directory: string) =>
+    ["--git-dir", "--git-common-dir"].map((flag) =>
+      resolve(
+        directory,
+        Bun.spawnSync([realGit, "-C", directory, "rev-parse", flag]).stdout.toString().trim(),
+      ),
+    );
+
+  test("ARK-T261 every git process of the suites, including those started by `ark worktree create`, `ark test` and Playwright, runs with automatic maintenance and gc off", () => {
+    const savedPath = process.env.PATH;
+    const savedLog = process.env.ARK_T261_LOG;
+    const logs = mkdtempSync(join(tmpdir(), "ark-t261-"));
+    const logFor = (entry: string) => {
+      const file = join(logs, entry);
+      writeFileSync(file, "");
+      process.env.ARK_T261_LOG = file;
+      return file;
+    };
+    try {
+      const shim = writeFakeCommand("git", shimScript);
+
+      // Entry point `bun test`: a fresh file set forces a template build; then a commit in the copy.
+      const bunLog = logFor("bun");
+      const repo = tempGitRepo({ "README.md": `unique ${logs}\n` });
+      expect(
+        Bun.spawnSync(["git", "-C", repo, "commit", "--allow-empty", "-q", "-m", "more"]).exitCode,
+      ).toBe(0);
+
+      // Entry points `ark worktree create` (inside buildingRun) and a commit in the worktree it made.
+      const worktreeLog = logFor("worktree");
+      const { runId, runDirectory } = buildingRun({
+        criteria: ["FAKE-1-AC1"],
+        unit: [`test("git runs", () => { Bun.spawnSync(["git", "status"]); });`],
+      });
+      const mirror = join(runDirectory, "workspace");
+      expect(
+        Bun.spawnSync(["git", "-C", mirror, "commit", "--allow-empty", "-q", "-m", "work"])
+          .exitCode,
+      ).toBe(0);
+
+      // Entry point `ark test`: its suite starts git.
+      const testLog = logFor("ark-test");
+      ark("test", runId);
+
+      // Entry point Playwright: its own process, from a clean environment, with the project's config.
+      const scratch = mkdtempSync(join(logs, "pw-"));
+      const playwright = join(repositoryRoot, "node_modules", "@playwright", "test");
+      writeFileSync(
+        join(scratch, "playwright.config.ts"),
+        [
+          `import { defineConfig } from ${JSON.stringify(playwright)};`,
+          `import base from ${JSON.stringify(join(repositoryRoot, "playwright.config.ts"))};`,
+          `export default defineConfig({ ...base, testDir: ${JSON.stringify(scratch)}, globalTeardown: undefined, outputDir: ${JSON.stringify(join(scratch, "out"))}, reporter: "line" });`,
+        ].join("\n"),
+      );
+      writeFileSync(
+        join(scratch, "git.pw.ts"),
+        [
+          `import { test } from ${JSON.stringify(playwright)};`,
+          `import { execFileSync } from "node:child_process";`,
+          `test("git runs", () => { execFileSync("git", ["rev-parse", "HEAD"], { cwd: process.env.ARK_T261_REPO }); });`,
+        ].join("\n"),
+      );
+      const playwrightLog = logFor("playwright");
+      const launched = Bun.spawnSync(
+        ["bunx", "playwright", "test", "--config", join(scratch, "playwright.config.ts")],
+        {
+          cwd: repositoryRoot,
+          env: {
+            PATH: `${shim}:${savedPath}`,
+            HOME: process.env.HOME as string,
+            ARK_T261_LOG: playwrightLog,
+            ARK_T261_REPO: repo,
+          },
+        },
+      );
+      expect(launched.exitCode, launched.stdout.toString() + launched.stderr.toString()).toBe(0);
+
+      // Every entry point ran git, and every git call saw both settings.
+      const observed = {
+        bun: linesOf(bunLog),
+        worktree: linesOf(worktreeLog),
+        arkTest: linesOf(testLog),
+        playwright: linesOf(playwrightLog),
+      };
+      expect(observed.bun.some((line) => line.includes(" commit "))).toBe(true);
+      expect(observed.worktree.some((line) => line.includes("worktree add"))).toBe(true);
+      expect(observed.worktree.some((line) => line.includes(" commit "))).toBe(true);
+      expect(observed.arkTest.some((line) => line.startsWith("status "))).toBe(true);
+      expect(observed.playwright.some((line) => line.startsWith("rev-parse HEAD "))).toBe(true);
+      expect(
+        Object.fromEntries(
+          Object.entries(observed).map(([entry, lines]) => [
+            entry,
+            lines.filter((line) => !line.endsWith(settings)),
+          ]),
+        ),
+      ).toEqual({ bun: [], worktree: [], arkTest: [], playwright: [] });
+
+      // No maintenance or gc process left its lock in either repo.
+      for (const directory of [repo, mirror].flatMap(gitDirectories))
+        for (const lock of ["maintenance.lock", "objects/maintenance.lock", "gc.pid"])
+          expect(existsSync(join(directory, lock))).toBe(false);
+    } finally {
+      process.env.PATH = savedPath;
+      if (savedLog === undefined) delete process.env.ARK_T261_LOG;
+      else process.env.ARK_T261_LOG = savedLog;
+    }
+  }, 180_000);
+});

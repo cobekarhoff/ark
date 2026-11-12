@@ -525,6 +525,13 @@ button:not(:disabled):active {
   gap: 12px;
   min-width: 0;
 }
+.queue-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .warn-panel {
   border-color: var(--amber);
   background: var(--amber-bg);
@@ -3260,7 +3267,7 @@ pre.code-plain {
 }
 
 /* Home at 1024 px: 3 tiles a row; words stay whole, ids and dates stay on one line. */
-@media (max-width: 1100px) {
+@media (max-width: 1280px) {
   .tiles {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

@@ -75,7 +75,15 @@ afterEach(() => {
           // already gone
         }
     }
-    Bun.spawnSync(["pkill", "-9", "-f", `test-runner ${fixture.runId} `]);
+    // By the pid of its runner.json, never by run id: a fake run id repeats across the files of `bun test --parallel`.
+    try {
+      const { pid } = JSON.parse(
+        readFileSync(join(fixture.runDirectory, "results", "runner.json"), "utf8"),
+      );
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // no runner.json, or the runner is already gone
+    }
     Bun.spawnSync(["pkill", "-9", "-f", fixture.directory]);
     rmSync(fixture.directory, { recursive: true, force: true });
   }

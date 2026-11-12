@@ -6,7 +6,7 @@ technique: state transition (idle, watched, idle) with boundary values (0 to 1 a
 priority: high
 risk: the loops start at boot and never stop (about 4 external commands a second with no page); or a read in flight when the last page leaves publishes or re-arms its timer after the stop; or a quick reconnect starts a second loop per source so reads double
 status: active
-changed_by: 2026-11-11-ARK-365-1
+changed_by: 2026-11-11-ARK-354-1
 ---
 
 ## Objective
@@ -22,6 +22,7 @@ Expected: While no page is connected to `/events`, the hub shall run no Orca, Pl
 - `ARK_HUB_INTERVAL_MS=100` so every source interval is 100 ms.
 - The hub is started with `Bun.spawn` on port 0 and its port is read from its output.
 - The run has an open plan gate (the gate event appended to its `events.ndjson`) and one merge request URL in its `state.json`, so Plannotator and GitHub have something to read. Fake `gh` answers `pr view` for that URL. (The `ark` source reads files and starts no binary, so it has no call log; its reads show through its `read_at`.)
+- Fake `orca` also answers the Master Chief Run lookup (`run-list`) and `task-list` with a valid answer, so the queue source has a read to run: it reads on connect and makes no call while idle, which the zero-line checks prove.
 - Fake `orca` answers at once, unless a hold file exists: then it waits in a loop until the hold file is removed, to leave a read in flight. The answer it prints comes from a control file, read when the answer is printed (after the hold ends), so the held read can return a different answer than the reads before it.
 
 ## Steps

@@ -32,6 +32,7 @@ import {
   type SessionHarness,
 } from "../hub-fixtures.ts";
 import {
+  ark,
   checkpoint,
   installFakeTools,
   startHub,
@@ -40,6 +41,7 @@ import {
   tempArkHome,
   tempDirectory,
   useCleanup,
+  writeFakeOrca,
   writeProject,
 } from "./helpers.ts";
 
@@ -483,7 +485,7 @@ test("ARK-277-AC9 Roadmap lists and filters the tickets, changes none, and copie
 
 // ---------------------------------------------------------------- AC10
 
-test("ARK-277-AC10 Runs draws one node for each ticket and one edge for each depends_on, colored by the newest run's phase", async ({
+test("ARK-T260 Runs draws one node for each ticket and one edge for each depends_on, colored by the newest run's phase, and a ready ticket is queued because the Orca queue holds its Task", async ({
   page,
 }) => {
   isolate();
@@ -527,7 +529,9 @@ test("ARK-277-AC10 Runs draws one node for each ticket and one edge for each dep
     ticket: ticketOf("ARK-903"),
     phase: "planning",
   });
+  // The queue holds the Task of ARK-905 only: queued comes from the queue, not from the read's timing.
   installFakeTools({});
+  installChiefOrca({ ready: ["ARK-905 Ticket ARK-905"] });
   const baseUrl = await launch();
   await open(page, baseUrl, "runs");
 
@@ -1752,7 +1756,9 @@ test("ARK-T152 Runs shows every run on one board and graph with filters, rings o
       startedAt: ago(86_400 - number * 600),
     });
   }
+  // Master Chief's queue holds the Task of ARK-603 (the Queued lane).
   installFakeTools({});
+  installChiefOrca({ ready: ["ARK-603 Title of ARK-603"] });
   const baseUrl = await launch();
   await open(page, baseUrl, "runs");
   await expect(page.getByTestId("run-card").first()).toBeVisible();
@@ -2674,7 +2680,7 @@ test("ARK-291-AC1 the nav shows Roadmap and not Backlog, and #/backlog and #/bac
   await expect(links.nth(2)).toHaveAttribute("href", "#/roadmap");
 });
 
-test("ARK-291-AC3 Now shows cards and Next, Later and Unranked rows in rank order with rank, ID, title, why, milestone, phase or status, Blocked by and Unblocks, and a finished ticket is in no list", async ({
+test("ARK-T259 Roadmap Now shows cards and Next, Later and Unranked rows in rank order with the derived ticket state", async ({
   page,
 }) => {
   isolate();
@@ -2742,11 +2748,13 @@ test("ARK-291-AC3 Now shows cards and Next, Later and Unranked rows in rank orde
     await expect(row).not.toContainText("More words follow");
     await expect(row.getByTestId("milestone-chip")).toHaveText("M4");
   }
-  // The run phase while a run is open, else the status; a proposed ticket has its badge.
+  // The run phase while a run is open, else the derived queue state of a ready ticket (the fixture queue holds no Task); a proposed ticket has its badge.
   await expect(rowOf(page, "ARK-101").getByTestId("status-chip")).toHaveText(/build/i);
-  await expect(rowOf(page, "ARK-102").getByTestId("status-chip")).toHaveText("ready");
+  await expect(rowOf(page, "ARK-102").getByTestId("status-chip")).toHaveText(
+    "approved, not queued",
+  );
   await expect(rowOf(page, "ARK-103").getByTestId("status-chip")).toHaveText("proposed");
-  await expect(rowOf(page, "ARK-104").getByTestId("status-chip")).toHaveText("ready");
+  await expect(rowOf(page, "ARK-104").getByTestId("status-chip")).toHaveText("blocked");
 
   // Blocked by lists the unfinished dependencies only; Unblocks the open tickets that wait.
   await expect(rowOf(page, "ARK-104").getByTestId("blocked-by")).toHaveText(["ARK-101"]);
@@ -5870,25 +5878,23 @@ async function homeFitProblems(page: Page): Promise<string[]> {
   });
 }
 
-test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a date or wrap a ticket id", async ({
-  page,
-}) => {
+/** The page clock is fixed at `instant` in UTC. The fixture dates (usage reset, run names, yesterday) must come from that same instant: the page reads "today" and "yesterday" from its own clock. */
+async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
+  await page.clock.setFixedTime(instant);
   isolate();
-  const local = (date: Date) =>
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
+  const day = new Date(instant).toISOString().slice(0, 10);
+  const yesterday = new Date(instant - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const gate = "ARK-12345-LONG";
   writeRun({
     project: "p",
-    run: `${local(new Date())}-${gate}-1`,
+    run: `${day}-${gate}-1`,
     ticket: { id: gate, title: "Run at a gate with a title that is rather long" },
     phase: "awaiting_criteria",
   });
   const building = "ARK-12346-LONG";
   writeRun({
     project: "p",
-    run: `${local(new Date())}-${building}-1`,
+    run: `${day}-${building}-1`,
     ticket: { id: building, title: "Run that builds with a title that is rather long" },
     phase: "building",
     steps: [
@@ -5906,14 +5912,14 @@ test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a 
     findings: "### P1: a\n",
   });
   // Multi-digit KPI values: $34.52 today against $12.34 yesterday, and a limit at 82%.
-  for (const [day, ticket, cost] of [
-    [local(new Date()), "ARK-12348-LONG", 34.52],
-    [local(yesterday), "ARK-12349-LONG", 12.34],
+  for (const [runDay, ticket, cost] of [
+    [day, "ARK-12348-LONG", 34.52],
+    [yesterday, "ARK-12349-LONG", 12.34],
   ] as const) {
     writeBacklogTicket({ project: "p", id: ticket, title: `Title of ${ticket}`, status: "done" });
     writeRun({
       project: "p",
-      run: `${day}-${ticket}-1`,
+      run: `${runDay}-${ticket}-1`,
       ticket: { id: ticket, title: `Title of ${ticket}` },
       phase: "closed",
       outcome: "merged",
@@ -5922,7 +5928,7 @@ test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a 
   }
   installFakeTools({
     mergeRequestViews: { [review.url]: review.view },
-    ompUsage: usageAt(0.82),
+    ompUsage: usageAt(0.82, instant),
   });
   const baseUrl = await launch();
   const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"]`);
@@ -5930,6 +5936,7 @@ test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a 
     await open(page, baseUrl, "");
     await expect(page.getByTestId("tile")).toHaveCount(6);
     await expect(tile("usage").locator(".big")).toHaveText("82%", { timeout: 20_000 });
+    await expect(tile("usage").locator(".tile-note")).toContainText(reset);
     await expect(tile("cost").locator(".big")).toHaveText("$34.52");
     await expect(tile("cost").locator(".tile-note")).toContainText("yesterday");
     await expect(tile("needs-me").locator(".tile-note")).toHaveText(gate);
@@ -5949,6 +5956,23 @@ test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a 
   await page.setViewportSize({ width: 1280, height: 800 });
   await ready();
   expect(await homeFitProblems(page)).toEqual([]);
+}
+
+test.describe("Home at 1024 px on a fixed clock", () => {
+  test.use({ timezoneId: "UTC" });
+  const at = (time: string) => Date.parse(`${new Date().toISOString().slice(0, 10)}T${time}:00Z`);
+
+  test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a date or wrap a ticket id", async ({
+    page,
+  }) => {
+    await checkHomeFits(page, at("12:00"), /resets 13:\d\d/);
+  });
+
+  test("ARK-T262 at 1024 px and 23:30 UTC the usage reset shows its date and the Home tiles still fit", async ({
+    page,
+  }) => {
+    await checkHomeFits(page, at("23:30"), /resets \d\d \w{3} 00:\d\d/);
+  });
 });
 
 type Box = { x: number; y: number; width: number; height: number };
@@ -6707,4 +6731,358 @@ test("ARK-T180 the run page shows the four time parts as one bar, in the closed 
   const planBox = (await page.locator(".plan-panel").boundingBox())!;
   expect(barBox.y + barBox.height).toBeLessThanOrEqual(planBox.y);
   await checkpoint(page, "open-run-top-bar");
+});
+
+// ---------------------------------------------------------------- ARK-354: Starts next
+
+type ChiefQueue = {
+  /** Titles of the ready and pending Tasks of the Run `Master Chief: p tickets`. */
+  ready?: string[];
+  pending?: string[];
+  /** No Run `Master Chief: p tickets` on any page. */
+  noRun?: boolean;
+  /** `task-list --ready` exits 1. */
+  readyFails?: boolean;
+  /** `task-list --status pending` sleeps this many seconds before it answers. */
+  pendingSleep?: number;
+};
+
+/**
+ * A fake `orca` first on PATH. `run-list` answers in 16 pages of 10 with a `nextCursor` and the Run
+ * of Master Chief sits last on the last page; `task-list` answers by `--ready` or `--status pending`.
+ * Every call is one line of `orca.log` in the returned folder. Call after `installFakeTools`.
+ */
+function installChiefOrca(queue: ChiefQueue = {}): string {
+  const state = tempDirectory("ark-chief-orca-");
+  const put = (name: string, text: string) => writeFileSync(join(state, name), text);
+  const pages = 16;
+  for (let page = 0; page < pages; page++) {
+    const runs = Array.from({ length: 10 }, (_, index) => ({
+      id: `orca-filler-${page}-${index}`,
+      objective: `Filler ${page}-${index}`,
+    }));
+    if (page === pages - 1 && !queue.noRun)
+      runs[9] = { id: "orca-chief", objective: "Master Chief: p tickets" };
+    put(
+      `runs.${page}`,
+      JSON.stringify({
+        result: {
+          runs,
+          nextCursor: page < pages - 1 ? String(page + 1) : null,
+        },
+      }),
+    );
+  }
+  const tasks = (titles: string[] = [], status: string) =>
+    JSON.stringify({
+      result: {
+        tasks: titles.map((title, index) => ({
+          id: `task-${status}-${index}`,
+          title,
+          status,
+        })),
+      },
+    });
+  put("ready", tasks(queue.ready, "ready"));
+  put("pending", tasks(queue.pending, "pending"));
+  put("pending.sleep", String(queue.pendingSleep ?? 0));
+  if (queue.readyFails) put("ready.fails", "");
+  writeFakeOrca(`echo "$*" >> '${state}/orca.log'
+cursor=0
+previous=
+for argument in "$@"; do
+  [ "$previous" = --cursor ] && cursor=$argument
+  previous=$argument
+done
+case "$1 $2" in
+  "terminal list") echo '{"result":{"terminals":[]}}' ;;
+  "worktree ps") echo '{"result":{"worktrees":[]}}' ;;
+  "orchestration run-list") cat '${state}/runs.'$cursor ;;
+  "orchestration worker-list") echo '{"result":{"workers":[]}}' ;;
+  "orchestration inbox") echo '{"result":{"messages":[]}}' ;;
+  "orchestration task-list")
+    case "$*" in
+      *--ready*) [ -e '${state}/ready.fails' ] && { echo "task-list broke" >&2; exit 1; }; cat '${state}/ready' ;;
+      *) sleep "$(cat '${state}/pending.sleep')"; cat '${state}/pending' ;;
+    esac ;;
+  *) exit 1 ;;
+esac`);
+  return state;
+}
+
+const orcaLines = (state: string) =>
+  readFileSync(join(state, "orca.log"), "utf8").trim().split("\n");
+
+/** Project `p` with `concurrency: 2` and these tickets (all status ready unless given). */
+function queueProject(
+  tickets: { id: string; status?: string; dependsOn?: string[] }[],
+  ranked: string[] = [],
+): void {
+  writeProject("p", {
+    workspace: tempDirectory("ark-workspace-"),
+    ticket_source: "github",
+    suites: [
+      {
+        name: "unit",
+        level: "unit",
+        repo: ".",
+        command: "true",
+        parser: "bun",
+      },
+    ],
+    roles: {
+      implementer: { harness: "omp", model: "m" },
+      validator: { harness: "omp", model: "m" },
+      reviewer: { harness: "omp", model: "m" },
+    },
+    concurrency: 2,
+  });
+  for (const ticket of tickets)
+    writeBacklogTicket({
+      project: "p",
+      id: ticket.id,
+      title: `Title of ${ticket.id}`,
+      status: ticket.status ?? "ready",
+      dependsOn: ticket.dependsOn,
+    });
+  writeRoadmap("p", { now: ranked });
+}
+
+const openRunFor = (ticket: string) =>
+  writeRun({
+    project: "p",
+    run: runId(ticket),
+    ticket: { id: ticket, title: `Title of ${ticket}` },
+    phase: "building",
+  });
+
+const startRows = (page: Page) => page.getByTestId("starts-next-row");
+const rowTickets = (page: Page) =>
+  startRows(page).evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-ticket")));
+
+test("ARK-T253 Home 'Starts next' lists the ready and pending Tasks of Master Chief's Run and leaves out a Task whose ticket has an open run", async ({
+  page,
+}) => {
+  isolate();
+  queueProject(["ARK-801", "ARK-802", "ARK-803", "ARK-804"].map((id) => ({ id })));
+  openRunFor("ARK-804");
+  installFakeTools({});
+  const state = installChiefOrca({
+    ready: ["ARK-801 First", "ARK-802 Second", "ARK-804 Fourth", "no id here"],
+    pending: ["ARK-803 Third"],
+  });
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+
+  await expect(startRows(page)).toHaveCount(3);
+  expect(await rowTickets(page)).toEqual(["ARK-801", "ARK-802", "ARK-803"]);
+  await expect(page.getByTestId("starts-next")).not.toContainText("ARK-804");
+  await expect(page.getByTestId("starts-next")).not.toContainText("no id here");
+  await checkpoint(page, "starts-next-listed");
+
+  // The Run was found by paging run-list with --cursor to the last page, and nothing changed a Task.
+  const lines = orcaLines(state);
+  const cursors = new Set(
+    lines.flatMap((line) => line.match(/^orchestration run-list .*--cursor (\d+)/)?.[1] ?? []),
+  );
+  expect([...cursors].sort((a, b) => Number(a) - Number(b))).toEqual(
+    Array.from({ length: 15 }, (_, index) => String(index + 1)),
+  );
+  for (const line of lines)
+    expect(line).toMatch(
+      /^(terminal list|worktree ps|orchestration (run-list|task-list|worker-list|inbox))\b/,
+    );
+});
+
+test("ARK-T254 Each ticket in 'Starts next' shows one reason, and ready Tasks come before pending Tasks in roadmap rank, then ticket id", async ({
+  page,
+}) => {
+  isolate();
+  queueProject(
+    [
+      ...[
+        "ARK-809",
+        "ARK-811",
+        "ARK-812",
+        "ARK-813",
+        "ARK-820",
+        "ARK-821",
+        "ARK-870",
+        "ARK-871",
+      ].map((id) => ({ id })),
+      { id: "ARK-822", status: "done" },
+      { id: "ARK-814", dependsOn: ["ARK-820"] },
+      { id: "ARK-815", dependsOn: ["ARK-820", "ARK-821", "ARK-822"] },
+      { id: "ARK-816", dependsOn: ["ARK-820"] },
+    ],
+    ["ARK-813", "ARK-812", "ARK-816", "ARK-815"],
+  );
+  openRunFor("ARK-870");
+  installFakeTools({});
+  // The supplied order: ready 812, 811, 813, 809 and pending 815, 814, 816.
+  installChiefOrca({
+    ready: ["ARK-812 b", "ARK-811 c", "ARK-813 a", "ARK-809 d"],
+    pending: ["ARK-815 e", "ARK-814 f", "ARK-816 g"],
+  });
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+
+  const order = ["ARK-813", "ARK-812", "ARK-809", "ARK-811", "ARK-816", "ARK-815", "ARK-814"];
+  const reasons = (ready: string) => [
+    ready,
+    ready,
+    ready,
+    ready,
+    "waits on ARK-820",
+    "waits on ARK-820, ARK-821",
+    "waits on ARK-820",
+  ];
+  const reasonTexts = () => page.getByTestId("starts-next-reason");
+  await expect(startRows(page)).toHaveCount(7);
+  expect(await rowTickets(page)).toEqual(order);
+  await expect(reasonTexts()).toHaveText(reasons("starts next"));
+  await checkpoint(page, "starts-next-reasons-below-limit");
+
+  // A second open run reaches concurrency 2; `ark chief state` counts the same two.
+  openRunFor("ARK-871");
+  await expect(reasonTexts().first()).toHaveText("starts when a run closes (2/2 open)");
+  await expect(reasonTexts()).toHaveText(reasons("starts when a run closes (2/2 open)"));
+  expect(await rowTickets(page)).toEqual(order);
+  await expect(page.getByTestId("starts-next")).not.toContainText("Master Chief's order");
+  await checkpoint(page, "starts-next-reasons-at-limit");
+  const chief = ark("chief", "state", "--project", "p");
+  expect(chief.out).toContain("- concurrency: 2 (2 open)");
+});
+
+test("ARK-T255 'Approved, not queued' lists ready tickets that have no Task and no open run", async ({
+  page,
+}) => {
+  isolate();
+  queueProject([
+    { id: "ARK-831" },
+    { id: "ARK-832" },
+    { id: "ARK-833" },
+    { id: "ARK-834" },
+    { id: "ARK-835" },
+    { id: "ARK-836", status: "proposed" },
+  ]);
+  openRunFor("ARK-834");
+  installFakeTools({});
+  installChiefOrca({
+    ready: ["ARK-832 Has a ready Task"],
+    pending: ["ARK-833 Has a pending Task"],
+  });
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+
+  const rows = page.getByTestId("not-queued-row");
+  await expect(rows).toHaveCount(2);
+  expect(
+    await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-ticket"))),
+  ).toEqual(["ARK-831", "ARK-835"]);
+  await expect(rows.getByText("ask Master Chief to queue it")).toHaveCount(2);
+  await checkpoint(page, "approved-not-queued");
+});
+
+/** Opens Home on two ready tickets and one open run, with a queue that cannot be read. */
+async function unreadableQueue(page: Page, queue: ChiefQueue, reason: RegExp): Promise<void> {
+  isolate();
+  queueProject([{ id: "ARK-841" }, { id: "ARK-842" }, { id: "ARK-843" }], ["ARK-841", "ARK-842"]);
+  openRunFor("ARK-843");
+  installFakeTools({});
+  installChiefOrca(queue);
+  const baseUrl = await launch();
+  await open(page, baseUrl, "");
+  // The other Home blocks answer first: a queue that is still being read does not hold them back.
+  await expect(page.locator('[data-testid="tile"][data-tile="runs"] .big')).toHaveText("1");
+  const block = page.getByTestId("starts-next");
+  await expect(block).toContainText("Queue unavailable: ");
+  await expect(block).toContainText(reason);
+  await expect(startRows(page)).toHaveCount(0);
+  await expect(page.getByTestId("not-queued-row")).toHaveCount(0);
+  await expect(page.getByTestId("not-queued")).toHaveCount(0);
+  // A failed or slow call is a failed read, so its source shows a stale chip.
+  if (!queue.noRun)
+    await expect(page.locator('[data-testid="stale-label"][data-source="queue"]')).toBeVisible();
+}
+
+test("ARK-T256 An unreadable queue shows 'Queue unavailable: <reason>' with no ticket when Master Chief has no Run", async ({
+  page,
+}) => {
+  await unreadableQueue(page, { noRun: true }, /no Orca Run "Master Chief: p tickets"/);
+  await checkpoint(page, "queue-unavailable-missing-run");
+});
+
+test("ARK-T256 An unreadable queue shows 'Queue unavailable: <reason>' with no ticket when an orca call fails", async ({
+  page,
+}) => {
+  await unreadableQueue(page, { readyFails: true }, /task-list failed/);
+  await checkpoint(page, "queue-unavailable-failed-call");
+});
+
+test("ARK-T256 An unreadable queue shows 'Queue unavailable: <reason>' with no ticket when an orca call times out", async ({
+  page,
+}) => {
+  process.env.ARK_ORCA_TIMEOUT_MS = "1500";
+  try {
+    await unreadableQueue(page, { pendingSleep: 8 }, /task-list failed: .*time/i);
+  } finally {
+    delete process.env.ARK_ORCA_TIMEOUT_MS;
+  }
+  await checkpoint(page, "queue-unavailable-timeout");
+});
+
+const rowState = (page: Page, ticket: string) => rowOf(page, ticket).getByTestId("status-chip");
+const pageState = (page: Page) => page.locator('[data-testid="ticket-page"] .meta .pill').first();
+
+test("ARK-T257 A ticket shows as queued only when the Orca queue has its Task; a ready ticket with no Task shows as approved, not queued on the Roadmap and the ticket page", async ({
+  page,
+}) => {
+  isolate();
+  queueProject(
+    [
+      { id: "ARK-851" },
+      { id: "ARK-852" },
+      { id: "ARK-853", dependsOn: ["ARK-859"] },
+      { id: "ARK-859" },
+    ],
+    ["ARK-851", "ARK-852", "ARK-853"],
+  );
+  installFakeTools({});
+  installChiefOrca({ ready: ["ARK-851 Queued"], pending: ["ARK-853 Waits"] });
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, "roadmap");
+  await expect(rowOf(page, "ARK-851")).toBeVisible();
+  await expect(rowState(page, "ARK-851")).toHaveText("queued");
+  await expect(rowState(page, "ARK-852")).toHaveText("approved, not queued");
+  await expect(rowState(page, "ARK-853")).toHaveText("blocked");
+  await checkpoint(page, "roadmap-queued-labels");
+
+  for (const [ticket, label] of [
+    ["ARK-851", "queued"],
+    ["ARK-852", "approved, not queued"],
+    ["ARK-853", "blocked"],
+  ] as const) {
+    await open(page, baseUrl, `roadmap/${ticket}`);
+    await expect(pageState(page)).toHaveText(label);
+    if (ticket === "ARK-852") await checkpoint(page, "ticket-page-approved-not-queued");
+  }
+});
+
+test("ARK-T257 An unreadable queue marks no ready ticket as approved, not queued", async ({
+  page,
+}) => {
+  isolate();
+  queueProject([{ id: "ARK-852" }], ["ARK-852"]);
+  installFakeTools({});
+  installChiefOrca({ noRun: true });
+  const baseUrl = await launch();
+
+  await open(page, baseUrl, "roadmap");
+  await expect(rowOf(page, "ARK-852")).toBeVisible();
+  await expect(page.locator('[data-testid="stale-label"][data-source="queue"]')).toBeVisible();
+  await expect(rowState(page, "ARK-852")).not.toHaveText("approved, not queued");
+  await open(page, baseUrl, "roadmap/ARK-852");
+  await expect(pageState(page)).not.toHaveText("approved, not queued");
 });
