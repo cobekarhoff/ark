@@ -130,7 +130,7 @@ function runCleanPullRequestScenario() {
     "---\nid: ARK-900\nstatus: ready\n---\n",
   );
 
-  return runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  return runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
 }
 
 function expectCleanPullRequestOnlyMerged(result: ScriptResult) {
@@ -399,7 +399,7 @@ test("ARK-281-AC1 auto-merger merges only the run with retro.md, and the other i
   ]);
 
   // Pass 1 merges #21 and exits on that change; #22 has no pr merge call.
-  const first = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  const first = runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
   expect(first.code).toBe(0);
   expect(mergeCalls()).toEqual(["pr merge https://github.com/org/app/pull/21 --merge"]);
   expect(first.out).not.toContain("#22");
@@ -409,12 +409,11 @@ test("ARK-281-AC1 auto-merger merges only the run with retro.md, and the other i
     join(bin, "hook.sh"),
     `[ "$1" = 2 ] && echo "# Retro" > "${join(directories["2026-11-02-ARK-22-1"]!, "retro.md")}"\nexit 0\n`,
   );
-  fakeSleep(10);
+  fakeSleep(3);
   // #21 is merged in the fake only: remove its retro so that it stays out of this second script run.
   rmSync(join(directories["2026-11-02-ARK-21-1"]!, "retro.md"));
   const second = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
-  expect(second.code).toBe(0);
-  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("2");
+  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
   expect(mergeCalls()).toEqual([
     "pr merge https://github.com/org/app/pull/21 --merge",
     "pr merge https://github.com/org/app/pull/22 --merge",
@@ -431,7 +430,7 @@ test("ARK-281-AC2 auto-merger skips superseded and done tickets, merges ready an
   ];
   const { workspace } = setUpMergerRuns(runs);
 
-  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  const result = runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
 
   expect(result.code).toBe(0);
   expect(mergeCalls().sort()).toEqual([
