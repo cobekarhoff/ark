@@ -6,7 +6,7 @@
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { beginMarker, endMarker } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
@@ -384,27 +384,59 @@ function requireGithubAttach(input: PostInput, existing: Existing | null) {
     );
 }
 
+/** A multipart/form-data body with one `file` part; the boundary is not in the bytes. */
+function multipartBody(file: string): { boundary: string; body: Buffer } {
+  const bytes = readFileSync(file);
+  let boundary: string;
+  do boundary = `----ark${crypto.randomUUID().replaceAll("-", "")}`;
+  while (bytes.includes(boundary));
+  const name = basename(file).replace(/["\r\n]/g, "_");
+  const head = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+  return {
+    boundary,
+    body: Buffer.concat([Buffer.from(head), bytes, Buffer.from(`\r\n--${boundary}--\r\n`)]),
+  };
+}
+
 /** Uploads each file to the GitLab project and returns the `url` of each answer, keyed by the path the body names. */
 function uploadGitlab(input: PostInput, media: Map<string, string>): Map<string, string> {
   const urls = new Map<string, string>();
-  for (const [target, file] of media) {
-    const result = host(
-      ["glab", "api", "--method", "POST", "projects/:fullpath/uploads", "-F", `file=@${file}`],
-      input.directory,
-      input,
-      true,
-    );
-    let url: unknown;
-    try {
-      url = (JSON.parse(result.output) as { url?: unknown }).url;
-    } catch {
-      url = undefined;
-    }
-    if (!result.ok || typeof url !== "string" || url === "")
-      throw new ArkError(
-        `upload of ${file} failed: ${result.error || result.output || "no url in the answer"}. Nothing was posted.`,
+  const dir = mkdtempSync(join(tmpdir(), "pr-writing-upload-"));
+  try {
+    for (const [target, file] of media) {
+      const { boundary, body } = multipartBody(file);
+      const bodyFile = join(dir, "multipart");
+      writeFileSync(bodyFile, body);
+      const result = host(
+        [
+          "glab",
+          "api",
+          "--method",
+          "POST",
+          "projects/:fullpath/uploads",
+          "-H",
+          `Content-Type: multipart/form-data; boundary=${boundary}`,
+          "--input",
+          bodyFile,
+        ],
+        input.directory,
+        input,
+        true,
       );
-    urls.set(target, url);
+      let url: unknown;
+      try {
+        url = (JSON.parse(result.output) as { url?: unknown }).url;
+      } catch {
+        url = undefined;
+      }
+      if (!result.ok || typeof url !== "string" || url === "")
+        throw new ArkError(
+          `upload of ${file} failed: ${result.error || result.output || "no url in the answer"}. Nothing was posted.`,
+        );
+      urls.set(target, url);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
   return urls;
 }

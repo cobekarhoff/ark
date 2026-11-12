@@ -2699,8 +2699,9 @@ test("ARK-T285 post_mr on GitLab uploads each local screenshot and posts a body 
     expect({ update, code: posted.code, err: posted.stderr }).toMatchObject({ update, code: 0 });
 
     const upload = uploads();
-    expect(upload.map((call) => call.argv.at(-1)!).toSorted()).toEqual(
-      run.shots.map((file) => `file=@${file}`).toSorted(),
+    // The fake logs the filename of the multipart `file` part as the call body.
+    expect(upload.map((call) => String(call.body)).toSorted((a, b) => a.localeCompare(b))).toEqual(
+      run.shots.map((file) => file.split("/").at(-1)!).toSorted((a, b) => a.localeCompare(b)),
     );
     const write = hostWrites()[0];
     // Every upload is logged before the MR write.
@@ -2748,7 +2749,7 @@ test("ARK-T286 post_mr exits 2 and posts nothing when an upload fails", () => {
   const posted = run.post();
   expect(posted.code).toBe(2);
   // The failing file is the second upload, whichever it is.
-  expect(posted.stderr).toContain(uploads()[1].argv.at(-1)!.replace("file=@", ""));
+  expect(posted.stderr).toContain(uploads()[1].body!);
   expect(uploads()).toHaveLength(2);
   expect(hostWrites()).toEqual([]);
 });

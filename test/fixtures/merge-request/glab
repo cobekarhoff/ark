@@ -3,11 +3,16 @@
 // The blocks call fails when FAKE_GLAB_BLOCK_FAIL is set. An upload answers a url made from the bytes of the file it reads;
 // FAKE_GLAB_UPLOAD_FAIL=<n> fails the n-th upload.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { creates, logged, editAfterFirstProbe, nextNumber, option, owner, raceAfterFirstProbe, readState, record, repo, writeState } from "./fake-host.ts";
 
 const argv = process.argv.slice(2);
-const body = option(argv, "--description");
+const uploading = argv.includes("projects/:fullpath/uploads");
+// An upload carries a multipart body file: its `file` part holds the name and the bytes.
+const part = uploading ? readFileSync(argv[argv.indexOf("--input") + 1]) : null;
+const sent = part && /filename="([^"]*)"/.exec(part.toString("latin1"));
+const bytes = part && sent ? part.subarray(part.indexOf("\r\n\r\n") + 4, part.lastIndexOf("\r\n--")) : null;
+const body = uploading ? (sent?.[1] ?? "") : option(argv, "--description");
 const previous = creates();
 const number = argv[0] === "mr" && argv[1] === "create" ? nextNumber(previous) : 0;
 record("glab", argv, body);
@@ -21,14 +26,14 @@ if (argv[0] === "mr" && argv[1] === "create") {
   writeState(state.map((mr) => (mr.number === Number(argv[2]) && mr.repo === repo ? { ...mr, body: body! } : mr)));
 } else if (argv[0] === "mr" && argv[1] === "view") {
   console.log(JSON.stringify({ state: "opened" }));
-} else if (argv.includes("projects/:fullpath/uploads")) {
-  const file = argv[argv.indexOf("-F") + 1].replace(/^file=@/, "");
-  if (Number(process.env.FAKE_GLAB_UPLOAD_FAIL) === logged("projects/:fullpath/uploads") || !existsSync(file)) {
+} else if (uploading) {
+  const file = sent![1];
+  if (Number(process.env.FAKE_GLAB_UPLOAD_FAIL) === logged("projects/:fullpath/uploads") || !bytes) {
     console.error("400 Bad Request: file is invalid");
     process.exit(1);
   }
-  const sha = createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 12);
-  console.log(JSON.stringify({ url: `/uploads/${sha}/${file.split("/").at(-1)}` }));
+  const sha = createHash("sha256").update(bytes!).digest("hex").slice(0, 12);
+  console.log(JSON.stringify({ url: `/uploads/${sha}/${file}` }));
 } else if (argv[0] === "api") {
   const path = argv.at(-1)!;
   if (path === "user") {

@@ -11,7 +11,7 @@ changed_by: 2026-11-12-ARK-399-1
 
 ## Objective
 
-Prove that on GitLab `scripts/post_mr.ts --confirmed` uploads each local image or video that the body names with `glab api --method POST projects/:fullpath/uploads -F file=@<path>`, replaces that path in the body with the `url` of the answer, and only then creates or updates the MR. Serves ARK-399/AC2.
+Prove that on GitLab `scripts/post_mr.ts --confirmed` uploads each local image or video that the body names with `glab api --method POST projects/:fullpath/uploads -H "Content-Type: multipart/form-data; boundary=<boundary>" --input <multipart body file>`, replaces that path in the body with the `url` of the answer, and only then creates or updates the MR. Serves ARK-399/AC2.
 
 Expected: When a body names a local image or video that exists, `post_mr.ts --confirmed` on GitLab shall upload it and shall post the body with the `url` of the answer in place of the path.
 
@@ -30,7 +30,7 @@ Expected: When a body names a local image or video that exists, `post_mr.ts --co
 
 ## Expected results
 
-- Exactly 2 upload calls, each `glab api --method POST projects/:fullpath/uploads -F file=@<absolute path>`, both before the `mr create` call.
+- Exactly 2 upload calls, each `glab api --method POST projects/:fullpath/uploads -H "Content-Type: multipart/form-data; boundary=<boundary>" --input <multipart body file>`, both before the `mr create` call.
 - The posted body holds the 2 distinct upload URLs and no run-folder path of a screenshot.
 - `a.png` and `x/a.png` are replaced independently: the longer path is not corrupted.
 - The backtick occurrence is left as it was; only Markdown image targets are replaced.
