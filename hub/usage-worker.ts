@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { parsers, readHead } from "../cli/usage/index.ts";
-import { readTranscriptPage } from "./transcript.ts";
+import { readTranscriptPage, readTranscriptResult } from "./transcript.ts";
 import type { WorkerReply, WorkerRequest } from "./usage.ts";
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
@@ -13,6 +13,11 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       reply = {
         id: request.id,
         page: readTranscriptPage(request.file, request.harness, request.cursor ?? 0),
+      };
+    } else if (request.kind === "result") {
+      reply = {
+        id: request.id,
+        result: readTranscriptResult(request.file, request.harness, request.callId ?? ""),
       };
     } else {
       const session = parsers[request.harness](request.file);

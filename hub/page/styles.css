@@ -2375,65 +2375,182 @@ a.rm-id:hover {
 .msgs {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 920px;
+  gap: 2px;
 }
-.msg {
+.filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.filterbar .grow {
+  flex: 1;
+}
+.fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 6px;
+  border: 1px dashed var(--line-2);
+  background: transparent;
+  color: var(--mute);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--ease),
+    color 120ms var(--ease),
+    transform 120ms var(--ease);
+}
+.fchip:active {
+  transform: scale(0.97);
+}
+.fchip[aria-pressed="true"] {
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+  color: var(--text);
+}
+.fchip .n {
+  color: var(--mute);
+}
+.fchip.errors[aria-pressed="true"] {
+  background: var(--red-bg);
+  border-color: var(--red);
+  color: var(--red-t);
+}
+.fchip.errors .n {
+  color: var(--red-t);
+}
+.filterbar.only-errors .fchip:not(.errors) {
+  opacity: 0.45;
+}
+@media (hover: hover) and (pointer: fine) {
+  .fchip:hover {
+    background: var(--panel-3);
+    color: var(--text);
+  }
+}
+.tsplit {
+  display: grid;
+  grid-template-columns: minmax(280px, 2fr) 3fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 800px) {
+  .tsplit {
+    grid-template-columns: 1fr;
+  }
+}
+@media (min-width: 801px) {
+  .tsplit .inspector {
+    position: sticky;
+    top: 8px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+  }
+}
+.tlist {
+  min-width: 0;
+}
+.tlist .msgs {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.trow {
+  display: grid;
+  grid-template-columns: auto 72px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  text-align: left;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.trow .k {
+  color: var(--dim);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trow .s {
+  font-family: var(--mono);
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trow.user .k,
+.trow.message .k {
+  color: var(--text);
+}
+.trow.err {
+  background: var(--red-bg);
+  border-color: var(--red);
+}
+.trow.err .e {
+  grid-column: 3;
+  color: var(--red-t);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trow[aria-current="true"] {
+  background: var(--sel);
+  border-color: var(--line-3);
+}
+.trow:focus-visible,
+.linkish:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .trow:hover:not(.err):not([aria-current="true"]) {
+    background: var(--panel-3);
+  }
+}
+.tfiles {
+  margin-top: 16px;
+}
+.linkish {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.linkish[aria-current="true"] {
+  font-weight: 600;
+}
+.inspector {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  padding: 8px 12px;
+  padding: 8px 14px 14px;
+  overflow-wrap: anywhere;
 }
-.msg.user {
-  background: var(--blue-bg);
-  border-color: var(--line-2);
+.inspector h2 {
+  font-size: 14px;
+  margin: 8px 0;
 }
-.msg > header {
-  display: flex;
-  gap: 10px;
-  font-size: 12px;
+.inspector .res {
+  font-family: var(--mono);
   color: var(--mute);
-  margin-bottom: 4px;
 }
-.msg > header .role {
-  color: var(--text);
-  font-weight: 600;
-}
-.msg p {
-  margin: 0;
+.inspector pre.raw {
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.tool {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel-2);
-  padding: 8px 12px;
-  font-size: 13px;
-}
-.tool.err {
-  border-color: var(--red);
-}
-.tool .head {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  flex-wrap: wrap;
-}
-.tool .name {
-  font-family: var(--mono);
-  font-weight: 600;
-}
-.tool .args {
-  font-family: var(--mono);
-  color: var(--dim);
-  overflow-wrap: anywhere;
-}
-.tool .res {
-  font-family: var(--mono);
-  color: var(--mute);
-  margin-top: 4px;
-  overflow-wrap: anywhere;
 }
 details.think {
   border: 1px dashed var(--line-2);
@@ -2444,10 +2561,6 @@ details.think {
 details.think summary {
   cursor: pointer;
   font-size: 12px;
-}
-details.think p {
-  margin: 6px 0 0;
-  white-space: pre-wrap;
 }
 .more {
   display: flex;
