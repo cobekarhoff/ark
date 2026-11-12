@@ -5870,13 +5870,16 @@ async function homeFitProblems(page: Page): Promise<string[]> {
   });
 }
 
-/** The page clock is fixed at `instant` in UTC, and every fixture date (run names, yesterday) comes from that instant: the page reads "today" and "yesterday" from its own clock. */
+/** The page clock is fixed at `instant` in UTC. The fixture dates (usage reset, run names, yesterday) must come from that same instant: the page reads "today" and "yesterday" from its own clock. */
 async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
   await page.clock.setFixedTime(instant);
   isolate();
-  const dayOf = (milliseconds: number) => new Date(milliseconds).toISOString().slice(0, 10);
-  const day = dayOf(instant);
-  const yesterday = dayOf(instant - 86_400_000);
+  const local = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const day = local(new Date());
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = local(yesterdayDate);
   const gate = "ARK-12345-LONG";
   writeRun({
     project: "p",
@@ -5921,7 +5924,7 @@ async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
   }
   installFakeTools({
     mergeRequestViews: { [review.url]: review.view },
-    ompUsage: usageAt(0.82, instant),
+    ompUsage: usageAt(0.82),
   });
   const baseUrl = await launch();
   const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"]`);
