@@ -13,7 +13,9 @@ import {
   readOrca,
   readPlannotator,
   readProviderLimits,
+  readQueues,
   signatureOf,
+  type QueueRead,
   type ArkRun,
   type ArkValue,
   type EvidenceValue,
@@ -60,6 +62,7 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   providerLimits: Number(process.env.ARK_PROVIDER_LIMITS_MS) || allIntervalMilliseconds || 60_000,
   agentWait: allIntervalMilliseconds || 3000,
   evidence: allIntervalMilliseconds || 5000,
+  queue: allIntervalMilliseconds || 3000, // its own source: a slow Orca queue never delays another source
 };
 
 const usageTimeoutMilliseconds = 30_000;
@@ -120,9 +123,12 @@ export function createSnapshotReader() {
     providerLimits: emptySlot<ProviderWindow[]>(),
     agentWait: emptySlot<Map<string, PsAgent[]>>(),
     evidence: emptySlot<EvidenceValue>(),
+    queue: emptySlot<true>(),
   };
   const evidenceReader = createEvidenceReader();
   let githubFacts = new Map<string, MergeRequestFacts>();
+  // The latest queue read of each project, failures included: the reason is data (AC4), so it lives beside the slot, not in it.
+  let queueReads: Map<string, QueueRead> | null = null;
   const costs = new Map<string, { key: string; cost: RunCost }>();
   const listeners = new Set<(json: string) => void>();
   const watchers = new Map<string, FSWatcher>();
@@ -386,6 +392,7 @@ export function createSnapshotReader() {
         ticket_runs: "unknown",
         provider_limits: slots.providerLimits.value ?? "unknown",
         role_times: {},
+        queues: "unknown",
       };
 
     const openRuns = ark.runs.filter((run) => run.state.phase !== "closed");
@@ -453,6 +460,14 @@ export function createSnapshotReader() {
       ticket_runs: [...newest.values()],
       provider_limits: slots.providerLimits.value ?? "unknown",
       role_times: roleTimes(),
+      queues:
+        queueReads === null
+          ? "unknown"
+          : [...queueReads].map(([project, queueRead]) => ({
+              project,
+              open: openRuns.filter((run) => run.state.project === project).length,
+              ...queueRead,
+            })),
     };
   }
 
@@ -556,6 +571,16 @@ export function createSnapshotReader() {
             })),
         ),
       ),
+    // Failed (stale chip) when any project's queue could not be read; the reason is in `queueReads`.
+    queue: () =>
+      read("queue", async () => {
+        const started = generation;
+        const reads = await readQueues();
+        if (started === generation) queueReads = reads;
+        return [...reads.values()].every((queueRead) => !("unavailable" in queueRead))
+          ? true
+          : null;
+      }),
   };
 
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
@@ -617,6 +642,7 @@ export function createSnapshotReader() {
       "providerLimits",
       "agentWait",
       "evidence",
+      "queue",
     ] as const)
       loop(name, started);
   }

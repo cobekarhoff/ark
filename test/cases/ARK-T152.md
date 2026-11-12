@@ -6,7 +6,7 @@ technique: equivalence classes of run state (queued, building, awaiting merge, c
 priority: medium
 risk: the Runs page drops a run from the board or graph, miscounts a filter, shows a wrong steps-done ring, loses a dashed edge to an open ticket or the unblock list, or shows an older-runs control when the Closed lane has fewer than one page
 status: active
-changed_by: 2026-11-09-ARK-353-1
+changed_by: 2026-11-11-ARK-354-1
 ---
 
 ## Objective
@@ -15,8 +15,8 @@ Prove that the Runs page shows every run on one board and one graph, with the Ac
 
 ## Preconditions
 
-- Hub started on a fake project `p` with isolated state.
-- Two building runs (ARK-601 with 1 of 3 steps done, ARK-602 with a long title), a queued ticket ARK-603 that depends on ARK-601, an awaiting-merge ticket ARK-604 that depends on the closed ARK-611, and six closed runs ARK-611 to ARK-616 where ARK-612 depends on ARK-611.
+- Hub started on a fake project `p` with isolated state, and a fake `orca` whose Master Chief Run (`Master Chief: p tickets`) holds a ready Task `ARK-603 Title of ARK-603`.
+- Two building runs (ARK-601 with 1 of 3 steps done, ARK-602 with a long title), a queued ticket ARK-603 (its Task is in the fake queue) that depends on ARK-601, an awaiting-merge ticket ARK-604 that depends on the closed ARK-611, and six closed runs ARK-611 to ARK-616 where ARK-612 depends on ARK-611.
 
 ## Steps
 

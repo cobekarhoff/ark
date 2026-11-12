@@ -38,6 +38,7 @@ const sourceNames: SourceName[] = [
   "providerLimits",
   "agentWait",
   "evidence",
+  "queue",
 ];
 
 const views = [
