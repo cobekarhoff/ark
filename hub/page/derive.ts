@@ -283,9 +283,11 @@ export function startsNext(snapshot: Snapshot): StartsNext[] {
         const reason =
           task.status === "pending"
             ? `waits on ${waitsOn.length > 0 ? waitsOn.join(", ") : "its dependencies"}`
-            : queue.concurrency === null || queue.open < queue.concurrency
-              ? "starts next"
-              : `starts when a run closes (${queue.open}/${queue.concurrency} open)`;
+            : queue.concurrency === null
+              ? "limit unknown"
+              : queue.open < queue.concurrency
+                ? "starts next"
+                : `starts when a run closes (${queue.open}/${queue.concurrency} open)`;
         return { ticket: id, title: byId.get(id)?.title ?? null, status: task.status, reason };
       })
       .toSorted(

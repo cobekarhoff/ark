@@ -2746,11 +2746,13 @@ test("ARK-291-AC3 Now shows cards and Next, Later and Unranked rows in rank orde
     await expect(row).not.toContainText("More words follow");
     await expect(row.getByTestId("milestone-chip")).toHaveText("M4");
   }
-  // The run phase while a run is open, else the status; a proposed ticket has its badge.
+  // The run phase while a run is open, else the derived queue state of a ready ticket (the fixture queue holds no Task); a proposed ticket has its badge.
   await expect(rowOf(page, "ARK-101").getByTestId("status-chip")).toHaveText(/build/i);
-  await expect(rowOf(page, "ARK-102").getByTestId("status-chip")).toHaveText("ready");
+  await expect(rowOf(page, "ARK-102").getByTestId("status-chip")).toHaveText(
+    "approved, not queued",
+  );
   await expect(rowOf(page, "ARK-103").getByTestId("status-chip")).toHaveText("proposed");
-  await expect(rowOf(page, "ARK-104").getByTestId("status-chip")).toHaveText("ready");
+  await expect(rowOf(page, "ARK-104").getByTestId("status-chip")).toHaveText("blocked");
 
   // Blocked by lists the unfinished dependencies only; Unblocks the open tickets that wait.
   await expect(rowOf(page, "ARK-104").getByTestId("blocked-by")).toHaveText(["ARK-101"]);
