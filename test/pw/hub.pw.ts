@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page, type Request, type Route } from "@playwright/test";
 import { readdir } from "node:fs/promises";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -1171,6 +1172,9 @@ async function expectTranscript(page: Page, harness: SessionHarness): Promise<vo
   const inspector = page.getByTestId("inspector");
   await rows.nth(3).click();
   await expect(inspector.getByTestId("tool-result")).toHaveText(text.okFirstLine);
+  // The shell command of every harness reads as a bash block, never as argv or a JSON string.
+  await expect(inspector.getByTestId("code-block").locator(".lang")).toHaveText("bash");
+  await expect(inspector.getByTestId("code-block").locator("pre")).toHaveText(text.command);
   await expect(inspector.getByTestId("show-result")).toBeVisible();
   await expect(page.locator("body")).not.toContainText(text.tail);
   await expect(page.locator("body")).not.toContainText("second line");
@@ -1182,7 +1186,7 @@ async function expectTranscript(page: Page, harness: SessionHarness): Promise<vo
   await thinking.locator("summary").click();
   await expect(thinking).toHaveJSProperty("open", true);
   await expect(inspector.getByTestId("entry-text")).toHaveText(text.thinking);
-  await expect(page.getByTestId("load-more")).toBeDisabled();
+  await expect(page.getByTestId("load-more")).toHaveText("Check for new entries");
 }
 
 test("ARK-T273 a DAG node, the run lead and an unassigned file open their transcript as a list and an inspector for an omp, a Claude and a Codex session file", async ({
@@ -1751,6 +1755,17 @@ test("ARK-T275 the chips filter the list into messages, tools, thinking and erro
   await expect(rows).toHaveCount(3);
   await expect(counter).toHaveText(/Showing 3 of 250/);
 
+  // A live file grows: at its end the button re-asks from the end and adds only the new entries.
+  const more = page.getByTestId("load-more");
+  await expect(more).toHaveText("Check for new entries");
+  appendFileSync(
+    join(process.env.ARK_OMP_SESSIONS as string, "big.jsonl"),
+    `${record({ role: "user", content: [{ type: "text", text: "live arrival" }] })}\n`,
+  );
+  await more.click();
+  await expect(counter).toHaveText(/Showing 3 of 251/);
+  await expect(chip("message")).toHaveText(/Messages\s*248/);
+
   // Leaving the page removes the key handler.
   await open(page, baseUrl, "");
   expect(await keydownListeners()).toBe(withoutTranscript);
@@ -1790,6 +1805,23 @@ test("ARK-T276 a context entry of 114 lines and a user message of more than 40 l
     kind: "user",
     text: lines(count),
   }));
+  // Claude names its tools Edit and Write and puts the path in file_path.
+  const claudeCalls: ExtraEntry[] = [
+    {
+      kind: "call",
+      id: "ce",
+      name: "Edit",
+      args: { file_path: "src/a.ts", old_string: "const a = 1;", new_string: "const a = 2;" },
+      result: "ok",
+    },
+    {
+      kind: "call",
+      id: "cw",
+      name: "Write",
+      args: { file_path: "src/b.ts", content: "export const b = 3;" },
+      result: "ok",
+    },
+  ];
   const cwd = join(directory, "workspace");
   writeSessionFile(
     process.env.ARK_CLAUDE_SESSIONS as string,
@@ -1798,7 +1830,7 @@ test("ARK-T276 a context entry of 114 lines and a user message of more than 40 l
       cwd,
       start: new Date(started.getTime() + 10_000),
       tag: "claude",
-      extra: longMessages,
+      extra: [...longMessages, ...claudeCalls],
     }),
   );
   writeSessionFile(
@@ -1863,7 +1895,20 @@ test("ARK-T276 a context entry of 114 lines and a user message of more than 40 l
 
   // Claude and Codex show injected text as a user message: each of 114, 41 and 40 lines is one row.
   for (const name of ["claude.jsonl", "codex.jsonl"]) {
-    await openFile(name, 8);
+    await openFile(name, name === "claude.jsonl" ? 10 : 8);
+    if (name === "claude.jsonl") {
+      await rowWith(page, "src/a.ts").click();
+      await expect(inspector.getByTestId("code-block").locator(".lang")).toHaveText("diff");
+      await expect(inspector.getByTestId("code-block").locator("pre")).toHaveText(
+        "- const a = 1;\n+ const a = 2;",
+      );
+      await expect(inspector).toContainText("src/a.ts");
+      await rowWith(page, "src/b.ts").click();
+      await expect(inspector.getByTestId("code-block").locator(".lang")).toHaveText("ts");
+      await expect(inspector.getByTestId("code-block").locator("pre")).toHaveText(
+        "export const b = 3;",
+      );
+    }
     for (const count of [114, 41, 40]) {
       const row = rowWith(page, `line 1 of ${count}`);
       await expect(row).toHaveCount(1);
@@ -1906,6 +1951,20 @@ test("ARK-T276 a context entry of 114 lines and a user message of more than 40 l
   await rowWith(page, "after answer").click();
   await expect(inspector.getByTestId("entry-text")).toHaveText("after answer");
 
+  // Raw is the inspector's: a file selected while Raw is on shows its source, and r switches it.
+  await page.keyboard.press("r");
+  await expect(mode).toHaveText("Raw");
+  await files.filter({ hasText: /^plan\.md$/ }).click();
+  await expect(inspector.locator("pre.raw")).toHaveText("# Plan title\n\n**bold plan**\n");
+  await expect(inspector.getByTestId("run-file-text")).toBeVisible();
+  await page.keyboard.press("r");
+  await expect(mode).toHaveText("Rendered");
+  await expect(inspector.locator("h1")).toHaveText("Plan title");
+  await expect(inspector.locator("pre.raw")).toHaveCount(0);
+
+  // Selecting a file brings the inspector into view even when the list is long.
+  await expect(inspector).toBeInViewport();
+
   // The full-page file route still works.
   await open(page, baseUrl, `run/${run}/file/plan.md`);
   await expect(page.getByTestId("run-file-text").locator("h1")).toHaveText("Plan title");
@@ -1942,7 +2001,7 @@ test("ARK-284-AC7 a transcript shows 200 entries a page and Load more adds the n
   await expect(entries).toHaveCount(400);
   await more.click();
   await expect(entries).toHaveCount(450);
-  await expect(more).toBeDisabled();
+  await expect(more).toHaveText("Check for new entries");
   await expect(page.getByText("End of file · 450 entries")).toBeVisible();
   await expect(entries.last()).toContainText("m449");
 });

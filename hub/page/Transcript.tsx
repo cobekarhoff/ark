@@ -4,10 +4,17 @@ import { Markdown, ViewSwitch } from "./Markdown.tsx";
 import { Clock, runHref, sessionName } from "./RunDetail.tsx";
 import type { SessionFile, TranscriptEntry, TranscriptPage, TranscriptResult } from "../types.ts";
 
+/** `next` is the cursor of the next page, or null at the end. `tail` is where a re-ask for new entries of a live file starts. */
 type Pages =
-  | { status: "loading"; entries: TranscriptEntry[]; next: number | null }
-  | { status: "ok" | "more"; entries: TranscriptEntry[]; next: number | null }
-  | { status: "failed"; entries: TranscriptEntry[]; next: number | null; reason: string };
+  | { status: "loading"; entries: TranscriptEntry[]; next: number | null; tail: number }
+  | { status: "ok" | "more"; entries: TranscriptEntry[]; next: number | null; tail: number }
+  | {
+      status: "failed";
+      entries: TranscriptEntry[];
+      next: number | null;
+      tail: number;
+      reason: string;
+    };
 
 type Chip = "message" | "tool" | "thinking" | "errors";
 const chips: { id: Chip; label: string }[] = [
@@ -65,10 +72,16 @@ function Arguments({ entry }: { entry: Extract<TranscriptEntry, { kind: "tool" }
   } catch {
     // A cut that broke the JSON shows as written.
   }
-  if (entry.name === "bash" && typeof parsed.command === "string")
-    return <Code code={parsed.command} language="bash" />;
+  const tool = entry.name.toLowerCase();
+  // Codex gives argv: `bash -lc <script>` shows as the script, any other argv as its words.
+  const argv = Array.isArray(parsed.command) ? parsed.command.map(String) : null;
+  const command = argv ? (argv[1] === "-lc" ? argv.slice(2) : argv).join(" ") : parsed.command;
+  if (["bash", "shell", "local_shell", "exec_command"].includes(tool)) {
+    const line = typeof command === "string" ? command : parsed.cmd;
+    if (typeof line === "string") return <Code code={line} language="bash" />;
+  }
   const path = parsed.path ?? parsed.file_path;
-  if (entry.name === "write" && typeof path === "string" && typeof parsed.content === "string")
+  if (tool === "write" && typeof path === "string" && typeof parsed.content === "string")
     return (
       <>
         <p className="mono mut">{path}</p>
@@ -77,7 +90,9 @@ function Arguments({ entry }: { entry: Extract<TranscriptEntry, { kind: "tool" }
     );
   const before = parsed.old_text ?? parsed.oldText ?? parsed.old_string;
   const after = parsed.new_text ?? parsed.newText ?? parsed.new_string;
-  if (entry.name === "edit" && typeof path === "string" && typeof after === "string") {
+  if (tool === "edit" && typeof parsed.input === "string")
+    return <Code code={parsed.input} language="diff" />;
+  if (tool === "edit" && typeof path === "string" && typeof after === "string") {
     const prefixed = (sign: string, text: string) =>
       text
         .split("\n")
@@ -232,7 +247,12 @@ function SessionPages({
   session: SessionFile;
   files: string[];
 }) {
-  const [pages, setPages] = useState<Pages>({ status: "loading", entries: [], next: null });
+  const [pages, setPages] = useState<Pages>({
+    status: "loading",
+    entries: [],
+    next: null,
+    tail: 0,
+  });
   const [on, setOn] = useState<Set<Chip>>(new Set());
   const [selected, setSelected] = useState<Selection>(null);
   const [raw, setRaw] = useState(false);
@@ -261,13 +281,20 @@ function SessionPages({
       );
       if (!response.ok) throw new Error(`the hub answered ${response.status}`);
       const page: TranscriptPage = await response.json();
-      setPages({ status: "ok", entries: [...previous, ...page.entries], next: page.next });
+      setPages({
+        status: "ok",
+        entries: [...previous, ...page.entries],
+        next: page.next,
+        // ponytail: a half-written last line is passed over on a re-ask; read the file again to see it.
+        tail: page.next ?? page.size,
+      });
     } catch (err) {
       if (signal?.aborted) return;
       setPages({
         status: "failed",
         entries: previous,
         next: cursor === 0 ? null : cursor,
+        tail: cursor,
         reason: err instanceof Error ? err.message : String(err),
       });
     }
@@ -379,10 +406,10 @@ function SessionPages({
               type="button"
               className="btn"
               data-testid="load-more"
-              disabled={pages.next === null || pages.status === "more"}
-              onClick={() => pages.next !== null && void load(pages.next, pages.entries)}
+              disabled={pages.status === "loading" || pages.status === "more"}
+              onClick={() => void load(pages.next ?? pages.tail, pages.entries)}
             >
-              Load more
+              {pages.next === null ? "Check for new entries" : "Load more"}
             </button>
             <span className="mut">
               {pages.next === null
@@ -419,7 +446,7 @@ function SessionPages({
           {selected?.kind === "file" ? (
             <>
               <h2 className="mono">{selected.path}</h2>
-              <FileBody run={run} path={selected.path} />
+              <FileBody run={run} path={selected.path} rawMode={raw} />
             </>
           ) : entry ? (
             <Inspector
@@ -505,13 +532,15 @@ export function Transcript({
 }
 
 /** A run file's body: .md through Markdown, .json through Json, any other file through Code as plain text. Raw shows the source as written. */
-export function FileBody({ run, path }: { run: string; path: string }) {
+/** `rawMode` lets an owner (the transcript inspector) decide Raw; without it the body has its own switch. */
+export function FileBody({ run, path, rawMode }: { run: string; path: string; rawMode?: boolean }) {
   const [state, setState] = useState<
     { status: "loading" | "missing" | "failed" } | { status: "ok"; text: string }
   >({
     status: "loading",
   });
-  const [raw, setRaw] = useState(false);
+  const [ownRaw, setRaw] = useState(false);
+  const raw = rawMode ?? ownRaw;
   useEffect(() => {
     const controller = new AbortController();
     fetch(`/api/run/${encodeURIComponent(run)}/file?path=${encodeURIComponent(path)}`, {
@@ -538,7 +567,7 @@ export function FileBody({ run, path }: { run: string; path: string }) {
       {state.status === "failed" && <p className="bad-text">The hub could not read this file.</p>}
       {state.status === "ok" && (
         <>
-          {(path.endsWith(".md") || path.endsWith(".json")) && (
+          {rawMode === undefined && (path.endsWith(".md") || path.endsWith(".json")) && (
             <div className="view-bar">
               <ViewSwitch raw={raw} onChange={setRaw} />
             </div>

@@ -2443,6 +2443,14 @@ a.rm-id:hover {
     grid-template-columns: 1fr;
   }
 }
+@media (min-width: 801px) {
+  .tsplit .inspector {
+    position: sticky;
+    top: 8px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+  }
+}
 .tlist {
   min-width: 0;
 }
