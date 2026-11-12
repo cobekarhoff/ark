@@ -644,6 +644,38 @@ describe("ark test evidence of the last full run", () => {
     );
     expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
   });
+
+  test("ARK-T269 after a stopped full ark test the next full run removes the evidence folders of renamed cases and writes the new ones", async () => {
+    const fixture = evidenceFixture(true);
+    writeFileSync(join(fixture.directory, "pass"), "");
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    const before = treeOf(evidenceDirectoryOf(fixture));
+    expect(Object.keys(before)).toContain("/DET-T1/head/command.log");
+
+    // The stopped run finishes the fast suite, then blocks in the second one.
+    commitFiles(fixture.mirrorOf("."), { "src/second.txt": "second\n" });
+    rmSync(join(fixture.directory, "pass"));
+    const second = spawnArk(fixture, ["test", fixture.runId]);
+    await appears(join(fixture.directory, "ready"));
+    const stopped = await arkDone(fixture, "test", fixture.runId, "--stop");
+    expect(stopped.code).toBe(0);
+    await second.finished();
+    expect(treeOf(evidenceDirectoryOf(fixture))).toEqual(before);
+
+    // Case DET-T1 is renamed to DET-T3; the next full run keeps only the folder of the case it has.
+    commitFiles(fixture.mirrorOf("."), {
+      "test/fast.test.ts": fastTest("renamed").replace("DET-T1", "DET-T3"),
+    });
+    writeFileSync(join(fixture.directory, "pass"), "");
+    const next = await arkDone(fixture, "test", fixture.runId);
+    expect(next.code, next.err + next.out).toBe(0);
+    const folders = readdirSync(evidenceDirectoryOf(fixture)).sort();
+    expect(folders).toContain("DET-T3");
+    expect(folders).not.toContain("DET-T1");
+    expect(Object.keys(treeOf(evidenceDirectoryOf(fixture)))).toContain("/DET-T3/head/command.log");
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+  });
 });
 
 describe("ark test result cache", () => {
