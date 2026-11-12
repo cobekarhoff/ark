@@ -5874,12 +5874,8 @@ async function homeFitProblems(page: Page): Promise<string[]> {
 async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
   await page.clock.setFixedTime(instant);
   isolate();
-  const local = (date: Date) =>
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  const day = local(new Date(instant));
-  const yesterdayDate = new Date(instant);
-  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-  const yesterday = local(yesterdayDate);
+  const day = new Date(instant).toISOString().slice(0, 10);
+  const yesterday = new Date(instant - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const gate = "ARK-12345-LONG";
   writeRun({
     project: "p",
