@@ -117,8 +117,9 @@ export function reviewQueue(runs: RunView[]): RunView[] {
 /**
  * The states the hub derives for a ticket, each with its lane of the Runs board. `ticketEntries`
  * picks the first that holds: needs me, awaiting merge, planning or building (an open run), closed
- * (the newest run), then blocked or queued (a ready ticket). A ticket in none of them shows its
- * own status and sits on no lane.
+ * (the newest run), then blocked, approved not queued or queued (a ready ticket). `queued` means
+ * the Orca queue holds the ticket's Task (or cannot be read, so nothing is claimed either way).
+ * A ticket in none of them shows its own status and sits on no lane.
  */
 export const ticketLanes = {
   "needs me": "Needs me",
@@ -127,6 +128,7 @@ export const ticketLanes = {
   building: "Building",
   closed: "Closed",
   blocked: "Queued",
+  "approved, not queued": "Queued",
   queued: "Queued",
 } as const;
 export type TicketState = keyof typeof ticketLanes;
@@ -155,6 +157,7 @@ function ticketState(
   newest: TicketRunView | null,
   status: string,
   blocked: boolean,
+  inQueue: boolean | null,
 ): TicketState | null {
   if (run && needsHuman(snapshot, run)) return "needs me";
   if (run)
@@ -164,7 +167,8 @@ function ticketState(
         ? "planning"
         : "building";
   if (newest?.phase === "closed") return "closed";
-  if (status === "ready") return blocked ? "blocked" : "queued";
+  if (status === "ready")
+    return blocked ? "blocked" : inQueue === false ? "approved, not queued" : "queued";
   return null;
 }
 
@@ -189,6 +193,9 @@ export function ticketEntries(snapshot: Snapshot): Map<string, TicketEntry> {
   const byKey = new Map(
     snapshot.tickets.map((ticket) => [ticketKey(ticket.project, ticket.id), ticket]),
   );
+  const queues = new Map(
+    (known(snapshot.queues) ? snapshot.queues : []).map((queue) => [queue.project, queue]),
+  );
   for (const ticket of snapshot.tickets) {
     const key = ticketKey(ticket.project, ticket.id);
     const run = open.get(key) ?? null;
@@ -196,7 +203,13 @@ export function ticketEntries(snapshot: Snapshot): Map<string, TicketEntry> {
     const blocked = ticket.depends_on.some(
       (id) => !isFinishedTicket(byKey.get(ticketKey(ticket.project, id))?.status),
     );
-    const state = ticketState(snapshot, run, last, ticket.status, blocked);
+    const queue = queues.get(ticket.project);
+    // Unreadable or unknown queue: no claim, the old `queued` label stays.
+    const inQueue =
+      !queue || "unavailable" in queue
+        ? null
+        : queue.tasks.some((task) => task.ticket === ticket.id);
+    const state = ticketState(snapshot, run, last, ticket.status, blocked, inQueue);
     const entry: Pick<TicketEntry, "state" | "tone" | "lane"> = {
       state: state ?? ticket.status.replaceAll("_", " "),
       tone:
@@ -219,6 +232,81 @@ export function ticketEntries(snapshot: Snapshot): Map<string, TicketEntry> {
     });
   }
   return entries;
+}
+
+export type StartRow = {
+  ticket: string;
+  title: string | null;
+  status: "ready" | "pending";
+  /** `starts next`, `starts when a run closes (<open>/<limit> open)` or `waits on <ticket ids>`. */
+  reason: string;
+};
+/** One project's block on Home: its queue rows and its approved tickets no Task holds, or why the queue is unreadable. */
+export type StartsNext = { project: string; open: number; limit: number | null } & (
+  | { unavailable: string }
+  | { rows: StartRow[]; notQueued: TicketView[] }
+);
+
+/**
+ * Master Chief's queue by project. A Task whose ticket has an open run, or whose title names no
+ * ticket, does not show. Order: ready before pending, each by roadmap rank, then ticket id; a
+ * ticket the roadmap does not rank comes after the ranked ones. A ready ticket with no Task and no
+ * open run is `notQueued` (a Task in any other status is not in the queue, so it counts as none).
+ */
+export function startsNext(snapshot: Snapshot): StartsNext[] {
+  if (!known(snapshot.queues)) return [];
+  const tickets = known(snapshot.tickets) ? snapshot.tickets : [];
+  const openKeys = new Set(
+    (known(snapshot.runs) ? snapshot.runs : []).map((run) => ticketKey(run.project, run.ticket.id)),
+  );
+  return snapshot.queues.map((queue): StartsNext => {
+    const head = { project: queue.project, open: queue.open };
+    if ("unavailable" in queue) return { ...head, limit: null, unavailable: queue.unavailable };
+    const mine = tickets.filter((ticket) => ticket.project === queue.project);
+    const byId = new Map(mine.map((ticket) => [ticket.id, ticket]));
+    const roadmap = known(snapshot.roadmap) ? snapshot.roadmap[queue.project] : undefined;
+    const ranked =
+      roadmap && "now" in roadmap ? [...roadmap.now, ...roadmap.next, ...roadmap.later] : [];
+    const rank = (id: string) => {
+      const at = ranked.findIndex((item) => item.id === id);
+      return at === -1 ? Number.MAX_SAFE_INTEGER : at;
+    };
+    const rows = queue.tasks
+      .filter(
+        (task) => task.ticket !== null && !openKeys.has(ticketKey(queue.project, task.ticket)),
+      )
+      .map((task): StartRow => {
+        const id = task.ticket!;
+        const waitsOn = (byId.get(id)?.depends_on ?? []).filter(
+          (dependency) => !isFinishedTicket(byId.get(dependency)?.status),
+        );
+        const reason =
+          task.status === "pending"
+            ? `waits on ${waitsOn.length > 0 ? waitsOn.join(", ") : "its dependencies"}`
+            : queue.concurrency === null || queue.open < queue.concurrency
+              ? "starts next"
+              : `starts when a run closes (${queue.open}/${queue.concurrency} open)`;
+        return { ticket: id, title: byId.get(id)?.title ?? null, status: task.status, reason };
+      })
+      .toSorted(
+        (a, b) =>
+          Number(a.status === "pending") - Number(b.status === "pending") ||
+          rank(a.ticket) - rank(b.ticket) ||
+          a.ticket.localeCompare(b.ticket, undefined, { numeric: true }),
+      );
+    const queued = new Set(queue.tasks.map((task) => task.ticket));
+    const notQueued = mine
+      .filter(
+        (ticket) =>
+          ticket.status === "ready" &&
+          !queued.has(ticket.id) &&
+          !openKeys.has(ticketKey(ticket.project, ticket.id)),
+      )
+      .toSorted(
+        (a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id, undefined, { numeric: true }),
+      );
+    return { ...head, limit: queue.concurrency, rows, notQueued };
+  });
 }
 
 /** Every project of the tickets, the runs and the gates that answered, in name order. */
@@ -248,6 +336,7 @@ export function scoped(snapshot: Snapshot, project: string | null): Snapshot {
     gates: only(snapshot.gates),
     tickets: only(snapshot.tickets),
     ticket_runs: only(snapshot.ticket_runs),
+    queues: only(snapshot.queues),
     roadmap: known(snapshot.roadmap)
       ? Object.fromEntries(Object.entries(snapshot.roadmap).filter(([name]) => name === project))
       : snapshot.roadmap,
