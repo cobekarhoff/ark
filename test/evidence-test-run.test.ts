@@ -1,4 +1,4 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -20,10 +20,22 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import {
+  expectHookEndedOnlyItsRuns,
+  holdRunners,
+  macOnly,
+  recordStartedRun,
+  proveFixtureSkipsMemoryWait,
+  stopHeld,
+  stopStartedRuns,
+} from "./orphan-runners.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it. Every test here runs real suites,
 // some of them in Chromium, at base and at head.
 setDefaultTimeout(180_000);
+
+// ARK-419: no test-runner of a run this file started outlives its test.
+afterEach(stopStartedRuns);
 
 const repositoryRoot = resolve(import.meta.dir, "..");
 const playwrightModule = join(repositoryRoot, "node_modules/@playwright/test/index.mjs");
@@ -98,6 +110,8 @@ function startBuildingRun(options: {
   writeProject("demo", {
     workspace: options.workspace,
     ticket_source: "local",
+    test_min_free_memory_percent: 0,
+    test_max_swap_gb: 1000,
     suites: options.suites,
     roles,
   });
@@ -117,6 +131,7 @@ function startBuildingRun(options: {
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
   )![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+  recordStartedRun({ runId, runDirectory });
   recordEvaluation(runDirectory);
   writeFileSync(
     join(runDirectory, "plan.yml"),
@@ -1015,3 +1030,44 @@ describe("checkpoint screenshots", () => {
     ]);
   });
 });
+
+// ARK-419: the demo fixture of this suite ends no suite on a memory wait and leaves no runner behind.
+const orphanFixture = {
+  start: (body: string) =>
+    startBuildingRun({
+      workspace: tempGitRepo({
+        "e2e.test.ts": `import { test } from "bun:test";\ntest("evidence suite probe", async () => { ${body} }, 400_000);\n`,
+      }),
+      suites: [
+        {
+          name: "e2e",
+          level: "e2e",
+          repo: ".",
+          command: "bun test --reporter=junit --reporter-outfile={report} ./e2e.test.ts",
+          parser: "bun",
+        },
+      ],
+      repos: ["."],
+    }),
+};
+
+// The file-level afterEach of this suite stops the runs it started; the first test leaves two runners for it.
+describe("ARK-T236 runners after the suite hook", () => {
+  afterAll(stopHeld);
+  macOnly(
+    "ARK-T236 a runner that ignores SIGTERM runs beside a runner the test started",
+    () => holdRunners(orphanFixture),
+    120_000,
+  );
+  macOnly(
+    "ARK-T236 after the suite hook ends, no test-runner process of a run the suite started remains and the runner of another run lives",
+    expectHookEndedOnlyItsRuns,
+    60_000,
+  );
+});
+
+macOnly(
+  "ARK-T235 the demo fixture of this suite finishes with free memory and swap past the default limits",
+  () => proveFixtureSkipsMemoryWait(orphanFixture),
+  120_000,
+);

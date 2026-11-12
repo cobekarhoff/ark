@@ -1,4 +1,4 @@
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -21,9 +21,21 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import {
+  expectHookEndedOnlyItsRuns,
+  holdRunners,
+  macOnly,
+  recordStartedRun,
+  proveFixtureSkipsMemoryWait,
+  stopHeld,
+  stopStartedRuns,
+} from "./orphan-runners.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
+
+// ARK-419: no test-runner of a run this file started outlives its test.
+afterEach(stopStartedRuns);
 
 const fakeCompose = join(import.meta.dir, "fixtures/worktree/fake-compose.sh");
 const roles = {
@@ -76,6 +88,8 @@ function buildingRun(options: {
   writeProject("demo", {
     workspace,
     ticket_source: "local",
+    test_min_free_memory_percent: 0,
+    test_max_swap_gb: 1000,
     compose: options.compose,
     ...(options.checks === undefined ? {} : { checks: options.checks }),
     ...(options.roundBudget === undefined ? {} : { round_budget: options.roundBudget }),
@@ -104,6 +118,7 @@ function buildingRun(options: {
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
   )![0];
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+  recordStartedRun({ runId, runDirectory });
   recordEvaluation(runDirectory);
   const plan = {
     design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
@@ -616,7 +631,8 @@ describe("ark test on a refactor run", () => {
     expect(ark("merge-request", "open", runId).err).not.toContain("base commit");
   });
 
-  test("ARK-302-AC7 the base suites of a touched repo can read an untouched sibling repo", () => {
+  /** The multi-repo refactor fixture: a run over repos/a whose base suites read repos/b. `extraTests` are more test lines of repos/a. */
+  function siblingRun(extraTests: string[] = []) {
     const arkHome = tempArkHome();
     const workspace = mkdtempSync(join(tmpdir(), "ark-workspace-"));
     mkdirSync(join(workspace, "repos"));
@@ -624,6 +640,7 @@ describe("ark test on a refactor run", () => {
       tempGitRepo({
         "e2e.test.ts": suiteTests([
           `test("FAKE-1-AC1 reads the sibling", () => { expect(require("node:fs").readFileSync("../b/data.txt", "utf8")).toBe("sibling"); });`,
+          ...extraTests,
         ]),
       }),
       join(workspace, "repos/a"),
@@ -632,6 +649,8 @@ describe("ark test on a refactor run", () => {
     writeProject("demo", {
       workspace,
       ticket_source: "local",
+      test_min_free_memory_percent: 0,
+      test_max_swap_gb: 1000,
       suites: [
         {
           name: "e2e",
@@ -651,6 +670,7 @@ describe("ark test on a refactor run", () => {
       "demo",
     ).out.match(/\d{4}-\d{2}-\d{2}-FAKE-1-\d+/)![0];
     const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+    recordStartedRun({ runId, runDirectory });
     recordEvaluation(runDirectory);
     writeFileSync(
       join(runDirectory, "plan.yml"),
@@ -692,11 +712,26 @@ describe("ark test on a refactor run", () => {
     ])
       expect(ark(...args).code).toBe(0);
 
+    return { runId, runDirectory };
+  }
+
+  test("ARK-T244 the base suites of a touched repo can read an untouched sibling repo", () => {
+    const { runId, runDirectory } = siblingRun();
     const result = ark("test", runId);
     expect(result.code).toBe(0);
     expect(result.out).toContain("base      passed");
     expect(testCompleted(runDirectory)[0].base_passed).toBe(true);
   });
+
+  macOnly(
+    "ARK-T235 the multi-repo demo fixture of test-run.test.ts finishes with free memory and swap past the default limits",
+    async () => {
+      await proveFixtureSkipsMemoryWait({
+        start: (markerBody) => siblingRun([`test("FAKE-1-AC1 marks", () => { ${markerBody} });`]),
+      });
+    },
+    120_000,
+  );
 });
 
 describe("ark test verified_by join", () => {
@@ -909,3 +944,33 @@ describe("ark test temp roots (ARK-404)", () => {
     expect(second.criteria).toEqual(first.criteria);
   }, 120_000);
 });
+
+// ARK-419: the demo fixture of this suite ends no suite on a memory wait and leaves no runner behind.
+const orphanFixture = {
+  start: (body: string) =>
+    buildingRun({
+      criteria: ["FAKE-1-AC1"],
+      e2e: [`test("FAKE-1-AC1 holds", async () => { ${body} }, 400_000);`],
+    }),
+};
+
+// The file-level afterEach of this suite stops the runs it started; the first test leaves two runners for it.
+describe("ARK-T236 runners after the suite hook", () => {
+  afterAll(stopHeld);
+  macOnly(
+    "ARK-T236 a runner that ignores SIGTERM runs beside a runner the test started",
+    () => holdRunners(orphanFixture),
+    120_000,
+  );
+  macOnly(
+    "ARK-T236 after the suite hook ends, no test-runner process of a run the suite started remains and the runner of another run lives",
+    expectHookEndedOnlyItsRuns,
+    60_000,
+  );
+});
+
+macOnly(
+  "ARK-T235 the demo fixture of this suite finishes with free memory and swap past the default limits",
+  () => proveFixtureSkipsMemoryWait(orphanFixture),
+  120_000,
+);
