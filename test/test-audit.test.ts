@@ -487,14 +487,23 @@ describe("ark test old-id gate", () => {
 
   const pytestCommand = `printf '<testsuites><testsuite><testcase classname="x" name="t"/></testsuite></testsuites>' > {report}`;
 
-  // The fake `ark test` runner is detached: stop it and kill anything of the fake run, even when a test failed.
-  let runIds: string[] = [];
+  // The fake `ark test` runner is detached: stop it, then kill the pid of its runner.json, even when a test failed.
+  // Never `pkill -f <run id>`: a fake run id repeats (`<date>-FAKE-1-1`) across the test files of one `bun test
+  // --parallel`, and that match killed the `ark test` caller of another file's run (exit by signal, no output).
+  let startedRuns: { runId: string; runDirectory: string }[] = [];
   afterEach(() => {
-    for (const runId of runIds) {
+    for (const { runId, runDirectory } of startedRuns) {
       ark("test", runId, "--stop");
-      Bun.spawnSync(["pkill", "-f", runId]);
+      try {
+        process.kill(
+          JSON.parse(readFileSync(join(runDirectory, "results", "runner.json"), "utf8")).pid,
+          "SIGKILL",
+        );
+      } catch {
+        // no runner.json, or the runner is already gone
+      }
     }
-    runIds = [];
+    startedRuns = [];
   });
 
   /** A building run on a repo whose base commit holds old-id tests; a bun suite and a pytest suite. */
@@ -517,8 +526,8 @@ describe("ark test old-id gate", () => {
     const runId = ark("run", "start", ticket, "--project", "fx").out.match(
       /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
     )![0];
-    runIds.push(runId);
     const runDirectory = join(arkHome, "projects", "fx", "runs", runId);
+    startedRuns.push({ runId, runDirectory });
     recordEvaluation(runDirectory);
     writeFileSync(
       join(runDirectory, "plan.yml"),

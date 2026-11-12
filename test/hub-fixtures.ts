@@ -1,7 +1,7 @@
 // Fixtures for the hub tests, shared by test/hub.test.ts (Bun) and test/pw/hub.pw.ts (Node):
 // no bun:test, no Bun.* globals. Every time comes from `new Date()`, never from a literal.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export type FixtureStep = {
@@ -371,7 +371,29 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   const wrap = (value: unknown[] | undefined, key: string) =>
     JSON.stringify({ result: { [key]: value ?? [] } });
   put("orca.terminals", wrap(options.orca?.terminals, "terminals"));
-  put("orca.runs", wrap(options.orca?.runs, "runs"));
+  // Every project of the fixture (and `p`) has a Master Chief Run, so the hub's queue source answers (an empty queue) and shows no stale chip.
+  const projectsFolder = join(process.env.ARK_HOME ?? "", "projects");
+  const projects = new Set([
+    "p",
+    ...(existsSync(projectsFolder) ? readdirSync(projectsFolder) : []),
+  ]);
+  const runs = options.orca?.runs ?? [];
+  const objectives = new Set(runs.map((run) => (run as { objective?: string }).objective));
+  put(
+    "orca.runs",
+    wrap(
+      [
+        ...runs,
+        ...[...projects]
+          .filter((project) => !objectives.has(`Master Chief: ${project} tickets`))
+          .map((project) => ({
+            id: `orca-chief-${project}`,
+            objective: `Master Chief: ${project} tickets`,
+          })),
+      ],
+      "runs",
+    ),
+  );
   put("orca.workers", wrap(options.orca?.workers, "workers"));
   put("orca.tasks", wrap(options.orca?.tasks, "tasks"));
   put("orca.inbox", wrap(options.orca?.messages, "messages"));
@@ -439,6 +461,8 @@ export function fakeToolScripts(state: string): {
 ${gateWait}
 sleep "$(cat '${state}/orca.sleep')"
 cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
+# The hub's queue source reads task-list with --ready or --status: its own count, so it never uses up the agents' two answers.
+case " $* " in *" --ready "*|*" --status "*) cmd="\${cmd}_queue" ;; esac
 ${modeGate(state, "orca", "$cmd")}
 case "$1 $2" in
   "terminal list") cat '${state}/orca.terminals' ;;

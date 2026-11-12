@@ -10,7 +10,16 @@ import {
   type RunState,
   type StepWindow,
 } from "../cli/events.ts";
-import { orcaOrchestration, orcaPages, type OrcaRun, type OrcaTerminal } from "../cli/orca.ts";
+import { loadConfig } from "../cli/config.ts";
+import {
+  orcaOrchestration,
+  orcaPages,
+  orcaTimeoutMilliseconds,
+  readChiefQueue,
+  type OrcaRun,
+  type OrcaTerminal,
+  type QueueTask,
+} from "../cli/orca.ts";
 import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
 import { loadPlan, type PlanStep } from "../cli/plan.ts";
 import { frontmatter } from "../cli/ticket.ts";
@@ -273,6 +282,34 @@ export function createArkReader() {
       return paths;
     },
   };
+}
+
+// ---------------------------------------------------------------- Master Chief's queue
+
+/** What one project's queue read gave, without the open-run count (the snapshot adds it from the runs it holds). `concurrency` is null when `ark.yml` does not load: the queue itself does not need it. */
+export type QueueRead =
+  | { concurrency: number | null; tasks: QueueTask[] }
+  | { unavailable: string };
+
+/**
+ * The queue of each project, through the reader `ark chief state` uses. Each project is its own
+ * read, so one project's slow Orca call shows only in its own entry.
+ */
+export async function readQueues(): Promise<Map<string, QueueRead>> {
+  const projects = listProjects();
+  const reads = await Promise.all(
+    projects.map(async (project): Promise<QueueRead> => {
+      let concurrency: number | null = null;
+      try {
+        concurrency = loadConfig(project).concurrency;
+      } catch {
+        // An ark.yml that does not load leaves the limit unknown; it never hides the queue.
+      }
+      const queue = await readChiefQueue(project, orcaTimeoutMilliseconds);
+      return queue.ok ? { concurrency, tasks: queue.value } : { unavailable: queue.reason };
+    }),
+  );
+  return new Map(projects.map((project, index) => [project, reads[index]]));
 }
 
 // ---------------------------------------------------------------- Orca
