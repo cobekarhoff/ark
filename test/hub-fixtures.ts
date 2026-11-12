@@ -552,12 +552,26 @@ const iso = (start: Date, second: number) =>
  */
 export function transcriptText(
   harness: SessionHarness,
-  options: { cwd: string; start: Date; tag?: string },
+  options: {
+    cwd: string;
+    start: Date;
+    tag?: string;
+    /** Characters of an extra `padding` string field in the arguments of the first call. */
+    argumentPadding?: number;
+    /** Characters of padding appended to the user message. */
+    messagePadding?: number;
+    /** Characters of padding appended to the result of the first call, after its tail. */
+    resultPadding?: number;
+  },
 ): string {
   const { cwd, start } = options;
   const text = transcriptTexts(options.tag ?? harness);
+  const extraArguments = options.argumentPadding
+    ? { padding: "a".repeat(options.argumentPadding) }
+    : {};
+  const user = text.user + "u".repeat(options.messagePadding ?? 0);
   const at = (second: number) => iso(start, second);
-  const okResult = `${text.okFirstLine}\nsecond line\n${text.tail}`;
+  const okResult = `${text.okFirstLine}\nsecond line\n${text.tail}${"r".repeat(options.resultPadding ?? 0)}`;
   const failResult = `${text.failFirstLine}\n${text.tail}`;
   const records: unknown[] = [];
   if (harness === "omp") {
@@ -569,13 +583,18 @@ export function transcriptText(
     });
     records.push(
       { type: "session", version: 3, id: "fixture", timestamp: at(0), cwd },
-      message(1, { role: "user", content: [{ type: "text", text: text.user }] }),
+      message(1, { role: "user", content: [{ type: "text", text: user }] }),
       message(2, {
         role: "assistant",
         content: [
           { type: "thinking", thinking: text.thinking },
           { type: "text", text: text.assistant },
-          { type: "toolCall", id: "c1", name: "bash", arguments: { command: text.command } },
+          {
+            type: "toolCall",
+            id: "c1",
+            name: "bash",
+            arguments: { command: text.command, ...extraArguments },
+          },
           { type: "toolCall", id: "c2", name: "bash", arguments: { command: "false" } },
         ],
       }),
@@ -601,11 +620,16 @@ export function transcriptText(
       message: { role: type, content },
     });
     records.push(
-      record(0, "user", text.user),
+      record(0, "user", user),
       record(1, "assistant", [
         { type: "thinking", thinking: text.thinking },
         { type: "text", text: text.assistant },
-        { type: "tool_use", id: "c1", name: "Bash", input: { command: text.command } },
+        {
+          type: "tool_use",
+          id: "c1",
+          name: "Bash",
+          input: { command: text.command, ...extraArguments },
+        },
         { type: "tool_use", id: "c2", name: "Bash", input: { command: "false" } },
       ]),
       record(2, "user", [
@@ -626,7 +650,7 @@ export function transcriptText(
       item(1, {
         type: "message",
         role: "user",
-        content: [{ type: "input_text", text: text.user }],
+        content: [{ type: "input_text", text: user }],
       }),
       item(2, { type: "reasoning", summary: [{ type: "summary_text", text: text.thinking }] }),
       item(3, {
@@ -638,7 +662,7 @@ export function transcriptText(
         type: "function_call",
         name: "shell",
         call_id: "c1",
-        arguments: JSON.stringify({ command: ["bash", "-lc", text.command] }),
+        arguments: JSON.stringify({ command: ["bash", "-lc", text.command], ...extraArguments }),
       }),
       item(5, { type: "function_call_output", call_id: "c1", output: output(okResult, 0) }),
       item(6, {
