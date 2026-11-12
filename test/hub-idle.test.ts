@@ -184,11 +184,15 @@ const orcaRunsFor = (fake: Fixture, runs: string[]) =>
     join(fake.state, "orca.runs"),
     JSON.stringify({
       result: {
-        runs: runs.map((run) => ({
-          id: `orca-${run}`,
-          objective: `Ark run ${run}`,
-          coordinator_handle: "term-lead",
-        })),
+        runs: [
+          ...runs.map((run) => ({
+            id: `orca-${run}`,
+            objective: `Ark run ${run}`,
+            coordinator_handle: "term-lead",
+          })),
+          // The queue source reads this Run's Tasks.
+          { id: "orca-chief", objective: "Master Chief: p tickets" },
+        ],
       },
     }),
   );

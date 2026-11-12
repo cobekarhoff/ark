@@ -525,6 +525,13 @@ button:not(:disabled):active {
   gap: 12px;
   min-width: 0;
 }
+.queue-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .warn-panel {
   border-color: var(--amber);
   background: var(--amber-bg);
