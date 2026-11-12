@@ -286,6 +286,10 @@ test("ARK-T290 the header strip is on every hub page and the Resources page grou
     agentsOf(run).and(page.locator(`[data-handle="${handle}"]`));
   await expect(agent(runA, "H1")).toContainText("build");
   await expect(agent(runA, "H1")).toContainText("openai/model-one");
+  // The harness is the one the Agents view shows, never "harness unknown"; every CPU % has at most one decimal.
+  await expect(agent(runA, "H1")).toContainText("omp");
+  await expect(page.getByTestId("resource-agent").first()).not.toContainText("unknown");
+  expect(await page.locator("main").innerText()).not.toMatch(/\d+\.\d{2,}%/);
   await expect(agent(runA, "H2")).toContainText("validate");
   await expect(agent(runA, "H2")).toContainText("anthropic/model-two");
   await expect(agent(runB, "H3")).toContainText("docs");

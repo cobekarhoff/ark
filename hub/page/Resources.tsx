@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Unknown, known, duration } from "./format.tsx";
 import { Stale, useLive } from "./store.tsx";
 import { runHref } from "./RunDetail.tsx";
+import { Field } from "./Agents.tsx";
 import type { Agent, HostLevel, ResourceProcess, ResourcesHistory } from "../types.ts";
 
 const refreshMilliseconds = 30_000;
@@ -71,7 +72,8 @@ const levelWords: Record<HostLevel, string> = {
 };
 
 const megabytes = (value: number) => `${value} MB`;
-const percent = (value: number | null) => (value === null ? "—" : `${value}%`);
+const percent = (value: number | null) =>
+  value === null ? "—" : `${Math.round(value * 10) / 10}%`;
 
 function ageText(seconds: number): string {
   const days = Math.floor(seconds / 86_400);
@@ -226,9 +228,18 @@ export function Resources() {
                       <span className="pill">{agent.role}</span>
                       {agent.step ? <span className="mono"> {agent.step}</span> : null}{" "}
                       <span className="mut small">
-                        {agent.harness ?? "harness unknown"} ·{" "}
+                        <Field
+                          reported={agent.harness}
+                          planned={agent.planned?.harness}
+                          source={agent.planned?.source ?? "plan"}
+                        />{" "}
+                        ·{" "}
                         <span className="mono">
-                          {agent.model ?? agent.planned?.model ?? "model unknown"}
+                          <Field
+                            reported={agent.model}
+                            planned={agent.planned?.model}
+                            source={agent.planned?.source ?? "plan"}
+                          />
                         </span>
                         {agent.presence === "ended" ? " · ended" : ""}
                       </span>
