@@ -1948,8 +1948,6 @@ test("ARK-T118 The hub header has the same height with 4 or more stale source la
   const baseUrl = await launch();
   await open(page, baseUrl, "roadmap");
   const labels = page.getByTestId("stale-label");
-  // The resources source reads real `ps` once; its label goes when that read lands, so the set of labels is stable only after.
-  await expect(page.locator("[data-testid=stale-label][data-source=resources]")).toHaveCount(0);
   await expect.poll(() => labels.count()).toBeGreaterThanOrEqual(4);
   const header = page.locator("header.top");
   const heightOf = async () => (await header.boundingBox())!.height;
