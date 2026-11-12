@@ -5876,8 +5876,8 @@ async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
   isolate();
   const local = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  const day = local(new Date());
-  const yesterdayDate = new Date();
+  const day = local(new Date(instant));
+  const yesterdayDate = new Date(instant);
   yesterdayDate.setDate(yesterdayDate.getDate() - 1);
   const yesterday = local(yesterdayDate);
   const gate = "ARK-12345-LONG";
@@ -5924,7 +5924,7 @@ async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
   }
   installFakeTools({
     mergeRequestViews: { [review.url]: review.view },
-    ompUsage: usageAt(0.82),
+    ompUsage: usageAt(0.82, instant),
   });
   const baseUrl = await launch();
   const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"]`);
