@@ -461,6 +461,8 @@ export function fakeToolScripts(state: string): {
 ${gateWait}
 sleep "$(cat '${state}/orca.sleep')"
 cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
+# The hub's queue source reads task-list with --ready or --status: its own count, so it never uses up the agents' two answers.
+case " $* " in *" --ready "*|*" --status "*) cmd="\${cmd}_queue" ;; esac
 ${modeGate(state, "orca", "$cmd")}
 case "$1 $2" in
   "terminal list") cat '${state}/orca.terminals' ;;
