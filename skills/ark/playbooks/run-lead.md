@@ -457,6 +457,22 @@ The full `ark test <run>` (the final gate, not the build round) runs the integra
 - **An AC is `missing`.** No tagged test passed for it. Start the validator step again.
 - **A criterion is `manual pending`.** A person proves it, so a validator step has no test to write: never restart the validator for it. Ask the human through Master Chief to check each criterion with `manual: true`, one question for each criterion id, and wait for the answer. Record it as the human's answer, never your own: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]`. Then run `ark test <run> --quick` again (the full run is the final gate before the MR). `manual ok` counts as proved. `manual problem` is a defect: write the human's note into `<run folder>/findings/round-<round>.md` and send the implementer step back (section 7). The wait for the human counts as gate wait in `ark retro`. A `manual pending` never opens the escalation gate and `ark merge-request open` refuses until each manual criterion is `manual ok`. In the validator spec, say that a manual criterion gets no test. Tell the implementer the literal strings `manual: true`, `manual pending`, `manual ok` and `manual problem`.
 - **A non-test AC needs an evidence file.** `ark merge-request open` and `ark run close <run> handed_off` refuse, before any push and any event, an AC with a method other than `test` (a `manual: true` AC reads as `demonstration`) that has no well-formed `<run folder>/results/evidence/<AC id>.md` (`evidence missing: <AC id> (<method>)`, `evidence malformed: <AC id>: <reason>`). Write it from what was done and seen, before you ask the human. `demonstration`: the sections What the human did, What the human saw, Before and After (each with screenshot paths); `ark gate record <run> manual <AC id> ok` appends the last line `human: ok`. `inspection`: Files (`path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`. `analysis`: Command, Output, Threshold and Result, each given for Base and for Head. They also refuse an AC with `method: test` when a `verified_by` case has no `base` or `head` folder in `results/evidence/<test case id>/` (`test evidence missing: <AC id> <test case id> (<base|head>)`) or when the `head` SHA is not the repo head (`test evidence stale: <AC id> <test case id>`): run `ark test <run>` again after the last commit.
+- **The shape of an `analysis` evidence file, and the reviewer's `Not in plan` line.** Use `##` headings for Command, Output, Threshold and Result, and give Base and Head inside each as `###` sub-headings or as `Base:` and `Head:` lines with text after the colon; a `##` Base ends the section and reads as "has no Base". Example:
+
+  ```markdown
+  ## Command
+
+  ### Base
+
+  bun test base.test.ts
+
+  ### Head
+
+  bun test base.test.ts
+  ```
+
+  The PR-writing lint (`RISK04`) also refuses a changed file that no plan step lists under `where:` unless the `## Merge risk` block has a line `- Not in plan: <path> — <reason>` for it (outside `test/` and `docs/`); the lint reads only the first `## Merge risk` block of the findings file, so edit that block and never append a second one. Fix it either way: add the path to a step's `where:` in the plan, or write the line. Example: `- Not in plan: src/util.ts — shared helper needed by the export step`. `RISK04` has other refusals too, for example `Door: one-way` without a recovery.
+
 - After any rework, run `ark test <run> --quick` again. Run the full `ark test <run>` once, before the MR opens: it must pass at the latest commit.
 - A validator commits its evidence files (for example a file written after a human check) before the last `ark test <run>`, so that no commit follows that test. A commit after the last test makes `ark status <run>` show `test head: stale`, and `ark merge-request open <run>` refuses the changed head.
 
