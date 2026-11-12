@@ -1,6 +1,6 @@
 ---
 id: ARK-T277
-title: ARK-T277 the ARK-284 rules stay: 200 entries a page with Load more, and while the worker reads a 200 MB session file with a result read queued, / and /nope answer with a p95 below 200 ms
+title: "ARK-T277 the ARK-284 rules stay: 200 entries a page with Load more, and while the worker reads a 200 MB session file with a result read queued, / and /nope answer with a p95 below 200 ms"
 level: integration
 technique: performance boundary (p95 under load), boundary values of the page (200, 201 entries), state transition (page 1 to Load more)
 priority: high

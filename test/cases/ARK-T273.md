@@ -1,6 +1,6 @@
 ---
 id: ARK-T273
-title: ARK-T273 the transcript opens as a list and an inspector: one-line rows of time, kind and summary, a failed call's row red with its error line, and the inspector showing a message, context, thinking, a bash command, an edit input and other arguments through Markdown, Code and Json
+title: "ARK-T273 the transcript opens as a list and an inspector: one-line rows of time, kind and summary, a failed call's row red with its error line, and the inspector showing a message, context, thinking, a bash command, an edit input and other arguments through Markdown, Code and Json"
 level: e2e
 technique: equivalence classes of entry kind (user, assistant, context, thinking, bash, edit, write, other tool, failed tool), state transition of selection
 priority: high
