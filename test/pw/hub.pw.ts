@@ -7283,15 +7283,13 @@ test("ARK-T279 the sticky bar holds the part chips and the Rendered and Raw swit
   const hash = await page.evaluate(() => location.hash);
   await chip("AC2").click();
   await expect(chip("AC2")).toHaveAttribute("aria-current", "location");
-  const gap = await page.evaluate(() => {
-    const bottom = document
-      .querySelector('[data-testid="outline-bar"]')!
-      .getBoundingClientRect().bottom;
+  const { gap, barHeight } = await page.evaluate(() => {
+    const rect = document.querySelector('[data-testid="outline-bar"]')!.getBoundingClientRect();
     const top = document.querySelector("#crit-AC2")!.getBoundingClientRect().top;
-    return top - bottom;
+    return { gap: top - rect.bottom, barHeight: rect.height };
   });
   expect(gap, "AC2 starts under the bar, not behind it").toBeGreaterThanOrEqual(0);
-  expect(gap).toBeLessThan(120);
+  expect(gap, "AC2 is not scrolled far below the bar").toBeLessThanOrEqual(barHeight * 2);
   expect(await page.evaluate(() => location.hash)).toBe(hash);
   await checkpoint(page, "ticket-chip-ac2");
 
@@ -7387,6 +7385,13 @@ async function expectFit(page: Page, label: string): Promise<Geometry> {
   await expect
     .poll(
       async () => {
+        // Measure after the fonts and two frames: the ResizeObserver has then fed the scale back.
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+          const { promise, resolve } = Promise.withResolvers<void>();
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          await promise;
+        });
         const view = await geometryOf(page);
         const want = fitScaleOf(view);
         return {
@@ -7577,7 +7582,7 @@ const graphPages: GraphPage[] = [
 test("ARK-T280 the ticket, Roadmap, Runs and plan graphs fit the width of their box down to 60% and then scroll, with Fit, 100% and Full screen controls, at 1024 px and at 1440 px", async ({
   page,
 }) => {
-  test.setTimeout(180_000);
+  test.slow();
   for (const kind of graphPages) {
     const hash = kind.build();
     const baseUrl = await launch();
@@ -7689,7 +7694,7 @@ test("ARK-T280 the ticket, Roadmap, Runs and plan graphs fit the width of their 
 test("ARK-T281 Full screen shows the one graph in a dialog over the window at fit scale, Esc and Close close it and return the focus, and a node click goes where it goes outside", async ({
   page,
 }) => {
-  test.setTimeout(180_000);
+  test.slow();
   await page.setViewportSize({ width: 1440, height: 900 });
   const dialog = page.getByRole("dialog");
   for (const kind of graphPages) {
