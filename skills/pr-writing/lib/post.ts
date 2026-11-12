@@ -4,9 +4,17 @@
  * between the two markers. The final body is linted, and a `fail` refuses the post before any write.
  * `buildTitle` is the one place that makes an MR title.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { beginMarker, endMarker } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
@@ -348,31 +356,66 @@ function writeCommand(input: PostInput, existing: Existing | null, bodyFile: str
 }
 
 const githubBodyLimit = 65_536;
-const imageTarget = /(!\[[^\]]*\]\()([^)\s]+)(\))/g;
+const imageTarget = /(!\[[^\]]*\]\()(?:<([^>\n]+)>|([^)\s]+))(\))/g;
 const mediaFile = /\.(png|jpe?g|gif|webp|svg|mp4|mov|webm)$/i;
 
-/** Each distinct local image or video that a Markdown image target of the body names and that exists, as an absolute path. */
+/**
+ * Calls `replace` with the target of each rendered Markdown image outside fenced and inline code, and swaps in what it returns
+ * (undefined keeps the image). A `<path>` destination loses its brackets when replaced.
+ */
+function mapImages(body: string, replace: (target: string) => string | undefined): string {
+  let fence: string | null = null;
+  return body
+    .split("\n")
+    .map((line) => {
+      const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      if (fence !== null) {
+        if (marker !== undefined && marker[0] === fence[0] && marker.length >= fence.length)
+          fence = null;
+        return line;
+      }
+      if (marker !== undefined) {
+        fence = marker;
+        return line;
+      }
+      let out = "";
+      let last = 0;
+      const prose = (text: string) =>
+        text.replace(imageTarget, (whole, open, angled, plain, close) => {
+          const replacement = replace(angled ?? plain);
+          return replacement === undefined ? whole : `${open}${replacement}${close}`;
+        });
+      for (const span of line.matchAll(/(`+)[^`]*?\1(?!`)/g)) {
+        out += prose(line.slice(last, span.index)) + span[0];
+        last = span.index + span[0].length;
+      }
+      return out + prose(line.slice(last));
+    })
+    .join("\n");
+}
+
+/** Each distinct local image or video that an image of the body names, that exists and that lies inside `root`, as an absolute path. */
 function localMedia(body: string, root: string): Map<string, string> {
   const found = new Map<string, string>();
-  for (const [, , target] of body.matchAll(imageTarget)) {
+  mapImages(body, (target) => {
     const file = resolve(root, target);
     if (
       !/^[a-z][a-z0-9+.-]*:/i.test(target) &&
       mediaFile.test(target) &&
       existsSync(file) &&
       statSync(file).isFile()
-    )
-      found.set(target, file);
-  }
+    ) {
+      const inside = relative(realpathSync(root), realpathSync(file));
+      if (!inside.startsWith("..") && !isAbsolute(inside)) found.set(target, file);
+    }
+    return undefined;
+  });
   return found;
 }
 
-/** Replaces exactly the Markdown image targets that `replacements` names, so a path in backticks or inside a longer path stays. */
+/** Replaces exactly the image targets that `replacements` names, so a path in backticks, in a fence or inside a longer path stays. */
 const replaceTargets = (body: string, replacements: Map<string, string>) =>
-  body.replace(imageTarget, (whole, open, target, close) => {
-    const replacement = replacements.get(target);
-    return replacement === undefined ? whole : `${open}${replacement}${close}`;
-  });
+  mapImages(body, (target) => replacements.get(target));
 
 /** `gh pr create --help` or `gh pr edit --help` must list `--attach` (gh 2.99.0 or newer). Read-only, so it runs in a dry run too. */
 function requireGithubAttach(input: PostInput, existing: Existing | null) {

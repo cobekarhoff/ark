@@ -2886,3 +2886,68 @@ test("ARK-T293 a secret-like command.log line is not in the built or the posted 
       for (const secret of secrets) expect(line).not.toContain(secret.split(/[=: ]+/).at(-1)!);
   }
 });
+
+test("ARK-T293 key assignments and private-key blocks, also a tail that starts inside one, are not in the built or the posted body", () => {
+  const keyBlock = [
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "b3BlbnNzaC1rZXktdjEAAAAA",
+    "-----END OPENSSH PRIVATE KEY-----",
+  ];
+  const leaks = ["example-private-value-123456", "b3BlbnNzaC1rZXktdjEAAAAA", "QUJDREVGR0g"];
+  const logs = [
+    ["ok before", "key=example-private-value-123456", ...keyBlock, "ok after"],
+    ["QUJDREVGR0g", "-----END OPENSSH PRIVATE KEY-----", "ok after"],
+    ["ok before", "-----BEGIN OPENSSH PRIVATE KEY-----", "QUJDREVGR0g"],
+  ];
+  for (const host of ["github", "gitlab"] as HostName[]) {
+    for (const lines of logs) {
+      logFile = join(mkdtempSync(join(tmpdir(), "pr-writing-log-")), "calls.ndjson");
+      process.env.FAKE_LOG = logFile;
+      const run = uploadRun(host, { log: lines.join("\n"), shots: false });
+      const built = readFileSync(run.bodyFile, "utf8");
+      const posted = run.post();
+      expect({ host, code: posted.code }).toEqual({ host, code: 0 });
+      const write = hostWrites()[0];
+      const sent = write.body ?? write.argv[write.argv.indexOf("--description") + 1];
+      for (const text of [built, sent]) {
+        for (const leak of leaks) expect(text).not.toContain(leak);
+        expect(text).not.toContain("PRIVATE KEY");
+      }
+      if (lines[0] === "ok before") expect(built).toContain("ok before");
+      if (lines.at(-1) === "ok after") expect(built).toContain("ok after");
+    }
+  }
+});
+
+test("ARK-T284 ARK-T285 a screenshot with a space and parentheses is uploaded on both hosts; a fenced or inline-code image reference is not", () => {
+  const name = "my shot (1).png";
+  for (const host of ["github", "gitlab"] as HostName[]) {
+    logFile = join(mkdtempSync(join(tmpdir(), "pr-writing-log-")), "calls.ndjson");
+    process.env.FAKE_LOG = logFile;
+    const run = uploadRun(host, { shots: false });
+    const named = shotPath("ARK-T1", name);
+    mkdirSync(join(run.directory, dirname(named)), { recursive: true });
+    writeFileSync(join(run.directory, named), pngBytes(3));
+    const outside = join(run.directory, "..", "private.png");
+    writeFileSync(outside, pngBytes(4));
+    const decoy = "../private.png";
+    writeFileSync(
+      run.bodyFile,
+      `${readFileSync(run.bodyFile, "utf8")}\n<details><summary>shots</summary>\n\n![ARK-T1 head](<${named}>)\n\n\`\`\`\n![x](${shotPath("ARK-T1", name).replace(/ .*/, "")})\n![x](<${named}>)\n\`\`\`\n\nInline \`![x](<${named}>)\` and ![out](${decoy}).\n\n</details>\n`,
+    );
+    expect(runScript("lint_body", run.repo, "--title", run.title).code).toBe(0);
+    const posted = run.post();
+    expect({ host, code: posted.code, err: posted.stderr }).toMatchObject({ host, code: 0 });
+    const write = hostWrites()[0];
+    const sent = write.body ?? write.argv[write.argv.indexOf("--description") + 1];
+    if (host === "github") {
+      expect(attachedFiles(write)).toEqual([join(run.directory, named)]);
+    } else {
+      expect(uploads().map((call) => String(call.body))).toEqual([name]);
+      // The rendered image is rewritten; the fenced and inline copies keep the path.
+      expect(sent).not.toMatch(/!\[ARK-T1 head\]\(<?results\//);
+      expect(sent.split(`![x](<${named}>)`).length - 1).toBe(2);
+    }
+    expect(sent).toContain(`(${decoy})`);
+  }
+});

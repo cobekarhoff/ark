@@ -144,11 +144,28 @@ function testLines({ tests }: Ledger): string[] {
 
 /** A log line that looks like it holds a credential is dropped, never posted. This is the only secret scan of a body. */
 const secretLike =
-  /token|secret|passw(or)?d|api[_-]?key|private[_-]?key|credential|bearer|authorization|\b(ghp|gho|ghs|github_pat|glpat|xox[bap]|sk)[-_][\w-]{8,}|AKIA[0-9A-Z]{12,}/i;
+  /token|secret|passw(or)?d|api[_-]?key|private[ _-]?key|credential|bearer|authorization|\b\w*(key|secret|credential)\w*\s*[=:]|\b(ghp|gho|ghs|github_pat|glpat|xox[bap]|sk)[-_][\w-]{8,}|AKIA[0-9A-Z]{12,}/i;
+
+/** Drops private-key blocks, also one whose BEGIN or END line is outside the lines given (a tail cut inside a block). */
+function withoutPrivateKeys(textLines: string[]): string[] {
+  const begin = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+  const end = /-----END [A-Z ]*PRIVATE KEY-----/;
+  const firstBegin = textLines.findIndex((line) => begin.test(line));
+  const firstEnd = textLines.findIndex((line) => end.test(line));
+  // An END before any BEGIN: the lines start inside a block.
+  let inside = firstEnd >= 0 && (firstBegin < 0 || firstEnd < firstBegin);
+  const kept: string[] = [];
+  for (const line of textLines) {
+    if (begin.test(line)) inside = true;
+    if (!inside) kept.push(line);
+    if (end.test(line)) inside = false;
+  }
+  return kept;
+}
 
 /** Log or AC text as a fenced block that no line of it can close or leave. */
 function fenced(textLines: string[]): string[] {
-  const safeLines = textLines
+  const safeLines = withoutPrivateKeys(textLines)
     .filter((line) => !secretLike.test(line))
     .map((line) => line.replace(/`{3,}|~{3,}/g, "'''").replace(/<\/details/gi, "<\\/details"));
   return safeLines.length === 0 ? [] : ["```", ...safeLines, "```", ""];
@@ -176,7 +193,8 @@ function evidenceBlock(ledger: Ledger): Block {
           ...shown
             .filter((path) => path.startsWith(prefix))
             .flatMap((path) => [
-              `![${entry.testCase} ${path.slice(prefix.length).split("/")[0]}](${path})`,
+              // A path with a space or a parenthesis goes in angle brackets; post.ts reads both forms.
+              `![${entry.testCase} ${path.slice(prefix.length).split("/")[0]}](${/[\s()<>]/.test(path) ? `<${path}>` : path})`,
               "",
             ]),
           ...fenced(entry.log ?? []),
