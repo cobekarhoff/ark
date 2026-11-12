@@ -716,6 +716,8 @@ describe("ark retro", () => {
       plan_changes: 1,
       mr_comments: 0,
       mr_commits_after_open: 0,
+      mr_sync_commits: 0,
+      mr_fix_commits: 0,
     });
     expect(metrics.escaped_defects).toEqual([
       {
@@ -852,53 +854,258 @@ describe("ark retro", () => {
 
   describe("merge request activity", () => {
     const originalPath = process.env.PATH;
-    const withMergeRequest: EventRow[] = [
-      ...scenario.slice(0, -1),
-      [
-        "14:56:30.000",
-        "merge_request.opened",
-        { repo: "repos/platform", url: "https://github.com/acme/platform/pull/7", number: 7 },
-      ],
-      scenario[scenario.length - 1],
-    ];
+    const originalCwd = process.cwd();
+    const before = day("14:40:00.000");
+    const after = day("14:58:00.000");
 
-    beforeEach(() => {
-      writeEvents(runDirectory, withMergeRequest);
-      mkdirSync(join(runDirectory, "workspace", "repos", "platform"), { recursive: true });
+    type GithubCommit = {
+      sha: string;
+      parents: string[];
+      date: string;
+      message: string;
+    };
+    type GitlabCommit = {
+      id: string;
+      parent_ids: string[];
+      committed_date: string;
+      title: string;
+    };
+    type Forges = {
+      github?: GithubCommit[];
+      gitlab?: GitlabCommit[];
+      failing?: boolean;
+      /** Extra commits in the base history, as after the MR merged: its side branches are in it. */
+      mergedHistory?: string[];
+      /** Every page of comments and notes is full, so the 1000-item cap hides further items. */
+      fullPages?: boolean;
+    };
+
+    const github = (sha: string, parents: string[], date: string, message = "work") => ({
+      sha,
+      parents,
+      date,
+      message,
+    });
+    const gitlab = (id: string, parent_ids: string[], committed_date: string, title = "work") => ({
+      id,
+      parent_ids,
+      committed_date,
+      title,
     });
 
-    test("ARK-160-AC5 counts MR comments and commits after open from gh", () => {
-      const bin = mkdtempSync(join(tmpdir(), "ark-fake-gh-"));
-      const answer = {
-        comments: [{}, {}],
-        reviews: [{ body: "please change" }, { body: "" }],
-        commits: [{ committedDate: day("14:40:00.000") }, { committedDate: day("14:58:00.000") }],
-      };
-      writeFileSync(join(bin, "gh"), `#!/bin/sh\ncat <<'JSON'\n${JSON.stringify(answer)}\nJSON\n`);
-      chmodSync(join(bin, "gh"), 0o755);
-      process.env.PATH = `${bin}:${originalPath}`;
+    const githubUrl = "https://github.com/acme/web/pull/7";
+    const gitlabUrl = "https://gitlab.com/acme/api/-/merge_requests/9";
+
+    // The run worktree folder is never created: `ark run close` deletes it before retro runs.
+    function writeMergeRequestRun(forges: Forges): void {
+      const rows: EventRow[] = scenario.slice(0, -1);
+      if (forges.github)
+        rows.push([
+          "14:56:30.000",
+          "merge_request.opened",
+          { repo: "repos/web", url: githubUrl, number: 7 },
+        ]);
+      if (forges.gitlab)
+        rows.push([
+          "14:56:30.000",
+          "merge_request.opened",
+          { repo: "repos/api", url: gitlabUrl, number: 9 },
+        ]);
+      writeEvents(runDirectory, [...rows, scenario[scenario.length - 1]]);
+    }
+
+    /** Fake gh and glab: each answers only a call that names the MR by its URL-derived path. */
+    function installForges(forges: Forges): string {
+      const binDirectory = mkdtempSync(join(tmpdir(), "ark-fake-forges-"));
+      const data = JSON.stringify({
+        github: forges.github ?? [],
+        gitlab: forges.gitlab ?? [],
+        failing: forges.failing === true,
+        mergedHistory: forges.mergedHistory ?? [],
+        fullPages: forges.fullPages === true,
+      });
+      const common = `#!/usr/bin/env bun
+const data = ${data};
+const callArguments = process.argv.slice(2);
+const reject = () => process.exit(1);
+if (data.failing) reject();
+const answer = (value) => { process.stdout.write(JSON.stringify(value)); process.exit(0); };
+const endpoint = callArguments[0] === "api" ? callArguments.slice(1).find((candidate) => !candidate.startsWith("-")) ?? "" : "";
+const [path, query = ""] = endpoint.split("?");
+const page = Number(/(?:^|&)page=(\\d+)/.exec(query)?.[1] ?? 1);
+if (data.fullPages && (path.endsWith("/comments") || path.endsWith("/notes")))
+  answer(Array.from({ length: 100 }, () => ({ system: false })));
+if (page > 1) answer([]);
+`;
+      const gh = `${common}
+const history = [{ sha: "aaa111" }, { sha: "aaa222" }, { sha: "aaa333" }, ...data.mergedHistory.map((sha) => ({ sha }))];
+const reviews = [{ body: "please change" }, { body: "" }];
+if (callArguments[0] === "pr" && callArguments[1] === "view") {
+  if (callArguments[2] !== ${JSON.stringify(githubUrl)}) reject();
+  answer({
+    baseRefName: "main",
+    comments: [{}, {}],
+    reviews,
+    commits: data.github.map((commit) => ({ oid: commit.sha, messageHeadline: commit.message, committedDate: commit.date })),
+  });
+}
+if (callArguments[0] !== "api") reject();
+if (path === "repos/acme/web/pulls/7") answer({ base: { ref: "main" }, number: 7 });
+if (path === "repos/acme/web/pulls/7/commits")
+  answer(data.github.map((commit) => ({
+    sha: commit.sha,
+    commit: { message: commit.message, committer: { date: commit.date } },
+    parents: commit.parents.map((sha) => ({ sha })),
+  })));
+if (path === "repos/acme/web/issues/7/comments") answer([{}, {}]);
+if (path === "repos/acme/web/pulls/7/reviews") answer(reviews);
+if (path === "repos/acme/web/pulls/7/comments") answer([]);
+if (path === "repos/acme/web/commits" && /(?:^|&)sha=main(?:&|$)/.test(query)) answer(history);
+reject();
+`;
+      const glab = `${common}
+const hostIndex = callArguments.indexOf("--hostname");
+const host = hostIndex >= 0 ? callArguments[hostIndex + 1] : process.env.GITLAB_HOST;
+if (!host || !host.includes("gitlab.com")) reject();
+if (callArguments[0] !== "api") reject();
+const history = [{ id: "aaa111" }, { id: "aaa222" }, { id: "aaa333" }, ...data.mergedHistory.map((id) => ({ id }))];
+const base = "projects/acme%2Fapi";
+if (path === base + "/merge_requests/9") answer({ target_branch: "main" });
+if (path === base + "/merge_requests/9/notes")
+  answer([{ system: false }, { system: false }, { system: true }]);
+if (path === base + "/merge_requests/9/commits") answer(data.gitlab);
+if (path === base + "/repository/commits" && /(?:^|&)ref_name=main(?:&|$)/.test(query)) answer(history);
+reject();
+`;
+      writeFileSync(join(binDirectory, "gh"), gh);
+      writeFileSync(join(binDirectory, "glab"), glab);
+      chmodSync(join(binDirectory, "gh"), 0o755);
+      chmodSync(join(binDirectory, "glab"), 0o755);
+      return binDirectory;
+    }
+
+    /** Runs retro from a folder that is not the run worktree, with the fake forges first in PATH. */
+    function retroWithForges(forges: Forges): void {
+      writeMergeRequestRun(forges);
+      const binDirectory = installForges(forges);
+      const elsewhere = mkdtempSync(join(tmpdir(), "ark-elsewhere-"));
+      process.env.PATH = `${binDirectory}:${originalPath}`;
+      process.chdir(elsewhere);
       try {
         retro(runId);
       } finally {
+        process.chdir(originalCwd);
         process.env.PATH = originalPath;
       }
+    }
+
+    test("ARK-T251 counts MR comments and commits after open by MR URL, with no run worktree and from another folder", () => {
+      retroWithForges({
+        github: [
+          github("g0", ["g00"], before),
+          github("g1", ["g0", "aaa222"], after, "bring in latest"),
+          github("g3", ["g1"], after),
+        ],
+        gitlab: [
+          gitlab("l0", ["l00"], before),
+          gitlab("l1", ["l0", "aaa333"], after),
+          gitlab("l2", ["l1"], after),
+          gitlab("l3", ["l2"], after),
+        ],
+      });
+      // 2 comments + 1 review body on GitHub, 2 non-system notes on GitLab; 2 + 3 commits after open.
       expect(readMetrics().human_intervention).toMatchObject({
-        mr_comments: 3,
-        mr_commits_after_open: 1,
+        mr_comments: 5,
+        mr_commits_after_open: 5,
       });
     });
 
-    test("ARK-160-AC5 reports unknown MR activity when gh cannot answer", () => {
-      const emptyBin = mkdtempSync(join(tmpdir(), "ark-no-gh-"));
-      process.env.PATH = emptyBin;
-      try {
-        retro(runId);
-      } finally {
-        process.env.PATH = originalPath;
-      }
+    test("ARK-T251 reports every MR number as unknown when gh or glab cannot answer", () => {
+      retroWithForges({
+        github: [github("g0", ["g00"], after)],
+        gitlab: [gitlab("l0", ["l00"], after)],
+        failing: true,
+      });
       expect(readMetrics().human_intervention).toMatchObject({
         mr_comments: "unknown",
         mr_commits_after_open: "unknown",
+        mr_sync_commits: "unknown",
+        mr_fix_commits: "unknown",
+      });
+    });
+
+    test("ARK-T252 lists merges from the base branch as sync commits and every other commit after open as fix commits", () => {
+      retroWithForges({
+        github: [
+          github("g0", ["g00"], before),
+          github("g1", ["g0", "aaa222"], after, "bring in latest"),
+          github("g2", ["g1", "bbb111"], after, "Merge feature/x"),
+          github("g3", ["g2"], after),
+          github("g4", ["g3"], after),
+        ],
+        gitlab: [
+          gitlab("l0", ["l00"], before),
+          gitlab("l1", ["l0", "aaa333"], after, "Merge branch 'main' into topic"),
+          gitlab("l2", ["l1"], after),
+          gitlab("l3", ["l2", "ccc111"], after, "Merge branch 'main' into topic"),
+        ],
+      });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_sync_commits: 2,
+        mr_fix_commits: 5,
+        mr_commits_after_open: 7,
+      });
+    });
+
+    test("ARK-T252 counts no fix commits when every commit after open is a merge from the base branch", () => {
+      retroWithForges({
+        github: [
+          github("g0", ["g00"], before),
+          github("g1", ["g0", "aaa111"], after),
+          github("g2", ["g1", "aaa222"], after),
+        ],
+      });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_sync_commits: 2,
+        mr_fix_commits: 0,
+        mr_commits_after_open: 2,
+      });
+    });
+
+    test("ARK-T252 counts a merged side branch of the MR as a fix commit, not a sync commit", () => {
+      retroWithForges({
+        github: [
+          github("g0", ["g00"], before),
+          github("gside", ["g0"], after),
+          github("g1", ["g0", "gside"], after, "Merge feature/x"),
+          github("g2", ["g1", "aaa222"], after, "Merge main"),
+        ],
+        gitlab: [
+          gitlab("l0", ["l00"], before),
+          gitlab("lside", ["l0"], after),
+          gitlab("l1", ["l0", "lside"], after, "Merge branch 'feature/x'"),
+          gitlab("l2", ["l1", "aaa333"], after, "Merge branch 'main'"),
+        ],
+        mergedHistory: ["gside", "lside"],
+      });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_sync_commits: 2,
+        mr_fix_commits: 4,
+        mr_commits_after_open: 6,
+      });
+    });
+
+    test("ARK-T251 reports every MR number as unknown when a list hits the page cap", () => {
+      retroWithForges({
+        github: [github("g0", ["g00"], after)],
+        gitlab: [gitlab("l0", ["l00"], after)],
+        fullPages: true,
+      });
+      expect(readMetrics().human_intervention).toMatchObject({
+        mr_comments: "unknown",
+        mr_commits_after_open: "unknown",
+        mr_sync_commits: "unknown",
+        mr_fix_commits: "unknown",
       });
     });
   });
