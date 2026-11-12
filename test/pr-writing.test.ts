@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { loadConfig, type PrWriting } from "../cli/config.ts";
+import { evidenceProblem } from "../cli/ticket.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import type { Ledger } from "../skills/pr-writing/lib/ledger.ts";
 import {
@@ -2503,4 +2504,64 @@ test("ARK-T151 gather.ts refuses a directory that is not a worktree of the run a
     expect(refused.stderr + refused.stdout).toContain(folder);
     expect(existsSync(join(folder, ".pr-writing", "ledger.json"))).toBe(false);
   }
+});
+
+// --- ARK-T270 ---------------------------------------------------------------------------------
+
+const runLeadPlaybook = readFileSync(join(root, "skills/ark/playbooks/run-lead.md"), "utf8");
+
+test("ARK-T270 the run-lead playbook's analysis evidence example and Not in plan example pass the real lint", () => {
+  const control = ["Command", "Output", "Threshold", "Result"]
+    .map((name) => `## ${name}\n\nBase: ok\n\nHead: ok\n`)
+    .join("\n");
+  expect(evidenceProblem("analysis", control)).toBeUndefined();
+
+  const example = runLeadPlaybook
+    .match(/^ *```markdown\n( *## Command\n[\s\S]*?)^ *```/m)![1]
+    .replace(/^ {2}/gm, "");
+  const swapped = control.replace(/## Command\n[\s\S]*?(?=\n## Output)/, example.trimEnd() + "\n");
+  expect(swapped).not.toBe(control);
+  expect(evidenceProblem("analysis", swapped)).toBeUndefined();
+  expect(evidenceProblem("analysis", swapped.replace("### Base", "## Base"))).toBe(
+    'section "Command" has no Base',
+  );
+  expect(evidenceProblem("analysis", swapped.replace(/### Base\n\n.*\n\n/, ""))).toBe(
+    'section "Command" has no Base',
+  );
+
+  const line = runLeadPlaybook.match(/`(- Not in plan: [^`]+)`/)![1];
+  const path = line.match(/Not in plan: (\S+)/)![1];
+  const block = (withLine: boolean) =>
+    [
+      "## Merge risk",
+      "",
+      "- Verification: good - ok",
+      "- Alignment: good - ok",
+      "- Impact: good - ok",
+      "- Rollback cost: good - ok",
+      "- Door: two-way",
+      "- Blast radius: small",
+      ...(withLine ? [line] : []),
+      "",
+    ].join("\n");
+  const riskOf = (findings: string) => {
+    const run = makeRun({
+      where: "cli/a.ts",
+      repos: [{ name: ".", changes: { "cli/a.ts": "changed\n", [path]: "x\n" } }],
+      steps: [
+        { id: "build", role: "implementer", repo: ".", needs: [] },
+        { id: "review", role: "reviewer", repo: ".", needs: ["build"] },
+      ],
+      findings: { "review-1.md": findings },
+    });
+    const ledger = run.ledger();
+    return lintBody({ body: buildBody(ledger), title: defaultTitle, ledger }).find(
+      (entry) => entry.id === "RISK04",
+    )!;
+  };
+  expect(riskOf(`### P3: Naming\n\n${block(true)}`).result).toBe("pass");
+  expect(riskOf(`### P3: Naming\n\n${block(false)}\n${block(true)}`)).toMatchObject({
+    result: "fail",
+    reason: expect.stringContaining("no reason given"),
+  });
 });
