@@ -19,7 +19,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { RunDetail, RunView, Snapshot, TicketCases, TranscriptPage } from "../hub/types.ts";
+import type {
+  RunDetail,
+  RunView,
+  Snapshot,
+  TicketCases,
+  TranscriptEntry,
+  TranscriptPage,
+} from "../hub/types.ts";
 import { parseTicketDocument } from "../hub/ticket-document.ts";
 import { createSnapshotReader } from "../hub/snapshot.ts";
 import { isHubName, proxyPort } from "../cli/proxy.ts";
@@ -37,6 +44,8 @@ import {
   orcaAnswersFor,
   today,
   transcriptText,
+  type ExtraEntry,
+  type SessionHarness,
   writeBacklogTicket,
   writeFakeToolState,
   writeOmpSession,
@@ -638,6 +647,9 @@ async function detailWithSessions(baseUrl: string, run: string, count: number): 
 const transcriptUrl = (baseUrl: string, run: string, file: string, cursor: number | string) =>
   `${baseUrl}/api/run/${run}/transcript?file=${encodeURIComponent(file)}&cursor=${cursor}`;
 
+const resultUrl = (baseUrl: string, run: string, file: string, call: string) =>
+  `${baseUrl}/api/run/${run}/transcript/result?file=${encodeURIComponent(file)}&call=${encodeURIComponent(call)}`;
+
 test("ARK-284-AC1 with orca down the hub keeps serving, open-in-orca answers 400 and runs nothing, and no run file changes", async () => {
   isolatedEnvironment();
   const run = `${today()}-ARK-806-1`;
@@ -822,7 +834,7 @@ test("ARK-T75 sessionsOf and modelsOf give the run lead, steps, rework rounds, g
   });
 });
 
-/** Writes a session file of about `bytes` bytes: records no transcript shows, then `tail` messages. */
+/** Writes a session file of about `bytes` bytes: records no transcript shows, then `tail` messages, then one tool call `late` with its result. */
 function writeBigSession(file: string, cwd: string, start: Date, bytes: number, tail: number) {
   const descriptor = openSync(file, "w");
   try {
@@ -842,6 +854,27 @@ function writeBigSession(file: string, cwd: string, start: Date, bytes: number, 
           message: { role: "user", content: [{ type: "text", text: `tail ${number}` }] },
         })}\n`,
       );
+    const at = (second: number) => new Date(start.getTime() + second * 1000).toISOString();
+    writeSync(
+      descriptor,
+      `${JSON.stringify({
+        type: "message",
+        timestamp: at(tail + 1),
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "late", name: "bash", arguments: { command: "echo" } }],
+        },
+      })}\n${JSON.stringify({
+        type: "message",
+        timestamp: at(tail + 2),
+        message: {
+          role: "toolResult",
+          toolCallId: "late",
+          isError: false,
+          content: [{ type: "text", text: "late result\nsecond line" }],
+        },
+      })}\n`,
+    );
   } finally {
     closeSync(descriptor);
   }
@@ -850,7 +883,7 @@ function writeBigSession(file: string, cwd: string, start: Date, bytes: number, 
 const percentile95 = (durations: number[]) =>
   [...durations].sort((left, right) => left - right)[Math.ceil(durations.length * 0.95) - 1];
 
-test("ARK-284-AC7 while the worker thread reads a 200 MB session file, / and /nope answer with a p95 below 200 ms, and the pages hold 200 entries", async () => {
+test("ARK-T277 while the worker thread reads a 200 MB session file and a result read is queued behind it, / and /nope answer with a p95 below 200 ms, and the pages hold 200 entries", async () => {
   const { sessions } = isolatedEnvironment();
   const run = `${today()}-ARK-808-1`;
   const started = new Date(Date.now() - 3_600_000);
@@ -865,11 +898,35 @@ test("ARK-284-AC7 while the worker thread reads a 200 MB session file, / and /no
   const file = join(sessions, "big.jsonl");
   writeBigSession(file, join(directory, "workspace"), started, 200 * 1024 * 1024, 250);
   expect(statSync(file).size).toBeGreaterThanOrEqual(200 * 1024 * 1024);
+  // 201 tool calls with a 20,000-character argument each: page 1 holds 200 of them, the next page the last.
+  const heavy = [
+    JSON.stringify({ type: "session", cwd: join(directory, "workspace") }),
+    ...Array.from({ length: 201 }, (_, number) =>
+      JSON.stringify({
+        type: "message",
+        timestamp: new Date(started.getTime() + (number + 1) * 1000).toISOString(),
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: `h${number}`,
+              name: "bash",
+              arguments: { command: "x".repeat(20_000) },
+            },
+          ],
+        },
+      }),
+    ),
+  ];
+  const heavyFile = writeSessionFile(sessions, "heavy.jsonl", `${heavy.join("\n")}\n`);
   installFakeTools({ orca: orcaAnswersFor(run) });
   const { baseUrl } = await start();
   try {
-    await detailWithSessions(baseUrl, run, 1);
+    await detailWithSessions(baseUrl, run, 2);
 
+    // A result read of a call at the end of the file joins the queue: the same slot, the same scan.
+    const resultRead = fetch(resultUrl(baseUrl, run, file, "late"));
     // Six page reads queue on the one transcript worker: it stays busy while the samples are taken.
     const url = transcriptUrl(baseUrl, run, file, 0);
     let finished = false;
@@ -894,15 +951,36 @@ test("ARK-284-AC7 while the worker thread reads a 200 MB session file, / and /no
       expect(percentile95(durations), `p95 of ${route}`).toBeLessThan(200);
 
     const [first] = await reads;
+    const result = await resultRead;
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({
+      text: "late result\nsecond line",
+      size: 23,
+      cut: false,
+    });
     expect(first.entries).toHaveLength(200);
     expect(first.entries[0]).toMatchObject({ kind: "message", role: "user", text: "tail 0" });
     expect(first.next).not.toBeNull();
     const second = (await (
       await fetch(transcriptUrl(baseUrl, run, file, first.next!))
     ).json()) as TranscriptPage;
-    expect(second.entries).toHaveLength(50);
+    expect(second.entries).toHaveLength(51);
     expect(second.entries[0]).toMatchObject({ text: "tail 200" });
     expect(second.next).toBeNull();
+
+    const heavyPage = await fetch(transcriptUrl(baseUrl, run, heavyFile, 0));
+    const heavyBody = await heavyPage.text();
+    const heavyFirst = JSON.parse(heavyBody) as TranscriptPage;
+    expect(heavyFirst.entries).toHaveLength(200);
+    expect(heavyFirst.next).not.toBeNull();
+    // 200 calls of 20,000 characters: 4 MB, and no more than 5 MB.
+    expect(heavyBody.length).toBeGreaterThan(4_000_000);
+    expect(heavyBody.length).toBeLessThanOrEqual(5_000_000);
+    const heavySecond = (await (
+      await fetch(transcriptUrl(baseUrl, run, heavyFile, heavyFirst.next!))
+    ).json()) as TranscriptPage;
+    expect(heavySecond.entries).toHaveLength(1);
+    expect(heavySecond.next).toBeNull();
   } finally {
     rmSync(file, { force: true });
   }
@@ -944,6 +1022,221 @@ test("ARK-284-AC7 a transcript request that fails answers 502 or 404, a bad curs
   // A path the index did not list for this run is never read.
   expect((await fetch(transcriptUrl(baseUrl, run, "/etc/passwd", 0))).status).toBe(404);
   expect((await fetch(transcriptUrl(baseUrl, "no-such-run", kept, 0))).status).toBe(404);
+});
+
+// ---------------------------------------------------------------- ARK-324
+
+type ToolEntry = Extract<TranscriptEntry, { kind: "tool" }>;
+const sessionHarnesses: SessionHarness[] = ["omp", "claude", "codex"];
+/** A text of exactly `length` characters that starts with `prefix`. `€` takes 3 bytes, so a byte count and a character count differ. */
+const sizedText = (prefix: string, length: number) => prefix + "€".repeat(length - prefix.length);
+const cutNote = (count: number) => `… (+${count} characters cut)`;
+const firstLineOf = (text: string) =>
+  text
+    .split("\n")
+    .find((line) => line.trim() !== "")!
+    .trim();
+
+/** A closed run with one session file of each harness holding `extra` entries, a second run that owns none, and the hub serving them. */
+async function longTranscriptRun(ticket: string, extra: ExtraEntry[]) {
+  const { sessions } = isolatedEnvironment();
+  const run = `${today()}-${ticket}-1`;
+  const otherRun = `${today()}-${ticket}-2`;
+  const started = new Date(Date.now() - 3_600_000);
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: ticket, title: "Long transcript" },
+    phase: "closed",
+    startedAt: started,
+  });
+  writeRun({
+    project: "p",
+    run: otherRun,
+    ticket: { id: ticket, title: "Other run" },
+    phase: "closed",
+    startedAt: started,
+  });
+  const roots: Record<SessionHarness, string> = {
+    omp: sessions,
+    claude: process.env.ARK_CLAUDE_SESSIONS as string,
+    codex: process.env.ARK_CODEX_SESSIONS as string,
+  };
+  const files = {} as Record<SessionHarness, string>;
+  sessionHarnesses.forEach((harness, index) => {
+    files[harness] = writeSessionFile(
+      roots[harness],
+      `${harness}.jsonl`,
+      transcriptText(harness, {
+        cwd: join(directory, "workspace"),
+        start: new Date(started.getTime() + (index + 1) * 60_000),
+        tag: harness,
+        extra,
+      }),
+    );
+  });
+  installFakeTools({ orca: orcaAnswersFor(run) });
+  const { baseUrl } = await start();
+  await detailWithSessions(baseUrl, run, sessionHarnesses.length);
+  return { baseUrl, run, otherRun, files };
+}
+
+test("ARK-T271 a transcript page of an omp, a Claude and a Codex file sends a tool call's arguments up to 20 KB and message, context and thinking text up to 32 KB, cuts longer text with a count of the cut characters, keeps valid arguments and keeps the result as its first line", async () => {
+  const tail = "TAIL-271";
+  const long = { command: sizedText("L30:", 30_000) };
+  const { baseUrl, run, files } = await longTranscriptRun("ARK-901", [
+    { kind: "call", id: "l30", args: long, result: `short result\nsecond line\n${tail}` },
+    { kind: "call", id: "l20", args: { command: sizedText("L20:", 20_000) } },
+    { kind: "call", id: "l21", args: { command: sizedText("L21:", 20_001) } },
+    { kind: "call", args: { command: "noid-command" }, result: "never read" },
+    { kind: "user", text: sizedText("U40:", 40_000) },
+    { kind: "assistant", text: sizedText("A32:", 32_000) },
+    { kind: "assistant", text: sizedText("A33:", 32_001) },
+    { kind: "thinking", text: sizedText("T40:", 40_000) },
+    { kind: "context", text: sizedText("C40:", 40_000) },
+  ]);
+  for (const harness of sessionHarnesses) {
+    const response = await fetch(transcriptUrl(baseUrl, run, files[harness], 0));
+    expect(response.status, harness).toBe(200);
+    const body = await response.text();
+    // The whole response is valid JSON, and no line after the first of a result is in it.
+    const page = JSON.parse(body) as TranscriptPage;
+    expect(body, harness).not.toContain(tail);
+    const textOf = (prefix: string) => {
+      const found = page.entries
+        .flatMap((entry) => (entry.kind === "tool" ? [] : [entry.text]))
+        .find((text) => text.startsWith(prefix));
+      expect(found, `${harness} ${prefix}`).toBeDefined();
+      return found as string;
+    };
+    // Text over 32,000 characters is cut to 32,000, with the real count of the rest.
+    expect(textOf("U40:"), harness).toBe(
+      sizedText("U40:", 40_000).slice(0, 32_000) + cutNote(8000),
+    );
+    expect(textOf("T40:"), harness).toBe(
+      sizedText("T40:", 40_000).slice(0, 32_000) + cutNote(8000),
+    );
+    expect(textOf("C40:"), harness).toBe(
+      sizedText("C40:", 40_000).slice(0, 32_000) + cutNote(8000),
+    );
+    expect(textOf("A32:"), harness).toBe(sizedText("A32:", 32_000));
+    expect(textOf("A33:"), harness).toBe(sizedText("A33:", 32_001).slice(0, 32_000) + cutNote(1));
+
+    const tools = page.entries.filter((entry): entry is ToolEntry => entry.kind === "tool");
+    const call = (id: string) => {
+      const found = tools.find((entry) => entry.callId === id);
+      expect(found, `${harness} ${id}`).toBeDefined();
+      return found as ToolEntry;
+    };
+    // A cut argument is still valid JSON: the string field holds the cut and its note.
+    expect(JSON.parse(call("l30").args).command, harness).toBe(
+      sizedText("L30:", 30_000).slice(0, 20_000) + cutNote(10_000),
+    );
+    // The row summary is the start of the command, parsed from the whole call.
+    expect(call("l30").summary.startsWith("L30:"), harness).toBe(true);
+    expect(call("l30").summary.length, harness).toBeLessThanOrEqual(400);
+    expect(JSON.parse(call("l20").args).command, harness).toBe(sizedText("L20:", 20_000));
+    expect(JSON.parse(call("l21").args).command, harness).toBe(
+      sizedText("L21:", 20_001).slice(0, 20_000) + cutNote(1),
+    );
+    // The result stays its first line.
+    expect(call("l30").result, harness).toBe("short result");
+    // A record with no string id gives an entry with no call id.
+    const noId = tools.find((entry) => entry.summary === "noid-command");
+    expect(noId, harness).toBeDefined();
+    expect(noId && "callId" in noId, harness).toBe(false);
+  }
+});
+
+test("ARK-T272 the transcript result route answers the full text of one tool result up to 64 KB with its size and whether it was cut, from the worker thread, and answers 404 for an unknown call, a call with no result yet and a file outside the run", async () => {
+  const tail = "TAIL-272";
+  const texts = {
+    ok: `first line\nsecond line\n${tail}`,
+    json: JSON.stringify({ alpha: 1, beta: [1, 2, 3] }, null, 2),
+    failed: `boom\n${tail}`,
+    plain: "plain first\nplain second",
+  };
+  const sizes = {
+    r64: sizedText("R64:", 64_000),
+    r65: sizedText("R65:", 64_001),
+    r100: sizedText("R100:", 100_000),
+  };
+  const { baseUrl, run, otherRun, files } = await longTranscriptRun("ARK-902", [
+    { kind: "call", id: "ok", args: { command: "a" }, result: texts.ok },
+    { kind: "call", id: "json", args: { command: "b" }, result: texts.json },
+    { kind: "call", id: "failed", args: { command: "c" }, result: texts.failed, failed: true },
+    {
+      kind: "call",
+      id: "plain",
+      args: { command: "d" },
+      result: texts.plain,
+      codexOutput: "plain",
+    },
+    { kind: "call", id: "r64", args: { command: "e" }, result: sizes.r64 },
+    { kind: "call", id: "r65", args: { command: "f" }, result: sizes.r65 },
+    { kind: "call", id: "r100", args: { command: "g" }, result: sizes.r100 },
+    { kind: "call", id: "live", args: { command: "h" } },
+  ]);
+  for (const harness of sessionHarnesses) {
+    const file = files[harness];
+    const page = (await (
+      await fetch(transcriptUrl(baseUrl, run, file, 0))
+    ).json()) as TranscriptPage;
+    const tools = page.entries.filter((entry): entry is ToolEntry => entry.kind === "tool");
+    // The full text carries what the page cut its first line from, in the shape of each harness.
+    for (const [call, text] of Object.entries(texts)) {
+      const response = await fetch(resultUrl(baseUrl, run, file, call));
+      expect(response.status, `${harness} ${call}`).toBe(200);
+      expect(await response.json(), `${harness} ${call}`).toEqual({
+        text,
+        size: text.length,
+        cut: false,
+      });
+      expect(tools.find((entry) => entry.callId === call)?.result, `${harness} ${call}`).toBe(
+        firstLineOf(text),
+      );
+    }
+    expect(tools.find((entry) => entry.callId === "failed")?.status, harness).toBe("error");
+    // 64,000 characters are whole; one more, or 100,000, comes cut to 64,000 with the size of the whole.
+    for (const [call, full] of Object.entries(sizes)) {
+      const answer = (await (await fetch(resultUrl(baseUrl, run, file, call))).json()) as {
+        text: string;
+        size: number;
+        cut: boolean;
+      };
+      expect(answer.text, `${harness} ${call}`).toBe(full.slice(0, 64_000));
+      expect(answer.size, `${harness} ${call}`).toBe(full.length);
+      expect(answer.cut, `${harness} ${call}`).toBe(full.length > 64_000);
+    }
+
+    const refused: [string, string][] = [
+      ["an unknown call", resultUrl(baseUrl, run, file, "nope")],
+      ["a call with no result yet", resultUrl(baseUrl, run, file, "live")],
+      ["no call", resultUrl(baseUrl, run, file, "")],
+      ["a foreign file", resultUrl(baseUrl, run, "/etc/passwd", "ok")],
+      ["a path with ..", resultUrl(baseUrl, run, `${file}/../../../../etc/passwd`, "ok")],
+      ["a file of another run", resultUrl(baseUrl, otherRun, file, "ok")],
+      ["an unknown run", resultUrl(baseUrl, "no-such-run", file, "ok")],
+    ];
+    for (const [name, url] of refused) {
+      const response = await fetch(url);
+      expect(response.status, `${harness} ${name}`).toBe(404);
+      expect(await response.text(), `${harness} ${name}`).not.toContain("first line");
+    }
+  }
+
+  // A file that vanishes after the index listed it: the worker's read fails, never a 200; the next result answers.
+  rmSync(files.omp);
+  expect([404, 502]).toContain((await fetch(resultUrl(baseUrl, run, files.omp, "ok"))).status);
+  expect((await fetch(resultUrl(baseUrl, run, files.claude, "ok"))).status).toBe(200);
+
+  // A worker that dies on the request rejects it.
+  const stub = join(scratch("ark-result-"), "worker.ts");
+  writeFileSync(stub, 'self.onmessage = () => { throw new Error("crash"); };\n');
+  const index = new UsageIndex(pathToFileURL(stub));
+  indexes.push(index);
+  const failure = await index.transcriptResult(files.claude, "claude", "ok").catch((err) => err);
+  expect(failure).toBeInstanceOf(Error);
 });
 
 // ---------------------------------------------------------------- ARK-285

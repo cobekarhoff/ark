@@ -4,14 +4,14 @@ title: ARK-T27 Home, Runs and Roadmap send no request after the first load, and 
 level: e2e
 technique: request accounting per route (a list of every request from navigation to idle), boundary of duplicate requests counting
 priority: high
-risk: "Home, Runs or Roadmap poll or fetch after the first load, the ticket page reads its document or its cases more than once or from a third route, the run page reads anything beyond its own `/api/run/` reads, or the run evidence is read twice"
+risk: "Home, Runs or Roadmap poll or fetch after the first load, the ticket page reads its document or its cases more than once or from a third route, the run page reads anything beyond its own `/api/run/` reads, or the run evidence is read twice, or a transcript of 200 rows reads a result or a run file per row or before a click"
 status: active
-changed_by: 2026-11-07-ARK-329-1
+changed_by: 2026-11-12-ARK-324-1
 ---
 
 ## Objective
 
-Prove the request limits of the hub pages: the first load makes only the document, one event stream and assets; moving between Home, Runs and Roadmap sends nothing; the ticket page sends exactly one read of its document and one of its test cases; each run page sends only `/api/run/` reads, with the test evidence read once for each run page and no image read when the plan has none.
+Prove the request limits of the hub pages: the first load makes only the document, one event stream and assets; moving between Home, Runs and Roadmap sends nothing; the ticket page sends exactly one read of its document and one of its test cases; each run page sends only `/api/run/` reads, with the test evidence read once for each run page and no image read when the plan has none; a transcript page of 200 rows sends one read of its page and nothing else.
 
 ## Preconditions
 
@@ -27,6 +27,7 @@ Prove the request limits of the hub pages: the first load makes only the documen
 4. Open `#/ticket/ARK-521`. Assert the ticket page shows. `checkpoint(page, "ticket-page-requests")`. Wait 1 s. Assert the `/api/ticket` requests are exactly `["/api/ticket/p/ARK-521", "/api/ticket/p/ARK-521/cases"]`, in any order.
 5. Open the stuck run page (timeline visible), then the older run page. Assert its evidence block shows. `checkpoint(page, "run-evidence-requests")`. Wait 2 s.
 6. Assert that every request other than `/`, `/events`, `/assets/*` and `/api/ticket/*` starts with `/api/run/`, that there is at least one, that exactly two requests end in `/evidence` (one for each run page) and that none ends in `/image`.
+7. Write an omp session file of 200 entries (195 tool calls with results) for the stuck run's step, wait until the run page lists it, open the step's transcript, wait for 200 rows, wait 1 s. Assert the `/api/` requests since the click are exactly `["/api/run/<stuck run>/transcript"]`: no `transcript/result` read, no per-row read and no run file read.
 
 ## Expected results
 
@@ -34,6 +35,7 @@ Prove the request limits of the hub pages: the first load makes only the documen
 - Home, Runs and Roadmap shall send no request after the first load.
 - The ticket page shall send one read of its document, one read of its test cases and nothing else under `/api/ticket`.
 - A run page shall send one read of its test evidence, and an image read only for an image that the plan names.
+- A transcript page shall send one read of its page for 200 rows, a result read only on the click of Show result (ARK-T274) and a run file read only on the click of a pinned run file.
 
 ## Screenshot checkpoints
 

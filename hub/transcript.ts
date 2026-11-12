@@ -1,12 +1,15 @@
 import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 import type { Harness } from "../cli/usage/index.ts";
-import type { TranscriptEntry, TranscriptPage } from "./types.ts";
+import type { TranscriptEntry, TranscriptPage, TranscriptResult } from "./types.ts";
 
 /** Entries in one page of a transcript. */
 export const pageSize = 200;
 const chunkBytes = 1 << 20;
-const messageLimit = 8000;
-const argumentsLimit = 300;
+const messageLimit = 32_000;
+/** Per string field of a tool call's arguments, counted in characters like every limit here. */
+const argumentsLimit = 20_000;
+/** The full result a route answers, in characters. */
+const resultTextLimit = 64_000;
 const resultLimit = 300;
 /** A tool call near the end of a page finds its result in the lines after the page. */
 const lookaheadLines = 200;
@@ -49,17 +52,57 @@ const message = (role: string, time: string | null, text: string): Item[] =>
     : [{ entry: { kind: "message", role, time, text: cut(text, messageLimit) } }];
 const thinking = (time: string | null, text: string): Item[] =>
   text.trim() === "" ? [] : [{ entry: { kind: "thinking", time, text: cut(text, messageLimit) } }];
-const call = (time: string | null, id: unknown, name: unknown, args: unknown): Item => ({
-  callId: typeof id === "string" ? id : undefined,
-  entry: {
-    kind: "tool",
-    time,
-    name: typeof name === "string" ? name : "tool",
-    args: cut(typeof args === "string" ? args : (JSON.stringify(args ?? {}) ?? ""), argumentsLimit),
-    status: "unknown",
-    result: "",
-  },
-});
+/** Cuts every long string of a parsed value in place of the whole JSON text, so the arguments stay valid JSON. */
+function cutStrings(value: unknown): unknown {
+  if (typeof value === "string") return cut(value, argumentsLimit);
+  if (Array.isArray(value)) return value.map(cutStrings);
+  if (isRecord(value))
+    return Object.fromEntries(
+      Object.entries(value).map(([key, field]) => [key, cutStrings(field)]),
+    );
+  return value;
+}
+
+/** Argument fields that name what a call does, in the order a row shows them. */
+const summaryFields = ["command", "file_path", "path", "pattern", "query", "url", "description"];
+
+const call = (time: string | null, id: unknown, name: unknown, args: unknown): Item => {
+  let parsed = args;
+  if (typeof args === "string") {
+    try {
+      parsed = JSON.parse(args);
+    } catch {
+      // plain text input (a custom tool): cut as text below
+    }
+  }
+  const fields: Record<string, unknown> = isRecord(parsed) ? parsed : {};
+  // Codex gives a command as an argv array: its words joined are the command line.
+  const named = summaryFields
+    .map((field) => fields[field])
+    .map((value) =>
+      Array.isArray(value) && value.every((word) => typeof word === "string")
+        ? value.join(" ")
+        : value,
+    )
+    .find((value) => typeof value === "string" && value.trim() !== "");
+  return {
+    callId: typeof id === "string" ? id : undefined,
+    entry: {
+      kind: "tool",
+      time,
+      name: typeof name === "string" ? name : "tool",
+      args:
+        typeof parsed === "string"
+          ? cut(parsed, argumentsLimit)
+          : (JSON.stringify(cutStrings(parsed ?? {})) ?? ""),
+      summary: typeof named === "string" ? firstLine(named) : "",
+      ...(typeof id === "string" ? { callId: id } : {}),
+      status: "unknown",
+      result: "",
+      resultSize: 0,
+    },
+  };
+};
 
 /** omp: `message` records hold assistant blocks (`text`, `thinking`, `toolCall`); a `toolResult` message answers a call by `toolCallId`. */
 function ompItems(record: Record<string, any>): Item[] {
@@ -247,6 +290,7 @@ export function readTranscriptPage(
       if (!tool) return;
       tool.status = status;
       tool.result = firstLine(text);
+      tool.resultSize = text.length;
       pending.delete(id);
     };
     let next = Math.min(Math.max(0, cursor), source.size);
@@ -281,6 +325,38 @@ export function readTranscriptPage(
       for (const item of record ? itemsOf(record) : []) if ("result" in item) resolve(item.result);
     }
     return { entries, next: next < source.size ? next : null, size: source.size };
+  } finally {
+    close();
+  }
+}
+
+/**
+ * The full result of one tool call, cut at 64,000 characters (`cut` says whether it was). Scans the
+ * file from its start, line by line, and stops at the first result of `callId`. Null when the file
+ * holds no result for it (an unknown call, or a call still running). The text is the one the page
+ * cuts its first line from.
+ */
+export function readTranscriptResult(
+  file: string,
+  harness: Harness,
+  callId: string,
+): TranscriptResult | null {
+  const { source, close } = openSource(file);
+  try {
+    const itemsOf = readers[harness];
+    for (const line of linesFrom(source, 0)) {
+      const record = parse(line.text);
+      for (const item of record ? itemsOf(record) : []) {
+        if (!("result" in item) || item.result.id !== callId) continue;
+        const { text } = item.result;
+        return {
+          text: text.slice(0, resultTextLimit),
+          size: text.length,
+          cut: text.length > resultTextLimit,
+        };
+      }
+    }
+    return null;
   } finally {
     close();
   }
