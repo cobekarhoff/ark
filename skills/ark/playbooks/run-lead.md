@@ -273,7 +273,17 @@ Rules for the plan:
 - Keep each step small enough for one worker. Do not put two repos in one step.
 - Read `kind` in `ticket.md` (`ark status <run>` shows it; a missing `kind` is `feature`). It sets the first and last steps. `steps` may have an optional `goal` text; `ark plan check` reads it for `perf`.
   - `bug`: the first step is a validator step that serves every AC, a manual one too. It writes the AC tests before the fix, and `ark test` must show each non-manual AC `failing` in one run. `ark run step <run> <implementer step> start` refuses with `bug run: record a failing ark test of the ACs before the fix` until then.
-  - `perf`: the first step `goal` names `results/baseline.md` (the measure before the change) and the last step `goal` names `results/compare.md` (the measure after it). `ark merge-request open` refuses when either file is missing or empty.
+  - `perf`: the first step `goal` names `results/baseline.md` (the measure before the change) and the last step `goal` names `results/compare.md` (the measure after it). `ark merge-request open` refuses when either file is missing or empty. `results/baseline.md` and `results/compare.md` each record these points, in this order:
+    - the limiter (what bounds the timed command: CPU, disk, network, a lock or a rate limit) and the work the timed command does;
+    - the same host, data and settings for both sides, with the load on the host;
+    - that no hardware or work limit was hit (CPU, memory, disk, a rate limit or a cap on the work);
+    - the errors, and a check of the output;
+    - 5 timed trials for each side, alternating base and head, with the median and the range;
+    - the user path, when the change is a small part of it;
+    - proof that the timed command did the work (for example the output, a count or a changed state).
+
+    When a point cannot be checked, the file says `inconclusive` and names the gap.
+
   - `refactor`: the suites must pass at the base commit. `ark test` runs them there on every run (as it does for every `kind`), records `base_passed` and exits 1 when they fail. `ark merge-request open` refuses unless `base_passed` and the last head test both passed. Plan no step for it.
   - `feature`: no extra step.
 
