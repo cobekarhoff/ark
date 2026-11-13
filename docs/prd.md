@@ -170,7 +170,7 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 | R10.3   | The system shall generate `docs/reference/cli.md` from the command descriptions, and the `cli-reference` check shall fail when the committed file differs from the generated one. |
 | R10.4   | **When** a project lists `checks` in `ark.yml`, `ark test` shall run each and record its exit status, and the implementer shall run them before every commit.                     |
 | Tickets | ARK-152, ARK-153, ARK-154, ARK-155, ARK-157, ARK-173, ARK-209, ARK-276                                                                                                            |
-| Held by | `cli/ark.ts`; `scripts/cli-reference.ts`; `ark test check *`                                                                                                                      |
+| Held by | `cli/ark.ts`; `cli/commands/`; `scripts/cli-reference.ts`; `ark test check *`                                                                                                     |
 | Cases   | R10.3: ARK-T44                                                                                                                                                                    |
 
 ### R11 · Retro and metrics
