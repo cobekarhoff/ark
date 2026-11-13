@@ -749,6 +749,126 @@ test("ARK-284-AC5 each session file maps whole to its step, the run lead or unas
   );
 });
 
+// The current start path records step.started after the worker launched, so a worker file starts before its step.
+test.each([
+  ["A: no other file", false],
+  ["B: an earlier unrecorded file", true],
+])(
+  "ARK-T309 a worker file recorded by worker.started that starts before the first step goes to its step, never to the run lead (%s)",
+  async (variant, withLead) => {
+    const { sessions } = isolatedEnvironment();
+    const run = `${today()}-ARK-81${withLead ? 1 : 0}-1`;
+    const started = new Date(Date.now() - 3_600_000);
+    const at = (seconds: number) => new Date(started.getTime() + seconds * 1000);
+    const directory = writeRun({
+      project: "p",
+      run,
+      ticket: { id: "ARK-810", title: variant },
+      phase: "building",
+      startedAt: started,
+      steps: [
+        {
+          id: "build",
+          role: "implementer",
+          harness: "omp",
+          model: "m",
+          needs: [],
+          startedAfter: 100,
+          finishedAfter: 150,
+        },
+      ],
+    });
+    const worktree = join(directory, "workspace");
+    const put = (name: string, startSeconds: number) =>
+      writeSessionFile(
+        sessions,
+        `${name}.jsonl`,
+        transcriptText("omp", { cwd: worktree, start: at(startSeconds), tag: name }),
+      );
+    const worker = put("worker", 90);
+    if (withLead) put("lead", 50);
+    appendRawEvent(
+      directory,
+      "worker.started",
+      { step: "build", dispatch: "ctx_1", terminal: "term_1", harness: "omp", session: worker },
+      5000,
+    );
+    installFakeTools({ orca: orcaAnswersFor(run) });
+    const { baseUrl } = await start();
+
+    const detail = await detailWithSessions(baseUrl, run, withLead ? 2 : 1);
+    const ownerOf = Object.fromEntries(
+      detail.sessions.map((session) => [
+        session.file.split("/").at(-1)!.replace(".jsonl", ""),
+        session.owner,
+      ]),
+    );
+    expect(ownerOf).toEqual({
+      worker: { kind: "step", step: "build" },
+      ...(withLead ? { lead: { kind: "lead" } } : {}),
+    });
+  },
+);
+
+test("ARK-T75 a run in the older event form (no worker.started, or session unknown) maps each file by the start window of its step", async () => {
+  const { sessions } = isolatedEnvironment();
+  const run = `${today()}-ARK-812-1`;
+  const started = new Date(Date.now() - 3_600_000);
+  const at = (seconds: number) => new Date(started.getTime() + seconds * 1000);
+  const step = (id: string, needs: string[], startedAfter: number, finishedAfter: number) => ({
+    id,
+    role: "implementer",
+    harness: "omp",
+    model: "m",
+    needs,
+    startedAfter,
+    finishedAfter,
+  });
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-812", title: "Older event form" },
+    phase: "building",
+    startedAt: started,
+    steps: [step("step-a", [], 100, 600), step("step-b", ["step-a"], 700, 1200)],
+  });
+  // step-a has no worker.started; step-b has one whose session is unknown.
+  appendRawEvent(
+    directory,
+    "worker.started",
+    { step: "step-b", dispatch: "ctx_1", terminal: "term_1", harness: "omp", session: "unknown" },
+    5000,
+  );
+  const worktree = join(directory, "workspace");
+  const put = (name: string, startSeconds: number) =>
+    writeSessionFile(
+      sessions,
+      `${name}.jsonl`,
+      transcriptText("omp", { cwd: worktree, start: at(startSeconds), tag: name }),
+    );
+  put("lead", 30);
+  put("worker-a", 150);
+  put("worker-b", 750);
+  put("gap", 650);
+  installFakeTools({ orca: orcaAnswersFor(run) });
+  const { baseUrl } = await start();
+
+  const detail = await detailWithSessions(baseUrl, run, 4);
+  expect(
+    Object.fromEntries(
+      detail.sessions.map((session) => [
+        session.file.split("/").at(-1)!.replace(".jsonl", ""),
+        session.owner,
+      ]),
+    ),
+  ).toEqual({
+    lead: { kind: "lead" },
+    "worker-a": { kind: "step", step: "step-a" },
+    "worker-b": { kind: "step", step: "step-b" },
+    gap: { kind: "unassigned" },
+  });
+});
+
 test("ARK-T75 sessionsOf and modelsOf give the run lead, steps, rework rounds, gaps and stage sessions the same owners", async () => {
   const { sessions } = isolatedEnvironment();
   const directory = writeRun({

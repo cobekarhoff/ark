@@ -1589,34 +1589,103 @@ describe("ark retro models and vendors", () => {
       anthropicReply("14:24:20.000", 0.02, "claude-haiku-4-5"),
     ]);
 
-  test("ARK-348/AC1 ARK-T65 a run lead that overlaps the reviewer window stays out of the reviewer, and an unassigned file is its own cost line", () => {
-    writeEvents(runDirectory, sharedScenario);
-    writeRunLead();
-    writeImplementer();
-    writeOwnedSession("reviewer", "14:28:30.000", [
-      openAiReply("14:29:00.000", 0.05),
-      openAiReply("14:35:00.000", 0.05),
-    ]);
-    // Starts in the gap between the build and review windows: no step owns it.
-    writeOwnedSession("unassigned", "14:27:00.000", [openAiReply("14:27:30.000", 0.09)]);
+  // The older event form: every start also records a worker.started with no usable session file.
+  const unknownSessionScenario: EventRow[] = sharedScenario.flatMap((row): EventRow[] =>
+    row[1] === "step.started"
+      ? [
+          row,
+          [
+            row[0],
+            "worker.started",
+            {
+              step: row[2].step,
+              dispatch: "ctx_1",
+              terminal: "term_1",
+              harness: "omp",
+              session: "unknown",
+            },
+          ],
+        ]
+      : [row],
+  );
+  test.each([
+    ["no worker.started event", sharedScenario],
+    ["worker.started session unknown", unknownSessionScenario],
+  ])(
+    "ARK-T65 a run lead that overlaps the reviewer window stays out of the reviewer, and an unassigned file is its own cost line (%s)",
+    (_form, rows) => {
+      writeEvents(runDirectory, rows);
+      writeRunLead();
+      writeImplementer();
+      writeOwnedSession("reviewer", "14:28:30.000", [
+        openAiReply("14:29:00.000", 0.05),
+        openAiReply("14:35:00.000", 0.05),
+      ]);
+      // Starts in the gap between the build and review windows: no step owns it.
+      writeOwnedSession("unassigned", "14:27:00.000", [openAiReply("14:27:30.000", 0.09)]);
 
-    const out = runRetro();
-    const metrics = readMetrics();
-    expect(metrics.actual_models.review).toEqual(["gpt-6.1-sol"]);
-    expect(metrics.actual_models.build).toEqual(["claude-haiku-4-5"]);
-    expect(metrics.cost.by_step.review.usd).toBeCloseTo(0.1, 6);
-    expect(metrics.cost.by_step.build.usd).toBeCloseTo(0.02, 6);
-    expect(metrics.cost.by_step.unassigned.usd).toBeCloseTo(0.09, 6);
-    expect(metrics.cost.by_step.orchestration.usd).toBeCloseTo(1.5, 6);
-    expect(metrics.cost.total_usd).toBeCloseTo(1.71, 6);
-    expect(Object.keys(metrics.cost.by_role).sort()).toEqual([
-      "implementer",
-      "orchestration",
-      "reviewer",
-    ]);
-    expect(out).toContain("unassigned: 1 file, $0.09");
-    expect(out).toContain("unassigned.jsonl");
-  });
+      const out = runRetro();
+      const metrics = readMetrics();
+      expect(metrics.actual_models.review).toEqual(["gpt-6.1-sol"]);
+      expect(metrics.actual_models.build).toEqual(["claude-haiku-4-5"]);
+      expect(metrics.cost.by_step.review.usd).toBeCloseTo(0.1, 6);
+      expect(metrics.cost.by_step.build.usd).toBeCloseTo(0.02, 6);
+      expect(metrics.cost.by_step.unassigned.usd).toBeCloseTo(0.09, 6);
+      expect(metrics.cost.by_step.orchestration.usd).toBeCloseTo(1.5, 6);
+      expect(metrics.cost.total_usd).toBeCloseTo(1.71, 6);
+      expect(Object.keys(metrics.cost.by_role).sort()).toEqual([
+        "implementer",
+        "orchestration",
+        "reviewer",
+      ]);
+      expect(out).toContain("unassigned: 1 file, $0.09");
+      expect(out).toContain("unassigned.jsonl");
+    },
+  );
+
+  // The current start path records step.started after the worker launched: its file starts before the step.
+  test.each([
+    ["A: no other file", false],
+    ["B: an earlier unrecorded file", true],
+  ])(
+    "ARK-T309 a worker file recorded by worker.started that starts before the first step goes to its step, never to the run lead (%s)",
+    (_variant, withLead) => {
+      const file = join(ompRoot, "workspace", "worker.jsonl");
+      writeEvents(
+        runDirectory,
+        sharedScenario.flatMap((row): EventRow[] =>
+          row[1] === "step.started" && row[2].step === "build"
+            ? [
+                row,
+                [
+                  row[0],
+                  "worker.started",
+                  {
+                    step: "build",
+                    dispatch: "ctx_1",
+                    terminal: "term_1",
+                    harness: "omp",
+                    session: file,
+                  },
+                ],
+              ]
+            : [row],
+        ),
+      );
+      if (withLead)
+        writeOwnedSession("lead", "14:21:00.000", [anthropicReply("14:30:00.000", 0.5)]);
+      writeOwnedSession("worker", "14:23:30.000", [
+        anthropicReply("14:24:20.000", 0.02, "claude-haiku-4-5"),
+      ]);
+
+      const out = runRetro();
+      const { by_step: steps } = readMetrics().cost;
+      expect(steps.build.usd).toBeCloseTo(0.02, 6);
+      expect(steps.unassigned).toBeUndefined();
+      expect(out).not.toContain("unassigned:");
+      expect(steps.orchestration?.usd ?? 0).toBeCloseTo(withLead ? 0.5 : 0, 6);
+    },
+  );
 
   test("ARK-348/AC2 ARK-T66 a cross-vendor reviewer with an overlapping Anthropic run lead and an Anthropic unassigned file is not same vendor and not mixed", () => {
     writeEvents(runDirectory, sharedScenario);
