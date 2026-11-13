@@ -5,6 +5,13 @@ import { type Harness, sessionRoots } from "../cli/usage/index.ts";
 import type { StageTimes, StepWindow } from "../cli/events.ts";
 import { ownersOf, stageOf } from "../cli/usage/owners.ts";
 import type { SessionFile, TranscriptPage, TranscriptResult } from "./types.ts";
+import type {
+  ConversationInput,
+  ConversationQuery,
+  ProjectAnswer,
+  RunAnswer,
+  RunEvents,
+} from "./conversation.ts";
 
 export type CompactMessage = {
   time: number;
@@ -15,13 +22,18 @@ export type CompactMessage = {
 };
 export type WorkerRequest = {
   id: number;
-  kind: "head" | "parse" | "transcript" | "result";
+  kind: "head" | "parse" | "transcript" | "result" | "conversation";
   file: string;
   harness: Harness;
   /** Byte offset of the first line of a transcript page. */
   cursor?: number;
   /** Id of the tool call whose result a `result` request reads. */
   callId?: string;
+  /** A `conversation` request: the inbox and directory (sent once for each version), the runs' events and the question. */
+  input?: ConversationInput;
+  version?: string;
+  runs?: RunEvents[];
+  query?: ConversationQuery;
 };
 export type WorkerReply = {
   id: number;
@@ -32,6 +44,7 @@ export type WorkerReply = {
   page?: TranscriptPage;
   /** Answer of a `result` request: null when the file holds no result for the call. */
   result?: TranscriptResult | null;
+  answer?: RunAnswer | ProjectAnswer;
   error?: string;
 };
 
@@ -109,6 +122,8 @@ export class UsageIndex {
   #workers: (Worker | undefined)[] = [];
   #waiting = new Map<number, { slot: number; resolve: (reply: WorkerReply) => void }>();
   #nextId = 0;
+  /** The version of the conversation input the conversation worker holds, or null when it holds none. */
+  #conversationVersion: string | null = null;
   #queue: Promise<void> = Promise.resolve();
   #workerUrl: URL;
 
@@ -338,6 +353,33 @@ export class UsageIndex {
   }
 
   /**
+   * The conversation of one run or of a window, built in its own worker slot (the cost parse and the
+   * transcript pages never wait behind it). The inbox is posted once for each version, not for each request.
+   */
+  async conversation(
+    input: ConversationInput,
+    runs: RunEvents[],
+    query: ConversationQuery,
+  ): Promise<RunAnswer | ProjectAnswer> {
+    const reply = await this.#ask(
+      {
+        kind: "conversation",
+        file: "",
+        harness: "omp",
+        version: input.version,
+        input: this.#conversationVersion === input.version ? undefined : input,
+        runs,
+        query,
+      },
+      workerCount + 1,
+    );
+    if (reply.error !== undefined || reply.answer === undefined)
+      throw new Error(reply.error ?? "no answer");
+    this.#conversationVersion = input.version;
+    return reply.answer;
+  }
+
+  /**
    * Sends one request to the worker of its slot. It always resolves: a worker that errors, closes,
    * sends an unreadable message or stays silent past the timeout is dropped (the next request
    * makes a new one) and every request it held resolves with `error`, so the caller marks that file failed.
@@ -382,6 +424,7 @@ export class UsageIndex {
   #drop(slot: number, worker: Worker, error: string): void {
     if (this.#workers[slot] !== worker) return;
     this.#workers[slot] = undefined;
+    if (slot === workerCount + 1) this.#conversationVersion = null;
     worker.terminate();
     for (const [id, entry] of this.#waiting) {
       if (entry.slot !== slot) continue;
