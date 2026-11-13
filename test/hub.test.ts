@@ -61,6 +61,7 @@ import {
   writeRun,
   writeSessionFile,
 } from "./hub-fixtures.ts";
+import { installProcessFakes } from "./resources-fixtures.ts";
 import {
   installFakeTools,
   startHub,
@@ -99,6 +100,8 @@ function isolatedEnvironment(): { sessions: string } {
   process.env.ARK_OMP_SESSIONS = sessions;
   process.env.ARK_CLAUDE_SESSIONS = scratch("ark-claude-sessions-");
   process.env.ARK_CODEX_SESSIONS = scratch("ark-codex-sessions-");
+  // The `resources` source reads `/bin/ps -E`, which Linux does not support: without a fake its slot never turns ok.
+  installProcessFakes(scratch("ark-process-fakes-")).setProcesses([]);
   return { sessions };
 }
 

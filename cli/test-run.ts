@@ -27,6 +27,7 @@ import { oldIdsTouched } from "./test-audit.ts";
 import { findRun } from "./paths.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
 import { openTestBudget, type TestBudget } from "./test-lock.ts";
+import { sampleGroup, updateResources, type SideUse } from "./resources-file.ts";
 import { callTest, runnerMain } from "./test-runner.ts";
 import { discoverRepos, mirrorRoot, repoBase, submodulesOf, targetBranch } from "./workspace.ts";
 import { initSubmodule, linkUntouched } from "./worktree.ts";
@@ -74,7 +75,8 @@ async function stopChildren(): Promise<void> {
   await waitForGroups(groups, stoppingMilliseconds);
 }
 
-async function run(command: string[], cwd: string, env?: Record<string, string>) {
+/** `measure` samples the process group, for a suite: the result then holds its `use` (peak memory and CPU seconds). */
+async function run(command: string[], cwd: string, env?: Record<string, string>, measure = false) {
   if (stopping) await new Promise<never>(() => {});
   // bun test --parallel workers set JEST_WORKER_ID; Playwright refuses to start when it sees it.
   const childEnv: Record<string, string | undefined> = { ...process.env, ...env };
@@ -88,16 +90,24 @@ async function run(command: string[], cwd: string, env?: Record<string, string>)
     env: childEnv,
   });
   children.add(child);
+  // The group of a detached child is its pid; only a suite is measured.
+  const sampler = measure ? sampleGroup(child.pid) : null;
   try {
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
     ]);
+    const usage = child.resourceUsage();
+    const use =
+      (await sampler?.stop(
+        usage ? { cpuMicroseconds: Number(usage.cpuTime.total), maxBytes: usage.maxRSS } : null,
+      )) ?? null;
     // A signal is stopping the run: never let it go on to the next process or write results.
     if (stopping) await new Promise<never>(() => {});
-    return { code, stdout, stderr };
+    return { code, stdout, stderr, use };
   } finally {
+    void sampler?.stop(null);
     children.delete(child);
   }
 }
@@ -398,6 +408,21 @@ async function retryFailedFiles(
   return { results: kept, flaky, failedFiles, log };
 }
 
+/** One side of a suite in `results/resources.json` of the run folder (`resultsDirectory` is its `results` folder): the `suites` key is this writer's, the hub's keys stay. */
+function recordSide(
+  resultsDirectory: string,
+  suite: string,
+  side: "head" | "base",
+  use: SideUse | "cached",
+): void {
+  updateResources(dirname(resultsDirectory), (file) => {
+    file.suites ??= {};
+    // A cached suite starts no process: keep the last measured figures and mark them cached.
+    const next = use === "cached" ? { ...file.suites[suite]?.[side], cached: true as const } : use;
+    file.suites[suite] = { ...file.suites[suite], [side]: next };
+  });
+}
+
 /**
  * Runs one suite in `cwd`, or replays its passed result when `cache` holds one. Its log goes to `<name>.log` of
  * `resultsDirectory` (`base-<name>.log` at base).
@@ -424,7 +449,7 @@ async function runSuite(
   const scratch = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-evidence-")));
   // ARK-390: a private TMPDIR per suite, so two suites or two runs never share temp files.
   const suiteTmpdir = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-suite-")));
-  let taken: { cores: number; release: () => void } | null = null;
+  let taken: { cores: number; waitMilliseconds: number; release: () => void } | null = null;
   try {
     const cached = cache ? loadCached(cache.project, cache.key, scratch) : null;
     if (cached !== null) {
@@ -440,6 +465,8 @@ async function runSuite(
         selected,
       );
       sideRun.reused.push(suite.name);
+      if (sideRun.side !== "census")
+        recordSide(resultsDirectory, suite.name, sideRun.side, "cached");
       for (const file of cached.flaky) sideRun.flaky.push({ suite: suite.name, file });
       const redOnMain = cached.redOnMain ?? [];
       for (const file of redOnMain) sideRun.redOnMain.push({ suite: suite.name, file });
@@ -450,10 +477,22 @@ async function runSuite(
     const command = template
       .replaceAll("{report}", reportPath)
       .replaceAll("<cores>", String(taken.cores));
-    const outcome = await run(["sh", "-c", command], cwd, {
-      ARK_EVIDENCE_DIR: scratch,
-      TMPDIR: suiteTmpdir,
-    });
+    const started = Date.now();
+    const outcome = await run(
+      ["sh", "-c", command],
+      cwd,
+      {
+        ARK_EVIDENCE_DIR: scratch,
+        TMPDIR: suiteTmpdir,
+      },
+      true,
+    );
+    if (sideRun.side !== "census")
+      recordSide(resultsDirectory, suite.name, sideRun.side, {
+        ...outcome.use!,
+        wall_s: Math.round((Date.now() - started) / 100) / 10,
+        wait_s: Math.round(taken.waitMilliseconds / 100) / 10,
+      });
     let output = outcome.stdout + outcome.stderr;
     const separator = output === "" || output.endsWith("\n") ? "" : "\n";
     let log = `${command}\n${output}${separator}exit ${outcome.code}\n`;
