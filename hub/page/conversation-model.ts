@@ -230,8 +230,14 @@ const clockSeconds = new Intl.DateTimeFormat("en-GB", {
   minute: "2-digit",
   second: "2-digit",
 });
-export const clockText = (time: number, seconds = false) =>
-  (seconds ? clockSeconds : clock).format(time);
+const dayFormat = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" });
+/** True when the range crosses a local midnight: its clock labels then need a date. */
+export const spansDays = (range: Range) =>
+  dayFormat.format(range.start) !== dayFormat.format(range.end);
+export const clockText = (time: number, seconds = false, dated = false) => {
+  const text = (seconds ? clockSeconds : clock).format(time);
+  return dated ? `${dayFormat.format(time)} ${text}` : text;
+};
 
 // ---------- feed ----------
 

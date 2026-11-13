@@ -4,6 +4,7 @@ import {
   buildTrace,
   clampView,
   clockText,
+  spansDays,
   clusterTicks,
   minimumViewMs,
   type Bar,
@@ -246,6 +247,7 @@ export function Trace({
   const pulsed = trace.ticks.find((tick) => tick.id === pulse?.id) ?? null;
   const width = view.end - view.start;
   const seconds = width < 10 * 60_000;
+  const dated = spansDays(full);
   const labels = [0, 0.25, 0.5, 0.75, 1].map((fraction) => view.start + fraction * width);
   const zoom = (factor: number) => {
     const centre = (view.start + view.end) / 2;
@@ -272,7 +274,7 @@ export function Trace({
     <section className="cv-trace" aria-label="Trace" data-testid="trace">
       <div className="cv-tools">
         <span className="mut">
-          {clockText(view.start, seconds)}–{clockText(view.end, seconds)}
+          {clockText(view.start, seconds, dated)}–{clockText(view.end, seconds, dated)}
         </span>
         <div className="seg end" role="group" aria-label="Zoom">
           <button type="button" aria-label="Zoom out" onClick={() => zoom(2)}>
@@ -295,7 +297,7 @@ export function Trace({
       <div className="cv-axis" aria-hidden="true">
         {labels.map((time, at) => (
           <span key={at} className="cv-axis-label" style={{ left: percent(at / 4) }}>
-            {clockText(time, seconds)}
+            {clockText(time, seconds, dated)}
           </span>
         ))}
       </div>

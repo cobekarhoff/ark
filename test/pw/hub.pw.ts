@@ -9789,6 +9789,23 @@ test("ARK-T340 the Conversation tab opens from the run page, keeps the sub route
   for (const testId of ["conversation-loading", "conversation-truncated", "conversation-stale"])
     await expect(page.getByTestId(testId)).toHaveCount(0);
 
+  // A loading directory logs no event: the tab reads again on its own and the notice clears, no reload.
+  reply = conversationReply(run, parts, { directory: "loading" });
+  await page.reload();
+  await expect(page.getByTestId("conversation-loading")).toBeVisible();
+  await expect(page.getByTestId("feed-message")).toHaveCount(1);
+  reply = conversationReply(run, {
+    ...parts,
+    messages: [
+      messageOf("only", "lead", "chief", conversationMinute(2)),
+      messageOf("later", "chief", "lead", conversationMinute(3)),
+    ],
+  });
+  await expect(page.getByTestId("conversation-loading")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.getByTestId("feed-message")).toHaveCount(2);
+  reply = conversationReply(run, parts);
+  await page.reload();
+
   // A read the hub cannot answer yet is an alert, not an empty trace.
   reply = 503;
   await page.reload();

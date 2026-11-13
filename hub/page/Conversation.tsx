@@ -21,6 +21,15 @@ export function useConversation(run: string, refreshKey: string): State {
     run,
     value: { status: "loading" },
   });
+  const [retry, setRetry] = useState(0);
+  const loadingDirectory =
+    state.run === run && state.value.status === "ok" && state.value.reply.directory === "loading";
+  // The directory loads in the background and logs no event: read again until it is ready.
+  useEffect(() => {
+    if (!loadingDirectory) return;
+    const timer = setTimeout(() => setRetry((count) => count + 1), 3000);
+    return () => clearTimeout(timer);
+  }, [loadingDirectory, retry, run]);
   useEffect(() => {
     const controller = new AbortController();
     void fetch(`/api/run/${encodeURIComponent(run)}/conversation`, { signal: controller.signal })
@@ -40,7 +49,7 @@ export function useConversation(run: string, refreshKey: string): State {
         if (!controller.signal.aborted) setState({ run, value });
       });
     return () => controller.abort();
-  }, [run, refreshKey]);
+  }, [run, refreshKey, retry]);
   return state.run === run ? state.value : { status: "loading" };
 }
 

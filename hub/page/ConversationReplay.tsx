@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { clockText, type Range } from "./conversation-model.ts";
+import { clockText, spansDays, type Range } from "./conversation-model.ts";
 import { reducedMotion } from "./motion.tsx";
 
 /** Run seconds that pass in one real second. */
@@ -121,12 +121,12 @@ export function Player({ full, replay }: { full: Range; replay: Replay }) {
         step={1}
         value={shown}
         aria-label="Replay position"
-        aria-valuetext={clockText(shown, true)}
+        aria-valuetext={clockText(shown, true, spansDays(full))}
         data-testid="replay-scrubber"
         onChange={(event) => replay.seek(Number(event.target.value))}
       />
       <span className="mono" data-testid="replay-clock">
-        {clockText(shown, true)}
+        {clockText(shown, true, spansDays(full))}
       </span>
       <button
         type="button"
