@@ -415,9 +415,10 @@ function targetBranchOf(
 /**
  * Files of the run that the plan does not list and no reviewer findings file gives a reason for, as the MR will
  * see them (diff against the target branch, so a file merged in by `ark worktree sync` does not count).
- * A worktree with no origin yields no files, so it yields no refusal.
+ * `repo` limits the check to that repo's worktree (a reviewer finishes for one repo); without it every worktree counts.
+ * A worktree whose target branch cannot be diffed yields no files, so it yields no refusal.
  */
-export function unplannedWithoutReason(directory: string): string[] {
+export function unplannedWithoutReason(directory: string, repo?: string): string[] {
   if (!existsSync(join(directory, "plan.yml"))) return [];
   const events = readEvents(directory);
   const state = deriveState(events);
@@ -428,7 +429,9 @@ export function unplannedWithoutReason(directory: string): string[] {
     : null;
   const reviewer = reviewerBlock(directory, reviewerStepsOf(events));
   return state.worktrees
-    .filter((worktree) => existsSync(worktree.path))
+    .filter(
+      (worktree) => (repo === undefined || worktree.repo === repo) && existsSync(worktree.path),
+    )
     .flatMap((worktree) =>
       repoLedger(
         worktree.repo,

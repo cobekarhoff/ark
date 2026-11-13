@@ -1983,10 +1983,10 @@ function mainRun(spec: RunSpec = {}) {
     ],
     repos: [{ name: ".", base: riskBase, changes: mainChanges }],
     findings: {
-      "review-1.md": reviewerBlock("high"),
-      "review-2.md": reviewerBlock("low", [
+      "review-1.md": reviewerBlock("high", [
         "- Not in plan: cli/helpers.ts - shared helper used by the gate change",
       ]),
+      "review-2.md": reviewerBlock("low"),
     },
     ...spec,
   });
@@ -2245,12 +2245,15 @@ test("ARK-T46 RISK04 fails when Door: one-way names no recovery", () => {
 });
 
 test("ARK-T46 RISK04 fails when a file under Also changed, not in plan has no reason", () => {
-  expect(
-    reviewedBody({ block: true, oneWay: false, recovery: false, unplanned: "no reason" }),
-  ).toMatchObject({
-    result: "fail",
-    reason: expect.stringContaining("an unplanned file has no reason"),
+  const entry = reviewedBody({
+    block: true,
+    oneWay: false,
+    recovery: false,
+    unplanned: "no reason",
   });
+  expect(entry.result).toBe("fail");
+  expect(entry.reason).toContain("an unplanned file has no reason: cli/c.ts");
+  expect(entry.reason).toMatch(/Not in plan: cli\/c\.ts — <reason>.*findings\/review\.md/);
 });
 
 test("ARK-T46 RISK04 passes a good body and does not require the block of a run with no reviewer step", () => {

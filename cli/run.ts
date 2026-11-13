@@ -445,7 +445,7 @@ export async function runStep(
           `step ${stepId} refused: the review range ${start}..${end} has no commits; a reviewer needs code to review (use --failed to close a step that did not review)`,
         );
       }
-      const unplanned = unplannedWithoutReason(directory);
+      const unplanned = unplannedWithoutReason(directory, planned.repo);
       if (unplanned.length > 0)
         throw new ArkError(
           `step ${stepId} refused: a changed file is not in the plan and has no reason: ${unplanned.join(", ")}.\n` +
