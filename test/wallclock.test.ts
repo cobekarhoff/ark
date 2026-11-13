@@ -10,6 +10,8 @@ setDefaultTimeout(30_000);
 //   ARK_WALLCLOCK_PRINT=1 bun test test/wallclock.test.ts
 // wallclock-base.json holds the counts of the base commit (16b4198). The allowed list may never
 // exceed it, so it cannot be raised to make the guard pass.
+// A *.pw.ts spec may not read a date at all (new Date( or Date.now(): see wallclock-dates.ts, limit 0, no allowance);
+// it takes dates from isoAt, dateOf and testNow in test/pw/helpers.ts, which follow the frozen ARK_NOW.
 // ponytail: line-pattern scan, not an AST; a sleep hidden behind a helper escapes it.
 const forbidden = [
   /\bwaitForTimeout\(/,

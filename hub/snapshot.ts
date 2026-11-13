@@ -523,7 +523,7 @@ export function createSnapshotReader() {
       const text = JSON.stringify(body);
       if (text === lastBody) return;
       lastBody = text;
-      lastJson = JSON.stringify({ generated_at: new Date().toISOString(), ...body });
+      lastJson = JSON.stringify({ generated_at: new Date(now()).toISOString(), ...body });
       for (const listener of listeners) listener(lastJson);
     });
   }
@@ -543,7 +543,7 @@ export function createSnapshotReader() {
     if (started !== generation) return;
     if (value === null) slot.ok = false;
     else {
-      const time = new Date().toISOString();
+      const time = new Date(now()).toISOString();
       if (!slot.ok || slot.since === null) slot.since = time;
       slot.value = value;
       slot.readAt = time;
@@ -783,7 +783,7 @@ export function createSnapshotReader() {
       if (lastJson === "") {
         lastBody = JSON.stringify(compose());
         lastJson = JSON.stringify({
-          generated_at: new Date().toISOString(),
+          generated_at: new Date(now()).toISOString(),
           ...JSON.parse(lastBody),
         });
       }

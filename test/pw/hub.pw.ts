@@ -67,6 +67,8 @@ import {
   tempArkHome,
   tempDirectory,
   useCleanup,
+  dateOf,
+  testNow,
   writeFakeOrca,
   writeProject,
 } from "./helpers.ts";
@@ -74,10 +76,6 @@ import {
 type QueuedProject = Extract<ProjectQueue, { tasks: unknown }>;
 
 useCleanup();
-// useCleanup freezes ARK_NOW for the hub clock; the hub reads real time here, as the fixtures do.
-test.beforeAll(() => {
-  delete process.env.ARK_NOW;
-});
 
 const started: StartedHub[] = [];
 const gates: string[] = [];
@@ -136,7 +134,7 @@ function isolate(): { sessions: string } {
 }
 
 const runId = (ticket: string, number = 1) => `${today()}-${ticket}-${number}`;
-const ago = (seconds: number) => new Date(Date.now() - seconds * 1000);
+const ago = (seconds: number) => dateOf(testNow() - seconds * 1000);
 
 /** Opens a view and waits for the app to mount (the main heading) before any input. */
 async function open(page: Page, baseUrl: string, hash: string): Promise<void> {
@@ -285,7 +283,7 @@ test("ARK-T133 ARK-277-AC4 the page sends no request but its first load and one 
     await expect(page.getByRole("heading", { name: new RegExp(heading) }).first()).toBeVisible();
     if (name === "Home") {
       // An event appended to the log of the open run reaches Home with no request of the page.
-      const appendedAt = Date.now();
+      const appendedAt = performance.now();
       appendRawEvent(
         directory,
         "merge_request.opened",
@@ -293,7 +291,7 @@ test("ARK-T133 ARK-277-AC4 the page sends no request but its first load and one 
         99,
       );
       await expect(page.getByTestId("mr")).toContainText("!77", { timeout: 5000 });
-      expect(Date.now() - appendedAt).toBeLessThan(5000);
+      expect(performance.now() - appendedAt).toBeLessThan(5000);
     }
     // The AC is about 30 s of silence on each view: advance the page clock, no real wait.
     const before = requests.length;
@@ -432,8 +430,8 @@ test("ARK-277-AC8 the run page draws one node for each plan step and one edge fo
     ],
   });
   // One message in the window of each started step; `review` never ran: its cost is unknown.
-  const start = Date.now() - 3_600_000;
-  const inside = (seconds: number) => new Date(start + seconds * 1000);
+  const start = testNow() - 3_600_000;
+  const inside = (seconds: number) => dateOf(start + seconds * 1000);
   writeOmpSession(sessions, "steps", join(directory, "workspace"), [
     { time: inside(70), costUsd: 0.25 },
     { time: inside(120), costUsd: 0.5 },
@@ -771,7 +769,7 @@ test("ARK-277-AC7 an unread question and an escalation of live workers wait on H
     to_handle: `run:orca-${run}`,
     subject,
     read,
-    created_at: new Date().toISOString(),
+    created_at: dateOf().toISOString(),
   });
   installFakeTools({
     orca: {
@@ -1181,7 +1179,7 @@ test("ARK-284-AC4 the run page lists each decision of events.ndjson oldest first
     await entries
       .locator("time")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("datetime"))),
-  ).toEqual(expected.map(([after]) => new Date(started.getTime() + after * 1000).toISOString()));
+  ).toEqual(expected.map(([after]) => dateOf(started.getTime() + after * 1000).toISOString()));
   const entry = (type: string) =>
     page.locator(`[data-testid="timeline-entry"][data-type="${type}"]`);
   await expect(entry("gate.answered")).toContainText("strategy gate: S2");
@@ -1246,7 +1244,7 @@ test("ARK-T273 a DAG node, the run lead and an unassigned file open their transc
   const { sessions } = isolate();
   const run = runId("ARK-871");
   const started = ago(7_200);
-  const at = (seconds: number) => new Date(started.getTime() + seconds * 1000);
+  const at = (seconds: number) => dateOf(started.getTime() + seconds * 1000);
   const directory = writeRun({
     project: "p",
     run,
@@ -1329,7 +1327,7 @@ function leadTranscriptRun(
     writeFileSync(join(directory, path), text);
   }
   // The session files start inside the step's window, so the step owns them all.
-  const fileStart = new Date(started.getTime() + 100_000);
+  const fileStart = dateOf(started.getTime() + 100_000);
   writeSessionFile(
     sessions,
     "lead.jsonl",
@@ -1616,8 +1614,7 @@ test("ARK-T275 the chips filter the list into messages, tools, thinking and erro
     { kind: "call", id: "e4", name: "read", args: { path: "a.json", offset: 1 }, result: "{}" },
   ]);
   // A second file of 250 entries: 200 messages on page 1; 47 messages and 3 failed calls on page 2.
-  const second = (number: number) =>
-    new Date(started.getTime() + (10 + number) * 1000).toISOString();
+  const second = (number: number) => dateOf(started.getTime() + (10 + number) * 1000).toISOString();
   const big = [
     JSON.stringify({
       type: "session",
@@ -1877,7 +1874,7 @@ test("ARK-T276 a context entry of 114 lines and a user message of more than 40 l
     "claude.jsonl",
     transcriptText("claude", {
       cwd,
-      start: new Date(started.getTime() + 10_000),
+      start: dateOf(started.getTime() + 10_000),
       tag: "claude",
       extra: [...longMessages, ...claudeCalls],
     }),
@@ -1887,7 +1884,7 @@ test("ARK-T276 a context entry of 114 lines and a user message of more than 40 l
     "codex.jsonl",
     transcriptText("codex", {
       cwd,
-      start: new Date(started.getTime() + 20_000),
+      start: dateOf(started.getTime() + 20_000),
       tag: "codex",
       extra: longMessages,
     }),
@@ -2060,7 +2057,7 @@ test("ARK-T300 a transcript shows 200 entries a page and Load more adds the next
     `${JSON.stringify({
       type: "message",
       id: "live",
-      timestamp: new Date().toISOString(),
+      timestamp: dateOf().toISOString(),
       message: { role: "user", content: [{ type: "text", text: "live arrival" }] },
     })}\n`,
   );
@@ -2235,11 +2232,11 @@ function reviewRun(options: {
   return { run, url, directory, view };
 }
 
-const usageAt = (fraction: number, baseInstant = Date.now()) => ({
+const usageAt = (fraction: number, baseInstant = testNow()) => ({
   reports: [
     {
       provider: "anthropic",
-      fetchedAt: Date.now(),
+      fetchedAt: testNow(),
       limits: [
         {
           window: { id: "5h", resetsAt: baseInstant + 4_440_000 },
@@ -2252,7 +2249,7 @@ const usageAt = (fraction: number, baseInstant = Date.now()) => ({
 
 /** Home with 1 gate, 1 stuck agent (a prompt), 2 MRs in review and the 5h window of anthropic at 82%. The usage reset is `baseInstant` + 74 min: the page compares it with its own clock, every age with the server's. */
 async function homeWithBlockers(
-  baseInstant = Date.now(),
+  baseInstant = testNow(),
   holdOrca = false,
   /** Runs once the fixture is written and before the hub starts. */
   beforeLaunch?: (stuckDirectory: string) => void,
@@ -2318,7 +2315,7 @@ async function homeWithBlockers(
             taskTitle: "hub-server (implementer, .)",
             state: "working",
             toolName: "bash",
-            updatedAt: Date.now(),
+            updatedAt: testNow(),
             agentWait: { reason: "approval", source: "hook" },
             lastAssistantMessage: "Allow bash?\n\nbun test test/hub.test.ts\n",
           },
@@ -2343,7 +2340,7 @@ async function homeWithBlockers(
 /** The fixture and the page clock share one instant in UTC, so the reset form (HH:MM or date and time) never depends on when the suite runs. */
 test.describe("the usage reset on a frozen clock", () => {
   test.use({ timezoneId: "UTC" });
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dateOf().toISOString().slice(0, 10);
   const at = (time: string) => Date.parse(`${day}T${time}:00Z`);
 
   test("ARK-285-AC5 Home shows the tile strip first, then the blockers, the review queue in merge order and the progress and usage, with Master Chief once", async ({
@@ -3168,7 +3165,7 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
 }) => {
   test.setTimeout(120_000);
   // The fake Orca is held: the first snapshot is late until the test releases it.
-  const { baseUrl, release } = await homeWithBlockers(Date.now(), true);
+  const { baseUrl, release } = await homeWithBlockers(testNow(), true);
   for (const [id, status] of [
     ["ARK-511", "ready"],
     ["ARK-512", "ready"],
@@ -3334,7 +3331,7 @@ test("ARK-T128 the first action of Home is visible and its hover colour final af
   page,
 }) => {
   // The fake Orca is held, so the first snapshot is late until the test releases it.
-  const { baseUrl, release } = await homeWithBlockers(Date.now(), true);
+  const { baseUrl, release } = await homeWithBlockers(testNow(), true);
   // The gate link is not an agent action: the held gate's own snapshot already draws it.
   const actions = page.locator(
     '.btn.primary:not(:disabled):not([data-testid="gate-link"]), .btn-orca:not(:disabled)',
@@ -3372,13 +3369,13 @@ test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a
   page,
 }) => {
   test.setTimeout(120_000);
-  const { baseUrl, older, stuckRun } = await homeWithBlockers(Date.now(), false, (stuckDirectory) =>
+  const { baseUrl, older, stuckRun } = await homeWithBlockers(testNow(), false, (stuckDirectory) =>
     writeSessionFile(
       process.env.ARK_OMP_SESSIONS as string,
       "t27.jsonl",
       transcriptText("omp", {
         cwd: join(stuckDirectory, "workspace"),
-        start: new Date(Date.now() - 3_600_000 + 300_000),
+        start: dateOf(testNow() - 3_600_000 + 300_000),
         extra: Array.from({ length: 195 }, (_, number): ExtraEntry => ({
           kind: "call",
           id: `c${number}`,
@@ -4380,7 +4377,7 @@ async function homeWorld() {
       ],
     });
     // Closed runs carry the cost (metrics.json), dated by the local day the page reads.
-    const now = new Date();
+    const now = dateOf();
     const localDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     writeRun({
       project: world.project,
@@ -4414,7 +4411,7 @@ async function homeWorld() {
     to_handle: `run:orca-${run}`,
     subject: "which port?",
     read: 0,
-    created_at: new Date().toISOString(),
+    created_at: dateOf().toISOString(),
   });
   installFakeTools({
     orca: {
@@ -4439,7 +4436,7 @@ async function homeWorld() {
             taskTitle: "hub-server (implementer, .)",
             state: "working",
             toolName: "bash",
-            updatedAt: Date.now(),
+            updatedAt: testNow(),
             agentWait: { reason: "approval", source: "hook" },
             lastAssistantMessage: "Allow bash?\n",
           },
@@ -4457,6 +4454,8 @@ test("ARK-309-AC2 Home counts only the chosen project in its tiles, lists, cost 
 }) => {
   test.setTimeout(120_000);
   const baseUrl = await homeWorld();
+  // The page dates today's cost by its own clock: put it on the frozen instant of the fixtures.
+  await page.clock.setFixedTime(testNow());
   const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"] .big`);
   const expected = [
     { hash: "", count: 2, cost: "$3.75", badge: "4 need you" },
@@ -4914,7 +4913,7 @@ function agentStateWorld() {
       { time: ago(500), costUsd: 0.01, model: "session/model-first" },
       { time: ago(400), costUsd: 0.01, model: "session/model-last" },
     ],
-    new Date(started.getTime() + (100 + 600 + 10) * 1000),
+    dateOf(started.getTime() + (100 + 600 + 10) * 1000),
   );
   const answers = orcaAnswersFor(run);
   const worker = (name: string, model?: string) => ({
@@ -4956,9 +4955,9 @@ function agentStateWorld() {
               taskTitle: `${name} (implementer, .)`,
               state: name === "finished" ? "done" : "working",
               toolName: "bash",
-              updatedAt: name === "finished" ? Date.now() - 3_600_000 : Date.now(),
+              updatedAt: name === "finished" ? testNow() - 3_600_000 : testNow(),
             })),
-            { taskTitle: "Master Chief: p tickets", state: "working", updatedAt: Date.now() },
+            { taskTitle: "Master Chief: p tickets", state: "working", updatedAt: testNow() },
           ],
         },
       ],
@@ -5076,7 +5075,7 @@ function stageModelWorld(options: { designerSession: boolean }) {
     startedAt,
   });
   appendRawEvent(directory, "strategy.recorded", { count: 1, recommended: "S1", cards: ["S1"] }, 4);
-  const after = (seconds: number) => new Date(startedAt.getTime() + seconds * 1000);
+  const after = (seconds: number) => dateOf(startedAt.getTime() + seconds * 1000);
   const workspacePath = join(directory, "workspace");
   writeOmpSession(
     sessions,
@@ -6712,8 +6711,10 @@ async function homeFitProblems(page: Page): Promise<string[]> {
 async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
   await page.clock.setFixedTime(instant);
   isolate();
-  const day = new Date(instant).toISOString().slice(0, 10);
-  const yesterday = new Date(instant - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const day = dateOf(instant).toISOString().slice(0, 10);
+  const yesterday = dateOf(instant - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
   const gate = "ARK-12345-LONG";
   writeRun({
     project: "p",
@@ -6790,7 +6791,7 @@ async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
 
 test.describe("Home at 1024 px on a fixed clock", () => {
   test.use({ timezoneId: "UTC" });
-  const at = (time: string) => Date.parse(`${new Date().toISOString().slice(0, 10)}T${time}:00Z`);
+  const at = (time: string) => Date.parse(`${dateOf().toISOString().slice(0, 10)}T${time}:00Z`);
 
   test("ARK-T227 at 1024 px the Home tiles do not break one word per line, clip a date or wrap a ticket id", async ({
     page,
@@ -7434,7 +7435,7 @@ test("ARK-T181 the run file viewer and the ticket page each have a Rendered and 
 
 // ---------------------------------------------------------------- ARK-355 time split
 
-const runStart = new Date("2026-11-02T10:00:00Z");
+const runStart = dateOf("2026-11-02T10:00:00Z");
 const minutesAfterStart = (minutes: number) => minutes * 60;
 const partMinutes = (page: Page, ids: string[]) =>
   Promise.all(ids.map((id) => page.getByTestId(`time-${id}`).locator(".mins").textContent()));
@@ -7522,12 +7523,13 @@ test("ARK-T180 the run page shows the four time parts as one bar, in the closed 
     { after: seconds(15), type: "step.started", data: planStart },
   ]);
   installFakeTools({});
-  process.env.ARK_NOW = new Date(runStart.getTime() + seconds(45) * 1000).toISOString();
+  const previousNow = process.env.ARK_NOW;
+  process.env.ARK_NOW = dateOf(runStart.getTime() + seconds(45) * 1000).toISOString();
   let baseUrl: string;
   try {
     baseUrl = await launch();
   } finally {
-    delete process.env.ARK_NOW;
+    process.env.ARK_NOW = previousNow;
   }
   const ids = ["you", "work", "merge", "idle"];
 
@@ -9415,14 +9417,15 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   const proxy = await proxyHub(hubUrl);
   // The page clock starts at 14:02:05 and runs. The page notes when each snapshot arrived: the
   // banner shows the time of the last one.
-  await page.clock.install({ time: new Date(2026, 10, 4, 14, 2, 5) });
+  await page.clock.install({ time: dateOf("2026-11-04T14:02:05") });
   await page.addInitScript(() => {
     const Native = window.EventSource;
     window.EventSource = class extends Native {
       constructor(url: string | URL) {
         super(url);
         this.addEventListener("message", () => {
-          (window as unknown as LiveWindow).__lastSnapshotAt = Date.now();
+          (window as unknown as LiveWindow).__lastSnapshotAt =
+            performance.timeOrigin + performance.now();
         });
       }
     };
@@ -9497,10 +9500,9 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   proxy.cut();
   await expect(banner).toBeVisible();
   const frozenAt = await page.evaluate(() =>
-    new Date((window as unknown as LiveWindow).__lastSnapshotAt).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" }).format(
+      (window as unknown as LiveWindow).__lastSnapshotAt,
+    ),
   );
   await expect(banner).toHaveText(`Disconnected: data frozen at ${frozenAt}`);
   await expect(main).toHaveCSS("opacity", "0.55");
@@ -9539,7 +9541,7 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
 
 const conversationStart = Date.parse("2026-11-12T08:00:00.000Z");
 const conversationMinute = (minutes: number) => conversationStart + minutes * 60_000;
-const isoOf = (time: number) => new Date(time).toISOString();
+const isoOf = (time: number) => dateOf(time).toISOString();
 /** The clock text of a time in UTC, the way the page prints it: HH:MM:SS. */
 const clockOf = (time: number) => isoOf(time).slice(11, 19);
 
@@ -9731,7 +9733,7 @@ test("ARK-T340 the Conversation tab opens from the run page, keeps the sub route
     "work.jsonl",
     transcriptText("omp", {
       cwd: join(directory, "workspace"),
-      start: new Date(started.getTime() + 100_000),
+      start: dateOf(started.getTime() + 100_000),
     }),
   );
   installFakeTools({});
@@ -10243,9 +10245,9 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
   const run = runId("ARK-9405");
   // A fixed start 30 minutes before UTC midnight: the run crosses a day, so every clock label carries its
   // date, and the expected text never depends on the hour the suite runs at.
-  const started = new Date("2026-11-12T23:30:00.000Z");
+  const started = dateOf("2026-11-12T23:30:00.000Z");
   const dated = (time: number) =>
-    `${String(new Date(time).getUTCDate()).padStart(2, "0")} Nov ${clockOf(time)}`;
+    `${String(dateOf(time).getUTCDate()).padStart(2, "0")} Nov ${clockOf(time)}`;
   const directory = writeRun({
     project: "p",
     run,
@@ -10277,22 +10279,22 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
   writeSessionFile(
     sessions,
     "lead.jsonl",
-    transcriptText("omp", { cwd, start: new Date(leadStart), extra }),
+    transcriptText("omp", { cwd, start: dateOf(leadStart), extra }),
   );
   writeSessionFile(
     sessions,
     "step.jsonl",
-    transcriptText("omp", { cwd, start: new Date(stepStart), extra }),
+    transcriptText("omp", { cwd, start: dateOf(stepStart), extra }),
   );
   // A second file of the same step, written after the first one ended (a rework round).
   const lateStart = started.getTime() + 400_000;
   writeSessionFile(
     sessions,
     "step-late.jsonl",
-    transcriptText("omp", { cwd, start: new Date(lateStart), extra }),
+    transcriptText("omp", { cwd, start: dateOf(lateStart), extra }),
   );
   // A file's window ends at its last write: close the first step file before the second begins.
-  const stepEnd = new Date(stepStart + 30_000);
+  const stepEnd = dateOf(stepStart + 30_000);
   utimesSync(join(sessions, "step.jsonl"), stepEnd, stepEnd);
   installFakeTools({});
   const baseUrl = await launch();
@@ -10505,10 +10507,10 @@ test("ARK-T345 the replay plays at 600x, moves the playhead, animates arrows, di
   const page = await conversationPage(browser);
   // The replay runs on the page clock: 600x is 600 run seconds for each second of it. The clock stands still
   // until a step advances it, so no assertion waits on wall time.
-  await page.clock.install({ time: new Date("2026-11-13T00:00:00Z") });
+  await page.clock.install({ time: dateOf("2026-11-13T00:00:00Z") });
   const served = await serveConversation(page, reply);
   await openConversation(page, baseUrl, run);
-  await page.clock.pauseAt(new Date("2026-11-13T01:00:00Z"));
+  await page.clock.pauseAt(dateOf("2026-11-13T01:00:00Z"));
   const feedCount = () => page.getByTestId("feed-message");
   const playhead = async () =>
     Number(await page.getByTestId("trace-playhead").getAttribute("data-time"));
