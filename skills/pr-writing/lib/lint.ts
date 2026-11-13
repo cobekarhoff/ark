@@ -490,11 +490,17 @@ const RISK04: Check = ({ body, ledger }) => {
     }
     const entries = /^(none\.?)?$/i.test(inline) ? listed : inline.split(/;\s*/);
     // `- \`file\`: reason` or `\`file\`: reason`: the reason is what follows the first colon after the path.
-    const bare = entries.find((entry) => {
+    const bare = entries.filter((entry) => {
       const reason = entry.replace(/^\s*[-*]\s*/, "").replace(/^`[^`]*`:?\s*/, "");
       return reason.replace(/[().]/g, "").trim() === "" || /no reason given/i.test(entry);
     });
-    if (bare) return fail(`an unplanned file has no reason: ${bare.trim().slice(0, 80)}`);
+    if (bare.length > 0) {
+      const files = bare.map((entry) => entry.match(/`([^`]*)`/)?.[1] ?? entry.trim().slice(0, 80));
+      const step = ledger.reviewerStep ?? "<step>";
+      return fail(
+        `an unplanned file has no reason: ${files.join(", ")}. Write \`- Not in plan: ${files[0]} — <reason>\` in the first ## Merge risk block of findings/${step}.md`,
+      );
+    }
   }
   return pass("the reviewer block exists, the door and the unplanned files are explained");
 };

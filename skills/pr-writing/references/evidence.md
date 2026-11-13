@@ -37,7 +37,7 @@ What counts as evidence in an MR or PR body, and every check `lint_body.ts` runs
 | RISK01               | warn   | Risk text names what breaks and a `git revert` step.                                                                                              |
 | RISK02               | fail   | A migration file in the diff has a rollback named.                                                                                                |
 | RISK03               | fail   | A CI file in the diff is named in the body.                                                                                                       |
-| RISK04               | fail   | Ark runs only: reviewer block present, one-way door has a recovery, unplanned files have reasons.                                                 |
+| RISK04               | fail   | Ark runs only: reviewer block present, one-way door has a recovery, unplanned files have reasons (any reviewer findings file may give it).        |
 | FMT01                | fail   | No hard-wrapped paragraph.                                                                                                                        |
 | FMT02                | fail   | No known token prefix (`AKIA`, `ghp_`, `glpat-`, `xox`, `-----BEGIN`).                                                                            |
 | STALE01              | fail   | The ledger head equals the branch head, and the body equals the body that was linted.                                                             |

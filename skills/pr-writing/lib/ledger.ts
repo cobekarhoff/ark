@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { evidenceFile, frontmatter, parseCriteria } from "../../../cli/ticket.ts";
-import { loadConfig, type PrWriting } from "../../../cli/config.ts";
+import { loadConfig, type PrWriting, type ProjectConfig } from "../../../cli/config.ts";
 import { ArkError } from "../../../cli/errors.ts";
 import { deriveState, readEvents, type ArkEvent } from "../../../cli/events.ts";
 import type { CriterionStatus } from "../../../cli/lifecycle.ts";
@@ -112,6 +112,8 @@ export type Ledger = {
   /** Findings no later review closed with `No findings.` or a `send back` decision. */
   findings: Finding[];
   hasReviewerStep: boolean;
+  /** The latest reviewer step: `findings/<step>.md` is where a `Not in plan:` line goes. `null` when the run has none. */
+  reviewerStep: string | null;
   /** Each `checks` entry of `ark.yml` with the outcome of the last `test.completed`; `not run` when that event has a `checks` list without it, `unknown` when the event has no `checks` list (an old run). */
   checks: { name: string; state: "passed" | "failed" | "not run" | "unknown" }[];
   /** Test files the last `test.completed` lists as flaky: they failed once and passed on retry. */
@@ -352,6 +354,102 @@ function whereEntries(where: string): string[] {
     .filter((entry) => entry !== "" && entry !== ".");
 }
 
+/** Files that no plan `where` lists, outside `test/` and `docs/`. The one rule for finish, the risk score and RISK04. */
+function unplannedFiles(paths: string[], where: string[]): string[] {
+  return paths.filter(
+    (path) =>
+      !path.startsWith("test/") &&
+      !path.startsWith("docs/") &&
+      !where.some((pattern) => pathMatches(pattern, path)),
+  );
+}
+
+/** The reason a reviewer gave for `file`, or `undefined`: an empty reason is no reason. */
+function reasonFor(reviewer: ReviewerBlock | null, file: string): string | undefined {
+  return Object.entries(reviewer?.unplanned ?? {}).find(
+    ([path, reason]) => reason !== "" && (path === file || file.endsWith(`/${path}`)),
+  )?.[1];
+}
+
+/**
+ * The reviewer block of the latest reviewer findings file (ratings, door, recovery), with the `Not in plan:` reasons
+ * of every reviewer findings file: a later non-empty reason wins, an empty one never erases an earlier reason.
+ * `round-N.md` and the findings of other steps never count.
+ */
+function reviewerBlock(directory: string, reviewerSteps: string[]): ReviewerBlock | null {
+  const files = readFindingsFiles(directory, reviewerSteps).filter(
+    (file) => !roundFile.test(file.name) && reviewerSteps.includes(file.group),
+  );
+  const latest = files.at(-1);
+  const block = latest ? parseReviewerBlock(latest.text) : null;
+  if (!block) return null;
+  const unplanned: Record<string, string> = {};
+  for (const file of files)
+    for (const [path, reason] of Object.entries(parseReviewerBlock(file.text)?.unplanned ?? {}))
+      if (reason !== "" || !(path in unplanned)) unplanned[path] = reason;
+  return { ...block, unplanned };
+}
+
+function reviewerStepsOf(events: ArkEvent[]): string[] {
+  return [
+    ...new Set(
+      events
+        .filter(
+          (event) =>
+            event.type === "step.started" && event.data.role === "reviewer" && !event.data.merge,
+        )
+        .map((event) => event.data.step as string),
+    ),
+  ];
+}
+
+/** The target branch the MR diffs against: the configured base, else origin's HEAD; `null` when neither is known. */
+function targetBranchOf(
+  worktree: { repo: string; path: string },
+  config: ProjectConfig | null,
+): string | null {
+  const configured = config?.repos?.[worktree.repo]?.base;
+  const symbolic = capture(
+    ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    worktree.path,
+  );
+  return configured ?? (symbolic ? symbolic.replace(/^origin\//, "") : null);
+}
+
+/**
+ * Files of the run that the plan does not list and no reviewer findings file gives a reason for, as the MR will
+ * see them (diff against the target branch, so a file merged in by `ark worktree sync` does not count).
+ * `repo` limits the check to that repo's worktree (a reviewer finishes for one repo); without it every worktree counts.
+ * A worktree whose target branch cannot be diffed yields no files, so it yields no refusal.
+ */
+export function unplannedWithoutReason(directory: string, repo?: string): string[] {
+  if (!existsSync(join(directory, "plan.yml"))) return [];
+  const events = readEvents(directory);
+  const state = deriveState(events);
+  const plan = loadPlan(directory, state.ticket.id);
+  const where = plan.summary.changes.flatMap((change) => whereEntries(change.where));
+  const config = existsSync(join(projectDirectory(state.project), "ark.yml"))
+    ? loadConfig(state.project)
+    : null;
+  const reviewer = reviewerBlock(directory, reviewerStepsOf(events));
+  return state.worktrees
+    .filter(
+      (worktree) => (repo === undefined || worktree.repo === repo) && existsSync(worktree.path),
+    )
+    .flatMap((worktree) =>
+      repoLedger(
+        worktree.repo,
+        worktree.path,
+        worktree.branch,
+        targetBranchOf(worktree, config) ?? worktree.base ?? "main",
+        [],
+      ).files.map((file) => file.path),
+    )
+    .filter(
+      (path) => unplannedFiles([path], where).length > 0 && reasonFor(reviewer, path) === undefined,
+    );
+}
+
 function scoreRisk(
   files: { path: string; status: string }[],
   criteria: Ledger["criteria"],
@@ -365,15 +463,7 @@ function scoreRisk(
   const sensitiveHits = hits(prWriting.sensitive_paths);
   const oneWayHits = hits(prWriting.one_way_paths);
   const deleted = files.filter((file) => file.status === "D").map((file) => file.path);
-  const unplannedFiles =
-    plan === null
-      ? []
-      : paths.filter(
-          (path) =>
-            !path.startsWith("test/") &&
-            !path.startsWith("docs/") &&
-            !plan.where.some((pattern) => pathMatches(pattern, path)),
-        );
+  const unplannedPaths = plan === null ? [] : unplannedFiles(paths, plan.where);
 
   const passing = (status: CriterionStatus) => status === "passing" || status === "manual ok";
   const verification = criteria.some((criterion) => !passing(criterion.status))
@@ -381,7 +471,7 @@ function scoreRisk(
     : criteria.length === 0 || criteria.some((criterion) => !criterion.evidenced)
       ? 2
       : 1;
-  const alignment = unplannedFiles.length === 0 ? 1 : unplannedFiles.length < 3 ? 2 : 3;
+  const alignment = unplannedPaths.length === 0 ? 1 : unplannedPaths.length < 3 ? 2 : 3;
   const hasCallers = (plan?.interfaces ?? []).some((entry) => entry.callers.length > 0);
   const impact = 1 + (sensitiveHits.length > 0 ? 1 : 0) + (hasCallers ? 1 : 0);
   const rollback = 1 + (oneWayHits.length > 0 ? 1 : 0) + (deleted.length > 0 ? 1 : 0);
@@ -416,12 +506,9 @@ function scoreRisk(
     sensitiveHits,
     oneWayHits,
     deleted,
-    unplanned: unplannedFiles.map((file) => ({
+    unplanned: unplannedPaths.map((file) => ({
       file,
-      reason:
-        Object.entries(reviewer?.unplanned ?? {}).find(
-          ([path, reason]) => reason !== "" && (path === file || file.endsWith(`/${path}`)),
-        )?.[1] ?? "no reason given",
+      reason: reasonFor(reviewer, file) ?? "no reason given",
     })),
   };
 }
@@ -613,6 +700,7 @@ function gitLedger(source: { directory: string; base?: string; prWriting?: PrWri
     evidence: null,
     findings: [],
     hasReviewerStep: false,
+    reviewerStep: null,
     checks: [],
     flaky: [],
     tests: null,
@@ -735,22 +823,9 @@ function runLedger(source: {
       : existsSync(evidenceFile(directory, id));
   };
 
-  const reviewerSteps = [
-    ...new Set(
-      events
-        .filter(
-          (event) =>
-            event.type === "step.started" && event.data.role === "reviewer" && !event.data.merge,
-        )
-        .map((event) => event.data.step as string),
-    ),
-  ];
+  const reviewerSteps = reviewerStepsOf(events);
   const findingsFiles = readFindingsFiles(directory, reviewerSteps);
-  // Only the reviewer steps' own findings carry the risk block: validator and live-check reports never count.
-  const latest = findingsFiles
-    .filter((file) => !roundFile.test(file.name) && reviewerSteps.includes(file.group))
-    .at(-1);
-  const reviewer = latest ? parseReviewerBlock(latest.text) : null;
+  const reviewer = reviewerBlock(directory, reviewerSteps);
 
   const { order, upstream } = plan
     ? repoGraph(plan)
@@ -772,13 +847,8 @@ function runLedger(source: {
           ),
       );
       // The recorded base is a commit: a file that `ark worktree sync` merged in from the target is not ours, so diff
-      // against the target branch (configured base, else origin's HEAD), and keep the commit only as the last resort.
-      const configured = config?.repos?.[worktree.repo]?.base;
-      const symbolic = capture(
-        ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-        worktree.path,
-      );
-      const targetBranch = configured ?? (symbolic ? symbolic.replace(/^origin\//, "") : null);
+      // against the target branch, and keep the commit only as the last resort.
+      const targetBranch = targetBranchOf(worktree, config);
       const remote = existsSync(worktree.path)
         ? capture(["git", "remote", "get-url", "origin"], worktree.path)
         : null;
@@ -874,6 +944,7 @@ function runLedger(source: {
     }),
     findings: openFindings(findingsFiles),
     hasReviewerStep: (plan?.steps ?? []).some((step) => step.role === "reviewer"),
+    reviewerStep: reviewerSteps.at(-1) ?? null,
     checks,
     flaky: lastTest?.data.flaky ?? [],
     tests:
