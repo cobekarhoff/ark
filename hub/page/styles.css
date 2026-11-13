@@ -2111,11 +2111,118 @@ a.rm-id:hover {
   }
 }
 /* ---------- ticket page ---------- */
+.ticket-band {
+  margin: 16px 0 0;
+}
+/* The prose keeps a reading measure; the right column takes the rest, up to 720px. */
 .ticket-cols {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
-  gap: 32px;
-  max-width: 1280px;
+  grid-template-columns: minmax(0, 680px) minmax(360px, 720px);
+  justify-content: start;
+  align-items: start;
+  gap: 56px;
+}
+@media (max-width: 1100px) {
+  .ticket-cols {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+}
+.ticket-prose {
+  min-width: 0;
+}
+.ticket-prose .md p,
+.ticket-prose .md ul,
+.ticket-prose .md ol {
+  max-width: 72ch;
+}
+.ticket-section {
+  scroll-margin-top: 56px;
+  padding-bottom: 24px;
+}
+.ticket-section + .ticket-section {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.ticket-section > h2 {
+  font-size: 17px;
+  font-weight: 650;
+}
+/* Sticky under the top of the window: the nav above scrolls away with the page. */
+.outline-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  margin: 16px -16px 8px;
+  padding: 0 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.outline-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--dim);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+.outline-chip.mono {
+  font-size: 11.5px;
+  padding: 2px 7px;
+  border-color: var(--line-2);
+}
+.outline-chip[aria-current="location"] {
+  background: var(--sel);
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--blue) 45%, transparent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .outline-chip:not([aria-current]):hover {
+    background: var(--panel-3);
+    color: var(--text);
+  }
+}
+.outline-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 8px;
+  background: var(--line-2);
+}
+.outline-switch {
+  flex: none;
+  margin-left: auto;
+}
+.relnone {
+  margin: 0;
+  padding: 2px 4px;
+  color: var(--mute);
+  font-size: 12px;
+}
+.relnone b {
+  color: var(--dim);
+  font-size: 13px;
+}
+#sec-criteria {
+  scroll-margin-top: 56px;
+}
+.crit-list > li {
+  scroll-margin-top: 56px;
 }
 .ticket-title {
   font-size: 30px;
@@ -2125,6 +2232,9 @@ a.rm-id:hover {
 }
 .ticket-page h2 {
   margin: 24px 0 8px;
+}
+.ticket-page .panel h2 {
+  margin: 0;
 }
 .meta {
   display: flex;
@@ -2145,9 +2255,6 @@ a.rm-id:hover {
   flex-direction: column;
   gap: 12px;
   min-width: 0;
-}
-.side .graph-scroll {
-  max-height: 360px;
 }
 .links {
   list-style: none;
@@ -3551,4 +3658,43 @@ pre.code-plain {
 }
 .panel > p.body {
   padding: 8px 12px;
+}
+
+/* ---------- graph viewport: Fit, 100% and Full screen ---------- */
+.gv-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 4px 8px 0;
+}
+.gv-scale {
+  color: var(--dim);
+  min-width: 4ch;
+  text-align: right;
+}
+.gv-scroll {
+  overflow: auto;
+  padding: 8px;
+  scrollbar-gutter: stable;
+}
+.gv-box {
+  margin: 0 auto;
+}
+.gv-graph {
+  position: relative;
+}
+.gv.full {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding: 8px 0 0;
+}
+.gv.full .gv-scroll {
+  flex: 1;
+  max-height: none;
+  min-height: 0;
 }

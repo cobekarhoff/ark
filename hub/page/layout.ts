@@ -40,9 +40,37 @@ export function edgePath(x1: number, y1: number, x2: number, y2: number): string
 }
 
 /**
- * Path for an edge that skips columns: it leaves the box, rises into the lane above every box, runs
- * along it and drops into the target, so it never passes behind a box of a column between.
+ * Path for an edge that skips columns: it leaves the box into the gap after its column, rises to
+ * `lane` (above every box), runs along it and drops in the gap before the target, so it never passes
+ * behind a box. `reach` is how far into those gaps the two vertical runs stand: it stays under the
+ * gap, and each edge takes its own so that two edges never share a vertical run.
  */
-export function detourPath(x1: number, y1: number, x2: number, y2: number, lane: number): string {
-  return `M${x1},${y1} C${x1 + 30},${y1} ${x1 + 30},${lane} ${x1 + 60},${lane} L${x2 - 60},${lane} C${x2 - 30},${lane} ${x2 - 30},${y2} ${x2},${y2}`;
+export function detourPath(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  lane: number,
+  reach: number,
+): string {
+  const corner = 6;
+  const points = [
+    [x1, y1],
+    [x1 + reach, y1],
+    [x1 + reach, lane],
+    [x2 - reach, lane],
+    [x2 - reach, y2],
+    [x2, y2],
+  ];
+  let path = `M${x1},${y1}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const [previousX, previousY] = points[i - 1]!;
+    const [x, y] = points[i]!;
+    const [nextX, nextY] = points[i + 1]!;
+    const before = Math.min(corner, Math.hypot(x - previousX, y - previousY) / 2);
+    const after = Math.min(corner, Math.hypot(nextX - x, nextY - y) / 2);
+    path += ` L${x - Math.sign(x - previousX) * before},${y - Math.sign(y - previousY) * before}`;
+    path += ` Q${x},${y} ${x + Math.sign(nextX - x) * after},${y + Math.sign(nextY - y) * after}`;
+  }
+  return `${path} L${x2},${y2}`;
 }

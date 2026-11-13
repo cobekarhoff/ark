@@ -169,7 +169,7 @@ Rewrite the file with the poll time taken before the poll only when no MR printe
 When the status of a run shows `ci: failed` (with its `checks failing:` names), a new human comment, or a `conflict`, the run is not merge-ready: pass each human comment to the human, and give the run lead the items (the failing check names, each comment with its author and URL, the conflicting repo). If the run lead is still live, send it a message. If it has stopped, start it again with the same spec `/skill:ark run-lead <run>` and the dispatch command of section 6, and send the items in its first message; it handles them as "Work on the open MRs" in its playbook.
 Relay its `ask` for the escalation gate of an implementer MR round to the human like any other `ask`. Its `worker_done` for an MR round is not a new first report: tell the human the outcome, do not repeat the MR-link handoff of "A `worker_done` from a run lead" unless the links changed, and release the run lead again (step 6 there).
 
-`scripts/auto-merger.sh` (section 12) can merge a CLEAN MR while MR work is open: it checks only CLEAN and `retro.md`, not the run lead's work. A comment that no commit answers yet, or a fix that is still being pushed, does not hold the merge, and no rule holds it. Tell the human when a run has MR work open, so that they do not merge early.
+The auto-merger service (section 12) can merge a CLEAN MR while MR work is open: it checks only CLEAN and `retro.md`, not the run lead's work. A comment that no commit answers yet, or a fix that is still being pushed, does not hold the merge, and no rule holds it. Tell the human when a run has MR work open, so that they do not merge early.
 
 A `status` message whose subject starts with `Brainstorm handoff:` is a request to evaluate and queue. Check this rule before the next rule. The body names the tickets. Its first line is `Human approval: "<the human's answer, word for word>" for <ticket ids> at <ISO time>`. For each ticket the message names, evaluate it (section 3) and queue it (section 5) only when all of these are true:
 
@@ -251,13 +251,15 @@ Choose the outcome:
 | The human took the branches and wants no MRs | `ark run close <run> handed_off` (`ark run close` applies the refusals of `ark merge-request open`; on a refusal, run `ark test <run>` again or `ark criteria amend`, and tell the human which AC is open). Each branch with commits stays in its clone, and `ark run close` prints a `kept` line for it: `git -C <repo> log <base>..<branch>` lists the commits |
 | The human stops the run before any MR exists | `ark run close <run> aborted`, see below                                                                                                                                                                                                                                                                                                                         |
 
+A status message `Merged: <run> !<number>` from the auto-merger (section 12) is a trigger to read `ark merge-request status <run>`; when every MR is merged, close the run `merged`.
+
 If some MRs are merged and others are still open, tell the human and wait. Do not close the run.
 
 Abort row: when the human aborts through the run lead, the run lead runs `ark run close <run> aborted` itself. Run it yourself only when `ark status <run>` shows a phase other than `closed` and no run lead is alive; a second close is refused.
 
 Before you close it, check that `$ARK_HOME/projects/<project>/runs/<run>/retro.md` exists. The run lead writes it. If it does not exist, the run is not ready to close: message the run lead with `orca orchestration send`, or ask the human what to do.
 
-A `HELD: <run> #<number> ticket superseded` line from the auto-merger (section 12) means nobody wants the PR. Tell the human. With the human, close the run `aborted` or `abandoned` (table above) and close the PR with `gh pr close <url>`. Never merge it. `no final report` needs nothing: the PR merges when `retro.md` exists. `ticket done`: check the run and the PR with the human.
+A `HELD: <run> #<number> ticket superseded` line is in the auto-merger log only (section 12); no message reaches you. When the human asks about a PR that does not merge, or `ark chief state` shows a run in `merge_requests_open` with `retro.md` for a long time, read the log (`$ARK_HOME/projects/<project>/services/auto-merger.log`) for it. It means nobody wants the PR: tell the human. With the human, close the run `aborted` or `abandoned` (table above) and close the PR with `gh pr close <url>`. Never merge it. `no final report` needs nothing: the PR merges when `retro.md` exists. `ticket done`: check the run and the PR with the human.
 
 `ark run close` also releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each. It leaves an active dispatch and says `<dispatch id> still active, not released`. An Orca failure prints one `orca: workers not released: <reason>` line and the close still exits 0. Run `ark run close --sweep` once to release the workers of runs closed earlier (it records no event; a second run prints nothing; it never releases a `release_unknown` row).
 
@@ -307,13 +309,15 @@ At 70% or more context use, as your status line shows, do these steps in order. 
 2. If it exits non-zero, tell the human and stop. Do not close your terminal.
 3. Tell the human the new handle, then close your own terminal: `orca terminal close --terminal "$ORCA_TERMINAL_HANDLE"`.
 
-## 12. Background loops
+## 12. Background services
 
-Two loops run in the Ark repo's `scripts/` folder. Start each one in its own background job in a terminal, with the workspace and the interval in seconds as arguments:
+`ark services install --project <project>` writes and loads three launchd services for the project: the auto-merger (`scripts/auto-merger.sh`, not for a project whose `ark.yml` says `merge_requests: none`), the temp cleaner (`scripts/temp-cleaner.sh`) and the sweep (`scripts/sweep.sh`). Master Chief starts none of them and never runs them in a terminal. The human installs them once; `ark services status --project <project>` and the Services section of `ark chief state` show each one as `not installed`, `loaded` or `running`. They run from the pinned clone and write logs to files, not to your terminal.
 
-- `scripts/auto-merger.sh <workspace> 60 [known conflicting PR numbers...]` merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN and 3 rules hold: it merges only after `retro.md` exists in the run folder (the run lead sent its final report), it skips a run whose ticket is `superseded` or `done`, and it re-reads `ark status <run>` right before `gh pr merge`. It prints `HELD: <run> #<number> <reason>` lines to stderr, once for each held PR. It prints a `CHANGE:` line and exits after the first pass with a change. Handle the change (section 8), then start it again.
-  Do not start `scripts/auto-merger.sh` for a project whose `ark.yml` says `merge_requests: none`: its runs never reach `merge_requests_open`.
-- `scripts/temp-cleaner.sh <workspace> 300` removes Ark test temp directories from `$TMPDIR`, then runs `git worktree prune` in the workspace so no removed folder stays listed as a worktree. It prints `LOW DISK` and exits when `/` has less than 15 GB free. The cleaner keeps a temp root whose `<root>/ark-owner.pid` names a live process, at any age. It removes a root 12 minutes after that process ended, and a root with no usable owner file after 180 minutes. Master Chief starts the cleaner again only after this ticket (ARK-404) is merged: an older cleaner removes a live suite's temp root by age.
+- The auto-merger merges each open PR of a run in `merge_requests_open` once GitHub reports it CLEAN and 3 rules hold: it merges only after `retro.md` exists in the run folder, it skips a run whose ticket is `superseded` or `done`, and it re-reads `ark status <run>` right before `gh pr merge`. After each merge it sends you one status message `Merged: <run> !<number>`. On that message close the run (section 8). It keeps looping. A `HELD: <run> #<number> <reason>` line goes to its log only, not to you, and a conflict or failed merge is a `CHANGE:` line in its log: read `$ARK_HOME/projects/<project>/services/auto-merger.log` when a PR does not merge.
+- The temp cleaner removes Ark test temp directories from `$TMPDIR`, then runs `git worktree prune` in the workspace so no removed folder stays listed as a worktree. It keeps a temp root whose `<root>/ark-owner.pid` names a live process, at any age. It removes a root 12 minutes after that process ended, and a root with no usable owner file after 180 minutes. When `/` falls below 15 GB free it sends one status message `Disk low: <n> GB free`, and sends again only after free disk rose above the limit and fell below it. On that message tell the human.
+- The sweep closes the terminal of each settled dispatch of the project that still runs and lists terminals idle for more than one day. It sends `Sweep: closed <n>, idle <m>`; tell the human only when idle terminals are listed. It never stops what it lists.
+
+Keep the supervise loop (section 7) in its own terminal: the services send their messages to your Run, and `check --wait` is what receives them.
 
 ## 13. Catch the human up
 

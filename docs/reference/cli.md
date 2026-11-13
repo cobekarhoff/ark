@@ -238,6 +238,30 @@ ark ui uninstall
 Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy, so the hub stops and neither starts at login. It does not stop the shared portless proxy: that keeps running until you run `portless proxy stop`. It does nothing, and exits 0, when neither agent is installed.
 ```
 
+### services install
+
+```text
+ark services install [--project <name>]
+
+Writes one LaunchAgent for each background job of the project in ~/Library/LaunchAgents and loads it: dev.ark.<project>.auto-merger (scripts/auto-merger.sh, every 60 s), dev.ark.<project>.temp-cleaner (scripts/temp-cleaner.sh, every 300 s) and dev.ark.<project>.sweep (scripts/sweep.sh, every 300 s). They start at login (RunAtLoad), restart after any exit (KeepAlive true, ThrottleInterval 30) and log to ~/.ark/projects/<project>/services/<service>.log. The scripts run from this clone (resolved from the module, not the workspace) and get the PATH, HOME, TMPDIR, ARK_HOME and ARK_PROJECT of the shell that runs install; it warns when ark, gh, orca or jq is not on that PATH. A second run with the same plists loads nothing again; a changed plist is unloaded and loaded again. A project with `merge_requests: none` gets no auto-merger, and one loaded from an earlier setting is unloaded and deleted. The labels carry the project, so they never collide with dev.ark.hub or dev.ark.proxy. Exits 1 when a load fails. --project falls back to ARK_PROJECT.
+```
+
+### services uninstall
+
+```text
+ark services uninstall [--project <name>]
+
+Unloads and deletes the three LaunchAgents of the project (auto-merger, temp-cleaner, sweep). It leaves the logs and the other projects alone, and it does nothing, and exits 0, when none is installed. --project falls back to ARK_PROJECT.
+```
+
+### services status
+
+```text
+ark services status [--project <name>]
+
+Prints one line for each service of the project: `not installed`, `loaded` (loaded, no process) or `running` with `pid <n>` (from `launchctl list <label>`), and `last log: <last line of its log>`. `ark chief state` prints the same lines under its Services heading. A project with `merge_requests: none` shows the auto-merger as not installed. --project falls back to ARK_PROJECT.
+```
+
 <!-- generated:commands:end -->
 
 ## Run folder
