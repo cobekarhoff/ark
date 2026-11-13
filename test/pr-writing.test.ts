@@ -2708,15 +2708,15 @@ test("ARK-T363 the MR body holds evidence blocks and screenshots only for the pl
   for (const path of shots)
     expect(named.some((id) => path.startsWith(`results/evidence/${id}/`))).toBe(true);
   expect(keptLogLines(section)).toBe(3 * 20);
-  expect(section).toContain("`AC2`: evidence");
-  expect(section).toContain("`AC3`: evidence");
+  expect(section).toContain("`ARK-9/AC2`: evidence");
+  expect(section).toContain("`ARK-9/AC3`: evidence");
   expect(body.length).toBeLessThan(bodyLimit);
 
   // The same 300 folders with a plan that names no case: the section stays, with the AC blocks and no case block.
   const none = suiteRun(300, { planCases: [] });
   const noneLedger = none.ledger();
   const noneBody = buildBody(noneLedger);
-  expect(evidenceSection(noneBody)).toContain("`AC2`: evidence");
+  expect(evidenceSection(noneBody)).toContain("`ARK-9/AC2`: evidence");
   expect(caseBlocks(evidenceSection(noneBody))).toHaveLength(0);
   expect(evidenceSection(noneBody)).not.toMatch(/log line|\.png/);
   expect(noneBody).not.toContain("the run has no `results/evidence/`");
@@ -2752,7 +2752,7 @@ test("ARK-T364 a body over the GitHub limit from plan cases alone has its log ta
   for (const id of big.ids) expect(section).toContain(`\`${id}\`: base fail, head pass @ abc1234`);
   for (const id of ["AC2", "AC3"])
     expect(section).toContain(
-      `Evidence file results/evidence/${id}.md:\n\n\`\`\`\n${id} live check 1\n${id} live check 2\n\`\`\``,
+      `Evidence file results/evidence/ARK-9/${id}.md:\n\n\`\`\`\n${id} live check 1\n${id} live check 2\n\`\`\``,
     );
   // The note is not a result claim and names no screenshot.
   const results = lintBody({ body, title: defaultTitle, ledger });
