@@ -48,7 +48,9 @@ import {
   transcriptText,
   type ExtraEntry,
   type SessionHarness,
+  runDirectoryOf,
   writeBacklogTicket,
+  writeEventLog,
   writeFakeToolState,
   writeOmpSession,
   writeRoadmap,
@@ -3064,6 +3066,170 @@ test("ARK-293-AC3 Master Chief listed by Orca and by worktree ps is one agent of
   expect(chiefs).toHaveLength(1);
   expect(chiefs[0]).toMatchObject({ model: "chief-model", presence: "live" });
   expect(chiefs[0].activity.kind).toBe("working");
+}, 60_000);
+
+// ---------------------------------------------------------------- ARK-335 gate age
+
+type LogEvent = { after: number; type: string; data: Record<string, unknown> };
+
+test("ARK-T311 A gate item's age starts at the event that opened the gate and never moves with later events", async () => {
+  isolatedEnvironment();
+  installFakeTools({});
+  const started = new Date(Date.now() - 3 * 3_600_000);
+  const at = (second: number) => new Date(started.getTime() + second * 1000).toISOString();
+  const ticketOf = (number: number) => `ARK-${number}`;
+  const runOf = (number: number) => `${today()}-${ticketOf(number)}-1`;
+  const gateOf = (number: number, kind: string) => `gate:${runOf(number)}:${kind}`;
+  const opening = (number: number, criteria: string[]): LogEvent[] => [
+    {
+      after: 0,
+      type: "run.started",
+      data: {
+        run: runOf(number),
+        project: "p",
+        ticket: { id: ticketOf(number), title: `Ticket ${number}` },
+        criteria,
+        round_budget: 1,
+      },
+    },
+    {
+      after: 10,
+      type: "evaluation.recorded",
+      data: { blockers: [], risks: [], surfaces: ["none"] },
+    },
+  ];
+  const approved = (number: number, afterApproval: LogEvent[] = []): LogEvent[] => [
+    ...opening(number, [`${ticketOf(number)}-AC1`]),
+    {
+      after: 20,
+      type: "plan.checked",
+      data: {
+        valid: true,
+        plan_hash: "h",
+        steps: [{ id: "build", role: "implementer", repo: "." }],
+      },
+    },
+    {
+      after: 30,
+      type: "gate.answered",
+      data: { gate: "plan", answer: "approve" },
+    },
+    ...afterApproval,
+  ];
+  const build = (round: number, after: number): LogEvent[] => [
+    {
+      after,
+      type: "step.started",
+      data: { step: "build", role: "implementer", repo: ".", round },
+    },
+    {
+      after: after + 10,
+      type: "step.finished",
+      data: { step: "build", outcome: "succeeded" },
+    },
+  ];
+  const failedTest = (after: number): LogEvent => ({
+    after,
+    type: "test.completed",
+    data: { passed: false, criteria: {} },
+  });
+  const logs: Record<number, LogEvent[]> = {
+    // A: the budget is spent and escalation.requested follows the failed test.
+    1: approved(1, [
+      ...build(1, 40),
+      failedTest(60),
+      { after: 70, type: "escalation.requested", data: {} },
+    ]),
+    // B: the failed test spent the budget and no escalation.requested exists.
+    2: approved(2, [...build(1, 40), failedTest(60)]),
+    // C: an earlier escalation was answered (one more round); a failed test spends the new budget.
+    3: approved(3, [
+      ...build(1, 40),
+      failedTest(60),
+      { after: 70, type: "escalation.requested", data: {} },
+      {
+        after: 80,
+        type: "gate.answered",
+        data: { gate: "escalation", answer: "one_more_round" },
+      },
+      ...build(2, 90),
+      failedTest(120),
+    ]),
+    // D: a criteria gate, a strategy gate and a plan gate.
+    4: opening(4, []),
+    5: [
+      ...opening(5, ["ARK-5-AC1"]),
+      {
+        after: 20,
+        type: "strategy.recorded",
+        data: { count: 2, cards: ["S1", "S2"], recommended: "S1", reason: "" },
+      },
+    ],
+    6: [
+      ...opening(6, ["ARK-6-AC1"]),
+      {
+        after: 25,
+        type: "plan.checked",
+        data: {
+          valid: true,
+          plan_hash: "h",
+          steps: [{ id: "build", role: "implementer", repo: "." }],
+        },
+      },
+    ],
+    // E and F: two budget-spent escalations; E opened first.
+    7: approved(7, [...build(1, 40), failedTest(65)]),
+    8: approved(8, [...build(1, 400), failedTest(420)]),
+  };
+  for (const [number, events] of Object.entries(logs)) {
+    const directory = writeRun({
+      project: "p",
+      run: runOf(Number(number)),
+      ticket: { id: ticketOf(Number(number)), title: `Ticket ${number}` },
+      phase: "building",
+      startedAt: started,
+    });
+    writeEventLog(directory, started, events);
+  }
+  const { baseUrl } = await start();
+  const gatesOf = (snapshot: Snapshot) => (snapshot.gates === "unknown" ? [] : snapshot.gates);
+  const before = await snapshotWhen(baseUrl, (snapshot) => gatesOf(snapshot).length === 8);
+  const sinceOf = (snapshot: Snapshot) =>
+    Object.fromEntries(gatesOf(snapshot).map((gate) => [gate.id, gate.since]));
+  const expected = {
+    [gateOf(1, "escalation")]: at(70),
+    [gateOf(2, "escalation")]: at(60),
+    [gateOf(3, "escalation")]: at(120), // not at(70): that request was answered
+    [gateOf(4, "criteria")]: at(0),
+    [gateOf(5, "strategy")]: at(20),
+    [gateOf(6, "plan")]: at(25),
+    [gateOf(7, "escalation")]: at(65),
+    [gateOf(8, "escalation")]: at(420),
+  };
+  expect(sinceOf(before)).toEqual(expected);
+  // Oldest gate first: the order is by opening time.
+  const order = Object.entries(expected)
+    .toSorted(([, left], [, right]) => left.localeCompare(right))
+    .map(([id]) => id);
+  expect(gatesOf(before).map((gate) => gate.id)).toEqual(order);
+
+  // Three later events on every gated run: the newest event of a run is not its gate's age.
+  for (const number of Object.keys(logs).map(Number))
+    for (const extra of [1, 2, 3])
+      appendRawEvent(
+        runDirectoryOf("p", runOf(number)),
+        "evaluation.recorded",
+        { blockers: [], risks: [], surfaces: ["none"] },
+        logs[number].length + extra,
+      );
+  const after = await snapshotWhen(
+    baseUrl,
+    (snapshot) =>
+      snapshot.runs !== "unknown" &&
+      snapshot.runs.every((run) => Date.parse(run.updated_at) > Date.now() - 60_000),
+  );
+  expect(sinceOf(after)).toEqual(expected);
+  expect(gatesOf(after).map((gate) => gate.id)).toEqual(gatesOf(before).map((gate) => gate.id));
 }, 60_000);
 
 // ---------------------------------------------------------------- ARK-344: the hub reads every Orca message

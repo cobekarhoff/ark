@@ -6,7 +6,7 @@ technique: request accounting per route (a list of every request from navigation
 priority: high
 risk: "Home, Runs or Roadmap poll or fetch after the first load, the ticket page reads its document or its cases more than once or from a third route, the run page reads anything beyond its own `/api/run/` reads, or the run evidence is read twice, or a transcript of 200 rows reads a result or a run file per row or before a click"
 status: active
-changed_by: 2026-11-12-ARK-324-1
+changed_by: 2026-11-12-ARK-335-1
 ---
 
 ## Objective
@@ -21,7 +21,7 @@ Prove the request limits of the hub pages: the first load makes only the documen
 
 ## Steps
 
-1. Open Home. Wait until the stuck count and the `6 pass · 0 fail` review tests show and no stale label remains. Take the recorded requests as the first load.
+1. Open Home. Wait until the stuck count and the `6 pass · 0 fail` review tests show and no stale chip remains. Take the recorded requests as the first load.
 2. Assert the first load holds exactly one `/events` request and otherwise only `/` and `/assets/*`.
 3. Click Runs, Roadmap, Home in the navigation; wait 2 s. Assert no request was sent.
 4. Open `#/ticket/ARK-521`. Assert the ticket page shows. `checkpoint(page, "ticket-page-requests")`. Wait 1 s. Assert the `/api/ticket` requests are exactly `["/api/ticket/p/ARK-521", "/api/ticket/p/ARK-521/cases"]`, in any order.
