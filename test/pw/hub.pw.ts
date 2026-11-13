@@ -656,9 +656,14 @@ test("ARK-T315 ARK-277-AC11 a source that stops answering keeps its last good va
   await expect(agents).toHaveText("unknown");
   await expect(agents).not.toContainText("no live agent");
 
-  // Each source now answers each command twice and then fails.
-  writeFileSync(join(state, "orca.mode"), "twice");
-  writeFileSync(join(state, "plannotator.mode"), "twice");
+  // Every source reads once (the chip vanishes), then each fails: the stale sources have a last
+  // read and so an age, never "unknown", however slow the runner is.
+  writeFileSync(join(state, "orca.mode"), "up");
+  writeFileSync(join(state, "plannotator.mode"), "up");
+  await expect(agents).toContainText("openai/gpt-worker-model", { timeout: 20_000 });
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0, { timeout: 30_000 });
+  writeFileSync(join(state, "orca.mode"), "down");
+  writeFileSync(join(state, "plannotator.mode"), "down");
   await expect(agents).toContainText("openai/gpt-worker-model", { timeout: 20_000 });
   await expect(page.getByTestId("gate-link")).toHaveAttribute(
     "href",
@@ -9394,9 +9399,15 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
     };
   });
   await open(page, proxy.url, "");
-  // Each source answers twice and then fails, so the stale sources have an age.
-  writeFileSync(join(state, "orca.mode"), "twice");
-  writeFileSync(join(state, "plannotator.mode"), "twice");
+  // The chip is absent until the first snapshot: wait for it, or the count-0 wait below passes at once.
+  await expect(page.getByTestId("stale-chip")).toBeVisible({ timeout: 60_000 });
+  // Every source reads once (the chip vanishes), then each fails: the stale sources have a last
+  // read and so an age, never "unknown", however slow the runner is.
+  writeFileSync(join(state, "orca.mode"), "up");
+  writeFileSync(join(state, "plannotator.mode"), "up");
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0, { timeout: 60_000 });
+  writeFileSync(join(state, "orca.mode"), "down");
+  writeFileSync(join(state, "plannotator.mode"), "down");
 
   const chip = page.getByTestId("stale-chip");
   const list = page.getByTestId("stale-list");
