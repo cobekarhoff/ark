@@ -233,6 +233,7 @@ describe("ark retro", () => {
       "gates",
       "escaped_defects",
       "orchestration",
+      "resources",
       "comparison",
     ]);
   });
@@ -1744,5 +1745,68 @@ describe("ark retro models and vendors", () => {
     expect(metrics.cost.by_step.review.usd).toBeCloseTo(0.106, 6);
     expect(out).toContain("helper models: review");
     expect(metrics.comparison.runs_compared).toBe(1);
+  });
+
+  test("ARK-T292 metrics.json holds the resources of the run and ark retro lists its top 3 by memory", () => {
+    // Written by `ark test` (suites) and by the hub (agents): 4 agents, 2 suites at head.
+    mkdirSync(join(runDirectory, "results"), { recursive: true });
+    writeFileSync(
+      join(runDirectory, "results", "resources.json"),
+      JSON.stringify({
+        suites: {
+          unit: { head: { peak_mb: 700, cpu_s: 30, wall_s: 60, wait_s: 0 } },
+          e2e: { head: { peak_mb: 450, cpu_s: 55, wall_s: 90, wait_s: 0 }, base: { cached: true } },
+        },
+        agents: {
+          H1: { peak_mb: 500, cpu_s: 26 },
+          H2: { peak_mb: 250, cpu_s: 12 },
+          H3: { peak_mb: 100, cpu_s: 2 },
+          H4: { peak_mb: 50, cpu_s: 1 },
+        },
+        gaps: [{ from: "2026-10-29T14:21:00.000Z", to: "2026-10-29T14:26:00.000Z" }],
+      }),
+    );
+    const printed = captureRetro();
+    const { resources } = readMetrics();
+    // The peak is the largest entry, never a sum; the CPU seconds are 26+12+2+1 for agents and 30+55 for suites.
+    expect(resources.peak_mb).toBe(700);
+    expect(resources.cpu_s).toBe(126);
+    expect(resources.top.map((entry: { name: string }) => entry.name)).toEqual([
+      "unit head",
+      "H1",
+      "e2e head",
+    ]);
+    const line = printed.split("\n").find((text) => text.startsWith("resources:"))!;
+    expect(line).toContain("suite unit head 700 MB");
+    expect(line.indexOf("agent H1 500 MB")).toBeGreaterThan(line.indexOf("suite unit head 700 MB"));
+    expect(line.indexOf("suite e2e head 450 MB")).toBeGreaterThan(line.indexOf("agent H1 500 MB"));
+    expect(line).not.toContain("H2");
+  });
+
+  test("ARK-T292 a run with no resources.json completes with resources unknown, and an earlier run without it is not counted as zero", () => {
+    const earlierId = "2026-10-28-ARK-900-1";
+    const earlier = join(arkHome, "projects", "demo", "runs", earlierId);
+    writeEvents(earlier, [
+      [
+        "14:00:00.000",
+        "run.started",
+        {
+          run: earlierId,
+          project: "demo",
+          ticket: { id: "ARK-900", title: "t" },
+          criteria: [],
+          round_budget: 1,
+        },
+      ],
+      ["14:10:00.000", "run.closed", { outcome: "merged" }],
+    ]);
+    writeFileSync(
+      join(earlier, "metrics.json"),
+      JSON.stringify({ run: earlierId, cost: { total_usd: 2 }, time: { wall_seconds: 60 } }),
+    );
+    const printed = captureRetro();
+    expect(readMetrics().resources).toBe("unknown");
+    expect(printed).toContain("resources: unknown");
+    expect(readMetrics().comparison.runs_compared).toBe(1);
   });
 });

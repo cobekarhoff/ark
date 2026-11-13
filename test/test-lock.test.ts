@@ -777,6 +777,31 @@ budget.close();`;
       ).toEqual(["first", "second"]);
     });
   });
+
+  // The exit handler goes with close(), so a ticket written after close() would outlive the process: the SIGTERM
+  // race where a suite's take() was still waiting for a memory reading while the runner closed its budget.
+  test("ARK-T59 a take after close() writes no ticket", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ark-admission-"));
+    try {
+      const script = `
+import { openTestBudget } from ${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))};
+const budget = openTestBudget("late", 6, { print: () => {} });
+budget.close();
+await budget.take(6).catch(() => {});`;
+      const child = Bun.spawn(["bun", "-e", script], {
+        env: { ...Bun.env, ARK_HOME: home },
+        stdout: "ignore",
+        stderr: "inherit",
+      });
+      await child.exited;
+      const left = existsSync(join(home, "test-budget"))
+        ? readdirSync(join(home, "test-budget")).filter((name) => name.endsWith(".json"))
+        : [];
+      expect(left).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 const onMac = process.platform === "darwin"; // the fake host reading of test/tmpdir-preload.ts reaches macOS only

@@ -12,7 +12,8 @@ class OrcaFailure extends Error {}
 
 async function call<T>(args: string[], timeout: number): Promise<T> {
   const command = ["orca", "orchestration", ...args, "--json"];
-  if (!Bun.which("orca")) throw new OrcaFailure("orca not found on PATH");
+  if (!Bun.which("orca", { PATH: process.env.PATH }))
+    throw new OrcaFailure("orca not found on PATH");
   const reply = await execJson<{ result?: T }>(command, timeout);
   if (reply?.result === undefined)
     throw new OrcaFailure(`orca orchestration ${args[0]} failed or timed out`);
