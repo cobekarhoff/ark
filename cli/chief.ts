@@ -69,12 +69,18 @@ export async function chiefState(inProject?: string): Promise<void> {
 
   sections.push(
     "## Open runs",
-    openRuns.length === 0
-      ? "none"
-      : table(
-          ["Run", "Phase", "Current step"],
-          openRuns.map((state) => [state.run, state.phase, state.current_step ?? "-"]),
-        ),
+    [
+      openRuns.length === 0 && unreadable.length === 0 ? "none" : "",
+      openRuns.length > 0
+        ? table(
+            ["Run", "Phase", "Current step"],
+            openRuns.map((state) => [state.run, state.phase, state.current_step ?? "-"]),
+          )
+        : "",
+      unreadable.length > 0 ? `unavailable: events of ${unreadable.join(", ")} cannot be read` : "",
+    ]
+      .filter((part) => part !== "")
+      .join("\n\n"),
   );
 
   // Open runs only. A run's last full test.completed decides: a file it no longer records is gone from here.
@@ -197,10 +203,11 @@ export async function chiefState(inProject?: string): Promise<void> {
   const sinceInterview = runs.filter(
     ({ state, closedAt }) => state.phase === "closed" && (closedAt ?? 0) > lastInterview,
   ).length;
-  sections.push(
-    "## Interview",
-    `- Closed runs since the last interview: ${sinceInterview}${sinceInterview >= 10 ? " (due)" : ""}`,
-  );
+  const interviewCount =
+    unreadable.length > 0
+      ? `unavailable: events of ${unreadable.join(", ")} cannot be read`
+      : `${sinceInterview}${sinceInterview >= 10 ? " (due)" : ""}`;
+  sections.push("## Interview", `- Closed runs since the last interview: ${interviewCount}`);
 
   const host = await readHost();
   const reasons = holdReasons(host, {

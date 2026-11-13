@@ -1157,6 +1157,23 @@ describe("ark test red on main", () => {
     expect(event.red_on_main).toBeUndefined();
   });
 
+  test("ARK-T328 an untouched file that the tip of the target branch no longer has is not red on main: the failure keeps counting", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    runFromTip(fixture, { red: redBody, ok: "" }, "DET-2");
+    git(fixture.workspace, "rm", "-q", "test/red.test.ts");
+    git(fixture.workspace, "commit", "-q", "-m", "remove red on main");
+    git(fixture.workspace, "push", "origin", "HEAD:refs/heads/main");
+    commitSided(fixture, fixture.mirrorOf("."), { other: "" });
+
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code).toBe(1);
+    expect(redOnMainLine(result.out, "test/red.test.ts")).toBe(false);
+    expect(result.out).toContain("not checked on main");
+    const event = completedEvents(fixture).at(-1);
+    expect(event.passed).toBe(false);
+    expect(event.red_on_main).toBeUndefined();
+  });
+
   test.each([
     ["the suite has no base_command", "base_command"],
     ["the repo has no origin remote", "origin"],

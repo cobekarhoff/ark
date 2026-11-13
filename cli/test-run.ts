@@ -496,6 +496,10 @@ async function runSuite(
         console.log(`suite      ${suite.name} head  not checked on main  (${checked.reason})`);
       else {
         redOnMain.push(...checked.red);
+        for (const file of checked.unchecked)
+          console.log(
+            `suite      ${suite.name} head  not checked on main  (${file} does not fail at the tip)`,
+          );
         output += checked.log;
         log += checked.log;
         writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
@@ -774,12 +778,12 @@ async function prepareCheckout(
 }
 
 type MainCheck = {
-  /** The files of `files` that the run did not touch and that fail at the tip of the target branch, with the command log; or why none was checked. */
+  /** The files of `files` that the run did not touch and whose tests fail at the tip of the target branch (`red`), the ones the tip run did not show failing, e.g. renamed or deleted there (`unchecked`), and the command log; or why none was checked. */
   check(
     suite: Suite,
     files: string[],
     env: { scratch: string; tmp: string; cores: number; reportBase: string },
-  ): Promise<{ red: string[]; log: string } | { reason: string }>;
+  ): Promise<{ red: string[]; unchecked: string[]; log: string } | { reason: string }>;
   close(): Promise<void>;
 };
 
@@ -829,11 +833,12 @@ function mainCheckOf(
       if (base === undefined) return { reason: `the run has no base commit for ${suite.repo}` };
       const touched = await touchedPaths(base, join(mirror, suite.repo));
       const candidates = files.filter((file) => !touched.has(file));
-      if (candidates.length === 0) return { red: [], log: "" };
+      if (candidates.length === 0) return { red: [], unchecked: [], log: "" };
       ready ??= prepare();
       const reason = await ready;
       if (reason !== null) return { reason };
       const red: string[] = [];
+      const unchecked: string[] = [];
       let log = "";
       for (const [index, file] of candidates.entries()) {
         const reportPath = `${env.reportBase}.main-${index}`;
@@ -850,10 +855,11 @@ function mainCheckOf(
         const again = parsers[suite.parser]({ report, stdout: outcome.stdout });
         const separator = output === "" || output.endsWith("\n") ? "" : "\n";
         log += `main ${file}\n${command}\n${output}${separator}exit ${outcome.code}\n`;
-        if (outcome.code !== 0 || again.some((result) => result.status === "failed"))
+        if (again.some((result) => result.status === "failed" && result.file === file))
           red.push(file);
+        else unchecked.push(file);
       }
-      return { red, log };
+      return { red, unchecked, log };
     },
     async close() {
       if (ready !== null) await ready;
@@ -1121,7 +1127,7 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     const provingResults: TestResult[] = [];
     const headResults = new Map<string, TestResult[]>();
     const headRun = newSide("head");
-    // A quick run runs only own files, so an untouched file never fails there: no red on main check.
+    // A quick run is not a gate, so it needs no main check.
     const mainCheck = quick ? undefined : mainCheckOf(config, runId, mirror, state.worktrees);
     const baseRun = newSide("base");
     const censusRun = newSide("census");

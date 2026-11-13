@@ -292,6 +292,8 @@ test("ARK-T331 chief state lists each red on main file with its run id once, fro
   const broken = ark("chief", "state", "--project", project);
   expect(broken.code, broken.err).toBe(0);
   expect(section(broken.out, "Red on main")).toContain("unavailable");
+  expect(section(broken.out, "Open runs")).toContain(`unavailable: events of ${openRun}`);
+  expect(section(broken.out, "Interview")).toContain("unavailable");
 });
 
 test("ARK-T297 chief state prints the services block of ark services status, with the pid of a running one and the last log line", () => {
