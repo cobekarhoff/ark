@@ -1495,3 +1495,21 @@ exit 1
     }
   });
 });
+
+test("ARK-T354 a runner that exits before it writes runner.json fails ark test with the runner-exited error", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ark-early-"));
+  try {
+    const script = `import { callTest } from ${JSON.stringify(join(import.meta.dir, "../cli/test-runner.ts"))};
+try { await callTest("NOPE-1", "nope", ${JSON.stringify(directory)}, { quick: false, wait: false, stop: false }); } catch (err) { console.log((err as Error).message); }`;
+    const child = Bun.spawn(["bun", "-e", script], {
+      env: { ...process.env, ARK_HOME: join(directory, "home") },
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    expect((await new Response(child.stdout).text()).trim()).toBe(
+      "the runner of NOPE-1 exited before it started",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 10_000);
