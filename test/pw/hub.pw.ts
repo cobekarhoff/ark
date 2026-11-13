@@ -381,7 +381,7 @@ test("ARK-277-AC7 Home shows the tiles first, then the gate, each open run with 
 
 // ---------------------------------------------------------------- AC8
 
-test("ARK-277-AC8 the run page draws one node for each plan step and one edge for each dependency", async ({
+test("ARK-T367 the run page draws one node for each plan step and one edge for each dependency", async ({
   page,
 }) => {
   const { sessions } = isolate();
@@ -752,7 +752,7 @@ test("ARK-277-AC7 an MR whose gh pr view fails shows unknown, never open", async
   await expect(request.getByTestId("ci")).toHaveAttribute("data-ci", "unknown");
 });
 
-test("ARK-277-AC7 an unread question and an escalation of live workers wait on Home, a finished worker's do not", async ({
+test("ARK-T368 an unread question and an escalation of live workers wait on Home, a finished worker's do not", async ({
   page,
 }) => {
   isolate();
@@ -1084,7 +1084,7 @@ test("ARK-284-AC3 a closed run opens from its Roadmap row and from its Runs card
   await expect(page.getByTestId("closed-banner")).toHaveCount(0);
 });
 
-test("ARK-284-AC4 the run page lists each decision of events.ndjson oldest first with its time, and skips a damaged line", async ({
+test("ARK-T369 the run page lists each decision of events.ndjson oldest first with its time, and skips a damaged line", async ({
   page,
 }) => {
   isolate();
@@ -4451,7 +4451,7 @@ async function homeWorld() {
   return launch();
 }
 
-test("ARK-309-AC2 Home counts only the chosen project in its tiles, lists, cost and the header, and the provider limit says all projects, for All, each project and after a reload", async ({
+test("ARK-T370 Home counts only the chosen project in its tiles, lists, cost and the header, and the provider limit says all projects, for All, each project and after a reload", async ({
   page,
 }) => {
   test.setTimeout(120_000);
