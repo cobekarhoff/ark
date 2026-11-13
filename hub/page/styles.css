@@ -15,7 +15,8 @@
   --mute: light-dark(#65615a, #8591a2);
   --red: light-dark(#c2371f, #ff6b5e);
   --amber: light-dark(#c27a0e, #f2b04a);
-  --highlight: light-dark(#f6c870, #8a5d12);
+  /* Text keeps 4.5:1 at the peak of the flash (ARK-T96): every text token holds it on both values. */
+  --highlight: light-dark(#fce9bf, #35260a);
   --green: light-dark(#2d8a57, #46c48a);
   --blue: light-dark(#2f62d8, #6aa6ff);
   --violet: light-dark(#7048c8, #a58bff);
