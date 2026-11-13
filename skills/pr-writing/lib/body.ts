@@ -101,6 +101,14 @@ function differentBlock(ledger: Ledger): Block {
 
 const shortSha = (sha: string) => sha.slice(0, 7);
 
+/** The flow of a screenshot path: `login-1.png` and `login-2.png` are the flow `login`. */
+const flowOf = (path: string) =>
+  path
+    .split("/")
+    .at(-1)!
+    .replace(/\.[^.]+$/, "")
+    .replace(/[-_]\d+$/, "");
+
 /** One screenshot for each flow (`login-1.png` and `login-2.png` are the flow `login`), head first, five at most. */
 function screenshotFlows(ledger: Ledger): { shown: string[]; total: number } {
   const paths = (ledger.evidence ?? []).flatMap((entry) => entry.screenshots);
@@ -109,11 +117,7 @@ function screenshotFlows(ledger: Ledger): { shown: string[]; total: number } {
   );
   const flows = new Map<string, string>();
   for (const path of sorted) {
-    const flow = path
-      .split("/")
-      .at(-1)!
-      .replace(/\.[^.]+$/, "")
-      .replace(/[-_]\d+$/, "");
+    const flow = flowOf(path);
     if (!flows.has(flow)) flows.set(flow, path);
   }
   const shown = [...flows.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, path]) => path);
@@ -186,24 +190,46 @@ function evidenceBlock(ledger: Ledger): Block {
   const lines: string[] = [];
   for (const entry of ledger.evidence ?? []) {
     const prefix = `results/evidence/${entry.testCase}/`;
+    const result = `base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`;
+    const pictures = shown.filter((path) => path.startsWith(prefix));
+    const log = fenced(entry.log ?? []);
     lines.push(
-      ...details(
-        `\`${entry.testCase}\`: base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`,
-        [
-          ...shown
-            .filter((path) => path.startsWith(prefix))
-            .flatMap((path) => [
-              // A path with a space or a parenthesis goes in angle brackets; post.ts reads both forms.
-              `![${entry.testCase} ${path.slice(prefix.length).split("/")[0]}](${/[\s()<>]/.test(path) ? `<${path}>` : path})`,
+      ...details(`\`${entry.testCase}\`: ${result}`, [
+        `Result: ${result}`,
+        "",
+        ...(pictures.length === 0
+          ? []
+          : [
+              "Screenshots:",
               "",
+              ...pictures.flatMap((path) => {
+                const side = path.slice(prefix.length).split("/")[0];
+                const flow = escapeTitle(flowOf(path));
+                const name = escapeTitle(
+                  path
+                    .split("/")
+                    .at(-1)!
+                    .replace(/\.[^.]+$/, ""),
+                );
+                return [
+                  // A path with a space or a parenthesis goes in angle brackets; post.ts reads both forms.
+                  `![${entry.testCase} ${side} ${flow}](${/[\s()<>]/.test(path) ? `<${path}>` : path})`,
+                  "",
+                  `${entry.testCase} ${side}, flow ${flow}: ${name}`,
+                  "",
+                ];
+              }),
             ]),
-          ...fenced(entry.log ?? []),
-        ],
-      ),
+        ...(log.length === 0 ? [] : ["Log (last 20 lines of the head command.log):", "", ...log]),
+      ]),
     );
   }
-  for (const { id, text } of ledger.acEvidence ?? [])
-    lines.push(...details(`\`${id}\`: evidence`, fenced(text.split("\n"))));
+  for (const { id, text } of ledger.acEvidence ?? []) {
+    const body = fenced(text.split("\n"));
+    lines.push(
+      ...details(`\`${id}\`: evidence`, [`Evidence file results/evidence/${id}.md:`, "", ...body]),
+    );
+  }
   if (kind === "perf")
     lines.push(
       "- Perf: `results/baseline.md` and `results/compare.md` in the run folder, not uploaded.",

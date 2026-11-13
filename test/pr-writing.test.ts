@@ -2315,7 +2315,7 @@ test("ARK-T47 the Evidence section has one line for each test case and one scree
   expect(shown).not.toContain("login-2.png");
   expect(shown).not.toContain("search.png");
   expect(section).toMatch(
-    /!\[ARK-T\d+ (base|head)\]\(results\/evidence\/ARK-T\d+\/(base|head)\/screenshots\//,
+    /!\[ARK-T\d+ (base|head) [^\]]+\]\(results\/evidence\/ARK-T\d+\/(base|head)\/screenshots\//,
   );
   expect(section).not.toMatch(/not uploaded/);
 
@@ -2825,6 +2825,39 @@ test("ARK-T287 Evidence section folds each test case and each non-test AC in a d
   expect(caseBlock).toBeDefined();
   expect(blocks.some((block) => block.includes("ARK-T2`: base fail, head pass"))).toBe(true);
   expect(blocks.find((block) => block.includes("AC5"))).toContain("Live check: both images shown.");
+
+  // Labels, and two screenshots of one case read differently (alt text and visible caption).
+  const labels = [
+    "Result: base fail, head pass @",
+    "Screenshots:",
+    "Log (last 20 lines of the head command.log):",
+  ];
+  const positions = labels.map((label) => caseBlock.indexOf(label));
+  expect(positions.every((position) => position >= 0)).toBe(true);
+  expect(positions).toEqual(positions.toSorted((a, b) => a - b));
+  expect(blocks.find((block) => block.includes("AC5"))).toContain(
+    "Evidence file results/evidence/ARK-9/AC5.md:",
+  );
+  const twoShots = detailsBlocks(
+    buildBody({
+      ...ledger,
+      evidence: ledger.evidence!.map((entry) => ({
+        ...entry,
+        screenshots:
+          entry.testCase === "ARK-T1"
+            ? ["login.png", "cart.png"].map(
+                (name) => `results/evidence/ARK-T1/head/screenshots/${name}`,
+              )
+            : [],
+      })),
+    }),
+  ).find((block) => block.includes("ARK-T1`"))!;
+  expect(twoShots).toContain(
+    "![ARK-T1 head cart](results/evidence/ARK-T1/head/screenshots/cart.png)\n\nARK-T1 head, flow cart: cart\n",
+  );
+  expect(twoShots).toContain(
+    "![ARK-T1 head login](results/evidence/ARK-T1/head/screenshots/login.png)\n\nARK-T1 head, flow login: login\n",
+  );
 
   // Exactly the last 20 lines, in a fence longer than any backtick run inside.
   expect(caseBlock).not.toContain("early");
