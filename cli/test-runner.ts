@@ -16,7 +16,8 @@ import { format } from "node:util";
 import { ArkError } from "./errors.ts";
 
 /**
- * `ark test` starts a detached runner process and follows it. The runner owns the host lock, the suites and
+ * `ark test` starts a detached runner process, through a shell that exits at once so the runner is no child of the
+ * caller, and follows it. The runner owns the host lock, the suites and
  * their process groups; it writes the run folder files below, so the first call, `--wait` and a second call all
  * print the same lines and exit with the same code, and a dead caller changes nothing.
  *
@@ -34,8 +35,13 @@ export type RunnerRecord = {
   started: string;
   finished?: string;
   exit_code?: number;
+  /** Set by the caller that started the runner (see runnerTokenVariable). */
+  token?: string;
 };
 
+/** The caller puts a token in this variable; the runner copies it into its record, so the caller finds its own runner. */
+const runnerTokenVariable = "ARK_TEST_RUNNER_TOKEN";
+const startLimitMilliseconds = 30_000;
 /** Exit code of a runner that finds another live runner for its run. */
 const alreadyRunning = 3;
 const pollMilliseconds = 50;
@@ -159,6 +165,7 @@ export async function runnerMain(
     mode: quick ? "quick" : "full",
     state: "running",
     started: new Date().toISOString(),
+    token: process.env[runnerTokenVariable],
   };
   writeFileSync(paths.out, "");
   writeFileSync(paths.err, "");
@@ -273,8 +280,17 @@ async function startAndFollow(
       console.error(`ark: attaching to the ${mode} ark test of ${runId} (pid ${live.pid})`);
       return follow(resultsDirectory, runId);
     }
-    const child = Bun.spawn(
+    const spawnedAt = new Date().toISOString();
+    const token = randomUUID();
+    // The shell starts the runner in the background and exits at once, so the runner is reparented to init and no
+    // process below the caller is its parent: a kill of the caller's descendants never reaches it. `detached` gives
+    // it its own process group.
+    Bun.spawn(
       [
+        "sh",
+        "-c",
+        '"$@" &',
+        "ark-test-runner",
         process.execPath,
         join(import.meta.dir, "ark.ts"),
         "test-runner",
@@ -283,20 +299,30 @@ async function startAndFollow(
         project,
         ...(quick ? ["--quick"] : []),
       ],
-      { stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true },
-    );
-    child.unref();
+      {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+        detached: true,
+        env: { ...process.env, [runnerTokenVariable]: token },
+      },
+    ).unref();
+    // The runner's pid is unknown, so its record carries the token. A live record of another token is a runner
+    // that won the claim: loop to attach to it. A finished record that started after the spawn is followed as is.
+    const deadline = Date.now() + startLimitMilliseconds;
     for (;;) {
-      if (readRecord(resultsDirectory)?.pid === child.pid) return follow(resultsDirectory, runId);
-      if (child.exitCode !== null) {
-        if (readRecord(resultsDirectory)?.pid === child.pid) return follow(resultsDirectory, runId);
-        if (child.exitCode === alreadyRunning) break;
-        throw new ArkError(`the runner of ${runId} exited ${child.exitCode} before it started`);
+      const record = readRecord(resultsDirectory);
+      if (record !== null) {
+        if (record.token === token) return follow(resultsDirectory, runId);
+        if (record.state === "running" && identityLive(record)) break;
+        if (record.started >= spawnedAt) return follow(resultsDirectory, runId);
       }
+      if (Date.now() > deadline)
+        throw new ArkError(
+          `the runner of ${runId} did not start within ${startLimitMilliseconds} ms`,
+        );
       await Bun.sleep(25);
     }
-    // another caller's runner won the claim: read its record and attach
-    await Bun.sleep(pollMilliseconds);
   }
 }
 
