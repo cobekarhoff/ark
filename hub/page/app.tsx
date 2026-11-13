@@ -27,11 +27,14 @@ import {
   type ThemeChoice,
 } from "./store.tsx";
 import { TicketPage } from "./Ticket.tsx";
+import { Resources } from "./Resources.tsx";
+import { ResourcesStrip } from "./ResourcesStrip.tsx";
 
 const views = [
   ["home", "#/", "Home"],
   ["runs", "#/runs", "Runs"],
   ["roadmap", "#/roadmap", "Roadmap"],
+  ["resources", "#/resources", "Resources"],
 ] as const;
 
 const themes: [ThemeChoice, string][] = [
@@ -174,12 +177,14 @@ function Shell() {
           <StaleChip />
         </div>
       </header>
+      <ResourcesStrip />
       <main id="main" tabIndex={-1} data-frozen={frozen || undefined}>
         {route.view === "home" ? <Home /> : null}
         {route.view === "runs" ? <Runs /> : null}
         {route.view === "run" ? <Run run={route.run!} sub={route.sub} at={route.at} /> : null}
         {route.view === "roadmap" ? <Roadmap /> : null}
         {route.view === "ticket" ? <TicketPage id={route.arg!} /> : null}
+        {route.view === "resources" ? <Resources /> : null}
       </main>
     </>
   );

@@ -679,7 +679,12 @@ none. `same_vendor_review` is true when a reviewer step ran all of its models on
 implementer step in the same repo also ran (`claude-` is anthropic, `gpt-` is openai, any other
 model has no vendor). A reviewer step that ran models of two vendors is `mixed`: it is not same
 vendor, `ark retro` prints `mixed review steps: <steps>`. It prints `same vendor review: true
-(<steps>)` or `false`. Both are reports only.
+(<steps>)` or `false`. Both are reports only. The `resources` object holds `peak_mb` (the largest
+single peak of the run's suites and agents, from `results/resources.json`: the peaks overlap, so
+they are never added), `cpu_s` (the CPU seconds of every suite side and agent, added) and `top` (the
+3 entries with the largest peak, each with `kind`, `name`, `peak_mb` and `cpu_s`); it is `unknown`
+when the run has no `resources.json` or it holds no figure. It prints `resources: peak <MB> MB, <s>
+CPU s; top 3 by memory: ...` or `resources: unknown`.
 ```
 
 ### chief state
