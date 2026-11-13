@@ -479,6 +479,7 @@ export function retro(runId: string, inProject?: string): void {
   const stages = stageTimes(events);
   const owners = ownersOf(
     sessions.map((session) => ({
+      file: session.file,
       cwd: session.cwd,
       start: session.start,
       mtime: session.mtime,

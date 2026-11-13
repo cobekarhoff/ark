@@ -423,6 +423,8 @@ export type StepWindow = {
   repo: string;
   start: number;
   end: number | null;
+  /** Session file of the last worker.started of this window (a path); absent in the older event form or when unknown. */
+  session?: string;
 };
 
 export type StageTimes = { evaluationEnd?: number; designStart?: number; designEnd?: number };
@@ -445,6 +447,10 @@ export function stepWindows(events: ArkEvent[]): StepWindow[] {
         (window) => window.id === event.data.step && window.end === null,
       );
       if (open) open.end = Date.parse(event.time);
+    }
+    if (event.type === "worker.started" && event.data.session && event.data.session !== "unknown") {
+      const window = windows.findLast((candidate) => candidate.id === event.data.step);
+      if (window) window.session = event.data.session;
     }
   }
   return windows;
