@@ -109,19 +109,22 @@ const flowOf = (path: string) =>
     .replace(/\.[^.]+$/, "")
     .replace(/[-_]\d+$/, "");
 
-/** One screenshot for each flow (`login-1.png` and `login-2.png` are the flow `login`), head first, five at most. */
-function screenshotFlows(ledger: Ledger): { shown: string[]; total: number } {
-  const paths = (ledger.evidence ?? []).flatMap((entry) => entry.screenshots);
-  const sorted = [...paths].sort(
-    (a, b) => Number(a.includes("/base/")) - Number(b.includes("/base/")) || a.localeCompare(b),
-  );
-  const flows = new Map<string, string>();
-  for (const path of sorted) {
-    const flow = flowOf(path);
-    if (!flows.has(flow)) flows.set(flow, path);
+/** One screenshot for each flow of a test case and side (`login-1.png` and `login-2.png` are one flow), five at most; `omitted` counts the flows cut. */
+function screenshotFlows(ledger: Ledger): { shown: string[]; omitted: number } {
+  const paths = [...new Set((ledger.evidence ?? []).flatMap((entry) => entry.screenshots))].sort();
+  // The directory holds the test case and the side, so equal file names in two cases stay apart.
+  const flows = new Map<string, { flow: string; path: string }>();
+  for (const path of paths) {
+    const key = `${path.slice(0, path.lastIndexOf("/"))}/${flowOf(path)}`;
+    if (!flows.has(key)) flows.set(key, { flow: flowOf(path), path });
   }
-  const shown = [...flows.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, path]) => path);
-  return { shown: shown.slice(0, 5), total: paths.length };
+  const ordered = [...flows.values()].sort(
+    (a, b) => a.flow.localeCompare(b.flow) || a.path.localeCompare(b.path),
+  );
+  return {
+    shown: ordered.slice(0, 5).map(({ path }) => path),
+    omitted: Math.max(0, ordered.length - 5),
+  };
 }
 
 /** A test title as literal Markdown text: one line, with the characters that format or break a table escaped. */
@@ -186,7 +189,7 @@ const details = (summary: string, inner: string[]) => [
 
 function evidenceBlock(ledger: Ledger): Block {
   const kind = ledger.ticket?.kind;
-  const { shown } = screenshotFlows(ledger);
+  const { shown, omitted } = screenshotFlows(ledger);
   const lines: string[] = [];
   for (const entry of ledger.evidence ?? []) {
     const prefix = `results/evidence/${entry.testCase}/`;
@@ -224,6 +227,8 @@ function evidenceBlock(ledger: Ledger): Block {
       ]),
     );
   }
+  if (omitted > 0)
+    lines.push(`- Screenshots: ${omitted} more flow(s) left out, five are shown at most.`);
   for (const { id, text } of ledger.acEvidence ?? []) {
     const body = fenced(text.split("\n"));
     lines.push(

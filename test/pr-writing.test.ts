@@ -2332,6 +2332,19 @@ test("ARK-T47 the Evidence section has one line for each test case and one scree
   ).toEqual(["alpha-1.png", "beta-1.png", "gamma-1.png"]);
 });
 
+test("ARK-T47 two test cases that share a screenshot name each keep their image, and a cut is counted", () => {
+  const shared = evidenceBody(evidenceWith(["login.png"], ["login.png"]));
+  const shown = screenshotNames(evidenceSection(shared.body));
+  expect(shown.filter((path) => path.includes("ARK-T1/"))).toHaveLength(1);
+  expect(shown.filter((path) => path.includes("ARK-T2/"))).toHaveLength(1);
+
+  const cut = evidenceBody(
+    evidenceWith(["a.png", "b.png", "c.png", "d.png"], ["a.png", "b.png", "c.png"]),
+  );
+  expect(screenshotNames(evidenceSection(cut.body))).toHaveLength(5);
+  expect(evidenceSection(cut.body)).toContain("2 more flow(s) left out");
+});
+
 test("ARK-T47 EVID04 passes the complete body, fails with no section, warns past five screenshots", () => {
   const { body, evid04 } = evidenceBody(
     evidenceWith(
