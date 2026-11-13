@@ -6,7 +6,7 @@ technique: state transition (first load, then each view); controlled page clock 
 priority: high
 risk: "a view polls the hub after the first load, or opens a second event stream, or an appended event does not reach Home without a page request; or the 30-second silence check waits in real time"
 status: active
-changed_by: 2026-11-08-ARK-331-1
+changed_by: 2026-11-12-ARK-335-1
 ---
 
 ## Objective
@@ -22,7 +22,7 @@ Expected: When the page is open, it shall send no request after its first load a
 
 ## Steps
 
-1. Open the hub; wait for the run card and no stale label.
+1. Open the hub; wait for the run card and no stale chip.
 2. Assert the requests are `/`, `/assets/*` and exactly one `/events`.
 3. Install the page clock. For Home, Runs and Roadmap in turn, open the view, then fast-forward the clock by 30 s and assert no request was sent.
 4. On Home, append a `merge_request.opened` event to the run log; assert the MR shows `!77` within 5 s.
