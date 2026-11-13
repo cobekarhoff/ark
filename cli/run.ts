@@ -264,6 +264,29 @@ function takesOverFromDeadWorker(events: ArkEvent[], stepId: string): boolean {
   );
 }
 
+/** A finished --merge step merged origin's target by hand: record that tip, so ark test's base side follows it. Nothing is recorded when the worker did not merge it. */
+function recordMergedTarget(project: string, directory: string, repo: string): void {
+  const worktree = deriveState(readEvents(directory)).worktrees.find(
+    (entry) => entry.repo === repo,
+  );
+  if (!worktree) return;
+  const target = targetBranch(worktree.path, repoBase(loadConfig(project), repo));
+  const tip = Bun.spawnSync(["git", "-C", worktree.path, "rev-parse", `origin/${target}`]);
+  if (tip.exitCode !== 0) return;
+  const commit = tip.stdout.toString().trim();
+  const merged = Bun.spawnSync([
+    "git",
+    "-C",
+    worktree.path,
+    "merge-base",
+    "--is-ancestor",
+    commit,
+    "HEAD",
+  ]);
+  if (merged.exitCode === 0)
+    appendEvent(directory, "worktree.synced", { repo, conflict: false, target_commit: commit });
+}
+
 /**
  * Starts the worker of a plan step through Orca and records `step.started` and `worker.started`.
  * The caller has validated the start. A step that was interrupted restores its recorded session, or starts
@@ -421,6 +444,8 @@ export async function runStep(
       ...(started?.data.merge ? { merge: true } : {}),
       ...(notStarted ? { not_started: true } : {}),
     });
+    if (started?.data.merge && outcome === "succeeded")
+      recordMergedTarget(project, directory, started.data.repo);
     console.log(`${runId} ${stepId} ${outcome}${notStarted ? " (not started)" : ""}`);
     return;
   }
