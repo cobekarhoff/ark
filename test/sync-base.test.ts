@@ -58,7 +58,7 @@ function syncedRun(kind: "feature" | "refactor") {
   const bare = join(mkdtempSync(join(tmpdir(), "ark-origin-")), "github.com", "org", "core.git");
   mkdirSync(bare, { recursive: true });
   for (const args of [
-    ["-C", bare, "init", "--bare", "-q"],
+    ["-C", bare, "init", "--bare", "-q", "--initial-branch=main"],
     ["-C", workspace, "remote", "add", "origin", bare],
     ["-C", workspace, "push", "origin", "HEAD:refs/heads/main"],
     ["-C", workspace, "remote", "set-head", "origin", "main"],
@@ -153,7 +153,7 @@ function moveTarget(workspace: string, files: Record<string, string>): string {
   }
   git(clone, "add", "-A");
   git(clone, "commit", "-qm", "target move");
-  git(clone, "push", "-q", "origin", "main");
+  git(clone, "push", "-q", "origin", "HEAD:refs/heads/main");
   return git(clone, "rev-parse", "HEAD");
 }
 
