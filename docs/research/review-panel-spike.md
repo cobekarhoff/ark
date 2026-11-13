@@ -1,5 +1,7 @@
 # Review panel spike: would a second reviewer model have caught the escaped defects?
 
+> Spike report, measured 2026-11-07 (ARK-349). A snapshot, not current behavior: the reviewer model named below is the one used then. Outcome: rejected, no always-on review panel (section 4.2). The replays need local run data and are not reproducible from this repo.
+
 Run ARK-349, replays done on 2026-11-07 with omp v18.16.0, in two rounds. **Question:** Ark reviews each change with one model (`openai-codex/gpt-6.1-sol`). Five reviews let a defect reach main (`reviewer: missed` in `escaped-defects.yml`). Would a second model, on the same prompt, have caught them?
 
 Round 1 gave the models no diff, only a command to produce it (section 3). Round 2 (sections 1, 2 and 4) gives every review the pinned diff as a read-only file. Round 2 is the measured result. Round 1 stays as a labelled baseline.

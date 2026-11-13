@@ -11,20 +11,22 @@ This page covers two cases:
 
 You need:
 
-- The Orca desktop app, running. Master Chief must run inside an Orca terminal.
-- The `ark` CLI and `git` on your path.
-- The harnesses your roles use, such as `claude` and `codex`.
+- The Orca desktop app, running, and its `orca` CLI on your PATH. Master Chief must run inside an Orca terminal. Ark runs `orca repo list` and `orca orchestration ...` for you.
+- [Bun](https://bun.sh), [OMP](https://omp.sh) and `git`. Ark is set up as in the [README](../../README.md): `bun link` puts `ark` on your PATH, and `omp plugin link .` makes `/skill:ark` available in OMP.
+- `jq`. The [background services](background-services.md) need it.
+- Any other harness your roles use, such as `claude` or `codex`.
 - For a project with several repos that run together, Docker with Docker Compose.
 
 ## Bootstrap a single repo
 
-1. Open a terminal in Orca and start Master Chief in the repo. For Ark:
+1. Open a terminal in Orca in the repo, start `omp`, and run `/skill:ark bootstrap`. This session plays Master Chief for the setup. For Ark:
 
    ```sh
    cd ~/Dev/abbott/ark
+   omp
    ```
 
-   Then start your harness and run `/skill:ark bootstrap`.
+   Then, in the `omp` session, run `/skill:ark bootstrap`.
 
 2. Wait while Master Chief detects the project. It asks you nothing yet. It reads:
 
@@ -37,7 +39,7 @@ You need:
 
 3. Answer any questions. Master Chief asks one at a time and recommends an answer. For example:
 
-   > Which models should the roles use? Recommended: the detected default, `anthropic/claude-sonnet-5-5` for the implementer, validator, evaluator, designer, chief and test writer and `openai-codex/gpt-6.1-sol` for the reviewer and test reviewer, because cross-vendor review catches more defects.
+   > Which models should the roles use? Recommended: the newest Anthropic Sonnet-class model that `omp models --json` lists for the implementer, validator, evaluator, designer, chief and test writer, and a model from another vendor for the reviewer and test reviewer, because cross-vendor review catches more defects.
 
    Reply with "yes" to take the recommendation, or give your own answer.
 
@@ -66,10 +68,22 @@ You need:
      implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
+     evaluator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+     designer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      test_reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
    ```
+
+   `ark status` fails without `implementer`, `validator` and `reviewer`. The other roles are optional in the file, but each run needs them:
+
+   | Role            | Used for                                                                                                                     | Without it                                                |
+   | --------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+   | `evaluator`     | Reads the ticket and the code before the criteria gate                                                                       | `ark evaluation record` refuses every run                 |
+   | `designer`      | Makes mockups and strategy cards for a change a person will see                                                              | `ark strategy record` refuses a ticket that needs mockups |
+   | `test_writer`   | Designs the test cases after the strategy, before `plan.yml`                                                                 | The run lead stops and escalates to Master Chief          |
+   | `test_reviewer` | Reviews the test cases. No implementer starts before it approves. Use a different vendor from the implementer and the writer | The run lead stops and escalates to Master Chief          |
+   | `chief`         | Master Chief                                                                                                                 | `ark chief handover` stops and names the role             |
 
    If a repo has UI code, Master Chief also offers to make `PRODUCT.md` with impeccable `init` and `DESIGN.md` with impeccable `document` in that repo. With no UI code, it asks one question: is the project designed for a UI that does not exist yet? On yes it offers `PRODUCT.md` only. On no it makes no design file. It never writes over an existing `PRODUCT.md` or `DESIGN.md`: it skips the file and names it in the summary.
 
@@ -83,13 +97,12 @@ You need:
 
 A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one: `clara-agentic-environment` holds `repos/platform`, `repos/shared/packages` and more. Follow the steps for a single repo, with these differences.
 
-1. Start Master Chief in the meta-repo root:
+1. Open an Orca terminal in the meta-repo root, start `omp`, and run `/skill:ark bootstrap`:
 
    ```sh
    cd ~/Dev/abbott/clara-agentic-environment
+   omp
    ```
-
-   Then run `/skill:ark bootstrap`.
 
 2. Master Chief detects more. It finds every nested repo up to four levels deep, for example `repos/platform` and `repos/shared/packages`. For each repo it reads the stack: Python from `pyproject.toml`, Node from `package.json`. It looks for suites by name (`integration`, `e2e`) and picks the runner and parser: `pytest` for Python suites, `behave` for suites with `.feature` files, `bun` for Bun tests. It reads `docker-compose.yml` at the workspace root and the `Taskfile` for the team's compose command. It reads the ticket source from `.mcp.json` and the docs: Jira for Clara, although the code is on GitLab.
 
@@ -119,26 +132,73 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
      implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
+     evaluator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
+     designer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      test_reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
    ```
 
-   The reviewer of the test cases (`test_reviewer`) uses a different vendor from the implementer and the writer. Without `roles.test_writer` or `roles.test_reviewer`, the run lead stops and escalates to Master Chief.
+   The roles are the same as for a single repo, and each one is described in the table in step 7 above. Without `roles.evaluator`, `ark evaluation record` refuses every run. Without `roles.designer`, `ark strategy record` refuses a ticket that needs mockups. Without `roles.test_writer` or `roles.test_reviewer`, the run lead stops and escalates to Master Chief.
 
-   `ark test` runs each suite from `<run folder>/workspace/<repo>`. Before the suites it runs `docker compose --project-directory <run folder>/workspace -p <run id> up -d --wait`, so the compose file resolves every `./repos/*` path to the run's worktrees.
+   `ark test` runs each suite from `<run folder>/workspace/<repo>`. Before the suites it runs `docker compose --project-directory <run folder>/workspace -p <run id in lowercase> up -d --wait`, so the compose file resolves every `./repos/*` path to the run's worktrees. After the suites it runs `down`.
 
 ## Check that bootstrap worked
 
-1. Run the config check yourself:
+1. Run the config check yourself. Use your project name in place of `ark`:
 
    ```sh
    ARK_PROJECT=ark ark status
    ```
 
-   Use your project name in place of `ark`. Exit code 0 means `ark.yml` passes. For an invalid file, the command exits 1 and prints `config error: <project>: <message>`. The message names the field to fix.
+   `ark status` reads `ark.yml`, then checks that each role's harness is on your PATH and that each omp role's model is in `omp models --json`. If everything passes, it exits 0 and lists your open runs, or prints this:
 
-2. Run `orca repo list --json` and check that each repo of the project appears with `externalWorktreeVisibility` set to `show`.
+   ```text
+   no open runs
+   ```
+
+   A field that is wrong, or a missing required role, prints the file, the field and the reason, then exits 1:
+
+   ```text
+   config error: ark: /Users/you/.ark/projects/ark/ark.yml: suites[0].parser must be one of bun, pytest, behave
+   no open runs
+   ark: 1 project config(s) invalid
+   ```
+
+   A role that cannot run prints the project, each role and the reason, then exits 1. Here a role names a harness that is not installed:
+
+   ```text
+   no open runs
+   ark
+     role validator: harness pi not installed
+   ark: 1 role(s) cannot run
+   ```
+
+   And here two roles name an omp model that omp does not list:
+
+   ```text
+   no open runs
+   ark
+     role implementer: omp anthropic/nope-9: model not found by omp
+     role validator: omp anthropic/nope-9: model not found by omp
+   ark: 2 role(s) cannot run
+   ```
+
+   `ark status` does not check `evaluator`, `designer`, `test_writer` or `test_reviewer`, because they are optional in the file. Read the table in step 7 and confirm you set them.
+
+2. Run `orca repo list --json` and check that each repo of the project appears with `externalWorktreeVisibility` set to `show`. The output is JSON; each repo is an entry in `result.repos`:
+
+   ```json
+   {
+     "result": {
+       "repos": [
+         { "id": "...", "path": "/Users/you/Dev/abbott/ark", "externalWorktreeVisibility": "show" }
+       ]
+     }
+   }
+   ```
+
+   The real output has more fields for each repo.
 
 3. Start the first ticket with Master Chief: `/skill:ark chief` and a ticket ID. The first run is the E2E check of the whole setup.
 
@@ -150,4 +210,4 @@ Edit `~/.ark/projects/<project>/ark.yml` by hand, or run `/skill:ark bootstrap` 
 
 - [The `ark.yml` fields](../reference/cli.md#arkyml-fields)
 - [Architecture: multi-repo by local composition](../explanation/architecture.md#multi-repo-by-local-composition)
-- [Orca spike findings](../explanation/orca-spikes.md)
+- [Orca spike findings](../research/orca-spikes.md)

@@ -1,6 +1,17 @@
 # Ark
 
-Ark takes tickets to merge-ready changes. You talk to one Master Chief session. It starts a run lead for each ticket, the run lead plans the work across the project's repos and runs workers, and you decide at gates and merge.
+Ark takes a ticket to merge-ready changes in one repo or across several dependent repos. You talk to one agent session, Master Chief. It starts a run lead for each ticket; the run lead plans the work and starts workers to build, test and review it. You decide at the gates and you merge.
+
+## Start with these
+
+| Term                   | In one line                                               |
+| ---------------------- | --------------------------------------------------------- |
+| **Ticket**             | The requested work, with acceptance criteria.             |
+| **Run**                | One attempt to take one ticket to a closed outcome.       |
+| **Master Chief**       | The one agent session you talk to.                        |
+| **Run lead**           | The agent that owns one ticket and plans its run.         |
+| **Gate**               | A point where the run waits for your decision.            |
+| **Merge request (MR)** | What Ark opens for you to review and merge, one per repo. |
 
 ## Work
 
@@ -16,20 +27,28 @@ _Avoid_: Requirement, condition
 One lasting statement of what the product does, in `test/cases/<KEY>-T<n>.md`. Its ID starts the title of the test that runs it. An AC links to its test cases through `verified_by`, many to many (ADR 0010).
 _Avoid_: Test, scenario
 
+**Kind**:
+A ticket field: `feature` (the default), `bug`, `perf` or `refactor`. It changes what `ark test` and `ark merge-request open` require.
+_Avoid_: Type, category
+
 **Evidence**:
-What shows that an AC holds, kept in the run folder under `results/evidence/`: for each `verified_by` test case, a `base/` and a `head/` folder with `result.json`, `command.log` and any `screenshots/` from the base and head runs of `ark test`; for a method other than `test`, one file `<AC id>.md` in the shape of its method plus the human's `manual` gate answer.
+What shows that an AC holds, kept in the run folder under `results/evidence/`: for each `verified_by` test case, a `base/` and a `head/` folder with `result.json`, `command.log` and any `screenshots/` from the base and head runs of `ark test`; for a method other than `test`, one file `<AC id>.md` in the shape of its method plus the human's `manual` gate answer. A manual AC may also commit its evidence file under `docs/evidence/`.
 _Avoid_: Proof file, report
 
 **Run**:
 One attempt to take a ticket from start to a closed outcome. A ticket can have several runs over time, but only one open at once.
 _Avoid_: Attempt, session, job
 
+**Run folder**:
+The directory `$ARK_HOME/projects/<project>/runs/<run>/`. It holds `events.ndjson`, `state.json`, the plan, the results, the findings and `retro.md`.
+_Avoid_: Run directory
+
 **Outcome**:
 How a closed run ended: merged, abandoned, aborted or handed off.
 _Avoid_: Result, status
 
 **Merged**:
-Every MR of the run was merged by a human.
+Every MR of the run was merged on the git host, by a human or by the auto-merger (`ark services install`). Ark's agents and the `ark` command never merge.
 _Avoid_: Done, shipped
 
 **Abandoned**:
@@ -80,7 +99,7 @@ The agent that drives one run across every repo its ticket touches. It plans, st
 _Avoid_: Orchestrator, ticket lead, lead
 
 **Worker**:
-An agent a run lead starts for one step: an implementer, validator or reviewer. The run lead also starts one evaluator before it plans, and one Designer when the ticket changes something a person sees, unless the surface is only `none`, or there is one card and the surface is only `document`, `cli_output` or `none`. A worker never starts other agents.
+An agent a run lead starts for one step. There are seven roles: implementer, validator, reviewer, evaluator, designer, test case writer and test case reviewer. The run lead starts one evaluator before it plans, and one designer when the ticket changes something a person sees, unless the surface is only `none`, or there is one card and the surface is only `document`, `cli_output` or `none`. It starts the test case writer and test case reviewer after the strategy and before `plan.yml`. A worker never starts other agents.
 _Avoid_: Subagent, child agent, helper
 
 **Implementer**:
@@ -102,6 +121,14 @@ _Avoid_: Pre-reviewer, triage agent
 **Designer**:
 The worker that makes mockups for the strategy cards, and for a question about interaction a running prototype in a throwaway worktree. It revises them in each design round and never edits product code. Mockups never go into an MR. `roles.designer` in `ark.yml` sets its harness and model, and it is optional: it is not needed when the surface is only `none`, or when there is one card and the surface is only `document`, `cli_output` or `none`.
 _Avoid_: UI agent, artist
+
+**Test case writer**:
+The worker the run lead starts after the strategy and before it writes `plan.yml`. It writes the run's test cases and never test code or product code. `roles.test_writer` in `ark.yml` sets its harness and model.
+_Avoid_: Test designer
+
+**Test case reviewer**:
+The worker that approves or rejects the test cases, from a different vendor than the writer by default, and checks the diff after the validator step. No implementer starts before it approves. `roles.test_reviewer` in `ark.yml` sets its harness and model.
+_Avoid_: QA reviewer
 
 **Strategy**:
 A whole way to do the ticket, written as a short card in `strategies.md`: approach, interfaces, tradeoffs, rough steps, optional mockup links and a recommendation. With one possible strategy, the file has one card and a reason.
@@ -142,6 +169,10 @@ _Avoid_: Task list, workflow, pipeline
 One piece of a plan: one role's work in one repo, the steps it waits for, and the ACs it serves.
 _Avoid_: Task, node, job, stage
 
+**Proof**:
+What lets an AC count as met. For `method: test`, every test case in its `verified_by` passes at head in the last `ark test`. For another method, its evidence file exists and you answered `manual ok`. `ark merge-request open` refuses until every AC is met (ADR 0010).
+_Avoid_: Verification
+
 **Finding**:
 A defect a reviewer reports, ranked from P0 (must fix) to P3 (minor).
 _Avoid_: Issue, comment, bug report
@@ -153,8 +184,8 @@ A point where the run waits for your decision. The gates are criteria (opens on 
 _Avoid_: Checkpoint, approval step
 
 **Answer**:
-Your decision at a gate. A decision made by an agent is never an answer.
-_Avoid_: Approval, sign-off, vote
+Your decision at a gate, such as `approve`, `change` or `abort` at the plan gate. A decision made by an agent is never an answer.
+_Avoid_: Sign-off, vote
 
 **Round**:
 One return to implementation after the first build, caused by a failing test case, a finding the run lead sends back, or an extra round granted at an escalation, by you or by auto (up to 2).
@@ -167,6 +198,25 @@ _Avoid_: Retry limit, max attempts
 **Escalation**:
 The gate a run reaches when its round budget is spent. You grant one more round, take over, or abort. With `gates.escalation: auto`, Ark grants the first 2 extra rounds itself (`by: auto`) and asks you after that. It never answers an escalation that `ark escalate` requested.
 _Avoid_: Failure, stuck run
+
+## Tools
+
+**Orca**:
+The desktop app that starts and hosts every agent session and carries messages between them. Master Chief must run in an Orca terminal (ADR 0005).
+_Avoid_: Terminal app
+
+**Plannotator**:
+The browser surface where you read, annotate and approve a plan. It is optional: the chat works without it (ADR 0005).
+
+**Orca Run and Orca Task**:
+Orca's own objects. An Orca Run groups a coordinator and the workers it starts, for example `Master Chief: <project> tickets` or `Ark run <run>`. An Orca Task is a queued entry in Orca's task list. Neither is an Ark run or a ticket.
+
+**Harness**:
+The agent program a role runs in: `claude`, `codex`, `omp` or `pi`. `ark.yml` names one for each role.
+_Avoid_: Runtime, engine
+
+**Skill and playbook**:
+A skill is an entry point, such as `/skill:ark chief`. A playbook is the instructions the skill loads for one role, in `skills/ark/playbooks/`.
 
 ## Projects
 
