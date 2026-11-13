@@ -1,7 +1,10 @@
 /// <reference lib="webworker" />
 import { parsers, readHead } from "../cli/usage/index.ts";
+import { buildConversation, type ConversationInput } from "./conversation.ts";
 import { readTranscriptPage, readTranscriptResult } from "./transcript.ts";
 import type { WorkerReply, WorkerRequest } from "./usage.ts";
+
+let conversationInput: ConversationInput | null = null;
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
@@ -13,6 +16,14 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       reply = {
         id: request.id,
         page: readTranscriptPage(request.file, request.harness, request.cursor ?? 0),
+      };
+    } else if (request.kind === "conversation") {
+      if (request.input) conversationInput = request.input;
+      if (!conversationInput || conversationInput.version !== request.version || !request.query)
+        throw new Error("conversation input is not loaded");
+      reply = {
+        id: request.id,
+        answer: buildConversation(conversationInput, request.runs ?? [], request.query),
       };
     } else if (request.kind === "result") {
       reply = {

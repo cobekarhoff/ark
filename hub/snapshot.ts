@@ -10,11 +10,15 @@ import {
   parseAgentTitle,
   readAgentWait,
   readGithub,
+  readDirectory,
+  readInbox,
   readOrca,
   readPlannotator,
   readProviderLimits,
   readQueues,
   signatureOf,
+  type InboxRead,
+  type RunWorkers,
   type QueueRead,
   type ArkRun,
   type ArkValue,
@@ -26,6 +30,14 @@ import {
   type PsAgent,
   readTicketDocument,
 } from "./sources.ts";
+import type {
+  ConversationInput,
+  ConversationQuery,
+  ConversationReply,
+  Directory,
+  InboxMessage,
+  RunEvents,
+} from "./conversation.ts";
 import type {
   Agent,
   ClosedBand,
@@ -65,6 +77,8 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   evidence: allIntervalMilliseconds || 5000,
   queue: allIntervalMilliseconds || 3000, // its own source: a slow Orca queue never delays another source
 };
+/** The full inbox read (ARK-344): its own loop, never a snapshot source, so a failure never touches `orca` and no message reaches `/events`. */
+const conversationIntervalMilliseconds = allIntervalMilliseconds || 15_000;
 
 const usageTimeoutMilliseconds = 30_000;
 
@@ -148,6 +162,19 @@ export function createSnapshotReader() {
   let queueReads: Map<string, QueueRead> | null = null;
   const costs = new Map<string, { key: string; cost: RunCost }>();
   const listeners = new Set<(json: string) => void>();
+  // The last good full inbox, outside `slots` and `compose()`: bodies never reach `json()`, `/api/snapshot` or `/events`.
+  let conversation: {
+    version: string;
+    messages: Map<string, InboxMessage>;
+    input: ConversationInput;
+    truncated: boolean;
+    stale: boolean;
+    /** "loading" while the handles are not mapped yet (the early value); "ready" once the directory read published. */
+    directory: "loading" | "ready";
+  } | null = null;
+  const closedWorkers = new Map<string, RunWorkers>();
+  /** Settles at the first publish (early or full) of the running read, or when that read ends without one. */
+  let conversationFirst: Promise<void> | undefined;
   const watchers = new Map<string, FSWatcher>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let stopped = false;
@@ -599,6 +626,59 @@ export function createSnapshotReader() {
       }),
   };
 
+  /** One full inbox read. A failure keeps the last good value and marks it stale; a read of an older generation is dropped. */
+  async function readConversation(): Promise<void> {
+    const started = generation;
+    let inbox: InboxRead | null = null;
+    let settleFirst: () => void = () => {};
+    conversationFirst = new Promise<void>((resolve) => (settleFirst = resolve));
+    const publish = (read: InboxRead, directory: Directory, state: "loading" | "ready") => {
+      const version = new Date().toISOString();
+      conversation = {
+        version,
+        messages: new Map(read.messages.map((message) => [message.id, message])),
+        input: { version, messages: read.messages, directory },
+        truncated: read.truncated,
+        stale: false,
+        directory: state,
+      };
+      settleFirst();
+    };
+    try {
+      inbox = await readInbox();
+      const reading = inbox
+        ? readDirectory(
+            (slots.ark.value?.runs ?? []).map((run) => ({
+              run: run.state.run,
+              closed: run.state.phase === "closed",
+            })),
+            inbox.messages,
+            closedWorkers,
+          )
+        : null;
+      // The first value waits two seconds for the handle directory, not the 35 s a cold read of every run's workers takes:
+      // after that the messages show with unmapped handles until the directory read fills them in.
+      if (inbox && reading && !conversation) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const early = await Promise.race([
+          reading.catch(() => null),
+          new Promise<"slow">((resolve) => (timer = setTimeout(() => resolve("slow"), 2000))),
+        ]);
+        clearTimeout(timer);
+        if (early === "slow" && started === generation)
+          publish(inbox, { chiefs: [], leads: [], workers: [] }, "loading");
+      }
+      const directory = await reading;
+      if (started !== generation) return settleFirst();
+      if (inbox && directory) return publish(inbox, directory, "ready");
+    } catch {
+      // A failed read is the stale case below.
+    }
+    if (started !== generation) return settleFirst();
+    if (conversation) conversation.stale = true;
+    settleFirst();
+  }
+
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
   let arkSoon: ReturnType<typeof setTimeout> | undefined;
   function syncWatchers(): void {
@@ -624,14 +704,14 @@ export function createSnapshotReader() {
     }
   }
 
-  function loop(name: SourceName, started: number): void {
+  function loop(read: () => Promise<void>, intervalMilliseconds: number, started: number): void {
     const tick = async () => {
-      await readers[name]();
+      await read();
       if (generation !== started) return;
       const timer = setTimeout(() => {
         timers.delete(timer);
         void tick();
-      }, intervalMilliseconds[name]);
+      }, intervalMilliseconds);
       timers.add(timer);
     };
     void tick();
@@ -660,7 +740,14 @@ export function createSnapshotReader() {
       "evidence",
       "queue",
     ] as const)
-      loop(name, started);
+      loop(() => readers[name](), intervalMilliseconds[name], started);
+    loop(
+      () => {
+        return readConversation();
+      },
+      conversationIntervalMilliseconds,
+      started,
+    );
   }
 
   /** Idempotent. A read in flight finishes into nothing: `generation` changed, so it neither publishes nor re-arms. */
@@ -813,6 +900,45 @@ export function createSnapshotReader() {
     ): Promise<TranscriptResult | null> {
       const session = this.runDetail(run)?.sessions.find((candidate) => candidate.file === file);
       return session ? usage.transcriptResult(file, session.harness, callId) : null;
+    },
+    /**
+     * The conversation of one run or of a window, built in the usage worker thread from the last good inbox read. Waits only for the
+     * first read of a connected page. Null when no read has succeeded (no page connected, or Orca down), or for a run with no events.
+     */
+    async conversation(query: ConversationQuery): Promise<ConversationReply | null> {
+      if (!conversation) await conversationFirst;
+      const held = conversation;
+      if (!held) return null;
+      const wanted = (slots.ark.value?.runs ?? []).filter(
+        (run) => query.kind === "project" || run.state.run === query.run,
+      );
+      const runs: RunEvents[] = wanted.map((run) => ({
+        run: run.state.run,
+        project: run.state.project,
+        // The project answer needs only the human answers, the step spans and the workers that ran them.
+        events:
+          query.kind === "run"
+            ? run.events
+            : run.events.filter((event) =>
+                ["gate.answered", "step.started", "step.finished", "worker.started"].includes(
+                  event.type,
+                ),
+              ),
+      }));
+      const answer = await usage.conversation(held.input, runs, query);
+      return answer
+        ? {
+            truncated: held.truncated,
+            stale: held.stale,
+            directory: held.directory,
+            read_at: held.version,
+            ...answer,
+          }
+        : null;
+    },
+    /** One message with its body, looked up by id in memory: the id never builds a path or a command. */
+    conversationMessage(id: string): InboxMessage | null {
+      return conversation?.messages.get(id) ?? null;
     },
   };
 }

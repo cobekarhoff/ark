@@ -14,6 +14,7 @@ import { loadConfig } from "../cli/config.ts";
 import {
   orcaOrchestration,
   orcaPages,
+  orcaRead,
   orcaTimeoutMilliseconds,
   readChiefQueue,
   type OrcaRun,
@@ -23,6 +24,7 @@ import {
 import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
 import { loadPlan, type PlanStep } from "../cli/plan.ts";
 import { frontmatter } from "../cli/ticket.ts";
+import type { Directory, DirectoryWorker, InboxMessage } from "./conversation.ts";
 import { readEventsLeniently } from "./run-detail.ts";
 import { readRoadmap, type RoadmapTicket } from "./roadmap.ts";
 import { parseTicketDocument, whyOf, withoutCodeMarks } from "./ticket-document.ts";
@@ -341,15 +343,15 @@ type OrcaMessage = {
 const finishedWorkerStates = ["succeeded", "failed", "stopped", "cancelled", "released"];
 const deadVerdicts = ["exited", "dead"];
 /** A step task is titled `<step id> [note] (<role>, <repo>)`: the first word is the step id. */
-const stepTask = /^([\w.-]+)[^(]*\((?:implementer|validator|reviewer),/;
+export const stepTask = /^([\w.-]+)[^(]*\((?:implementer|validator|reviewer),/;
 
 /** Until `orca worktree ps` has listed the agent, what it does is not known. */
 export const unknownActivity: AgentActivity = { kind: "unknown", text: "unknown", last_line: null };
 
-/** `hub-server (implementer, .)` is a step task and `evaluator (<run>)` a stage task: both name the role. */
-function roleOfTask(title: string | undefined): string {
+/** `hub-server (implementer, .)` is a step task and `evaluator (<run>)` or `test-case-writer (<run>)` a stage task: both name the role. */
+export function roleOfTask(title: string | undefined): string {
   const step = title?.match(/\((implementer|validator|reviewer),/);
-  return step?.[1] ?? title?.match(/^(\w+) \(/)?.[1] ?? "worker";
+  return step?.[1] ?? title?.match(/^([\w-]+) \(/)?.[1] ?? "worker";
 }
 
 const isLive = (worker: OrcaWorker): boolean => {
@@ -535,6 +537,151 @@ export async function readOrca(
     }),
   );
   return failed ? null : { agents, waits };
+}
+
+// ---------------------------------------------------------------- Conversation
+
+/** Orca keeps about nine days of messages (3,592 on 2026-11-12, one third more each week); `inbox` has no default big enough, so the read names its limit. */
+export const inboxLimit = 10_000;
+
+export type InboxRead = { messages: InboxMessage[]; truncated: boolean };
+
+const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+/**
+ * Every message in Orca's inbox, with bodies: `orca orchestration inbox --json --full --limit <inboxLimit>`.
+ * `truncated` when the count equals the limit. A missing field stays null; null when the read fails.
+ */
+export async function readInbox(): Promise<InboxRead | null> {
+  const inbox = await orcaRead<{ messages?: Record<string, unknown>[] }>(
+    ["inbox", "--full", "--limit", String(inboxLimit)],
+    orcaTimeoutMilliseconds,
+  );
+  if (!inbox.ok) return null;
+  const rows = inbox.value.messages ?? [];
+  const messages = rows.flatMap((row): InboxMessage[] => {
+    const id = text(row.id);
+    if (id === null) return [];
+    const payload = row.payload;
+    return [
+      {
+        id,
+        type: text(row.type),
+        from_handle: text(row.from_handle),
+        to_handle: text(row.to_handle),
+        subject: text(row.subject),
+        body: text(row.body),
+        thread_id: text(row.thread_id),
+        run_id: text(row.run_id),
+        payload:
+          typeof payload === "object" && payload !== null
+            ? (payload as Record<string, unknown>)
+            : null,
+        created_at: text(row.created_at),
+        delivered_at: text(row.delivered_at),
+      },
+    ];
+  });
+  return { messages, truncated: rows.length === inboxLimit };
+}
+
+/** The handles one Orca worker answers to: the same three fields the pending-wait filter matches, plain and with `dispatch:`. */
+const handlesOf = (worker: OrcaWorker): string[] =>
+  [worker.dispatchId, worker.terminal, worker.agentTerminalHandle].filter(
+    (handle): handle is string => typeof handle === "string",
+  );
+
+/** What one Ark run's Orca Run holds: its workers (and their task titles). Closed runs never change, so the caller keeps them. */
+export type RunWorkers = DirectoryWorker[];
+
+async function readRunWorkers(arkRun: string, orcaRun: string): Promise<RunWorkers | null> {
+  const [workers, tasks] = await Promise.all([
+    orcaPages<OrcaWorker>("worker-list", "workers", ["--run", orcaRun, "--include-remote"]),
+    orcaOrchestration<{ tasks?: OrcaTask[] }>("task-list", "--run", orcaRun),
+  ]);
+  if (!workers.ok || !tasks) return null;
+  const titles = new Map(
+    (tasks.tasks ?? []).map((task) => [task.id, task.title ?? task.task_title]),
+  );
+  return workers.value.map((worker) => {
+    const title = titles.get(worker.taskId ?? "") ?? worker.taskId ?? "worker";
+    return {
+      arkRun,
+      handles: handlesOf(worker),
+      step: title.match(stepTask)?.[1] ?? null,
+      role: roleOfTask(title),
+      title,
+    };
+  });
+}
+
+/**
+ * What maps handles to agents: Master Chief's Orca Runs and run leads from `run-list`, and the workers of
+ * each Ark run that has a message. A closed run's workers are read once (`closedWorkers`); an open run's each time.
+ * A read that fails leaves its handles unmapped, never drops a message. Null when `run-list` fails.
+ */
+export async function readDirectory(
+  arkRuns: { run: string; closed: boolean }[],
+  messages: InboxMessage[],
+  closedWorkers: Map<string, RunWorkers>,
+): Promise<Directory | null> {
+  const runList = await orcaPages<OrcaRun>("run-list", "runs", ["--full"], orcaTimeoutMilliseconds);
+  if (!runList.ok) return null;
+  const chiefRuns = runList.value.filter((orcaRun) =>
+    /^Master Chief: .+ tickets$/.test(orcaRun.objective ?? ""),
+  );
+  const chiefWorkers = (
+    await Promise.all(
+      chiefRuns.map((chief) =>
+        orcaPages<OrcaWorker>("worker-list", "workers", ["--run", chief.id, "--include-remote"]),
+      ),
+    )
+  ).flatMap((list) => (list.ok ? list.value : []));
+  const leads = runList.value.flatMap((orcaRun) => {
+    const arkRun = orcaRun.objective?.startsWith("Ark run ")
+      ? orcaRun.objective.slice("Ark run ".length)
+      : null;
+    if (arkRun === null) return [];
+    // A run lead is a supervised worker of Master Chief's Orca Run: its dispatch and terminal are there.
+    const handles = [
+      orcaRun.coordinator_handle,
+      ...chiefWorkers
+        .filter((worker) => handlesOf(worker).includes(orcaRun.coordinator_handle ?? "\0"))
+        .flatMap(handlesOf),
+    ].filter((handle): handle is string => typeof handle === "string");
+    return [{ arkRun, orcaRun: orcaRun.id, handles }];
+  });
+  const seen = new Set(
+    messages.flatMap((message) => [message.run_id, message.to_handle, message.from_handle]),
+  );
+  const wanted = leads.filter(
+    (lead) =>
+      arkRuns.some((known) => known.run === lead.arkRun) &&
+      (seen.has(lead.orcaRun) || seen.has(`run:${lead.orcaRun}`)),
+  );
+  const workers: DirectoryWorker[] = [];
+  // Eight Orca reads at a time: the first read of a long inbox must not start hundreds of processes together.
+  for (let start = 0; start < wanted.length; start += 8)
+    await Promise.all(
+      wanted.slice(start, start + 8).map(async (lead) => {
+        const closed = arkRuns.find((known) => known.run === lead.arkRun)?.closed === true;
+        const kept = closed ? closedWorkers.get(lead.arkRun) : undefined;
+        const read = kept ?? (await readRunWorkers(lead.arkRun, lead.orcaRun));
+        if (read === null) return;
+        if (closed) closedWorkers.set(lead.arkRun, read);
+        workers.push(...read);
+      }),
+    );
+  return {
+    chiefs: chiefRuns.map((chief) => ({
+      orcaRun: chief.id,
+      handles: [chief.coordinator_handle].filter(
+        (handle): handle is string => typeof handle === "string",
+      ),
+    })),
+    leads,
+    workers,
+  };
 }
 
 // ---------------------------------------------------------------- Plannotator

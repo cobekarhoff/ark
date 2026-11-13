@@ -19,6 +19,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
+import type { ProjectAnswer, RunConversation } from "../hub/conversation.ts";
 import type {
   RunDetail,
   RunView,
@@ -3229,3 +3231,652 @@ test("ARK-T311 A gate item's age starts at the event that opened the gate and ne
   expect(sinceOf(after)).toEqual(expected);
   expect(gatesOf(after).map((gate) => gate.id)).toEqual(gatesOf(before).map((gate) => gate.id));
 }, 60_000);
+
+// ---------------------------------------------------------------- ARK-344: the hub reads every Orca message
+
+type ConversationHead = {
+  truncated: boolean;
+  stale: boolean;
+  directory: "loading" | "ready";
+  read_at: string;
+};
+type RunReply = ConversationHead & RunConversation;
+type ProjectReply = ConversationHead & ProjectAnswer;
+
+/** Appends an event with an explicit time to a run's log, so the times of a fixture are exact. */
+function appendEventAt(
+  directory: string,
+  time: string,
+  type: string,
+  data: Record<string, unknown>,
+): void {
+  const file = join(directory, "events.ndjson");
+  const seq = readFileSync(file, "utf8").split("\n").filter(Boolean).length + 1;
+  appendFileSync(file, `${JSON.stringify({ seq, time, type, data })}\n`);
+}
+
+/**
+ * Two Ark runs, Master Chief, a run lead, five workers (implementer, validator, reviewer and two planning
+ * titles), a brainstorm session and two unknown handles. Handle kinds as Orca sends them: `structworker_*`
+ * (run leads), `dispatch:ctx_*`, `term_*` and `run:<Orca Run id>`. The lead is only in Master Chief's
+ * worker-list; each worker answers to a dispatch id, a terminal or an agent terminal handle.
+ */
+function conversationFixture() {
+  const run = `${today()}-ARK-840-1`;
+  const otherRun = `${today()}-ARK-841-1`;
+  const base = Date.now();
+  const at = (minutesAgo: number) => new Date(base - minutesAgo * 60_000).toISOString();
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-840", title: "Conversation" },
+    phase: "building",
+    steps: [
+      {
+        id: "impl-api",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 100,
+        finishedAfter: 200,
+      },
+      // No step.finished: an open span.
+      {
+        id: "spec-cases-write",
+        role: "validator",
+        harness: "omp",
+        model: "m",
+        needs: ["impl-api"],
+        startedAfter: 300,
+      },
+    ],
+  });
+  writeRun({
+    project: "p",
+    run: otherRun,
+    ticket: { id: "ARK-841", title: "Other" },
+    phase: "building",
+  });
+  // Round 1 of impl-api ran on worker w1; round 2 runs on worker w6.
+  appendEventAt(directory, at(46), "worker.started", {
+    step: "impl-api",
+    dispatch: "ctx_w1",
+    terminal: "term_w1",
+  });
+  // In time order: an auto answer, a human answer, a second round of impl-api, a second human answer.
+  appendEventAt(directory, at(45), "gate.answered", {
+    gate: "plan",
+    answer: "approve",
+    by: "auto",
+  });
+  appendEventAt(directory, at(40), "gate.answered", {
+    gate: "plan",
+    answer: "revise",
+    by: "human",
+  });
+  appendEventAt(directory, at(35), "step.started", {
+    step: "impl-api",
+    role: "implementer",
+    repo: ".",
+    round: 2,
+  });
+  appendEventAt(directory, at(34), "worker.started", {
+    step: "impl-api",
+    dispatch: "ctx_w6",
+    terminal: "term_w6",
+  });
+  appendEventAt(directory, at(32), "step.finished", { step: "impl-api", outcome: "succeeded" });
+  appendEventAt(directory, at(20), "gate.answered", {
+    gate: "plan",
+    answer: "approve",
+    by: "human",
+  });
+
+  const message = (
+    id: string,
+    type: string,
+    from: string,
+    to: string,
+    minutesAgo: number,
+    rest: Partial<{
+      delivered: string | null;
+      thread: string | null;
+      payload: Record<string, unknown> | null;
+      runId: string | null;
+    }> = {},
+  ) => ({
+    id,
+    type,
+    from_handle: from,
+    to_handle: to,
+    subject: `subject of ${id}`,
+    body: `SECRET-BODY ${id}`,
+    thread_id: rest.thread ?? null,
+    run_id: rest.runId === undefined ? "orca-chief-p" : rest.runId,
+    payload: rest.payload ?? null,
+    created_at: at(minutesAgo),
+    delivered_at: rest.delivered ?? null,
+  });
+  const messages = [
+    // Question: no delivered time recorded.
+    message("msg_1", "question", "structworker_lead", "run:orca-chief-p", 50),
+    // Escalation, delivered one minute later, relayed to the lead on the same thread.
+    message("msg_2", "escalation", "dispatch:ctx_lead", "run:orca-chief-p", 30, {
+      delivered: at(29),
+      thread: "thr_1",
+      payload: { kind: "stuck", attempts: 2 },
+    }),
+    message("msg_3", "status", "run:orca-chief-p", "dispatch:ctx_lead", 25, {
+      delivered: at(24),
+      thread: "thr_1",
+    }),
+    message("msg_4", "worker_done", "dispatch:ctx_w1", "structworker_lead", 34),
+    message("msg_5", "status", "term_w2", `run:orca-${run}`, 33, { runId: `orca-${run}` }),
+    message("msg_6", "status", "term_w3a", "dispatch:ctx_lead", 32),
+    message("msg_7", "worker_done", "dispatch:ctx_w4", "structworker_lead", 31),
+    message("msg_8", "worker_done", "term_w5", "structworker_lead", 30),
+    // A brainstorm session that asks Master Chief.
+    message("msg_9", "question", "term_brain", "run:orca-chief-p", 15, { runId: null }),
+    // Two handles that no list knows.
+    message("msg_10", "status", "term_unknown", "term_ghost", 14, { runId: null }),
+    // The lead of another Ark run.
+    message("msg_11", "question", "structworker_lead2", "run:orca-chief-p", 10, {
+      runId: `orca-${otherRun}`,
+    }),
+    // A worker asks its run lead: no human answer waits on it.
+    message("msg_12", "question", "dispatch:ctx_w1", "structworker_lead", 5),
+  ];
+  const worker = (
+    name: string,
+    fields: { dispatchId?: string; terminal?: string; agentTerminalHandle?: string },
+  ) => ({ taskId: `task-${name}`, state: "running", ...fields });
+  const orca = {
+    terminals: [],
+    runs: [
+      {
+        id: "orca-chief-p",
+        objective: "Master Chief: p tickets",
+        coordinator_handle: "term_chief",
+      },
+      {
+        id: `orca-${run}`,
+        objective: `Ark run ${run}`,
+        coordinator_handle: "structworker_lead",
+      },
+      {
+        id: `orca-${otherRun}`,
+        objective: `Ark run ${otherRun}`,
+        coordinator_handle: "structworker_lead2",
+      },
+    ],
+    workersByRun: {
+      "orca-chief-p": [
+        worker("lead", { dispatchId: "ctx_lead", terminal: "structworker_lead" }),
+        worker("lead2", { dispatchId: "ctx_lead2", terminal: "structworker_lead2" }),
+      ],
+      [`orca-${run}`]: [
+        worker("w1", { dispatchId: "ctx_w1", terminal: "term_w1" }),
+        worker("w2", { terminal: "term_w2" }),
+        worker("w3", { agentTerminalHandle: "term_w3a" }),
+        worker("w4", { dispatchId: "ctx_w4" }),
+        worker("w5", { terminal: "term_w5" }),
+        worker("w6", { dispatchId: "ctx_w6", terminal: "term_w6" }),
+      ],
+    },
+    tasks: [
+      { id: "task-w1", title: "impl-api (implementer, .)" },
+      { id: "task-w2", title: "spec-cases-write (validator, .)" },
+      { id: "task-w3", title: "review-1 (reviewer, .)" },
+      { id: "task-w4", title: `evaluator (${run})` },
+      { id: "task-w5", title: `test-case-writer (${run})` },
+      { id: "task-w6", title: "impl-api (implementer, .)" },
+    ],
+    messages,
+  };
+  return { run, otherRun, at, messages, orca };
+}
+
+async function conversationWhen<Reply extends ConversationHead>(
+  baseUrl: string,
+  ready: (reply: Reply) => boolean,
+  path = "/api/conversation",
+): Promise<Reply> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const response = await fetch(`${baseUrl}${path}`);
+    const body = await response.text();
+    if (response.status === 200 && ready(JSON.parse(body) as Reply)) return JSON.parse(body);
+    if (Date.now() > deadline)
+      throw new Error(
+        `the conversation never reached the state: ${response.status} ${body.slice(0, 300)}`,
+      );
+    await delay(50);
+  }
+}
+
+const allMessagesOf = (reply: ProjectReply) => [
+  ...reply.runs.flatMap((run) => run.messages),
+  ...reply.other.messages,
+];
+const agentsOf = (reply: ProjectReply) => [
+  ...reply.runs.flatMap((run) => run.agents),
+  ...reply.other.agents,
+];
+/** The agent that sent (`from`) or received (`to`) a message, from the project answer. */
+const agentOfMessage = (reply: ProjectReply, id: string, side: "from" | "to") => {
+  const found = allMessagesOf(reply).find((message) => message.id === id)!;
+  return agentsOf(reply).find((agent) => agent.id === found[side])!;
+};
+
+test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the last good value, and marks it truncated or stale", async () => {
+  isolatedEnvironment();
+  const { run, messages, orca } = conversationFixture();
+  const state = installFakeTools({ orca });
+  process.env.ARK_HUB_INTERVAL_MS = "100";
+  const { baseUrl } = await start();
+  delete process.env.ARK_HUB_INTERVAL_MS;
+  // The liveness read is `--limit 200 --full`; the conversation read names a larger limit.
+  const fullReads = () =>
+    readFileSync(join(state, "orca.log"), "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("orchestration inbox") && !line.includes("--limit 200 "));
+
+  // A good read: below the limit, nothing stale, every field kept.
+  const first = await conversationWhen<ProjectReply>(baseUrl, (reply) => !reply.stale);
+  const limit = Number(
+    fullReads()
+      .at(-1)!
+      .match(/--limit (\d+)/)![1],
+  );
+  expect(fullReads().at(-1)).toContain("--full");
+  expect(fullReads().at(-1)).toContain("--json");
+  expect(limit).toBeGreaterThan(messages.length);
+  expect(first.truncated).toBe(false);
+  expect(first.read_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+  expect(allMessagesOf(first)).toHaveLength(messages.length);
+  const kept = (id: string) => allMessagesOf(first).find((message) => message.id === id)!;
+  expect(kept("msg_1")).toMatchObject({ delivered_at: null, thread_id: null });
+  expect(kept("msg_2")).toMatchObject({
+    thread_id: "thr_1",
+    delivered_at: messages[1].delivered_at,
+  });
+  const body = (await (await fetch(`${baseUrl}/api/conversation/message/msg_2`)).json()) as {
+    body: string;
+    payload: unknown;
+    delivered_at: string;
+  };
+  expect(body).toMatchObject({
+    body: "SECRET-BODY msg_2",
+    payload: { kind: "stuck", attempts: 2 },
+  });
+  expect(await (await fetch(`${baseUrl}/api/conversation/message/msg_1`)).json()).toMatchObject({
+    payload: null,
+    delivered_at: null,
+  });
+
+  // No body reaches the snapshot or a pushed frame.
+  const pushes = await openPushes(baseUrl);
+  const frame = await pushes.next();
+  pushes.close();
+  const snapshotText = await (await fetch(`${baseUrl}/api/snapshot`)).text();
+  expect(frame).not.toContain("SECRET-BODY");
+  expect(snapshotText).not.toContain("SECRET-BODY");
+
+  // A failed read keeps the first value with its read time; the other Orca sources stay ok.
+  writeFakeToolState(state, { orca, orcaInboxFails: true });
+  const stale = await conversationWhen<ProjectReply>(baseUrl, (reply) => reply.stale);
+  expect(stale.read_at).toBe(first.read_at);
+  expect(allMessagesOf(stale)).toEqual(allMessagesOf(first));
+  const afterFailure = (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
+  expect(afterFailure.sources.orca.ok).toBe(true);
+  expect(openRunOf(afterFailure, run).run).toBe(run);
+
+  // Recovery: fresh and not stale.
+  writeFakeToolState(state, { orca });
+  const fresh = await conversationWhen<ProjectReply>(baseUrl, (reply) => !reply.stale);
+  expect(Date.parse(fresh.read_at)).toBeGreaterThan(Date.parse(first.read_at));
+
+  // Exactly the limit: truncated. One fewer: not. (Old messages, outside the default window, keep the answers small.)
+  const filler = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      ...messages[0],
+      id: `msg_fill_${index}`,
+      created_at: "2020-01-01T00:00:00.000Z",
+    }));
+  writeFakeToolState(state, { orca: { ...orca, messages: filler(limit) } });
+  expect(
+    (await conversationWhen<ProjectReply>(baseUrl, (reply) => reply.truncated)).truncated,
+  ).toBe(true);
+  writeFakeToolState(state, { orca: { ...orca, messages: filler(limit - 1) } });
+  expect(
+    (await conversationWhen<ProjectReply>(baseUrl, (reply) => !reply.truncated)).truncated,
+  ).toBe(false);
+}, 90_000);
+
+test("ARK-T320 every message handle maps to Master Chief, a run lead, a worker with step and role, a session agent, or an unmapped agent", async () => {
+  isolatedEnvironment();
+  const { run, otherRun, messages, orca } = conversationFixture();
+  installFakeTools({ orca });
+  const { baseUrl } = await start();
+  const reply = await conversationWhen<ProjectReply>(baseUrl, () => true);
+
+  // No message is dropped, whatever its handles.
+  expect(new Set(allMessagesOf(reply).map((message) => message.id))).toEqual(
+    new Set(messages.map((message) => message.id)),
+  );
+  const of = (id: string, side: "from" | "to") => agentOfMessage(reply, id, side);
+
+  expect(of("msg_1", "to").kind).toBe("chief"); // run:<Master Chief Run id>
+  const lead = of("msg_1", "from"); // structworker_*
+  expect(lead).toMatchObject({ kind: "run_lead" });
+  expect(of("msg_2", "from").id).toBe(lead.id); // dispatch:ctx_*
+  expect(of("msg_3", "to").id).toBe(lead.id);
+  expect(of("msg_5", "to").id).toBe(lead.id); // run:<Ark run's Orca Run id>
+  expect(of("msg_11", "from")).toMatchObject({ kind: "run_lead" });
+  expect(of("msg_11", "from").id).not.toBe(lead.id);
+
+  // A worker answers to its dispatch id, terminal or agent terminal handle; step and role come from the task title.
+  expect(of("msg_4", "from")).toMatchObject({
+    kind: "worker",
+    step: "impl-api",
+    role: "implementer",
+    group: "Implementers",
+  });
+  expect(of("msg_5", "from")).toMatchObject({
+    kind: "worker",
+    step: "spec-cases-write",
+    role: "validator",
+    group: "Validators",
+  });
+  expect(of("msg_6", "from")).toMatchObject({
+    kind: "worker",
+    step: "review-1",
+    role: "reviewer",
+    group: "Reviewers",
+  });
+  expect(of("msg_7", "from")).toMatchObject({
+    kind: "worker",
+    role: "evaluator",
+    group: "Planning",
+  });
+  expect(of("msg_8", "from")).toMatchObject({
+    kind: "worker",
+    role: "test-case-writer",
+    group: "Planning",
+  });
+
+  // A terminal that sent to Master Chief and is neither lead nor worker is a session; the rest is unmapped with the raw handle.
+  expect(of("msg_9", "from")).toMatchObject({ kind: "session", handle: "term_brain" });
+  expect(of("msg_10", "from")).toMatchObject({ kind: "unmapped", handle: "term_unknown" });
+  expect(of("msg_10", "to")).toMatchObject({ kind: "unmapped", handle: "term_ghost" });
+  expect(reply.other.messages.map((message) => message.id).sort()).toEqual(["msg_10", "msg_9"]);
+
+  // Each message sits with the run that owns it.
+  const owned = (name: string) => reply.runs.find((candidate) => candidate.run === name)!;
+  expect(owned(otherRun).messages.map((message) => message.id)).toEqual(["msg_11"]);
+  expect(
+    owned(run)
+      .messages.map((message) => message.id)
+      .sort(),
+  ).toEqual(
+    ["msg_1", "msg_12", "msg_2", "msg_3", "msg_4", "msg_5", "msg_6", "msg_7", "msg_8"].sort(),
+  );
+}, 60_000);
+
+test("ARK-T321 the conversation routes answer agents, role groups, spans, events, messages, human answers and question times from the worker thread", async () => {
+  isolatedEnvironment();
+  const { run, otherRun, at, messages, orca } = conversationFixture();
+  const state = installFakeTools({ orca });
+  // Slow Orca calls: the handle directory read outlasts the 2 s wait, so the first value is the early one.
+  writeFileSync(join(state, "orca.sleep"), "3");
+  const { baseUrl } = await start();
+  const early = await conversationWhen<ProjectReply>(baseUrl, () => true);
+  expect(early.directory).toBe("loading");
+  writeFileSync(join(state, "orca.sleep"), "0");
+  await conversationWhen<ProjectReply>(baseUrl, (reply) => reply.directory === "ready");
+
+  // The run route.
+  const answer = await conversationWhen<RunReply>(
+    baseUrl,
+    () => true,
+    `/api/run/${run}/conversation`,
+  );
+  expect(answer.agents.filter((agent) => agent.kind === "chief")).toHaveLength(1);
+  expect(answer.agents.filter((agent) => agent.kind === "run_lead")).toHaveLength(1);
+  const workers = answer.agents.filter((agent) => agent.kind === "worker");
+  expect(
+    workers.map((agent) => agent.group).sort((left, right) => left!.localeCompare(right!)),
+  ).toEqual(["Implementers", "Implementers", "Planning", "Planning", "Reviewers", "Validators"]);
+  const spans = (step: string) => answer.spans.filter((span) => span.step === step);
+  expect(spans("impl-api")).toHaveLength(2); // two rounds
+  expect(spans("impl-api")[1]).toMatchObject({ start: at(35), end: at(32), group: "Implementers" });
+  // Each round names the worker its own worker.started recorded.
+  const agentOf = (handle: string) => workers.find((agent) => agent.id.endsWith(`:${handle}`))!.id;
+  expect(spans("impl-api").map((span) => span.agent)).toEqual([
+    agentOf("ctx_w1"),
+    agentOf("ctx_w6"),
+  ]);
+  // No worker.started follows this step.started: no agent.
+  expect(spans("spec-cases-write")[0].agent).toBeNull();
+  expect(spans("spec-cases-write")).toEqual([
+    expect.objectContaining({ end: null, role: "validator", group: "Validators" }),
+  ]);
+  expect(answer.events!.map((event) => event.type)).toContain("step.started");
+  expect(answer.events!.filter((event) => event.type === "gate.answered")).toHaveLength(4);
+  // Human answers only: the auto answer and the plan answer with no `by` are not the human's.
+  expect(answer.answers.map((entry) => entry.time)).toEqual([at(40), at(20)]);
+  expect(answer.messages.map((message) => message.id)).not.toContain("msg_11");
+  expect(answer.messages.find((message) => message.id === "msg_3")).toMatchObject({
+    body: "SECRET-BODY msg_3",
+    thread_id: "thr_1",
+  });
+
+  // Question times: the first human answer at or after delivery (sent, when delivery is not recorded); never created_at as delivered.
+  expect(answer.questions).toEqual([
+    {
+      id: "msg_1",
+      sent: messages[0].created_at,
+      delivered: null,
+      answered: at(40),
+      pickup_seconds: "not recorded",
+    },
+    {
+      id: "msg_2",
+      sent: messages[1].created_at,
+      delivered: messages[1].delivered_at,
+      answered: at(20),
+      pickup_seconds: 60,
+    },
+    {
+      id: "msg_12",
+      sent: messages[11].created_at,
+      delivered: null,
+      answered: null,
+      pickup_seconds: "not recorded",
+    },
+  ]);
+  expect((await fetch(`${baseUrl}/api/run/no-such-run/conversation`)).status).toBe(404);
+
+  // The project route: a window holds both runs and no body; another window is empty; bad values give 400.
+  const window = (since: string, until: string) =>
+    `/api/conversation?since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`;
+  const text = await (await fetch(`${baseUrl}${window(at(120), at(0))}`)).text();
+  expect(text).not.toContain("SECRET-BODY");
+  const project = JSON.parse(text) as ProjectReply;
+  expect(project.runs.map((entry) => entry.run).sort()).toEqual([run, otherRun].sort());
+  const projectRun = project.runs.find((entry) => entry.run === run)!;
+  expect(projectRun.questions).toEqual(answer.questions);
+  expect(projectRun.spans).toEqual(answer.spans);
+  expect(projectRun.answers).toEqual(answer.answers);
+  expect(projectRun.messages.every((message) => !("body" in message))).toBe(true);
+  const narrow = JSON.parse(
+    await (await fetch(`${baseUrl}${window(at(36), at(24))}`)).text(),
+  ) as ProjectReply;
+  expect(
+    allMessagesOf(narrow)
+      .map((message) => message.id)
+      .sort(),
+  ).toEqual(["msg_2", "msg_3", "msg_4", "msg_5", "msg_6", "msg_7", "msg_8"].sort());
+  const empty = (await (
+    await fetch(`${baseUrl}${window("2000-01-01T00:00:00Z", "2000-01-02T00:00:00Z")}`)
+  ).json()) as ProjectReply;
+  expect(empty.runs).toEqual([]);
+  expect(empty.other.messages).toEqual([]);
+  for (const query of [
+    "?since=yesterday",
+    "?until=not-a-time",
+    `?since=${encodeURIComponent(at(0))}&until=${encodeURIComponent(at(60))}`,
+  ])
+    expect((await fetch(`${baseUrl}/api/conversation${query}`)).status, query).toBe(400);
+
+  // The message route: one body from memory; an unknown or hostile id reads nothing and answers 404.
+  const one = await fetch(`${baseUrl}/api/conversation/message/msg_9`);
+  expect(one.status).toBe(200);
+  expect(await one.json()).toMatchObject({ id: "msg_9", body: "SECRET-BODY msg_9" });
+  for (const id of ["msg_none", "..%2F..%2Fetc%2Fpasswd", "..%2Fevents.ndjson", "a%00b", "%ZZ"])
+    expect((await fetch(`${baseUrl}/api/conversation/message/${id}`)).status, id).toBe(404);
+  expect((await fetch(`${baseUrl}/api/conversation/message/a/b`)).status).toBe(404);
+
+  // The routes are GET only, and / still answers while builds run.
+  expect((await fetch(`${baseUrl}/api/conversation`, { method: "POST" })).status).toBe(405);
+  const builds = Array.from({ length: 10 }, () => fetch(`${baseUrl}/api/run/${run}/conversation`));
+  expect((await fetch(`${baseUrl}/nope`)).status).toBe(404);
+  for (const build of await Promise.all(builds)) expect(build.status).toBe(200);
+}, 60_000);
+
+// AC4 of ARK-344: the budgets of the 2,000-message case ARK-T322.
+const pageBudgetMilliseconds = 200;
+const conversationBudgetMilliseconds = 1000;
+test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and the project conversation answers within 1 s", async () => {
+  isolatedEnvironment();
+  const base = Date.now();
+  const runs = Array.from(
+    { length: 20 },
+    (_, index) => `${today()}-ARK-9${String(index).padStart(2, "0")}-1`,
+  );
+  const orcaRuns: unknown[] = [
+    { id: "orca-chief-p", objective: "Master Chief: p tickets", coordinator_handle: "term_chief" },
+  ];
+  const chiefWorkers: unknown[] = [];
+  const workersByRun: Record<string, unknown[]> = {};
+  const messages: unknown[] = [];
+  const bodyText = "x".repeat(900); // a body of realistic size
+  runs.forEach((run, index) => {
+    writeRun({
+      project: "p",
+      run,
+      ticket: { id: `ARK-9${String(index).padStart(2, "0")}`, title: `Load ${index}` },
+      phase: "building",
+      steps: [
+        {
+          id: "impl",
+          role: "implementer",
+          harness: "omp",
+          model: "m",
+          needs: [],
+          startedAfter: 100,
+          finishedAfter: 200,
+        },
+      ],
+    });
+    orcaRuns.push({
+      id: `orca-${run}`,
+      objective: `Ark run ${run}`,
+      coordinator_handle: `structworker_${index}`,
+    });
+    chiefWorkers.push({
+      taskId: "task-lead",
+      dispatchId: `ctx_lead${index}`,
+      terminal: `structworker_${index}`,
+    });
+    workersByRun[`orca-${run}`] = [
+      { taskId: "task-impl", state: "running", dispatchId: `ctx_w${index}` },
+    ];
+    for (let number = 0; number < 100; number++) {
+      const worker = number % 2 === 0;
+      messages.push({
+        id: `msg_${index}_${number}`,
+        type: number % 10 === 0 ? "question" : "status",
+        from_handle: worker ? `dispatch:ctx_w${index}` : `structworker_${index}`,
+        to_handle: worker ? `structworker_${index}` : "run:orca-chief-p",
+        subject: `subject ${index} ${number}`,
+        body: bodyText,
+        thread_id: null,
+        run_id: `orca-${run}`,
+        payload: null,
+        created_at: new Date(base - (index * 100 + number) * 60_000).toISOString(),
+        delivered_at:
+          number % 3 === 0
+            ? null
+            : new Date(base - (index * 100 + number) * 60_000 + 5000).toISOString(),
+      });
+    }
+  });
+  expect(messages).toHaveLength(2000);
+  installFakeTools({
+    orca: {
+      terminals: [],
+      runs: orcaRuns,
+      workersByRun: { "orca-chief-p": chiefWorkers, ...workersByRun },
+      tasks: [{ id: "task-impl", title: "impl (implementer, .)" }],
+      messages,
+    },
+  });
+  const { baseUrl } = await start();
+  // 20 runs and 2,000 messages sit 100 minutes apart, so a 48 h window holds them all.
+  const path = `/api/conversation?since=${encodeURIComponent(new Date(base - 48 * 3_600_000).toISOString())}&until=${encodeURIComponent(new Date(base + 60_000).toISOString())}`;
+  const timed = async () => {
+    const requestedAt = performance.now();
+    const response = await fetch(`${baseUrl}${path}`);
+    const reply = (await response.json()) as ProjectReply;
+    return { milliseconds: performance.now() - requestedAt, status: response.status, reply };
+  };
+  // The first conversation request waits for the first read, so wait for it on the cheap message route; then ask for the
+  // full value (directory ready, not the early one). The first ready answer is the cold build.
+  const deadline = Date.now() + 60_000;
+  while ((await fetch(`${baseUrl}/api/conversation/message/msg_0_0`)).status !== 200) {
+    if (Date.now() > deadline) throw new Error("the inbox was never read");
+    await delay(50);
+  }
+  let cold = await timed();
+  while (cold.reply.directory !== "ready") {
+    if (Date.now() > deadline) throw new Error("the handle directory was never read");
+    await delay(50);
+    cold = await timed();
+  }
+  expect(cold.status).toBe(200);
+  expect(allMessagesOf(cold.reply)).toHaveLength(2000);
+  expect(cold.reply.runs).toHaveLength(20);
+  expect(cold.milliseconds, "cold /api/conversation").toBeLessThan(conversationBudgetMilliseconds);
+
+  // / and /nope while the conversation is requested again and again.
+  let building = true;
+  const conversationTimes: number[] = [];
+  // Four clients ask at once, so the worker's queue is never empty.
+  const background = Promise.all(
+    Array.from({ length: 4 }, async () => {
+      while (building) conversationTimes.push((await timed()).milliseconds);
+    }),
+  );
+  const latencies: Record<string, number[]> = { "/": [], "/nope": [] };
+  for (let round = 0; round < 100; round++)
+    for (const route of ["/", "/nope"]) {
+      const requestedAt = performance.now();
+      await (await fetch(`${baseUrl}${route}`)).arrayBuffer();
+      latencies[route].push(performance.now() - requestedAt);
+    }
+  building = false;
+  await background;
+  const p95 = Object.fromEntries(
+    Object.entries(latencies).map(([route, durations]) => [route, percentile95(durations)]),
+  );
+  console.log(
+    `ARK-T322 cold=${cold.milliseconds.toFixed(0)}ms warm-max=${Math.max(...conversationTimes).toFixed(0)}ms builds=${conversationTimes.length} p95(/)=${p95["/"].toFixed(1)}ms p95(/nope)=${p95["/nope"].toFixed(1)}ms`,
+  );
+  for (const [route, value] of Object.entries(p95))
+    expect(value, `p95 of ${route}`).toBeLessThan(pageBudgetMilliseconds);
+  expect(Math.max(...conversationTimes), "/api/conversation under load").toBeLessThan(
+    conversationBudgetMilliseconds,
+  );
+}, 120_000);

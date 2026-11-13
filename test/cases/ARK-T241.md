@@ -6,12 +6,12 @@ technique: state transition (idle, watched, idle) with boundary values (0 to 1 a
 priority: high
 risk: the loops start at boot and never stop (about 4 external commands a second with no page); or a read in flight when the last page leaves publishes or re-arms its timer after the stop; or a quick reconnect starts a second loop per source so reads double
 status: active
-changed_by: 2026-11-11-ARK-354-1
+changed_by: 2026-11-12-ARK-344-1
 ---
 
 ## Objective
 
-Prove that an unwatched hub is idle and the first page wakes it. Serves ARK-365/AC2.
+Prove that an unwatched hub is idle and the first page wakes it. Serves ARK-365/AC2. Also owns the idle lifecycle of the full conversation inbox read (`orca orchestration inbox --json --full --limit <N>`, ARK-344): it is one more Orca source that shall not run with no page and shall not double on reconnect.
 
 Expected: While no page is connected to `/events`, the hub shall run no Orca, Plannotator or GitHub read. The first page to connect shall get fresh data within 5 seconds.
 
@@ -23,6 +23,7 @@ Expected: While no page is connected to `/events`, the hub shall run no Orca, Pl
 - The hub is started with `Bun.spawn` on port 0 and its port is read from its output.
 - The run has an open plan gate (the gate event appended to its `events.ndjson`) and one merge request URL in its `state.json`, so Plannotator and GitHub have something to read. Fake `gh` answers `pr view` for that URL. (The `ark` source reads files and starts no binary, so it has no call log; its reads show through its `read_at`.)
 - Fake `orca` also answers the Master Chief Run lookup (`run-list`) and `task-list` with a valid answer, so the queue source has a read to run: it reads on connect and makes no call while idle, which the zero-line checks prove.
+- Fake `orca` also answers `inbox --json --full --limit <N>` with a valid message list; its calls are counted in the orca log as the lines whose arguments hold `--full` (the liveness read `--limit 200 --full` is counted with the others, so count the conversation read by its larger `--limit`).
 - Fake `orca` answers at once, unless a hold file exists: then it waits in a loop until the hold file is removed, to leave a read in flight. The answer it prints comes from a control file, read when the answer is printed (after the hold ends), so the held read can return a different answer than the reads before it.
 
 ## Steps
@@ -39,10 +40,10 @@ Expected: While no page is connected to `/events`, the hub shall run no Orca, Pl
 
 - Step 1: 0 lines in each log, a `ps` check shows no child process of the hub.
 - Step 2: fresh data for every source within 5 s of the connect.
-- Step 3: N1 is at least 5 for each source (reads run at the interval) and below 25 (the interval is 100 ms, so about 20 at most).
+- Step 3: the conversation `inbox --full` read also runs (at least one call with the large `--limit` after connect). N1 is at least 5 for each source (reads run at the interval) and below 25 (the interval is 100 ms, so about 20 at most).
 - Step 4: after the release the log counts are the same as before the release (no timer is re-armed). Through `/api/snapshot`, which does not subscribe, orca still shows the old terminal set A and `ok: true`, never B and never `ok: false`, and `read_at` still equals T0. A hub that accepts the late result shows B (or `ok: false`) there, so the stale result is detected even though a same-answer read would leave the body unchanged.
 - Step 5: after the churn N2 is below 1.5 times N1 for each source (a duplicate loop would be about 2 times N1) and at least 0.5 times N1.
-- Step 6: 0 new log lines.
+- Step 6: 0 new log lines, including no `inbox` call with the conversation `--limit`.
 - Step 7: the hub stays up; orca, plannotator and github show `ok: false` (each has an eligible read: the open gate and the MR URL); the client gets a push.
 
 ## Screenshot checkpoints
