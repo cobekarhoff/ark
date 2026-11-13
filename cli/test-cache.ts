@@ -29,6 +29,8 @@ export type CachedSuite = {
   log: string;
   /** Test files that failed once and passed on retry. */
   flaky: string[];
+  /** Test files that failed at head and at the tip of the target branch. Absent in an entry stored before ARK-428. */
+  redOnMain?: string[];
 };
 
 const pruneAfterMilliseconds = 14 * 24 * 60 * 60 * 1000;

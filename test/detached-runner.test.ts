@@ -21,6 +21,7 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import { installFakeOrca, removeFakeOrca } from "./fake-orca.ts";
 
 // ARK-366: real `ark test` callers, detached runners and suite processes. Waits are events (a file appears, a
 // stream prints, a process exits), never sleeps: see test/wallclock.test.ts and test/timeouts.test.ts.
@@ -1038,5 +1039,333 @@ exit 1
     expect(result.out).toContain("suite      second (integration)  failed");
     expect(headStarts(fixture, "samea")).toBe(2);
     expect(headStarts(fixture, "sameb")).toBe(2);
+  });
+});
+
+// ARK-428: red on main. Every start of a test file appends the side it ran on to the file's counter: `head` (the run's
+// worktree, on an `ark/` branch), `base` (the ark-base- checkout) or `main` (any other checkout, the tip of the target branch).
+const sidedFile = (directory: string, name: string, body: string, header = "") =>
+  `import { appendFileSync, realpathSync } from "node:fs";
+import { test } from "bun:test";
+${header}
+const cwd = realpathSync(process.cwd());
+const branch = Bun.spawnSync(["git", "symbolic-ref", "-q", "HEAD"]).stdout.toString();
+const side = cwd.includes("/ark-base-") ? "base" : branch.startsWith("refs/heads/ark/") ? "head" : "main";
+appendFileSync(${JSON.stringify(`${directory}/count-${name}`)}, side + "\\n");
+test(${JSON.stringify(name)}, () => { ${body} });
+`;
+const redBody = 'if (side !== "base") throw new Error("red");';
+const helperHeader = 'import { helper } from "../src/helper.ts";';
+const usesHelperBody = 'if (helper() !== 1) throw new Error("helper changed");';
+
+function commitSided(
+  fixture: Fixture,
+  target: string,
+  files: Record<string, string | [string, string]>,
+): void {
+  commitFiles(
+    target,
+    Object.fromEntries(
+      Object.entries(files).map(([name, body]) => [
+        `test/${name}.test.ts`,
+        Array.isArray(body)
+          ? sidedFile(fixture.directory, name, body[0], body[1])
+          : sidedFile(fixture.directory, name, body),
+      ]),
+    ),
+  );
+}
+
+const sideStarts = (fixture: Fixture, name: string, side: "head" | "main" | "base") =>
+  lines(join(fixture.directory, `count-${name}`), side).length;
+
+/** Every test file of the checkout, so a file added later is run without a new suite. */
+const wholeSuite = (name = "cli"): Suite => ({
+  name,
+  level: "integration",
+  repo: ".",
+  command: "bun test --reporter=junit --reporter-outfile={report}",
+  parser: "bun",
+  base_files: "test/*.test.ts",
+  base_command: "bun test --reporter=junit --reporter-outfile={report} {files}",
+});
+
+/** Puts `files` on the target branch of the fixture's origin, then starts a fresh run from it. */
+function runFromTip(
+  fixture: Fixture,
+  files: Record<string, string | [string, string]>,
+  ticket: string,
+) {
+  commitSided(fixture, fixture.workspace, files);
+  git(fixture.workspace, "push", "origin", "HEAD:refs/heads/main");
+  Object.assign(fixture, fixture.startRun(ticket));
+}
+
+const redOnMainLine = (output: string, file: string) =>
+  new RegExp(`^red on main.*${file.replaceAll(".", "\\.")}`, "m").test(output);
+
+describe("ark test red on main", () => {
+  test("ARK-T327 an untouched file that fails at head and at the tip of the target branch is printed as red on main, recorded in test.completed, not counted, and survives a cached reuse; a quick run records none", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    runFromTip(fixture, { red: redBody, ok: "" }, "DET-2");
+    commitSided(fixture, fixture.mirrorOf("."), { other: "" });
+
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    // the flaky retry runs first: two starts at head, then one at the tip checkout
+    expect(sideStarts(fixture, "red", "head")).toBe(2);
+    expect(sideStarts(fixture, "red", "main")).toBe(1);
+    expect(sideStarts(fixture, "ok", "head")).toBe(1);
+    expect(sideStarts(fixture, "ok", "main")).toBe(0);
+    expect(sideStarts(fixture, "other", "main")).toBe(0);
+    expect(redOnMainLine(first.out, "test/red.test.ts")).toBe(true);
+    expect(first.out).not.toMatch(/^red on main.*(ok|other)\.test/m);
+    const event = completedEvents(fixture).at(-1);
+    expect(event.passed).toBe(true);
+    expect(event.red_on_main).toEqual(["test/red.test.ts"]);
+    expect(event.flaky).toBeUndefined();
+    expect(event.suites.every((suite: { passed: boolean }) => suite.passed)).toBe(true);
+
+    const again = await arkDone(fixture, "test", fixture.runId);
+    expect(again.code, again.err).toBe(0);
+    expect(again.out).toMatch(/passed {2}reused/);
+    expect(sideStarts(fixture, "red", "head")).toBe(2);
+    expect(redOnMainLine(again.out, "test/red.test.ts")).toBe(true);
+    expect(completedEvents(fixture).at(-1).red_on_main).toEqual(["test/red.test.ts"]);
+
+    const quick = await arkDone(fixture, "test", fixture.runId, "--quick");
+    expect(quick.code, quick.err).toBe(0);
+    expect(quick.out).not.toMatch(/^red on main/m);
+    const quickEvent = completedEvents(fixture).at(-1);
+    expect(quickEvent.mode).toBe("quick");
+    expect(quickEvent.red_on_main).toBeUndefined();
+  });
+
+  test("ARK-T327 the file is checked at the fetched tip of the target branch, not at the run's base: a tip that fixes it makes the failure count", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    runFromTip(fixture, { red: redBody, ok: "" }, "DET-2");
+    commitSided(fixture, fixture.workspace, { red: "" });
+    git(fixture.workspace, "push", "origin", "HEAD:refs/heads/main");
+    commitSided(fixture, fixture.mirrorOf("."), { other: "" });
+
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code).toBe(1);
+    expect(sideStarts(fixture, "red", "main")).toBe(1);
+    expect(redOnMainLine(result.out, "test/red.test.ts")).toBe(false);
+    const event = completedEvents(fixture).at(-1);
+    expect(event.passed).toBe(false);
+    expect(event.red_on_main).toBeUndefined();
+  });
+
+  test("ARK-T328 an untouched file that the tip of the target branch no longer has is not red on main: the failure keeps counting", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    runFromTip(fixture, { red: redBody, ok: "" }, "DET-2");
+    git(fixture.workspace, "rm", "-q", "test/red.test.ts");
+    git(fixture.workspace, "commit", "-q", "-m", "remove red on main");
+    git(fixture.workspace, "push", "origin", "HEAD:refs/heads/main");
+    commitSided(fixture, fixture.mirrorOf("."), { other: "" });
+
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code).toBe(1);
+    expect(redOnMainLine(result.out, "test/red.test.ts")).toBe(false);
+    expect(result.out).toContain("not red on main");
+    const event = completedEvents(fixture).at(-1);
+    expect(event.passed).toBe(false);
+    expect(event.red_on_main).toBeUndefined();
+  });
+
+  test("ARK-T339 a file where a test that failed at head passes at the tip still counts, although another test of it is red on main", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    // test "a" fails at head and main passes it; test "mixed" fails at head and at the tip
+    commitFiles(fixture.workspace, {
+      "test/mixed.test.ts": `${sidedFile(fixture.directory, "mixed", redBody)}test("a", () => { if (side === "head") throw new Error("broken by the run"); });\n`,
+    });
+    git(fixture.workspace, "push", "origin", "HEAD:refs/heads/main");
+    Object.assign(fixture, fixture.startRun("DET-2"));
+    commitSided(fixture, fixture.mirrorOf("."), { other: "" });
+
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code).toBe(1);
+    expect(sideStarts(fixture, "mixed", "main")).toBe(1);
+    expect(redOnMainLine(result.out, "test/mixed.test.ts")).toBe(false);
+    expect(result.out).toContain("not red on main");
+    const event = completedEvents(fixture).at(-1);
+    expect(event.passed).toBe(false);
+    expect(event.red_on_main).toBeUndefined();
+  });
+
+  test.each([
+    ["the suite has no base_command", "base_command"],
+    ["the repo has no origin remote", "origin"],
+    ["git fetch origin fails", "fetch"],
+  ])(
+    "ARK-T327 when %s the failure keeps counting, no red on main line is printed and the output says why the file was not checked on main",
+    async (_why, cause) => {
+      const fixture = makeFixture({
+        forge: cause !== "origin",
+        suites: () => [
+          cause === "base_command"
+            ? { ...wholeSuite(), base_files: undefined, base_command: undefined }
+            : wholeSuite(),
+        ],
+      });
+      if (cause === "origin") {
+        commitSided(fixture, fixture.workspace, { red: redBody, ok: "" });
+        Object.assign(fixture, fixture.startRun("DET-2"));
+      } else runFromTip(fixture, { red: redBody, ok: "" }, "DET-2");
+      commitSided(fixture, fixture.mirrorOf("."), { other: "" });
+      if (cause === "fetch")
+        for (const directory of [fixture.workspace, fixture.mirrorOf(".")])
+          git(directory, "remote", "set-url", "origin", join(fixture.directory, "missing.git"));
+
+      const result = await arkDone(fixture, "test", fixture.runId);
+      expect(result.code).toBe(1);
+      expect(sideStarts(fixture, "red", "main")).toBe(0);
+      expect(result.out).not.toMatch(/^red on main/m);
+      expect(result.out + result.err).toContain("not checked on main");
+      const event = completedEvents(fixture).at(-1);
+      expect(event.passed).toBe(false);
+      expect(event.red_on_main).toBeUndefined();
+    },
+  );
+
+  test("ARK-T327 a failed test that names no file is not checked on main and the suite stays failed", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    runFromTip(fixture, { ok: "" }, "DET-2");
+    writeFileSync(
+      join(fixture.directory, "nofile.sh"),
+      `#!/bin/sh
+case "$2" in */census/*) ;; *) echo start >> "$1/starts";; esac
+cat > "$2" <<'XML'
+<testsuites><testsuite name="s"><testcase name="t" classname="c"><failure message="x"/></testcase></testsuite></testsuites>
+XML
+exit 1
+`,
+    );
+    const command = `sh ${fixture.directory}/nofile.sh ${fixture.directory} {report}`;
+    fixture.suites = [{ ...wholeSuite("nofile"), command, base_command: `${command} # {files}` }];
+    fixture.rewriteProject();
+
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code).toBe(1);
+    expect(lines(join(fixture.directory, "starts"))).toEqual(["start"]);
+    expect(result.out).not.toMatch(/^red on main/m);
+    expect(result.out + result.err).toContain("not checked on main");
+  });
+
+  test.each([false, true])(
+    "ARK-T328 an untouched file that the run broke through a changed helper fails at head, passes at the tip, and still fails the run (another file red on main: %s)",
+    async (withRed) => {
+      const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+      commitFiles(fixture.workspace, { "src/helper.ts": "export const helper = () => 1;\n" });
+      runFromTip(
+        fixture,
+        {
+          "uses-helper": [usesHelperBody, helperHeader],
+          ...(withRed ? { red: redBody } : {}),
+        },
+        "DET-2",
+      );
+      commitFiles(fixture.mirrorOf("."), { "src/helper.ts": "export const helper = () => 2;\n" });
+
+      const result = await arkDone(fixture, "test", fixture.runId);
+      expect(result.code).toBe(1);
+      expect(sideStarts(fixture, "uses-helper", "head")).toBe(2);
+      expect(sideStarts(fixture, "uses-helper", "main")).toBe(1);
+      expect(redOnMainLine(result.out, "test/uses-helper.test.ts")).toBe(false);
+      expect(redOnMainLine(result.out, "test/red.test.ts")).toBe(withRed);
+      const event = completedEvents(fixture).at(-1);
+      expect(event.passed).toBe(false);
+      expect(event.red_on_main).toEqual(withRed ? ["test/red.test.ts"] : undefined);
+    },
+  );
+
+  test("ARK-T329 a touched file that fails fails the run and is never run at the tip, even when the tip fails it too", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    runFromTip(fixture, { red: redBody, ok: "" }, "DET-2");
+    commitSided(fixture, fixture.mirrorOf("."), { red: `/* edited by the run */ ${redBody}` });
+
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code).toBe(1);
+    expect(sideStarts(fixture, "red", "head")).toBe(2);
+    expect(sideStarts(fixture, "red", "main")).toBe(0);
+    expect(redOnMainLine(result.out, "test/red.test.ts")).toBe(false);
+    const event = completedEvents(fixture).at(-1);
+    expect(event.passed).toBe(false);
+    expect(event.red_on_main).toBeUndefined();
+  });
+
+  test("ARK-T329 a file that reached the run only through ark worktree sync is untouched: red on main, not counted", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    Object.assign(fixture, fixture.startRun("DET-2"));
+    commitSided(fixture, fixture.mirrorOf("."), { other: "" });
+    commitSided(fixture, fixture.workspace, { red: redBody });
+    git(fixture.workspace, "push", "origin", "HEAD:refs/heads/main");
+    const synced = await arkDone(fixture, "worktree", "sync", fixture.runId);
+    expect(synced.code, synced.err + synced.out).toBe(0);
+    expect(existsSync(join(fixture.mirrorOf("."), "test/red.test.ts"))).toBe(true);
+
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code, result.err + result.out).toBe(0);
+    expect(sideStarts(fixture, "red", "head")).toBe(2);
+    expect(sideStarts(fixture, "red", "main")).toBe(1);
+    expect(redOnMainLine(result.out, "test/red.test.ts")).toBe(true);
+    const event = completedEvents(fixture).at(-1);
+    expect(event.passed).toBe(true);
+    expect(event.red_on_main).toEqual(["test/red.test.ts"]);
+  });
+
+  test("ARK-T330 a run whose only failure is red on main spends no round, opens no escalation gate and opens its merge request; a run that breaks another file does not", async () => {
+    installFakeOrca();
+    try {
+      const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+      commitFiles(fixture.workspace, { "src/helper.ts": "export const helper = () => 1;\n" });
+      runFromTip(fixture, { red: redBody, "uses-helper": [usesHelperBody, helperHeader] }, "DET-2");
+      const control = fixture.startRun("DET-3");
+      commitFiles(fixture.mirrorOf(".", control.runDirectory), {
+        "src/helper.ts": "export const helper = () => 2;\n",
+      });
+
+      // two rounds, each: start the implementer, finish it, commit, run the tests
+      const rounds = async (runId: string, runDirectory: string, worktree: string) => {
+        const tested: { code: number; out: string; err: string }[] = [];
+        for (const round of [1, 2]) {
+          const started = await arkDone(fixture, "run", "step", runId, "build-0", "start");
+          expect(started.code, started.err).toBe(0);
+          commitSided(fixture, worktree, { [`round${round}`]: "" });
+          const finished = await arkDone(fixture, "run", "step", runId, "build-0", "finish");
+          expect(finished.code, finished.err).toBe(0);
+          tested.push(await arkDone(fixture, "test", runId));
+        }
+        const events = readFileSync(join(runDirectory, "events.ndjson"), "utf8");
+        return { tested, escalations: (events.match(/"escalation\.requested"/g) ?? []).length };
+      };
+
+      const counted = await rounds(
+        control.runId,
+        control.runDirectory,
+        fixture.mirrorOf(".", control.runDirectory),
+      );
+      expect(counted.tested.map((result) => result.code)).toEqual([1, 1]);
+      const controlStatus = await arkDone(fixture, "status", control.runId);
+      expect(controlStatus.out).toContain("phase: escalation");
+      writeEvidenceFile(control.runDirectory, "DET-3-AC1");
+      const refused = await arkDone(fixture, "merge-request", "open", control.runId);
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain("the last test run did not pass");
+
+      const main = await rounds(fixture.runId, fixture.runDirectory, fixture.mirrorOf("."));
+      expect(main.tested.map((result) => result.code)).toEqual([0, 0]);
+      expect(main.escalations).toBe(0);
+      const status = await arkDone(fixture, "status", fixture.runId);
+      expect(status.out).not.toContain("phase: escalation");
+      expect(status.out).toContain("last test: passed");
+      writeEvidenceFile(fixture.runDirectory, "DET-2-AC1");
+      const opened = await arkDone(fixture, "merge-request", "open", fixture.runId);
+      expect(opened.err).not.toContain("the last test run did not pass");
+      expect(opened.code, opened.err).toBe(0);
+    } finally {
+      removeFakeOrca();
+    }
   });
 });
