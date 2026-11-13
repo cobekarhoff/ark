@@ -1,6 +1,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
 import type { PlanStep } from "../cli/plan.ts";
@@ -37,11 +38,24 @@ function planStep(id: string, role: string, repo = "."): PlanStep {
   };
 }
 
-/** A run with an approved plan and a real worktree (HEAD equals base); the steps are the plan's. */
-function openRun(steps: PlanStep[]) {
+/**
+ * A run with an approved plan and a real worktree (HEAD equals base); the steps are the plan's.
+ * `planExtras` adds keys to plan.yml; `withOrigin` gives the repo a bare origin, so the merge request diff exists.
+ */
+function openRun(steps: PlanStep[], options: { planExtras?: object; withOrigin?: boolean } = {}) {
   tempArkHome();
   installFakeOrca();
   const workspace = tempGitRepo();
+  if (options.withOrigin) {
+    const origin = mkdtempSync(join(tmpdir(), "ark-origin-"));
+    for (const args of [
+      ["clone", "-q", "--bare", workspace, origin],
+      ["-C", workspace, "remote", "add", "origin", origin],
+      ["-C", workspace, "fetch", "-q", "origin"],
+      ["-C", workspace, "remote", "set-head", "origin", "main"],
+    ])
+      expect(Bun.spawnSync(["git", ...args]).exitCode).toBe(0);
+  }
   const projectDirectory = writeProject("demo", {
     workspace,
     ticket_source: "local",
@@ -64,7 +78,7 @@ function openRun(steps: PlanStep[]) {
   const ticketFile = writeTicket("demo", "ARK-900", [{ id: "ARK-900-AC1", text: "Fixture works" }]);
   const runId = ark("run", "start", ticketFile, "--project", "demo").out.trim();
   const directory = join(projectDirectory, "runs", runId);
-  writeFileSync(join(directory, "plan.yml"), JSON.stringify({ steps }));
+  writeFileSync(join(directory, "plan.yml"), JSON.stringify({ steps, ...options.planExtras }));
   recordEvaluation(directory);
   appendEvent(directory, "plan.checked", {
     valid: true,
@@ -182,6 +196,128 @@ test("ARK-T304 finishing a succeeded reviewer step is refused when its review ra
   ]);
   expect(commit.exitCode).toBe(0);
   expect(ark("run", "step", runId, "review", "finish").code).toBe(0);
+  expect(readEvents(directory).at(-1)).toMatchObject({
+    type: "step.finished",
+    data: { step: "review", outcome: "succeeded" },
+  });
+});
+
+/**
+ * A started reviewer step whose worktree holds one commit that changes `files`; the plan lists only cli/run.ts.
+ * `otherRepoFile` also gives the run a second repo `other` whose worktree changes that file (listed nowhere).
+ */
+function reviewerWithChanges(files: string[], otherRepoFile?: string) {
+  const steps = [planStep("build", "implementer"), planStep("review", "reviewer")];
+  const run = openRun(steps, {
+    withOrigin: true,
+    planExtras: {
+      summary: {
+        why: "fixture",
+        changes: [{ criterion: "ARK-900-AC1", where: "cli/run.ts", now: "", fix: "" }],
+      },
+    },
+  });
+  for (const file of files) {
+    mkdirSync(dirname(join(run.worktree!.path, file)), { recursive: true });
+    writeFileSync(join(run.worktree!.path, file), "changed\n");
+  }
+  for (const args of [
+    ["add", "-A"],
+    ["commit", "-qm", "work"],
+  ])
+    expect(
+      Bun.spawnSync(["git", "-c", "user.name=Ark", "-c", "user.email=ark@example.com", ...args], {
+        cwd: run.worktree!.path,
+      }).exitCode,
+    ).toBe(0);
+  if (otherRepoFile) {
+    const other = mkdtempSync(join(tmpdir(), "ark-other-"));
+    const origin = Bun.spawnSync(["git", "-C", run.worktree!.path, "remote", "get-url", "origin"])
+      .stdout.toString()
+      .trim();
+    for (const args of [
+      ["clone", "-q", origin, other],
+      ["-C", other, "remote", "set-head", "origin", "main"],
+    ])
+      expect(Bun.spawnSync(["git", ...args]).exitCode).toBe(0);
+    mkdirSync(dirname(join(other, otherRepoFile)), { recursive: true });
+    writeFileSync(join(other, otherRepoFile), "changed\n");
+    for (const args of [
+      ["add", "-A"],
+      ["commit", "-qm", "other work"],
+    ])
+      expect(
+        Bun.spawnSync(["git", "-c", "user.name=Ark", "-c", "user.email=ark@example.com", ...args], {
+          cwd: other,
+        }).exitCode,
+      ).toBe(0);
+    appendEvent(run.directory, "worktree.created", {
+      repo: "other",
+      path: other,
+      branch: "main",
+      base: run.worktree!.base,
+    });
+  }
+  expect(ark("run", "step", run.runId, "build", "start").code).toBe(0);
+  expect(ark("run", "step", run.runId, "build", "finish").code).toBe(0);
+  expect(ark("run", "step", run.runId, "review", "start").code).toBe(0);
+  return run;
+}
+
+function writeReviewerFindings(directory: string, text: string) {
+  mkdirSync(join(directory, "findings"), { recursive: true });
+  writeFileSync(join(directory, "findings", "review.md"), text);
+}
+
+const mergeRiskBlock = (...lines: string[]) => ["## Merge risk", "", ...lines, ""].join("\n");
+
+test("ARK-T335 reviewer finish is refused for an unplanned file with no reason and names the line", () => {
+  const { runId, directory } = reviewerWithChanges(
+    ["cli/helpers.ts", "cli/run.ts"],
+    "lib/other.ts",
+  );
+  const before = readEvents(directory);
+
+  // The findings file exists, with a block and no line; then it does not exist at all.
+  writeReviewerFindings(directory, mergeRiskBlock("- Door: two-way"));
+  for (const absent of [false, true]) {
+    if (absent) rmSync(join(directory, "findings", "review.md"));
+    const refused = ark("run", "step", runId, "review", "finish");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("cli/helpers.ts");
+    expect(refused.err).toContain("Not in plan: cli/helpers.ts — <reason>");
+    expect(refused.err).toContain("findings/review.md");
+    expect(refused.err).not.toContain("cli/run.ts");
+    expect(refused.err).not.toContain("lib/other.ts"); // another repo's file is that repo's reviewer's
+    expect(readEvents(directory)).toEqual(before);
+  }
+
+  // A dead reviewer can still be closed.
+  expect(ark("run", "step", runId, "review", "finish", "--failed").code).toBe(0);
+});
+
+test("ARK-T336 reviewer finish passes when each unplanned file has a reason and test/ and docs/ need none", () => {
+  const files = ["cli/helpers.ts", "test/foo.test.ts", "docs/foo.md"];
+  const line = "- Not in plan: cli/helpers.ts — fixture reason";
+
+  // An empty reason, and a line only in a second block, are no reason.
+  for (const text of [
+    mergeRiskBlock("- Not in plan: cli/helpers.ts —"),
+    `${mergeRiskBlock("- Door: two-way")}\n${mergeRiskBlock(line)}`,
+  ]) {
+    const { runId, directory } = reviewerWithChanges(files);
+    writeReviewerFindings(directory, text);
+    const refused = ark("run", "step", runId, "review", "finish");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("cli/helpers.ts");
+    expect(refused.err).not.toContain("foo.test.ts");
+    expect(refused.err).not.toContain("docs/foo.md");
+  }
+
+  const { runId, directory } = reviewerWithChanges(files);
+  writeReviewerFindings(directory, mergeRiskBlock(line));
+  const finished = ark("run", "step", runId, "review", "finish");
+  expect(finished.code, finished.err).toBe(0);
   expect(readEvents(directory).at(-1)).toMatchObject({
     type: "step.finished",
     data: { step: "review", outcome: "succeeded" },

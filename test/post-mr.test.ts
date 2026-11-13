@@ -1,5 +1,5 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
@@ -386,8 +386,22 @@ function submoduleRun() {
   const libTree = worktrees.find((worktree) => worktree.repo === "lib")!;
   const appTree = worktrees.find((worktree) => worktree.repo === "app")!;
   const finish = (stepId: string) => {
+    if (stepId === "review") {
+      mkdirSync(join(directory, "findings"), { recursive: true });
+      writeFileSync(
+        join(directory, "findings", "review.md"),
+        [
+          "## Merge risk",
+          "",
+          "- Not in plan: app/libs/lib — submodule bump",
+          "- Not in plan: lib/feature.txt — library change",
+          "",
+        ].join("\n"),
+      );
+    }
     expect(ark("run", "step", runId, stepId, "start").code).toBe(0);
-    expect(ark("run", "step", runId, stepId, "finish").code).toBe(0);
+    const finished = ark("run", "step", runId, stepId, "finish");
+    expect(finished.code, finished.out + finished.err).toBe(0);
   };
 
   // impl-lib: one commit on the lib branch, pushed so that the submodule can fetch it
