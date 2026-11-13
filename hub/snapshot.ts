@@ -2,8 +2,8 @@ import { watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { now } from "../cli/clock.ts";
 import { loadConfig } from "../cli/config.ts";
-import { waitingGate } from "../cli/events.ts";
-import { splitRunTime } from "../cli/time-split.ts";
+import { waitingGate, type ArkEvent } from "../cli/events.ts";
+import { gateWaits, splitRunTime } from "../cli/time-split.ts";
 import {
   createArkReader,
   createEvidenceReader,
@@ -98,12 +98,28 @@ const questions: Record<GateKind, (title: string) => string> = {
   plan: (title) => `Approve the plan for "${title}"?`,
   escalation: (title) => `Escalation on "${title}": decide how to go on`,
 };
-const gateEvents: Record<GateKind, string> = {
-  criteria: "run.started",
-  strategy: "strategy.recorded",
-  plan: "plan.checked",
-  escalation: "escalation.requested",
-};
+
+/**
+ * When the open gate of `kind` started; never the newest event of the run. One rule for every kind:
+ * the open wait of `gateWaits` (cli/time-split.ts). An escalation with an `escalation.requested`
+ * after its last answered escalation starts at that request (an earlier, answered escalation does
+ * not count); without one, at the `test.completed` or `step.finished` that spent the round budget.
+ */
+export function gateSince(events: ArkEvent[], kind: GateKind): string {
+  const openWait = gateWaits(events).findLast(
+    (wait) => wait.gate === kind && wait.answered === null,
+  );
+  if (kind === "escalation") {
+    const lastAnswer = events.findLastIndex(
+      (event) => event.type === "gate.answered" && event.data.gate === "escalation",
+    );
+    const request = events.findLast(
+      (event, index) => index > lastAnswer && event.type === "escalation.requested",
+    );
+    if (request) return request.time;
+  }
+  return openWait?.asked ?? events[0].time; // run.started: gateWaits always opens the wait that waitingGate names
+}
 
 export type SnapshotReader = ReturnType<typeof createSnapshotReader>;
 
@@ -415,8 +431,7 @@ export function createSnapshotReader() {
           kind,
           question: questions[kind](state.ticket.title),
           review_url: sessions.find((session) => session.target === document)?.url ?? null,
-          since: (events.findLast((event) => event.type === gateEvents[kind]) ?? events.at(-1)!)
-            .time,
+          since: gateSince(events, kind),
         });
       }
       return viewOf(run, false);
