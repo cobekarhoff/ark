@@ -9,7 +9,6 @@ import {
   nowAt,
   projectRange,
   projectRuns,
-  runAtPlayhead,
   waitingBands,
 } from "../hub/page/conversation-model.ts";
 
@@ -140,7 +139,7 @@ test("now at the scrubber time: between steps counts live, m9 never counts", () 
   expect(nowAt(runs, [], ms("08:01")).live.map((l) => l.run)).toEqual(["A"]);
 });
 
-test("filter: chip, run and subject search act on the messages; the cut is reused until something crosses", () => {
+test("filter: chip, run and subject search act on the messages", () => {
   const types = filterProject(runs, [], { ...noFilter, types: new Set(["question"]) });
   expect(types.runs.flatMap((r) => r.conversation.messages.map((m) => m.id))).toEqual([
     "m3",
@@ -155,7 +154,4 @@ test("filter: chip, run and subject search act on the messages; the cut is reuse
       (r) => r.conversation.messages,
     ),
   ).toEqual([]);
-  const a = runAtPlayhead(A, ms("08:03"));
-  expect(runAtPlayhead(A, ms("08:04"))).toBe(a);
-  expect(runAtPlayhead(A, ms("08:10"))).not.toBe(a);
 });

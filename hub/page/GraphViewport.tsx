@@ -15,7 +15,7 @@ const focusable = 'a[href], button:not(:disabled), [tabindex="0"]';
  * copy, so test ids stay unique), closes on Esc, Close and a route change, and returns the focus.
  */
 export function GraphViewport({
-  width,
+  width: widthProp,
   height,
   label,
   scrollClass,
@@ -23,7 +23,8 @@ export function GraphViewport({
   onFullChange,
   children,
 }: {
-  width: number;
+  /** A function lays the graph out for the zoom mode and the room (graph pixels) the box has; 0 before it is measured. */
+  width: number | ((mode: "fit" | "actual", available: number) => number);
   height: number;
   /** Names the scroll region and the dialog. */
   label: string;
@@ -33,8 +34,8 @@ export function GraphViewport({
   focusY?: number | null;
   /** Called when Full screen opens or closes, for a panel that must stay above the layer. */
   onFullChange?: (full: boolean) => void;
-  /** A function receives the zoom mode, for a graph that draws fewer marks at Fit. */
-  children: ReactNode | ((mode: "fit" | "actual") => ReactNode);
+  /** A function receives the zoom mode and the laid-out width, for a graph that draws fewer marks at Fit. */
+  children: ReactNode | ((mode: "fit" | "actual", width: number) => ReactNode);
 }) {
   const [full, setFull] = useState(false);
   useEffect(() => onFullChange?.(full), [full, onFullChange]);
@@ -56,6 +57,7 @@ export function GraphViewport({
     return () => observer.disconnect();
   }, [full]);
 
+  const width = typeof widthProp === "function" ? widthProp(mode, available) : widthProp;
   const fit = available > 0 ? Math.min(1, Math.max(minScale, available / width)) : 1;
   const scale = mode === "fit" ? fit : 1;
 
@@ -164,7 +166,7 @@ export function GraphViewport({
             className="gv-graph"
             style={{ width, height, transform: `scale(${scale})`, transformOrigin: "0 0" }}
           >
-            {typeof children === "function" ? children(mode) : children}
+            {typeof children === "function" ? children(mode, width) : children}
           </div>
         </div>
       </div>

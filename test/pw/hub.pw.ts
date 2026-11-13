@@ -11216,15 +11216,18 @@ test("ARK-T357 the Now panel follows the scrubber, a type chip, a run filter and
   await page.getByTestId("map-search").fill("");
   expect(await both()).toEqual({ map: all, strip: all });
 
-  // The map controls, on a page narrower than the map so Fit differs from 100%.
+  // The map controls, on a page narrower than the 100% map: Fit lays the whole window out in the room, 100% scrolls.
   await page.setViewportSize({ width: 900, height: 900 });
   const viewport = page.getByTestId("graph-viewport");
   const scale = async () => Number(await viewport.getAttribute("data-scale"));
+  const mapWidth = async () => (await page.getByTestId("map").boundingBox())!.width;
+  const room = async () => (await viewport.getByRole("region").boundingBox())!.width;
   await page.getByRole("button", { name: "100%", exact: true }).click();
   expect(await scale()).toBe(1);
+  expect(await mapWidth()).toBeGreaterThan(await room());
   await page.getByRole("button", { name: "Fit", exact: true }).click();
-  expect(await scale()).toBeLessThan(1);
   expect(await scale()).toBeGreaterThanOrEqual(0.6);
+  expect(await mapWidth()).toBeLessThanOrEqual(await room());
   await page.getByRole("button", { name: "100%", exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 900 });
 

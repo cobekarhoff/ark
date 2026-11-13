@@ -239,6 +239,12 @@ function AgentView({
       <dl className="cv-facts">
         <dt>Role</dt>
         <dd data-testid="inspector-role">{nameOf(agent).badge}</dd>
+        {agent.handle ? (
+          <>
+            <dt>Handle</dt>
+            <dd className="mono">{agent.handle}</dd>
+          </>
+        ) : null}
         <dt>Steps</dt>
         <dd>
           {spans.length === 0 ? (

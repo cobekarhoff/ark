@@ -592,26 +592,6 @@ export function waitingBands(runs: readonly ProjectRun[], playhead: number = Inf
 
 // -- replay --
 
-const cuts = new WeakMap<RunConversation, { key: string; cut: RunConversation }>();
-
-/**
- * `atPlayhead` for one run, memoised: the same object comes back until a message, answer or reply
- * crosses the playhead, so a scrub that crosses nothing re-renders no run.
- */
-export function runAtPlayhead(conversation: RunConversation, playhead: number): RunConversation {
-  const before = (iso: string | null) => iso !== null && Date.parse(iso) <= playhead;
-  const key = [
-    conversation.messages.filter((message) => sentAt(message) <= playhead).length,
-    conversation.answers.filter((answer) => before(answer.time)).length,
-    conversation.questions.filter((question) => before(question.answered)).length,
-  ].join(",");
-  const held = cuts.get(conversation);
-  if (held?.key === key) return held.cut;
-  const cut = atPlayhead(conversation, playhead);
-  cuts.set(conversation, { key, cut });
-  return cut;
-}
-
 /** The send times that count, for `useReplay`: messages with no time are left out. */
 export const sentTimes = (
   runs: readonly ProjectRun[],

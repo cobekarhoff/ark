@@ -4605,6 +4605,17 @@ button.cv-name:hover {
   margin-left: -1px;
   background: var(--line-3);
 }
+.tscale-tick,
+.tscale-answer {
+  cursor: pointer;
+}
+/* A 3 px tick is hard to hit: a wider invisible target. */
+.tscale-tick::after,
+.tscale-answer::after {
+  content: "";
+  position: absolute;
+  inset: -2px -3px;
+}
 .tscale-tick.ty-question {
   background: var(--amber);
 }
@@ -4621,6 +4632,7 @@ button.cv-name:hover {
   border-radius: 4px 4px 0 0;
 }
 .tscale-hit {
+  pointer-events: none;
   position: absolute;
   top: 34px;
   bottom: 0;
@@ -4636,16 +4648,33 @@ button.cv-name:hover {
   border-left: 1.5px dashed var(--blue-t);
   pointer-events: none;
 }
-.pc-main {
+.pc-top {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 340px;
   gap: 12px;
   align-items: start;
 }
+/* The side column stays in view while the map scrolls, so a click shows its inspector at once. */
+.pc-side {
+  position: sticky;
+  top: 8px;
+  display: grid;
+  gap: 8px;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
 @media (max-width: 1100px) {
-  .pc-main {
+  .pc-top {
     grid-template-columns: minmax(0, 1fr);
   }
+  .pc-side {
+    position: static;
+    max-height: none;
+  }
+}
+/* Full screen: the inspector is a panel at the right and the map gives it the room, so it hides no line. */
+.pc-inspecting .gv.full {
+  right: min(444px, 50vw);
 }
 .pc-over .cv-inspector {
   position: fixed;

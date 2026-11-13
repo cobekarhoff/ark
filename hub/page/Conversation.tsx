@@ -73,7 +73,7 @@ export function Notices({ reply }: { reply: ConversationReply }) {
     <>
       {reply.directory === "loading" ? (
         <p className="mut" role="status" data-testid="conversation-loading">
-          The agent directory is still loading, so some agents show by their raw handle.
+          The agent directory is still loading, so some agents show as Unmapped.
         </p>
       ) : null}
       {reply.truncated ? (
