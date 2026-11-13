@@ -2948,7 +2948,12 @@ test("ARK-293-AC3 Master Chief listed by Orca and by worktree ps is one agent of
 
 // ---------------------------------------------------------------- ARK-344: the hub reads every Orca message
 
-type ConversationHead = { truncated: boolean; stale: boolean; read_at: string };
+type ConversationHead = {
+  truncated: boolean;
+  stale: boolean;
+  directory: "loading" | "ready";
+  read_at: string;
+};
 type RunReply = ConversationHead & RunConversation;
 type ProjectReply = ConversationHead & ProjectAnswer;
 
@@ -3336,9 +3341,14 @@ test("ARK-T320 every message handle maps to Master Chief, a run lead, a worker w
 test("ARK-T321 the conversation routes answer agents, role groups, spans, events, messages, human answers and question times from the worker thread", async () => {
   isolatedEnvironment();
   const { run, otherRun, at, messages, orca } = conversationFixture();
-  installFakeTools({ orca });
+  const state = installFakeTools({ orca });
+  // Slow Orca calls: the handle directory read outlasts the 2 s wait, so the first value is the early one.
+  writeFileSync(join(state, "orca.sleep"), "3");
   const { baseUrl } = await start();
-  await conversationWhen<ProjectReply>(baseUrl, () => true);
+  const early = await conversationWhen<ProjectReply>(baseUrl, () => true);
+  expect(early.directory).toBe("loading");
+  writeFileSync(join(state, "orca.sleep"), "0");
+  await conversationWhen<ProjectReply>(baseUrl, (reply) => reply.directory === "ready");
 
   // The run route.
   const answer = await conversationWhen<RunReply>(
@@ -3528,12 +3538,6 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
     },
   });
   const { baseUrl } = await start();
-  // The inbox is held as soon as it is read; the first conversation request is the cold build of the 2,000-message index.
-  const deadline = Date.now() + 30_000;
-  while ((await fetch(`${baseUrl}/api/conversation/message/msg_0_0`)).status !== 200) {
-    if (Date.now() > deadline) throw new Error("the inbox was never read");
-    await delay(50);
-  }
   // 20 runs and 2,000 messages sit 100 minutes apart, so a 48 h window holds them all.
   const path = `/api/conversation?since=${encodeURIComponent(new Date(base - 48 * 3_600_000).toISOString())}&until=${encodeURIComponent(new Date(base + 60_000).toISOString())}`;
   const timed = async () => {
@@ -3542,7 +3546,19 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
     const reply = (await response.json()) as ProjectReply;
     return { milliseconds: performance.now() - requestedAt, status: response.status, reply };
   };
-  const cold = await timed();
+  // The first conversation request waits for the first read, so wait for it on the cheap message route; then ask for the
+  // full value (directory ready, not the early one). The first ready answer is the cold build.
+  const deadline = Date.now() + 60_000;
+  while ((await fetch(`${baseUrl}/api/conversation/message/msg_0_0`)).status !== 200) {
+    if (Date.now() > deadline) throw new Error("the inbox was never read");
+    await delay(50);
+  }
+  let cold = await timed();
+  while (cold.reply.directory !== "ready") {
+    if (Date.now() > deadline) throw new Error("the handle directory was never read");
+    await delay(50);
+    cold = await timed();
+  }
   expect(cold.status).toBe(200);
   expect(allMessagesOf(cold.reply)).toHaveLength(2000);
   expect(cold.reply.runs).toHaveLength(20);

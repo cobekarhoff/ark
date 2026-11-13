@@ -76,7 +76,8 @@ const switchTimeoutMilliseconds = 5000;
  * `GET /api/ticket/<project>/<ticket>/cases` (the test cases of a ticket), and the conversation
  * (ARK-344): `GET /api/run/<run>/conversation` (agents, spans, events, messages with bodies,
  * human answers, question times), `GET /api/conversation?since=&until=` (the same for every run in
- * a window, no bodies) and `GET /api/conversation/message/<id>` (one body). The one POST
+ * a window, no bodies; both carry `directory: "loading"` until the handle directory is read, then
+ * `"ready"`) and `GET /api/conversation/message/<id>` (one body). The one POST
  * route is `POST /api/open-in-orca` (ADR 0009): it focuses a live terminal in Orca and does nothing
  * else. Any other method gets 405, any other path 404.
  *

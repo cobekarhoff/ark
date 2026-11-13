@@ -153,9 +153,12 @@ export function createSnapshotReader() {
     input: ConversationInput;
     truncated: boolean;
     stale: boolean;
+    /** "loading" while the handles are not mapped yet (the early value); "ready" once the directory read published. */
+    directory: "loading" | "ready";
   } | null = null;
   const closedWorkers = new Map<string, RunWorkers>();
-  let conversationRead: Promise<void> | undefined;
+  /** Settles at the first publish (early or full) of the running read, or when that read ends without one. */
+  let conversationFirst: Promise<void> | undefined;
   const watchers = new Map<string, FSWatcher>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let stopped = false;
@@ -612,7 +615,9 @@ export function createSnapshotReader() {
   async function readConversation(): Promise<void> {
     const started = generation;
     let inbox: InboxRead | null = null;
-    const publish = (read: InboxRead, directory: Directory) => {
+    let settleFirst: () => void = () => {};
+    conversationFirst = new Promise<void>((resolve) => (settleFirst = resolve));
+    const publish = (read: InboxRead, directory: Directory, state: "loading" | "ready") => {
       const version = new Date().toISOString();
       conversation = {
         version,
@@ -620,7 +625,9 @@ export function createSnapshotReader() {
         input: { version, messages: read.messages, directory },
         truncated: read.truncated,
         stale: false,
+        directory: state,
       };
+      settleFirst();
     };
     try {
       inbox = await readInbox();
@@ -644,16 +651,17 @@ export function createSnapshotReader() {
         ]);
         clearTimeout(timer);
         if (early === "slow" && started === generation)
-          publish(inbox, { chiefs: [], leads: [], workers: [] });
+          publish(inbox, { chiefs: [], leads: [], workers: [] }, "loading");
       }
       const directory = await reading;
-      if (started !== generation) return;
-      if (inbox && directory) return publish(inbox, directory);
+      if (started !== generation) return settleFirst();
+      if (inbox && directory) return publish(inbox, directory, "ready");
     } catch {
       // A failed read is the stale case below.
     }
-    if (started !== generation) return;
+    if (started !== generation) return settleFirst();
     if (conversation) conversation.stale = true;
+    settleFirst();
   }
 
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
@@ -720,8 +728,7 @@ export function createSnapshotReader() {
       loop(() => readers[name](), intervalMilliseconds[name], started);
     loop(
       () => {
-        conversationRead = readConversation();
-        return conversationRead;
+        return readConversation();
       },
       conversationIntervalMilliseconds,
       started,
@@ -884,7 +891,7 @@ export function createSnapshotReader() {
      * first read of a connected page. Null when no read has succeeded (no page connected, or Orca down), or for a run with no events.
      */
     async conversation(query: ConversationQuery): Promise<ConversationReply | null> {
-      if (!conversation) await conversationRead;
+      if (!conversation) await conversationFirst;
       const held = conversation;
       if (!held) return null;
       const wanted = (slots.ark.value?.runs ?? []).filter(
@@ -905,7 +912,13 @@ export function createSnapshotReader() {
       }));
       const answer = await usage.conversation(held.input, runs, query);
       return answer
-        ? { truncated: held.truncated, stale: held.stale, read_at: held.version, ...answer }
+        ? {
+            truncated: held.truncated,
+            stale: held.stale,
+            directory: held.directory,
+            read_at: held.version,
+            ...answer,
+          }
         : null;
     },
     /** One message with its body, looked up by id in memory: the id never builds a path or a command. */

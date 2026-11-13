@@ -99,10 +99,13 @@ export type ProjectAnswer = {
   other: { agents: ConversationAgent[]; messages: ConversationMessage[] };
 };
 /** What the conversation routes send: the read's state, then the answer. */
-export type ConversationReply = { truncated: boolean; stale: boolean; read_at: string } & (
-  | RunConversation
-  | ProjectAnswer
-);
+export type ConversationReply = {
+  truncated: boolean;
+  stale: boolean;
+  /** "loading": the handle directory is still being read, so handles show unmapped; "ready" when it is read. */
+  directory: "loading" | "ready";
+  read_at: string;
+} & (RunConversation | ProjectAnswer);
 
 const planningRoles = new Set(["evaluator", "designer", "test-case-writer", "test-case-reviewer"]);
 const groupOfRole = (role: string): RoleGroup | null =>
