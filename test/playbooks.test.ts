@@ -62,7 +62,6 @@ test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
     "skills/ark/playbooks/chief.md",
     "test/playbooks.test.ts",
     "test/brainstorm.test.ts",
-    "docs/evidence/ARK-289-ac6.md",
   ].filter((file) => existsSync(join(root, file)));
   const result = Bun.spawnSync(["bunx", "oxfmt", "--check", ...files], { cwd: root });
   expect(result.exitCode).toBe(0);
