@@ -227,7 +227,7 @@ test("ARK-277-AC3 handlers read only memory: p95 under 200 ms on 25 runs and 300
 
 // ---------------------------------------------------------------- AC4
 
-test("ARK-T133 ARK-277-AC4 the page sends no request but its first load and one event stream, and an appended event shows on Home within 5 s", async ({
+test("ARK-T133 the page sends no request but its first load and one event stream, and an appended event shows on Home within 5 s", async ({
   page,
 }) => {
   isolate();
@@ -2343,17 +2343,17 @@ test.describe("the usage reset on a frozen clock", () => {
   const day = dateOf().toISOString().slice(0, 10);
   const at = (time: string) => Date.parse(`${day}T${time}:00Z`);
 
-  test("ARK-285-AC5 Home shows the tile strip first, then the blockers, the review queue in merge order and the progress and usage, with Master Chief once", async ({
+  test("ARK-T371 Home shows the tile strip first, then the blockers, the review queue in merge order and the progress and usage, with Master Chief once", async ({
     page,
   }) => {
     await checkHomeWithBlockers(page, at("12:00"), /resets \d\d:\d\d/);
   });
-  test("ARK-301-AC1 page clock at 23:30 UTC: the reset falls on the next day and shows its date", async ({
+  test("ARK-T372 page clock at 23:30 UTC: the reset falls on the next day and shows its date", async ({
     page,
   }) => {
     await checkHomeWithBlockers(page, at("23:30"), /resets \d\d \w{3} 00:\d\d/);
   });
-  test("ARK-301-AC1 page clock at 12:00 UTC: the reset falls on the same day and shows HH:MM only", async ({
+  test("ARK-T372 page clock at 12:00 UTC: the reset falls on the same day and shows HH:MM only", async ({
     page,
   }) => {
     await checkHomeWithBlockers(page, at("12:00"), /resets 13:\d\d/);
