@@ -8744,6 +8744,14 @@ const frames = (page: Page, count: number) =>
       await new Promise((done) => requestAnimationFrame(done));
   }, count);
 
+/** Waits 600 ms of page time: clear of the page's keyboard window (a route change soon after a key is a keyboard action). */
+const pastKeyWindow = (page: Page) =>
+  page.evaluate(async () => {
+    const start = performance.now();
+    while (performance.now() - start < 600)
+      await new Promise((done) => requestAnimationFrame(done));
+  });
+
 /** Every animation and transition of the page, named for a failure message: `<name or property> on <tag.class>`. */
 const animationsOf = (page: Page) =>
   page.evaluate(() =>
@@ -8896,7 +8904,7 @@ function withExtraGate(first: Snapshot): Snapshot {
 test("ARK-T312 A pushed new gate or changed count shows a fading amber highlight and a polite live count, and no animation loops forever", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   isolate();
   liveWorld();
   installFakeTools({});
@@ -9095,7 +9103,7 @@ const homeLists = {
 test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most 250 ms and end in the new place, and a view change transitions in at most 200 ms", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   isolate();
   roadmapOf44();
   liveWorld();
@@ -9160,7 +9168,7 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
   await finiteAnimationsEnded(page); // the change to Home above has recorded its transition
   const already = await recorded();
   for (const [index, [hash, marker]] of views.entries()) {
-    await page.waitForTimeout(600); // clear of the keyboard window of the last key
+    await pastKeyWindow(page);
     await page.evaluate((next) => (location.hash = next), hash);
     await expect(marker).toBeVisible();
     await expect.poll(recorded).toBe(already + index + 1);
@@ -9194,7 +9202,7 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
 test("ARK-T314 With prefers-reduced-motion, or for a keyboard action's result, no element animates or transitions", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   isolate();
   roadmapOf44();
   liveWorld();
@@ -9257,7 +9265,7 @@ test("ARK-T314 With prefers-reduced-motion, or for a keyboard action's result, n
   // (hover, pressed) is not the result of the route change.
   expect(await motionOf(page)).toEqual([]);
   expect(await calls()).toBe(callsBefore);
-  await page.waitForTimeout(600);
+  await pastKeyWindow(page);
   await page
     .getByRole("navigation", { name: "Views" })
     .getByRole("link", { name: "Roadmap" })
@@ -9309,7 +9317,7 @@ async function proxyHub(hubUrl: string) {
 test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the page, and keeps the stale chip list working without moving the header", async ({
   page,
 }) => {
-  test.setTimeout(180_000);
+  test.slow();
   isolate();
   const run = runId("ARK-111");
   writeRun({
