@@ -121,8 +121,8 @@ test("beads: 8 timed messages, m9 has no position, 3 spurs", () => {
   expect(beads.filter((b) => b.spur).map((b) => b.id)).toEqual(["m3", "m5", "m7"]);
   const axis = buildAxis(runs, []);
   expect(axis.at(ms("08:00"))).toBe(0);
-  expect(clusterBeads(beads, axis, true)).toHaveLength(8);
-  expect(clusterBeads(beads, axis, false).flat()).toHaveLength(8);
+  expect(clusterBeads(beads, axis, true, 10)).toHaveLength(8);
+  expect(clusterBeads(beads, axis, false, 10).flat()).toHaveLength(8);
 });
 
 test("now at the scrubber time: between steps counts live, m9 never counts", () => {

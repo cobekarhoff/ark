@@ -20,6 +20,7 @@ export function GraphViewport({
   label,
   scrollClass,
   focusY = null,
+  onFullChange,
   children,
 }: {
   width: number;
@@ -30,10 +31,13 @@ export function GraphViewport({
   scrollClass: string;
   /** Unscaled y of a spot to keep in the middle of the box, such as the running step. */
   focusY?: number | null;
+  /** Called when Full screen opens or closes, for a panel that must stay above the layer. */
+  onFullChange?: (full: boolean) => void;
   /** A function receives the zoom mode, for a graph that draws fewer marks at Fit. */
   children: ReactNode | ((mode: "fit" | "actual") => ReactNode);
 }) {
   const [full, setFull] = useState(false);
+  useEffect(() => onFullChange?.(full), [full, onFullChange]);
   const [mode, setMode] = useState<"fit" | "actual">("fit");
   const [available, setAvailable] = useState(0);
   const root = useRef<HTMLDivElement>(null);

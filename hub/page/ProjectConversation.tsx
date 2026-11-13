@@ -124,6 +124,7 @@ function MetroMap({
   selected,
   pickMessage,
   pickFocus,
+  onFull,
 }: {
   runs: ProjectRun[];
   other: ConversationMessage[];
@@ -136,6 +137,7 @@ function MetroMap({
   selected: string | null;
   pickMessage: (run: string | null, id: string) => void;
   pickFocus: (run: string, focus: InspectorFocus) => void;
+  onFull: (full: boolean) => void;
 }) {
   const slots = Math.max(axis.times.length - 1, 1);
   const step = Math.max(minStep, Math.min(maxStep, targetWidth / slots));
@@ -148,7 +150,13 @@ function MetroMap({
   const beads = buildBeads(runs, other);
   const pulsed = pulse ? beads.find((bead) => bead.id === pulse.id) : undefined;
   return (
-    <GraphViewport width={width} height={height} label="Master Chief map" scrollClass="pc-scroll">
+    <GraphViewport
+      width={width}
+      height={height}
+      label="Master Chief map"
+      scrollClass="pc-scroll"
+      onFullChange={onFull}
+    >
       {(mode) => (
         <div className="map" data-testid="map" style={{ width, height }}>
           <svg className="map-svg" width={width} height={height} aria-hidden="true">
@@ -304,7 +312,7 @@ function MetroMap({
                 onClick={() => pickMessage(bead.run, bead.id)}
               />
             ))}
-          {clusterBeads(beads, axis, mode === "actual").map((cluster) => {
+          {clusterBeads(beads, axis, mode === "actual", step).map((cluster) => {
             const first = cluster[0];
             const left = x(cluster.reduce((sum, bead) => sum + bead.time, 0) / cluster.length);
             return cluster.length === 1 ? (
@@ -660,6 +668,7 @@ function Loaded({
   const types = useMemo(() => projectTypes(allRuns, other), [allRuns, other]);
 
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [mapFull, setMapFull] = useState(false);
   const ownerOf = useMemo(() => {
     const owners = new Map<string, string | null>();
     for (const run of allRuns)
@@ -711,6 +720,7 @@ function Loaded({
           selected={selection?.message ?? null}
           pickMessage={pickMessage}
           pickFocus={pickFocus}
+          onFull={setMapFull}
         />
       </section>
       <Player full={full} replay={replay} />
@@ -721,7 +731,7 @@ function Loaded({
         playhead={playhead}
         seek={replay.seek}
       />
-      <div className="pc-main">
+      <div className={mapFull ? "pc-main pc-over" : "pc-main"}>
         <NowPanel now={now} playhead={at} pickMessage={pickMessage} owner={ownerOf} />
         {owning && selection ? (
           <Inspector

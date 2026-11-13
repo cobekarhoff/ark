@@ -535,23 +535,28 @@ export function buildBeads(
 }
 
 /**
- * Beads of the central line grouped by slot distance: at Fit a crowd is one cluster, at 100% (`zoomed`)
- * every bead stands alone. Reuses `clusterTicks` over slots instead of times.
+ * Beads of the central line grouped into fixed buckets of `bucket` graph pixels (`step` pixels a slot): at Fit
+ * a crowd becomes several clusters along the line, at 100% (`zoomed`) every bead stands alone. Buckets are
+ * fixed, not chained, so a steady stream does not merge into one cluster.
  */
-export function clusterBeads(beads: readonly Bead[], axis: Axis, zoomed: boolean): Bead[][] {
+export function clusterBeads(
+  beads: readonly Bead[],
+  axis: Axis,
+  zoomed: boolean,
+  step: number,
+  bucket = 24,
+): Bead[][] {
   const chief = beads.filter((bead) => bead.onChief);
   if (zoomed) return chief.map((bead) => [bead]);
-  const byId = new Map(chief.map((bead) => [bead.id, bead]));
-  const ticks: Tick[] = chief.map((bead) => ({
-    id: bead.id,
-    time: axis.at(bead.time),
-    type: bead.message.type,
-    row: bead.run ?? "other",
-    toRow: "chief",
-  }));
-  return clusterTicks(ticks, { start: 0, end: Math.max(axis.times.length - 1, 1) }).map((cluster) =>
-    cluster.map((tick) => byId.get(tick.id)!),
-  );
+  const clusters: Bead[][] = [];
+  let last = NaN;
+  for (const bead of chief) {
+    const key = Math.floor((axis.at(bead.time) * step) / bucket);
+    if (key === last) clusters.at(-1)!.push(bead);
+    else clusters.push([bead]);
+    last = key;
+  }
+  return clusters;
 }
 
 export type Band = { question: string; run: string; start: number; end: number; open: boolean };
