@@ -1,6 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { installAgent, type Outcome, plistPath, removeAgent } from "./agent.ts";
 import { arkHome } from "./paths.ts";
 import { mainHubName, portlessProgram, proxyStartArguments, wrappedHubArguments } from "./proxy.ts";
 
@@ -23,111 +22,9 @@ export async function ui(port: number, name?: string): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => child.kill(signal));
   process.exitCode = await child.exited;
 }
+
 const hubLabel = "dev.ark.hub";
 const proxyLabel = "dev.ark.proxy";
-const plistPath = (label: string) => join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
-const launchctl = (...arguments_: string[]): { ok: boolean; error: string } => {
-  try {
-    const result = Bun.spawnSync([process.env.ARK_LAUNCHCTL || "launchctl", ...arguments_], {
-      stdout: "ignore",
-      stderr: "pipe",
-    });
-    return {
-      ok: result.exitCode === 0,
-      error: result.stderr.toString().trim(),
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-};
-
-const xml = (value: string) =>
-  value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-
-type Agent = {
-  label: string;
-  noun: string;
-  arguments_: string[];
-  keepAlive: boolean;
-  log: string;
-};
-
-function plistFor(agent: Agent): string {
-  // launchd starts with a bare PATH, so hand over this one: the hub finds orca by it, portless finds node.
-  const environment = {
-    PATH: process.env.PATH ?? "",
-    ARK_HOME: process.env.ARK_HOME ?? "",
-  };
-  const entries = Object.entries(environment)
-    .filter(([, value]) => value !== "")
-    .map(([key, value]) => `    <key>${key}</key><string>${xml(value)}</string>`);
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>${agent.label}</string>
-  <key>ProgramArguments</key>
-  <array>
-${agent.arguments_.map((argument) => `    <string>${xml(argument)}</string>`).join("\n")}
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key>${agent.keepAlive ? "<dict><key>SuccessfulExit</key><false/></dict>" : "<false/>"}
-  <key>EnvironmentVariables</key>
-  <dict>
-${entries.join("\n")}
-  </dict>
-  <key>StandardOutPath</key><string>${xml(agent.log)}</string>
-  <key>StandardErrorPath</key><string>${xml(agent.log)}</string>
-</dict>
-</plist>
-`;
-}
-
-type Outcome = { failed: boolean; changed: boolean; lines: string[] };
-
-/** Writes one agent's plist and loads it. A failed load restores that agent's previous plist. */
-function installAgent(agent: Agent, extraLines: string[], port: number): Outcome {
-  const path = plistPath(agent.label);
-  const plist = plistFor(agent);
-  const old = existsSync(path) ? readFileSync(path, "utf8") : null;
-  if (old === plist) return { failed: false, changed: false, lines: [`  plist:  ${path}`] };
-  mkdirSync(join(path, ".."), { recursive: true });
-  mkdirSync(join(agent.log, ".."), { recursive: true });
-  if (old !== null) launchctl("unload", path);
-  writeFileSync(path, plist);
-  const loaded = launchctl("load", "-w", path);
-  if (!loaded.ok) {
-    let recovery: string;
-    if (old === null) {
-      rmSync(path);
-      recovery = `The ${agent.noun} is not running.`;
-    } else {
-      writeFileSync(path, old);
-      const restored = launchctl("load", "-w", path);
-      recovery = restored.ok
-        ? `The update was not applied. Restored the previous LaunchAgent ${agent.label} and reloaded it.\nThe ${agent.noun} is running with the old settings.`
-        : `The previous LaunchAgent was restored, but reloading it failed: ${restored.error || "no error text"}\nThe ${agent.noun} is not running.`;
-    }
-    console.error(`launchctl load failed: ${loaded.error || "no error text"}\n${recovery}`);
-    return { failed: true, changed: false, lines: [] };
-  }
-  const oldPort = old?.match(/<string>--port<\/string>\s*<string>(\d+)</)?.[1];
-  return {
-    failed: false,
-    changed: true,
-    lines: [
-      old === null
-        ? `Installed LaunchAgent ${agent.label}`
-        : `Updated LaunchAgent ${agent.label}${oldPort && oldPort !== `${port}` ? ` (port ${oldPort} -> ${port})` : ""}. Reloaded.`,
-      `  plist:  ${path}`,
-      ...extraLines,
-      `  log:    ${agent.log}`,
-    ],
-  };
-}
 
 /**
  * Writes the LaunchAgents that start the hub (and, when portless is found, the name proxy) at login
@@ -145,6 +42,10 @@ export function uiInstall(port: number): void {
     "--port",
     `${port}`,
   ];
+  const portNote = (old: string) => {
+    const oldPort = old.match(/<string>--port<\/string>\s*<string>(\d+)</)?.[1];
+    return oldPort && oldPort !== `${port}` ? ` (port ${oldPort} -> ${port})` : "";
+  };
   const hubLines = [`  hub:    http://127.0.0.1:${port}`];
   if (portless) hubLines.push(`  name:   http://${mainHubName}`);
   const outcomes: Outcome[] = [];
@@ -161,7 +62,7 @@ export function uiInstall(port: number): void {
           log: join(arkHome(), "hub", "proxy.log"),
         },
         [],
-        port,
+        portNote,
       ),
     );
   } else {
@@ -174,11 +75,11 @@ export function uiInstall(port: number): void {
         label: hubLabel,
         noun: "hub",
         arguments_: portless ? wrappedHubArguments(portless, port, plainArguments) : plainArguments,
-        keepAlive: true,
+        keepAlive: "crash",
         log: hubLog,
       },
       hubLines,
-      port,
+      portNote,
     ),
   );
   if (outcomes.some((outcome) => outcome.failed)) {
@@ -221,10 +122,8 @@ export function uiUninstall(): void {
   const removed: string[] = [];
   for (const label of [hubLabel, proxyLabel]) {
     const path = plistPath(label);
-    if (!existsSync(path)) continue;
-    launchctl("unload", path);
-    rmSync(path);
-    removed.push(`Removed LaunchAgent ${label}\n  plist:  ${path} (deleted)`);
+    if (removeAgent(label))
+      removed.push(`Removed LaunchAgent ${label}\n  plist:  ${path} (deleted)`);
   }
   console.log(
     removed.length === 0

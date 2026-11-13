@@ -95,6 +95,21 @@ test("ARK-T221 post-MR validator and reviewer steps persist starts, finishes and
       type: "step.started",
       data: { step: role, role },
     });
+    if (role === "reviewer")
+      Bun.spawnSync(
+        [
+          "git",
+          "-c",
+          "user.name=Ark",
+          "-c",
+          "user.email=ark@example.com",
+          "commit",
+          "--allow-empty",
+          "-qm",
+          "work",
+        ],
+        { cwd: deriveState(readEvents(directory)).worktrees[0]!.path },
+      );
     expect(ark("run", "step", runId, role, "finish").code).toBe(0);
     expect(readEvents(directory).at(-1)).toMatchObject({
       type: "step.finished",
@@ -200,8 +215,16 @@ if (process.argv[2] === "mr") {
   chmodSync(gitlab, 0o755);
   process.env.PATH = `${executableDirectory}:${originalPath}`;
   return [
-    { repo: "github-other", url: "https://github.com/example/other/pull/2", number: 2 },
-    { repo: "gitlab", url: "https://gitlab.com/example/app/-/merge_requests/3", number: 3 },
+    {
+      repo: "github-other",
+      url: "https://github.com/example/other/pull/2",
+      number: 2,
+    },
+    {
+      repo: "gitlab",
+      url: "https://gitlab.com/example/app/-/merge_requests/3",
+      number: 3,
+    },
   ].map((mergeRequest) => ({ ...mergeRequest, workspace }));
 }
 
@@ -462,7 +485,10 @@ test("ARK-T142 refreshing a fast-forward merge records the event and makes no co
   const { runId, directory, appTree, submodule, branchHead } = submoduleRun();
   // a fast-forward merge: the merged commit is the branch head, already pinned
   fakeHosts({
-    "glab mr view 41 --output json": { state: "merged", merge_commit_sha: branchHead },
+    "glab mr view 41 --output json": {
+      state: "merged",
+      merge_commit_sha: branchHead,
+    },
   });
   const head = git(appTree.path, "rev-parse", "HEAD");
   const refreshed = ark("bump", "refresh", runId, "bump-lib");
@@ -484,7 +510,10 @@ test("ARK-T142 the refresh commit holds only the gitlink, and unrelated staged w
   git(host, "push", "-q", "origin", "main");
   expect(merged).not.toBe(branchHead);
   fakeHosts({
-    "glab mr view 41 --output json": { state: "merged", squash_commit_sha: merged },
+    "glab mr view 41 --output json": {
+      state: "merged",
+      squash_commit_sha: merged,
+    },
   });
   writeFileSync(join(appTree.path, "unrelated.txt"), "work in progress\n");
   git(appTree.path, "add", "unrelated.txt");
