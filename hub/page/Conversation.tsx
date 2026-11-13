@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
-import type { ConversationReply, RunConversation } from "../conversation.ts";
+import { useEffect, useMemo, useState } from "react";
+import type { ConversationReply, RoleGroup, RunConversation } from "../conversation.ts";
+import { clampView, runRange, sentAt, type Range } from "./conversation-model.ts";
+import { Feed } from "./ConversationFeed.tsx";
+import { Trace } from "./ConversationTrace.tsx";
 
 type State =
   | { status: "loading" }
@@ -61,6 +64,60 @@ function Notices({ reply }: { reply: ConversationReply }) {
   );
 }
 
+/** The trace and the feed, linked: a selected message marks its tick and arrow, and the trace cursor follows the feed. */
+function Linked({ conversation }: { conversation: RunConversation }) {
+  const full = useMemo(() => runRange(conversation), [conversation]);
+  const [zoomed, setZoomed] = useState<Range | null>(null);
+  const view = zoomed ? clampView(zoomed, full) : full;
+  const [selected, setSelected] = useState<string | null>(null);
+  const [reveal, setReveal] = useState<{ id: string; nonce: number } | null>(null);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<RoleGroup>>(new Set());
+
+  const fromTrace = (id: string) => {
+    setSelected(id);
+    setReveal((previous) => ({ id, nonce: (previous?.nonce ?? 0) + 1 }));
+  };
+  // A click in the feed moves the trace only when the message is out of view.
+  const fromFeed = (id: string) => {
+    setSelected(id);
+    const message = conversation.messages.find((candidate) => candidate.id === id);
+    const time = message ? sentAt(message) : NaN;
+    if (Number.isFinite(time) && (time < view.start || time > view.end)) {
+      const width = view.end - view.start;
+      setZoomed({ start: time - width / 2, end: time + width / 2 });
+    }
+  };
+  return (
+    <>
+      <Trace
+        conversation={conversation}
+        full={full}
+        view={view}
+        onView={setZoomed}
+        selected={selected}
+        onPick={fromTrace}
+        cursor={cursor}
+        expanded={expanded}
+        onToggle={(group) =>
+          setExpanded((previous) => {
+            const next = new Set(previous);
+            if (!next.delete(group)) next.add(group);
+            return next;
+          })
+        }
+      />
+      <Feed
+        conversation={conversation}
+        selected={selected}
+        reveal={reveal}
+        onSelect={fromFeed}
+        onTop={setCursor}
+      />
+    </>
+  );
+}
+
 export function Conversation({ run, refreshKey }: { run: string; refreshKey: string }) {
   const state = useConversation(run, refreshKey);
   if (state.status === "loading") return <p className="mut">Reading the conversation…</p>;
@@ -74,9 +131,7 @@ export function Conversation({ run, refreshKey }: { run: string; refreshKey: str
   return (
     <section data-testid="conversation" aria-label="Conversation">
       <Notices reply={reply} />
-      <p className="mut" data-testid="conversation-summary">
-        {reply.messages.length} messages between {reply.agents.length} agents.
-      </p>
+      <Linked conversation={reply} />
     </section>
   );
 }
