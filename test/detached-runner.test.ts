@@ -390,14 +390,13 @@ async function killTree(helper: Subprocess): Promise<void> {
 
 /**
  * A helper shell with a second child (`sleep`). It runs `ark test <run>` as a child; with `withWait` it then also
- * runs `ark test <run> --wait` once the suite started, and writes that process's pid to `waiter`. It is its own
+ * runs `ark test <run> --wait` once the suite started, and its output is the helper's stdout. It is its own
  * process group leader, so a group kill reaches the callers but not a runner that made its own group.
  */
 function spawnHelper(fixture: Fixture, withWait = false): Subprocess {
   const started = join(fixture.directory, "started");
-  const waiter = join(fixture.directory, "waiter");
   const waitCaller = withWait
-    ? `until [ -e "${started}" ]; do sleep 0.05; done; bun "$0" test "$1" --wait >/dev/null 2>&1 & echo $! > "${waiter}";`
+    ? `until [ -e "${started}" ]; do sleep 0.05; done; bun "$0" test "$1" --wait 2>&1 &`
     : "";
   return Bun.spawn(
     [
@@ -410,7 +409,7 @@ function spawnHelper(fixture: Fixture, withWait = false): Subprocess {
     {
       env: fixture.environment,
       stdin: "ignore",
-      stdout: "ignore",
+      stdout: withWait ? "pipe" : "ignore",
       stderr: "ignore",
       detached: true,
     },
@@ -639,7 +638,9 @@ describe("detached ark test runner", () => {
       const fixture = makeFixture({ suites: gateSuite });
       if (outcome === "failing") writeFileSync(join(fixture.directory, "fail"), "");
       const helper = spawnHelper(fixture, true);
-      await appears(join(fixture.directory, "waiter"));
+      // `--wait` attached once it prints the runner's first line: the runner prints its checks before the suite.
+      const first = await (helper.stdout as ReadableStream<Uint8Array>).getReader().read();
+      expect(first.done, "the --wait caller ended before it printed").toBe(false);
       const record = runnerRecord(fixture);
       expect(record.state).toBe("running");
       expect(record.pid).not.toBe(helper.pid);
