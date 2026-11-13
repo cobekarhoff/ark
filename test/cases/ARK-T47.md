@@ -1,12 +1,12 @@
 ---
 id: ARK-T47
-title: ARK-T47 evidence section lists 2 test cases and at most 5 screenshots
+title: "ARK-T47 evidence section lists 2 test cases and at most 5 screenshots"
 level: integration
-technique: boundary values on the screenshot count (5, 6, 7) and a run with no evidence folder
+technique: "boundary values on the screenshot count (5, 6, 7) and a run with no evidence folder"
 priority: medium
-risk: the Evidence section is absent or lists 7 screenshots, a screenshot is presented as uploaded, or EVID04 does not fire and the body ships with no evidence
+risk: "the Evidence section is absent or lists 7 screenshots, or EVID04 does not fire and the body ships with no evidence"
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-12-ARK-399-1
 ---
 
 ## Objective
@@ -34,7 +34,7 @@ Expected: When `results/evidence/` exists, the system shall write an `## Evidenc
 ## Expected results
 
 - The section has one line for each of the 2 test cases: its id, the result at base, the result at head and the head SHA.
-- The section names at most 5 screenshot paths, one per distinct user flow: no flow appears twice, so `login-1.png` and `login-2.png` are not both listed (taking the first 5 paths would list both), and says that the screenshots stay in the run folder and are not uploaded. The other 2 screenshots are not listed. The 3-flow variant lists 3 paths, one per flow.
+- The section names at most 5 screenshot paths, one per distinct user flow: no flow appears twice, so `login-1.png` and `login-2.png` are not both listed (taking the first 5 paths would list both), each as a Markdown image `![<test case id> <base|head>](<path>)`, and the line `kept in the run folder and not uploaded` is absent (ARK-399/AC1; ARK-T284 owns upload). The other 2 screenshots are not listed. The 3-flow variant lists 3 paths, one per flow.
 - Lint on the complete body does not fail EVID04.
 - EVID04 fails when `results/evidence/` exists and the section is missing.
 - EVID04 warns when the section names more than 5 screenshots (6 and 7 warn; 5 does not).

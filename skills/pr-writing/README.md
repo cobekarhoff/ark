@@ -24,7 +24,7 @@ When you open a merge request or pull request, or write or update its descriptio
 2. `review.ts` runs the shell checks from config and records pass, fail or `not_run`.
 3. Edit `.pr-writing/body.md`, then `lint_body.ts`.
 4. Show the human the title, body and lint report. Wait for a go in this conversation.
-5. `post_mr.ts --confirmed` creates a Draft, or updates the open one inside the `pr-writing` markers. `--ready` opens it ready. Without `--confirmed` it refuses.
+5. `skills/pr-writing/scripts/post_mr.ts --confirmed` creates a Draft, or updates the open one inside the `pr-writing` markers. `--ready` opens it ready. Without `--confirmed` it refuses.
 
 Outside Ark there is no ticket, so pass `--title` to `lint_body.ts` and `post_mr.ts`. The repo's own MR or PR template wins over the default layout.
 
@@ -58,4 +58,4 @@ The host is read from the `origin` remote. GitHub uses `gh` and makes a Draft PR
 
 ## Not built yet
 
-Captures (screenshots) and structure diagrams are not built: there is no `capture.ts` and no `diagram.ts`. Attach images by hand. The fresh-context self-review is not in `review.ts` either; it runs shell checks only.
+Diagrams: not built (ARK-400), there is no `diagram.ts`. `post_mr.ts` uploads the screenshots and videos of the body on both hosts: GitHub needs `gh` 2.99.0 or newer and write access, and a failed upload exits 2 and posts nothing. Text evidence goes in `<details>` blocks, and evidence is never committed. The fresh-context self-review is not in `review.ts` either; it runs shell checks only.

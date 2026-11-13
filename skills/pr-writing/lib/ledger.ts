@@ -37,6 +37,8 @@ export type EvidenceEntry = {
   sha: string;
   /** Run folder relative paths, all screenshots of both sides. */
   screenshots: string[];
+  /** Last 20 lines of the head `command.log`. Absent in a ledger saved before ARK-399, and when the file is missing. */
+  log?: string[];
 };
 
 export type RepoLedger = {
@@ -105,6 +107,8 @@ export type Ledger = {
   criteria: { id: string; status: CriterionStatus; evidenced: boolean }[];
   /** `null` when the run folder has no `results/evidence/`. */
   evidence: EvidenceEntry[] | null;
+  /** Text of `results/evidence/<AC id>.md` for each AC with no test case. Absent in an old ledger. */
+  acEvidence?: { id: string; text: string }[];
   /** Findings no later review closed with `No findings.` or a `send back` decision. */
   findings: Finding[];
   hasReviewerStep: boolean;
@@ -732,6 +736,9 @@ function listScreenshots(folder: string, relative: string): string[] {
   );
 }
 
+const logTail = (file: string): string[] | undefined =>
+  existsSync(file) ? readFileSync(file, "utf8").trimEnd().split("\n").slice(-20) : undefined;
+
 function readEvidence(directory: string): EvidenceEntry[] | null {
   const root = join(directory, "results", "evidence");
   if (!existsSync(root)) return null;
@@ -751,6 +758,7 @@ function readEvidence(directory: string): EvidenceEntry[] | null {
         base: base.status,
         head: head.status,
         sha: head.sha,
+        log: logTail(join(root, entry.name, "head", "command.log")),
         screenshots: ["base", "head"].flatMap((side) =>
           listScreenshots(
             join(root, entry.name, side, "screenshots"),
@@ -928,6 +936,12 @@ function runLedger(source: {
     },
     criteria: ledgerCriteria,
     evidence,
+    acEvidence: criteria.flatMap(({ id, verified_by }) => {
+      const file = evidenceFile(directory, id);
+      return verified_by.length === 0 && existsSync(file)
+        ? [{ id, text: readFileSync(file, "utf8").trim() }]
+        : [];
+    }),
     findings: openFindings(findingsFiles),
     hasReviewerStep: (plan?.steps ?? []).some((step) => step.role === "reviewer"),
     reviewerStep: reviewerSteps.at(-1) ?? null,
