@@ -1,5 +1,6 @@
 ---
 status: superseded by ADR 0010
+date: 2026-10-29
 ---
 
 # An AC is proven only by integration or E2E tests passing at head

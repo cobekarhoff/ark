@@ -1,8 +1,8 @@
-# Roadmap file
+# Roadmap file format
 
-`$ARK_HOME/projects/<project>/ROADMAP.md` holds the vision, the milestones and the rank of the open work of one project. `ARK_HOME` defaults to `~/.ark`. The file is in `ARK_HOME`, not in a repo. `readRoadmap(markdown, tickets)` in `hub/roadmap.ts` reads it. It reads text only, so the hub passes it the file and the ticket list.
+`$ARK_HOME/projects/<project>/ROADMAP.md` holds the vision, the milestones and the rank of the open work of one project. `ARK_HOME` defaults to `~/.ark`. The file is in `ARK_HOME`, not in a repo. `readRoadmap(markdown, tickets)` in `hub/roadmap.ts` reads it. It reads text only, so the hub passes it the file and the ticket list. This page describes the format of the file. It is not a roadmap.
 
-Only the Ark project has a `ROADMAP.md`. The roadmap of any other project lives in its ticket source.
+Any project can have a `ROADMAP.md`. The hub reads it for every project. Without one, the hub shows a line that says the project's roadmap lives in its ticket source (`local`, `github` or `jira`, from `ark.yml`).
 
 ## Format
 
@@ -40,6 +40,7 @@ Ark takes a ticket to merge-ready changes in one repo or several, and you decide
 - A finished ticket (`done` or `superseded`) can stay listed. It does not show in its horizon, and it gives a `finished_listed` warning.
 - An open ticket in no list is Unranked. A `proposed` ticket in no list is not Unranked: it is in Review.
 - A `proposed` ticket in a list keeps its place and is marked `proposed: true`.
+- A ticket file with no readable front matter (no `id` or no `title`), or with no `status:`, counts as `proposed`. It waits in Review until you give it a status. A ticket that the hub cannot read hides no other ticket.
 
 ## Result
 
