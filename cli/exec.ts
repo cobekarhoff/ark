@@ -12,7 +12,14 @@ export async function exec(
   cwd?: string,
 ): Promise<string | null> {
   try {
-    const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    // `env` makes Bun resolve the command on the PATH of now: on Linux it otherwise keeps the PATH of its start.
+    const child = Bun.spawn(command, {
+      cwd,
+      env: process.env,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+    });
     const killer = setTimeout(() => child.kill(), timeoutMilliseconds);
     // The race also covers a killed shell whose grandchild still holds the stdout pipe open.
     let backstop: ReturnType<typeof setTimeout> | undefined;
@@ -59,7 +66,12 @@ export async function execResult(
   timeoutMilliseconds = readerTimeoutMilliseconds,
 ): Promise<ExecResult> {
   try {
-    const child = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn(command, {
+      env: process.env,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     let deadlineFired = false;
     const killer = setTimeout(() => {
       deadlineFired = true;
