@@ -965,3 +965,176 @@ export function writeRoadmap(project: string, roadmap: FixtureRoadmap = {}): voi
   ].join("\n");
   writeFileSync(join(process.env.ARK_HOME as string, "projects", project, "ROADMAP.md"), text);
 }
+
+// ---------------------------------------------------------------- ARK-339: multi-repo runs
+
+/**
+ * Git repos at `<root>/<repo>`, each on the branch `branch` with `ahead` commits beyond its first commit
+ * (`bases[repo]`). A repo with `gitlink` records a submodule pointer for `gitlink.pin` in that first commit, so
+ * `git ls-tree HEAD <pin>` answers `gitlink.sha`. The caller writes the project config with `workspace: root`.
+ */
+export function writeRepoWorkspace(
+  root: string,
+  branch: string,
+  repos: Record<string, { ahead: number; gitlink?: { pin: string; sha: string } }>,
+): { bases: Record<string, string> } {
+  const git = (repo: string, ...args: string[]) => {
+    const done = spawnSync(
+      "git",
+      ["-c", "user.name=fixture", "-c", "user.email=fixture@example.com", ...args],
+      { cwd: join(root, repo), encoding: "utf8" },
+    );
+    if (done.status !== 0) throw new Error(`git ${args.join(" ")} in ${repo}: ${done.stderr}`);
+    return done.stdout.trim();
+  };
+  const bases: Record<string, string> = {};
+  for (const [repo, { ahead, gitlink }] of Object.entries(repos)) {
+    mkdirSync(join(root, repo), { recursive: true });
+    git(repo, "init", "-q", "-b", "main");
+    git(repo, "commit", "-q", "--allow-empty", "-m", "first");
+    if (gitlink) {
+      git(repo, "update-index", "--add", "--cacheinfo", `160000,${gitlink.sha},${gitlink.pin}`);
+      git(repo, "commit", "-q", "-m", "pointer");
+    }
+    bases[repo] = git(repo, "rev-parse", "HEAD");
+    git(repo, "checkout", "-q", "-b", branch);
+    for (let number = 0; number < ahead; number++)
+      git(repo, "commit", "-q", "--allow-empty", "-m", `work ${number}`);
+  }
+  return { bases };
+}
+
+/** The sha that `writeRepoWorkspace` records for the submodule pointer of the fixture's web repo. */
+export const submodulePointerSha = "0123456789abcdef0123456789abcdef01234567";
+
+/**
+ * A run over the repo chain core-lib -> service -> web (-> e2e with four repos). `service` depends on `core-lib` by
+ * a package edge with the bump step `service-bump`, `web` on `service` by a submodule edge with `web-bump`, `e2e` on
+ * `web` by a package edge with `e2e-bump`. The `why` of core-lib holds markup, which the page shows as text.
+ * - `building`: no MR; `web-bump` is the running step, later steps wait. The run started 10 minutes ago.
+ * - `mr`: every step done, one MR per repo (!11 core-lib, !12 service waits for !11, !13 web waits for !12,
+ *   !14 e2e waits for !13), `service-bump` refreshed to `1.4.0`.
+ * - `handed_off`: closed, every step done, no MR; the branches stay for a person.
+ * `workspace` holds the repos (`writeRepoWorkspace`); each worktree is the repo itself on branch `branch`.
+ */
+export function repoRunFixture(options: {
+  project: string;
+  run: string;
+  ticket: { id: string; title: string };
+  repoCount: 3 | 4;
+  mode: "building" | "mr" | "handed_off";
+  workspace: string;
+  branch: string;
+  bases: Record<string, string>;
+  /** The GitHub owner in the MR URLs (default `example`): a test that answers `gh pr view` per URL gives each run its own. */
+  owner?: string;
+}): FixtureRun {
+  const four = options.repoCount === 4;
+  const model = "anthropic/claude-sonnet-5-5";
+  const step = (
+    id: string,
+    role: string,
+    repo: string,
+    needs: string[],
+    at: number,
+  ): FixtureStep => ({ id, role, harness: "omp", model, needs, repo, startedAfter: at });
+  const planned: FixtureStep[] = [
+    step("core-impl", "implementer", "core-lib", [], 20),
+    step("service-bump", "implementer", "service", ["core-impl"], 60),
+    step("service-impl", "implementer", "service", ["service-bump"], 100),
+    step("web-bump", "implementer", "web", ["service-impl"], 140),
+    step("web-impl", "implementer", "web", ["web-bump"], 180),
+    step("web-tests", "validator", "web", ["web-impl"], 220),
+    ...(four
+      ? [
+          step("e2e-bump", "implementer", "e2e", ["web-tests"], 260),
+          step("e2e-review", "reviewer", "e2e", ["e2e-bump"], 300),
+        ]
+      : []),
+  ];
+  // `building`: finished up to service-impl, web-bump runs. Otherwise every step is done.
+  const doneUpTo = options.mode === "building" ? 3 : planned.length;
+  const steps = planned.map((item, index) => ({
+    ...item,
+    ...(index < doneUpTo ? { finishedAfter: (item.startedAfter ?? 0) + 30 } : {}),
+    ...(index > doneUpTo ? { startedAfter: undefined } : {}),
+  }));
+  const repoNames = four ? ["core-lib", "service", "web", "e2e"] : ["core-lib", "service", "web"];
+  const edge = (repo: string, kind: string, pin: string, bump: string) => ({
+    repo,
+    kind,
+    pin,
+    evidence: `${pin}:1`,
+    bump,
+  });
+  const repos = [
+    // listed out of merge order on purpose: the page must show the order `repoGraph` gives
+    ...(four
+      ? [
+          {
+            repo: "e2e",
+            why: "End-to-end suite",
+            depends_on: [edge("web", "package", "@acme/web", "e2e-bump")],
+          },
+        ]
+      : []),
+    {
+      repo: "web",
+      why: "Web app that embeds the service",
+      depends_on: [edge("service", "submodule", "vendor/service", "web-bump")],
+    },
+    {
+      repo: "service",
+      why: "Service that consumes the core",
+      depends_on: [edge("core-lib", "package", "@acme/core", "service-bump")],
+    },
+    { repo: "core-lib", why: "Shared <b>core</b> types", depends_on: [] },
+  ];
+  const mergeRequests = repoNames.map((repo, index) => ({
+    repo,
+    url: `https://github.com/${options.owner ?? "example"}/${repo}/pull/${11 + index}`,
+    number: 11 + index,
+    order: index + 1,
+    waits_for: index === 0 ? [] : [10 + index],
+  }));
+  return {
+    project: options.project,
+    run: options.run,
+    ticket: options.ticket,
+    phase:
+      options.mode === "building"
+        ? "building"
+        : options.mode === "mr"
+          ? "merge_requests_open"
+          : "closed",
+    startedAt: options.mode === "building" ? new Date(Date.now() - 600_000) : undefined,
+    steps,
+    repos,
+    worktrees: repoNames.map((repo) => ({
+      repo,
+      path: join(options.workspace, repo),
+      branch: options.branch,
+      base: options.bases[repo],
+    })),
+    ...(options.mode === "mr"
+      ? {
+          mergeRequests: mergeRequests.slice(0, repoNames.length),
+          bumpRefreshed: { "service-bump": "1.4.0" },
+        }
+      : {}),
+    ...(options.mode === "handed_off" ? { outcome: "handed_off" as const } : {}),
+  };
+}
+
+/** An `ark.yml` that loads for a workspace made by `writeRepoWorkspace` (its suite names the repo `core-lib`). */
+export const repoProjectConfig = (workspace: string): Record<string, unknown> => ({
+  workspace,
+  ticket_source: "local",
+  suites: [{ name: "unit", level: "unit", repo: "core-lib", command: "true", parser: "bun" }],
+  roles: {
+    implementer: { harness: "omp", model: "m" },
+    validator: { harness: "omp", model: "m" },
+    reviewer: { harness: "omp", model: "m" },
+    chief: { harness: "claude", model: "claude-opus" },
+  },
+});

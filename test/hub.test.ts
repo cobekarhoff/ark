@@ -44,6 +44,10 @@ import {
   ompSessionText,
   commitCase,
   orcaAnswersFor,
+  repoProjectConfig,
+  repoRunFixture,
+  submodulePointerSha,
+  writeRepoWorkspace,
   today,
   transcriptText,
   type ExtraEntry,
@@ -1044,8 +1048,39 @@ test("ARK-T277 while the worker thread reads a 200 MB session file and a result 
     ),
   ];
   const heavyFile = writeSessionFile(sessions, "heavy.jsonl", `${heavy.join("\n")}\n`);
+  // A 3-repo run in the load: its branches are read by the background reader, never on a request.
+  const workspace = scratch("ark-repo-workspace-");
+  const branch = "ark/ARK-809-fixture";
+  const { bases } = writeRepoWorkspace(workspace, branch, {
+    "core-lib": { ahead: 3 },
+    service: { ahead: 2 },
+    web: { ahead: 0, gitlink: { pin: "vendor/service", sha: submodulePointerSha } },
+  });
+  writeProject("p", repoProjectConfig(workspace));
+  const repoRun = `${today()}-ARK-809-1`;
+  writeRun(
+    repoRunFixture({
+      project: "p",
+      run: repoRun,
+      ticket: { id: "ARK-809", title: "Three repos" },
+      repoCount: 3,
+      mode: "building",
+      workspace,
+      branch,
+      bases,
+    }),
+  );
   installFakeTools({ orca: orcaAnswersFor(run) });
   const { baseUrl } = await start();
+  const repos = openRunOf(
+    await snapshotWhen(baseUrl, (snapshot) =>
+      Array.isArray(snapshot.runs)
+        ? snapshot.runs.find((candidate) => candidate.run === repoRun)?.repos?.[0].state === "ahead"
+        : false,
+    ),
+    repoRun,
+  ).repos;
+  expect(repos?.map((entry) => entry.repo)).toEqual(["core-lib", "service", "web"]);
   try {
     await detailWithSessions(baseUrl, run, 2);
 
@@ -3880,3 +3915,215 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
     conversationBudgetMilliseconds,
   );
 }, 120_000);
+
+// ---------------------------------------------------------------- ARK-339
+
+const repoUrl = (repo: string, number: number) =>
+  `https://github.com/example/${repo}/pull/${number}`;
+
+/** Polls `/api/run/<run>` until `ready` holds (the git facts of a repo graph come from a background read). */
+async function runDetailWhen(
+  baseUrl: string,
+  run: string,
+  ready: (detail: RunDetail) => boolean,
+): Promise<RunDetail> {
+  const deadline = Date.now() + 20_000;
+  let detail: RunDetail;
+  do {
+    await Bun.sleep(100);
+    detail = (await (await fetch(`${baseUrl}/api/run/${run}`)).json()) as RunDetail;
+    if (ready(detail)) return detail;
+  } while (Date.now() < deadline);
+  throw new Error(`the run never reached the state: ${JSON.stringify(detail.view.repos)}`);
+}
+
+test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGraph order, step repos, MR waits and bump states, and a run with no usable graph carries none", async () => {
+  isolatedEnvironment();
+  const workspace = scratch("ark-repo-workspace-");
+  const branch = "ark/ARK-339-fixture";
+  const { bases } = writeRepoWorkspace(workspace, branch, {
+    "core-lib": { ahead: 3 },
+    service: { ahead: 2 },
+    web: { ahead: 0, gitlink: { pin: "vendor/service", sha: submodulePointerSha } },
+    e2e: { ahead: 1 },
+  });
+  writeProject("p", repoProjectConfig(workspace));
+  const fixture = (run: string, id: string, mode: "building" | "mr" | "handed_off", count: 3 | 4) =>
+    repoRunFixture({
+      project: "p",
+      run,
+      ticket: { id, title: `Repo graph ${id}` },
+      repoCount: count,
+      mode,
+      workspace,
+      branch,
+      bases,
+    });
+  const mrRun = `${today()}-ARK-901-1`;
+  const handedOff = `${today()}-ARK-902-1`;
+  writeRun(fixture(mrRun, "ARK-901", "mr", 3));
+  writeRun(fixture(handedOff, "ARK-902", "handed_off", 4));
+  // The same run in a project whose ark.yml does not load: the branch is there, its state is not known.
+  const unknownRun = `${today()}-ARK-903-1`;
+  writeRun({ ...fixture(unknownRun, "ARK-903", "handed_off", 3), project: "no-config" });
+  // One step repo with a repos list, an old plan with no repos list, and a cycle.
+  const step = (id: string, repo: string, needs: string[]) => ({
+    id,
+    role: "implementer",
+    harness: "omp",
+    model: "m",
+    needs,
+    repo,
+    startedAfter: 20,
+  });
+  const oneRepo = `${today()}-ARK-904-1`;
+  writeRun({
+    project: "p",
+    run: oneRepo,
+    ticket: { id: "ARK-904", title: "One step repo" },
+    phase: "building",
+    steps: [step("a-impl", "a", [])],
+    repos: [
+      {
+        repo: "a",
+        why: "a",
+        depends_on: [{ repo: "lib", kind: "package", pin: "lib", evidence: "f:1" }],
+      },
+      { repo: "lib", why: "lib" },
+    ],
+  });
+  const oldPlan = `${today()}-ARK-905-1`;
+  writeRun({
+    project: "p",
+    run: oldPlan,
+    ticket: { id: "ARK-905", title: "Old plan" },
+    phase: "building",
+    steps: [step("b-impl", "b", ["a-impl"]), step("a-impl", "a", [])],
+  });
+  const cyclic = `${today()}-ARK-906-1`;
+  writeRun({
+    project: "p",
+    run: cyclic,
+    ticket: { id: "ARK-906", title: "Cycle" },
+    phase: "building",
+    steps: [step("a-impl", "a", []), step("b-impl", "b", [])],
+    repos: [
+      {
+        repo: "a",
+        why: "a",
+        depends_on: [{ repo: "b", kind: "package", pin: "b", evidence: "f:1" }],
+      },
+      {
+        repo: "b",
+        why: "b",
+        depends_on: [{ repo: "a", kind: "package", pin: "a", evidence: "f:1" }],
+      },
+    ],
+  });
+  installFakeTools({
+    orca: orcaAnswersFor(mrRun),
+    mergeRequestViews: {
+      [repoUrl("core-lib", 11)]: {
+        state: "MERGED",
+        statusCheckRollup: [],
+        additions: 1,
+        deletions: 1,
+        changedFiles: 1,
+        createdAt: new Date().toISOString(),
+      },
+    },
+  });
+  const { baseUrl } = await start();
+
+  // The MR run: repos in merge order (the plan lists them the other way round), each with its facts.
+  const snapshot = await snapshotWhen(baseUrl, (next) => {
+    const view = Array.isArray(next.runs) ? next.runs.find((run) => run.run === mrRun) : undefined;
+    return view?.merge_requests.some((request) => request.state === "merged") === true;
+  });
+  const view = openRunOf(snapshot, mrRun);
+  expect(view.repos?.map(({ repo, order, why }) => [repo, order, why])).toEqual([
+    ["core-lib", 1, "Shared <b>core</b> types"],
+    ["service", 2, "Service that consumes the core"],
+    ["web", 3, "Web app that embeds the service"],
+  ]);
+  expect(view.plan?.map(({ id, repo }) => [id, repo])).toContainEqual(["web-bump", "web"]);
+  expect(view.merge_requests.map(({ repo, order, waits_for }) => [repo, order, waits_for])).toEqual(
+    [
+      ["core-lib", 1, []],
+      ["service", 2, [11]],
+      ["web", 3, [12]],
+    ],
+  );
+  // The upstream MR's state is in the same list: !11 merged, so service's wait is met.
+  expect(view.merge_requests.find((request) => request.number === 11)?.state).toBe("merged");
+  const bumps = Object.fromEntries(
+    (view.repos ?? []).flatMap((entry) =>
+      entry.depends_on.map((edge) => [edge.bump, edge.bump_state] as const),
+    ),
+  );
+  // A recorded refresh wins; a submodule not refreshed shows the pointer its worktree records.
+  expect(bumps).toEqual({
+    "service-bump": "refreshed to 1.4.0",
+    "web-bump": `points at upstream branch ${submodulePointerSha.slice(0, 8)}`,
+  });
+  expect(view.repos?.map((entry) => [entry.repo, entry.state, entry.mr])).toEqual([
+    ["core-lib", "merged", 11],
+    ["service", "open", 12],
+    ["web", "open", 13],
+  ]);
+
+  // The runs with no usable graph stay in the snapshot with no graph and no throw.
+  expect(openRunOf(snapshot, oneRepo).repos).toBeNull();
+  expect(openRunOf(snapshot, cyclic).repos).toBeNull();
+  expect(openRunOf(snapshot, cyclic).plan?.map((entry) => entry.id)).toEqual(["a-impl", "b-impl"]);
+  // An old plan has no repos list: the order comes from step needs, and there are no edges.
+  expect(
+    openRunOf(snapshot, oldPlan).repos?.map((entry) => [entry.repo, entry.depends_on]),
+  ).toEqual([
+    ["a", []],
+    ["b", []],
+  ]);
+
+  // A closed handed_off run has no MR card but keeps its repos, in hand-off order, with the branch of each.
+  const closed = await runDetailWhen(
+    baseUrl,
+    handedOff,
+    (detail) => detail.view.repos?.every((entry) => entry.branch?.ahead != null) === true,
+  );
+  expect(closed.view.merge_requests).toEqual([]);
+  expect(
+    closed.view.repos?.map((entry) => [entry.repo, entry.state, entry.branch, entry.mr]),
+  ).toEqual([
+    ["core-lib", "ahead", { name: branch, ahead: 3 }, null],
+    ["service", "ahead", { name: branch, ahead: 2 }, null],
+    ["web", "clean", { name: branch, ahead: 0 }, null],
+    ["e2e", "ahead", { name: branch, ahead: 1 }, null],
+  ]);
+  // The ticket chain of a closed newest run holds the same order and states.
+  const chained = await snapshotWhen(baseUrl, (next) =>
+    Array.isArray(next.ticket_runs)
+      ? next.ticket_runs.find((entry) => entry.ticket === "ARK-902")?.chain?.[0].state === "ahead"
+      : false,
+  );
+  const newest = Array.isArray(chained.ticket_runs)
+    ? chained.ticket_runs.find((entry) => entry.ticket === "ARK-902")
+    : undefined;
+  expect(newest?.chain?.map(({ repo, order, state }) => [repo, order, state])).toEqual([
+    ["core-lib", 1, "ahead"],
+    ["service", 2, "ahead"],
+    ["web", 3, "clean"],
+    ["e2e", 4, "ahead"],
+  ]);
+
+  // No ark.yml: the branch shows, its state is unknown, never a guess.
+  const unknown = await runDetailWhen(baseUrl, unknownRun, (detail) => detail.view.repos !== null);
+  expect(unknown.view.repos?.map((entry) => [entry.state, entry.branch])).toEqual([
+    ["unknown", { name: branch, ahead: null }],
+    ["unknown", { name: branch, ahead: null }],
+    ["unknown", { name: branch, ahead: null }],
+  ]);
+
+  // The design reference is in the tree.
+  for (const file of ["hybrid-1.html", "data.js"])
+    expect(existsSync(join(root, "docs/design/repo-graph", file)), file).toBe(true);
+});
