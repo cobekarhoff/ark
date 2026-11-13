@@ -167,15 +167,7 @@ function makeRun(spec: RunSpec = {}) {
   writeProject("demo", {
     workspace: base,
     ticket_source: "local",
-    suites: [
-      {
-        name: "s",
-        level: "integration",
-        repo: ".",
-        command: "true",
-        parser: "bun",
-      },
-    ],
+    suites: [{ name: "s", level: "integration", repo: ".", command: "true", parser: "bun" }],
     roles: Object.fromEntries(
       ["implementer", "validator", "reviewer"].map((role) => [
         role,
@@ -216,29 +208,15 @@ function makeRun(spec: RunSpec = {}) {
   writeFileSync(
     join(directory, "plan.yml"),
     JSON.stringify({
-      steps: steps.map((step) => ({
-        harness: "omp",
-        model: "m",
-        criteria: [],
-        ...step,
-      })),
+      steps: steps.map((step) => ({ harness: "omp", model: "m", criteria: [], ...step })),
       test_cases: (spec.planCases ?? Object.keys(spec.evidence ?? { "ARK-T1": 0 })).map(
-        (testCase) => ({
-          id: testCase,
-          action: "reuse",
-          level: "integration",
-        }),
+        (testCase) => ({ id: testCase, action: "reuse", level: "integration" }),
       ),
       design: { interfaces: spec.interfaces ?? [] },
       summary: {
         why: "Bodies went stale.",
         changes: [
-          {
-            criterion: criteria[0].id,
-            where: spec.where ?? "cli/a.ts",
-            now: "n",
-            fix: "f",
-          },
+          { criterion: criteria[0].id, where: spec.where ?? "cli/a.ts", now: "n", fix: "f" },
         ],
       },
     }),
@@ -249,11 +227,7 @@ function makeRun(spec: RunSpec = {}) {
   for (const [name, text] of Object.entries(spec.files ?? {}))
     writeFileSync(join(directory, name), text);
 
-  const events: {
-    type: string;
-    time?: string;
-    data: Record<string, unknown>;
-  }[] = [
+  const events: { type: string; time?: string; data: Record<string, unknown> }[] = [
     {
       type: "run.started",
       time: "2026-11-06T10:00:00.000Z",
@@ -312,12 +286,7 @@ function makeRun(spec: RunSpec = {}) {
     paths[repoSpec.name] = repoDirectory;
     events.push({
       type: "worktree.created",
-      data: {
-        repo: repoSpec.name,
-        path: repoDirectory,
-        branch: "ark/ARK-9-x",
-        base: "main",
-      },
+      data: { repo: repoSpec.name, path: repoDirectory, branch: "ark/ARK-9-x", base: "main" },
     });
   }
   for (const step of steps.filter((candidate) => candidate.role === "reviewer"))
@@ -357,20 +326,12 @@ function makeRun(spec: RunSpec = {}) {
   writeFileSync(
     join(directory, "events.ndjson"),
     events
-      .map((event, i) =>
-        JSON.stringify({
-          seq: i + 1,
-          time: "2026-11-06T10:05:00.000Z",
-          ...event,
-        }),
-      )
+      .map((event, i) => JSON.stringify({ seq: i + 1, time: "2026-11-06T10:05:00.000Z", ...event }))
       .join("\n") + "\n",
   );
 
   if (spec.evidence !== null) {
-    const evidence = spec.evidence ?? {
-      "ARK-T1": { base: "fail", head: "pass" },
-    };
+    const evidence = spec.evidence ?? { "ARK-T1": { base: "fail", head: "pass" } };
     mkdirSync(join(directory, "results", "evidence"), { recursive: true });
     for (const [testCase, entry] of Object.entries(evidence))
       for (const side of ["base", "head"] as const) {
@@ -378,11 +339,7 @@ function makeRun(spec: RunSpec = {}) {
         mkdirSync(join(folder, "screenshots"), { recursive: true });
         writeFileSync(
           join(folder, "result.json"),
-          JSON.stringify({
-            case: testCase,
-            status: entry[side],
-            sha: entry.sha ?? evidenceSha,
-          }),
+          JSON.stringify({ case: testCase, status: entry[side], sha: entry.sha ?? evidenceSha }),
         );
         if (side === "head")
           for (const shot of entry.shots ?? [])
@@ -395,10 +352,7 @@ function makeRun(spec: RunSpec = {}) {
     paths,
     heads,
     ledger: (prWriting?: RunSpec["prWriting"]): Ledger =>
-      ledgerOf({
-        runFolder: directory,
-        prWriting: prWriting ?? spec.prWriting,
-      }),
+      ledgerOf({ runFolder: directory, prWriting: prWriting ?? spec.prWriting }),
   };
 }
 
@@ -499,20 +453,11 @@ test("ARK-T53 the run ledger holds the last test result, the open findings, evid
       { name: "repos/app", changes: { "cli/a.ts": "app one\napp two\n" } },
     ],
     steps: [
-      {
-        id: "app-impl",
-        role: "implementer",
-        repo: "repos/app",
-        needs: ["core-impl"],
-      },
+      { id: "app-impl", role: "implementer", repo: "repos/app", needs: ["core-impl"] },
       { id: "core-impl", role: "implementer", repo: "repos/core", needs: [] },
     ],
     openedMergeRequests: [
-      {
-        repo: "repos/core",
-        url: "https://github.com/org/core/pull/7",
-        number: 7,
-      },
+      { repo: "repos/core", url: "https://github.com/org/core/pull/7", number: 7 },
     ],
     findings: {
       // A P0 that a later file closes with `No findings.`.
@@ -527,11 +472,7 @@ test("ARK-T53 the run ledger holds the last test result, the open findings, evid
   const ledger = run.ledger();
 
   expect(ledger.source).toBe("run");
-  expect(ledger.ticket).toMatchObject({
-    id: "ARK-9",
-    kind: "bug",
-    summary: "Short outcome",
-  });
+  expect(ledger.ticket).toMatchObject({ id: "ARK-9", kind: "bug", summary: "Short outcome" });
   expect(ledger.ticket?.problem).toContain("already fixed");
   expect(ledger.ticket?.change).toContain("rebuilt from the run");
   expect(ledger.ticket?.criteria).toHaveLength(2);
@@ -624,10 +565,7 @@ test("ARK-T53 the git ledger picks the base by the fixed order and records a fai
 
   // Succeeding host. Each row sets all three sources, so a wrong order picks another base.
   setOriginHead("main");
-  const rowA = withHost({
-    FAKE_MR_TARGET: "release/2",
-    FAKE_DEFAULT_BRANCH: "develop",
-  }).value!;
+  const rowA = withHost({ FAKE_MR_TARGET: "release/2", FAKE_DEFAULT_BRANCH: "develop" }).value!;
   expect(rowA.baseProbe).toEqual({
     mergeRequestTarget: "release/2",
     originHead: "main",
@@ -637,17 +575,11 @@ test("ARK-T53 the git ledger picks the base by the fixed order and records a fai
   expect(rowA.repos[0].base).toBe("release/2");
 
   const rowB = withHost({ FAKE_DEFAULT_BRANCH: "develop" }).value!;
-  expect(rowB.baseProbe).toMatchObject({
-    mergeRequestTarget: "none",
-    chosen: "main",
-  });
+  expect(rowB.baseProbe).toMatchObject({ mergeRequestTarget: "none", chosen: "main" });
 
   setOriginHead(null);
   const rowC = withHost({ FAKE_DEFAULT_BRANCH: "develop" }).value!;
-  expect(rowC.baseProbe).toMatchObject({
-    originHead: "none",
-    chosen: "develop",
-  });
+  expect(rowC.baseProbe).toMatchObject({ originHead: "none", chosen: "develop" });
 
   expect(withHost({ FAKE_DEFAULT_BRANCH: "" }).error).toMatch(/pass --base/);
 
@@ -768,12 +700,7 @@ function cliRun(
     { type: "gate.answered", data: { gate: "plan", answer: "approve" } },
     {
       type: "worktree.created",
-      data: {
-        repo: "repos/core",
-        path: worktree,
-        branch: `ark/${runId}`,
-        base: "main",
-      },
+      data: { repo: "repos/core", path: worktree, branch: `ark/${runId}`, base: "main" },
     },
     {
       type: "test.completed",
@@ -788,13 +715,7 @@ function cliRun(
   writeFileSync(
     join(directory, "events.ndjson"),
     events
-      .map((event, i) =>
-        JSON.stringify({
-          seq: i + 1,
-          time: "2026-11-06T10:00:00.000Z",
-          ...event,
-        }),
-      )
+      .map((event, i) => JSON.stringify({ seq: i + 1, time: "2026-11-06T10:00:00.000Z", ...event }))
       .join("\n") + "\n",
   );
   const pushed = () => git(bare, "branch", "--list", "ark/*");
@@ -834,11 +755,7 @@ test("ARK-T54 the title is the summary, else a ticket title that fits, else --su
       ticket: { title: words(63) },
       expected: `ARK-316: ${words(63)}`,
     },
-    {
-      name: "3 title of 64 is 73 in all",
-      ticket: { title: words(64) },
-      expected: "refused",
-    },
+    { name: "3 title of 64 is 73 in all", ticket: { title: words(64) }, expected: "refused" },
     {
       name: "3b the flag rescues it",
       ticket: { title: words(64) },
@@ -861,11 +778,7 @@ test("ARK-T54 the title is the summary, else a ticket title that fits, else --su
       flag: "Short outcome text",
       expected: "ARK-316: Short outcome text",
     },
-    {
-      name: "6 no summary and long title",
-      ticket: { title: words(120) },
-      expected: "refused",
-    },
+    { name: "6 no summary and long title", ticket: { title: words(120) }, expected: "refused" },
     {
       name: "6b the flag rescues it",
       ticket: { title: words(120) },
@@ -886,11 +799,7 @@ test("ARK-T54 the title is the summary, else a ticket title that fits, else --su
       expect(createdTitles().length).toBe(0);
       continue;
     }
-    expect({ name, code: opened.code, err: opened.err }).toEqual({
-      name,
-      code: 0,
-      err: "",
-    });
+    expect({ name, code: opened.code, err: opened.err }).toEqual({ name, code: 0, err: "" });
     const [title] = createdTitles().slice(-1);
     expect({ name, title }).toEqual({ name, title: expected });
     expect(title.length).toBeLessThanOrEqual(72);
@@ -905,10 +814,7 @@ test("ARK-T54 a title_prefix rule wins and its length counts", () => {
     const { runId, pushed } = cliRun(ticket, prefix);
     return { opened: ark("merge-request", "open", runId), pushed: pushed() };
   };
-  const { opened } = open({
-    title: words(120),
-    summary: "MR bodies come from one core",
-  });
+  const { opened } = open({ title: words(120), summary: "MR bodies come from one core" });
   expect(opened.code, opened.err).toBe(0);
   expect(createdTitles()).toEqual(["feat(ARK-316): MR bodies come from one core"]);
 
@@ -953,12 +859,7 @@ function gappyRun(spec: RunSpec = {}) {
       { name: "repos/app", changes: { "cli/a.ts": "app\n" } },
     ],
     steps: [
-      {
-        id: "app-impl",
-        role: "implementer",
-        repo: "repos/app",
-        needs: ["core-impl"],
-      },
+      { id: "app-impl", role: "implementer", repo: "repos/app", needs: ["core-impl"] },
       { id: "core-impl", role: "implementer", repo: "repos/core", needs: [] },
     ],
     prWriting: {
@@ -1071,10 +972,7 @@ test("ARK-T37 the evidence follows the ticket kind: perf names baseline.md and c
   expect(perfEvidence).toContain("compare.md");
 
   const refactor = buildBody(
-    gappyRun({
-      kind: "refactor",
-      evidence: { "ARK-T5": { base: "pass", head: "pass" } },
-    }).ledger(),
+    gappyRun({ kind: "refactor", evidence: { "ARK-T5": { base: "pass", head: "pass" } } }).ledger(),
   );
   expect(refactor.split("## Evidence")[1]).toContain("`ARK-T5`: base pass, head pass");
 });
@@ -1187,10 +1085,7 @@ test("ARK-T38 the provenance line follows the gates the human answered: spec, st
 test("ARK-T38 on GitLab the handle is the glab token owner", () => {
   process.env.FAKE_TOKEN_OWNER = "cobe.k";
   const body = buildBody(
-    makeRun({
-      host: "gitlab",
-      gates: [{ gate: "criteria", answer: "accept" }],
-    }).ledger(),
+    makeRun({ host: "gitlab", gates: [{ gate: "criteria", answer: "accept" }] }).ledger(),
   );
   expect(firstContentLine(body)).toBe(provenanceText("cobe.k", ", following their spec."));
 });
@@ -1285,10 +1180,7 @@ function loadFixture(id: string, side: "fail" | "control"): Fixture {
     input: {
       body,
       title: title ?? defaultTitle,
-      ledger: baseLedger({
-        ...json("ledger.json"),
-        ...json(`${side}.ledger.json`),
-      }),
+      ledger: baseLedger({ ...json("ledger.json"), ...json(`${side}.ledger.json`) }),
       ...extra,
     },
   };
@@ -1331,10 +1223,7 @@ for (const [id, reason] of decidable)
     const failed = result(lintOf(loadFixture(id, "fail")), id);
     expect({ id, result: failed.result }).toEqual({ id, result: "fail" });
     expect(failed.reason).toMatch(reason);
-    expect(result(lintOf(loadFixture(id, "control")), id)).toMatchObject({
-      id,
-      result: "pass",
-    });
+    expect(result(lintOf(loadFixture(id, "control")), id)).toMatchObject({ id, result: "pass" });
   });
 
 test("ARK-T39 the variants of each decidable check fail and the near misses pass", () => {
@@ -1354,10 +1243,7 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
       "PROV01",
       good.body.replace(/^> Written by an AI agent.*$/m, "> Written by an AI."),
     ),
-  ).toMatchObject({
-    result: "fail",
-    reason: expect.stringContaining("not a provenance variant"),
-  });
+  ).toMatchObject({ result: "fail", reason: expect.stringContaining("not a provenance variant") });
 
   // PROV02: Generated with in the body, and a trailer only in a commit of the range.
   expect(lintLine(good, "PROV02", `${good.body}\nGenerated with Claude Code\n`).reason).toContain(
@@ -1369,11 +1255,7 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
     input: {
       ...good.input,
       ledger: baseLedger({
-        repos: [
-          {
-            commits: [{ sha: head, subject: "ARK-316: fix", message: trailer }],
-          },
-        ],
+        repos: [{ commits: [{ sha: head, subject: "ARK-316: fix", message: trailer }] }],
       }),
     },
   });
@@ -1384,9 +1266,7 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
 
   // TITLE01: a trailing period, and a broken prefix rule against a kept one.
   expect(
-    lintLine(good, "TITLE01", good.body, {
-      title: "ARK-316: Fix stale bodies.",
-    }).reason,
+    lintLine(good, "TITLE01", good.body, { title: "ARK-316: Fix stale bodies." }).reason,
   ).toContain("ends with a period");
   const prefixed = (title: string) =>
     result(
@@ -1421,9 +1301,7 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
   const proseBody = (count: number) =>
     Array.from({ length: count }, (_, i) => `Line ${i + 1}.`).join("\n\n");
   for (const [tier, shortstat, ceiling] of tiers) {
-    const ledger = baseLedger({
-      repos: [{ shortstat: `1 file changed, ${shortstat}` }],
-    });
+    const ledger = baseLedger({ repos: [{ shortstat: `1 file changed, ${shortstat}` }] });
     const at = result(
       lintBody({ body: proseBody(ceiling), title: defaultTitle, ledger }),
       "SIZE01",
@@ -1432,11 +1310,7 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
       lintBody({ body: proseBody(ceiling + 1), title: defaultTitle, ledger }),
       "SIZE01",
     );
-    expect({ tier, at: at.result, over: over.result }).toEqual({
-      tier,
-      at: "pass",
-      over: "fail",
-    });
+    expect({ tier, at: at.result, over: over.result }).toEqual({ tier, at: "pass", over: "fail" });
     const fenced = `${proseBody(ceiling)}\n\n\`\`\`text\n${proseBody(20)}\n\`\`\`\n`;
     expect(result(lintBody({ body: fenced, title: defaultTitle, ledger }), "SIZE01").result).toBe(
       "pass",
@@ -1557,14 +1431,9 @@ const judgment: [string, RegExp][] = [
 ];
 
 test("ARK-T55 the good body warns on none of the nine judgment checks", () => {
-  const good = lintOf(loadFixture("PROV01", "control"), {
-    diff: "+a plain line\n",
-  });
+  const good = lintOf(loadFixture("PROV01", "control"), { diff: "+a plain line\n" });
   for (const [id] of judgment)
-    expect({ id, result: result(good, id).result }).not.toEqual({
-      id,
-      result: "warn",
-    });
+    expect({ id, result: result(good, id).result }).not.toEqual({ id, result: "warn" });
 });
 
 for (const [id, reason] of judgment)
@@ -1572,10 +1441,7 @@ for (const [id, reason] of judgment)
     const warned = result(lintOf(loadFixture(id, "fail")), id);
     expect({ id, result: warned.result }).toEqual({ id, result: "warn" });
     expect(warned.reason).toMatch(reason);
-    expect(result(lintOf(loadFixture(id, "control")), id)).toMatchObject({
-      id,
-      result: "pass",
-    });
+    expect(result(lintOf(loadFixture(id, "control")), id)).toMatchObject({ id, result: "pass" });
   });
 
 test("ARK-T55 TITLE01-imperative warns on Fixes, VAL02 on a command with no Expect, EVID01 on perf, EVID03 on a head SHA that differs", () => {
@@ -1602,13 +1468,7 @@ test("ARK-T55 TITLE01-imperative warns on Fixes, VAL02 on a command with no Expe
   const stale = loadFixture("EVID03", "control");
   const other = baseLedger({
     evidence: [
-      {
-        testCase: "ARK-T5",
-        base: "fail",
-        head: "pass",
-        sha: "deadbee0000",
-        screenshots: [],
-      },
+      { testCase: "ARK-T5", base: "fail", head: "pass", sha: "deadbee0000", screenshots: [] },
     ],
   });
   expect(result(lintBody({ ...stale.input, ledger: other }), "EVID03").reason).toContain(
@@ -1639,10 +1499,7 @@ test("ARK-T55 the tier follows the changed lines, a sensitive path, a raise with
     [400, 3],
   ];
   for (const [count, tier] of boundaries)
-    expect({ count, tier: tierOfLedger(lines(count)).tier }).toEqual({
-      count,
-      tier,
-    });
+    expect({ count, tier: tierOfLedger(lines(count)).tier }).toEqual({ count, tier });
 
   // A sensitive path lifts a 5-line diff above tier 0 and names the path; no reason line is needed.
   const sensitive = tierOfLedger(lines(5, ["cli/gate.ts"]));
@@ -1675,13 +1532,7 @@ function postScenario(host: HostName, existingBody?: string) {
     host === "github"
       ? `https://github.com/org/${repo}/pull/9`
       : `https://gitlab.com/org/${repo}/-/merge_requests/9`;
-  const mergeRequest = {
-    number: 9,
-    url,
-    head: branch,
-    repo,
-    body: existingBody ?? "",
-  };
+  const mergeRequest = { number: 9, url, head: branch, repo, body: existingBody ?? "" };
   const state = () =>
     existsSync(`${logFile}.state`) ? JSON.parse(readFileSync(`${logFile}.state`, "utf8")) : [];
   if (existingBody !== undefined) writeFileSync(`${logFile}.state`, JSON.stringify([mergeRequest]));
@@ -1792,9 +1643,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
 
     const secure = postScenario(host);
     const secureHead = secure.commitBranch("const key = process.env.API_TOKEN;");
-    const posted = secure.post(goodBody, {
-      ledger: baseLedger({ repos: [{ head: secureHead }] }),
-    });
+    const posted = secure.post(goodBody, { ledger: baseLedger({ repos: [{ head: secureHead }] }) });
     expect(posted.value!.action).toBe("created");
     expect(posted.err.join("\n")).toMatch(/warning: SEC01/);
   });
@@ -1900,10 +1749,7 @@ const configBase = () => ({
 
 function loadWith(block: Record<string, unknown> | undefined) {
   tempArkHome();
-  writeProject("demo", {
-    ...configBase(),
-    ...(block === undefined ? {} : { pr_writing: block }),
-  });
+  writeProject("demo", { ...configBase(), ...(block === undefined ? {} : { pr_writing: block }) });
   return loadConfig("demo").pr_writing;
 }
 
@@ -1925,10 +1771,7 @@ test("ARK-T58 a pr_writing block loads with its six keys, and defaults fill a pa
     one_way_paths: [],
     agent_authored: true,
   };
-  expect(loadWith({ reviewers: ["alice"] })).toEqual({
-    ...defaults,
-    reviewers: ["alice"],
-  });
+  expect(loadWith({ reviewers: ["alice"] })).toEqual({ ...defaults, reviewers: ["alice"] });
   expect(loadWith(undefined)).toEqual(defaults);
   expect(loadWith({ tier_floor: 0 }).tier_floor).toBe(0);
   expect(loadWith({ tier_floor: 3 }).tier_floor).toBe(3);
@@ -1949,10 +1792,7 @@ test("ARK-T58 a bad pr_writing value is refused with a message that names its ke
   ];
   for (const [key, value] of bad) {
     tempArkHome();
-    writeProject("demo", {
-      ...configBase(),
-      pr_writing: { ...fullBlock, [key]: value },
-    });
+    writeProject("demo", { ...configBase(), pr_writing: { ...fullBlock, [key]: value } });
     expect({ key, value, ...refusedLoad() }).toMatchObject({
       key,
       value,
@@ -2011,11 +1851,7 @@ const reviewerBlock = (level: "low" | "high" | "medium", extra: string[] = []) =
   ].join("\n");
 };
 
-type RiskRow = {
-  name: string;
-  spec: RunSpec;
-  scores: [number, number, number, number];
-};
+type RiskRow = { name: string; spec: RunSpec; scores: [number, number, number, number] };
 
 /** One input changed from a baseline run that scores 1/1/1/1: all ACs passing and evidenced, nothing else. */
 const baselineChanges = { "cli/a.ts": "changed\n" };
@@ -2044,13 +1880,7 @@ const riskRows: RiskRow[] = [
   {
     name: "one unplanned source file",
     spec: {
-      repos: [
-        {
-          name: ".",
-          base: riskBase,
-          changes: { ...baselineChanges, "cli/b.ts": "b\n" },
-        },
-      ],
+      repos: [{ name: ".", base: riskBase, changes: { ...baselineChanges, "cli/b.ts": "b\n" } }],
     },
     scores: [1, 2, 1, 1],
   },
@@ -2061,12 +1891,7 @@ const riskRows: RiskRow[] = [
         {
           name: ".",
           base: riskBase,
-          changes: {
-            ...baselineChanges,
-            "cli/b.ts": "b\n",
-            "cli/c.ts": "c\n",
-            "cli/d.ts": "d\n",
-          },
+          changes: { ...baselineChanges, "cli/b.ts": "b\n", "cli/c.ts": "c\n", "cli/d.ts": "d\n" },
         },
       ],
     },
@@ -2079,11 +1904,7 @@ const riskRows: RiskRow[] = [
         {
           name: ".",
           base: riskBase,
-          changes: {
-            ...baselineChanges,
-            "test/x.test.ts": "t\n",
-            "docs/y.md": "d\n",
-          },
+          changes: { ...baselineChanges, "test/x.test.ts": "t\n", "docs/y.md": "d\n" },
         },
       ],
     },
@@ -2093,13 +1914,7 @@ const riskRows: RiskRow[] = [
     name: "one sensitive hit",
     spec: {
       where: "cli/a.ts, cli/gate.ts",
-      repos: [
-        {
-          name: ".",
-          base: riskBase,
-          changes: { ...baselineChanges, "cli/gate.ts": "g\n" },
-        },
-      ],
+      repos: [{ name: ".", base: riskBase, changes: { ...baselineChanges, "cli/gate.ts": "g\n" } }],
     },
     scores: [1, 1, 2, 1],
   },
@@ -2108,13 +1923,7 @@ const riskRows: RiskRow[] = [
     spec: {
       where: "cli/a.ts, cli/gate.ts",
       interfaces: [{ name: "gate", callers: ["cli/run.ts"] }],
-      repos: [
-        {
-          name: ".",
-          base: riskBase,
-          changes: { ...baselineChanges, "cli/gate.ts": "g\n" },
-        },
-      ],
+      repos: [{ name: ".", base: riskBase, changes: { ...baselineChanges, "cli/gate.ts": "g\n" } }],
     },
     scores: [1, 1, 3, 1],
   },
@@ -2123,11 +1932,7 @@ const riskRows: RiskRow[] = [
     spec: {
       where: "cli/a.ts, cli/events.ts",
       repos: [
-        {
-          name: ".",
-          base: riskBase,
-          changes: { ...baselineChanges, "cli/events.ts": "e\n" },
-        },
+        { name: ".", base: riskBase, changes: { ...baselineChanges, "cli/events.ts": "e\n" } },
       ],
     },
     scores: [1, 1, 1, 2],
@@ -2136,13 +1941,7 @@ const riskRows: RiskRow[] = [
     name: "a deleted file",
     spec: {
       where: "cli/a.ts, cli/old.ts",
-      repos: [
-        {
-          name: ".",
-          base: riskBase,
-          changes: { ...baselineChanges, "cli/old.ts": null },
-        },
-      ],
+      repos: [{ name: ".", base: riskBase, changes: { ...baselineChanges, "cli/old.ts": null } }],
     },
     scores: [1, 1, 1, 2],
   },
@@ -2154,11 +1953,7 @@ const riskRows: RiskRow[] = [
         {
           name: ".",
           base: riskBase,
-          changes: {
-            ...baselineChanges,
-            "cli/events.ts": "e\n",
-            "cli/old.ts": null,
-          },
+          changes: { ...baselineChanges, "cli/events.ts": "e\n", "cli/old.ts": null },
         },
       ],
     },
@@ -2174,10 +1969,7 @@ test("ARK-T45 each isolated input scores only its own category good 1, decent 2 
       ...spec,
     }).ledger();
     const { verification, alignment, impact, rollback } = ledger.risk;
-    expect({
-      name,
-      scores: [verification, alignment, impact, rollback],
-    }).toEqual({ name, scores });
+    expect({ name, scores: [verification, alignment, impact, rollback] }).toEqual({ name, scores });
   }
 });
 
@@ -2250,11 +2042,7 @@ test("ARK-T45 the reviewer level comes from the latest findings file and wins wh
       ]),
     },
   }).ledger();
-  expect(swapped.risk).toMatchObject({
-    script: "medium",
-    reviewer: "high",
-    level: "high",
-  });
+  expect(swapped.risk).toMatchObject({ script: "medium", reviewer: "high", level: "high" });
   expect(buildBody(swapped)).toContain("Merge risk: high (script medium, reviewer high)");
 
   const equal = mainRun({
@@ -2297,11 +2085,7 @@ test("ARK-T45 the script level is low below 1.5, medium to below 2.25, high from
       {
         name: ".",
         base: riskBase,
-        changes: {
-          ...baselineChanges,
-          "cli/events.ts": "e\n",
-          "cli/old.ts": null,
-        },
+        changes: { ...baselineChanges, "cli/events.ts": "e\n", "cli/old.ts": null },
       },
     ],
   };
@@ -2348,11 +2132,7 @@ test("ARK-T45 the script level is low below 1.5, medium to below 2.25, high from
         ledger.risk.rollback,
       ],
       level: ledger.risk.script,
-    }).toEqual({
-      name,
-      scores: [verification, alignment, impact, rollback],
-      level,
-    });
+    }).toEqual({ name, scores: [verification, alignment, impact, rollback], level });
   }
   // (2,3,2,2) 30/13: the main fixture with one AC without evidence and the one-way hit removed.
   const high = mainRun({
@@ -2372,10 +2152,7 @@ test("ARK-T45 the script level is low below 1.5, medium to below 2.25, high from
 });
 
 test("ARK-T45 a run with no one-way hit shows Door: two-way", () => {
-  const ledger = makeRun({
-    evidence: withEvidence,
-    prWriting: sensitiveConfig,
-  }).ledger();
+  const ledger = makeRun({ evidence: withEvidence, prWriting: sensitiveConfig }).ledger();
   expect(buildBody(ledger)).toMatch(/Door: two-way/);
 });
 
@@ -2458,35 +2235,20 @@ function reviewedBody({ block, oneWay, recovery, unplanned, reviewerStep = true 
     findings: reviewerStep ? { "review-1.md": lines.join("\n") } : {},
   });
   const ledger = run.ledger();
-  return lintBody({
-    body: buildBody(ledger),
-    title: defaultTitle,
-    ledger,
-  }).find((entry) => entry.id === "RISK04")!;
+  return lintBody({ body: buildBody(ledger), title: defaultTitle, ledger }).find(
+    (entry) => entry.id === "RISK04",
+  )!;
 }
 
 test("ARK-T46 RISK04 fails when the latest findings file of the reviewer step has no Merge risk block", () => {
   expect(
-    reviewedBody({
-      block: false,
-      oneWay: false,
-      recovery: false,
-      unplanned: "none",
-    }),
-  ).toMatchObject({
-    result: "fail",
-    reason: expect.stringContaining("no ## Merge risk block"),
-  });
+    reviewedBody({ block: false, oneWay: false, recovery: false, unplanned: "none" }),
+  ).toMatchObject({ result: "fail", reason: expect.stringContaining("no ## Merge risk block") });
 });
 
 test("ARK-T46 RISK04 fails when Door: one-way names no recovery", () => {
   expect(
-    reviewedBody({
-      block: true,
-      oneWay: true,
-      recovery: false,
-      unplanned: "none",
-    }),
+    reviewedBody({ block: true, oneWay: true, recovery: false, unplanned: "none" }),
   ).toMatchObject({
     result: "fail",
     reason: expect.stringContaining("Door: one-way names no recovery"),
@@ -2507,12 +2269,7 @@ test("ARK-T46 RISK04 fails when a file under Also changed, not in plan has no re
 
 test("ARK-T46 RISK04 passes a good body and does not require the block of a run with no reviewer step", () => {
   expect(
-    reviewedBody({
-      block: true,
-      oneWay: true,
-      recovery: true,
-      unplanned: "all reasons",
-    }).result,
+    reviewedBody({ block: true, oneWay: true, recovery: true, unplanned: "all reasons" }).result,
   ).toBe("pass");
   expect(
     reviewedBody({
@@ -2544,10 +2301,7 @@ const screenshotNames = (text: string) => text.match(/[^\s`,()]+\.png/g) ?? [];
 
 /** The body of a run with evidence, with its lint on the same ledger. */
 function evidenceBody(evidence: EvidenceSpec | null) {
-  const ledger = makeRun({
-    evidence,
-    prWriting: { ...sensitiveConfig, tier_floor: 1 },
-  }).ledger();
+  const ledger = makeRun({ evidence, prWriting: { ...sensitiveConfig, tier_floor: 1 } }).ledger();
   const body = buildBody(ledger);
   return {
     body,
@@ -2631,10 +2385,7 @@ test("ARK-T47 EVID04 passes the complete body, fails with no section, warns past
     [6, "warn"],
     [7, "warn"],
   ] as const)
-    expect({ count, result: evid04(naming(count)).result }).toEqual({
-      count,
-      result: expected,
-    });
+    expect({ count, result: evid04(naming(count)).result }).toEqual({ count, result: expected });
 });
 
 test("ARK-T47 a run with no results/evidence/ needs no Evidence section", () => {
@@ -2967,11 +2718,9 @@ test("ARK-T270 the run-lead playbook's analysis evidence example and Not in plan
       findings: { "review-1.md": findings },
     });
     const ledger = run.ledger();
-    return lintBody({
-      body: buildBody(ledger),
-      title: defaultTitle,
-      ledger,
-    }).find((entry) => entry.id === "RISK04")!;
+    return lintBody({ body: buildBody(ledger), title: defaultTitle, ledger }).find(
+      (entry) => entry.id === "RISK04",
+    )!;
   };
   expect(riskOf(`### P3: Naming\n\n${block(true)}`).result).toBe("pass");
   expect(riskOf(`### P3: Naming\n\n${block(false)}\n${block(true)}`)).toMatchObject({
@@ -2991,27 +2740,15 @@ const shotPath = (testCase: string, name = "a.png") =>
 /** A one-repo run with real PNG bytes in 2 screenshots, gathered and linted by the scripts in the repo worktree. */
 function uploadRun(
   host: HostName,
-  options: {
-    shots?: boolean;
-    log?: string;
-    mutateBody?: (body: string) => string;
-  } = {},
+  options: { shots?: boolean; log?: string; mutateBody?: (body: string) => string } = {},
 ) {
   const withShots = options.shots !== false;
   const run = makeRun({
     host,
     repos: [{ name: "repos/a", changes: { "cli/a.ts": "from a\n" } }],
     evidence: {
-      "ARK-T1": {
-        base: "fail",
-        head: "pass",
-        shots: withShots ? ["a.png"] : [],
-      },
-      "ARK-T2": {
-        base: "fail",
-        head: "pass",
-        shots: withShots ? ["b.png"] : [],
-      },
+      "ARK-T1": { base: "fail", head: "pass", shots: withShots ? ["a.png"] : [] },
+      "ARK-T2": { base: "fail", head: "pass", shots: withShots ? ["b.png"] : [] },
     },
   });
   const repo = realpathSync(run.paths["repos/a"]);
@@ -3070,12 +2807,7 @@ test("ARK-T284 post_mr on GitHub passes one --attach per existing local file, re
       expect(run.repo.startsWith(run.directory)).toBe(false);
       if (update) run.openMergeRequest();
       const posted = run.post();
-      expect({
-        update,
-        withMissing,
-        code: posted.code,
-        err: posted.stderr,
-      }).toMatchObject({
+      expect({ update, withMissing, code: posted.code, err: posted.stderr }).toMatchObject({
         update,
         withMissing,
         code: 0,
@@ -3118,10 +2850,7 @@ test("ARK-T285 post_mr on GitLab uploads each local screenshot and posts a body 
     });
     if (update) run.openMergeRequest(`- [x] Tested locally\n\n${beginMarker}\nold\n${endMarker}\n`);
     const posted = run.post();
-    expect({ update, code: posted.code, err: posted.stderr }).toMatchObject({
-      update,
-      code: 0,
-    });
+    expect({ update, code: posted.code, err: posted.stderr }).toMatchObject({ update, code: 0 });
 
     const upload = uploads();
     // The fake logs the filename of the multipart `file` part as the call body.
@@ -3336,10 +3065,7 @@ test("ARK-T293 a secret-like command.log line is not in the built or the posted 
     const built = readFileSync(run.bodyFile, "utf8");
     for (const line of clean) expect(built).toContain(line);
     const posted = run.post();
-    expect({ host, code: posted.code, err: posted.stderr }).toMatchObject({
-      host,
-      code: 0,
-    });
+    expect({ host, code: posted.code, err: posted.stderr }).toMatchObject({ host, code: 0 });
     const write = hostWrites()[0];
     const sent = write.body ?? write.argv[write.argv.indexOf("--description") + 1];
     expect(sent).toContain(clean[0]);
@@ -3398,10 +3124,7 @@ test("ARK-T284 ARK-T285 a screenshot with a space and parentheses is uploaded on
     );
     expect(runScript("lint_body", run.repo, "--title", run.title).code).toBe(0);
     const posted = run.post();
-    expect({ host, code: posted.code, err: posted.stderr }).toMatchObject({
-      host,
-      code: 0,
-    });
+    expect({ host, code: posted.code, err: posted.stderr }).toMatchObject({ host, code: 0 });
     const write = hostWrites()[0];
     const sent = write.body ?? write.argv[write.argv.indexOf("--description") + 1];
     if (host === "github") {
@@ -3468,9 +3191,7 @@ test("ARK-T337 RISK04 uses a reason from an earlier reviewer findings file when 
 });
 
 test("ARK-T338 RISK04 message for an unplanned file names the file, the Not in plan line and the findings file", () => {
-  const ledger = mainRun({
-    findings: { "review-1.md": reviewerBlock("low") },
-  }).ledger();
+  const ledger = mainRun({ findings: { "review-1.md": reviewerBlock("low") } }).ledger();
   expect(risk04Of(ledger)).toMatchObject({
     result: "fail",
     reason: expect.stringContaining("cli/helpers.ts"),
