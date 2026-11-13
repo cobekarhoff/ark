@@ -386,7 +386,6 @@ async function killTree(helper: Subprocess): Promise<void> {
       // already gone
     }
   await helper.exited;
-  for (const pid of tree) while (alive(pid)) await Bun.sleep(10);
 }
 
 /**
