@@ -779,6 +779,12 @@ test("ARK-T308 two steps started through the current start path each open their 
     files[step] = workerOf(run.directory, step).session;
     expect(files[step].startsWith(fakeSessionFolder())).toBe(true);
     fillSession(files[step], run.worktree, head, [
+      JSON.stringify({
+        type: "message",
+        id: `user-${step}`,
+        timestamp: instant(head),
+        message: { role: "user", content: [{ type: "text", text: `transcript of ${step}` }] },
+      }),
       message(startedAt.replace(":00:00", ":01:00"), 10, 5),
     ]);
     expect(at(finishedAt, "run", "step", run.runId, step, "finish").code).toBe(0);
@@ -808,18 +814,32 @@ test("ARK-T308 two steps started through the current start path each open their 
   delete process.env.ARK_NOW;
   const hub = await startHub();
   try {
-    const owners: Record<string, unknown> = {};
+    // The step transcript page reads the sessions the run detail owns to the step, then each file's entries.
+    type Owner = { kind: string; step?: string };
+    type Detail = { sessions_ready: boolean; sessions: { file: string; owner: Owner }[] };
+    let detail: Detail = { sessions_ready: false, sessions: [] };
     // Each fetch round trip paces the loop; sessions_ready flips when the hub's scan ends.
-    for (let attempt = 0; attempt < 20_000 && Object.keys(owners).length < 3; attempt++) {
+    for (let attempt = 0; attempt < 20_000 && !detail.sessions_ready; attempt++) {
       const response = await fetch(`${hub.baseUrl}/api/run/${run.runId}`);
-      const detail = response.ok ? await response.json() : { sessions: [], sessions_ready: false };
-      if (detail.sessions_ready)
-        for (const session of detail.sessions) owners[session.file] = session.owner;
+      if (response.ok) detail = await response.json();
     }
-    expect(owners[files.a]).toEqual({ kind: "step", step: "a" });
-    expect(owners[files.b]).toEqual({ kind: "step", step: "b" });
-    expect(owners[lead]).toEqual({ kind: "lead" });
-    expect(Object.values(owners).filter((owner: any) => owner.kind === "unassigned")).toEqual([]);
+    expect(detail.sessions_ready).toBe(true);
+    for (const step of ["a", "b"]) {
+      const mapped = detail.sessions.filter(
+        (session) => session.owner.kind === "step" && session.owner.step === step,
+      );
+      expect(mapped.map((session) => session.file)).toEqual([files[step]]);
+      const response = await fetch(
+        `${hub.baseUrl}/api/run/${run.runId}/transcript?file=${encodeURIComponent(files[step])}&cursor=0`,
+      );
+      expect(response.status).toBe(200);
+      const page = (await response.json()) as { entries: { text?: string }[] };
+      expect(page.entries.map((entry) => entry.text)).toContain(`transcript of ${step}`);
+    }
+    expect(detail.sessions.find((session) => session.file === lead)?.owner).toEqual({
+      kind: "lead",
+    });
+    expect(detail.sessions.filter((session) => session.owner.kind === "unassigned")).toEqual([]);
   } finally {
     await stopHub(hub.process);
   }
