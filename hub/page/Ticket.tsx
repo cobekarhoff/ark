@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import { outcomeOf, ticketEntries, ticketKey, type TicketEntry } from "./derive.ts";
 import { Criteria } from "./Evidence.tsx";
@@ -9,7 +9,7 @@ import { runHref } from "./RunDetail.tsx";
 import { hashOf, ticketHref, useLive } from "./store.tsx";
 import type { TicketDocument, TicketView } from "../types.ts";
 
-const node = (entry: TicketEntry, base: TicketEntry["ticket"]): GraphTicket => ({
+const node = (entry: TicketEntry): GraphTicket => ({
   key: entry.key,
   id: entry.ticket.id,
   title: entry.ticket.title ?? entry.ticket.id,
@@ -24,9 +24,7 @@ const node = (entry: TicketEntry, base: TicketEntry["ticket"]): GraphTicket => (
       : entry.satisfied || entry.lane === "Closed"
         ? { done: 1, total: 1, label: "✓" }
         : { done: 0, total: 1, label: "–" },
-  needs: entry.ticket.depends_on
-    .filter((id) => entry.ticket.id === base.id || id === base.id)
-    .map((id) => ticketKey(entry.ticket.project, id)),
+  needs: entry.ticket.depends_on.map((id) => ticketKey(entry.ticket.project, id)),
   satisfied: entry.satisfied,
 });
 
@@ -54,66 +52,191 @@ function useDocument(ticket: TicketView): TicketDocument | null | undefined {
   return read?.key === key ? read.document : undefined;
 }
 
-function TicketText({ ticket }: { ticket: TicketView }) {
-  const document = useDocument(ticket);
+const proseSections = [
+  ["problem", "Problem"],
+  ["change", "Change"],
+  ["evidence", "Evidence"],
+] as const;
+/** A part counts as in view once its top has scrolled under the sticky bar. */
+const viewLine = 96;
+
+/** The chips marked now, as `<prose id> <criterion id or empty>`: the two columns scroll side by side. */
+function useMarked(enabled: boolean, criteria: string[]): string {
+  const [marked, setMarked] = useState("");
+  const key = criteria.join(",");
+  useEffect(() => {
+    if (!enabled) return;
+    const passed = (id: string) =>
+      (window.document.getElementById(id)?.getBoundingClientRect().top ?? Infinity) <= viewLine;
+    const update = () => {
+      const atBottom = innerHeight + scrollY >= window.document.documentElement.scrollHeight - 2;
+      const ids = proseSections.map(([name]) => `sec-${name}`);
+      const prose = atBottom ? ids.at(-1) : (ids.filter(passed).at(-1) ?? ids[0]);
+      const criterion = key
+        .split(",")
+        .filter((id) => key !== "" && passed(`crit-${id}`))
+        .at(-1);
+      setMarked(`${prose} ${criterion === undefined ? "" : `crit-${criterion}`}`);
+    };
+    update();
+    addEventListener("scroll", update, { passive: true });
+    addEventListener("resize", update);
+    return () => {
+      removeEventListener("scroll", update);
+      removeEventListener("resize", update);
+    };
+  }, [enabled, key]);
+  return marked;
+}
+
+const jump = (id: string) => window.document.getElementById(id)?.scrollIntoView({ block: "start" });
+
+/**
+ * The ticket text in two columns under the graph band: Problem, Change and Evidence on the left, the
+ * relations and the acceptance criteria on the right, with a sticky bar of chips and the
+ * Rendered / Raw switch. A chip is a button, never a link: the router is the hash.
+ */
+function TicketText({ ticket, relations }: { ticket: TicketView; relations: ReactNode }) {
+  const text = useDocument(ticket);
   const [raw, setRaw] = useState(false);
-  if (document === undefined)
+  const marked = useMarked(
+    !!text,
+    text ? text.criteria.map((criterion) => criterion.id) : [],
+  ).split(" ");
+  if (!text)
     return (
-      <>
-        <div role="status" className="doc-status">
-          <span className="spinner" aria-hidden="true" />
-          Loading the ticket text…
-        </div>
-        <div aria-hidden="true">
-          {[
-            ["Problem", [90, 75, 60]],
-            ["Change", [90, 40]],
-            ["Evidence", [75, 50]],
-            ["Acceptance criteria", [75, 60, 75]],
-          ].map(([title, widths]) => (
-            <div key={title as string}>
-              <h2>{title as string}</h2>
-              {(widths as number[]).map((width, index) => (
-                <span key={index} className="sk" style={{ width: `${width}%` }} />
-              ))}
+      <div className="ticket-cols">
+        <div className="ticket-prose">
+          {text === null ? (
+            <div role="alert" className="doc-alert">
+              <strong>The hub could not read the text of this ticket.</strong>
+              The file is missing or does not parse. This page loads it again by itself when the
+              file changes.
             </div>
-          ))}
+          ) : (
+            <>
+              <div role="status" className="doc-status">
+                <span className="spinner" aria-hidden="true" />
+                Loading the ticket text…
+              </div>
+              <div aria-hidden="true">
+                {[
+                  ["Problem", [90, 75, 60]],
+                  ["Change", [90, 40]],
+                  ["Evidence", [75, 50]],
+                  ["Acceptance criteria", [75, 60, 75]],
+                ].map(([title, widths]) => (
+                  <div key={title as string}>
+                    <h2>{title as string}</h2>
+                    {(widths as number[]).map((width, index) => (
+                      <span key={index} className="sk" style={{ width: `${width}%` }} />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-      </>
-    );
-  if (document === null)
-    return (
-      <div role="alert" className="doc-alert">
-        <strong>The hub could not read the text of this ticket.</strong>
-        The file is missing or does not parse. This page loads it again by itself when the file
-        changes.
+        <aside className="side">{relations}</aside>
       </div>
     );
-  const section = (text: string, testId: string) =>
-    text === "" ? (
+  const section = (body: string, testId: string) =>
+    body === "" ? (
       <p className="mut">Not written in the ticket.</p>
     ) : (
-      <Markdown text={text} raw={raw} testId={testId} />
+      <Markdown text={body} raw={raw} testId={testId} />
     );
+  const chip = (id: string, label: ReactNode, extra = "") => (
+    <button
+      key={id}
+      type="button"
+      className={`outline-chip${extra}`}
+      aria-current={marked.includes(id) ? "location" : undefined}
+      onClick={() => jump(id)}
+    >
+      {label}
+    </button>
+  );
   return (
     <>
-      <div className="view-bar">
-        <ViewSwitch raw={raw} onChange={setRaw} />
+      <nav className="outline-bar" aria-label="Ticket outline" data-testid="outline-bar">
+        {proseSections.map(([name, label]) => chip(`sec-${name}`, label))}
+        <span className="outline-sep" role="separator" />
+        <button
+          type="button"
+          className="outline-chip"
+          aria-current={marked[1] === "" ? undefined : "location"}
+          onClick={() => jump("sec-criteria")}
+        >
+          Acceptance criteria <span className="count">{text.criteria.length}</span>
+        </button>
+        {text.criteria.map((criterion) => chip(`crit-${criterion.id}`, criterion.id, " mono"))}
+        <span className="outline-switch">
+          <ViewSwitch raw={raw} onChange={setRaw} />
+        </span>
+      </nav>
+      <div className="ticket-cols">
+        <div className="ticket-prose">
+          <section id="sec-problem" className="ticket-section">
+            <h2>Problem</h2>
+            {section(text.problem, "ticket-problem")}
+          </section>
+          <section id="sec-change" className="ticket-section">
+            <h2>Change</h2>
+            {section(text.change, "ticket-change")}
+          </section>
+          <section id="sec-evidence" className="ticket-section">
+            <h2>Evidence</h2>
+            {section(text.evidence, "ticket-evidence")}
+          </section>
+        </div>
+        <aside className="side">
+          {relations}
+          <section className="panel" id="sec-criteria">
+            <header>
+              <h2>Acceptance criteria</h2>
+              <span className="count">{text.criteria.length}</span>
+            </header>
+            <div className="body">
+              <Criteria
+                project={ticket.project}
+                ticket={ticket.id}
+                criteria={text.criteria}
+                raw={raw}
+              />
+            </div>
+          </section>
+        </aside>
       </div>
-      <h2>Problem</h2>
-      {section(document.problem, "ticket-problem")}
-      <h2>Change</h2>
-      {section(document.change, "ticket-change")}
-      <h2>Evidence</h2>
-      {section(document.evidence, "ticket-evidence")}
-      <h2>Acceptance criteria · {document.criteria.length}</h2>
-      <Criteria
-        project={ticket.project}
-        ticket={ticket.id}
-        criteria={document.criteria}
-        raw={raw}
-      />
     </>
+  );
+}
+
+/** A relation with entries is a panel; an empty one is a single line. */
+function Relation({
+  title,
+  testId,
+  count,
+  children,
+}: {
+  title: string;
+  testId: string;
+  count: number;
+  children: ReactNode;
+}) {
+  return count === 0 ? (
+    <p className="relnone" data-testid={testId}>
+      <b>{title}</b> · none
+    </p>
+  ) : (
+    <section className="panel" data-testid={testId}>
+      <header>
+        <h2>
+          {title} · {count}
+        </h2>
+      </header>
+      <ul className="body links">{children}</ul>
+    </section>
   );
 }
 
@@ -176,51 +299,43 @@ export function TicketPage({ id }: { id: string }) {
         <a href={hashOf("#/roadmap")}>← Roadmap</a>{" "}
         <span className="mut">Esc returns to the list</span>
       </p>
-      <div className="ticket-cols">
-        <article>
-          <div className="meta">
-            <span className="mono strong">{ticket.id}</span>
-            <span className={`pill ${entry.tone}`}>{entry.state}</span>
-            {ticket.milestone ? <span className="pill">{ticket.milestone}</span> : null}
-            {ticket.status.replaceAll("_", " ") === entry.state ? null : (
-              <span className="pill">{ticket.status}</span>
-            )}
-            <ProjectValue project={ticket.project} />
-          </div>
-          <OutsideNote project={ticket.project} />
-          <h1 className="ticket-title">{ticket.title ?? ticket.id}</h1>
-          <div className="actions">
-            {run ? (
-              <a className="btn primary" href={runHref(run.run)}>
-                Open run
-              </a>
-            ) : null}
-            {lead ? <OpenInOrca agent={lead} /> : null}
-          </div>
-          <TicketText ticket={ticket} />
-        </article>
-        <aside className="side">
-          <section className="panel">
-            <header>
-              <h2>Dependency graph</h2>
-            </header>
-            <div className="body graph-scroll" data-testid="ticket-graph">
-              <DepGraph
-                size="compact"
-                label={`Dependency graph of ${ticket.id}`}
-                focus={entry.key}
-                tickets={neighbours.map((other) => node(other, ticket))}
-              />
-            </div>
-          </section>
-          <section className="panel" data-testid="depends-on">
-            <header>
-              <h2>Depends on · {dependsOn.length}</h2>
-            </header>
-            <ul className="body links">
-              {dependsOn.length === 0 ? (
-                <li className="mut">Nothing. It can start any time.</li>
-              ) : null}
+      <div className="meta">
+        <span className="mono strong">{ticket.id}</span>
+        <span className={`pill ${entry.tone}`}>{entry.state}</span>
+        {ticket.milestone ? <span className="pill">{ticket.milestone}</span> : null}
+        {ticket.status.replaceAll("_", " ") === entry.state ? null : (
+          <span className="pill">{ticket.status}</span>
+        )}
+        <ProjectValue project={ticket.project} />
+      </div>
+      <OutsideNote project={ticket.project} />
+      <h1 className="ticket-title">{ticket.title ?? ticket.id}</h1>
+      <div className="actions">
+        {run ? (
+          <a className="btn primary" href={runHref(run.run)}>
+            Open run
+          </a>
+        ) : null}
+        {lead ? <OpenInOrca agent={lead} /> : null}
+      </div>
+      <section className="panel ticket-band">
+        <header>
+          <h2>Dependency graph</h2>
+        </header>
+        <div className="body" data-testid="ticket-graph">
+          <DepGraph
+            size="compact"
+            label={`Dependency graph of ${ticket.id}`}
+            focus={entry.key}
+            tickets={neighbours.map(node)}
+          />
+        </div>
+      </section>
+      <TicketText
+        ticket={ticket}
+        relations={
+          <>
+            <Relation title="Depends on" testId="depends-on" count={dependsOn.length}>
               {dependsOn.map((need) => (
                 <li key={need.id}>
                   <a className="mono" href={ticketHref(need.id)} data-testid="dep-link">
@@ -230,14 +345,8 @@ export function TicketPage({ id }: { id: string }) {
                   <span className="pill">{need.entry?.state ?? "unknown"}</span>
                 </li>
               ))}
-            </ul>
-          </section>
-          <section className="panel" data-testid="unblocks-list">
-            <header>
-              <h2>Unblocks · {unblocks.length}</h2>
-            </header>
-            <ul className="body links">
-              {unblocks.length === 0 ? <li className="mut">No ticket waits for it.</li> : null}
+            </Relation>
+            <Relation title="Unblocks" testId="unblocks-list" count={unblocks.length}>
               {unblocks.map((other) => (
                 <li key={other.key}>
                   <a className="mono" href={ticketHref(other.ticket.id)} data-testid="unblock-link">
@@ -246,10 +355,10 @@ export function TicketPage({ id }: { id: string }) {
                   {other.ticket.title} <span className="pill">{other.state}</span>
                 </li>
               ))}
-            </ul>
-          </section>
-        </aside>
-      </div>
+            </Relation>
+          </>
+        }
+      />
     </div>
   );
 }

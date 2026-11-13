@@ -235,6 +235,57 @@ test("ARK-T115 chief state prints each live source in one Markdown snapshot", ()
   expect(out).toMatch(/concurrency\W+3/);
   expect(section(out, "Interview")).toMatch(/last interview: 1\s*$/);
   expect(section(out, "Host")).toMatch(/free disk: \d+ GB/);
+  // Nothing is installed for this project: the refused launchctl and no plist both read as not installed.
+  expect(section(out, "Services").match(/not installed/g)).toHaveLength(3);
+});
+
+test("ARK-T297 chief state prints the services block of ark services status, with the pid of a running one and the last log line", () => {
+  setScenario({ runs: [chiefOrcaRun] });
+  const home = mkdtempSync(join(tmpdir(), "ark-chief-services-home-"));
+  const launchctl = join(home, "launchctl");
+  // `list <label>` prints the real dict: a PID line only for the label with a pid file; exit 113 for an unknown one.
+  writeFileSync(
+    launchctl,
+    `#!/bin/sh
+[ "$1" = list ] || exit 0
+[ -e "${home}/$2.loaded" ] || exit 113
+printf '{\\n\\t"Label" = "%s";\\n' "$2"
+[ -s "${home}/$2.loaded" ] && printf '\\t"PID" = %s;\\n' "$(cat "${home}/$2.loaded")"
+printf '};\\n'
+`,
+  );
+  chmodSync(launchctl, 0o755);
+  const agents = join(home, "Library", "LaunchAgents");
+  mkdirSync(agents, { recursive: true });
+  const logs = join(process.env.ARK_HOME as string, "projects", project, "services");
+  mkdirSync(logs, { recursive: true });
+  for (const service of ["auto-merger", "temp-cleaner"])
+    writeFileSync(join(agents, `dev.ark.${project}.${service}.plist`), "");
+  writeFileSync(join(home, `dev.ark.${project}.auto-merger.loaded`), "");
+  writeFileSync(join(home, `dev.ark.${project}.temp-cleaner.loaded`), "4242");
+  writeFileSync(join(logs, "temp-cleaner.log"), "swept\nfree 31 GB\n\n");
+
+  const previous = { HOME: process.env.HOME, ARK_LAUNCHCTL: process.env.ARK_LAUNCHCTL };
+  process.env.HOME = home;
+  process.env.ARK_LAUNCHCTL = launchctl;
+  try {
+    const state = ark("chief", "state", "--project", project);
+    const status = ark("services", "status", "--project", project);
+    expect(state.code, state.err).toBe(0);
+    expect(status.code, status.err).toBe(0);
+    expect(
+      section(state.out, "Services")
+        .replace(/^Services\s*/, "")
+        .trim(),
+    ).toBe(status.out.trim());
+    expect(status.out).toMatch(/^auto-merger\s+loaded\s+pid -/m);
+    expect(status.out).toMatch(/^temp-cleaner\s+running\s+pid 4242\s+last log: free 31 GB$/m);
+    expect(status.out).toMatch(/^sweep\s+not installed$/m);
+  } finally {
+    for (const [key, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  }
 });
 
 test("ARK-244-AC1 chief state lists the run lead from Master Chief's own Run, not step workers", () => {

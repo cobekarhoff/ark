@@ -79,6 +79,7 @@ esac
   // No notification may fire on the human's desktop.
   executable("osascript", `echo "$*" >> "${notificationLog}"\n`);
   executable("ark", `exec bun "${join(repositoryRoot, "cli", "ark.ts")}" "$@"\n`);
+  installFakeOrca();
 });
 
 /** Two repos (PR 11 CLEAN, PR 12 DIRTY) with retro.md, ticket.md id ARK-900 and a ready ticket file; one auto-merger pass. */
@@ -130,7 +131,7 @@ function runCleanPullRequestScenario() {
     "---\nid: ARK-900\nstatus: ready\n---\n",
   );
 
-  return runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  return runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
 }
 
 function expectCleanPullRequestOnlyMerged(result: ScriptResult) {
@@ -145,11 +146,11 @@ function expectCleanPullRequestOnlyMerged(result: ScriptResult) {
   expect(change).toContain(`${run} #12 conflicting`);
 }
 
-test("ARK-244-AC3 auto-merger merges the CLEAN PR only, reports the conflict and exits", () => {
+test("ARK-T295 auto-merger --once merges the CLEAN PR only, reports the conflict and exits", () => {
   expectCleanPullRequestOnlyMerged(runCleanPullRequestScenario());
 });
 
-test("ARK-281-AC6 auto-merger with retro.md and a ready ticket file merges the CLEAN PR only, reports the conflict and holds nothing", () => {
+test("ARK-T295 auto-merger --once with retro.md and a ready ticket file merges the CLEAN PR only, reports the conflict and holds nothing", () => {
   const result = runCleanPullRequestScenario();
   expectCleanPullRequestOnlyMerged(result);
   expect(result.err).not.toContain("HELD:");
@@ -392,14 +393,14 @@ const mergeCalls = () =>
     .split("\n")
     .filter((call) => call.startsWith("pr merge"));
 
-test("ARK-281-AC1 auto-merger merges only the run with retro.md, and the other in a later pass once retro.md exists", () => {
+test("ARK-T295 auto-merger merges only the run with retro.md, and the other in a later pass once retro.md exists", () => {
   const { workspace, directories } = setUpMergerRuns([
     { name: "2026-11-02-ARK-21-1", pr: 21, retro: true },
     { name: "2026-11-02-ARK-22-1", pr: 22, retro: false },
   ]);
 
   // Pass 1 merges #21 and exits on that change; #22 has no pr merge call.
-  const first = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  const first = runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
   expect(first.code).toBe(0);
   expect(mergeCalls()).toEqual(["pr merge https://github.com/org/app/pull/21 --merge"]);
   expect(first.out).not.toContain("#22");
@@ -409,12 +410,11 @@ test("ARK-281-AC1 auto-merger merges only the run with retro.md, and the other i
     join(bin, "hook.sh"),
     `[ "$1" = 2 ] && echo "# Retro" > "${join(directories["2026-11-02-ARK-22-1"]!, "retro.md")}"\nexit 0\n`,
   );
-  fakeSleep(10);
+  fakeSleep(3);
   // #21 is merged in the fake only: remove its retro so that it stays out of this second script run.
   rmSync(join(directories["2026-11-02-ARK-21-1"]!, "retro.md"));
   const second = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
-  expect(second.code).toBe(0);
-  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("2");
+  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
   expect(mergeCalls()).toEqual([
     "pr merge https://github.com/org/app/pull/21 --merge",
     "pr merge https://github.com/org/app/pull/22 --merge",
@@ -422,7 +422,7 @@ test("ARK-281-AC1 auto-merger merges only the run with retro.md, and the other i
   expect(second.out).toContain("2026-11-02-ARK-22-1 #22 merged");
 });
 
-test("ARK-281-AC2 auto-merger skips superseded and done tickets, merges ready and missing ticket files", () => {
+test("ARK-T295 auto-merger --once skips superseded and done tickets, merges ready and missing ticket files", () => {
   const runs: MergerRun[] = [
     { name: "2026-11-02-ARK-31-1", pr: 31, retro: true, ticket: "superseded" },
     { name: "2026-11-02-ARK-32-1", pr: 32, retro: true, ticket: "done" },
@@ -431,7 +431,7 @@ test("ARK-281-AC2 auto-merger skips superseded and done tickets, merges ready an
   ];
   const { workspace } = setUpMergerRuns(runs);
 
-  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  const result = runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
 
   expect(result.code).toBe(0);
   expect(mergeCalls().sort()).toEqual([
@@ -492,4 +492,463 @@ test("ARK-281-AC4 a PR held for a superseded ticket prints HELD with the reason 
     `HELD: ${name} #52 ticket superseded`,
   ]);
   expect(result.out).not.toContain("CHANGE:");
+});
+
+// --- ARK-358: the loops send Orca messages. A fake orca, df and sleep stand in for the real ones. ---
+
+const masterChiefRun = { id: "run_chief", objective: "Master Chief: demo tickets" };
+const decoyRun = { id: "run_decoy", objective: "Master Chief: other tickets" };
+
+/**
+ * Fake orca in the bin folder. State files live next to it: `runs.ndjson` (run-list, one row per page: the page
+ * size is 1, so the Run on row 2 needs the cursor), `workers-<run id>.json` and `workers-<run id>.after.json`
+ * (worker-list: the `after` file answers from the second call on), `terminals.json`. `fail-send` makes `send`
+ * exit 1 and leaves no record; `fail-close-<handle>` makes that terminal's close exit 1 (still recorded as an
+ * attempt); a close removes the terminal from the list. Every other call is appended to orca.log: arguments
+ * joined by \x1f, calls ended by \x1e.
+ */
+function installFakeOrca() {
+  writeFileSync(
+    join(bin, "runs.ndjson"),
+    [decoyRun, masterChiefRun].map((row) => `${JSON.stringify(row)}\n`).join(""),
+  );
+  executable(
+    "orca",
+    `d=$(dirname "$0")
+[ "$2" = send ] && [ -e "$d/fail-send" ] && { echo "orca is not answering" >&2; exit 1; }
+printf '%s' "$(printf '%s\\037' "$@"; printf '\\036')" >> "$d/orca.log"
+case "$1 $2" in
+  "orchestration run-list")
+    offset=0
+    while [ $# -gt 0 ]; do [ "$1" = --cursor ] && offset=\${2#c}; shift; done
+    total=$(wc -l < "$d/runs.ndjson")
+    row=$(sed -n "$((offset + 1))p" "$d/runs.ndjson")
+    if [ $((offset + 1)) -lt "$total" ]; then next="\\"c$((offset + 1))\\""; else next=null; fi
+    printf '{"result":{"runs":[%s],"nextCursor":%s}}\\n' "$row" "$next" ;;
+  "orchestration send") echo '{"ok":true}' ;;
+  "orchestration worker-list")
+    while [ $# -gt 0 ]; do [ "$1" = --run ] && run=$2; shift; done
+    calls=$(($(cat "$d/worker-calls-$run" 2>/dev/null || echo 0) + 1)); echo $calls > "$d/worker-calls-$run"
+    file="$d/workers-$run.json"
+    [ -e "$file" ] || { echo '{"result":{"workers":[],"nextCursor":null}}'; exit 0; }
+    [ $calls -gt 1 ] && [ -e "$d/workers-$run.after.json" ] && file="$d/workers-$run.after.json"
+    cat "$file" ;;
+  "terminal list") cat "$d/terminals.json" ;;
+  "terminal close")
+    while [ $# -gt 0 ]; do [ "$1" = --terminal ] && handle=$2; shift; done
+    [ -e "$d/fail-close-$handle" ] && { echo "close refused" >&2; exit 1; }
+    jq -c --arg handle "$handle" '.result.terminals |= map(select(.handle != $handle))' "$d/terminals.json" > "$d/terminals.tmp" &&
+      mv "$d/terminals.tmp" "$d/terminals.json"
+    echo '{"ok":true}' ;;
+  *) exit 2 ;;
+esac
+`,
+  );
+}
+
+const orcaCalls = (): string[][] =>
+  existsSync(join(bin, "orca.log"))
+    ? readFileSync(join(bin, "orca.log"), "utf8")
+        .split("\x1e")
+        .filter(Boolean)
+        .map((call) => call.split("\x1f").slice(0, -1))
+    : [];
+const orcaSends = () =>
+  orcaCalls().filter((call) => call[0] === "orchestration" && call[1] === "send");
+const flagValue = (call: string[], flag: string) => call[call.indexOf(flag) + 1];
+const orcaCloses = () =>
+  orcaCalls()
+    .filter((call) => call[0] === "terminal" && call[1] === "close")
+    .map((call) => flagValue(call, "--terminal"));
+
+/** Starts a new launchd-style process: the pass counter restarts, the state folder stays. */
+function resetPasses(stopAfter: number) {
+  rmSync(join(bin, "sleep.count"), { force: true });
+  fakeSleep(stopAfter);
+}
+
+test("ARK-T295 auto-merger sends one 'Merged: <run> !<number>' to the Master Chief Run on page 2, keeps looping, and repeats nothing after a restart", () => {
+  const first = "2026-11-02-ARK-61-1";
+  const second = "2026-11-02-ARK-62-1";
+  const { workspace, directories } = setUpMergerRuns([
+    { name: first, pr: 61, retro: true },
+    { name: second, pr: 62, retro: false },
+  ]);
+
+  // 1-3. Three passes: alive after the merge (only the fake sleep ends it), one send, to the right Run.
+  fakeSleep(3);
+  runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
+  expect(mergeCalls()).toEqual(["pr merge https://github.com/org/app/pull/61 --merge"]);
+  expect(orcaSends()).toHaveLength(1);
+  const [message] = orcaSends();
+  expect(flagValue(message!, "--to")).toBe("run:run_chief");
+  expect(flagValue(message!, "--type")).toBe("status");
+  expect(flagValue(message!, "--subject")).toBe(`Merged: ${first} !61`);
+
+  // 4. A launchd restart with the same state and the same merged run: nothing new.
+  resetPasses(2);
+  runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  expect(mergeCalls()).toHaveLength(1);
+  expect(orcaSends()).toHaveLength(1);
+
+  // 5. The second MR becomes mergeable: one more send with its number.
+  writeFileSync(join(directories[second]!, "retro.md"), "# Retro\n");
+  resetPasses(2);
+  runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+  expect(orcaSends().map((call) => flagValue(call, "--subject"))).toEqual([
+    `Merged: ${first} !61`,
+    `Merged: ${second} !62`,
+  ]);
+});
+
+test("ARK-T295 auto-merger logs the notice and keeps merging when there is no Master Chief Run, and sends it once orca answers", () => {
+  const name = "2026-11-02-ARK-63-1";
+  const { workspace } = setUpMergerRuns([{ name, pr: 63, retro: true }]);
+  writeFileSync(join(bin, "runs.ndjson"), `${JSON.stringify(decoyRun)}\n`);
+  fakeSleep(2);
+
+  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+
+  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("2");
+  expect(mergeCalls()).toHaveLength(1);
+  expect(orcaSends()).toEqual([]);
+  expect(result.err).toContain(
+    `no Orca Run "Master Chief: demo tickets", not sent: Merged: ${name} !63`,
+  );
+
+  // orca is not answering: the message stays pending and goes out on a later pass.
+  const retry = "2026-11-02-ARK-64-1";
+  const second = setUpMergerRuns([{ name: retry, pr: 64, retro: true }]);
+  writeFileSync(
+    join(bin, "runs.ndjson"),
+    [decoyRun, masterChiefRun].map((row) => `${JSON.stringify(row)}\n`).join(""),
+  );
+  writeFileSync(join(bin, "fail-send"), "");
+  resetPasses(1);
+  const failed = runScript("auto-merger.sh", [second.workspace, "1"], { ARK_PROJECT: "demo" });
+  expect(failed.err).toContain("orca send failed, will retry");
+  expect(orcaSends()).toEqual([]);
+  rmSync(join(bin, "fail-send"));
+  resetPasses(1);
+  runScript("auto-merger.sh", [second.workspace, "1"], { ARK_PROJECT: "demo" });
+  expect(orcaSends().map((call) => flagValue(call, "--subject"))).toEqual([`Merged: ${retry} !64`]);
+});
+
+test("ARK-T295 auto-merger prints a conflict and a failed merge once over four passes and sends neither", () => {
+  const { workspace } = setUpMergerRuns([
+    { name: "2026-11-02-ARK-71-1", pr: 71, retro: true },
+    { name: "2026-11-02-ARK-72-1", pr: 72, retro: true },
+  ]);
+  // PR 71 is CLEAN but refuses to merge; PR 72 is DIRTY.
+  executable(
+    "gh",
+    `echo "$*" >> "${ghLog}"
+case "$*" in
+  "pr merge"*) exit 1 ;;
+  *mergeStateStatus*) case "$3" in */72) echo DIRTY ;; *) echo CLEAN ;; esac ;;
+  *) echo '{"state":"OPEN","statusCheckRollup":[]}' ;;
+esac
+`,
+  );
+  fakeSleep(4);
+
+  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+
+  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("4");
+  expect(result.out.match(/#71 merge failed/g)).toHaveLength(1);
+  expect(result.out.match(/#72 conflicting/g)).toHaveLength(1);
+  expect(orcaSends()).toEqual([]);
+});
+
+// --- ARK-T296: the cleaner's disk message ---
+
+/** Free GB of `df -k /` for each pass of one cleaner process; the last value repeats. The limit is the script's own 15. */
+function cleanerPasses(freeGigabytes: number[]) {
+  const scratch = mkdtempSync(join(tmpdir(), "ark-scratch-tmp-"));
+  writeFileSync(join(bin, "df.values"), freeGigabytes.join("\n") + "\n");
+  rmSync(join(bin, "df.count"), { force: true });
+  executable(
+    "df",
+    `count=$(($(cat "${join(bin, "df.count")}" 2>/dev/null || echo 0) + 1))
+echo $count > "${join(bin, "df.count")}"
+total=$(wc -l < "${join(bin, "df.values")}")
+[ $count -gt $total ] && count=$total
+gigabytes=$(sed -n "$count"p "${join(bin, "df.values")}")
+echo "Filesystem 1024-blocks Used Available Capacity Mounted"
+echo "/dev/fake 1 1 $((gigabytes * 1048576)) 1% /"
+`,
+  );
+  resetPasses(freeGigabytes.length);
+  const result = runScript("temp-cleaner.sh", [cleanerWorkspace, "1"], {
+    TMPDIR: scratch,
+    ARK_PROJECT: "demo",
+  });
+  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe(`${freeGigabytes.length}`);
+  return result;
+}
+let cleanerWorkspace = "";
+const diskSubjects = () => orcaSends().map((call) => flagValue(call, "--subject"));
+
+test("ARK-T296 temp-cleaner sends one 'Disk low: <n> GB free' per drop below the limit and again only after free disk rose above it", () => {
+  cleanerWorkspace = tempGitRepo();
+
+  // 1-4. Above, drop (three passes low), above, drop: two sends in one process that never exits.
+  const first = cleanerPasses([20, 20, 14, 14, 14, 16, 16, 12, 12, 12]);
+  expect(first.out.match(/LOW DISK/g)).toHaveLength(2);
+  expect(diskSubjects()).toEqual(["Disk low: 14 GB free", "Disk low: 12 GB free"]);
+  expect(flagValue(orcaSends()[0]!, "--to")).toBe("run:run_chief");
+  expect(flagValue(orcaSends()[0]!, "--type")).toBe("status");
+
+  // 5. A restart while still low: the state survives it.
+  cleanerPasses([12, 12]);
+  expect(diskSubjects()).toHaveLength(2);
+
+  // 6-7. Exactly the limit is not below it and does not count as recovery.
+  cleanerPasses([15, 15]);
+  cleanerPasses([14, 14, 14]);
+  expect(diskSubjects()).toHaveLength(2);
+
+  // 8-9. Above the limit resets; the next drop is the third send.
+  cleanerPasses([16, 16]);
+  expect(diskSubjects()).toHaveLength(2);
+  cleanerPasses([13, 13, 13]);
+  expect(diskSubjects()).toEqual([
+    "Disk low: 14 GB free",
+    "Disk low: 12 GB free",
+    "Disk low: 13 GB free",
+  ]);
+});
+
+test("ARK-T296 temp-cleaner keeps sweeping and sends the disk message on the next pass when orca is not answering", () => {
+  cleanerWorkspace = tempGitRepo();
+  writeFileSync(join(bin, "fail-send"), "");
+
+  const failed = cleanerPasses([10, 10]);
+  expect(failed.err.match(/orca send failed, will retry/g)).toHaveLength(2);
+  expect(orcaSends()).toEqual([]);
+
+  rmSync(join(bin, "fail-send"));
+  cleanerPasses([10, 10]);
+  expect(diskSubjects()).toEqual(["Disk low: 10 GB free"]);
+});
+
+// --- ARK-T299: the sweep ---
+
+test("ARK-T299 sweep closes only the terminals of settled dispatches that still run, lists terminals idle over a day, and never touches a live dispatch or Master Chief", () => {
+  const runName = "2026-11-02-ARK-900-1";
+  const runsRoot = join(process.env.ARK_HOME!, "projects", "demo", "runs");
+  mkdirSync(join(runsRoot, runName), { recursive: true });
+  const workspace = tempGitRepo();
+  const row = (dispatchId: string, state: string, terminalState: string) => ({
+    dispatchId,
+    state,
+    terminalState,
+    terminal: `term_${dispatchId}`,
+  });
+  const writeWorkers = (name: string, workers: unknown[]) =>
+    writeFileSync(join(bin, name), JSON.stringify({ result: { workers, nextCursor: null } }));
+  const rows = [
+    row("released", "succeeded", "released"),
+    row("closed", "failed", "active"),
+    row("live", "running", "active"),
+    row("retained", "succeeded", "retained"),
+    row("gone", "succeeded", "released"),
+  ];
+  writeFileSync(
+    join(bin, "runs.ndjson"),
+    [
+      decoyRun,
+      masterChiefRun,
+      { id: "run_ark", objective: `Ark run ${runName}` },
+      { id: "run_other", objective: "Ark run 2026-11-02-ARK-5-1" },
+    ]
+      .map((run) => `${JSON.stringify(run)}\n`)
+      .join(""),
+  );
+  writeWorkers("workers-run_ark.json", rows);
+  // A settled, connected dispatch of project `other`: its run folder is not under this project.
+  writeWorkers("workers-run_other.json", [row("other", "succeeded", "released")]);
+  writeWorkers("workers-run_chief.json", [row("lead", "running", "active")]);
+  const hour = 3_600_000;
+  const terminal = (handle: string, worktreePath: string, idleHours = 0) => ({
+    handle,
+    worktreePath,
+    connected: true,
+    title: handle,
+    lastOutputAt: Date.now() - idleHours * hour,
+  });
+  const inRun = join(runsRoot, runName, "workspace");
+  const writeTerminals = () =>
+    writeFileSync(
+      join(bin, "terminals.json"),
+      JSON.stringify({
+        result: {
+          terminals: [
+            ...["released", "closed", "live", "retained"].map((id) =>
+              terminal(`term_${id}`, inRun),
+            ),
+            terminal(
+              "term_other",
+              join(process.env.ARK_HOME!, "projects", "other", "runs", "x", "workspace"),
+            ),
+            terminal("term_chief", workspace),
+            terminal("term_lead", inRun),
+            terminal("term_idle25", inRun, 25),
+            terminal("term_idle23", inRun, 23),
+          ],
+        },
+      }),
+    );
+  const sweep = () => runScript("sweep.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
+  writeTerminals();
+
+  // 1-2. Only the first two are closed; one message names them and the 25 h terminal.
+  const first = sweep();
+  expect(first.code).toBe(0);
+  expect(orcaCloses()).toEqual(["term_released", "term_closed"]);
+  expect(orcaSends()).toHaveLength(1);
+  expect(flagValue(orcaSends()[0]!, "--to")).toBe("run:run_chief");
+  expect(flagValue(orcaSends()[0]!, "--type")).toBe("status");
+  expect(flagValue(orcaSends()[0]!, "--subject")).toBe("Sweep: closed 2, idle 1");
+  const body = flagValue(orcaSends()[0]!, "--body");
+  expect(body).toContain("closed term_released (released)");
+  expect(body).toContain("closed term_closed (closed)");
+  expect(body).toContain("term_idle25");
+  expect(body).not.toContain("term_idle23");
+  // The idle terminal is listed, never closed.
+  expect(orcaCloses()).not.toContain("term_idle25");
+
+  // 4. Again, the closed terminals are gone: no close, no repeated message.
+  sweep();
+  expect(orcaCloses()).toEqual(["term_released", "term_closed"]);
+  expect(orcaSends()).toHaveLength(1);
+});
+
+test("ARK-T299 sweep does not close a dispatch that restarted before the close, and logs a failed close and goes on", () => {
+  const runName = "2026-11-02-ARK-900-1";
+  const runsRoot = join(process.env.ARK_HOME!, "projects", "demo", "runs");
+  mkdirSync(join(runsRoot, runName), { recursive: true });
+  const workspace = tempGitRepo();
+  const inRun = join(runsRoot, runName, "workspace");
+  const row = (dispatchId: string, state: string) => ({
+    dispatchId,
+    state,
+    terminalState: "active",
+    terminal: `term_${dispatchId}`,
+  });
+  const writeWorkers = (name: string, workers: unknown[]) =>
+    writeFileSync(join(bin, name), JSON.stringify({ result: { workers, nextCursor: null } }));
+  writeFileSync(
+    join(bin, "runs.ndjson"),
+    [masterChiefRun, { id: "run_ark", objective: `Ark run ${runName}` }]
+      .map((run) => `${JSON.stringify(run)}\n`)
+      .join(""),
+  );
+  writeFileSync(
+    join(bin, "terminals.json"),
+    JSON.stringify({
+      result: {
+        terminals: ["first", "second"].map((id) => ({
+          handle: `term_${id}`,
+          worktreePath: inRun,
+          connected: true,
+          title: id,
+          lastOutputAt: Date.now(),
+        })),
+      },
+    }),
+  );
+  const sweep = () => runScript("sweep.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
+
+  // The second dispatch restarts between the first list and the fresh one that precedes its close.
+  writeWorkers("workers-run_ark.json", [row("first", "succeeded"), row("second", "succeeded")]);
+  writeWorkers("workers-run_ark.after.json", [row("first", "succeeded"), row("second", "running")]);
+  sweep();
+  expect(orcaCloses()).toEqual(["term_first"]);
+
+  // A close that fails is logged and the next terminal is still closed.
+  rmSync(join(bin, "orca.log"));
+  rmSync(join(bin, "workers-run_ark.after.json"));
+  rmSync(join(bin, "worker-calls-run_ark"));
+  writeWorkers("workers-run_ark.json", [row("first", "succeeded"), row("second", "succeeded")]);
+  writeFileSync(
+    join(bin, "terminals.json"),
+    JSON.stringify({
+      result: {
+        terminals: ["first", "second"].map((id) => ({
+          handle: `term_${id}`,
+          worktreePath: inRun,
+          connected: true,
+          title: id,
+          lastOutputAt: Date.now(),
+        })),
+      },
+    }),
+  );
+  writeFileSync(join(bin, "fail-close-term_first"), "");
+  const failed = sweep();
+  expect(failed.code).toBe(0);
+  expect(failed.err).toContain("closing term_first (first) failed");
+  // Both were tried; only the second left the terminal list.
+  expect(orcaCloses()).toEqual(["term_first", "term_second"]);
+  expect(
+    JSON.parse(readFileSync(join(bin, "terminals.json"), "utf8")).result.terminals.map(
+      (entry: { handle: string }) => entry.handle,
+    ),
+  ).toEqual(["term_first"]);
+});
+
+test("ARK-T299 sweep does not close a terminal that a live dispatch of another Run reuses, and lists an idle terminal in the project workspace", () => {
+  const runName = "2026-11-02-ARK-900-1";
+  const runsRoot = join(process.env.ARK_HOME!, "projects", "demo", "runs");
+  mkdirSync(join(runsRoot, runName), { recursive: true });
+  const workspace = tempGitRepo();
+  const writeWorkers = (name: string, workers: unknown[]) =>
+    writeFileSync(join(bin, name), JSON.stringify({ result: { workers, nextCursor: null } }));
+  writeFileSync(
+    join(bin, "runs.ndjson"),
+    [masterChiefRun, { id: "run_ark", objective: `Ark run ${runName}` }, decoyRun]
+      .map((run) => `${JSON.stringify(run)}\n`)
+      .join(""),
+  );
+  const settled = {
+    dispatchId: "old",
+    state: "succeeded",
+    terminalState: "released",
+    terminal: "term_shared",
+  };
+  writeWorkers("workers-run_ark.json", [settled]);
+  writeWorkers(`workers-${decoyRun.id}.json`, [
+    { dispatchId: "new", state: "running", terminalState: "active", terminal: "term_shared" },
+  ]);
+  const terminal = (handle: string, worktreePath: string, idleHours: number) => ({
+    handle,
+    worktreePath,
+    connected: true,
+    title: handle,
+    lastOutputAt: Date.now() - idleHours * 3_600_000,
+  });
+  writeFileSync(
+    join(bin, "terminals.json"),
+    JSON.stringify({
+      result: {
+        terminals: [
+          terminal("term_shared", join(runsRoot, runName, "workspace"), 0),
+          terminal("term_ws_idle", workspace, 25),
+          terminal("term_ws_sibling", `${workspace}-other`, 25),
+        ],
+      },
+    }),
+  );
+
+  const result = runScript("sweep.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
+
+  expect(result.code).toBe(0);
+  expect(orcaCloses()).toEqual([]);
+  expect(result.err).toContain("term_shared is used by a live dispatch");
+  expect(orcaSends()).toHaveLength(1);
+  const body = flagValue(orcaSends()[0]!, "--body");
+  expect(body).toContain("term_ws_idle");
+  expect(body).not.toContain("term_ws_sibling");
 });
