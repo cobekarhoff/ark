@@ -16,7 +16,8 @@ import { format } from "node:util";
 import { ArkError } from "./errors.ts";
 
 /**
- * `ark test` starts a detached runner process and follows it. The runner owns the host lock, the suites and
+ * `ark test` starts a detached runner process, through a shell that exits at once so the runner is no child of the
+ * caller, and follows it. The runner owns the host lock, the suites and
  * their process groups; it writes the run folder files below, so the first call, `--wait` and a second call all
  * print the same lines and exit with the same code, and a dead caller changes nothing.
  *
@@ -73,6 +74,17 @@ function readRecord(resultsDirectory: string): RunnerRecord | null {
 
 const isLive = (record: RunnerRecord | null): record is RunnerRecord =>
   record !== null && record.state === "running" && identityLive(record);
+
+/** The runner.lock folder names a live owner: a runner won the claim and may not have written its record yet. */
+function lockOwnerLive(resultsDirectory: string): boolean {
+  const { lock } = files(resultsDirectory);
+  try {
+    const name = readdirSync(lock).find((entry) => entry.startsWith("owner-"));
+    return name !== undefined && identityLive(JSON.parse(readFileSync(join(lock, name), "utf8")));
+  } catch {
+    return false;
+  }
+}
 
 function writeRecord(resultsDirectory: string, record: RunnerRecord): void {
   const { record: file } = files(resultsDirectory);
@@ -273,8 +285,15 @@ async function startAndFollow(
       console.error(`ark: attaching to the ${mode} ark test of ${runId} (pid ${live.pid})`);
       return follow(resultsDirectory, runId);
     }
-    const child = Bun.spawn(
+    // The shell starts the runner in the background, prints its pid and exits at once, so the runner is reparented to
+    // init and no process below the caller is its parent: a kill of the caller's descendants never reaches it.
+    // `detached` gives it its own process group.
+    const shell = Bun.spawn(
       [
+        "sh",
+        "-c",
+        '"$@" </dev/null >/dev/null 2>&1 & echo $!',
+        "ark-test-runner",
         process.execPath,
         join(import.meta.dir, "ark.ts"),
         "test-runner",
@@ -283,15 +302,17 @@ async function startAndFollow(
         project,
         ...(quick ? ["--quick"] : []),
       ],
-      { stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true },
+      { stdin: "ignore", stdout: "pipe", stderr: "ignore", detached: true },
     );
-    child.unref();
+    const runnerPid = Number.parseInt(await new Response(shell.stdout).text(), 10);
+    // A record of the runner's pid means follow it. A runner that is gone without its own record either lost the
+    // claim to a live runner (loop to attach to it) or failed before it started.
     for (;;) {
-      if (readRecord(resultsDirectory)?.pid === child.pid) return follow(resultsDirectory, runId);
-      if (child.exitCode !== null) {
-        if (readRecord(resultsDirectory)?.pid === child.pid) return follow(resultsDirectory, runId);
-        if (child.exitCode === alreadyRunning) break;
-        throw new ArkError(`the runner of ${runId} exited ${child.exitCode} before it started`);
+      if (readRecord(resultsDirectory)?.pid === runnerPid) return follow(resultsDirectory, runId);
+      if (!identityLive({ pid: runnerPid, start: "" })) {
+        if (readRecord(resultsDirectory)?.pid === runnerPid) return follow(resultsDirectory, runId);
+        if (isLive(readRecord(resultsDirectory)) || lockOwnerLive(resultsDirectory)) break;
+        throw new ArkError(`the runner of ${runId} exited before it started`);
       }
       await Bun.sleep(25);
     }
