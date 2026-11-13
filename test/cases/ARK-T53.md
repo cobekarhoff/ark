@@ -6,7 +6,7 @@ technique: equivalence classes (run folder, no run folder) and decision table on
 priority: high
 risk: the ledger lists a fixed finding, drops evidence or a gate answer, picks the wrong base, or records a failed host probe as none, so every body built from it misstates the change
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-13-ARK-446-1
 ---
 
 ## Objective
@@ -45,6 +45,7 @@ Expected: When a host probe fails, the system shall record `unknown` and never `
 - Git ledger has the same shape as the run ledger, with the commit range, the three-dot diff, the template and tracker refs filled from git.
 - Rows a, b and c take base `release/2`, `main` and `develop`. Row d exits 1 with a message that asks for `--base`. In row b the MR field is `none` because the probe succeeded and found no MR.
 - Row e: the base is `main` (from git, no host needed); the MR-target field and the host default branch field are `unknown`; no field holds `none`. Row f exits 1 asking for `--base`, and its host-derived fields are `unknown`, not `none`.
+- The run ledger holds the test case ids of the plan's `test_cases` as `planCases`; a run with no `plan.yml` leaves the field absent, and `evidence` still lists every folder (ARK-446).
 - `bun test test/pr-writing.test.ts` exits 0.
 
 ## Screenshot checkpoints

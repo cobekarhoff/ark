@@ -109,6 +109,8 @@ export type Ledger = {
   evidence: EvidenceEntry[] | null;
   /** Text of `results/evidence/<AC id>.md` for each AC with no test case. Absent in an old ledger. */
   acEvidence?: { id: string; text: string }[];
+  /** Ids of the plan's `test_cases`: the body shows evidence for these only. Absent with no plan.yml and in an old ledger: the body shows every entry. */
+  planCases?: string[];
   /** Findings no later review closed with `No findings.` or a `send back` decision. */
   findings: Finding[];
   hasReviewerStep: boolean;
@@ -942,6 +944,7 @@ function runLedger(source: {
         ? [{ id, text: readFileSync(file, "utf8").trim() }]
         : [];
     }),
+    ...(plan ? { planCases: plan.test_cases.map(({ id }) => id) } : {}),
     findings: openFindings(findingsFiles),
     hasReviewerStep: (plan?.steps ?? []).some((step) => step.role === "reviewer"),
     reviewerStep: reviewerSteps.at(-1) ?? null,

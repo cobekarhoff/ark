@@ -61,7 +61,7 @@ Write about the system. The subject of a sentence is the code, the command, the 
 - Every claim of "tested", "passed" or "verified" carries the command and its result line, or a file in the repo. "Self-review completed" with no command is not evidence. Lint fails a body with no `- [ ]` verify item (VAL01) and warns on an item with no command or no `Expect` (VAL02).
 - Numbers carry bounds: n, the date, the base and head, what was excluded.
 - Name at most 5 screenshots as Markdown images (EVID04 warns). `post_mr.ts` uploads each local image or video on both hosts: GitHub needs `gh` 2.99.0 or newer (`--attach`) and write access, GitLab uploads with `glab api`. A failed upload exits 2 and posts nothing.
-- Text evidence (the last 20 lines of the head `command.log` of each test case, secret-like lines dropped, and each `results/evidence/<AC id>.md`) goes in `<details>` blocks of the Evidence section. SIZE01 skips them. Evidence is never committed to the repo.
+- Text evidence (the last 20 lines of the head `command.log` of each test case of the plan, secret-like lines dropped, and each `results/evidence/<AC id>.md`) goes in `<details>` blocks of the Evidence section. SIZE01 skips them. The body shows only the cases the plan names, not every folder of `results/evidence/`. When the body is over 65,536 characters (GitHub's limit), the log tails are cut first and the body says how many lines were left out. Evidence is never committed to the repo.
 - Diagrams: not built (ARK-400).
 - The full list of lint checks and what each wants: `references/evidence.md`.
 
