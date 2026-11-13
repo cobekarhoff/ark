@@ -9,8 +9,14 @@ const healthyHost: HostReading = {
   freeMemoryPercent: 50,
   swapUsedGigabytes: 1,
   swapTotalGigabytes: 4,
+  pressureLevel: 1,
+  loadOne: 2,
   load: 2.5,
+  loadFifteen: 2,
+  cores: 8,
+  cpuPercent: 10,
   freeDiskGigabytes: 100,
+  freeRootGigabytes: 100,
 };
 
 const reasonsFor = (overrides: Partial<HostReading>) =>

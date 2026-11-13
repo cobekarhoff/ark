@@ -3357,7 +3357,9 @@ test("ARK-T128 the first action of Home is visible and its hover colour final af
   expect(await contrastRatioOf(action), "hovered first action of Home").toBeGreaterThanOrEqual(4.5);
 });
 
-test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ page }) => {
+test("ARK-T301 #/map redirects to #/runs and the nav lists Home, Runs, Roadmap and Resources", async ({
+  page,
+}) => {
   isolate();
   installFakeTools({});
   const baseUrl = await launch();
@@ -3365,7 +3367,7 @@ test("ARK-285-AC1 #/map redirects to #/runs and the nav has no Map", async ({ pa
   await expect(page.getByTestId("lane")).toHaveCount(5);
   await expect(page).toHaveURL(/#\/runs$/);
   const links = page.getByRole("navigation", { name: "Views" }).getByRole("link");
-  await expect(links).toHaveText(["Home", "Runs", "Roadmap"]);
+  await expect(links).toHaveText(["Home", "Runs", "Roadmap", "Resources"]);
 });
 
 test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a ticket page and a run page read only their own text", async ({
@@ -3490,7 +3492,7 @@ const ticketsOf = (page: Page) =>
     .getByTestId("ticket-row")
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-ticket")));
 
-test("ARK-291-AC1 the nav shows Roadmap and not Backlog, and #/backlog and #/backlog/<ticket> redirect to #/roadmap and #/roadmap/<ticket>", async ({
+test("ARK-T301 the nav lists Home, Runs, Roadmap and Resources, and #/backlog and #/backlog/<ticket> redirect to #/roadmap and #/roadmap/<ticket>", async ({
   page,
 }) => {
   isolate();
@@ -3508,7 +3510,7 @@ test("ARK-291-AC1 the nav shows Roadmap and not Backlog, and #/backlog and #/bac
   await expect(page.getByTestId("roadmap-page")).toHaveCount(0);
 
   const links = page.getByRole("navigation", { name: "Views" }).getByRole("link");
-  await expect(links).toHaveText(["Home", "Runs", "Roadmap"]);
+  await expect(links).toHaveText(["Home", "Runs", "Roadmap", "Resources"]);
   await expect(page.getByRole("navigation", { name: "Views" })).not.toContainText("Backlog");
   await expect(links.nth(2)).toHaveAttribute("href", "#/roadmap");
 });

@@ -1,0 +1,6 @@
+import { test } from "bun:test";
+// Ends almost at once, after about 0.2 s of CPU.
+test("FAKE-1-AC1 burns", () => {
+  const end = performance.now() + 200;
+  while (performance.now() < end);
+});

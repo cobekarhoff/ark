@@ -141,12 +141,27 @@ export function installFakeTools(options: FakeToolOptions): string {
   return state;
 }
 
+/**
+ * ARK_PS and ARK_LSOF for a hub whose test has not set its own: a fast fake that lists no process, so the
+ * `resources` source answers at once and its stale label never comes and goes with the load of the host.
+ */
+function quietProcessTools(): { ARK_PS: string; ARK_LSOF: string } {
+  const directory = tempDirectory("ark-quiet-ps-");
+  const tool = (name: string) => {
+    const file = join(directory, name);
+    writeFileSync(file, "#!/bin/sh\nexit 0\n");
+    chmodSync(file, 0o755);
+    return file;
+  };
+  return { ARK_PS: tool("fake-ps"), ARK_LSOF: tool("fake-lsof") };
+}
+
 export type StartedHub = { process: ChildProcess; baseUrl: string };
 
 /** Starts `bun hub/main.ts --port 0` and resolves once it prints its address. `useCleanup` kills it. */
 export async function startHub(): Promise<StartedHub> {
   const hub = spawn("bun", [join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
-    env: process.env,
+    env: { ...quietProcessTools(), ...process.env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   hubs.push(hub);
@@ -192,8 +207,9 @@ export function useCleanup(): void {
   test.afterAll(async () => {
     await Promise.all(hubs.splice(0).map(stopHub));
     await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
+    // A fake tool that a killed hub started can still write its log for a moment: retry the removal.
     for (const directory of tempDirectories.splice(0))
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     for (const key of Object.keys(process.env))
       if (!(key in savedEnvironment!)) delete process.env[key];
     Object.assign(process.env, savedEnvironment);
