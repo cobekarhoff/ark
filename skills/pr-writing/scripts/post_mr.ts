@@ -37,7 +37,7 @@ await runCli(
     exits: [
       "MR created or updated",
       "refused: no --confirmed, lint fail, STALE01 (stale head or body), bad argument",
-      "environment: not authenticated, host unreachable, unknown host, git or gh/glab missing",
+      "environment: not authenticated, host unreachable, unknown host, git or gh/glab missing, an image upload failed, gh older than 2.99.0 (no --attach), a body over 65,536 characters on GitHub",
     ],
     schema: {
       title: "post_mr output",

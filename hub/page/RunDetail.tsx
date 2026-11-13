@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ExternalLink } from "./format.tsx";
 import { Markdown } from "./Markdown.tsx";
-import { hashOf } from "./store.tsx";
+import { currentProject, hashOf } from "./store.tsx";
 import type { RunDetail, SessionFile, TimelineEntry } from "../types.ts";
 
 export type DetailState =
@@ -82,6 +82,19 @@ export function Timeline({ entries }: { entries: TimelineEntry[] }) {
 
 export const runHref = (run: string, ...parts: string[]) =>
   hashOf(`#/run/${[run, ...parts].map(encodeURIComponent).join("/")}`);
+
+/** A transcript (`step`, `lead` or `session`) that opens at the entry nearest `at`, an ISO time. */
+export const transcriptHref = (
+  run: string,
+  kind: "step" | "lead" | "session",
+  arg: string | null,
+  at: string,
+) =>
+  hashOf(
+    `#/run/${[run, kind, ...(arg === null ? [] : [arg])].map(encodeURIComponent).join("/")}`,
+    currentProject(),
+    at,
+  );
 
 export function RunFiles({ run, files }: { run: string; files: string[] }) {
   if (files.length === 0)

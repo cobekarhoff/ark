@@ -101,23 +101,30 @@ function differentBlock(ledger: Ledger): Block {
 
 const shortSha = (sha: string) => sha.slice(0, 7);
 
-/** One screenshot for each flow (`login-1.png` and `login-2.png` are the flow `login`), head first, five at most. */
-function screenshotFlows(ledger: Ledger): { shown: string[]; total: number } {
-  const paths = (ledger.evidence ?? []).flatMap((entry) => entry.screenshots);
-  const sorted = [...paths].sort(
-    (a, b) => Number(a.includes("/base/")) - Number(b.includes("/base/")) || a.localeCompare(b),
-  );
-  const flows = new Map<string, string>();
-  for (const path of sorted) {
-    const flow = path
-      .split("/")
-      .at(-1)!
-      .replace(/\.[^.]+$/, "")
-      .replace(/[-_]\d+$/, "");
-    if (!flows.has(flow)) flows.set(flow, path);
+/** The flow of a screenshot path: `login-1.png` and `login-2.png` are the flow `login`. */
+const flowOf = (path: string) =>
+  path
+    .split("/")
+    .at(-1)!
+    .replace(/\.[^.]+$/, "")
+    .replace(/[-_]\d+$/, "");
+
+/** One screenshot for each flow of a test case and side (`login-1.png` and `login-2.png` are one flow), five at most; `omitted` counts the flows cut. */
+function screenshotFlows(ledger: Ledger): { shown: string[]; omitted: number } {
+  const paths = [...new Set((ledger.evidence ?? []).flatMap((entry) => entry.screenshots))].sort();
+  // The directory holds the test case and the side, so equal file names in two cases stay apart.
+  const flows = new Map<string, { flow: string; path: string }>();
+  for (const path of paths) {
+    const key = `${path.slice(0, path.lastIndexOf("/"))}/${flowOf(path)}`;
+    if (!flows.has(key)) flows.set(key, { flow: flowOf(path), path });
   }
-  const shown = [...flows.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, path]) => path);
-  return { shown: shown.slice(0, 5), total: paths.length };
+  const ordered = [...flows.values()].sort(
+    (a, b) => a.flow.localeCompare(b.flow) || a.path.localeCompare(b.path),
+  );
+  return {
+    shown: ordered.slice(0, 5).map(({ path }) => path),
+    omitted: Math.max(0, ordered.length - 5),
+  };
 }
 
 /** A test title as literal Markdown text: one line, with the characters that format or break a table escaped. */
@@ -142,12 +149,92 @@ function testLines({ tests }: Ledger): string[] {
   ];
 }
 
+/** A log line that looks like it holds a credential is dropped, never posted. This is the only secret scan of a body. */
+const secretLike =
+  /token|secret|passw(or)?d|api[_-]?key|private[ _-]?key|credential|bearer|authorization|\b\w*(key|secret|credential)\w*\s*[=:]|\b(ghp|gho|ghs|github_pat|glpat|xox[bap]|sk)[-_][\w-]{8,}|AKIA[0-9A-Z]{12,}/i;
+
+/** Drops private-key blocks, also one whose BEGIN or END line is outside the lines given (a tail cut inside a block). */
+function withoutPrivateKeys(textLines: string[]): string[] {
+  const begin = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+  const end = /-----END [A-Z ]*PRIVATE KEY-----/;
+  const firstBegin = textLines.findIndex((line) => begin.test(line));
+  const firstEnd = textLines.findIndex((line) => end.test(line));
+  // An END before any BEGIN: the lines start inside a block.
+  let inside = firstEnd >= 0 && (firstBegin < 0 || firstEnd < firstBegin);
+  const kept: string[] = [];
+  for (const line of textLines) {
+    if (begin.test(line)) inside = true;
+    if (!inside) kept.push(line);
+    if (end.test(line)) inside = false;
+  }
+  return kept;
+}
+
+/** Log or AC text as a fenced block that no line of it can close or leave. */
+function fenced(textLines: string[]): string[] {
+  const safeLines = withoutPrivateKeys(textLines)
+    .filter((line) => !secretLike.test(line))
+    .map((line) => line.replace(/`{3,}|~{3,}/g, "'''").replace(/<\/details/gi, "<\\/details"));
+  return safeLines.length === 0 ? [] : ["```", ...safeLines, "```", ""];
+}
+
+/** One collapsed block. The visible summary holds the id and the result (EVID01 and EVID03 read it); the rest is Markdown. */
+const details = (summary: string, inner: string[]) => [
+  `<details><summary>${summary}</summary>`,
+  "",
+  ...inner,
+  "</details>",
+  "",
+];
+
 function evidenceBlock(ledger: Ledger): Block {
   const kind = ledger.ticket?.kind;
-  const lines = (ledger.evidence ?? []).map(
-    (entry) =>
-      `- \`${entry.testCase}\`: base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`,
-  );
+  const { shown, omitted } = screenshotFlows(ledger);
+  const lines: string[] = [];
+  for (const entry of ledger.evidence ?? []) {
+    const prefix = `results/evidence/${entry.testCase}/`;
+    const result = `base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`;
+    const pictures = shown.filter((path) => path.startsWith(prefix));
+    const log = fenced(entry.log ?? []);
+    lines.push(
+      ...details(`\`${entry.testCase}\`: ${result}`, [
+        `Result: ${result}`,
+        "",
+        ...(pictures.length === 0
+          ? []
+          : [
+              "Screenshots:",
+              "",
+              ...pictures.flatMap((path) => {
+                const side = path.slice(prefix.length).split("/")[0];
+                const flow = escapeTitle(flowOf(path));
+                const name = escapeTitle(
+                  path
+                    .split("/")
+                    .at(-1)!
+                    .replace(/\.[^.]+$/, ""),
+                );
+                return [
+                  // A path with a space or a parenthesis goes in angle brackets; post.ts reads both forms.
+                  `![${entry.testCase} ${side} ${flow}](${/[\s()<>]/.test(path) ? `<${path}>` : path})`,
+                  "",
+                  `${entry.testCase} ${side}, flow ${flow}: ${name}`,
+                  "",
+                ];
+              }),
+            ]),
+        ...(log.length === 0 ? [] : ["Log (last 20 lines of the head command.log):", "", ...log]),
+      ]),
+    );
+  }
+  if (omitted > 0)
+    lines.push(`- Screenshots: ${omitted} more flow(s) left out, five are shown at most.`);
+  for (const { id, text } of ledger.acEvidence ?? []) {
+    const body = fenced(text.split("\n"));
+    lines.push(
+      ...details(`\`${id}\`: evidence`, [`Evidence file results/evidence/${id}.md:`, "", ...body]),
+    );
+  }
   if (kind === "perf")
     lines.push(
       "- Perf: `results/baseline.md` and `results/compare.md` in the run folder, not uploaded.",
@@ -157,11 +244,6 @@ function evidenceBlock(ledger: Ledger): Block {
   lines.push(...testLines(ledger));
   for (const { suite, file } of ledger.flaky)
     lines.push(`- Flaky: \`${file}\` in suite \`${suite}\` failed once and passed on retry.`);
-  const { shown, total } = screenshotFlows(ledger);
-  if (shown.length > 0)
-    lines.push(
-      `- Screenshots, ${shown.length} flows of ${total} files, kept in the run folder and not uploaded: ${shown.map((path) => `\`${path}\``).join(", ")}`,
-    );
   return { key: "evidence", title: "Evidence", lines };
 }
 
