@@ -548,7 +548,7 @@ test.skip("FAKE-T3 is skipped", () => {});
     };
     const run = startBuildingRun({
       workspace,
-      repos: ["touched", "touched2"],
+      repos: ["touched", "touched2", "untouched"],
       suites: [
         {
           name: "suite-a",
