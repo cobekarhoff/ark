@@ -1,5 +1,5 @@
 import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import {
@@ -58,6 +58,15 @@ const planWith = (decisions: unknown[] = []) => ({
     },
     {
       id: "review",
+      role: "reviewer",
+      repo: ".",
+      harness: "omp",
+      model: "pi/validate",
+      needs: ["build"],
+      criteria: criteria.map(({ id }) => id),
+    },
+    {
+      id: "second-review",
       role: "reviewer",
       repo: ".",
       harness: "omp",
@@ -546,4 +555,40 @@ test("ARK-T353 a P0 or P1 with no Repro line in the newest reviewer file holds t
   failTest(directory);
   const fixed = attempt(`${finding("P1", true)}${finding("P0", true)}`);
   expect(fixed.result.out).toContain("(3 of 4)");
+});
+
+/** Two reviewer steps and a run lead file, each with its own findings file and modification time. */
+test("ARK-T353 the newest reviewer file by mtime decides, and a run lead file is ignored", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" }, { escalation_rounds: 4 });
+  spendRounds(runId, directory);
+  mkdirSync(join(directory, "findings"), { recursive: true });
+  const gap = "### P1: title\n\n- **File:** `a.ts`\n- **Problem:** x\n";
+  const clean = "Reviewed head: abc\n\nNo findings.\n";
+  const write = (name: string, text: string, seconds: number) => {
+    const file = join(directory, "findings", `${name}.md`);
+    writeFileSync(file, text);
+    utimesSync(file, seconds, seconds);
+  };
+  const attempt = () => {
+    const before = autoAnswers(directory).length;
+    const result = start(runId);
+    return { result, answered: autoAnswers(directory).length - before };
+  };
+  // The older reviewer file holds the gap; the newer one is clean: answered by auto.
+  write("review", gap, 1_000_000);
+  write("second-review", clean, 2_000_000);
+  expect(attempt().answered).toBe(1);
+  expect(finish(runId).code).toBe(0);
+  failTest(directory);
+  // A newer run lead file with a P1 and no Repro is not a reviewer file: still answered.
+  write("round-1", gap, 3_000_000);
+  expect(attempt().answered).toBe(1);
+  expect(finish(runId).code).toBe(0);
+  failTest(directory);
+  // Swap: the gap file is now the newest reviewer file, so the human decides.
+  write("review", gap, 4_000_000);
+  const held = attempt();
+  expect(held.result.code).toBe(1);
+  expect(held.result.err).toContain("record gate escalation");
+  expect(held.answered).toBe(0);
 });
