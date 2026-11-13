@@ -1,8 +1,6 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { isoAt } from "./pw/helpers.ts";
-import { countDateReads } from "./wallclock-dates";
 
 setDefaultTimeout(30_000);
 
@@ -77,6 +75,10 @@ test("ARK-T126 the allowed list never exceeds the base-commit list", () => {
   );
 });
 
+// The date guard and helper load inside their tests, so a missing module fails that test alone.
+const loadDates = async () =>
+  (await import("./wallclock-dates" as string)) as { countDateReads: (text: string) => number };
+
 const spec = readFileSync(join(testRoot, "pw/checkpoint.pw.ts"), "utf8");
 const specFile = "test/pw/checkpoint.pw.ts";
 
@@ -109,7 +111,8 @@ test("ARK-T126 a raised allowance fails against the base list and a lowered one 
   expect(above({ "test/new.test.ts": 1 }, base)).toEqual([["test/new.test.ts", 1, 0]]);
 });
 
-test("ARK-T126 an appended new Date( or Date.now( fails a pw spec at limit 0; a comment or a unit test file does not", () => {
+test("ARK-T126 an appended new Date( or Date.now( fails a pw spec at limit 0; a comment or a unit test file does not", async () => {
+  const { countDateReads } = await loadDates();
   expect(countDateReads(spec), "checkpoint.pw.ts starts clean").toBe(0);
   for (const line of ["const d = new Date();", "const n = Date.now();"]) {
     expect(above({ [specFile]: countDateReads(`${spec}\n${line}`) }, {}), line).toEqual([
@@ -124,7 +127,8 @@ test("ARK-T126 an appended new Date( or Date.now( fails a pw spec at limit 0; a 
 const specs = sources(testRoot).filter((file) => file.endsWith(".pw.ts"));
 const relative = (file: string) => file.slice(testRoot.length - "test".length);
 
-test("ARK-T349 no playwright spec reads the wall clock", () => {
+test("ARK-T349 no playwright spec reads the wall clock", async () => {
+  const { countDateReads } = await loadDates();
   expect(specs.length).toBeGreaterThan(0);
   expect(
     above(
@@ -137,7 +141,10 @@ test("ARK-T349 no playwright spec reads the wall clock", () => {
   ).toEqual([]);
 });
 
-test("ARK-T349 isoAt follows ARK_NOW", () => {
+test("ARK-T349 isoAt follows ARK_NOW", async () => {
+  const { isoAt } = (await import("./pw/helpers.ts" as string)) as {
+    isoAt: (offsetMs?: number) => string;
+  };
   const saved = process.env.ARK_NOW;
   try {
     for (const instant of ["2026-11-04T23:30:00Z", "2026-02-01T00:00:00Z"]) {
