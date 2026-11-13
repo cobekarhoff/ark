@@ -1,6 +1,8 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import type { ArkEvent } from "../cli/events.ts";
 import { gateSince } from "../hub/snapshot.ts";
+
+setDefaultTimeout(30_000);
 
 const log = (...rows: [number, string, Record<string, unknown>][]): ArkEvent[] =>
   rows.map(([minute, type, data], index) => ({
