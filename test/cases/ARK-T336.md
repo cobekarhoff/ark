@@ -4,7 +4,7 @@ title: ARK-T336 reviewer finish passes when each unplanned file has a reason and
 level: integration
 technique: equivalence classes (unplanned with line, test/ and docs/ exempt), boundary of the path filter
 priority: high
-risk: the finish check over-refuses: it demands a line for `test/` or `docs/` files or ignores a present line (path match, empty reason, wrong block), so a reviewer is blocked on a correct findings file or the repair loop never ends
+risk: the finish check over-refuses, because it demands a line for `test/` or `docs/` files or ignores a present line (path match, empty reason, wrong block), so a reviewer is blocked on a correct findings file or the repair loop never ends
 status: active
 changed_by: 2026-11-13-ARK-430-1
 ---
