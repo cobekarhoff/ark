@@ -809,12 +809,12 @@ test("ARK-T308 two steps started through the current start path each open their 
   const hub = await startHub();
   try {
     const owners: Record<string, unknown> = {};
-    for (let tries = 0; tries < 150 && Object.keys(owners).length < 3; tries++) {
+    // Each fetch round trip paces the loop; sessions_ready flips when the hub's scan ends.
+    for (let attempt = 0; attempt < 20_000 && Object.keys(owners).length < 3; attempt++) {
       const response = await fetch(`${hub.baseUrl}/api/run/${run.runId}`);
       const detail = response.ok ? await response.json() : { sessions: [], sessions_ready: false };
       if (detail.sessions_ready)
         for (const session of detail.sessions) owners[session.file] = session.owner;
-      if (Object.keys(owners).length < 3) await Bun.sleep(100);
     }
     expect(owners[files.a]).toEqual({ kind: "step", step: "a" });
     expect(owners[files.b]).toEqual({ kind: "step", step: "b" });
