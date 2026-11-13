@@ -981,6 +981,9 @@ test(
     writeFileSync(join(worktree, "shared.txt"), "resolved\n");
     git(worktree, "add", "shared.txt");
     git(worktree, "commit", "-m", "resolve");
+    // The origin advances again and is fetched before finish: the event holds the tip that was merged.
+    advanceOrigin(scenario.workspace, ".", "newest.txt", "newest\n");
+    git(worktree, "fetch", "origin");
     expect(ark("run", "step", scenario.runId, "build", "finish").code).toBe(0);
     expect(syncedEvents(scenario.runDirectory)).toEqual([
       { repo: ".", conflict: true },

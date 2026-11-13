@@ -264,26 +264,30 @@ function takesOverFromDeadWorker(events: ArkEvent[], stepId: string): boolean {
   );
 }
 
-/** A finished --merge step merged origin's target by hand: record that tip, so ark test's base side follows it. Nothing is recorded when the worker did not merge it. */
+/** A finished --merge step merged origin's target by hand: record the newest target commit HEAD contains (the merge-base with origin's target, so a later fetch does not hide it), so ark test's base side follows it. Nothing is recorded when that commit is not newer than the current base. */
 function recordMergedTarget(project: string, directory: string, repo: string): void {
   const worktree = deriveState(readEvents(directory)).worktrees.find(
     (entry) => entry.repo === repo,
   );
   if (!worktree) return;
   const target = targetBranch(worktree.path, repoBase(loadConfig(project), repo));
-  const tip = Bun.spawnSync(["git", "-C", worktree.path, "rev-parse", `origin/${target}`]);
-  if (tip.exitCode !== 0) return;
-  const commit = tip.stdout.toString().trim();
-  const merged = Bun.spawnSync([
+  const mergeBase = Bun.spawnSync([
     "git",
     "-C",
     worktree.path,
     "merge-base",
-    "--is-ancestor",
-    commit,
     "HEAD",
+    `origin/${target}`,
   ]);
-  if (merged.exitCode === 0)
+  if (mergeBase.exitCode !== 0) return;
+  const commit = mergeBase.stdout.toString().trim();
+  const current = worktree.synced ?? worktree.base;
+  if (!current) return;
+  const isNewer =
+    commit !== current &&
+    Bun.spawnSync(["git", "-C", worktree.path, "merge-base", "--is-ancestor", current, commit])
+      .exitCode === 0;
+  if (isNewer)
     appendEvent(directory, "worktree.synced", { repo, conflict: false, target_commit: commit });
 }
 
