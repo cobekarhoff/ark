@@ -205,8 +205,11 @@ function evidenceBlock(ledger: Ledger, keep = logLines): Block {
     const prefix = `results/evidence/${entry.testCase}/`;
     const result = `base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`;
     const pictures = shown.filter((path) => path.startsWith(prefix));
-    const logTail = (entry.log ?? []).slice(-keep);
-    leftOut += (entry.log ?? []).length - logTail.length;
+    const allLog = entry.log ?? [];
+    // `slice(-0)` keeps everything, so keep 0 is its own case.
+    const logTail = keep === 0 ? [] : allLog.slice(-keep);
+    // The left-out count is lines cut off the tail, taken before secret filtering: a secret-like line kept in the tail is dropped by `fenced` and not counted.
+    leftOut += allLog.length - logTail.length;
     const log = fenced(logTail);
     lines.push(
       ...details(`\`${entry.testCase}\`: ${result}`, [
@@ -235,7 +238,13 @@ function evidenceBlock(ledger: Ledger, keep = logLines): Block {
                 ];
               }),
             ]),
-        ...(log.length === 0 ? [] : ["Log (last 20 lines of the head command.log):", "", ...log]),
+        ...(log.length === 0
+          ? []
+          : [
+              `Log (last ${keep} ${keep === 1 ? "line" : "lines"} of the head command.log):`,
+              "",
+              ...log,
+            ]),
       ]),
     );
   }

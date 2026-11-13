@@ -2490,6 +2490,11 @@ test("ARK-T363 the MR body holds evidence blocks and screenshots only for the pl
 
 test("ARK-T364 a body over the GitHub limit from plan cases alone has its log tails cut first, says how many lines were left out, and keeps the AC evidence", () => {
   const big = suiteRun(150);
+  // A secret-like last line is always in the tail, so `fenced` drops it: it is shown nowhere and is not counted as left out.
+  writeFileSync(
+    join(big.evidenceDirectory, "ARK-T1/head/command.log"),
+    `${Array.from({ length: 19 }, (_, k) => `ARK-T1 log line ${k + 1}`).join("\n")}\nARK-T1 token=hunter2zz\n`,
+  );
   const ledger = big.ledger();
   const body = buildBody(ledger);
 
@@ -2497,7 +2502,8 @@ test("ARK-T364 a body over the GitHub limit from plan cases alone has its log ta
   const kept = keptLogLines(body);
   const note = body.match(/([\d,]+) (?:log )?lines? left out/);
   expect(note).not.toBeNull();
-  expect(Number(note![1].replaceAll(",", ""))).toBe(150 * 20 - kept);
+  expect(body).not.toContain("hunter2zz");
+  expect(Number(note![1].replaceAll(",", ""))).toBe(150 * 20 - kept - 1);
   expect(kept).toBeGreaterThan(0);
   const section = evidenceSection(body);
   for (const id of big.ids) expect(section).toContain(`\`${id}\`: base fail, head pass @ abc1234`);
@@ -2532,6 +2538,14 @@ test("ARK-T364 a body over the GitHub limit from plan cases alone has its log ta
   expect(over).toMatch(/lines? left out/);
   expect(over).toContain("AC2 live check 1xxx");
   expect(over).toContain("AC2 live check 2");
+
+  // Only keeping no lines fits: no log line and no "last 20 lines" label stay, and the note counts every line.
+  const huge = suiteRun(400);
+  const hugeBody = buildBody(huge.ledger());
+  expect(hugeBody.length).toBeLessThanOrEqual(bodyLimit);
+  expect(keptLogLines(hugeBody)).toBe(0);
+  expect(hugeBody).not.toContain("Log (last");
+  expect(hugeBody).toContain("8,000 log lines left out");
 });
 
 // --- ARK-T150, ARK-T151: one run, two repos, one branch name ----------------------------------
