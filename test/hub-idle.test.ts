@@ -89,6 +89,8 @@ type Fixture = {
   reads(tool: "orca" | "plannotator" | "gh"): number;
   /** Every orca call, whatever the command. */
   orcaCalls(): number;
+  /** The full conversation inbox reads: `inbox` calls with a `--limit` other than the liveness read's 200. */
+  conversationReads(): number;
   control(name: string, on: boolean): void;
   setLeadModel(model: string): void;
   setSessions(sessions: unknown[]): void;
@@ -158,6 +160,14 @@ cat "$S/gh.view"`,
     path: process.env.PATH,
     reads: (tool) => lines(tool === "orca" ? "orca.terminal-list" : `${tool}.log`),
     orcaCalls: () => lines("orca.log"),
+    conversationReads: () =>
+      existsSync(join(state, "orca.log"))
+        ? readFileSync(join(state, "orca.log"), "utf8")
+            .split("\n")
+            .filter(
+              (line) => line.startsWith("orchestration inbox") && !line.includes("--limit 200 "),
+            ).length
+        : 0,
     control(name, on) {
       if (on) writeFileSync(join(state, name), "");
       else rmSync(join(state, name), { force: true });
@@ -475,6 +485,7 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   // Step 1: no page, no read, no child process.
   await sleep(1500);
   expect(everyCall()).toBe(0);
+  expect(fake.conversationReads()).toBe(0);
   const idle = await snapshotOf(hub);
   for (const source of ["orca", "plannotator", "github"] as const)
     expect(readAtOf(idle, source)).toBeNull();
@@ -496,7 +507,13 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   );
 
   // Step 3: reads run at the interval.
-  const counts = () => [fake.reads("orca"), fake.reads("plannotator"), fake.reads("gh")];
+  // The fourth count is the full conversation inbox read (ARK-344): its own loop, so it has its own rate.
+  const counts = () => [
+    fake.reads("orca"),
+    fake.reads("plannotator"),
+    fake.reads("gh"),
+    fake.conversationReads(),
+  ];
   const windowOf = async () => {
     const start = counts();
     await sleep(2000);
@@ -559,8 +576,10 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   client.close();
   await sleep(500); // a read in flight ends
   const settled = everyCall();
+  const settledConversation = fake.conversationReads();
   await sleep(1500);
   expect(everyCall()).toBe(settled);
+  expect(fake.conversationReads()).toBe(settledConversation);
 
   // Step 7: every tool fails; the hub stays up and the page gets the failures.
   for (const control of ["orca.fail", "plannotator.fail", "gh.fail"]) fake.control(control, true);
