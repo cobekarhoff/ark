@@ -9157,6 +9157,28 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
   for (const [name, items] of Object.entries(still))
     for (const item of items) expect(item.moving, `${name} ${item.key}`).toEqual([]);
 
+  // A list above grows and pushes the lists below down the page: they did not reorder, so nothing
+  // in them slides (a place is measured in its own container).
+  const { before: shifted, during: grown } = await pushAndRead(
+    page,
+    withExtraGate(first),
+    homeLists,
+    false,
+  );
+  expect(grown.gates.length).toBe(shifted.gates.length + 1);
+  const pushed = Object.keys(shifted).filter(
+    (name) =>
+      !["gates", "waiting"].includes(name) &&
+      shifted[name].length > 0 &&
+      grown[name][0].top > shifted[name][0].top + 0.5,
+  );
+  expect(pushed.length, "lists pushed down by the new gate").toBeGreaterThan(0);
+  for (const [name, items] of Object.entries(grown))
+    if (!["gates", "waiting"].includes(name))
+      // waiting shares the Needs me container with the gates
+      for (const item of items)
+        expect(item.moving, `${name} ${item.key} did not reorder`).toEqual([]);
+
   // A view change is a view transition of 200 ms or less, and the new view is in the DOM.
   const views: [string, Locator][] = [
     ["#/runs", page.getByTestId("lane").first()],
@@ -9249,6 +9271,16 @@ test("ARK-T314 With prefers-reduced-motion, or for a keyboard action's result, n
   await expect(gates).toHaveCount(2);
   await push(page, withExtraGate(swapped));
   await expect.poll(() => animationsOf(page).then((names) => names.length)).toBeGreaterThan(0);
+
+  // A key just pressed: the reorder and the new gate that follow are its result, so no FLIP slide
+  // and no highlight.
+  await finiteAnimationsEnded(page);
+  await page.keyboard.press("Shift");
+  await push(page, withExtraGate(first));
+  await expect(gates).toHaveCount(3);
+  await frames(page, 4);
+  expect(await motionOf(page)).toEqual([]);
+  await expect(page.locator(".hl")).toHaveCount(0);
 
   // A key starts the change: no view transition. A click on the same link starts one.
   await finiteAnimationsEnded(page);
@@ -9391,6 +9423,16 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   await expect(list.locator('[data-source="plannotator"]')).toContainText("Plannotator");
   expect(await heightOf()).toBe(height);
   await checkpoint(page, "chip-list-open");
+  // The list is visible, not clipped by an ancestor: the point at its centre hits the list.
+  await expect
+    .poll(() =>
+      list.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return !!hit && element.contains(hit);
+      }),
+    )
+    .toBe(true);
   await page.keyboard.press("Escape");
   await expect(list).toHaveCount(0);
   await expect(chip).toBeFocused();
@@ -9421,6 +9463,9 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   await expect(list).toBeVisible();
   expect(await heightOf()).toBe(height);
   expect(await mainTop()).toBe(top);
+  // The banner sits in the reserved header row: it covers no content.
+  const bannerBox = (await banner.boundingBox())!;
+  expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual((await mainTop()) + 0.5);
   await checkpoint(page, "disconnected-banner");
   // EventSource retries about every 3 s: the banner stays through 3 attempts.
   await expect.poll(() => proxy.refused(), { timeout: 30_000 }).toBeGreaterThanOrEqual(3);

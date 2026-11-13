@@ -258,7 +258,6 @@ a.chip[aria-current] {
   justify-content: safe flex-end;
   gap: 10px;
   min-height: 22px;
-  overflow-x: auto;
   white-space: nowrap;
 }
 .stale {
@@ -300,25 +299,19 @@ a.chip[aria-current] {
 .stale-list .affects {
   color: var(--dim);
 }
-/* Out of flow under the header: appearing never shifts the page. */
-.top {
-  position: relative;
-}
+/* Inside the reserved `.asof-list` row: appearing never shifts the page or covers content. */
 .banner {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
-  z-index: 4;
-  height: 32px;
+  margin-right: auto;
+  height: 22px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 16px;
-  font-size: 13px;
+  padding: 0 10px;
+  border-radius: 11px;
+  font-size: 12px;
   background: var(--red-bg);
   color: var(--red-t);
-  border-bottom: 1px solid var(--red);
+  border: 1px solid var(--red);
 }
 .banner .dot {
   --c: var(--red);

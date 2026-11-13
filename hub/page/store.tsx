@@ -1,5 +1,5 @@
 import { flushSync } from "react-dom";
-import { reducedMotion } from "./motion.tsx";
+import { keyboardOrigin, reducedMotion } from "./motion.tsx";
 import {
   createContext,
   useContext,
@@ -119,7 +119,7 @@ export function StaleChip() {
         className="stale-chip"
         data-testid="stale-chip"
         aria-expanded={open}
-        aria-controls="stale-list"
+        aria-controls={open ? "stale-list" : undefined}
         onClick={() => setOpen(!open)}
       >
         {label}
@@ -258,9 +258,6 @@ export function applyTheme(choice: ThemeChoice): void {
   }
 }
 
-/** A keyboard action does not animate its own result: a route change this soon after a key is one. */
-const keyboardWindowMs = 500;
-let lastKeyAt = -Infinity;
 const hashListeners = new Set<() => void>();
 const pathOf = (url: string) => url.split("#")[1]?.split("?")[0] ?? "";
 
@@ -275,27 +272,22 @@ function onHashChange(event: HashChangeEvent) {
   if (
     typeof document.startViewTransition !== "function" ||
     reducedMotion() ||
-    performance.now() - lastKeyAt < keyboardWindowMs ||
+    keyboardOrigin() ||
     pathOf(event.oldURL) === pathOf(event.newURL)
   )
     return render();
   document.startViewTransition(() => flushSync(render));
 }
-const onKeyDown = () => {
-  lastKeyAt = performance.now();
-};
 
 const subscribeHash = (notify: () => void) => {
   if (hashListeners.size === 0) {
     addEventListener("hashchange", onHashChange);
-    addEventListener("keydown", onKeyDown, true);
   }
   hashListeners.add(notify);
   return () => {
     hashListeners.delete(notify);
     if (hashListeners.size === 0) {
       removeEventListener("hashchange", onHashChange);
-      removeEventListener("keydown", onKeyDown, true);
     }
   };
 };

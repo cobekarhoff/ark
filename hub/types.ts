@@ -8,7 +8,7 @@
  * unchanged read changes nothing and sends no push; while not `ok` it is the time of the last
  * good read. A source with `ok: false` and `read_at: null` has never answered: its data is
  * `"unknown"` (or `null` for a single value), never an empty list. With `ok: false` and a
- * `read_at`, the data is the last good value and the page shows "as of N s ago".
+ * `read_at`, the data is the last good value and the stale chip shows its age in minutes.
  *
  * Costs are USD numbers, or `null` when unknown (no session found, one message without a price,
  * or the usage index has not finished its first build). Times are ISO strings.

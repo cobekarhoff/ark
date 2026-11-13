@@ -3,6 +3,16 @@ import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes } fro
 /** Script-driven motion (FLIP, view transitions) is not under the CSS rule, so it asks here. */
 export const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/**
+ * A keyboard action does not animate its own result: a result this soon after a key, with no
+ * pointer press since, is one. One check for the view transition, FLIP and the highlight.
+ */
+const keyboardWindowMs = 500;
+let lastKeyAt = -Infinity;
+addEventListener("keydown", () => (lastKeyAt = performance.now()), true);
+addEventListener("pointerdown", () => (lastKeyAt = -Infinity), true);
+export const keyboardOrigin = () => performance.now() - lastKeyAt < keyboardWindowMs;
+
 /** A change flashes for this long: the length of the `hl` keyframes in styles.css. */
 const highlightMs = 600;
 /** FLIP duration: the AC caps it at 250 ms. */
@@ -23,8 +33,8 @@ export function useChanges(values: Map<string, string>): ReadonlySet<string> {
     previous.current = values;
     if (!before) return;
     const changed = [...values].filter(([key, value]) => before.get(key) !== value);
+    if (changed.length === 0 || keyboardOrigin() || reducedMotion()) return setHot(new Set());
     setHot(new Set(changed.map(([key]) => key)));
-    if (changed.length === 0) return;
     const timer = setTimeout(() => setHot(new Set()), highlightMs);
     return () => clearTimeout(timer);
     // `values` is rebuilt each render; `signature` is its value.
@@ -34,8 +44,9 @@ export function useChanges(values: Map<string, string>): ReadonlySet<string> {
 }
 
 /**
- * A list container: after each render, a child that moved (its offset in the container changed)
- * slides from its old place to the new one (FLIP, `flipMs`). A child with no earlier place (new)
+ * A list container: after each render, a child that moved (its place in the container changed)
+ * slides from its old place to the new one (FLIP, `flipMs`). Places are relative to the container, so
+ * a list that only shifts with the page does not move. Never nest one `Flip` in another. A child with no earlier place (new)
  * does not animate, nor does anything under reduced motion. The end state is the real layout: no
  * transform is left.
  */
@@ -46,11 +57,22 @@ export function Flip(props: HTMLAttributes<HTMLDivElement>) {
     const element = container.current;
     if (!element) return;
     const next = new Map<Element, { x: number; y: number }>();
-    for (const child of Array.from(element.children) as HTMLElement[]) {
-      const place = { x: child.offsetLeft, y: child.offsetTop };
+    const origin = element.getBoundingClientRect();
+    for (const child of Array.from(element.children)) {
+      // The box includes a slide in flight: take it off, so a re-render mid-slide sees the real place.
+      const box = child.getBoundingClientRect();
+      const slide = new DOMMatrixReadOnly(getComputedStyle(child).transform);
+      const place = { x: box.left - slide.m41 - origin.left, y: box.top - slide.m42 - origin.top };
       next.set(child, place);
       const old = places.current.get(child);
-      if (!old || reducedMotion() || (old.x === place.x && old.y === place.y)) continue;
+      // Under half a pixel is layout rounding, not a move.
+      if (
+        !old ||
+        reducedMotion() ||
+        keyboardOrigin() ||
+        (Math.abs(old.x - place.x) < 0.5 && Math.abs(old.y - place.y) < 0.5)
+      )
+        continue;
       child.animate(
         [
           { transform: `translate(${old.x - place.x}px, ${old.y - place.y}px)` },

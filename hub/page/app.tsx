@@ -165,14 +165,14 @@ function Shell() {
           <ThemeSwitch />
         </div>
         <div className="asof-list">
+          {frozen ? (
+            <div className="banner" role="status">
+              <i className="dot" />
+              Disconnected: data frozen at <time>{frozenAt}</time>
+            </div>
+          ) : null}
           <StaleChip />
         </div>
-        {frozen ? (
-          <div className="banner" role="status">
-            <i className="dot" />
-            Disconnected: data frozen at <time>{frozenAt}</time>
-          </div>
-        ) : null}
       </header>
       <main id="main" tabIndex={-1} data-frozen={frozen || undefined}>
         {route.view === "home" ? <Home /> : null}

@@ -88,6 +88,7 @@ function Panel({
   count,
   live,
   hint,
+  flip = true,
   children,
 }: {
   title: string;
@@ -95,6 +96,8 @@ function Panel({
   /** The count is a polite live region: its text changes only when the count does. */
   live?: boolean;
   hint?: string;
+  /** False when the children hold their own `Flip`: one never nests in another. */
+  flip?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -113,7 +116,7 @@ function Panel({
         </h2>
         {hint ? <span className="hint">{hint}</span> : null}
       </header>
-      <Flip className="body">{children}</Flip>
+      {flip ? <Flip className="body">{children}</Flip> : <div className="body">{children}</div>}
     </section>
   );
 }
@@ -451,6 +454,7 @@ function StartsNextBlock({ block, single }: { block: StartsNext; single: boolean
         title={single ? "Starts next" : `Starts next · ${block.project}`}
         count={block.rows.length}
         hint={`${label}, by roadmap rank`}
+        flip={false}
       >
         <Flip data-testid="starts-next" data-project={block.project}>
           {block.rows.length === 0 ? <p className="mut">Nothing in the queue.</p> : null}
@@ -463,6 +467,7 @@ function StartsNextBlock({ block, single }: { block: StartsNext; single: boolean
         title={single ? "Approved, not queued" : `Approved, not queued · ${block.project}`}
         count={block.notQueued.length}
         hint="ready, no Task, no open run"
+        flip={false}
       >
         <Flip data-testid="not-queued" data-project={block.project}>
           {block.notQueued.length === 0 ? (
