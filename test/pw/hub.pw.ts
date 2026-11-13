@@ -1792,7 +1792,8 @@ test("ARK-T275 the chips filter the list into messages, tools, thinking and erro
 
   // Leaving the page removes the key handler.
   await open(page, baseUrl, "");
-  expect(await keydownListeners()).toBe(withoutTranscript);
+  // The route change runs in a view transition: the old page unmounts a frame later.
+  await expect.poll(keydownListeners).toBe(withoutTranscript);
 });
 
 test("ARK-T276 a context entry of 114 lines and a user message of more than 40 lines are one list row and show in full in the inspector, thinking is folded until a click, and the run files are pinned below the list and open in the same inspector", async ({
