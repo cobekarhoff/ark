@@ -264,6 +264,33 @@ function takesOverFromDeadWorker(events: ArkEvent[], stepId: string): boolean {
   );
 }
 
+/** A finished --merge step merged origin's target by hand: record the newest target commit HEAD contains (the merge-base with origin's target, so a later fetch does not hide it), so ark test's base side follows it. Nothing is recorded when that commit is not newer than the current base. */
+function recordMergedTarget(project: string, directory: string, repo: string): void {
+  const worktree = deriveState(readEvents(directory)).worktrees.find(
+    (entry) => entry.repo === repo,
+  );
+  if (!worktree) return;
+  const target = targetBranch(worktree.path, repoBase(loadConfig(project), repo));
+  const mergeBase = Bun.spawnSync([
+    "git",
+    "-C",
+    worktree.path,
+    "merge-base",
+    "HEAD",
+    `origin/${target}`,
+  ]);
+  if (mergeBase.exitCode !== 0) return;
+  const commit = mergeBase.stdout.toString().trim();
+  const current = worktree.synced ?? worktree.base;
+  if (!current) return;
+  const isNewer =
+    commit !== current &&
+    Bun.spawnSync(["git", "-C", worktree.path, "merge-base", "--is-ancestor", current, commit])
+      .exitCode === 0;
+  if (isNewer)
+    appendEvent(directory, "worktree.synced", { repo, conflict: false, target_commit: commit });
+}
+
 /**
  * Starts the worker of a plan step through Orca and records `step.started` and `worker.started`.
  * The caller has validated the start. A step that was interrupted restores its recorded session, or starts
@@ -435,6 +462,8 @@ export async function runStep(
       ...(started?.data.merge ? { merge: true } : {}),
       ...(notStarted ? { not_started: true } : {}),
     });
+    if (started?.data.merge && outcome === "succeeded")
+      recordMergedTarget(project, directory, started.data.repo);
     console.log(`${runId} ${stepId} ${outcome}${notStarted ? " (not started)" : ""}`);
     return;
   }

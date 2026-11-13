@@ -940,3 +940,71 @@ test(
   },
   { timeout: 120_000 },
 );
+
+/** The `worktree.synced` events of a run, in log order. */
+const syncedEvents = (runDirectory: string) =>
+  readEventLines(runDirectory)
+    .filter((event) => event.type === "worktree.synced")
+    .map((event) => event.data);
+
+test(
+  "ARK-T305 a clean sync records the merged origin tip, a conflicting sync records none, and a finished --merge step records the tip it merged",
+  () => {
+    // Step 1: the recorded commit is the merged origin tip, not the merge commit that is the worktree HEAD.
+    const clean = startRun();
+    commitFile(clean.worktreePath(), "own.txt", "own\n");
+    const tip = advanceOrigin(clean.workspace, ".", "target.txt", "target\n");
+    expect(ark("worktree", "sync", clean.runId).code).toBe(0);
+    expect(syncedEvents(clean.runDirectory)).toEqual([
+      { repo: ".", conflict: false, target_commit: tip },
+    ]);
+    expect(git(clean.worktreePath(), "rev-parse", "HEAD")).not.toBe(tip);
+
+    // Step 4: a sync with no new target commit records the same commit again.
+    expect(ark("worktree", "sync", clean.runId).code).toBe(0);
+    expect(syncedEvents(clean.runDirectory).at(-1)).toMatchObject({
+      conflict: false,
+      target_commit: tip,
+    });
+
+    // Step 2: a conflict carries no commit.
+    const scenario = startRun();
+    syncWithConflict(scenario);
+    expect(syncedEvents(scenario.runDirectory)).toEqual([{ repo: ".", conflict: true }]);
+
+    // Step 3: the origin moves on after the conflict; the step merges that newer tip by hand.
+    const second = advanceOrigin(scenario.workspace, ".", "later.txt", "later\n");
+    expect(ark("run", "step", scenario.runId, "build", "start", "--merge").code).toBe(0);
+    const worktree = scenario.worktreePath();
+    git(worktree, "fetch", "origin");
+    expect(Bun.spawnSync(["git", "-C", worktree, "merge", "origin/main"]).exitCode).not.toBe(0);
+    writeFileSync(join(worktree, "shared.txt"), "resolved\n");
+    git(worktree, "add", "shared.txt");
+    git(worktree, "commit", "-m", "resolve");
+    // The origin advances again and is fetched before finish: the event holds the tip that was merged.
+    advanceOrigin(scenario.workspace, ".", "newest.txt", "newest\n");
+    git(worktree, "fetch", "origin");
+    expect(ark("run", "step", scenario.runId, "build", "finish").code).toBe(0);
+    expect(syncedEvents(scenario.runDirectory)).toEqual([
+      { repo: ".", conflict: true },
+      { repo: ".", conflict: false, target_commit: second },
+    ]);
+    expect(
+      JSON.parse(readFileSync(join(scenario.runDirectory, "state.json"), "utf8")).sync_conflicts,
+    ).toEqual([]);
+  },
+  { timeout: 30_000 },
+);
+
+test(
+  "ARK-T305 an old-shape worktree.synced event with no commit is still accepted and derives",
+  () => {
+    const scenario = startRun();
+    appendEvent(scenario.runDirectory, "worktree.synced", { repo: ".", conflict: true });
+    appendEvent(scenario.runDirectory, "worktree.synced", { repo: ".", conflict: false });
+    const state = JSON.parse(readFileSync(join(scenario.runDirectory, "state.json"), "utf8"));
+    expect(state.sync_conflicts).toEqual([]);
+    expect(ark("status", scenario.runId).code).toBe(0);
+  },
+  { timeout: 30_000 },
+);
