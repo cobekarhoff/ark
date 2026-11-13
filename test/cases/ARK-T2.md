@@ -6,7 +6,7 @@ technique: equivalence classes of outcome (failed/passed/skipped) and a base-cra
 priority: high
 risk: a case has no base or head folder, result.json lacks the id/name/status/sha fields, the base SHA equals the head SHA in a touched repo, or a base crash leaves a case with no base evidence
 status: active
-changed_by: 2026-11-08-ARK-389-1
+changed_by: 2026-11-12-ARK-416-1
 ---
 
 ## Objective
@@ -18,7 +18,7 @@ Prove `results/evidence/<case id>/{base,head}/result.json` is written for every 
 - Fake project as in ARK-T1, run `kind: feature`, with two touched repos and one untouched repo:
   - `touched`: base commit and a distinct head commit.
   - `touched2`: a mirror/worktree setup where the composed workspace checkout head differs from the mirror head (a commit exists only in the workspace checkout), so a wrong checkout choice yields a wrong SHA.
-  - `untouched`: no change in the run; base and head are the same commit. Its suite has `base_files` and no changed test file, so it is skipped at base (ARK-389).
+  - `untouched`: no change in the run, but the run has a `worktree.created` event for it (the head pass runs only suites whose repo is `.` or has a worktree, ARK-416); base and head are the same commit. Its suite has `base_files` and no changed test file, so it is skipped at base (ARK-389).
 - Expected SHAs come only from git in the fixture: `git -C <repo base checkout> rev-parse HEAD` for base, and `git -C <workspace checkout that ran> rev-parse HEAD` for head, captured by the test before invoking `ark test`. The `worktree.created` event is written by the fixture from the same `rev-parse`. Never call `headOf` or any function of the code under test to compute an expectation.
 - Suites A to C declare `base_files` and `base_command` and match the changed test files, so each runs at base; a suite crash at base is a failure, a deliberate skip is not.
 - Suite A (in `touched`): `FAKE-T1` fails at base, passes at head; `FAKE-T2` passes both; `FAKE-T3` skipped at both.
