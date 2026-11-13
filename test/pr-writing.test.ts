@@ -2566,3 +2566,65 @@ test("ARK-T270 the run-lead playbook's analysis evidence example and Not in plan
     reason: expect.stringContaining("an unplanned file has no reason"),
   });
 });
+
+// --- ARK-430 ----------------------------------------------------------------------------------
+
+const helpersLine = (reason: string) => `- Not in plan: cli/helpers.ts - ${reason}`;
+const risk04Of = (ledger: Ledger) =>
+  lintBody({ body: buildBody(ledger), title: defaultTitle, ledger }).find(
+    (c) => c.id === "RISK04",
+  )!;
+const helpersReason = (ledger: Ledger) =>
+  ledger.risk.unplanned.find((entry) => entry.file === "cli/helpers.ts")?.reason;
+
+test("ARK-T337 RISK04 uses a reason from an earlier reviewer findings file when a later file omits it", () => {
+  const earlier = reviewerBlock("low", [helpersLine("first reason")]);
+  const later = reviewerBlock("high");
+  const run = (findings: Record<string, string>) => mainRun({ findings }).ledger();
+
+  // The unnumbered file sorts first; the later file omits the line.
+  const merged = run({ "review.md": earlier, "review-2.md": later });
+  expect(helpersReason(merged)).toBe("first reason");
+  expect(risk04Of(merged).result).toBe("pass");
+  // Ratings still come from the latest file.
+  expect(merged.risk.reviewer).toBe("high");
+
+  // No file has the line.
+  const none = run({ "review.md": later, "review-2.md": later });
+  expect(helpersReason(none)).toBe("no reason given");
+  expect(risk04Of(none).result).toBe("fail");
+
+  // An empty later reason never erases the earlier one; a later non-empty reason wins.
+  const empty = run({
+    "review.md": earlier,
+    "review-2.md": reviewerBlock("low", [helpersLine("")]),
+  });
+  expect(helpersReason(empty)).toBe("first reason");
+  expect(risk04Of(empty).result).toBe("pass");
+  const replaced = run({
+    "review.md": earlier,
+    "review-2.md": reviewerBlock("low", [helpersLine("second reason")]),
+  });
+  expect(helpersReason(replaced)).toBe("second reason");
+
+  // round-N.md and the findings of other steps never count.
+  const excluded = run({
+    "review.md": later,
+    "review-2.md": later,
+    "round-1.md": reviewerBlock("low", [helpersLine("from a round file")]),
+    "pr-writing-tests.md": reviewerBlock("low", [helpersLine("from a validator")]),
+  });
+  expect(helpersReason(excluded)).toBe("no reason given");
+  expect(risk04Of(excluded).result).toBe("fail");
+});
+
+test("ARK-T338 RISK04 message for an unplanned file names the file, the Not in plan line and the findings file", () => {
+  const ledger = mainRun({ findings: { "review-1.md": reviewerBlock("low") } }).ledger();
+  expect(risk04Of(ledger)).toMatchObject({
+    result: "fail",
+    reason: expect.stringContaining("cli/helpers.ts"),
+  });
+  const { reason } = risk04Of(ledger);
+  expect(reason).toContain("Not in plan: cli/helpers.ts — <reason>");
+  expect(reason).toContain("findings/review.md");
+});

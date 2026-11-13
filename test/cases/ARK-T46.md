@@ -6,7 +6,7 @@ technique: one fixture per failure mode (equivalence classes) plus a passing con
 priority: high
 risk: a body with no reviewer risk block, a one-way door with no recovery or an unplanned file with no reason passes lint, so the human reviews a risk section that does not hold
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-13-ARK-430-1
 ---
 
 ## Objective
@@ -35,7 +35,7 @@ Expected: When a reviewer step has no `## Merge risk` block, the system shall fa
 
 ## Expected results
 
-- Bodies 1, 2 and 3 each return `fail` for RISK04, each only for its one broken condition, and the reason names the cause (no `## Merge risk` block; no recovery for `Door: one-way`; the unplanned file without a reason).
+- Bodies 1, 2 and 3 each return `fail` for RISK04, each only for its one broken condition, and the reason names the cause (no `## Merge risk` block; no recovery for `Door: one-way`; for body 3 the new message naming the unplanned file, the line `Not in plan:` and the findings path `findings/<step>.md`).
 - The good body returns `pass` for RISK04.
 - The control run, with no reviewer step, does not fail on the missing block.
 - `bun test test/pr-writing.test.ts` exits 0.
