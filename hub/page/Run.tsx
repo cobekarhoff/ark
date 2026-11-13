@@ -22,6 +22,7 @@ import type { Attention } from "./format.tsx";
 import { TestEvidence } from "./Evidence.tsx";
 import { MergeRequest } from "./Home.tsx";
 import { layout } from "./layout.ts";
+import { Conversation } from "./Conversation.tsx";
 import {
   RunFiles,
   SessionLists,
@@ -471,7 +472,15 @@ function Body({
   );
 }
 
-export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
+export function Run({
+  run: wanted,
+  sub,
+  at,
+}: {
+  run: string;
+  sub: Route["sub"];
+  at: string | null;
+}) {
   const { snapshot } = useLive();
   const openRuns = snapshot && known(snapshot.runs) ? snapshot.runs : null;
   const open = openRuns?.find((candidate) => candidate.run === wanted) ?? null;
@@ -498,7 +507,7 @@ export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
 
   if (sub?.kind === "file" && sub.arg)
     return <FileView run={run.run} ticket={run.ticket.id} path={sub.arg} />;
-  if (sub) {
+  if (sub && sub.kind !== "conversation") {
     const sessions =
       sub.kind === "step"
         ? detail?.sessions.filter((s) => s.owner.kind === "step" && s.owner.step === sub.arg)
@@ -531,6 +540,7 @@ export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
         }
         sessions={sessions}
         files={detail?.files ?? []}
+        at={at}
         empty={
           detail && !detail.sessions_ready
             ? "The session files are not indexed yet. Try again in a few seconds."
@@ -556,7 +566,29 @@ export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
         <ProjectValue project={run.project} />
       </p>
       <OutsideNote project={run.project} />
-      <Body run={run} detail={detail} loading={state.status === "loading"} open={open !== null} />
+      <nav className="run-tabs" aria-label="Run page">
+        <a
+          className="tab"
+          href={runHref(run.run)}
+          aria-current={sub === null ? "page" : undefined}
+          data-testid="run-tab-overview"
+        >
+          Overview
+        </a>
+        <a
+          className="tab"
+          href={runHref(run.run, "conversation")}
+          aria-current={sub?.kind === "conversation" ? "page" : undefined}
+          data-testid="run-tab-conversation"
+        >
+          Conversation
+        </a>
+      </nav>
+      {sub?.kind === "conversation" ? (
+        <Conversation run={run.run} refreshKey={open?.updated_at ?? ""} />
+      ) : (
+        <Body run={run} detail={detail} loading={state.status === "loading"} open={open !== null} />
+      )}
     </>
   );
 }

@@ -2340,6 +2340,11 @@ a.rm-id:hover {
   font-size: 13px;
   margin-bottom: 8px;
 }
+/* The run page's tabs reuse the nav's .tab; the line under them closes the header. */
+.run-tabs {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
 .run-title {
   margin-bottom: 4px;
 }

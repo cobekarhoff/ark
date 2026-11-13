@@ -168,9 +168,15 @@ export type Route = {
   run: string | null;
   /**
    * `#/run/<run>/step/<id>`, `/lead`, `/session/<file>` open a transcript; `/file/<path>` shows a run
-   * file. Each argument is one URL-encoded segment.
+   * file; `/conversation` is the run page's Conversation tab (no argument). Each argument is one
+   * URL-encoded segment.
    */
-  sub: { kind: "step" | "lead" | "session" | "file"; arg: string | null } | null;
+  sub: {
+    kind: "step" | "lead" | "session" | "file" | "conversation";
+    arg: string | null;
+  } | null;
+  /** `?at=<time>` on a transcript route: the transcript opens at the entry nearest this ISO time. */
+  at: string | null;
   /** `#/ticket/<id>`: the ticket of the page. A ticket id is taken as unique across projects. */
   arg: string | null;
   /** `?project=<name>` on every route: the site-wide project filter. The URL is its only state; null is All projects. */
@@ -184,8 +190,17 @@ export const currentProject = (): string | null => parseRoute(location.hash).pro
  * A hash for `path` (`#/runs`, `#/ticket/ARK-1`) with the project filter: the filter of the URL, or
  * `project` when the caller sets one (`null` for All projects). The one builder of every link.
  */
-export const hashOf = (path: string, project: string | null = currentProject()) =>
-  project === null ? path : `${path}?project=${encodeURIComponent(project)}`;
+export const hashOf = (
+  path: string,
+  project: string | null = currentProject(),
+  at: string | null = null,
+) => {
+  const query = new URLSearchParams();
+  if (project !== null) query.set("project", project);
+  if (at !== null) query.set("at", at);
+  const text = query.toString();
+  return text === "" ? path : `${path}?${text}`;
+};
 
 export const ticketHref = (id: string) => hashOf(`#/ticket/${encodeURIComponent(id)}`);
 
@@ -218,14 +233,14 @@ export function parseRoute(hash: string): Route {
   const project = new URLSearchParams(query).get("project");
   const [, view, part, kind, ...argumentSegments] = path.split("/");
   const arg = part ? decode(part) : null;
-  const none = { run: null, sub: null, arg: null, project };
+  const none = { run: null, sub: null, at: null, arg: null, project };
   if (view === "run" && arg !== null) {
-    const subKinds = ["step", "lead", "session", "file"] as const;
+    const subKinds = ["step", "lead", "session", "file", "conversation"] as const;
     const subKind = subKinds.find((candidate) => candidate === kind);
     // A file path may hold plain slashes (`/file/findings/a.md`) or encoded ones; both name the same path.
     const subArg = argumentSegments.map(decode).join("/");
     const sub = subKind ? { kind: subKind, arg: subArg || null } : null;
-    return { ...none, view, run: arg, sub };
+    return { ...none, view, run: arg, sub, at: new URLSearchParams(query).get("at") };
   }
   if (view === "runs" || view === "run" || view === "map") return { ...none, view: "runs" };
   if (view === "roadmap" && arg === null) return { ...none, view };

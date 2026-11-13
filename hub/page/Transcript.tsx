@@ -242,10 +242,12 @@ function SessionPages({
   run,
   session,
   files,
+  at,
 }: {
   run: string;
   session: SessionFile;
   files: string[];
+  at: string | null;
 }) {
   const [pages, setPages] = useState<Pages>({
     status: "loading",
@@ -305,6 +307,41 @@ function SessionPages({
     return () => controller.abort();
     // The component is keyed by file: it mounts once per session file.
   }, []);
+
+  // `at`: read on until an entry at or after that time is loaded (or the file ends), then select and
+  // show the nearest entry once. Later pages the human loads never move the selection again.
+  const anchored = useRef(at === null);
+  useEffect(() => {
+    if (anchored.current || at === null || pages.status !== "ok") return;
+    const target = Date.parse(at);
+    if (Number.isNaN(target)) {
+      anchored.current = true;
+      return;
+    }
+    const timed = pages.entries.flatMap((candidate, index) =>
+      candidate.time === null ? [] : [{ index, time: Date.parse(candidate.time) }],
+    );
+    if (pages.next !== null && (timed.at(-1)?.time ?? -Infinity) < target) {
+      void load(pages.next, pages.entries);
+      return;
+    }
+    anchored.current = true;
+    const nearest = timed.reduce<(typeof timed)[number] | null>(
+      (best, candidate) =>
+        best === null || Math.abs(candidate.time - target) < Math.abs(best.time - target)
+          ? candidate
+          : best,
+      null,
+    );
+    if (nearest === null) return;
+    setSelected({ kind: "entry", index: nearest.index });
+    // The list renders the new rows after this effect: scroll on the next frame.
+    requestAnimationFrame(() =>
+      list.current
+        ?.querySelectorAll("[data-testid=transcript-entry]")
+        [nearest.index]?.scrollIntoView({ block: "center" }),
+    );
+  }, [pages]);
 
   // Errors overrides the kind chips: only failed calls. Else the kind chips combine; none on = all.
   const visible = pages.entries
@@ -472,6 +509,7 @@ export function Transcript({
   title,
   sessions,
   files,
+  at,
   empty,
 }: {
   run: string;
@@ -479,6 +517,8 @@ export function Transcript({
   title: string;
   sessions: SessionFile[];
   files: string[];
+  /** Open at the entry nearest this ISO time (`?at=`); null opens at the start. */
+  at: string | null;
   empty: string;
 }) {
   const [index, setIndex] = useState(0);
@@ -524,7 +564,7 @@ export function Transcript({
               {session.start ? <Clock time={session.start} /> : "?"} → <Clock time={session.end} />
             </span>
           </p>
-          <SessionPages key={session.file} run={run} session={session} files={files} />
+          <SessionPages key={session.file} run={run} session={session} files={files} at={at} />
         </>
       )}
     </>
