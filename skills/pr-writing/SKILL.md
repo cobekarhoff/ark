@@ -89,5 +89,5 @@ Write about the system. The subject of a sentence is the code, the command, the 
 - A new MR or PR is a Draft. `--ready` opens it ready. An update keeps the state of the open one.
 - An update replaces only the text between `<!-- pr-writing:begin -->` and `<!-- pr-writing:end -->`. An old body with no markers is rewritten once, with a note on stderr.
 - It re-runs the lint on the final body and refuses on a `fail` or STALE01 (head moved, or body edited after lint).
-- `post_mr.ts --confirmed` is the only way to post. Do not call `gh` or `glab` to create or edit the MR yourself.
+- `skills/pr-writing/scripts/post_mr.ts --confirmed` is the only way to post. Do not call `gh` or `glab` to create or edit the MR yourself.
 - Print the URL from stdout to the human. Host commands and quirks: `references/gitlab.md`, `references/github.md`.
