@@ -24,12 +24,14 @@ Expected: When the diff from the run's base changes a bun test whose title holds
 ## Steps
 
 1. Run `ark test <run>`; read its output, its exit code and the recorded results.
-2. Delete `plan.yml` from the run folder and run `ark test <run>` again.
+2. Commit a change of the `ARK-T9` test on top (as main would), record a `worktree.synced` event whose `target_commit` is that commit, commit a new edit of the `ARK-T2` test, and run `ark test <run>` again.
+3. Delete `plan.yml` from the run folder and run `ark test <run>` again.
 
 ## Expected results
 
 - Step 1: exit 1. The output names `ARK-T2`, `ARK-T3` and `ARK-T4`, the test file path, and the fix (add the id to `test_cases` with the action reuse, update or retire). `ARK-T1` and the untouched `ARK-T9` are not named. `ARK-T3` appears once for the file, not once for each test. The failure shows in the recorded checks of `test.completed`, next to the old id check.
-- Step 2: `ark test` does not crash; it prints a skip line for the check and the suite results decide the exit code.
+- Step 2: only `ARK-T2` is named. The ids that the run changed before the synced commit (`ARK-T3` to `ARK-T6`) and `ARK-T9`, which main changed, are not named: the check diffs from the newest synced target commit, else the created base.
+- Step 3: `ark test` does not crash; it prints a skip line for the check and the suite results decide the exit code.
 
 ## Screenshot checkpoints
 

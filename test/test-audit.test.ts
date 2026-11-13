@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { appendEvent } from "../cli/events.ts";
 import {
   ark,
   recordEvaluation,
@@ -660,6 +661,28 @@ describe("ark test old-id gate", () => {
       .map((line) => JSON.parse(line))
       .findLast((event) => event.type === "test.completed");
     expect(completed.data.checks).toContainEqual({ name: "plan-membership e2e", passed: false });
+
+    // After a sync the check reads only the run's own change: a case that main changed is not named.
+    const mainChange = commitAll(mirror, {
+      "e2e.test.ts": readFileSync(join(mirror, "e2e.test.ts"), "utf8").replace(
+        "const untouched = 1;",
+        "const untouched = 2;",
+      ),
+    });
+    appendEvent(runDirectory, "worktree.synced", {
+      repo: ".",
+      conflict: false,
+      target_commit: mainChange,
+    });
+    commitAll(mirror, {
+      "e2e.test.ts": readFileSync(join(mirror, "e2e.test.ts"), "utf8").replace(
+        `"ARK-T2 unlisted", () => {\n  const x = 2;`,
+        `"ARK-T2 unlisted", () => {\n  const x = 3;`,
+      ),
+    });
+    const synced = ark("test", runId);
+    expect(synced.out).toContain("case id not in plan test_cases: ARK-T2 in e2e.test.ts");
+    expect(synced.out).not.toMatch(/not in plan test_cases: ARK-T(3|4|5|6|9) /);
 
     rmSync(join(runDirectory, "plan.yml"));
     const skipped = ark("test", runId);

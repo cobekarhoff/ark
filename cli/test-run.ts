@@ -1148,7 +1148,8 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     }
     for (const suite of planned === undefined ? [] : config.suites) {
       const label = `plan-membership suite ${suite.name} (${suite.parser})`;
-      const base = state.worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+      // the newest synced target commit, not the created base: what main changed is not this run's change
+      const base = baseSide(state.worktrees.find((worktree) => worktree.repo === suite.repo));
       if (suite.parser !== "bun" || base === undefined) continue;
       let missing: string[];
       try {
