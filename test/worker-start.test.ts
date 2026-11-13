@@ -158,6 +158,8 @@ function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boo
   if (options.worktreeInRunFolder) {
     worktree = join(directory, "workspace");
     mkdirSync(worktree, { recursive: true });
+    // a step worktree is a git repo: finish refuses when `git status` fails
+    expect(Bun.spawnSync(["git", "init", "-q", worktree]).exitCode).toBe(0);
   }
   return { runId, directory, worktree: addWorktree(directory, ".", worktree) };
 }
