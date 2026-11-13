@@ -9712,7 +9712,7 @@ test("ARK-T340 the Conversation tab opens from the run page, keeps the sub route
     project: "p",
     run,
     ticket: { id: "ARK-9401", title: "Tab" },
-    phase: "closed",
+    phase: "building",
     startedAt: started,
     steps: [
       {
@@ -9746,7 +9746,7 @@ test("ARK-T340 the Conversation tab opens from the run page, keeps the sub route
       messageOf("second", "chief", "lead", conversationMinute(4), { subject: "Second message" }),
     ],
   });
-  await serveConversation(page, () => reply);
+  const served = await serveConversation(page, () => reply);
 
   // The run page opens on its overview; the tab is one click away and lives in the hash.
   await open(page, baseUrl, `run/${run}`);
@@ -9814,6 +9814,25 @@ test("ARK-T340 the Conversation tab opens from the run page, keeps the sub route
   });
   await expect(page.getByTestId("conversation-loading")).toHaveCount(0, { timeout: 10_000 });
   await expect(page.getByTestId("feed-message")).toHaveCount(2);
+  reply = conversationReply(run, parts);
+  await page.reload();
+  await expect(page.getByTestId("feed-message")).toHaveCount(1);
+
+  // A failed refetch keeps the last read: the notice shows, the feed and the selection stay.
+  await page.locator('[data-testid="feed-message"][data-id="only"] .cv-subject').click();
+  await expect(page.getByTestId("inspector-type")).toBeVisible();
+  const reads = served.reads();
+  reply = 502;
+  appendRawEvent(
+    directory,
+    "worker.started",
+    { step: "work", dispatch: "ctx_w", terminal: "t" },
+    readFileSync(join(directory, "events.ndjson"), "utf8").trim().split("\n").length + 1,
+  );
+  await expect.poll(served.reads).toBeGreaterThan(reads);
+  await expect(page.getByTestId("conversation-refetch-failed")).toBeVisible();
+  await expect(page.getByTestId("feed-message")).toHaveCount(1);
+  await expect(page.getByTestId("inspector-type")).toBeVisible();
   reply = conversationReply(run, parts);
   await page.reload();
 
@@ -10222,7 +10241,11 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
 }) => {
   const { sessions } = isolate();
   const run = runId("ARK-9405");
-  const started = ago(7_200);
+  // A fixed start 30 minutes before UTC midnight: the run crosses a day, so every clock label carries its
+  // date, and the expected text never depends on the hour the suite runs at.
+  const started = new Date("2026-11-12T23:30:00.000Z");
+  const dated = (time: number) =>
+    `${String(new Date(time).getUTCDate()).padStart(2, "0")} Nov ${clockOf(time)}`;
   const directory = writeRun({
     project: "p",
     run,
@@ -10356,8 +10379,8 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
   await expect(inspector.getByTestId("inspector-type")).toHaveText("question");
   await expect(inspector).toContainText("Run lead");
   await expect(inspector).toContainText("Master Chief");
-  await expect(inspector.getByTestId("inspector-sent")).toHaveText(clockOf(leadSent));
-  await expect(inspector.getByTestId("inspector-delivered")).toHaveText(clockOf(delivered));
+  await expect(inspector.getByTestId("inspector-sent")).toHaveText(dated(leadSent));
+  await expect(inspector.getByTestId("inspector-delivered")).toHaveText(dated(delivered));
   await expect(inspector.getByTestId("inspector-wait")).toHaveText("12.0 min");
   await expect(inspector.getByTestId("inspector-answer")).toContainText(
     "You answered criteria: accept",
@@ -10387,7 +10410,7 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
 
   // A question with no delivery time: "not recorded", never the sent time, and no wait.
   await select("q2");
-  await expect(inspector.getByTestId("inspector-sent")).toHaveText(clockOf(leadSent + 30 * 60_000));
+  await expect(inspector.getByTestId("inspector-sent")).toHaveText(dated(leadSent + 30 * 60_000));
   await expect(inspector.getByTestId("inspector-delivered")).toHaveText("not recorded");
   await expect(inspector.getByTestId("inspector-wait")).toHaveText("not recorded");
   await expect(inspector.getByTestId("inspector-answer")).toHaveText(
@@ -10429,7 +10452,7 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
     .click();
   await expect(inspector.getByTestId("inspector-role")).toHaveText("implementer");
   await expect(inspector.getByTestId("inspector-steps")).toContainText(
-    `work ${clockOf(started.getTime() + 60_000)}–${clockOf(started.getTime() + 600_000)}`,
+    `work ${dated(started.getTime() + 60_000)}–${dated(started.getTime() + 600_000)}`,
   );
   await expect(inspector.getByTestId("inspector-counts")).toHaveText("2 sent, 0 received");
   await expect(inspector.getByTestId("inspector-cost")).toHaveText("$1.50");
