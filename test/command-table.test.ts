@@ -108,7 +108,9 @@ test("ARK-T283 the command table is the same as at base - order, usage, descript
     expect(help[0]).toBe("Usage: ark <command>");
     const lines = help.slice(1).map((line) => line.trim());
     expect(lines.some((line) => line.startsWith("test-runner"))).toBe(false);
-    const records = await Promise.all(lines.map(describe));
+    // One command at a time: parallel probes burst to ~5 cores and starve other suites on CI.
+    const records: Row[] = [];
+    for (const line of lines) records.push(await describe(line));
     if (process.env.UPDATE_COMMAND_TABLE) {
       writeFileSync(snapshotPath, `${JSON.stringify(records, null, 2)}\n`);
     }
