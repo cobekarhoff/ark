@@ -2,7 +2,7 @@
 id: ARK-T369
 title: ARK-T369 the run page lists each decision of events.ndjson oldest first with its time, and skips a damaged line
 level: e2e
-technique: equivalence classes of event type; boundary: one damaged line in the log
+technique: "equivalence classes of event type; boundary: one damaged line in the log"
 priority: medium
 risk: "the timeline shows events out of order, drops an event or its time, shows a wrong summary for a type, a non-decision event (`run.started`, `step.started`, `step.finished`) shows as an entry, or a damaged line hides the lines after it"
 status: active
