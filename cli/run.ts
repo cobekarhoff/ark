@@ -10,7 +10,7 @@ import {
   startWorker,
   type StartedWorker,
 } from "./orca.ts";
-import { buildSpec } from "./spec.ts";
+import { buildSpec, reviewRangeStart } from "./spec.ts";
 import { watchSession } from "./usage/index.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
@@ -431,6 +431,20 @@ export async function runStep(
   }
 
   if (action === "finish") {
+    const planned = state.steps.find((step) => step.id === stepId);
+    const worktree = state.worktrees.find((entry) => entry.repo === planned?.repo)?.path;
+    if (planned?.role === "reviewer" && !failed && worktree && existsSync(worktree)) {
+      const start = reviewRangeStart(directory, state, planned, false);
+      // An uncountable range (unknown sha) is not read as empty.
+      if (start && commitsAhead(worktree, "HEAD", start) === 0) {
+        const end = Bun.spawnSync(["git", "-C", worktree, "rev-parse", "HEAD"])
+          .stdout.toString()
+          .trim();
+        throw new ArkError(
+          `step ${stepId} refused: the review range ${start}..${end} has no commits; a reviewer needs code to review (use --failed to close a step that did not review)`,
+        );
+      }
+    }
     const outcome = failed ? "failed" : "succeeded";
     const last = events.findLast(
       (event) =>

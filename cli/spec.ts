@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { parseEvaluation } from "./evaluation.ts";
@@ -41,19 +41,34 @@ function literalStrings(runDirectory: string, state: RunState, step: PlanStep): 
   return [...new Set(strings)];
 }
 
-/** `Reviewed head:` of the newest findings file that has one; undefined before the first review. */
-function lastReviewedHead(runDirectory: string): string | undefined {
-  const folder = join(runDirectory, "findings");
-  if (!existsSync(folder)) return undefined;
-  const reviews = readdirSync(folder)
-    .map((name) => join(folder, name))
+/**
+ * Where a reviewer's range starts: the `Reviewed head:` of the newest findings file of another-or-same reviewer step
+ * in the step's repo, else the run's base for that repo (undefined for a run created before bases were recorded).
+ * Other findings files (rounds, test-case reviews) are not reviews of the code and are ignored. `includeOwn` is
+ * false at finish, when the step's own file already holds the head it just reviewed.
+ */
+export function reviewRangeStart(
+  runDirectory: string,
+  state: RunState,
+  step: Pick<PlanStep, "id" | "repo">,
+  includeOwn: boolean,
+): string | undefined {
+  const reviews = state.steps
+    .filter(
+      (other) =>
+        other.role === "reviewer" &&
+        other.repo === step.repo &&
+        (includeOwn || other.id !== step.id),
+    )
+    .map((other) => join(runDirectory, "findings", `${other.id}.md`))
+    .filter((file) => existsSync(file))
     .map((file) => ({
       time: statSync(file).mtimeMs,
       head: /^Reviewed head:\s*(\S+)/m.exec(readFileSync(file, "utf8"))?.[1],
     }))
     .filter((review) => review.head !== undefined)
     .sort((left, right) => right.time - left.time);
-  return reviews[0]?.head;
+  return reviews[0]?.head ?? state.worktrees.find((entry) => entry.repo === step.repo)?.base;
 }
 
 /**
@@ -95,7 +110,7 @@ export function buildSpec(options: {
   if (strings.length > 0) lines.push(`Literal strings: ${strings.join(", ")}`);
   if (step.skills.length > 0) lines.push(`UI skills: ${step.skills.join(", ")}`);
   if (step.role === "reviewer") {
-    const head = lastReviewedHead(directory);
+    const head = reviewRangeStart(directory, state, step, true);
     if (head) lines.push(`Last reviewed head: ${head}`);
   }
   const rules = join(directory, "rules.md");
