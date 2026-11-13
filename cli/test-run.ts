@@ -581,6 +581,11 @@ export async function pathsSkipReason(
   return changed.some(covered) ? null : `diff touches none of: ${suite.paths.join(", ")}`;
 }
 
+/** A suite runs only when its repo has a worktree in the run; repo `.` is the worktree repo of a one-repo project. One rule for the head and base passes. */
+export function suiteRepoInRun(suite: Suite, worktrees: RunState["worktrees"]): boolean {
+  return suite.repo === "." || worktrees.some((worktree) => worktree.repo === suite.repo);
+}
+
 /** The test files of the run's own commits (no merge-in files) that match `base_files`. */
 async function ownPaths(suite: Suite, base: string, mirror: string): Promise<string[]> {
   const glob = new Bun.Glob(suite.base_files!);
@@ -644,6 +649,7 @@ async function baseSuitesPassed(
 ): Promise<boolean> {
   const plan: PlanEntry[] = [];
   for (const suite of config.suites) {
+    if (!suiteRepoInRun(suite, worktrees)) continue;
     if (refactor || suite.base_files === undefined) {
       // A refactor runs whole, but its added test files still need to reach base.
       const base = baseSide(worktrees.find((worktree) => worktree.repo === suite.repo));
@@ -671,6 +677,7 @@ async function baseSuitesPassed(
   // run's own files as the base has them.
   const census: PlanEntry[] = [];
   for (const suite of config.suites) {
+    if (!suiteRepoInRun(suite, worktrees)) continue;
     const base = baseSide(worktrees.find((worktree) => worktree.repo === suite.repo));
     if (base === undefined) continue;
     if (refactor || suite.base_files === undefined) {
@@ -1007,6 +1014,10 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
           throw new ArkError(`compose up failed: ${(up.stderr || up.stdout).trim()}`);
       }
       for (const suite of config.suites) {
+        if (!suiteRepoInRun(suite, state.worktrees)) {
+          console.log(`skipped ${suite.name} (repo ${suite.repo} not in run)`);
+          continue;
+        }
         const skip = await pathsSkipReason(suite, quick, state.worktrees, mirror);
         if (skip !== null) {
           headRun.skipped.set(suite.name, skip);
