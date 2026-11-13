@@ -180,6 +180,9 @@ export function openTestBudget(
     return reasons;
   };
   const files = new Set<string>();
+  // After close() no ticket may be written: close() also drops the exit handler, so a ticket written by a take() that
+  // was still awaiting a memory reading or a nap would stay on disk when the process exits.
+  let closed = false;
   const cleanup = () => {
     for (const file of files) rmSync(file, { force: true });
     files.clear();
@@ -188,10 +191,12 @@ export function openTestBudget(
 
   return {
     close() {
+      closed = true;
       process.off("exit", cleanup);
       cleanup();
     },
     async take(requested) {
+      if (closed) throw new Error("ark test: the budget is closed");
       const cores = requested === undefined || requested > budget ? budget : Math.max(1, requested);
       const file = join(ticketDirectory(), `${process.pid}-${randomUUID()}.json`);
       mkdirSync(ticketDirectory(), { recursive: true });
@@ -214,6 +219,7 @@ export function openTestBudget(
       };
       try {
         for (;;) {
+          if (closed) throw new Error("ark test: the budget is closed");
           const tickets = readTickets();
           const mine = tickets.findIndex((entry) => entry.file === file);
           const startedTickets = tickets.filter((entry) => entry.ticket.started !== undefined);
@@ -247,6 +253,7 @@ export function openTestBudget(
               sumOf(startedTickets) + cores <= budget
             ) {
               const held = await memoryHold();
+              if (closed) throw new Error("ark test: the budget is closed");
               if (held.length > 0) {
                 // Its own line and key: once for each change of reason, never for each poll.
                 const line = `ark test: waiting for memory: ${held.join("; ")}`;
