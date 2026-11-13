@@ -3234,9 +3234,19 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
       if (hash.startsWith("ticket")) await expect(page.getByTestId("ticket-problem")).toBeVisible();
       // A color that still fades from the other theme is not the color the page rests on.
       await finiteAnimationsEnded(page);
-      const { checked, weak } = await weakContrast(page);
-      expect(checked, `text checked on ${name} in ${choice}`).toBeGreaterThan(20);
-      expect(weak, `${name} in ${choice}`).toEqual([]);
+      // A live-change highlight is not a finite animation: poll until the colours rest, same threshold.
+      let checkedCount = 0;
+      await expect
+        .poll(
+          async () => {
+            const result = await weakContrast(page);
+            checkedCount = result.checked;
+            return result.weak;
+          },
+          { message: `${name} in ${choice}`, timeout: 15_000 },
+        )
+        .toEqual([]);
+      expect(checkedCount, `text checked on ${name} in ${choice}`).toBeGreaterThan(20);
     }
   }
   // Switching the theme and the views sent no request but the document read of each ticket page opening (ARK-329).
