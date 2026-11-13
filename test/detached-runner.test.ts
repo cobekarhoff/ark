@@ -21,6 +21,7 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import { macOnly, recordStartedRun, stopStartedRuns } from "./orphan-runners.ts";
 
 // ARK-366: real `ark test` callers, detached runners and suite processes. Waits are events (a file appears, a
 // stream prints, a process exits), never sleeps: see test/wallclock.test.ts and test/timeouts.test.ts.
@@ -62,6 +63,7 @@ type Fixture = {
 const fixtures: Fixture[] = [];
 
 afterEach(() => {
+  stopStartedRuns();
   for (const fixture of fixtures.splice(0)) {
     // A SIGKILLed runner cannot stop its suites: find them by the pid files and the fixture folder.
     for (const name of ["suite-pid", "child", "grandchild"]) {
@@ -322,6 +324,7 @@ function makeFixture(options: {
       const result = ark(...args);
       if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.err}`);
     }
+    recordStartedRun({ runId, runDirectory });
     return { runId, runDirectory };
   };
   Object.assign(fixture, fixture.startRun("DET-1"));
@@ -352,6 +355,65 @@ const noTickets = (fixture: Fixture) =>
 const runnerRecord = (fixture: Fixture, runDirectory = fixture.runDirectory) =>
   readJson(join(runDirectory, "results", "runner.json"));
 const openGate = (fixture: Fixture) => Bun.write(join(fixture.directory, "gate"), "go\n");
+
+/** Every process below `rootPid` by parent pid, taken while the caller lives: a reparented runner is not in it. */
+function descendantsOf(rootPid: number): number[] {
+  const listing = Bun.spawnSync(["ps", "-axo", "pid,ppid"]).stdout.toString();
+  const children = new Map<number, number[]>();
+  for (const line of listing.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+    if (match)
+      children.set(Number(match[2]), [...(children.get(Number(match[2])) ?? []), Number(match[1])]);
+  }
+  const found: number[] = [];
+  for (const queue = [rootPid]; queue.length > 0;) {
+    for (const child of children.get(queue.shift()!) ?? []) {
+      found.push(child);
+      queue.push(child);
+    }
+  }
+  return found;
+}
+
+/** SIGKILL of the helper, its process group and every process below it, then waits until they are all gone. */
+async function killTree(helper: Subprocess): Promise<void> {
+  const tree = [helper.pid, ...descendantsOf(helper.pid)];
+  for (const target of [-helper.pid, ...tree])
+    try {
+      process.kill(target, "SIGKILL");
+    } catch {
+      // already gone
+    }
+  await helper.exited;
+  for (const pid of tree) while (alive(pid)) await Bun.sleep(10);
+}
+
+/**
+ * A helper shell with a second child (`sleep`) that runs `ark <args>` as a child. It is its own process group
+ * leader, so a group kill reaches the caller but not a runner that made its own group.
+ */
+function spawnHelper(fixture: Fixture, args: string[], pidFile: string): Subprocess {
+  return Bun.spawn(
+    [
+      "sh",
+      "-c",
+      `sleep 300 & bun "$0" "$@" >/dev/null 2>&1 & echo $! > "${pidFile}"; wait`,
+      arkEntry,
+      ...args,
+    ],
+    {
+      env: fixture.environment,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      detached: true,
+    },
+  );
+}
+
+/** The suite process of the gated suite: the shell that `gate.sh` runs in. */
+const suiteAlive = (fixture: Fixture): boolean =>
+  Bun.spawnSync(["pgrep", "-f", `gate.sh ${fixture.directory}`]).exitCode === 0;
 
 describe("detached ark test runner", () => {
   test("ARK-T161 a caller killed during a suite leaves the runner and the lock, a second call attaches, and --wait prints the lines and exit code of the first call", async () => {
@@ -529,6 +591,73 @@ describe("detached ark test runner", () => {
     expect(idle.code).not.toBe(0);
     expect(idle.out + idle.err).toContain(`no ark test is running for ${fixture.runId}`);
   });
+
+  // ARK-427: the caller dies with its whole tree. A runner that is still a child of the caller dies with it.
+  macOnly.each([
+    { outcome: "passing", code: 0, line: "suite      gated (integration)  passed" },
+    { outcome: "failing", code: 1, line: "suite      gated (integration)  failed" },
+  ])(
+    "ARK-T325 the whole process tree of a dead ark test caller leaves the runner and its suite alive, and a new --wait returns the result of a $outcome suite",
+    async ({ code, line, outcome }) => {
+      const fixture = makeFixture({ suites: gateSuite });
+      if (outcome === "failing") writeFileSync(join(fixture.directory, "fail"), "");
+      const helper = spawnHelper(
+        fixture,
+        ["test", fixture.runId],
+        join(fixture.directory, "caller"),
+      );
+      await appears(join(fixture.directory, "started"));
+      const record = runnerRecord(fixture);
+      expect(record.state).toBe("running");
+      expect(record.pid).not.toBe(helper.pid);
+
+      await killTree(helper);
+      expect(alive(record.pid), "the runner died with the tree of its caller").toBe(true);
+      expect(suiteAlive(fixture), "the suite died with the tree of its caller").toBe(true);
+      expect(runnerRecord(fixture)).toMatchObject({ state: "running", pid: record.pid });
+
+      const waiting = spawnArk(fixture, ["test", fixture.runId, "--wait"]);
+      await openGate(fixture);
+      const done = await waiting.finished();
+      expect(done.code, done.err).toBe(code);
+      expect(done.out).toContain(line);
+      expect(done.out).toBe(
+        readFileSync(join(fixture.runDirectory, "results", "runner.out"), "utf8"),
+      );
+      expect(runnerRecord(fixture)).toMatchObject({ state: "done", exit_code: code });
+    },
+  );
+
+  macOnly.each([
+    { outcome: "passing", code: 0 },
+    { outcome: "failing", code: 1 },
+  ])(
+    "ARK-T326 the whole process tree of a dead ark test --wait caller leaves the runner running, and a new --wait returns the exit code of a $outcome suite",
+    async ({ code, outcome }) => {
+      const fixture = makeFixture({ suites: gateSuite });
+      if (outcome === "failing") writeFileSync(join(fixture.directory, "fail"), "");
+      const starter = spawnArk(fixture, ["test", fixture.runId]);
+      await appears(join(fixture.directory, "started"));
+      const record = runnerRecord(fixture);
+      const helper = spawnHelper(
+        fixture,
+        ["test", fixture.runId, "--wait"],
+        join(fixture.directory, "waiter"),
+      );
+      await appears(join(fixture.directory, "waiter"));
+
+      await killTree(helper);
+      expect(alive(record.pid), "the runner died with the tree of the --wait caller").toBe(true);
+      expect(suiteAlive(fixture)).toBe(true);
+      expect(runnerRecord(fixture)).toMatchObject({ state: "running", pid: record.pid });
+
+      const waiting = spawnArk(fixture, ["test", fixture.runId, "--wait"]);
+      await openGate(fixture);
+      const [done] = await Promise.all([waiting.finished(), starter.finished()]);
+      expect(done.code, done.err).toBe(code);
+      expect(runnerRecord(fixture)).toMatchObject({ state: "done", exit_code: code });
+    },
+  );
 });
 
 // ARK-T163: the cache. The suite runs `count.sh`, which appends `head` or `base` to one counter file.
