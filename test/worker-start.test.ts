@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { addWorktree, fakeSessionFolder, useFakeOrca } from "./fake-orca.ts";
 import {
   ark,
   recordEvaluation,
+  startHub,
+  stopHub,
   tempArkHome,
   tempGitRepo,
   writeProject,
@@ -160,7 +162,7 @@ function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boo
   return { runId, directory, worktree: addWorktree(directory, ".", worktree) };
 }
 
-type Recorded = { type: string; data: Record<string, any> };
+type Recorded = { type: string; time: string; data: Record<string, any> };
 const eventsOf = (directory: string): Recorded[] =>
   readFileSync(join(directory, "events.ndjson"), "utf8")
     .trim()
@@ -734,7 +736,8 @@ test("ARK-T216 a restored step keeps its one session file with one owner, counti
   const { run, workspace, first, second } = twoWindows({ restore: true });
   expect(second).toBe(first);
   expect(first.startsWith(fakeSessionFolder())).toBe(true);
-  fillSession(first, workspace, "10:00:30", [
+  // The worker's file starts at launch, before step.started is recorded.
+  fillSession(first, workspace, "09:59:50", [
     message("10:01:00", 10, 5),
     message("10:21:00", 20, 10),
   ]);
@@ -751,8 +754,9 @@ test("ARK-T216 a fresh restart keeps two session files, each with one owner, cou
   const { run, workspace, first, second } = twoWindows({ restore: false });
   expect(second).not.toBe(first);
   for (const file of [first, second]) expect(file.startsWith(fakeSessionFolder())).toBe(true);
-  fillSession(first, workspace, "10:00:30", [message("10:01:00", 10, 5)]);
-  fillSession(second, workspace, "10:20:30", [message("10:21:00", 20, 10)]);
+  // Each worker's file starts at launch, before step.started is recorded.
+  fillSession(first, workspace, "09:59:50", [message("10:01:00", 10, 5)]);
+  fillSession(second, workspace, "10:19:50", [message("10:21:00", 20, 10)]);
   const printed = ark("retro", run.runId);
   expect(printed.code).toBe(0);
   expect(printed.out).not.toContain("unassigned");
@@ -760,4 +764,63 @@ test("ARK-T216 a fresh restart keeps two session files, each with one owner, cou
   expect(metrics.cost.by_step.a.tokens).toBe(45);
   expect(metrics.cost.tokens).toBe(45);
   expect(metrics.orchestration.restarts).toBe(1);
+});
+
+test("ARK-T308 two steps started through the current start path each open their worker's session transcript, and no step session is unassigned", async () => {
+  const run = buildRun({ worktreeInRunFolder: true });
+  const at = (time: string, ...args: string[]) => arkAt(instant(time), ...args);
+  const files: Record<string, string> = {};
+  // [step, started, file head, finished]: the file head is the worker's launch, before step.started.
+  for (const [step, startedAt, head, finishedAt] of [
+    ["a", "10:00:00", "09:59:50", "10:10:00"],
+    ["b", "10:20:00", "10:19:50", "10:30:00"],
+  ]) {
+    expect(at(startedAt, "run", "step", run.runId, step, "start").code).toBe(0);
+    files[step] = workerOf(run.directory, step).session;
+    expect(files[step].startsWith(fakeSessionFolder())).toBe(true);
+    fillSession(files[step], run.worktree, head, [
+      message(startedAt.replace(":00:00", ":01:00"), 10, 5),
+    ]);
+    expect(at(finishedAt, "run", "step", run.runId, step, "finish").code).toBe(0);
+    const stepStartedAt = eventsOf(run.directory).find(
+      (event) => event.type === "step.started" && event.data.step === step,
+    )!.time;
+    expect(Date.parse(instant(head))).toBeLessThan(Date.parse(stepStartedAt));
+  }
+  const order = eventsOf(run.directory).map((event) => `${event.type}:${event.data.step ?? ""}`);
+  for (const step of ["a", "b"])
+    expect(order.indexOf(`step.started:${step}`)).toBeLessThan(
+      order.indexOf(`worker.started:${step}`),
+    );
+  // The run lead's file starts before the first step and is written after it.
+  const lead = join(fakeSessionFolder(), "scratch", "lead.jsonl");
+  fillSession(lead, run.worktree, "09:50:00", []);
+  utimesSync(lead, new Date(instant("11:00:00")), new Date(instant("11:00:00")));
+
+  const printed = ark("retro", run.runId);
+  expect(printed.err).toBe("");
+  expect(printed.code).toBe(0);
+  expect(printed.out).not.toContain("unassigned");
+  const metrics = JSON.parse(readFileSync(join(run.directory, "metrics.json"), "utf8"));
+  expect(metrics.cost.by_step.a.tokens).toBe(15);
+  expect(metrics.cost.by_step.b.tokens).toBe(15);
+
+  delete process.env.ARK_NOW;
+  const hub = await startHub();
+  try {
+    const owners: Record<string, unknown> = {};
+    for (let tries = 0; tries < 150 && Object.keys(owners).length < 3; tries++) {
+      const response = await fetch(`${hub.baseUrl}/api/run/${run.runId}`);
+      const detail = response.ok ? await response.json() : { sessions: [], sessions_ready: false };
+      if (detail.sessions_ready)
+        for (const session of detail.sessions) owners[session.file] = session.owner;
+      if (Object.keys(owners).length < 3) await Bun.sleep(100);
+    }
+    expect(owners[files.a]).toEqual({ kind: "step", step: "a" });
+    expect(owners[files.b]).toEqual({ kind: "step", step: "b" });
+    expect(owners[lead]).toEqual({ kind: "lead" });
+    expect(Object.values(owners).filter((owner: any) => owner.kind === "unassigned")).toEqual([]);
+  } finally {
+    await stopHub(hub.process);
+  }
 });
