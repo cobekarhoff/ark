@@ -30,18 +30,26 @@ function table(headers: string[], rows: string[][]): string {
   return [line(headers), line(headers.map(() => "---")), ...rows.map(line)].join("\n");
 }
 
-/** Each run's state and, when closed, the time of its `run.closed` event in milliseconds. */
-function readStates(project: string): { state: RunState; closedAt: number | null }[] {
+/** Each readable run's state and, when closed, the time of its `run.closed` event in milliseconds; the names of the runs whose events cannot be read. */
+function readStates(project: string): {
+  runs: { state: RunState; closedAt: number | null }[];
+  unreadable: string[];
+} {
   const runsRoot = runsDirectory(project);
-  if (!existsSync(runsRoot)) return [];
-  return readdirSync(runsRoot)
-    .sort()
-    .map((name) => ({ directory: join(runsRoot, name), events: readEvents(join(runsRoot, name)) }))
-    .filter(({ events }) => events.length > 0)
-    .map(({ events }) => {
+  const runs: { state: RunState; closedAt: number | null }[] = [];
+  const unreadable: string[] = [];
+  if (!existsSync(runsRoot)) return { runs, unreadable };
+  for (const name of readdirSync(runsRoot).sort()) {
+    try {
+      const events = readEvents(join(runsRoot, name));
+      if (events.length === 0) continue;
       const closed = events.findLast((event) => event.type === "run.closed");
-      return { state: deriveState(events), closedAt: closed ? Date.parse(closed.time) : null };
-    });
+      runs.push({ state: deriveState(events), closedAt: closed ? Date.parse(closed.time) : null });
+    } catch {
+      unreadable.push(name);
+    }
+  }
+  return { runs, unreadable };
 }
 
 function elapsed(since: string): string {
@@ -55,7 +63,7 @@ export async function chiefState(inProject?: string): Promise<void> {
   const project = resolveProject(inProject);
   const config = loadConfig(project);
   const workspace = resolve(config.workspace);
-  const runs = readStates(project);
+  const { runs, unreadable } = readStates(project);
   const openRuns = runs.map(({ state }) => state).filter((state) => state.phase !== "closed");
   const sections: string[] = [`# Chief state: ${project} (${new Date().toISOString()})`];
 
@@ -67,6 +75,19 @@ export async function chiefState(inProject?: string): Promise<void> {
           ["Run", "Phase", "Current step"],
           openRuns.map((state) => [state.run, state.phase, state.current_step ?? "-"]),
         ),
+  );
+
+  // Open runs only. A run's last full test.completed decides: a file it no longer records is gone from here.
+  const redRows = openRuns.flatMap((state) => state.red_on_main.map((file) => [state.run, file]));
+  sections.push(
+    "## Red on main",
+    [
+      redRows.length === 0 && unreadable.length === 0 ? "none" : "",
+      redRows.length > 0 ? table(["Run", "File"], redRows) : "",
+      unreadable.length > 0 ? `unavailable: events of ${unreadable.join(", ")} cannot be read` : "",
+    ]
+      .filter((part) => part !== "")
+      .join("\n\n"),
   );
 
   // The budget is host-wide: it names runs of every project.
