@@ -264,7 +264,13 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       const message = pathname.match(/^\/api\/conversation\/message\/([^/]+)$/);
       if (message) {
         // The id only selects a message held in memory: never a path or a command.
-        const found = reader.conversationMessage(decodeURIComponent(message[1]));
+        let messageId: string | undefined;
+        try {
+          messageId = decodeURIComponent(message[1]);
+        } catch {
+          // A malformed escape names no message.
+        }
+        const found = messageId === undefined ? undefined : reader.conversationMessage(messageId);
         return found ? json(found) : text("no such message", 404);
       }
 
