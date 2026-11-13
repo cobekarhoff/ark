@@ -4091,6 +4091,18 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
     ["web", "clean", { name: branch, ahead: 0 }, null],
     ["e2e", "ahead", { name: branch, ahead: 1 }, null],
   ]);
+  // No MR will exist for a hand-off run: a package bump is worded from its done step, a submodule from its pointer.
+  expect(
+    Object.fromEntries(
+      (closed.view.repos ?? []).flatMap((entry) =>
+        entry.depends_on.map((edge) => [edge.bump, edge.bump_state] as const),
+      ),
+    ),
+  ).toEqual({
+    "service-bump": "bump step done",
+    "web-bump": `points at upstream branch ${submodulePointerSha.slice(0, 8)}`,
+    "e2e-bump": "bump step done",
+  });
   // The ticket chain of a closed newest run holds the same order and states.
   const newest = Array.isArray(chained.ticket_runs)
     ? chained.ticket_runs.find((entry) => entry.ticket === "ARK-902")

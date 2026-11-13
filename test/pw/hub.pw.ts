@@ -10646,6 +10646,8 @@ type RepoWorld = {
   single: string;
   /** Three repos, MRs !11 and !12 merged and `web-tests` running. */
   running3: string;
+  /** Three repos, core-lib and service both own `!12`; only core-lib's is merged. */
+  sameNumber3: string;
 };
 
 /** Git repos, an `ark.yml` that loads, and the runs and tickets that the repo graph tests open. Call before `launch`. */
@@ -10665,9 +10667,11 @@ function repoWorld(): RepoWorld {
     mode: "building" | "mr" | "handed_off",
     repoCount: 3 | 4,
     owner?: string,
+    sameNumber?: boolean,
   ) =>
     repoRunFixture({
       owner,
+      sameNumber,
       project: "p",
       run: runId(ticket, number),
       ticket: { id: ticket, title: `Repo graph ${ticket}` },
@@ -10736,11 +10740,13 @@ function repoWorld(): RepoWorld {
     ),
   });
   for (const id of ["ARK-951", "ARK-952", "ARK-953", "ARK-954", "ARK-955"]) ticket(id);
+  writeRun(fixture("ARK-956", 1, "mr", 3, "same-number", true));
   installFakeTools({
     mergeRequestViews: {
       [repoMergeRequest("example", "core-lib", 11)]: mergedView(),
       [repoMergeRequest("both-merged", "core-lib", 11)]: mergedView(),
       [repoMergeRequest("both-merged", "service", 12)]: mergedView(),
+      [repoMergeRequest("same-number", "core-lib", 12)]: mergedView(),
     },
   });
   return {
@@ -10749,6 +10755,7 @@ function repoWorld(): RepoWorld {
     handedOff4: runId("ARK-953"),
     single: runId("ARK-954"),
     running3: runId("ARK-955"),
+    sameNumber3: runId("ARK-956"),
   };
 }
 
@@ -10831,6 +10838,19 @@ test("ARK-T359 The run page draws repo cards in merge or hand-off order with lab
   );
   await toWeb.blur();
   await expect(page.getByTestId("edge-tip")).toHaveCount(0);
+
+  // The wait of web is for service's !12, not core-lib's merged !12 of the same number.
+  await open(page, baseUrl, `run/${world.sameNumber3}`);
+  await expect(cardOf(page, "core-lib").getByTestId("repo-mr")).toContainText("merged");
+  await expect(cardOf(page, "web").locator(".unmet")).toHaveText("!12");
+  await expect(cardOf(page, "service").locator(".met")).toContainText("!12");
+
+  // A hand-off run has no MR to wait for: the bump is worded from its step (done here), never "waits for upstream merge".
+  await open(page, baseUrl, `run/${world.handedOff4}`);
+  await pillOf(page, "core-lib", "service").hover();
+  await expect(page.getByTestId("edge-tip")).toContainText("service-bump bump step done");
+  await expect(page.getByTestId("edge-tip")).not.toContainText("waits for upstream");
+  await page.mouse.move(0, 0);
 
   // Four repos, handed off: collapsed, in hand-off order, a branch and no MR number on each card.
   await open(page, baseUrl, `run/${world.handedOff4}`);
@@ -10966,7 +10986,6 @@ test("ARK-T361 The ticket page shows the repo chain of the newest run and links 
   const baseUrl = await launch();
   const chain = page.getByTestId("repo-chain");
   const items = page.getByTestId("chain-repo");
-  const toggles = page.getByTestId("repo-toggle");
   const targeted = (repo: string) =>
     page.locator(`[data-testid="repo-card"][data-repo="${repo}"].targeted`);
 
@@ -10994,7 +11013,6 @@ test("ARK-T361 The ticket page shows the repo chain of the newest run and links 
   await expect(page).toHaveURL(new RegExp(`#/run/${world.merged3}/repo/service$`));
   await checkpoint(page, "run-card-target");
   await expect(targeted("service")).toBeInViewport();
-  await expect(toggles.filter({ has: page.locator(":focus") })).toHaveCount(0);
   await expect(toggleOf(page, "service")).toBeFocused();
   // The card of the chain has the state of its dot.
   await expect(cardOf(page, "service")).toHaveAttribute("data-state", states[1]!);

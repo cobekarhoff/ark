@@ -6,7 +6,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig } from "../cli/config.ts";
+import { loadConfig, mergeRequestsMode } from "../cli/config.ts";
 import { bumpState, submodulePointer } from "../cli/merge-request.ts";
 import { hasMultipleRepos, repoGraph, type PlanRepo, type PlanRepoEdge } from "../cli/plan.ts";
 import { commitsAhead } from "../cli/worktree.ts";
@@ -17,6 +17,8 @@ import type { ChainRepo, MergeRequestView, RepoState, RepoView } from "./types.t
 export type RepoFacts = {
   ahead: Record<string, number | null>;
   pointers: Record<string, string | undefined>;
+  /** The project opens no merge requests (`merge_requests: none`). */
+  localOnly: boolean;
 };
 
 /** The repos of the run in merge order with their `repos` entry, or null when the run draws no graph. */
@@ -42,7 +44,12 @@ export function readRepoFacts(run: ArkRun): RepoFacts {
   } catch {
     // ark.yml does not load: the branch state stays unknown
   }
-  const facts: RepoFacts = { ahead: {}, pointers: {} };
+  const facts: RepoFacts = { ahead: {}, pointers: {}, localOnly: false };
+  try {
+    facts.localOnly = mergeRequestsMode(state.project) === "none";
+  } catch {
+    // ark.yml does not load: treated as open
+  }
   for (const { repo, branch, base } of state.worktrees)
     facts.ahead[repo] =
       (workspace === null ? undefined : commitsAhead(join(workspace, repo), branch, base)) ?? null;
@@ -65,6 +72,7 @@ export function repoViews(
   if (!graph) return null;
   const mergeRequestOf = (repo: string) =>
     mergeRequests.find((candidate) => candidate.repo === repo);
+  const localOnly = run.state.outcome === "handed_off" || facts?.localOnly === true;
   return graph.order.map((repo, index) => {
     const entry = graph.entries.get(repo);
     const mergeRequest = mergeRequestOf(repo);
@@ -86,7 +94,13 @@ export function repoViews(
       depends_on: (entry?.depends_on ?? []).map((edge: PlanRepoEdge) => ({
         ...edge,
         bump_state: edge.bump
-          ? bumpState(edge, facts?.pointers[edge.bump], run.state, mergeRequestOf(edge.repo)?.state)
+          ? bumpState(
+              edge,
+              facts?.pointers[edge.bump],
+              run.state,
+              mergeRequestOf(edge.repo)?.state,
+              localOnly,
+            )
           : null,
       })),
       state,

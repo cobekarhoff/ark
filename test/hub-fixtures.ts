@@ -1028,6 +1028,8 @@ export function repoRunFixture(options: {
   bases: Record<string, string>;
   /** The GitHub owner in the MR URLs (default `example`): a test that answers `gh pr view` per URL gives each run its own. */
   owner?: string;
+  /** Two repos share the MR number `!12`, so a wait on `!12` is told apart by the repo (see `mergeRequests` below). */
+  sameNumber?: boolean;
 }): FixtureRun {
   const four = options.repoCount === 4;
   const model = "anthropic/claude-sonnet-5-5";
@@ -1090,13 +1092,17 @@ export function repoRunFixture(options: {
     },
     { repo: "core-lib", why: "Shared <b>core</b> types", depends_on: [] },
   ];
-  const mergeRequests = repoNames.map((repo, index) => ({
-    repo,
-    url: `https://github.com/${options.owner ?? "example"}/${repo}/pull/${11 + index}`,
-    number: 11 + index,
-    order: index + 1,
-    waits_for: index === 0 ? [] : [10 + index],
-  }));
+  // `sameNumber`: core-lib and service both own `!12` (numbers are per repo); service and web both wait for `!12`.
+  const mergeRequests = repoNames.map((repo, index) => {
+    const number = options.sameNumber ? [12, 12, 13, 14][index]! : 11 + index;
+    return {
+      repo,
+      url: `https://github.com/${options.owner ?? "example"}/${repo}/pull/${number}`,
+      number,
+      order: index + 1,
+      waits_for: index === 0 ? [] : [options.sameNumber ? 12 : 10 + index],
+    };
+  });
   return {
     project: options.project,
     run: options.run,

@@ -81,8 +81,9 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   queue: allIntervalMilliseconds || 3000, // its own source: a slow Orca queue never delays another source
   resources: allIntervalMilliseconds || 5000, // one ps and one lsof: about 0.2 s of CPU, so slower than Orca
 };
-/** The full inbox read (ARK-344): its own loop, never a snapshot source, so a failure never touches `orca` and no message reaches `/events`. */
+/** The git facts of a run's repo graph: its own loop, like the inbox read, so no git runs in `viewOf`. */
 const repoFactsIntervalMilliseconds = allIntervalMilliseconds || 3000;
+/** The full inbox read (ARK-344): its own loop, never a snapshot source, so a failure never touches `orca` and no message reaches `/events`. */
 const conversationIntervalMilliseconds = allIntervalMilliseconds || 15_000;
 
 const usageTimeoutMilliseconds = 30_000;

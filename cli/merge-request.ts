@@ -926,21 +926,30 @@ export function submodulePointer(
 }
 
 /**
- * `refreshed to <value>` once recorded; else a submodule shows its pointer (from `submodulePointer`), a package waits
- * on its upstream MR. No registry is asked. The CLI status and the hub run page both word the bump through this.
+ * `refreshed to <value>` once recorded; else a submodule shows its pointer (from `submodulePointer`). A package waits
+ * on its upstream merge request, or, when the run has no merge request path (`localOnly`: a hand-off run or a
+ * `merge_requests: none` project), shows the bump step's status as `localOnlyLines` does. No registry is asked.
+ * The CLI status and the hub run page both word the bump through this.
  */
 export function bumpState(
   edge: PlanRepoEdge,
   pointer: string | undefined,
-  state: Pick<RunState, "bump_refreshed">,
-  upstreamMr: string | undefined,
+  state: Pick<RunState, "bump_refreshed" | "steps">,
+  upstreamMergeRequest: string | undefined,
+  localOnly = false,
 ): string {
   const refreshed = state.bump_refreshed[edge.bump];
   if (refreshed !== undefined)
     return `refreshed to ${edge.kind === "submodule" ? refreshed.slice(0, 8) : refreshed}`;
   if (edge.kind === "submodule")
     return `points at upstream branch ${pointer?.slice(0, 8) || "unknown"}`;
-  return upstreamMr === "merged" ? "waits for upstream publish" : "waits for upstream merge";
+  if (localOnly)
+    return state.steps.find((step) => step.id === edge.bump)?.status === "succeeded"
+      ? "bump step done"
+      : "pending: needs published version";
+  return upstreamMergeRequest === "merged"
+    ? "waits for upstream publish"
+    : "waits for upstream merge";
 }
 
 /**

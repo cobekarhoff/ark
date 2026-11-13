@@ -125,7 +125,11 @@ function Card({
                 <>
                   waits for
                   {mergeRequest.waits_for.map((number) => {
-                    const met = mergeRequests.find((other) => other.number === number)?.state;
+                    const met = mergeRequests.find(
+                      (other) =>
+                        other.number === number &&
+                        view.depends_on.some((edge) => edge.repo === other.repo),
+                    )?.state;
                     return (
                       <span key={number} className={met === "merged" ? "met" : "unmet"}>
                         {" "}
