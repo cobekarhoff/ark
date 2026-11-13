@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -237,6 +238,60 @@ test("ARK-T115 chief state prints each live source in one Markdown snapshot", ()
   expect(section(out, "Host")).toMatch(/free disk: \d+ GB/);
   // Nothing is installed for this project: the refused launchctl and no plist both read as not installed.
   expect(section(out, "Services").match(/not installed/g)).toHaveLength(3);
+});
+
+test("ARK-T331 chief state lists each red on main file with its run id once, from the last full test of the run, and says unavailable when a run cannot be read", () => {
+  setScenario({ runs: [chiefOrcaRun] });
+  const runsRoot = join(process.env.ARK_HOME as string, "projects", project, "runs");
+  const runStarted = (run: string) => {
+    mkdirSync(join(runsRoot, run), { recursive: true });
+    appendEvent(join(runsRoot, run), "run.started", {
+      run,
+      project,
+      round_budget: 2,
+      ticket: { id: run.slice(11, -2), title: `Ticket of ${run}` },
+      criteria: [],
+    });
+  };
+  // appendEvent refuses a test result before the run is planned: write the line the way `ark test` would
+  const testCompleted = (run: string, extra: Record<string, unknown>) => {
+    const events = join(runsRoot, run, "events.ndjson");
+    const seq = readFileSync(events, "utf8").trim().split("\n").length + 1;
+    const data = { passed: true, heads: {}, suites: [], criteria: {}, ...extra };
+    appendFileSync(
+      events,
+      `${JSON.stringify({ seq, time: new Date().toISOString(), type: "test.completed", data })}\n`,
+    );
+  };
+  const runWithout = "2026-11-02-ARK-901-1";
+  const runCleared = "2026-11-02-ARK-902-1";
+  runStarted(runWithout);
+  runStarted(runCleared);
+  // run A (`openRun`): two earlier full tests record red.test, the last full one records two files, a quick one records none
+  testCompleted(openRun, { red_on_main: ["test/red.test.ts"] });
+  testCompleted(openRun, { red_on_main: ["test/red.test.ts"] });
+  testCompleted(openRun, { red_on_main: ["test/red.test.ts", "test/other.test.ts"] });
+  testCompleted(openRun, { mode: "quick" });
+  testCompleted(runWithout, {});
+  testCompleted(runCleared, { red_on_main: ["test/red.test.ts"] });
+  testCompleted(runCleared, {});
+
+  const listed = ark("chief", "state", "--project", project);
+  expect(listed.code, listed.err).toBe(0);
+  const rows = section(listed.out, "Red on main")
+    .split("\n")
+    .filter((line) => line.startsWith("| 20"));
+  expect(rows.map((row) => row.replaceAll(/\s+/g, " ").trim()).sort()).toEqual([
+    `| ${openRun} | test/other.test.ts |`,
+    `| ${openRun} | test/red.test.ts |`,
+  ]);
+
+  // a run whose events cannot be read: the section says unavailable, never an empty list
+  const events = join(runsRoot, openRun, "events.ndjson");
+  writeFileSync(events, `${readFileSync(events, "utf8")}not json\n`);
+  const broken = ark("chief", "state", "--project", project);
+  expect(broken.code, broken.err).toBe(0);
+  expect(section(broken.out, "Red on main")).toContain("unavailable");
 });
 
 test("ARK-T297 chief state prints the services block of ark services status, with the pid of a running one and the last log line", () => {
