@@ -120,6 +120,8 @@ type Resolved = { agent: ConversationAgent; arkRun: string | null };
 type Index = {
   byMessage: Map<string, { from: Resolved; to: Resolved; arkRuns: string[] }>;
   workersOf: Map<string, ConversationAgent[]>;
+  /** `<ark run>\0<handle>` to the id of the worker that owns the handle. */
+  workerOfHandle: Map<string, string>;
 };
 
 const dispatchHandle = (handle: string) => handle.replace(/^dispatch:/, "");
@@ -163,6 +165,7 @@ function indexOf(input: ConversationInput): Index {
     for (const handle of [`run:${orcaRun}`, ...handles]) add(handle, { agent: lead, arkRun });
   }
   const workersOf = new Map<string, ConversationAgent[]>();
+  const workerOfHandle = new Map<string, string>();
   for (const worker of directory.workers) {
     const agent: ConversationAgent = {
       id: `worker:${worker.arkRun}:${worker.handles[0] ?? worker.title}`,
@@ -174,7 +177,10 @@ function indexOf(input: ConversationInput): Index {
       title: worker.title,
     };
     workersOf.set(worker.arkRun, [...(workersOf.get(worker.arkRun) ?? []), agent]);
-    for (const handle of worker.handles) add(handle, { agent, arkRun: worker.arkRun });
+    for (const handle of worker.handles) {
+      add(handle, { agent, arkRun: worker.arkRun });
+      workerOfHandle.set(`${worker.arkRun}\0${dispatchHandle(handle)}`, agent.id);
+    }
   }
   // A terminal that sent to Master Chief and is none of the above is a brainstorm or other session.
   const sentToChief = new Set(
@@ -216,7 +222,7 @@ function indexOf(input: ConversationInput): Index {
     const arkRuns = [...new Set(owned.length > 0 ? owned : viaRun ? [viaRun] : [])];
     byMessage.set(message.id, { from, to, arkRuns });
   }
-  return { byMessage, workersOf };
+  return { byMessage, workersOf, workerOfHandle };
 }
 
 const indexes = new WeakMap<ConversationInput, Index>();
@@ -280,7 +286,11 @@ function runConversation(
         id: message.id,
         sent: message.created_at,
         delivered: message.delivered_at,
-        answered: answers.find((answer) => Date.parse(answer.time) >= since)?.time ?? null,
+        // Only Master Chief's questions wait for the human; a worker's question to a run lead does not.
+        answered:
+          index.byMessage.get(message.id)!.to.agent.kind === "chief"
+            ? (answers.find((answer) => Date.parse(answer.time) >= since)?.time ?? null)
+            : null,
         pickup_seconds:
           Number.isNaN(delivered) || Number.isNaN(sent)
             ? "not recorded"
@@ -288,14 +298,27 @@ function runConversation(
       };
     });
   // One span for each step.started: a step started again in a rework round is a second span; a start with no finish stays open.
-  const spans = stepWindows(events).map((window): ConversationSpan => ({
-    step: window.id,
-    role: window.role,
-    group: groupOfRole(window.role),
-    agent: workers.find((worker) => worker.step === window.id)?.id ?? null,
-    start: new Date(window.start).toISOString(),
-    end: window.end === null ? null : new Date(window.end).toISOString(),
-  }));
+  // Its agent is the worker of the `worker.started` that follows that start (before the step starts again); null when none (old runs).
+  const started = events.flatMap((event, at) => (event.type === "step.started" ? [at] : []));
+  const spans = stepWindows(events).map((window, number): ConversationSpan => {
+    const from = started[number];
+    const next = started.slice(number + 1).find((at) => events[at].data.step === window.id);
+    const launch = events
+      .slice(from, next ?? events.length)
+      .find((event) => event.type === "worker.started" && event.data.step === window.id);
+    const handle = [launch?.data.dispatch, launch?.data.terminal]
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => index.workerOfHandle.get(`${run}\0${dispatchHandle(value)}`))
+      .find((id) => id !== undefined);
+    return {
+      step: window.id,
+      role: window.role,
+      group: groupOfRole(window.role),
+      agent: handle ?? null,
+      start: new Date(window.start).toISOString(),
+      end: window.end === null ? null : new Date(window.end).toISOString(),
+    };
+  });
   return {
     run,
     project,

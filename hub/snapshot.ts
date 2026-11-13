@@ -612,11 +612,20 @@ export function createSnapshotReader() {
   async function readConversation(): Promise<void> {
     const started = generation;
     let inbox: InboxRead | null = null;
-    let directory: Directory | null = null;
+    const publish = (read: InboxRead, directory: Directory) => {
+      const version = new Date().toISOString();
+      conversation = {
+        version,
+        messages: new Map(read.messages.map((message) => [message.id, message])),
+        input: { version, messages: read.messages, directory },
+        truncated: read.truncated,
+        stale: false,
+      };
+    };
     try {
       inbox = await readInbox();
-      directory = inbox
-        ? await readDirectory(
+      const reading = inbox
+        ? readDirectory(
             (slots.ark.value?.runs ?? []).map((run) => ({
               run: run.state.run,
               closed: run.state.phase === "closed",
@@ -625,22 +634,26 @@ export function createSnapshotReader() {
             closedWorkers,
           )
         : null;
+      // The first value waits two seconds for the handle directory, not the 35 s a cold read of every run's workers takes:
+      // after that the messages show with unmapped handles until the directory read fills them in.
+      if (inbox && reading && !conversation) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const early = await Promise.race([
+          reading.catch(() => null),
+          new Promise<"slow">((resolve) => (timer = setTimeout(() => resolve("slow"), 2000))),
+        ]);
+        clearTimeout(timer);
+        if (early === "slow" && started === generation)
+          publish(inbox, { chiefs: [], leads: [], workers: [] });
+      }
+      const directory = await reading;
+      if (started !== generation) return;
+      if (inbox && directory) return publish(inbox, directory);
     } catch {
       // A failed read is the stale case below.
     }
     if (started !== generation) return;
-    if (!inbox || !directory) {
-      if (conversation) conversation.stale = true;
-      return;
-    }
-    const version = new Date().toISOString();
-    conversation = {
-      version,
-      messages: new Map(inbox.messages.map((message) => [message.id, message])),
-      input: { version, messages: inbox.messages, directory },
-      truncated: inbox.truncated,
-      stale: false,
-    };
+    if (conversation) conversation.stale = true;
   }
 
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
@@ -880,12 +893,14 @@ export function createSnapshotReader() {
       const runs: RunEvents[] = wanted.map((run) => ({
         run: run.state.run,
         project: run.state.project,
-        // The project answer needs only the human answers and the step spans.
+        // The project answer needs only the human answers, the step spans and the workers that ran them.
         events:
           query.kind === "run"
             ? run.events
             : run.events.filter((event) =>
-                ["gate.answered", "step.started", "step.finished"].includes(event.type),
+                ["gate.answered", "step.started", "step.finished", "worker.started"].includes(
+                  event.type,
+                ),
               ),
       }));
       const answer = await usage.conversation(held.input, runs, query);

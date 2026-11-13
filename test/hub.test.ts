@@ -3007,6 +3007,12 @@ function conversationFixture() {
     ticket: { id: "ARK-841", title: "Other" },
     phase: "building",
   });
+  // Round 1 of impl-api ran on worker w1; round 2 runs on worker w6.
+  appendEventAt(directory, at(46), "worker.started", {
+    step: "impl-api",
+    dispatch: "ctx_w1",
+    terminal: "term_w1",
+  });
   // In time order: an auto answer, a human answer, a second round of impl-api, a second human answer.
   appendEventAt(directory, at(45), "gate.answered", {
     gate: "plan",
@@ -3023,6 +3029,11 @@ function conversationFixture() {
     role: "implementer",
     repo: ".",
     round: 2,
+  });
+  appendEventAt(directory, at(34), "worker.started", {
+    step: "impl-api",
+    dispatch: "ctx_w6",
+    terminal: "term_w6",
   });
   appendEventAt(directory, at(32), "step.finished", { step: "impl-api", outcome: "succeeded" });
   appendEventAt(directory, at(20), "gate.answered", {
@@ -3082,6 +3093,8 @@ function conversationFixture() {
     message("msg_11", "question", "structworker_lead2", "run:orca-chief-p", 10, {
       runId: `orca-${otherRun}`,
     }),
+    // A worker asks its run lead: no human answer waits on it.
+    message("msg_12", "question", "dispatch:ctx_w1", "structworker_lead", 5),
   ];
   const worker = (
     name: string,
@@ -3117,6 +3130,7 @@ function conversationFixture() {
         worker("w3", { agentTerminalHandle: "term_w3a" }),
         worker("w4", { dispatchId: "ctx_w4" }),
         worker("w5", { terminal: "term_w5" }),
+        worker("w6", { dispatchId: "ctx_w6", terminal: "term_w6" }),
       ],
     },
     tasks: [
@@ -3125,6 +3139,7 @@ function conversationFixture() {
       { id: "task-w3", title: "review-1 (reviewer, .)" },
       { id: "task-w4", title: `evaluator (${run})` },
       { id: "task-w5", title: `test-case-writer (${run})` },
+      { id: "task-w6", title: "impl-api (implementer, .)" },
     ],
     messages,
   };
@@ -3313,7 +3328,9 @@ test("ARK-T320 every message handle maps to Master Chief, a run lead, a worker w
     owned(run)
       .messages.map((message) => message.id)
       .sort(),
-  ).toEqual(["msg_1", "msg_2", "msg_3", "msg_4", "msg_5", "msg_6", "msg_7", "msg_8"].sort());
+  ).toEqual(
+    ["msg_1", "msg_12", "msg_2", "msg_3", "msg_4", "msg_5", "msg_6", "msg_7", "msg_8"].sort(),
+  );
 }, 60_000);
 
 test("ARK-T321 the conversation routes answer agents, role groups, spans, events, messages, human answers and question times from the worker thread", async () => {
@@ -3334,11 +3351,18 @@ test("ARK-T321 the conversation routes answer agents, role groups, spans, events
   const workers = answer.agents.filter((agent) => agent.kind === "worker");
   expect(
     workers.map((agent) => agent.group).sort((left, right) => left!.localeCompare(right!)),
-  ).toEqual(["Implementers", "Planning", "Planning", "Reviewers", "Validators"]);
+  ).toEqual(["Implementers", "Implementers", "Planning", "Planning", "Reviewers", "Validators"]);
   const spans = (step: string) => answer.spans.filter((span) => span.step === step);
   expect(spans("impl-api")).toHaveLength(2); // two rounds
   expect(spans("impl-api")[1]).toMatchObject({ start: at(35), end: at(32), group: "Implementers" });
-  expect(spans("impl-api")[0].agent).toBe(spans("impl-api")[1].agent);
+  // Each round names the worker its own worker.started recorded.
+  const agentOf = (handle: string) => workers.find((agent) => agent.id.endsWith(`:${handle}`))!.id;
+  expect(spans("impl-api").map((span) => span.agent)).toEqual([
+    agentOf("ctx_w1"),
+    agentOf("ctx_w6"),
+  ]);
+  // No worker.started follows this step.started: no agent.
+  expect(spans("spec-cases-write")[0].agent).toBeNull();
   expect(spans("spec-cases-write")).toEqual([
     expect.objectContaining({ end: null, role: "validator", group: "Validators" }),
   ]);
@@ -3367,6 +3391,13 @@ test("ARK-T321 the conversation routes answer agents, role groups, spans, events
       delivered: messages[1].delivered_at,
       answered: at(20),
       pickup_seconds: 60,
+    },
+    {
+      id: "msg_12",
+      sent: messages[11].created_at,
+      delivered: null,
+      answered: null,
+      pickup_seconds: "not recorded",
     },
   ]);
   expect((await fetch(`${baseUrl}/api/run/no-such-run/conversation`)).status).toBe(404);
