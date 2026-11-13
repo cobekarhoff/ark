@@ -1,5 +1,8 @@
 ---
 status: accepted
+date: 2026-10-29
+supersedes: ADR 0002, ADR 0003
+amends: ADR 0001
 ---
 
 # Agents are trusted; the only hard line is that only a human merges

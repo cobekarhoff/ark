@@ -1,44 +1,64 @@
-# Add project checks to ark.yml
+# Project checks, ticket kinds and how `ark test` proves a ticket
+
+This page covers three things you meet before an MR opens. On GitHub an MR is a pull request.
+
+| You want to                                                  | Read                                                                  |
+| ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Run lint, typecheck or a similar command on every run        | [Add project checks](#add-project-checks)                             |
+| Know what a `bug`, `perf` or `refactor` ticket needs         | [Ticket kinds](#ticket-kinds)                                         |
+| Know what `ark test` runs, and what evidence it leaves       | [What `ark test` runs](#what-ark-test-runs) and [Evidence](#evidence) |
+| Know why `ark merge-request open` or `ark run close` refused | [What refuses an MR](#what-refuses-an-mr)                             |
+
+## Add project checks
 
 A check is a command that `ark test <run>` runs in its repo worktree before the suites. A check that exits non-zero makes `test.completed` record `passed: false`. `ark test` prints `check <name> failed` and the last 20 lines of its output. The full output is in `<run folder>/results/check-<name>.log`, next to the suite logs. A project with no `checks` runs as before.
 
-`checks:` is a list of `{ name, repo, command }`. `repo` must be a repo of the workspace. A check must not write files, so `format` is not a check: use `format:check`.
+`checks:` is a list of `{ name, repo, command }`. `repo` must be a repo of the workspace, such as `.` for a single-repo project. A check must not write files, so a formatter is not a check: use its check mode.
 
-Add this block to `~/.ark/projects/ark/ark.yml`. Ark runs do not edit `ark.yml`:
+Add a block like this to `~/.ark/projects/<project>/ark.yml`. Ark runs do not edit `ark.yml`:
 
 ```yaml
 checks:
-  - name: format:check
-    repo: .
-    command: bun run format:check
-  - name: typecheck
-    repo: .
-    command: bun run typecheck
   - name: lint
     repo: .
-    command: bun run lint
-  - name: cli-reference
+    command: "<your lint command>"
+  - name: typecheck
     repo: .
-    command: bun scripts/cli-reference.ts && git diff --exit-code docs/reference/cli.md
+    command: "<your typecheck command>"
 ```
 
-`cli-reference` regenerates `docs/reference/cli.md` and fails when the file differs from the committed one.
+A check may use two more things:
 
-## What else refuses
+- `cores`: the CPU cores the check takes from the host's test budget (`test_budget_cores`, default 60% of the host's cores, rounded down). A whole number, 1 or more. The default for a check is 1.
+- `<cores>`: Ark replaces this in the command of a check, a suite or a suite's `base_command` with the number of cores that command took. Use it for a flag such as `--workers=<cores>`.
 
-- `ark merge-request open <run>` refuses when a non-manual AC is not `passing` in the last `test.completed`.
-- It runs `git fetch origin` and `git merge-tree --write-tree HEAD origin/<target>` in each repo it pushes (a new MR or an open one it refreshes), before any push, and refuses when the head does not merge cleanly: the message names the repo and `--merge`. Nothing is pushed for any repo. After the merge step fixes the branch, the same command passes with no new `ark worktree sync`.
-- It refuses when a counted string in backticks in the text of an AC is in no tracked file at HEAD of any repo of the workspace, run worktree or not. A backtick span must sit on one line and be non-blank. Each is searched with `git grep -F`; a string also passes when it names a tracked file or folder at HEAD (`git cat-file -e HEAD:<path>`, with one trailing `/` dropped, so `scripts/check.py` and `docs/old/` pass when they exist). A string that is empty after the drop, such as `/`, never passes.
-- These strings are not counted, because no file holds them: a string with a placeholder (`<` followed later by `>`, or a lone `<`), a `*`, the three dots `...`, or a suffix `:<digits>` or `:<digits>-<digits>` (a `file:line` reference); a string that holds the id of its own AC, written with `-` or `_` (a test name or command of that AC); and every string of a manual AC.
-- A string that starts with `not:` is a removed string. The text after `not:` must be in no tracked file of any repo at HEAD and name no tracked file or folder there, else the command refuses with `AC string still in a tracked file at head:`, the AC and the string without the prefix. `not:` alone is no string. `git grep -F` matches a substring, so a stale path inside a longer path that stays is still found: write that one outside backticks, as you do a string that the run rewrites or that only describes the old state.
-- Fix the text of an AC of a run with `ark criteria amend`.
-- `ark run close <run> handed_off` applies the same refusals, and those of the `kind` rules below, before it appends `run.closed` or removes a worktree. On a refusal run `ark test <run>` again or `ark criteria amend`.
-- A ticket may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`). `bug`: `ark run step <run> <implementer step> start` refuses until a failing `ark test` of every AC exists. `perf`: `results/baseline.md` and `results/compare.md` must exist and not be empty. `refactor`: the suites must pass at the base commit. `ark test` runs them there on every run, records `base_passed` and exits 1 when they fail.
-- Both commands also refuse missing, malformed or stale evidence. See Evidence below.
+### Ark's own check that writes
+
+Ark's own `ark.yml` also runs `bun scripts/cli-reference.ts && git diff --exit-code docs/reference/cli.md`, named `cli-reference`. It regenerates `docs/reference/cli.md` and fails when the committed copy was stale. It is the one check that writes a file. Skip it unless your repo generates a doc the same way.
+
+## Ticket kinds
+
+A ticket may set `kind` to `feature`, `bug`, `perf` or `refactor`. The default is `feature`. A kind changes what must exist before the run goes on.
+
+| Kind       | What it requires                                                                                                                                            | Where it refuses                                                       |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `feature`  | Nothing more.                                                                                                                                               |                                                                        |
+| `bug`      | A failing `ark test` of every AC exists before the fix.                                                                                                     | `ark run step <run> <implementer step> start`                          |
+| `perf`     | `results/baseline.md` and `results/compare.md` exist and are not empty.                                                                                     | `ark merge-request open`, `ark run close <run> handed_off`             |
+| `refactor` | The suites pass at the base commit, when the ticket has a `test` AC. `ark test` runs them there on every run, records `base_passed` and exits 1 on failure. | `ark test`, `ark merge-request open`, `ark run close <run> handed_off` |
+
+## What `ark test` runs
+
+`ark test <run>` runs the suites twice, on every run and for every kind. A failure at base is data: a new test fails there, and `ark test` still exits 0. A failure at head fails `ark test`.
+
+- **Head run.** The suites run on the run's workspace.
+- **Base run.** The suites run again on a throwaway checkout of each touched repo at its `worktree.created` commit. The checkout is a `git clone --shared` under `$TMPDIR/ark-base-*`, not a git worktree, so a killed `ark test` leaves no detached worktree in the repo or in Orca. Before the base run, Ark copies the head's version of each file that the diff adds or changes under a `test`, `tests` or `features` folder, at any depth, into that checkout, so a new test meets the base build. A deleted file stays at base, and production files are never copied.
+- **Census.** A full run first counts the base's own tests on the same checkout, before the head's test files are copied in. A suite with `base_files` runs the run's own test files that exist at base, and any other suite runs whole. The logs go to `<run folder>/results/census/`, and the result is cached by the base commits and the suite command. The census is how `ark test` reports the tests skipped at base and the tests the run deleted (the `tests` and `deleted` lines, and `passed_count`, `skipped`, `base_skipped` and `deleted` in `test.completed`).
+- **Reuse.** A suite that passed at the same heads, mode and command (head), or at the same base commits, copied test files and command (base), is reused from the project's `test-cache/` and printed `reused`. A failed result runs again, and `checks` run every time.
+- **Flaky.** A test file that fails once and passes on retry (through `base_command` with that file) passes the suite and is printed `flaky`. The retro and the MR body list it.
+- **Runner.** `ark test` runs in a detached runner that holds the host lock and survives a lost connection. `ark test <run> --wait` prints its output and exits with its code, and `ark test <run> --stop` stops it and every suite process.
 
 ## Evidence
-
-`ark test <run>` runs the suites twice, on every run and for every `kind`: at head on the run's workspace, and at base on a throwaway checkout of each touched repo at its `worktree.created` commit. The base checkout is a `git clone --shared` under `$TMPDIR/ark-base-*`, not a git worktree, so an `ark test` that is killed leaves no detached worktree in the repo or in Orca. A full run also runs a census on that same base checkout before the head's test files are copied in (a suite with `base_files` runs the run's own test files that exist at base, any other suite runs whole; its logs go to `<run folder>/results/census/`), only to list and count the base's tests: that is how `ark test` reports the skipped tests at base and the tests the run deleted (`tests` and `deleted` lines, `passed_count`, `skipped`, `base_skipped` and `deleted` in `test.completed`). The census result is cached by the base commits and the suite command. Before the base run it copies the head's version of each file that the diff adds or changes under a `test`, `tests` or `features` folder, at any depth, into the base checkout, so a new test meets the base build. A deleted file stays at base, and production files are never copied. A failure at base is data: a new test fails there, and `ark test` still exits 0. A failure at head fails `ark test`. A `refactor` run also needs its suites to pass at base. A suite that passed at the same heads, mode and command (head), or at the same base commits, copied test files and command (base), is reused from the project's `test-cache/` and printed `reused`; a failed result runs again, and `checks` run every time. `ark test` runs in a detached runner that holds the host lock and survives a lost connection: use `ark test <run> --wait` to get its output and exit code and `ark test <run> --stop` to stop it and every suite process. A test file that fails once and passes on retry (through `base_command` with that file) passes the suite and is printed `flaky`, and the retro and the MR body list it.
 
 The base logs stay in `<run folder>/results/base-<suite>.log`. The evidence goes to the run folder:
 
@@ -50,135 +70,63 @@ results/evidence/<test case id>/head/...
 results/evidence/<AC id>.md
 ```
 
-- `result.json` holds `case`, `name` (the JUnit name), `status` (`passed`, `failed` or `skipped`) and `sha`, the commit of the checkout that ran, and `repo`, the repo that ran it. A case carried by several suites keeps the failed result of any of them and the command output of all of them. A case that one run reports and the other does not gets a `failed` result and the suite's `command.log` on the missing side: a new test file that crashes at base, or a test file the run deleted (it stays at base, so the head has no result). `ark test` removes the folder of a case that no longer appears.
+- `result.json` holds `case`, `name` (the JUnit name), `status` (`passed`, `failed` or `skipped`), `sha` (the commit of the checkout that ran) and `repo` (the repo that ran it).
+- A case carried by several suites keeps the failed result of any of them and the command output of all of them.
+- A case that one run reports and the other does not gets a `failed` result and the suite's `command.log` on the missing side. This happens for a new test file that crashes at base, and for a test file the run deleted (it stays at base, so the head has no result). `ark test` removes the folder of a case that no longer appears.
 - `command.log` has the suite command on its first line, then the whole output of the suite for that checkout, and `exit <code>` on its last line. Every case of one suite shares the same `command.log`.
 - `ARK_EVIDENCE_DIR` is set for each suite run to a scratch folder. In a Playwright test, `checkpoint(page, "<name>")` from `test/pw/helpers.ts` writes `screenshots/<name>.png` under it, under one subfolder for each test case id in the test's title. Call it before the assertion of that step, so the screenshot exists when the assertion fails at base. It writes nothing when the variable is not set. `ark test` moves each subfolder to the `screenshots/` folder of its case and drops the screenshots of a test with no case id. The setting `screenshot: "only-on-failure"` in `playwright.config.ts` is separate and stays.
-- A non-test AC (`demonstration`, `inspection` or `analysis`; an old `manual: true` AC reads as `demonstration`) has one file `results/evidence/<AC id>.md`, where `<AC id>` is the local id such as `AC6`:
-  - `demonstration`: the sections What the human did, What the human saw, Before and After (each with a screenshot path, checked for shape, not for existence), and the last line `human: ok`. `ark gate record <run> manual <AC id> ok` appends that line once; a `problem` answer appends nothing, and the other methods keep their file as written.
-  - `inspection`: the sections Files (each `path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`.
-  - `analysis`: the sections Command, Output, Threshold and Result, each given for Base and for Head.
-- `ark merge-request open` and `ark run close <run> handed_off` check the evidence last, before any push and before any event, and name every AC and case that fails, after `refused: evidence is not complete`:
-  - `evidence missing: <AC id> (<method>)` when a non-test AC has no file.
-  - `evidence malformed: <AC id>: <reason>` when the file lacks a section of its method or a required value, and the reason names it.
-  - `test evidence missing: <AC id> <test case id> (<base|head>)` when a case in the `verified_by` of a `test` AC has no `base/` or no `head/` folder.
-  - `test evidence stale: <AC id> <test case id>` when the `sha` in its `head` `result.json` is not the current head of the repo named in that `result.json`. Run `ark test <run>` again after the last commit.
-  - An AC with no `verified_by` needs no test evidence.
 
-## Literals
+### Evidence of a non-test AC
 
-The ACs of ARK-302, ARK-304 and ARK-305 name these strings. `ark merge-request open` finds each one in this file, as the rule above requires:
+A non-test AC has the method `demonstration`, `inspection` or `analysis`. An old `manual: true` AC reads as `demonstration`. It has one file `results/evidence/<AC id>.md`, where `<AC id>` is the local id such as `AC6`:
 
-- `ark.yml`
-- `checks:`
-- `{ name, repo, command }`
-- `ark test <run>`
-- `test.completed`
-- `passed: false`
-- `check <name> failed`
-- `checks`
-- `test/test-run.test.ts`
-- `ARK-302-AC1`
-- `bun test test/test-run.test.ts -t ARK-302-AC1`
-- `ark merge-request open <run>`
-- `manual: true`
-- `passing`
-- `test/merge-request.test.ts`
-- `ARK-302-AC2`
-- `bun test test/merge-request.test.ts -t ARK-302-AC2`
-- `ARK-302-AC3`
-- `bun test test/merge-request.test.ts -t ARK-302-AC3`
-- `kind: bug`
-- `perf`
-- `refactor`
-- `feature`
-- `kind`
-- `ark run start`
-- `run.started`
-- `ark status <run>`
-- `test/run.test.ts`
-- `ARK-302-AC4`
-- `bun test test/run.test.ts -t ARK-302-AC4`
-- `ark plan check`
-- `ark run step <run> <implementer step> start`
-- `failing`
-- `bug run: record a failing ark test of the ACs before the fix`
-- `test/plan.test.ts`
-- `ARK-302-AC5`
-- `bun test -t ARK-302-AC5`
-- `kind: perf`
-- `results/baseline.md`
-- `results/compare.md`
-- `ark merge-request open`
-- `ARK-302-AC6`
-- `bun test -t ARK-302-AC6`
-- `kind: refactor`
-- `worktree.created`
-- `base_passed`
-- `ARK-T12`
-- `bun test test/test-run.test.ts -t ARK-T12`
-- `run-lead.md`
-- `brainstorm.md`
-- `chief.md`
-- `test/playbooks.test.ts`
-- `ARK-302-AC8`
-- `bun test test/playbooks.test.ts -t ARK-302-AC8`
-- `docs/`
-- `format:check`
-- `typecheck`
-- `lint`
-- `cli-reference`
-- `docs/reference/cli.md`
-- `bun scripts/cli-reference.ts`
-- `bun test`
-- `bun run typecheck`
-- `bun run lint`
-- `bun run format:check`
-- `Enforced by: <check or refusal>`
-- `ARK-304-AC1`
-- `bun test test/run.test.ts -t ARK-304-AC1`
-- `ARK-304-AC2`
-- `bun test test/run.test.ts -t ARK-304-AC2`
-- `ARK-304-AC3`
-- `bun test test/run.test.ts -t ARK-304-AC3`
-- `ARK-304-AC4`
-- `bun test test/run.test.ts -t ARK-304-AC4`
-- `ARK-304-AC5`
-- `bun test test/run.test.ts -t ARK-304-AC5`
-- `the last test must have passed`
-- `ARK-304-AC6`
-- `bun test test/playbooks.test.ts -t ARK-304-AC6`
-- `--limit <n>`
-- `--cursor <cursor>`
-- `test/chief.test.ts`
-- `ARK-306-AC1`
-- `bun test test/chief.test.ts -t ARK-306-AC1`
-- `cli/orca-release.ts`
-- `ARK-306-AC2`
-- `bun test test/chief.test.ts -t ARK-306-AC2`
-- `unavailable: orca orchestration run-list failed: <reason>`
-- `timed out after <n> s`
-- `unavailable: no Orca Run "Master Chief: <project> tickets"`
-- `ARK-306-AC3`
-- `orca: runtime is not running`
-- `bun test test/chief.test.ts -t ARK-306-AC3`
-- `ARK-306-AC4`
-- `bun test test/playbooks.test.ts -t ARK-306-AC4`
-- `test/fixtures/merge-request/sqc-1-criteria.md`
-- `SQC-1`
-- `SQC-1-AC2`
-- `SQC-1-AC6`
-- `docs/00-master-reference.md`
-- `docs/architecture/`
-- `docs/references/`
-- `docs/workflows/`
-- `docs/operations/`
-- `docs/templates/`
-- `(N docs)`
-- `## Finding the knowledge base`
-- `uv run check-knowledge-docs`
-- `Paths are relative to the workspace root`
-- `ARK_305_AC1`
-- `bun test test/merge-request.test.ts -t ARK-305-AC1`
-- `bun test test/merge-request.test.ts -t ARK-305-AC2`
-- `bun test test/merge-request.test.ts -t ARK-305-AC3`
-- `bun test test/playbooks.test.ts -t ARK-305-AC4`
+| Method          | Sections the file needs                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `demonstration` | What the human did, What the human saw, Before and After (each with a screenshot path, checked for shape, not for existence), and the last line `human: ok`. |
+| `inspection`    | Files (each `path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`.                                              |
+| `analysis`      | Command, Output, Threshold and Result, each given for Base and for Head.                                                                                     |
+
+`ark gate record <run> manual <AC id> ok` appends the line `human: ok` once to a `demonstration` file. A `problem` answer appends nothing, and the other methods keep their file as written.
+
+### Evidence refusals
+
+`ark merge-request open` and `ark run close <run> handed_off` check the evidence last, before any push and before any event. They name every AC and case that fails, after `refused: evidence is not complete`:
+
+- `evidence missing: <AC id> (<method>)`: a non-test AC has no file.
+- `evidence malformed: <AC id>: <reason>`: the file lacks a section of its method or a required value. The reason names it.
+- `test evidence missing: <AC id> <test case id> (<base|head>)`: a case in the `verified_by` of a `test` AC has no `base/` or no `head/` folder.
+- `test evidence stale: <AC id> <test case id>`: the `sha` in its `head` `result.json` is not the current head of the repo named in that `result.json`. Run `ark test <run>` again after the last commit.
+
+An AC with no `verified_by` needs no test evidence.
+
+## What refuses an MR
+
+`ark merge-request open <run>` refuses in these cases. `ark run close <run> handed_off` applies the same refusals, except the clean-merge check, before it appends `run.closed` or removes a worktree. On a refusal, run `ark test <run>` again or fix the AC text with `ark criteria amend`.
+
+- A non-manual AC is not `passing` in the last `test.completed`.
+- A manual AC has no `ok` answer.
+- A repo head changed since the last test.
+- A branch does not merge cleanly (`ark merge-request open` only). Ark runs `git fetch origin` and `git merge-tree --write-tree HEAD origin/<target>` in each repo it pushes (a new MR or an open one it refreshes), before any push. The message names the repo and `--merge`, and nothing is pushed for any repo. After the merge step fixes the branch, the same command passes with no new `ark worktree sync`.
+- A counted string in an AC is in no tracked file. See below.
+- A `not:` string is still in a tracked file. See below.
+- The evidence is missing, malformed or stale. See [Evidence refusals](#evidence-refusals).
+
+### Counted strings in an AC
+
+A string in backticks in the text of an AC must be in a tracked file at HEAD of some repo of the workspace, run worktree or not.
+
+- A backtick span must sit on one line and be non-blank.
+- Each string is searched with `git grep -F`.
+- A string also passes when it names a tracked file or folder at HEAD (`git cat-file -e HEAD:<path>`, with one trailing `/` dropped), so `scripts/check.py` and `docs/old/` pass when they exist. A string that is empty after the drop, such as `/`, never passes.
+
+These strings are not counted, because no file holds them:
+
+- a string with a placeholder (`<` followed later by `>`, or a lone `<`), a `*`, the three dots `...`, or a suffix `:<digits>` or `:<digits>-<digits>` (a `file:line` reference),
+- a string that holds the id of its own AC, written with `-` or `_` (a test name or command of that AC),
+- every string of a manual AC.
+
+### Removed strings in an AC
+
+A string that starts with `not:` is a removed string. The text after `not:` must be in no tracked file of any repo at HEAD and name no tracked file or folder there. Otherwise the command refuses with `AC string still in a tracked file at head:`, the AC and the string without the prefix. `not:` alone is no string.
+
+`git grep -F` matches a substring, so a stale path inside a longer path that stays is still found. Write that one outside backticks, as you do a string that the run rewrites or that only describes the old state.
