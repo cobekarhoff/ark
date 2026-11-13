@@ -10,7 +10,7 @@ What counts as evidence in an MR or PR body, and every check `lint_body.ts` runs
 | "bug fixed"                    | A test that fails at base and passes at head, with both results.                                                |
 | "refactor, no behavior change" | The same test passing at base and at head.                                                                      |
 | "faster"                       | Baseline and compare numbers, with n, the machine and the bounds.                                               |
-| "works in the UI"              | Screenshot files named in the body, 5 at most. Captures are not built yet: add them by hand.                    |
+| "works in the UI"              | Screenshots as Markdown images in the body, 5 at most; `post_mr.ts` uploads them.                               |
 | "not tested"                   | `Not run: <what>, <reason>`. This is evidence of honesty and is welcome.                                        |
 | "[x] Self-review completed"    | None. Delete it or name the command.                                                                            |
 | "passed three runs in a row"   | The three commands and their result lines, or drop the claim.                                                   |
@@ -23,7 +23,7 @@ What counts as evidence in an MR or PR body, and every check `lint_body.ts` runs
 | PROV02               | fail   | No model `Co-Authored-By` and no `Generated with` line in the body or the commits of the range.                                                   |
 | TITLE01              | fail   | Title is 72 characters or less, has no trailing period, and matches `title_prefix` when set.                                                      |
 | TITLE01 (imperative) | warn   | The first word is imperative (`Fix`, not `Fixed` or `Fixes`).                                                                                     |
-| SIZE01               | fail   | Prose lines at most 3, 12, 40 or 150 for tier 0 to 3.                                                                                             |
+| SIZE01               | fail   | Prose lines at most 3, 12, 40 or 150 for tier 0 to 3. Lines inside a `<details>` block do not count.                                              |
 | SIZE02               | fail   | No headings at tier 0, unless the repo template names headings.                                                                                   |
 | REF01                | fail   | Every tracker ref of the branch or commits is in the body, and no `Closes X` names another ref.                                                   |
 | REF02                | fail   | `Depends on` and merge order lines match the ledger.                                                                                              |

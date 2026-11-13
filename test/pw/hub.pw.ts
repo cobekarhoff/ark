@@ -1,4 +1,13 @@
-import { expect, test, type Locator, type Page, type Request, type Route } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Browser,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type Request,
+  type Route,
+} from "@playwright/test";
 import { readdir } from "node:fs/promises";
 import {
   appendFileSync,
@@ -7,13 +16,23 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { request as httpRequest } from "node:http";
 import type { Socket } from "node:net";
 import { dirname, join } from "node:path";
 import type { Gate, ProjectQueue, RunView, Snapshot, TicketView } from "../../hub/types.ts";
+import type { ArkEvent } from "../../cli/events.ts";
+import type {
+  ConversationAgent,
+  ConversationMessage,
+  ConversationQuestion,
+  ConversationSpan,
+  RoleGroup,
+} from "../../hub/conversation.ts";
 import { crc32, deflateSync } from "node:zlib";
 import {
   appendRawEvent,
@@ -3216,9 +3235,19 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
       if (hash.startsWith("ticket")) await expect(page.getByTestId("ticket-problem")).toBeVisible();
       // A color that still fades from the other theme is not the color the page rests on.
       await finiteAnimationsEnded(page);
-      const { checked, weak } = await weakContrast(page);
-      expect(checked, `text checked on ${name} in ${choice}`).toBeGreaterThan(20);
-      expect(weak, `${name} in ${choice}`).toEqual([]);
+      // A live-change highlight is not a finite animation: poll until the colours rest, same threshold.
+      let checkedCount = 0;
+      await expect
+        .poll(
+          async () => {
+            const result = await weakContrast(page);
+            checkedCount = result.checked;
+            return result.weak;
+          },
+          { message: `${name} in ${choice}`, timeout: 15_000 },
+        )
+        .toEqual([]);
+      expect(checkedCount, `text checked on ${name} in ${choice}`).toBeGreaterThan(20);
     }
   }
   // Switching the theme and the views sent no request but the document read of each ticket page opening (ARK-329).
@@ -9501,4 +9530,1087 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   proxy.cut();
   await expect(banner).toHaveText(/^Disconnected: data frozen at /);
   expect(await heightOf()).toBe(height);
+});
+
+// ---------------------------------------------------------------- ARK-345 Conversation tab
+//
+// The hub's own conversation read is proven by ARK-T319 to ARK-T321. These cases prove what the page
+// draws from that read, so the run page is real and the read's reply is a fixture the page fetches.
+
+const conversationStart = Date.parse("2026-11-12T08:00:00.000Z");
+const conversationMinute = (minutes: number) => conversationStart + minutes * 60_000;
+const isoOf = (time: number) => new Date(time).toISOString();
+/** The clock text of a time in UTC, the way the page prints it: HH:MM:SS. */
+const clockOf = (time: number) => isoOf(time).slice(11, 19);
+
+const noAgent = { handle: null, step: null, role: null, group: null, title: null };
+const chiefAgent: ConversationAgent = { id: "chief", kind: "chief", ...noAgent };
+const leadAgent: ConversationAgent = { id: "lead", kind: "run_lead", ...noAgent };
+const workerAgent = (step: string, role: string, group: RoleGroup): ConversationAgent => ({
+  id: `worker:${step}`,
+  kind: "worker",
+  handle: null,
+  step,
+  role,
+  group,
+  title: step,
+});
+const spanOf = (
+  step: string,
+  role: string,
+  group: RoleGroup,
+  startMinute: number,
+  endMinute: number,
+): ConversationSpan => ({
+  step,
+  role,
+  group,
+  agent: `worker:${step}`,
+  start: isoOf(conversationMinute(startMinute)),
+  end: isoOf(conversationMinute(endMinute)),
+});
+
+/** A message sent at `time` (epoch milliseconds) and delivered 5 s later unless the fields say otherwise. */
+function messageOf(
+  id: string,
+  from: string,
+  to: string,
+  time: number,
+  fields: Partial<ConversationMessage> = {},
+): ConversationMessage {
+  return {
+    id,
+    type: "status",
+    from_handle: from,
+    to_handle: to,
+    subject: id,
+    body: null,
+    thread_id: null,
+    run_id: null,
+    created_at: isoOf(time),
+    delivered_at: isoOf(time + 5_000),
+    from,
+    to,
+    ...fields,
+  };
+}
+
+type ConversationParts = {
+  agents: ConversationAgent[];
+  spans?: ConversationSpan[];
+  events?: ArkEvent[];
+  answers?: { time: string; gate: string | null; answer: string | null }[];
+  questions?: ConversationQuestion[];
+  messages: ConversationMessage[];
+};
+
+/** What `GET /api/run/<run>/conversation` answers: the read's states and the run's conversation. */
+const conversationReply = (
+  run: string,
+  parts: ConversationParts,
+  state: { truncated?: boolean; stale?: boolean; directory?: "loading" | "ready" } = {},
+) => ({
+  truncated: false,
+  stale: false,
+  directory: "ready",
+  read_at: isoOf(conversationStart),
+  run,
+  project: "p",
+  spans: [],
+  events: [],
+  answers: [],
+  questions: [],
+  ...parts,
+  ...state,
+});
+
+/** Serves the conversation read of the page from `reply`; a number answers with that status. Counts the reads. */
+async function serveConversation(
+  page: Page,
+  reply: () => object | number,
+): Promise<{ reads: () => number }> {
+  let reads = 0;
+  await page.route("**/api/run/*/conversation", (route) => {
+    reads += 1;
+    const answer = reply();
+    return typeof answer === "number"
+      ? route.fulfill({ status: answer, body: "" })
+      : route.fulfill({ json: answer });
+  });
+  return { reads: () => reads };
+}
+
+const conversationContexts: BrowserContext[] = [];
+test.afterEach(async () => {
+  await Promise.all(conversationContexts.splice(0).map((context) => context.close()));
+});
+
+/** A page of 1440x900 in UTC, so the clock text of a fixture time never depends on the machine. */
+async function conversationPage(
+  browser: Browser,
+  options: { reducedMotion?: "reduce" } = {},
+): Promise<Page> {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    timezoneId: "UTC",
+    colorScheme: "dark",
+    ...options,
+  });
+  conversationContexts.push(context);
+  return context.newPage();
+}
+
+/** A closed run on a fresh ARK_HOME with no session files, served by a new hub. */
+async function conversationRun(ticket: string): Promise<{ run: string; baseUrl: string }> {
+  isolate();
+  const run = runId(ticket);
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: ticket, title: "Conversation" },
+    phase: "closed",
+    startedAt: ago(7_200),
+  });
+  installFakeTools({});
+  return { run, baseUrl: await launch() };
+}
+
+async function openConversation(page: Page, baseUrl: string, run: string): Promise<void> {
+  await open(page, baseUrl, `run/${run}/conversation`);
+  await expect(page.getByTestId("trace")).toBeVisible();
+}
+
+/** Text of the tab at 4.5:1 or better, in dark and in light. */
+async function expectReadableInBothThemes(page: Page): Promise<void> {
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  // The page starts dark: light first, then dark again, so each theme is reached by a change.
+  for (const colorScheme of ["light", "dark"] as const) {
+    const before = await background();
+    await page.emulateMedia({ colorScheme });
+    await expect.poll(background).not.toBe(before);
+    // A color that still fades from the other theme is not the color the page rests on.
+    await finiteAnimationsEnded(page);
+    const { checked, weak } = await weakContrast(page);
+    expect(checked, colorScheme).toBeGreaterThan(20);
+    expect(weak, colorScheme).toEqual([]);
+  }
+}
+
+test("ARK-T340 the Conversation tab opens from the run page, keeps the sub routes, and shows the design reference files", async ({
+  browser,
+}) => {
+  for (const file of ["hybrid-2.html", "data.js"])
+    expect(
+      statSync(join(process.cwd(), "docs/design/agent-comms", file)).size,
+      file,
+    ).toBeGreaterThan(0);
+
+  const { sessions } = isolate();
+  const run = runId("ARK-9401");
+  const started = ago(7_200);
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-9401", title: "Tab" },
+    phase: "building",
+    startedAt: started,
+    steps: [
+      {
+        id: "work",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 60,
+        finishedAfter: 600,
+      },
+    ],
+  });
+  writeSessionFile(
+    sessions,
+    "work.jsonl",
+    transcriptText("omp", {
+      cwd: join(directory, "workspace"),
+      start: new Date(started.getTime() + 100_000),
+    }),
+  );
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  const page = await conversationPage(browser);
+  let reply: object | number = conversationReply(run, {
+    agents: [chiefAgent, leadAgent, workerAgent("work", "implementer", "Implementers")],
+    spans: [spanOf("work", "implementer", "Implementers", 1, 9)],
+    messages: [
+      messageOf("first", "lead", "chief", conversationMinute(2), { subject: "First message" }),
+      messageOf("second", "chief", "lead", conversationMinute(4), { subject: "Second message" }),
+    ],
+  });
+  const served = await serveConversation(page, () => reply);
+
+  // The run page opens on its overview; the tab is one click away and lives in the hash.
+  await open(page, baseUrl, `run/${run}`);
+  await expect(page.getByTestId("step-node")).toHaveCount(1);
+  await expect(page.getByTestId("conversation")).toHaveCount(0);
+  await page.getByTestId("run-tab-conversation").click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${run}/conversation$`));
+  await expect(page.getByTestId("trace")).toBeVisible();
+  await expect(page.getByTestId("feed-message")).toHaveCount(2);
+  await checkpoint(page, "conversation-tab-dark");
+
+  // A reload on the tab hash keeps the tab.
+  await page.reload();
+  await expect(page.getByTestId("trace")).toBeVisible();
+  await expect(page.getByTestId("run-tab-conversation")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByTestId("step-node")).toHaveCount(0);
+
+  // Back to the overview, into a transcript and back: each route opens as before.
+  await page.getByTestId("run-tab-overview").click();
+  await expect(page.getByTestId("run-tab-overview")).toHaveAttribute("aria-current", "page");
+  await page.locator('[data-testid="step-node"][data-step="work"] a').click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${run}/step/work$`));
+  await expect(page.getByTestId("transcript-entry").first()).toBeVisible();
+  await page.goBack();
+  await expect(page.getByTestId("step-node")).toHaveCount(1);
+  await expect(page.getByTestId("run-tab-overview")).toHaveAttribute("aria-current", "page");
+  await page.goBack();
+  await expect(page.getByTestId("trace")).toBeVisible();
+  await expect(page.getByTestId("run-tab-conversation")).toHaveAttribute("aria-current", "page");
+
+  // Each state of the read is a notice, and the trace still draws what it has.
+  const parts: ConversationParts = {
+    agents: [chiefAgent, leadAgent],
+    messages: [messageOf("only", "lead", "chief", conversationMinute(2))],
+  };
+  const notices: [string, object, string][] = [
+    ["loading", conversationReply(run, parts, { directory: "loading" }), "conversation-loading"],
+    ["truncated", conversationReply(run, parts, { truncated: true }), "conversation-truncated"],
+    ["stale", conversationReply(run, parts, { stale: true }), "conversation-stale"],
+  ];
+  for (const [name, variant, testId] of notices) {
+    reply = variant;
+    await page.reload();
+    await expect(page.getByTestId(testId), name).toBeVisible();
+    await expect(page.getByTestId("trace-row"), name).toHaveCount(6);
+    await expect(page.getByTestId("feed-message"), name).toHaveCount(1);
+    if (name === "truncated") await checkpoint(page, "truncated-notice");
+  }
+  reply = conversationReply(run, parts);
+  await page.reload();
+  for (const testId of ["conversation-loading", "conversation-truncated", "conversation-stale"])
+    await expect(page.getByTestId(testId)).toHaveCount(0);
+
+  // A loading directory logs no event: the tab reads again on its own and the notice clears, no reload.
+  reply = conversationReply(run, parts, { directory: "loading" });
+  await page.reload();
+  await expect(page.getByTestId("conversation-loading")).toBeVisible();
+  await expect(page.getByTestId("feed-message")).toHaveCount(1);
+  reply = conversationReply(run, {
+    ...parts,
+    messages: [
+      messageOf("only", "lead", "chief", conversationMinute(2)),
+      messageOf("later", "chief", "lead", conversationMinute(3)),
+    ],
+  });
+  await expect(page.getByTestId("conversation-loading")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.getByTestId("feed-message")).toHaveCount(2);
+  reply = conversationReply(run, parts);
+  await page.reload();
+  await expect(page.getByTestId("feed-message")).toHaveCount(1);
+
+  // A failed refetch keeps the last read: the notice shows, the feed and the selection stay.
+  await page.locator('[data-testid="feed-message"][data-id="only"] .cv-subject').click();
+  await expect(page.getByTestId("inspector-type")).toBeVisible();
+  const reads = served.reads();
+  reply = 502;
+  appendRawEvent(
+    directory,
+    "worker.started",
+    { step: "work", dispatch: "ctx_w", terminal: "t" },
+    readFileSync(join(directory, "events.ndjson"), "utf8").trim().split("\n").length + 1,
+  );
+  await expect.poll(served.reads).toBeGreaterThan(reads);
+  await expect(page.getByTestId("conversation-refetch-failed")).toBeVisible();
+  await expect(page.getByTestId("feed-message")).toHaveCount(1);
+  await expect(page.getByTestId("inspector-type")).toBeVisible();
+  reply = conversationReply(run, parts);
+  await page.reload();
+
+  // A read the hub cannot answer yet is an alert, not an empty trace.
+  reply = 503;
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("has not read the inbox yet");
+  await expect(page.getByTestId("trace")).toHaveCount(0);
+});
+
+test("ARK-T341 the trace shows the Master Chief, run lead and role-group rows, expands a group, and fits 19 workers at 1440x900 collapsed", async ({
+  browser,
+}) => {
+  const { run, baseUrl } = await conversationRun("ARK-9402");
+  // 3 planning, 8 implementer, 4 validator and 4 reviewer workers; the workers of a group overlap.
+  const groups: [RoleGroup, string, string, number, number, number][] = [
+    ["Planning", "plan", "designer", 3, 0, 3],
+    ["Implementers", "impl", "implementer", 8, 10, 3],
+    ["Validators", "valid", "validator", 4, 40, 5],
+    ["Reviewers", "review", "reviewer", 4, 70, 8],
+  ];
+  const agents = [chiefAgent, leadAgent];
+  const spans: ConversationSpan[] = [];
+  for (const [group, prefix, role, count, firstStart, stagger] of groups)
+    for (let index = 1; index <= count; index++) {
+      const step = `${prefix}-${index}`;
+      agents.push(workerAgent(step, role, group));
+      const start = firstStart + (index - 1) * stagger;
+      // Spans last 20 minutes (validators 5, so the run lead idles from 60 to 70); the last reviewer ends the run at 100.
+      const length = group === "Validators" ? 5 : 20;
+      const end = group === "Reviewers" && index === 4 ? 100 : start + length;
+      spans.push(spanOf(step, role, group, start, end));
+    }
+  expect(agents.length - 2).toBe(19);
+  const page = await conversationPage(browser);
+  await serveConversation(page, () =>
+    conversationReply(run, {
+      agents,
+      spans,
+      // The run lead waits on the human twice: 12-15 and 40-45.
+      messages: [
+        messageOf("ask-1", "lead", "chief", conversationMinute(12), { type: "question" }),
+        messageOf("ask-2", "lead", "chief", conversationMinute(40), { type: "question" }),
+      ],
+      questions: [
+        {
+          id: "ask-1",
+          sent: isoOf(conversationMinute(12)),
+          delivered: isoOf(conversationMinute(12)),
+          answered: isoOf(conversationMinute(15)),
+          pickup_seconds: 0,
+        },
+        {
+          id: "ask-2",
+          sent: isoOf(conversationMinute(40)),
+          delivered: isoOf(conversationMinute(40)),
+          answered: isoOf(conversationMinute(45)),
+          pickup_seconds: 0,
+        },
+      ],
+      answers: [
+        { time: isoOf(conversationMinute(15)), gate: "criteria", answer: "accept" },
+        { time: isoOf(conversationMinute(45)), gate: "plan", answer: "approve" },
+      ],
+    }),
+  );
+  await openConversation(page, baseUrl, run);
+  const trace = page.getByTestId("trace");
+  const rowOf = (key: string) => page.locator(`[data-testid="trace-row"][data-row="${key}"]`);
+
+  // The time axis, with the minimap brush over the whole run.
+  await expect(trace.locator(".cv-axis-label")).toHaveCount(5);
+  await expect(page.getByTestId("trace-minimap")).toBeVisible();
+  await expect(page.getByTestId("trace-brush")).toBeVisible();
+
+  // Master Chief: one person marker for each human answer. Run lead: waiting and idle bars.
+  await expect(rowOf("chief").getByTestId("answer-marker")).toHaveCount(2);
+  await expect(rowOf("chief").getByTestId("answer-marker").first()).toHaveAttribute(
+    "aria-label",
+    "You answered criteria: accept at 08:15:00",
+  );
+  await expect(rowOf("lead").getByTestId("trace-waiting")).toHaveCount(2);
+  await expect(rowOf("lead").getByTestId("trace-idle").first()).toBeVisible();
+
+  // Four collapsed group rows with their workers counted, each in its own role colour.
+  await expect(page.getByTestId("trace-row")).toHaveCount(6);
+  const labels = await page
+    .getByTestId("trace-group")
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")));
+  expect(labels).toEqual([
+    "Planning, 3 workers",
+    "Implementers, 8 workers",
+    "Validators, 4 workers",
+    "Reviewers, 4 workers",
+  ]);
+  const colours = await Promise.all(
+    groups.map(([group]) =>
+      rowOf(`group:${group}`)
+        .getByTestId("trace-bar")
+        .first()
+        .evaluate((node) => getComputedStyle(node).backgroundColor),
+    ),
+  );
+  expect(new Set(colours).size).toBe(4);
+
+  // 19 workers fit: no scroll in the trace and the whole trace inside 1440x900.
+  const fit = async () => {
+    const box = (await trace.boundingBox())!;
+    const scroll = await trace.evaluate((node) => ({
+      client: node.clientHeight,
+      scroll: node.scrollHeight,
+    }));
+    expect(scroll.scroll).toBeLessThanOrEqual(scroll.client);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(900);
+  };
+  await fit();
+  await checkpoint(page, "collapsed-19-workers-dark");
+
+  // Hover on the Implementers row at minute 20 names the four overlapping workers, no others.
+  const lane = (await rowOf("group:Implementers").locator(".cv-lane").boundingBox())!;
+  await page.mouse.move(lane.x + lane.width * 0.2, lane.y + lane.height / 2);
+  const tip = page.getByTestId("trace-tip");
+  await expect(tip).toBeVisible();
+  for (const step of ["impl-1", "impl-2", "impl-3", "impl-4"])
+    await expect(tip).toContainText(step);
+  await expect(tip).not.toContainText("impl-5");
+  await checkpoint(page, "overlap-hover");
+
+  // A click on the group row expands it to one row per worker; a second click collapses it.
+  await page.getByRole("button", { name: "Implementers, 8 workers" }).click();
+  await expect(page.locator('[data-testid="trace-row"][data-row^="worker:"]')).toHaveCount(8);
+  await expect(page.getByTestId("trace-row")).toHaveCount(14);
+  await checkpoint(page, "group-expanded");
+  await expectReadableInBothThemes(page);
+  await page.getByRole("button", { name: "Implementers, 8 workers" }).click();
+  await expect(page.getByTestId("trace-row")).toHaveCount(6);
+  await fit();
+});
+
+test("ARK-T342 the feed lists messages with avatar, role, time, Markdown body and Show more, threads, question cards, folded events, chips and search", async ({
+  browser,
+}) => {
+  const { run, baseUrl } = await conversationRun("ARK-9403");
+  const at = conversationMinute;
+  const event = (seq: number, minutes: number, type: string): ArkEvent => ({
+    seq,
+    time: isoOf(at(minutes)),
+    type,
+    data: { step: "impl" },
+  });
+  const reportLines = Array.from({ length: 12 }, (_, line) => `Line ${line + 1} of the report`);
+  // Messages in a shuffled order: the feed sorts them oldest first.
+  const messages = [
+    messageOf("after", "chief", "lead", at(25), { subject: "After the events" }),
+    messageOf("qw", "lead", "chief", at(12), { type: "question", subject: "Merge?" }),
+    messageOf("t1b", "chief", "lead", at(5), { thread_id: "t1", subject: "Reply two" }),
+    messageOf("plain", "lead", "chief", at(1), {
+      subject: "Plan ready",
+      body: "**bold** text\n\n- first item\n- second item\n\n<script>window.__pwned = 1</script><b>raw</b> html",
+    }),
+    messageOf("long", "lead", "chief", at(2), {
+      subject: "Long report",
+      body: reportLines.join("\n"),
+    }),
+    messageOf("edge600", "lead", "chief", at(2) + 20_000, {
+      subject: "At the cut",
+      body: "y".repeat(600),
+    }),
+    messageOf("edge601", "lead", "chief", at(2) + 40_000, {
+      subject: "Past the cut",
+      body: "x".repeat(601),
+    }),
+    messageOf("t1", "lead", "chief", at(3), { subject: "Thread root" }),
+    messageOf("t1a", "chief", "lead", at(4), { thread_id: "t1", subject: "Reply one" }),
+    messageOf("t1c", "chief", "lead", at(6), { thread_id: "t1", subject: "Reply three" }),
+    messageOf("qa", "lead", "chief", at(8), { type: "question", subject: "Criteria?" }),
+  ];
+  const page = await conversationPage(browser);
+  await serveConversation(page, () =>
+    conversationReply(run, {
+      agents: [chiefAgent, leadAgent],
+      messages,
+      answers: [{ time: isoOf(at(10)), gate: "criteria", answer: "accept" }],
+      questions: [
+        {
+          id: "qa",
+          sent: isoOf(at(8)),
+          delivered: isoOf(at(9)),
+          answered: isoOf(at(10)),
+          pickup_seconds: 60,
+        },
+        {
+          id: "qw",
+          sent: isoOf(at(12)),
+          delivered: isoOf(at(13)),
+          answered: null,
+          pickup_seconds: 60,
+        },
+      ],
+      // 2 events in a row, a message, then 3 in a row.
+      events: [
+        event(1, 20, "step.started"),
+        event(2, 21, "step.finished"),
+        event(3, 30, "step.started"),
+        event(4, 31, "step.finished"),
+        event(5, 32, "test.completed"),
+      ],
+    }),
+  );
+  await openConversation(page, baseUrl, run);
+  const feed = page.getByTestId("feed");
+  const message = (id: string) => feed.locator(`[data-testid="feed-message"][data-id="${id}"]`);
+
+  // Oldest first, thread replies collapsed.
+  expect(
+    await feed
+      .getByTestId("feed-message")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-id"))),
+  ).toEqual(["plain", "long", "edge600", "edge601", "t1", "qa", "qw", "after"]);
+  await checkpoint(page, "feed-top-dark");
+
+  // One message in full: avatar, role badge, time and subject, and a Markdown body whose HTML is text.
+  const plain = message("plain");
+  await expect(plain.locator(".cv-avatar")).toHaveText("RL");
+  await expect(plain.locator(".cv-badge")).toHaveText("run lead");
+  await expect(plain.locator(".cv-head .mono")).toHaveText(clockOf(at(1)));
+  await expect(plain.locator(".cv-subject")).toHaveText("Plan ready");
+  await expect(plain.locator(".cv-body strong")).toHaveText("bold");
+  await expect(plain.locator(".cv-body li")).toHaveCount(2);
+  await expect(plain.locator(".cv-body")).toContainText("<b>raw</b> html");
+  await expect(plain.locator(".cv-body b, .cv-body script")).toHaveCount(0);
+  expect(await page.evaluate(() => "__pwned" in window)).toBe(false);
+  await expect(plain.getByRole("button", { name: "Show more" })).toHaveCount(0);
+
+  // A body is cut past 600 characters or 8 lines; Show more opens it.
+  await expect(message("edge600").getByRole("button", { name: "Show more" })).toHaveCount(0);
+  await expect(message("edge601").getByRole("button", { name: "Show more" })).toHaveCount(1);
+  const long = message("long");
+  await expect(long.locator(".cv-body")).toHaveAttribute("data-clamped", "true");
+  await long.getByRole("button", { name: "Show more" }).click();
+  await expect(long.locator(".cv-body")).toHaveAttribute("data-clamped", "false");
+  await expect(long.getByRole("button", { name: "Show less" })).toBeVisible();
+
+  // A thread is its root and "3 replies".
+  const replies = feed.getByTestId("feed-replies");
+  await expect(replies).toHaveText("3 replies");
+  await replies.click();
+  await expect(message("t1a")).toBeVisible();
+  await expect(message("t1c")).toBeVisible();
+  await expect(feed.getByTestId("feed-message")).toHaveCount(11);
+  await replies.click();
+  await expect(feed.getByTestId("feed-message")).toHaveCount(8);
+
+  // A question card: the answer with its gate, or the waiting text.
+  await expect(message("qa").getByTestId("feed-answer")).toContainText(
+    "You answered criteria: accept",
+  );
+  await expect(message("qa").getByTestId("feed-waiting")).toHaveCount(0);
+  await expect(message("qw").getByTestId("feed-waiting")).toHaveText(
+    "Waiting for an answer from you",
+  );
+  await expect(message("qw").getByTestId("feed-answer")).toHaveCount(0);
+  await message("qw").scrollIntoViewIfNeeded();
+  await checkpoint(page, "question-cards");
+
+  // Ark events: 2 in a row stay 2 quiet lines; 3 in a row fold into one line that opens.
+  await expect(feed.getByTestId("feed-events")).toHaveCount(1);
+  await expect(feed.getByTestId("feed-events").getByTestId("feed-event")).toHaveCount(2);
+  const folded = feed.getByTestId("feed-events-folded");
+  await expect(folded).toHaveCount(1);
+  await expect(folded).toContainText(`3 Ark events, ${clockOf(at(30))}–${clockOf(at(32))}`);
+  await folded.scrollIntoViewIfNeeded();
+  await checkpoint(page, "folded-events");
+  await folded.getByRole("button").click();
+  await expect(feed.getByTestId("feed-events").getByTestId("feed-event")).toHaveCount(5);
+
+  // A chip keeps one type; clicking it again restores the feed.
+  const chip = feed.locator('[data-testid="feed-chip"][data-chip="question"]');
+  await chip.click();
+  await expect(feed.getByTestId("feed-message")).toHaveCount(2);
+  expect(
+    await feed
+      .getByTestId("feed-message")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-type"))),
+  ).toEqual(["question", "question"]);
+  await chip.click();
+  await expect(feed.getByTestId("feed-message")).toHaveCount(8);
+
+  // Search reads the subject and the body.
+  const search = feed.getByTestId("feed-search");
+  await search.fill("Criteria");
+  await expect(feed.getByTestId("feed-message")).toHaveCount(1);
+  await expect(message("qa")).toBeVisible();
+  await search.fill("second item");
+  await expect(feed.getByTestId("feed-message")).toHaveCount(1);
+  await expect(message("plain")).toBeVisible();
+  await search.fill("");
+  await expect(feed.getByTestId("feed-message")).toHaveCount(8);
+
+  await expectReadableInBothThemes(page);
+});
+
+test("ARK-T343 a click on a tick, a cluster or a feed message links the trace and the feed both ways, and the trace cursor follows the feed scroll", async ({
+  browser,
+}) => {
+  const { run, baseUrl } = await conversationRun("ARK-9404");
+  // 9 hours: a message every 15 minutes, Master Chief and the run lead taking turns, and a burst of
+  // three from the run lead inside one minute at 4 h that is one cluster at full view.
+  const messages: ConversationMessage[] = [];
+  for (let index = 0; index <= 35; index++) {
+    if (index === 16) continue;
+    const [from, to] = index % 2 === 0 ? ["lead", "chief"] : ["chief", "lead"];
+    messages.push(
+      messageOf(`m${index}`, from!, to!, conversationMinute(index * 15), {
+        subject: `Message ${index}`,
+      }),
+    );
+  }
+  for (const [id, seconds] of [
+    ["burst-1", 0],
+    ["burst-2", 20],
+    ["burst-3", 40],
+  ] as const)
+    messages.push(
+      messageOf(id, "lead", "chief", conversationMinute(240) + seconds * 1000, { subject: id }),
+    );
+  const page = await conversationPage(browser);
+  await serveConversation(page, () =>
+    conversationReply(run, { agents: [chiefAgent, leadAgent], messages }),
+  );
+  await openConversation(page, baseUrl, run);
+  const feed = page.getByTestId("feed");
+  const scroller = feed.locator(".cv-scroller");
+  const message = (id: string) => feed.locator(`[data-testid="feed-message"][data-id="${id}"]`);
+  const brushWidth = async () => (await page.getByTestId("trace-brush").boundingBox())!.width;
+  const reset = page.getByTestId("trace-reset");
+  const inView = async (id: string) => {
+    const box = await message(id).boundingBox();
+    const area = (await scroller.boundingBox())!;
+    return box !== null && box.y >= area.y - 1 && box.y + box.height <= area.y + area.height + 1;
+  };
+  // Puts the message at the top of the feed, as a wheel scroll would.
+  const scrollToTop = (id: string) =>
+    scroller.evaluate((node, target) => {
+      const row = node.querySelector<HTMLElement>(`[data-id="${target}"]`)!;
+      node.scrollTop += row.getBoundingClientRect().top - node.getBoundingClientRect().top + 3;
+    }, id);
+  const full = await brushWidth();
+  await expect(reset).toBeDisabled();
+  await expect(page.getByTestId("trace-cluster")).toHaveCount(1);
+  await expect(page.getByTestId("trace-cluster")).toHaveAttribute(
+    "data-ids",
+    "burst-1 burst-2 burst-3",
+  );
+
+  // A tick: the axis zooms, the message is selected and the feed scrolls it into view.
+  await page.locator('[data-testid="trace-tick"][data-id="m8"]').click();
+  await expect(reset).toBeEnabled();
+  expect(await brushWidth()).toBeLessThan(full);
+  await expect(message("m8")).toHaveAttribute("aria-current", "true");
+  await expect.poll(() => inView("m8")).toBe(true);
+  await expect(page.getByTestId("inspector")).toContainText("Message 8");
+  await checkpoint(page, "after-tick-click");
+
+  // A cluster: the axis zooms until its ticks separate, and its first message is selected.
+  await reset.click();
+  await expect(reset).toBeDisabled();
+  const beforeCluster = await brushWidth();
+  await page.getByTestId("trace-cluster").click();
+  await expect(page.getByTestId("trace-cluster")).toHaveCount(0);
+  expect(await brushWidth()).toBeLessThan(beforeCluster);
+  for (const id of ["burst-1", "burst-2", "burst-3"])
+    await expect(page.locator(`[data-testid="trace-tick"][data-id="${id}"]`)).toBeVisible();
+  await expect(message("burst-1")).toHaveAttribute("aria-current", "true");
+  await checkpoint(page, "after-cluster-zoom");
+
+  // A feed message: its tick is marked and an arrow runs from the sender's row to the receiver's.
+  await expect.poll(() => inView("m17")).toBe(true);
+  await message("m17").locator(".cv-subject").click();
+  await expect(page.locator('[data-testid="trace-tick"][data-id="m17"]')).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const arrow = page.getByTestId("trace-arrow");
+  await expect(arrow).toHaveAttribute("data-from", "chief");
+  await expect(arrow).toHaveAttribute("data-to", "lead");
+  await checkpoint(page, "arrow-after-feed-click");
+
+  // The cursor follows the time of the top message of the feed.
+  await reset.click();
+  await scrollToTop("m25");
+  await expect(page.getByTestId("trace-cursor")).toHaveAttribute(
+    "data-time",
+    String(conversationMinute(25 * 15)),
+  );
+  await scrollToTop("m5");
+  await expect(page.getByTestId("trace-cursor")).toHaveAttribute(
+    "data-time",
+    String(conversationMinute(5 * 15)),
+  );
+});
+
+test("ARK-T344 the inspector shows a selected question with sent, delivered, waits, answer, thread and body, and its transcript buttons open the entries nearest the sent time", async ({
+  browser,
+}) => {
+  const { sessions } = isolate();
+  const run = runId("ARK-9405");
+  // A fixed start 30 minutes before UTC midnight: the run crosses a day, so every clock label carries its
+  // date, and the expected text never depends on the hour the suite runs at.
+  const started = new Date("2026-11-12T23:30:00.000Z");
+  const dated = (time: number) =>
+    `${String(new Date(time).getUTCDate()).padStart(2, "0")} Nov ${clockOf(time)}`;
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-9405", title: "Inspector" },
+    phase: "closed",
+    startedAt: started,
+    steps: [
+      {
+        id: "work",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 60,
+        finishedAfter: 600,
+      },
+    ],
+    metricsText: JSON.stringify({ cost: { total_usd: 1.5, by_step: { work: { usd: 1.5 } } } }),
+  });
+  // The run lead's file starts before the first step; the step's file starts inside its window.
+  // Each holds the standard entries at 1 to 4 seconds and three more at 20, 22 and 24 seconds.
+  const extra: ExtraEntry[] = ["a", "b", "c"].map((letter) => ({
+    kind: "assistant",
+    text: `extra ${letter}`,
+  }));
+  const cwd = join(directory, "workspace");
+  const leadStart = started.getTime() + 10_000;
+  const stepStart = started.getTime() + 100_000;
+  writeSessionFile(
+    sessions,
+    "lead.jsonl",
+    transcriptText("omp", { cwd, start: new Date(leadStart), extra }),
+  );
+  writeSessionFile(
+    sessions,
+    "step.jsonl",
+    transcriptText("omp", { cwd, start: new Date(stepStart), extra }),
+  );
+  // A second file of the same step, written after the first one ended (a rework round).
+  const lateStart = started.getTime() + 400_000;
+  writeSessionFile(
+    sessions,
+    "step-late.jsonl",
+    transcriptText("omp", { cwd, start: new Date(lateStart), extra }),
+  );
+  // A file's window ends at its last write: close the first step file before the second begins.
+  const stepEnd = new Date(stepStart + 30_000);
+  utimesSync(join(sessions, "step.jsonl"), stepEnd, stepEnd);
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  // Sent 22.2 s into each file: nearest the entry at 22 s, the seventh row, neither the first nor the last.
+  const leadSent = leadStart + 22_200;
+  const stepSent = stepStart + 22_200;
+  const delivered = leadSent + 12 * 60_000;
+  const answered = delivered + 5 * 60_000;
+  const ghost: ConversationAgent = {
+    id: "session:ghost",
+    kind: "session",
+    handle: "ghost",
+    step: null,
+    role: null,
+    group: null,
+    title: null,
+  };
+  const worker = workerAgent("work", "implementer", "Implementers");
+  const messages = [
+    messageOf("q1", "lead", "chief", leadSent, {
+      type: "question",
+      subject: "Which criteria?",
+      body: "Pick **one** of the two.",
+      delivered_at: isoOf(delivered),
+    }),
+    messageOf("q1-reply", "chief", "lead", answered + 1_000, {
+      thread_id: "q1",
+      subject: "Re: Which criteria?",
+    }),
+    messageOf("q2", "lead", "chief", leadSent + 30 * 60_000, {
+      type: "question",
+      subject: "Merge now?",
+      delivered_at: null,
+    }),
+    messageOf("from-worker", worker.id, "lead", stepSent, { subject: "Step done" }),
+    messageOf("from-worker-late", worker.id, "lead", lateStart + 22_200, {
+      subject: "Round two done",
+    }),
+    messageOf("from-ghost", ghost.id, "lead", leadSent + 40 * 60_000, { subject: "Who am I" }),
+  ];
+  const page = await conversationPage(browser);
+  await serveConversation(page, () =>
+    conversationReply(run, {
+      agents: [chiefAgent, leadAgent, worker, ghost],
+      spans: [
+        {
+          step: "work",
+          role: "implementer",
+          group: "Implementers",
+          agent: worker.id,
+          start: isoOf(started.getTime() + 60_000),
+          end: isoOf(started.getTime() + 600_000),
+        },
+      ],
+      messages,
+      answers: [{ time: isoOf(answered), gate: "criteria", answer: "accept" }],
+      questions: [
+        {
+          id: "q1",
+          sent: isoOf(leadSent),
+          delivered: isoOf(delivered),
+          answered: isoOf(answered),
+          pickup_seconds: 720,
+        },
+        {
+          id: "q2",
+          sent: isoOf(leadSent + 30 * 60_000),
+          delivered: null,
+          answered: null,
+          pickup_seconds: "not recorded",
+        },
+      ],
+    }),
+  );
+  await openConversation(page, baseUrl, run);
+  const inspector = page.getByTestId("inspector");
+  const select = (id: string) =>
+    page.locator(`[data-testid="feed-message"][data-id="${id}"] .cv-subject`).click();
+  const nearestRow = page.locator('[data-testid="transcript-entry"][aria-current="true"]');
+
+  // The answered question: every field of the message, the answer and the wait after it.
+  await select("q1");
+  await expect(inspector.getByTestId("inspector-type")).toHaveText("question");
+  await expect(inspector).toContainText("Run lead");
+  await expect(inspector).toContainText("Master Chief");
+  await expect(inspector.getByTestId("inspector-sent")).toHaveText(dated(leadSent));
+  await expect(inspector.getByTestId("inspector-delivered")).toHaveText(dated(delivered));
+  await expect(inspector.getByTestId("inspector-wait")).toHaveText("12.0 min");
+  await expect(inspector.getByTestId("inspector-answer")).toContainText(
+    "You answered criteria: accept",
+  );
+  await expect(inspector.getByTestId("inspector-answer")).toContainText(
+    "5.0 min after it was picked up",
+  );
+  await expect(inspector.getByTestId("inspector-thread").getByRole("button")).toHaveCount(2);
+  await expect(inspector.getByTestId("inspector-body").locator("strong")).toHaveText("one");
+  await checkpoint(page, "inspector-question-dark");
+
+  // The sender's button opens the run lead's transcript at the entry nearest the sent time.
+  // Master Chief has no transcript in a run: the receiver's button is disabled and says why.
+  await expect(inspector.getByTestId("inspector-transcript-to")).toBeDisabled();
+  await expect(inspector.getByTestId("inspector-transcript-to")).toHaveAttribute(
+    "title",
+    /Master Chief has no transcript/,
+  );
+  await inspector.getByTestId("inspector-transcript-from").click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${run}/lead\\?at=`));
+  await expect(page.getByTestId("transcript-entry")).toHaveCount(8);
+  await expect(nearestRow).toHaveCount(1);
+  await expect(nearestRow).toContainText("extra b");
+  await expect(nearestRow).toBeInViewport();
+  await checkpoint(page, "transcript-at-sent-time");
+  await page.goBack();
+
+  // A question with no delivery time: "not recorded", never the sent time, and no wait.
+  await select("q2");
+  await expect(inspector.getByTestId("inspector-sent")).toHaveText(dated(leadSent + 30 * 60_000));
+  await expect(inspector.getByTestId("inspector-delivered")).toHaveText("not recorded");
+  await expect(inspector.getByTestId("inspector-wait")).toHaveText("not recorded");
+  await expect(inspector.getByTestId("inspector-answer")).toHaveText(
+    "Waiting for an answer from you",
+  );
+
+  // A worker's message: its sender button opens the step's transcript, its receiver's the run lead's.
+  await select("from-worker");
+  await inspector.getByTestId("inspector-transcript-from").click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${run}/step/work\\?at=`));
+  await expect(page.getByTestId("transcript-entry")).toHaveCount(8);
+  await expect(nearestRow).toContainText("extra b");
+  await page.goBack();
+  await select("from-worker");
+  await inspector.getByTestId("inspector-transcript-to").click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${run}/lead\\?at=`));
+  // The message was sent 90 s after the run lead's file began: the last entry of that file is nearest.
+  await expect(nearestRow).toContainText("extra c");
+  await page.goBack();
+
+  // A step with a second session file (a rework round): the button opens the file that holds the sent time.
+  await select("from-worker-late");
+  await inspector.getByTestId("inspector-transcript-from").click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${run}/step/work\\?at=`));
+  await expect(page.getByTestId("transcript-file")).toHaveCount(2);
+  await expect(page.getByTestId("transcript-file").nth(1)).toHaveAttribute("aria-pressed", "true");
+  // The first file's last entry is "extra c": only the second file's entry at 22 s is "extra b".
+  await expect(nearestRow).toContainText("extra b");
+  await page.goBack();
+
+  // A sender with no session file: its button is disabled; the receiver's still works.
+  await select("from-ghost");
+  await expect(inspector.getByTestId("inspector-transcript-from")).toBeDisabled();
+  await expect(inspector.getByTestId("inspector-transcript-to")).toBeEnabled();
+
+  // An agent: role, steps with times, messages sent and received, and the cost.
+  await page
+    .locator('[data-testid="feed-message"][data-id="from-worker"] [data-testid="feed-agent"]')
+    .click();
+  await expect(inspector.getByTestId("inspector-role")).toHaveText("implementer");
+  await expect(inspector.getByTestId("inspector-steps")).toContainText(
+    `work ${dated(started.getTime() + 60_000)}–${dated(started.getTime() + 600_000)}`,
+  );
+  await expect(inspector.getByTestId("inspector-counts")).toHaveText("2 sent, 0 received");
+  await expect(inspector.getByTestId("inspector-cost")).toHaveText("$1.50");
+  await expectReadableInBothThemes(page);
+});
+
+test("ARK-T345 the replay plays at 600x, moves the playhead, animates arrows, dims the future, and the feed shows only the messages up to the playhead", async ({
+  browser,
+}) => {
+  isolate();
+  const run = runId("ARK-9406");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-9406", title: "Replay" },
+    phase: "building",
+    startedAt: ago(7_200),
+    steps: [
+      {
+        id: "work",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 60,
+      },
+    ],
+  });
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  // 3 messages in the first hour and 5 in the second; the run lasts 2 hours (minutes 0 to 120).
+  const sentAt = [10, 20, 30, 70, 80, 90, 100, 110];
+  const messages = sentAt.map((minute, index) =>
+    // The message at minute 30 goes from Master Chief to the run lead: the arrow of the first hour's last message.
+    minute === 30
+      ? messageOf(`r${index}`, "chief", "lead", conversationMinute(minute))
+      : messageOf(`r${index}`, "lead", "chief", conversationMinute(minute)),
+  );
+  const worker = workerAgent("work", "implementer", "Implementers");
+  const reply = () =>
+    conversationReply(run, {
+      agents: [chiefAgent, leadAgent, worker],
+      spans: [spanOf("work", "implementer", "Implementers", 0, 120)],
+      messages,
+    });
+  const firstHour = conversationMinute(45);
+  const secondHour = conversationMinute(115);
+
+  const page = await conversationPage(browser);
+  // The replay runs on the page clock: 600x is 600 run seconds for each second of it. The clock stands still
+  // until a step advances it, so no assertion waits on wall time.
+  await page.clock.install({ time: new Date("2026-11-13T00:00:00Z") });
+  const served = await serveConversation(page, reply);
+  await openConversation(page, baseUrl, run);
+  await page.clock.pauseAt(new Date("2026-11-13T01:00:00Z"));
+  const feedCount = () => page.getByTestId("feed-message");
+  const playhead = async () =>
+    Number(await page.getByTestId("trace-playhead").getAttribute("data-time"));
+  const speed = (rate: number) =>
+    page.locator(`[data-testid="replay-speed"][data-speed="${rate}"]`);
+  const play = page.getByTestId("replay-play");
+  await expect(feedCount()).toHaveCount(8);
+  await expect(page.getByTestId("replay-scrubber")).toBeVisible();
+  await expect(play).toHaveText("Play");
+  await expect(page.getByTestId("replay-speed")).toHaveText(["10x", "60x", "600x"]);
+
+  // 600x for 4.5 s of the page clock is 45 run minutes: 3 messages, the rest dimmed, the last arrow animating.
+  await speed(600).click();
+  await expect(speed(600)).toHaveAttribute("aria-pressed", "true");
+  await play.click();
+  await expect(play).toHaveText("Pause");
+  await page.clock.runFor(4_500);
+  await expect(feedCount()).toHaveCount(3);
+  expect(await playhead()).toBeGreaterThan(conversationMinute(44));
+  expect(await playhead()).toBeLessThanOrEqual(firstHour);
+  await expect(page.getByTestId("trace-future")).toBeVisible();
+  await expect(page.locator('[data-testid="trace-tick"].future')).toHaveCount(5);
+  await expect(page.locator('[data-testid="trace-tick"]:not(.future)')).toHaveCount(3);
+  const pulse = page.getByTestId("trace-pulse");
+  await expect(pulse).toHaveAttribute("data-from", "chief");
+  await expect(pulse).toHaveAttribute("data-to", "lead");
+  expect(
+    await pulse.evaluate((line) =>
+      line.getAnimations().map((animation) => (animation as CSSAnimation).animationName),
+    ),
+  ).toContain("cv-pulse");
+  await checkpoint(page, "replay-600x-dark");
+
+  // 70 more run minutes: all 8 messages. Pause stops the playhead.
+  await page.clock.runFor(7_000);
+  await expect(feedCount()).toHaveCount(8);
+  await play.click();
+  await expect(play).toHaveText("Play");
+  const paused = await playhead();
+  expect(paused).toBeGreaterThan(conversationMinute(114));
+  await page.clock.runFor(3_000);
+  expect(await playhead()).toBe(paused);
+
+  // 10x and 60x: the playhead advances 10 or 60 run seconds for each second of the page clock.
+  for (const [rate, seconds] of [
+    [10, 10],
+    [60, 60],
+  ] as const) {
+    await speed(rate).click();
+    await expect(speed(rate)).toHaveAttribute("aria-pressed", "true");
+    // Playing again from the end restarts at the beginning; scrub back to minute 50 first.
+    await page.getByTestId("replay-scrubber").fill(String(conversationMinute(50)));
+    const from = await playhead();
+    await play.click();
+    await page.clock.runFor(1_000);
+    await play.click();
+    const moved = (await playhead()) - from;
+    // A frame of 16 ms is the clock's resolution.
+    expect(moved, `${rate}x`).toBeGreaterThan((seconds - 0.2 * rate) * 1_000);
+    expect(moved, `${rate}x`).toBeLessThanOrEqual(seconds * 1_000);
+  }
+
+  // The scrubber sets the playhead: back at minute 45 there are 3 messages again, at 115 there are 8.
+  await page.getByTestId("replay-scrubber").fill(String(firstHour));
+  expect(await playhead()).toBe(firstHour);
+  await expect(feedCount()).toHaveCount(3);
+  await page.getByTestId("replay-scrubber").fill(String(secondHour));
+  await expect(feedCount()).toHaveCount(8);
+  await page.getByTestId("replay-scrubber").fill(String(firstHour));
+
+  // A live change of the run during replay re-reads the conversation and leaves the playhead and the speed.
+  await speed(600).click();
+  const readsBefore = served.reads();
+  appendRawEvent(
+    directory,
+    "worker.started",
+    { step: "work", dispatch: "ctx_w", terminal: "t" },
+    6,
+  );
+  await expect.poll(served.reads).toBeGreaterThan(readsBefore);
+  expect(await playhead()).toBe(firstHour);
+  await expect(speed(600)).toHaveAttribute("aria-pressed", "true");
+  await expect(feedCount()).toHaveCount(3);
+
+  // Reduced motion: Play is off and nothing animates, but the scrubber still sets the playhead and the feed.
+  const still = await conversationPage(browser, { reducedMotion: "reduce" });
+  await serveConversation(still, reply);
+  await openConversation(still, baseUrl, run);
+  await expect(still.getByTestId("replay-play")).toBeDisabled();
+  await expect(still.getByTestId("feed-message")).toHaveCount(8);
+  await still.getByTestId("replay-scrubber").fill(String(firstHour));
+  await expect(still.getByTestId("feed-message")).toHaveCount(3);
+  expect(Number(await still.getByTestId("trace-playhead").getAttribute("data-time"))).toBe(
+    firstHour,
+  );
+  await still.getByTestId("replay-scrubber").fill(String(secondHour));
+  await expect(still.getByTestId("feed-message")).toHaveCount(8);
+  await expect(still.getByTestId("trace-pulse")).toHaveCount(0);
+  expect(
+    await still
+      .getByTestId("trace")
+      .evaluate((node) => node.getAnimations({ subtree: true }).length),
+  ).toBe(0);
+  await checkpoint(still, "reduced-motion-player");
 });

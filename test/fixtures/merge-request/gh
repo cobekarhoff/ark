@@ -11,7 +11,10 @@ const number = argv[0] === "pr" && argv[1] === "create" ? nextNumber(previous) :
 record("gh", argv, body);
 const state = readState();
 
-if (argv[0] === "api" && argv[1] === "user") {
+if (argv.includes("--help")) {
+  // `gh pr create --help` lists --attach from gh 2.99.0; FAKE_GH_NO_ATTACH makes this an older gh.
+  console.log(`Usage: gh pr ${argv[1]} [flags]\n\nFlags:\n  --body-file file\n${process.env.FAKE_GH_NO_ATTACH ? "" : "  --attach strings   Attach local images or videos\n"}`);
+} else if (argv[0] === "api" && argv[1] === "user") {
   console.log(owner);
 } else if (argv[0] === "pr" && argv[1] === "list") {
   if (process.env.FAKE_PROBE_FAIL) {
