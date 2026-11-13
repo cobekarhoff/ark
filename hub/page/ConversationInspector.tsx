@@ -4,7 +4,7 @@ import type { PlanStepView, SessionFile } from "../types.ts";
 import { sentAt, typeOf, useClockText } from "./conversation-model.ts";
 import { nameOf, roleClass } from "./ConversationFeed.tsx";
 import { Markdown } from "./Markdown.tsx";
-import { transcriptHref } from "./RunDetail.tsx";
+import { runHref, transcriptHref } from "./RunDetail.tsx";
 
 /** A transcript link, or why the button is disabled. */
 export type TranscriptTarget = { href: string } | { reason: string };
@@ -58,9 +58,16 @@ function TranscriptButton({
 
 const minutes = (seconds: number) => `${(seconds / 60).toFixed(1)} min`;
 
-/** One body, read from the hub when the run answer did not carry it. Null: none, or still loading. */
-function useBody(message: ConversationMessage): string | null {
-  const [fetched, setFetched] = useState<{ id: string; body: string | null } | null>(null);
+/**
+ * One body, read from the hub when the run answer did not carry it. `text` is null while loading or when
+ * there is none; `missing` is true when the hub no longer holds the message (a 404).
+ */
+function useBody(message: ConversationMessage): { text: string | null; missing: boolean } {
+  const [fetched, setFetched] = useState<{
+    id: string;
+    text: string | null;
+    missing: boolean;
+  } | null>(null);
   useEffect(() => {
     if (message.body !== undefined) return;
     const controller = new AbortController();
@@ -68,17 +75,18 @@ function useBody(message: ConversationMessage): string | null {
       signal: controller.signal,
     })
       .then(async (response) =>
-        response.ok ? ((await response.json()) as { body: string | null }) : null,
+        response.ok
+          ? { text: ((await response.json()) as { body: string | null }).body, missing: false }
+          : { text: null, missing: true },
       )
-      .then((found) => setFetched({ id: message.id, body: found?.body ?? null }))
+      .then((found) => setFetched({ id: message.id, ...found }))
       .catch(() => {});
     return () => controller.abort();
   }, [message.id, message.body]);
-  return message.body !== undefined
-    ? message.body
-    : fetched?.id === message.id
-      ? fetched.body
-      : null;
+  if (message.body !== undefined) return { text: message.body, missing: false };
+  return fetched?.id === message.id
+    ? { text: fetched.text, missing: fetched.missing }
+    : { text: null, missing: false };
 }
 
 function MessageView({
@@ -193,10 +201,14 @@ function MessageView({
           ))}
         </ol>
       ) : null}
-      {body ? (
+      {body.text ? (
         <div className="cv-body" data-testid="inspector-body">
-          <Markdown text={body} />
+          <Markdown text={body.text} />
         </div>
+      ) : body.missing ? (
+        <p className="mut" data-testid="inspector-body-missing">
+          The hub no longer holds this message body.
+        </p>
       ) : null}
     </>
   );
@@ -259,12 +271,147 @@ function AgentView({
     </>
   );
 }
+/** What a click on the project map picked that is not a message or an agent. */
+export type InspectorFocus =
+  /** A human answer: the person marker on Master Chief's line, by its answer time. */
+  | { kind: "person"; time: string }
+  /** A station: one step of the run, by step id and start. */
+  | { kind: "station"; step: string; start: string }
+  /** The run line itself; `start` and `close` (null while open) come from the project run. */
+  | { kind: "run"; start: number; close: number | null };
 
-/** The side panel of the feed: the selected agent, else the selected message. */
+function PersonView({
+  conversation,
+  time,
+  onSelect,
+}: {
+  conversation: RunConversation;
+  time: string;
+  onSelect: (id: string) => void;
+}) {
+  const clockAt = useClockText();
+  const answer = conversation.answers.find((candidate) => candidate.time === time);
+  const subjects = new Map(conversation.messages.map((message) => [message.id, message.subject]));
+  const answered = conversation.questions.filter((question) => question.answered === time);
+  return (
+    <>
+      <h3 className="cv-subject">You answered</h3>
+      <dl className="cv-facts">
+        <dt>At</dt>
+        <dd data-testid="inspector-person-time">{clockAt(Date.parse(time))}</dd>
+        <dt>Run</dt>
+        <dd className="mono">{conversation.run}</dd>
+        <dt>Gate</dt>
+        <dd>{answer?.gate ?? "not recorded"}</dd>
+        <dt>Answer</dt>
+        <dd data-testid="inspector-person-answer">{answer?.answer ?? "(no text)"}</dd>
+      </dl>
+      {answered.length > 0 ? (
+        <ol
+          className="cv-thread-list"
+          aria-label="Questions answered"
+          data-testid="inspector-asked"
+        >
+          {answered.map((question) => (
+            <li key={question.id}>
+              <button type="button" onClick={() => onSelect(question.id)}>
+                {subjects.get(question.id) ?? "(no subject)"}
+              </button>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="mut">No question of this run is paired with this answer.</p>
+      )}
+    </>
+  );
+}
+
+function StationView({
+  conversation,
+  step,
+  start,
+}: {
+  conversation: RunConversation;
+  step: string;
+  start: string;
+}) {
+  const clockAt = useClockText();
+  const span = conversation.spans.find(
+    (candidate) => candidate.step === step && candidate.start === start,
+  );
+  if (!span) return <p className="mut">This step is not in the run any more.</p>;
+  const agent = conversation.agents.find((candidate) =>
+    span.agent !== null ? candidate.id === span.agent : candidate.step === step,
+  );
+  return (
+    <>
+      <h3 className="cv-subject">Step {span.step}</h3>
+      <dl className="cv-facts">
+        <dt>Run</dt>
+        <dd className="mono">{conversation.run}</dd>
+        <dt>Role</dt>
+        <dd data-testid="inspector-role">{span.role}</dd>
+        <dt>Agent</dt>
+        <dd>{agent ? nameOf(agent).name : "not mapped"}</dd>
+        <dt>Started</dt>
+        <dd>{clockAt(Date.parse(span.start))}</dd>
+        <dt>Ended</dt>
+        <dd data-testid="inspector-ended">
+          {span.end === null ? "still running or crashed" : clockAt(Date.parse(span.end))}
+        </dd>
+      </dl>
+    </>
+  );
+}
+
+function RunView({
+  conversation,
+  start,
+  close,
+}: {
+  conversation: RunConversation;
+  start: number;
+  close: number | null;
+}) {
+  const clockAt = useClockText();
+  return (
+    <>
+      <h3 className="cv-subject mono">{conversation.run}</h3>
+      <dl className="cv-facts">
+        <dt>Started</dt>
+        <dd>{clockAt(start)}</dd>
+        <dt>Closed</dt>
+        <dd data-testid="inspector-closed">{close === null ? "still open" : clockAt(close)}</dd>
+        <dt>Messages</dt>
+        <dd data-testid="inspector-counts">{conversation.messages.length}</dd>
+        <dt>Questions</dt>
+        <dd>{conversation.questions.length}</dd>
+        <dt>Answers</dt>
+        <dd>{conversation.answers.length}</dd>
+      </dl>
+      <div className="cv-actions">
+        <a
+          className="btn"
+          data-testid="inspector-open-run"
+          href={runHref(conversation.run, "conversation")}
+        >
+          Open conversation
+        </a>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The side panel of the feed. A `focus` (project map: person, station, run line) wins, then the selected
+ * agent, then the selected message. `conversation` is always the run that owns the click.
+ */
 export function Inspector({
   conversation,
   selected,
   agent,
+  focus = null,
   sessions,
   plan,
   onSelect,
@@ -273,20 +420,31 @@ export function Inspector({
   conversation: RunConversation;
   selected: string | null;
   agent: string | null;
+  focus?: InspectorFocus | null;
   sessions: SessionFile[] | null;
   plan: PlanStepView[] | null;
   onSelect: (id: string) => void;
   onAgent: (id: string) => void;
 }) {
-  const agentSelected = conversation.agents.find((candidate) => candidate.id === agent);
-  const message = conversation.messages.find((candidate) => candidate.id === selected);
+  const agentSelected = focus
+    ? undefined
+    : conversation.agents.find((candidate) => candidate.id === agent);
+  const message = focus
+    ? undefined
+    : conversation.messages.find((candidate) => candidate.id === selected);
   return (
     <aside
       className={`cv-inspector ${roleClass(agentSelected ?? conversation.agents.find((candidate) => candidate.id === message?.from))}`}
       aria-label="Inspector"
       data-testid="inspector"
     >
-      {agentSelected ? (
+      {focus?.kind === "person" ? (
+        <PersonView conversation={conversation} time={focus.time} onSelect={onSelect} />
+      ) : focus?.kind === "station" ? (
+        <StationView conversation={conversation} step={focus.step} start={focus.start} />
+      ) : focus?.kind === "run" ? (
+        <RunView conversation={conversation} start={focus.start} close={focus.close} />
+      ) : agentSelected ? (
         <AgentView conversation={conversation} agent={agentSelected} plan={plan} />
       ) : message ? (
         <MessageView
