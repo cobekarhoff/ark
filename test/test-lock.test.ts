@@ -3,6 +3,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   setDefaultTimeout,
@@ -942,6 +943,66 @@ describe("ark chief state host", () => {
   };
   const holdLines = (text: string) =>
     text.split("\n").filter((line) => line.startsWith("hold new runs:"));
+  // The real CPU and load are never read by these tests: a busy CI host would add a CPU reason.
+  const seam = (cpuPercent: number | null, load: number) => {
+    if (cpuPercent === null) delete process.env.ARK_FAKE_CPU_PERCENT;
+    else process.env.ARK_FAKE_CPU_PERCENT = String(cpuPercent);
+    process.env.ARK_FAKE_LOAD = String(load);
+  };
+  beforeEach(() => seam(10, 2));
+  afterEach(() => {
+    delete process.env.ARK_FAKE_CPU_PERCENT;
+    delete process.env.ARK_FAKE_LOAD;
+  });
+
+  test.skipIf(!onMac)(
+    "ARK-T365 does not hold on a high load with CPU use below the busy limit, even at the limit",
+    () => {
+      setFakeHost(healthyHost);
+      seam(5, 500);
+      const idle = host();
+      expect(idle).toMatch(/load \(5 min\): 500/);
+      expect(holdLines(idle)).toHaveLength(1);
+      expect(idle.trimEnd().split("\n").at(-1)).toBe("hold new runs: no");
+      seam(90, 500);
+      expect(holdLines(host())).toEqual(["hold new runs: no"]);
+    },
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T366 holds on CPU use above the busy limit and names the measured value",
+    () => {
+      setFakeHost(healthyHost);
+      seam(95, 2);
+      const busy = host();
+      expect(holdLines(busy)).toEqual(["hold new runs: CPU 95.0% is above the 90% busy limit"]);
+      expect(busy.trimEnd().split("\n").at(-1)).toBe(holdLines(busy)[0]!);
+      seam(90.1, 2);
+      expect(holdLines(host())).toEqual(["hold new runs: CPU 90.1% is above the 90% busy limit"]);
+      seam(95, 500);
+      const loaded = host();
+      expect(holdLines(loaded)).toEqual(["hold new runs: CPU 95.0% is above the 90% busy limit"]);
+      expect(loaded).toMatch(/load \(5 min\): 500/);
+    },
+  );
+
+  test.skipIf(!onMac)("ARK-T366 reads a real CPU value on the one-shot chief state path", () => {
+    setFakeHost(healthyHost);
+    seam(null, 2);
+    const text = host();
+    expect(text).toMatch(/^cpu: \d+(\.\d)?%$/m);
+    expect(holdLines(text)).toHaveLength(1);
+  });
+
+  test.skipIf(!onMac)("ARK-T188 joins free memory, swap and CPU reasons in the fixed order", () => {
+    setFakeHost({ freePercent: 19, swapGigabytes: 8.1 });
+    seam(95, 2);
+    const lines = holdLines(host());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(
+      "free 19% is below the 20% floor; swap 8.1 GB is above the 8 GB ceiling; CPU 95.0% is above the 90% busy limit",
+    );
+  });
 
   test.skipIf(!onMac)(
     "ARK-T188 prints the readings and no memory or swap hold on a healthy host",
@@ -951,6 +1012,7 @@ describe("ark chief state host", () => {
       expect(text).toContain("free memory: 50%");
       expect(text).toContain("swap used: 2.0 GB of 16.0 GB");
       expect(text).toMatch(/load \(5 min\): \d/);
+      expect(text).toMatch(/^cpu: \d/m);
       expect(text).toMatch(/free disk: \d+ GB/);
       expect(text).toContain("tests: running 0, waiting 0");
       expect(holdLines(text)).toHaveLength(1);
