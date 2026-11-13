@@ -10,6 +10,8 @@ setDefaultTimeout(30_000);
 //   ARK_WALLCLOCK_PRINT=1 bun test test/wallclock.test.ts
 // wallclock-base.json holds the counts of the base commit (16b4198). The allowed list may never
 // exceed it, so it cannot be raised to make the guard pass.
+// Playwright specs also may not read the date (ARK-433): the hub clock is frozen by ARK_NOW, so a
+// spec takes its instants from `isoAt` in pw/helpers.ts. The limit is 0, with no allowance file.
 // ponytail: line-pattern scan, not an AST; a sleep hidden behind a helper escapes it.
 const forbidden = [
   /\bwaitForTimeout\(/,
@@ -17,6 +19,8 @@ const forbidden = [
   /\bsetTimeout\(/,
   /\.toBeLessThan\(\s*\d[\d_]{2,}\s*\)/,
 ];
+
+const dateReads = [/\bnew Date\(/, /\bDate\.now\(/];
 
 const testRoot = resolve(import.meta.dir);
 const readCounts = (name: string): Record<string, number> =>
@@ -26,6 +30,14 @@ export function countUses(text: string): number {
   return text
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("//") && forbidden.some((p) => p.test(line)))
+    .length;
+}
+
+/** Lines of a `*.pw.ts` text that read the date; comment lines are skipped. */
+export function countDateReads(text: string): number {
+  return text
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//") && dateReads.some((p) => p.test(line)))
     .length;
 }
 
@@ -60,7 +72,7 @@ function currentCounts(): Record<string, number> {
   return uses;
 }
 
-test("ARK-T126 ARK-331-AC3 no test file gains a wall-clock wait or millisecond budget", () => {
+test("ARK-T126 no test file gains a wall-clock wait or millisecond budget", () => {
   const uses = currentCounts();
   if (process.env.ARK_WALLCLOCK_PRINT) console.log(JSON.stringify(uses, null, 2));
   expect(
@@ -105,4 +117,75 @@ test("ARK-T126 a raised allowance fails against the base list and a lowered one 
     ["test/hub.test.ts", 18, 17],
   ]);
   expect(above({ "test/new.test.ts": 1 }, base)).toEqual([["test/new.test.ts", 1, 0]]);
+});
+
+test("ARK-T126 an appended new Date( or Date.now( fails a pw spec at limit 0; a comment or a unit test file does not", () => {
+  expect(countDateReads(spec), "checkpoint.pw.ts starts clean").toBe(0);
+  for (const line of ["const d = new Date();", "const n = Date.now();"]) {
+    expect(above({ [specFile]: countDateReads(`${spec}\n${line}`) }, {}), line).toEqual([
+      [specFile, 1, 0],
+    ]);
+  }
+  expect(countDateReads(`${spec}\n// new Date(`)).toBe(0);
+  // the date list covers *.pw.ts only: the same line in a unit test is left to the shared list
+  expect(countUses("const d = new Date();")).toBe(0);
+});
+
+const specs = sources(testRoot).filter((file) => file.endsWith(".pw.ts"));
+const relative = (file: string) => file.slice(testRoot.length - "test".length);
+
+test("ARK-T349 no playwright spec reads the wall clock", () => {
+  expect(specs.length).toBeGreaterThan(0);
+  expect(
+    above(
+      Object.fromEntries(
+        specs.map((file) => [relative(file), countDateReads(readFileSync(file, "utf8"))]),
+      ),
+      {},
+    ),
+    "[file, count, 0]: use isoAt from test/pw/helpers.ts",
+  ).toEqual([]);
+});
+
+test("ARK-T349 isoAt follows ARK_NOW", async () => {
+  const { isoAt } = await import("./pw/helpers.ts");
+  const saved = process.env.ARK_NOW;
+  try {
+    for (const instant of ["2026-11-04T23:30:00Z", "2026-02-01T00:00:00Z"]) {
+      process.env.ARK_NOW = instant;
+      expect(isoAt()).toBe(new Date(instant).toISOString());
+      expect(isoAt(-60_000)).toBe(new Date(Date.parse(instant) - 60_000).toISOString());
+    }
+  } finally {
+    if (saved === undefined) delete process.env.ARK_NOW;
+    else process.env.ARK_NOW = saved;
+  }
+});
+
+/** Spec files that break the ARK_NOW rules: [file, rule]. */
+function clockRuleBreaks(texts: Record<string, string>): [string, string][] {
+  return Object.entries(texts).flatMap(([file, text]) => [
+    ...(/\bstartHub\(/.test(text) && !/\buseCleanup\(/.test(text)
+      ? [[file, "startHub without useCleanup"] as [string, string]]
+      : []),
+    ...(text.includes("delete process.env.ARK_NOW")
+      ? [[file, "delete process.env.ARK_NOW"] as [string, string]]
+      : []),
+  ]);
+}
+
+test("ARK-T350 every spec that starts a hub calls useCleanup and none deletes ARK_NOW", () => {
+  const texts = Object.fromEntries(
+    specs.map((file) => [relative(file), readFileSync(file, "utf8")]),
+  );
+  expect(Object.keys(texts)).toContain("test/pw/hub.pw.ts");
+  expect(clockRuleBreaks(texts)).toEqual([]);
+  // the scan sees both breaks on a mutated copy of the hub spec
+  const hub = texts["test/pw/hub.pw.ts"];
+  expect(clockRuleBreaks({ hub: `${hub}\ndelete process.env.ARK_NOW;` })).toEqual([
+    ["hub", "delete process.env.ARK_NOW"],
+  ]);
+  expect(clockRuleBreaks({ hub: hub.replaceAll("useCleanup(", "noop(") })).toEqual([
+    ["hub", "startHub without useCleanup"],
+  ]);
 });
