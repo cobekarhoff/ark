@@ -19,6 +19,7 @@ import {
   outcomeClass,
   outcomeRing,
 } from "./format.tsx";
+import { Flip } from "./motion.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { ticketHref, useLive, useProject } from "./store.tsx";
 import type { RunView, Snapshot, TicketRunView } from "../types.ts";
@@ -166,7 +167,7 @@ function Board({ snapshot, entries }: { snapshot: Snapshot; entries: Map<string,
               <span className="count">{count}</span>
               <span className="hint">{hint}</span>
             </header>
-            <div className="lane-body">
+            <Flip className="lane-body">
               {cards.map((entry) => (
                 <Card
                   key={entry.key}
@@ -215,7 +216,7 @@ function Board({ snapshot, entries }: { snapshot: Snapshot; entries: Map<string,
                   Show more
                 </button>
               ) : null}
-            </div>
+            </Flip>
           </section>
         );
       })}

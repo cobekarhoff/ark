@@ -1,3 +1,5 @@
+import { flushSync } from "react-dom";
+import { reducedMotion } from "./motion.tsx";
 import {
   createContext,
   useContext,
@@ -35,7 +37,15 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           ? { ...previous, connection: "reconnecting" }
           : previous,
       );
-    return () => source.close();
+    // Bounded loops (pulse, dash) pause while the tab is hidden: styles.css reads this attribute.
+    const markHidden = () =>
+      document.documentElement.toggleAttribute("data-hidden", document.hidden);
+    markHidden();
+    document.addEventListener("visibilitychange", markHidden);
+    return () => {
+      source.close();
+      document.removeEventListener("visibilitychange", markHidden);
+    };
   }, []);
   return <Context value={live}>{children}</Context>;
 }
@@ -248,9 +258,46 @@ export function applyTheme(choice: ThemeChoice): void {
   }
 }
 
+/** A keyboard action does not animate its own result: a route change this soon after a key is one. */
+const keyboardWindowMs = 500;
+let lastKeyAt = -Infinity;
+const hashListeners = new Set<() => void>();
+const pathOf = (url: string) => url.split("#")[1]?.split("?")[0] ?? "";
+
+/**
+ * One listener for every `useHash`. A route change to another path runs its render inside
+ * `document.startViewTransition` (flushSync, so the new DOM is there when the callback returns),
+ * unless the browser has none, reduced motion is set, or a key started the change. The project
+ * filter changes only the query: no transition.
+ */
+function onHashChange(event: HashChangeEvent) {
+  const render = () => hashListeners.forEach((notify) => notify());
+  if (
+    typeof document.startViewTransition !== "function" ||
+    reducedMotion() ||
+    performance.now() - lastKeyAt < keyboardWindowMs ||
+    pathOf(event.oldURL) === pathOf(event.newURL)
+  )
+    return render();
+  document.startViewTransition(() => flushSync(render));
+}
+const onKeyDown = () => {
+  lastKeyAt = performance.now();
+};
+
 const subscribeHash = (notify: () => void) => {
-  addEventListener("hashchange", notify);
-  return () => removeEventListener("hashchange", notify);
+  if (hashListeners.size === 0) {
+    addEventListener("hashchange", onHashChange);
+    addEventListener("keydown", onKeyDown, true);
+  }
+  hashListeners.add(notify);
+  return () => {
+    hashListeners.delete(notify);
+    if (hashListeners.size === 0) {
+      removeEventListener("hashchange", onHashChange);
+      removeEventListener("keydown", onKeyDown, true);
+    }
+  };
 };
 export const useHash = () => useSyncExternalStore(subscribeHash, () => location.hash);
 

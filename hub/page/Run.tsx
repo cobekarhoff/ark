@@ -97,7 +97,11 @@ function Dag({
           return (
             <path
               key={`${from}>${to}`}
-              className="edge"
+              className={
+                plan.find((step) => step.id === to)?.status === "running"
+                  ? "edge into-running"
+                  : "edge"
+              }
               data-testid="step-edge"
               data-from={from}
               data-to={to}

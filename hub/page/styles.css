@@ -15,6 +15,7 @@
   --mute: light-dark(#65615a, #8591a2);
   --red: light-dark(#c2371f, #ff6b5e);
   --amber: light-dark(#c27a0e, #f2b04a);
+  --highlight: light-dark(#f6c870, #8a5d12);
   --green: light-dark(#2d8a57, #46c48a);
   --blue: light-dark(#2f62d8, #6aa6ff);
   --violet: light-dark(#7048c8, #a58bff);
@@ -471,7 +472,13 @@ button:not(:disabled):active {
   transform: scale(0.97);
 }
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  ::before,
+  ::after,
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
     transition: none !important;
   }
 }
@@ -3609,4 +3616,50 @@ pre.code-plain {
   flex: 1;
   max-height: none;
   min-height: 0;
+}
+
+/* ---------- live changes (ARK-335): motion marks a change, then stops ---------- */
+/* A new or changed Needs me item or tile: amber fades out over 600 ms; the class goes after that. */
+@keyframes highlight-fade {
+  from {
+    background-color: var(--highlight);
+  }
+}
+.hl {
+  animation: highlight-fade 600ms ease-out;
+}
+/* A segment and a meter change colour and width over 200 ms. */
+.steps i,
+.meter i {
+  transition:
+    background-color 200ms ease-out,
+    width 200ms ease-out;
+}
+/* The running step pulses 4 times and its incoming edges flow 5 times, then both rest. A hidden tab pauses them. */
+@keyframes step-pulse {
+  50% {
+    stroke-width: 3.5;
+    stroke-opacity: 0.55;
+  }
+}
+@keyframes edge-flow {
+  to {
+    stroke-dashoffset: -9;
+  }
+}
+.graph .s-running .box {
+  animation: step-pulse 1.6s ease-in-out 4;
+}
+.graph .edge.into-running {
+  stroke: var(--blue);
+  stroke-dasharray: 5 4;
+  animation: edge-flow 1.2s linear 5;
+}
+:root[data-hidden] .graph .s-running .box,
+:root[data-hidden] .graph .edge.into-running {
+  animation-play-state: paused;
+}
+/* A view change: a quick cross-fade, at most 200 ms. */
+::view-transition-group(root) {
+  animation-duration: 150ms;
 }
