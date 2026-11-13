@@ -10731,7 +10731,7 @@ function projectReply(
       run(
         world.b,
         "p",
-        [span("B1", at(8, 30), at(11, 30))],
+        [span("B1", at(8, 30), at(10, 55))],
         [
           projectMessage("m5", "lead", "chief", at(8, 40), { type: "question", subject: "elm" }),
           projectMessage("m7", "lead", "chief", at(10, 50), {
@@ -10858,7 +10858,7 @@ test("ARK-T355 the Runs page switches to Conversation and draws the metro map of
   ).toEqual([world.a, world.c, world.b]);
   await expect(page.locator('[data-testid="map-run-line"][data-run="other-run"]')).toHaveCount(0);
 
-  // A (08:00 to 09:00) and B (08:30 to 11:30) close; C (08:05) is open. Left edges follow the start order.
+  // A (08:00 to 09:00) and B (08:30 to 10:55) close; C (08:05) is open. Left edges follow the start order.
   const line = (run: string) => page.locator(`[data-testid="map-run-line"][data-run="${run}"]`);
   await expect(line(world.a)).toHaveAttribute("data-open", "false");
   await expect(line(world.b)).toHaveAttribute("data-open", "false");
@@ -10871,9 +10871,9 @@ test("ARK-T355 the Runs page switches to Conversation and draws the metro map of
   ];
   expect(boxA.x).toBeLessThan(boxC.x);
   expect(boxC.x).toBeLessThan(boxB.x);
-  // A returns at 09:00, long before B at 11:30; the open C runs to the end of the map, where B closes.
+  // A returns at 09:00, long before B at 10:55; the open C runs on to the window end 11:00, past B's close.
   expect(boxA.x + boxA.width).toBeLessThan(boxB.x + boxB.width);
-  expect(Math.abs(boxC.x + boxC.width - (boxB.x + boxB.width))).toBeLessThan(1.5);
+  expect(boxC.x + boxC.width).toBeGreaterThan(boxB.x + boxB.width + 3);
 
   // 3 thick spurs (the questions m3, m5, m7); the other messages of Master Chief are thin.
   const thick = page.locator('[data-testid="map-spur"][data-thick="true"]');
@@ -10898,7 +10898,8 @@ test("ARK-T355 the Runs page switches to Conversation and draws the metro map of
   );
 
   // 3 hatched bands: Q1 from 08:10 to the answer at 08:25 (the person marker); Q2 from 08:40 and Q3, which has
-  // no delivery time, from its sent time 10:50, both to the window end where B closes.
+  // no delivery time, from its sent time 10:50. Neither is answered, so each ends where B closes (10:55), not
+  // at the window end, and is not open.
   const spurX = async (id: string) => {
     const spur = await box(page.locator(`[data-testid="map-spur"][data-id="${id}"]`));
     expect(spur.height).toBeGreaterThan(0);
@@ -10917,11 +10918,11 @@ test("ARK-T355 the Runs page switches to Conversation and draws the metro map of
   expect(Math.abs(q1.x + q1.width - (await spurX("m4")))).toBeLessThan(3);
   expect(Math.abs(q2.x - (await spurX("m5")))).toBeLessThan(3);
   expect(Math.abs(q3.x - (await spurX("m7")))).toBeLessThan(3);
-  for (const open of [q2, q3])
-    expect(Math.abs(open.x + open.width - (boxB.x + boxB.width))).toBeLessThan(3);
+  for (const unanswered of [q2, q3])
+    expect(Math.abs(unanswered.x + unanswered.width - (boxB.x + boxB.width))).toBeLessThan(3);
   await expect(band("m3")).toHaveAttribute("data-open", "false");
-  await expect(band("m5")).toHaveAttribute("data-open", "true");
-  await expect(band("m7")).toHaveAttribute("data-open", "true");
+  await expect(band("m5")).toHaveAttribute("data-open", "false");
+  await expect(band("m7")).toHaveAttribute("data-open", "false");
 
   // Every drawn thing has a box and no overlay hides it.
   const mapBox = await box(page.getByTestId("map"));
@@ -10942,6 +10943,15 @@ test("ARK-T355 the Runs page switches to Conversation and draws the metro map of
   expect(await topmostAtCentre(person)).toBe(true);
   expect(await topmostAtCentre(page.getByTestId("map-run-badge").first())).toBe(true);
   await checkpoint(page, "map-dark");
+
+  // At 09:30 B is still open, so Q2 waits: its band is open and ends at the scrubber, not at B's close.
+  await page.getByTestId("replay-scrubber").fill(String(minuteOf(9, 30)));
+  await expect(band("m5")).toHaveAttribute("data-open", "true");
+  await expect(band("m7")).toHaveCount(0);
+  const waiting = await box(band("m5"));
+  expect(waiting.x + waiting.width).toBeLessThan(q2.x + q2.width - 3);
+  await page.getByTestId("replay-exit").click();
+  await expect(band("m7")).toHaveAttribute("data-open", "false");
 
   // A click on the line of B opens B's Conversation tab; back, the badge of A opens A's.
   await page
@@ -11159,7 +11169,7 @@ test("ARK-T357 the Now panel follows the scrubber, a type chip, a run filter and
     latest: ["m5", "m4", "m3", "m2", "m1"],
   });
   await checkpoint(page, "now-t3-dark");
-  // T4 08:20: A and C in a step; T5 08:01: A only; T2 11:00: B and C in C2.
+  // T4 08:20: A and C in a step; T5 08:01: A only; T2 11:00: B has closed, only C in C2.
   await seek(minuteOf(8, 20));
   await settle("3");
   expect(await now()).toEqual({
@@ -11177,10 +11187,6 @@ test("ARK-T357 the Now panel follows the scrubber, a type chip, a run filter and
   await seek(minuteOf(11, 0));
   await settle("8");
   expect(await now()).toMatchObject({
-    live: [
-      [world.c, "C2"],
-      [world.b, "B1"],
-    ],
     messages: "8",
     answers: "1",
   });
@@ -11263,7 +11269,7 @@ test("ARK-T357 the Now panel follows the scrubber, a type chip, a run filter and
   const rowBox = (await row.boundingBox())!;
   await row.click({ position: { x: rowBox.width - 6, y: 3 } });
   await expect(inspector).toContainText(world.b);
-  await expect(page.getByTestId("inspector-closed")).toHaveText("11:30:00");
+  await expect(page.getByTestId("inspector-closed")).toHaveText("10:55:00");
   await expect(page.getByTestId("inspector-counts")).toHaveText("2");
   await expect(page.getByTestId("inspector-open-run")).toHaveAttribute(
     "href",

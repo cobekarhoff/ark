@@ -4607,6 +4607,8 @@ button.cv-name:hover {
 }
 .tscale-tick,
 .tscale-answer {
+  padding: 0;
+  border: 0;
   cursor: pointer;
 }
 /* A 3 px tick is hard to hit: a wider invisible target. */

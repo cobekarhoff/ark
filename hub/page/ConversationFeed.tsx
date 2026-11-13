@@ -34,9 +34,9 @@ export function nameOf(agent: ConversationAgent | undefined): { name: string; ba
     case "worker":
       return { name: agent.step ?? agent.title ?? "worker", badge: agent.role ?? "worker" };
     case "session":
-      return { name: "Session", badge: "session" };
+      return { name: agent.handle ?? "session", badge: "session" };
     case "unmapped":
-      return { name: "Unmapped", badge: "unmapped" };
+      return { name: agent.handle ?? "unmapped", badge: "unmapped" };
   }
 }
 

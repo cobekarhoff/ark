@@ -267,14 +267,17 @@ const StationButton = memo(function StationButton({
   span,
   left,
   top,
+  shown,
   onFocus,
 }: {
   run: string;
   span: RunConversation["spans"][number];
   left: number;
   top: number;
+  shown: boolean;
   onFocus: PickFocus;
 }) {
+  if (!shown) return null;
   return (
     <button
       type="button"
@@ -460,6 +463,7 @@ function Drawing({
             span={span}
             left={xOf(Date.parse(span.start))}
             top={rowY.get(run.run)! - 6}
+            shown={Date.parse(span.start) <= upto}
             onFocus={pickFocus}
           />
         )),
@@ -619,12 +623,14 @@ const StripLanes = memo(function StripLanes({
     messages
       .filter((message) => Number.isFinite(sentAt(message)))
       .map((message) => (
-        <span
+        <button
+          type="button"
           key={message.id}
           className={`tscale-tick ty-${typeOf(message)}`}
           data-testid="strip-tick"
           data-id={message.id}
           data-run={run ?? ""}
+          aria-label={`${typeOf(message)}: ${message.subject ?? message.id}`}
           title={message.subject ?? typeOf(message)}
           style={{ left: percent(sentAt(message)) }}
           onClick={(event) => {
@@ -646,11 +652,13 @@ const StripLanes = memo(function StripLanes({
         {ticks(other, null)}
         {runs.flatMap((run) =>
           run.conversation.answers.map((answer) => (
-            <span
+            <button
+              type="button"
               key={`${run.run}/${answer.time}`}
               className="tscale-answer"
               data-testid="strip-answer"
               data-run={run.run}
+              aria-label={`You answered ${run.run}`}
               title={`You answered ${run.run}`}
               style={{ left: percent(Date.parse(answer.time)) }}
               onClick={(event) => {

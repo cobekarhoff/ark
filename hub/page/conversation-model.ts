@@ -563,13 +563,16 @@ export type Band = { question: string; run: string; start: number; end: number; 
 
 /**
  * The time each run waited for the human: a question or escalation to Master Chief, from delivery (sent,
- * when delivery is not recorded) to its answer. An unanswered one runs to `playhead`. A question not yet
- * sent at the playhead has no band; one answered after it is waiting again.
+ * when delivery is not recorded) to its answer. An unanswered one runs to the run's close or to `playhead`,
+ * whichever is first: a closed run waits for no one. It is open only while the run is open at the playhead.
+ * A question not yet sent at the playhead has no band; one answered after it is waiting again.
  */
 export function waitingBands(runs: readonly ProjectRun[], playhead: number = Infinity): Band[] {
   return runs.flatMap((run) => {
     const toChief = new Set(
-      run.conversation.messages.filter((m) => m.to === "chief").map((m) => m.id),
+      run.conversation.messages
+        .filter((message) => message.to === "chief")
+        .map((message) => message.id),
     );
     return run.conversation.questions.flatMap((question): Band[] => {
       if (!toChief.has(question.id)) return [];
@@ -577,13 +580,15 @@ export function waitingBands(runs: readonly ProjectRun[], playhead: number = Inf
       if (!Number.isFinite(start) || start > playhead) return [];
       const answered = Date.parse(question.answered ?? "");
       const done = Number.isFinite(answered) && answered <= playhead;
+      const closed = run.close !== null && run.close <= playhead;
+      const stop = Math.min(done ? answered : Infinity, run.close ?? Infinity, playhead);
       return [
         {
           question: question.id,
           run: run.run,
           start,
-          end: done ? answered : playhead,
-          open: !done,
+          end: Math.max(start, stop),
+          open: !done && !closed,
         },
       ];
     });

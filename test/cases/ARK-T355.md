@@ -4,7 +4,7 @@ title: "ARK-T355 the Runs page switches to Conversation and draws the metro map 
 level: e2e
 technique: "equivalence classes of run (closed, open, with question, answered/unanswered) with state transition of the List/Conversation switch"
 priority: high
-risk: "List stops being the default or loses its test ids; a run line does not leave at its start or return at its close; an open run is drawn closed; a question has no thick spur or no waiting band; an unanswered question's band stops early; a question with no `delivered` time starts its band at the wrong place; a human answer has no person marker; another project's run is drawn; the 'In order, not to scale' label is missing; a run click opens the wrong run or tab"
+risk: "List stops being the default or loses its test ids; a run line does not leave at its start or return at its close; an open run is drawn closed; a question has no thick spur or no waiting band; an unanswered question's band stops early or runs past its run's close; a question with no `delivered` time starts its band at the wrong place; a human answer has no person marker; another project's run is drawn; the 'In order, not to scale' label is missing; a run click opens the wrong run or tab"
 status: active
 changed_by: 2026-11-13-ARK-346-1
 ---
@@ -21,12 +21,12 @@ Prove AC1: the List and Conversation switch, and the metro map drawn from `GET /
 
 ## Shared fixture (ARK-T355 to ARK-T357)
 
-Base `2026-11-12T08:00Z`; times are UTC, never `ago()`. Window end is 11:30 (B's close, the latest known time).
+Base `2026-11-12T08:00Z`; times are UTC, never `ago()`. Window end is 11:00 (C's last message m8, the latest known time). B closes earlier, at 10:55.
 
 | Run | Project | Start | Close | Steps                                           |
 | --- | ------- | ----- | ----- | ----------------------------------------------- |
 | A   | scoped  | 08:00 | 09:00 | A1 08:00-09:00                                  |
-| B   | scoped  | 08:30 | 11:30 | B1 08:30-11:30                                  |
+| B   | scoped  | 08:30 | 10:55 | B1 08:30-10:55                                  |
 | C   | scoped  | 08:05 | open  | C1 08:05-08:50, C2 10:30-open (gap 08:50-10:30) |
 | D   | other   | 08:00 | 09:00 | not drawn, not counted                          |
 
@@ -50,9 +50,9 @@ Rule for m9: with no time it is dropped from the strip ticks, from the feed posi
 
 1. Open Runs without a mode: List is selected and the existing Board, graph and closed band test ids are present; the Conversation map is absent.
 2. Press Conversation: the map shows, labelled 'In order, not to scale', a Master Chief line and one line for each of the 3 runs of the scoped project (run D is not drawn).
-3. Check each line: runs A (08:00 to 09:00) and B (08:30 to 11:30) leave the central line at their start and return at their close; run C (08:05) leaves and stays open.
+3. Check each line: runs A (08:00 to 09:00) and B (08:30 to 10:55) leave the central line at their start and return at their close; run C (08:05) leaves and stays open to the window end 11:00.
 4. Check message beads: every message to or from Master Chief touches the central line; Q1, Q2 and Q3 are thick spurs; other messages are thin.
-5. Check bands: Q1 has a hatched 'waiting on you' band from 08:10 to 08:25; Q2's band runs from 08:40 to the window end 11:30 (no answer); Q3 (`delivered: null`) starts its band at its sent time 10:50 and runs to 11:30.
+5. Check bands: Q1 has a hatched 'waiting on you' band from 08:10 to 08:25; Q2's band runs from 08:40 and Q3 (`delivered: null`) starts its band at its sent time 10:50; neither has an answer, so both end where B closes (10:55), not at the window end, and are not open. Scrub to 09:30: B is open, so Q2's band is open and ends at the scrubber; Q3 has no band yet.
 6. Check the person marker: exactly 1 on the central line at 08:25.
 7. Click the line of run B: the page opens run B's Conversation tab. Go back, click the badge of run A: run A's tab opens.
 8. Press List: the List content is back with its test ids.
@@ -61,7 +61,7 @@ Rule for m9: with no time it is dropped from the strip ticks, from the feed posi
 
 - List is the default and unchanged; Conversation is a mode of the same page.
 - 3 run lines for the scoped project (run D absent); positions follow the start and close times; run C is open.
-- 3 thick spurs, 3 hatched bands (Q2's from 08:40 and Q3's from 10:50, both to the window end 11:30), 1 person marker at 08:25.
+- 3 thick spurs, 3 hatched bands (Q2's from 08:40 and Q3's from 10:50, both ending at B's close 10:55, not open; at 09:30 Q2's band is open), 1 person marker at 08:25.
 - The label 'In order, not to scale' is visible.
 - A run line or badge click opens that run's Conversation tab, by `runHref(run, "conversation")`.
 - Bounding boxes of lines, spurs, bands and the marker are non-zero and inside the map, and `document.elementFromPoint` at a line's centre returns that line (no overlay hides it).

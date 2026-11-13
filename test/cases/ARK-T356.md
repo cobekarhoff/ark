@@ -21,12 +21,12 @@ Prove AC2: the 'To scale' strip (density, one lane per run, human answers), the 
 
 ## Shared fixture (ARK-T355 to ARK-T357)
 
-Base `2026-11-12T08:00Z`; times are UTC, never `ago()`. Window end is 11:30 (B's close, the latest known time).
+Base `2026-11-12T08:00Z`; times are UTC, never `ago()`. Window end is 11:00 (C's last message m8, the latest known time). B closes earlier, at 10:55.
 
 | Run | Project | Start | Close | Steps                                           |
 | --- | ------- | ----- | ----- | ----------------------------------------------- |
 | A   | scoped  | 08:00 | 09:00 | A1 08:00-09:00                                  |
-| B   | scoped  | 08:30 | 11:30 | B1 08:30-11:30                                  |
+| B   | scoped  | 08:30 | 10:55 | B1 08:30-10:55                                  |
 | C   | scoped  | 08:05 | open  | C1 08:05-08:50, C2 10:30-open (gap 08:50-10:30) |
 | D   | other   | 08:00 | 09:00 | not drawn, not counted                          |
 

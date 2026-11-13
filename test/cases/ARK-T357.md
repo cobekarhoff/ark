@@ -20,12 +20,12 @@ Prove AC3: the Now panel at the scrubber time, the type chips, run filter and se
 
 ## Shared fixture (ARK-T355 to ARK-T357)
 
-Base `2026-11-12T08:00Z`; times are UTC, never `ago()`. Window end is 11:30 (B's close, the latest known time).
+Base `2026-11-12T08:00Z`; times are UTC, never `ago()`. Window end is 11:00 (C's last message m8, the latest known time). B closes earlier, at 10:55.
 
 | Run | Project | Start | Close | Steps                                           |
 | --- | ------- | ----- | ----- | ----------------------------------------------- |
 | A   | scoped  | 08:00 | 09:00 | A1 08:00-09:00                                  |
-| B   | scoped  | 08:30 | 11:30 | B1 08:30-11:30                                  |
+| B   | scoped  | 08:30 | 10:55 | B1 08:30-10:55                                  |
 | C   | scoped  | 08:05 | open  | C1 08:05-08:50, C2 10:30-open (gap 08:50-10:30) |
 | D   | other   | 08:00 | 09:00 | not drawn, not counted                          |
 
@@ -48,7 +48,7 @@ Rule for m9: with no time it is dropped from the strip ticks, from the feed posi
 ## Steps
 
 1. Scrub to T3 (09:30): the Now panel shows exactly 2 live runs, B (current step B1) and C (reads 'between steps', since C1 ended 08:50 and C2 starts 10:30). A run between steps counts as live; A (closed 09:00) is not counted. It shows 5 messages (m1 to m5) and 1 human answer. The latest messages are listed newest first: m5, m4, m3, m2, m1; none after 09:30.
-2. Scrub to T4 (08:20): 2 live runs (A and C, both in a step, none 'between steps'), 3 messages, 0 human answers. Scrub to T5 (08:01): 1 live run (A), 0 messages, 0 answers and no latest messages. Scrub to T2 (11:00): 2 live runs (B and C in C2), 8 messages, 1 answer.
+2. Scrub to T4 (08:20): 2 live runs (A and C, both in a step, none 'between steps'), 3 messages, 0 human answers. Scrub to T5 (08:01): 1 live run (A), 0 messages, 0 answers and no latest messages. Scrub to T2 (11:00): 1 live run (C in C2; B closed at 10:55), 8 messages, 1 answer.
 3. Select the 'question' type chip: the map and the strip show only m3, m5 and m7 (the fixture has no escalation); the other beads leave both; clear the chip: all return.
 4. Select run B in the run filter: only B's line and lane stay on both the map and the strip, with m5, m7 as its only beads; Master Chief's line stays.
 5. Type "elm" (the subject of m5) into search: only m5 stays on both views. Type "plover" (in m5's body only): nothing matches (body text is not in the project reply).
