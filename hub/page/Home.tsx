@@ -1,4 +1,5 @@
 import { Markdown } from "./Markdown.tsx";
+import { Flip, useChanges } from "./motion.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import {
   costByDay,
@@ -53,12 +54,15 @@ function Tile({
 }: {
   tile: string;
   label: string;
-  value: React.ReactNode;
+  value: string | number;
   note: React.ReactNode;
   tone?: "warn" | "alarm";
 }) {
+  // A changed count flashes; the first render is the baseline.
+  const hot = useChanges(new Map([["value", String(value)]]));
+  const classes = ["tile", tone, hot.has("value") ? "hl" : undefined].filter(Boolean).join(" ");
   return (
-    <div className={tone ? `tile ${tone}` : "tile"} data-testid="tile" data-tile={tile}>
+    <div className={classes} data-testid="tile" data-tile={tile}>
       <b className="big">{value}</b>
       <span className="tile-text">
         <span className="tile-label">{label}</span>
@@ -82,12 +86,18 @@ function Resets({ limit }: { limit: ProviderWindow }) {
 function Panel({
   title,
   count,
+  live,
   hint,
+  flip = true,
   children,
 }: {
   title: string;
   count?: React.ReactNode;
+  /** The count is a polite live region: its text changes only when the count does. */
+  live?: boolean;
   hint?: string;
+  /** False when the children hold their own `Flip`: one never nests in another. */
+  flip?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -96,23 +106,51 @@ function Panel({
         <h2>
           {title}
           {count === undefined ? "" : ` · `}
-          {count}
+          {live ? (
+            <span aria-live="polite" aria-atomic="true" data-testid="live-count">
+              {count}
+            </span>
+          ) : (
+            count
+          )}
         </h2>
         {hint ? <span className="hint">{hint}</span> : null}
       </header>
-      <div className="body">{children}</div>
+      {flip ? <Flip className="body">{children}</Flip> : <div className="body">{children}</div>}
     </section>
   );
 }
 
 function NeedsMe({ gates, waiting }: { gates: Gate[] | "unknown"; waiting: Waiting[] }) {
   const count = known(gates) ? gates.length + waiting.length : null;
+  const waitingKey = ({ run, item }: Waiting) =>
+    `${run.run}/${item.kind}/${item.step}/${item.reason}`;
+  // By value: an existing gate with new text flashes though the count is the same.
+  const hot = useChanges(
+    new Map([
+      ...(known(gates) ? gates : []).map((gate): [string, string] => [
+        gate.id,
+        JSON.stringify(gate),
+      ]),
+      ...waiting.map((entry): [string, string] => [waitingKey(entry), entry.item.reason]),
+    ]),
+  );
   return (
-    <Panel title="Needs me" count={count ?? <Unknown />} hint="gates and questions, oldest first">
+    <Panel
+      title="Needs me"
+      count={count ?? <Unknown />}
+      live
+      hint="gates and questions, oldest first"
+    >
       {count === 0 ? <p className="mut">Nothing waits for you.</p> : null}
       {known(gates)
         ? gates.map((gate) => (
-            <div className="item" key={gate.id} data-testid="gate" data-gate={gate.id}>
+            <div
+              className={hot.has(gate.id) ? "item hl" : "item"}
+              key={gate.id}
+              data-testid="gate"
+              data-gate={gate.id}
+            >
               <div className="item-head">
                 <span className="pill warn">{gate.kind}</span>
                 <a className="mono strong" href={runHref(gate.run)}>
@@ -144,8 +182,8 @@ function NeedsMe({ gates, waiting }: { gates: Gate[] | "unknown"; waiting: Waiti
         : null}
       {waiting.map(({ run, item }) => (
         <div
-          className="item"
-          key={`${run.run}/${item.kind}/${item.step}/${item.reason}`}
+          className={hot.has(waitingKey({ run, item })) ? "item hl" : "item"}
+          key={waitingKey({ run, item })}
           data-testid="waiting"
           data-run={run.run}
           data-kind={item.kind}
@@ -416,20 +454,22 @@ function StartsNextBlock({ block, single }: { block: StartsNext; single: boolean
         title={single ? "Starts next" : `Starts next · ${block.project}`}
         count={block.rows.length}
         hint={`${label}, by roadmap rank`}
+        flip={false}
       >
-        <div data-testid="starts-next" data-project={block.project}>
+        <Flip data-testid="starts-next" data-project={block.project}>
           {block.rows.length === 0 ? <p className="mut">Nothing in the queue.</p> : null}
           {block.rows.map((row) => (
             <QueueRow key={row.ticket} row={row} />
           ))}
-        </div>
+        </Flip>
       </Panel>
       <Panel
         title={single ? "Approved, not queued" : `Approved, not queued · ${block.project}`}
         count={block.notQueued.length}
         hint="ready, no Task, no open run"
+        flip={false}
       >
-        <div data-testid="not-queued" data-project={block.project}>
+        <Flip data-testid="not-queued" data-project={block.project}>
           {block.notQueued.length === 0 ? (
             <p className="mut">Every ready ticket is queued.</p>
           ) : null}
@@ -450,7 +490,7 @@ function StartsNextBlock({ block, single }: { block: StartsNext; single: boolean
               <p className="mut">ask Master Chief to queue it</p>
             </div>
           ))}
-        </div>
+        </Flip>
       </Panel>
     </>
   );

@@ -8,7 +8,7 @@
  * unchanged read changes nothing and sends no push; while not `ok` it is the time of the last
  * good read. A source with `ok: false` and `read_at: null` has never answered: its data is
  * `"unknown"` (or `null` for a single value), never an empty list. With `ok: false` and a
- * `read_at`, the data is the last good value and the page shows "as of N s ago".
+ * `read_at`, the data is the last good value and the stale chip shows its age in minutes.
  *
  * Costs are USD numbers, or `null` when unknown (no session found, one message without a price,
  * or the usage index has not finished its first build). Times are ISO strings.
@@ -29,6 +29,18 @@ export type SourceName =
   | "agentWait"
   | "evidence"
   | "queue";
+/** What a stale source leaves wrong on the page: the stale chip lists it. Exhaustive over SourceName. */
+export const sourceAffects: Record<SourceName, string> = {
+  ark: "Runs, gates, steps and the review queue",
+  orca: "Agents, stuck agents and terminals",
+  plannotator: "Plannotator review links and answers",
+  github: "Merge requests and checks",
+  usage: "Cost and token usage",
+  providerLimits: "Provider limits in the header",
+  agentWait: "Time agents waited on you",
+  evidence: "Test evidence of a run",
+  queue: "Orca task queue and merge order",
+};
 export type SourceStatus = { ok: boolean; read_at: string | null };
 
 export type { StepStatus };
