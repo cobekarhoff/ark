@@ -27,6 +27,10 @@ type Props = {
   cursor: number | null;
   expanded: ReadonlySet<RoleGroup>;
   onToggle: (group: RoleGroup) => void;
+  /** Replay playhead, or null when no replay runs. Everything after it is dimmed. */
+  playhead: number | null;
+  /** The message just sent during a replay: its arrow animates once. */
+  pulse: { id: string; nonce: number } | null;
 };
 
 const share = (time: number, view: Range) => (time - view.start) / (view.end - view.start);
@@ -128,6 +132,7 @@ function Lane({
   onZoomCluster,
   rowKey,
   label,
+  playhead,
 }: {
   bars: Bar[];
   ticks: Tick[];
@@ -137,6 +142,7 @@ function Lane({
   onZoomCluster: (cluster: Tick[]) => void;
   rowKey: string;
   label: string;
+  playhead: number | null;
 }) {
   const [tip, setTip] = useState<{ x: number; text: string } | null>(null);
   const clusters = useMemo(() => clusterTicks(ticks, view), [ticks, view]);
@@ -186,7 +192,7 @@ function Lane({
           <button
             key={cluster[0]!.id}
             type="button"
-            className={`cv-tick ty-${cluster[0]!.type}${selected === cluster[0]!.id ? " sel" : ""}`}
+            className={`cv-tick ty-${cluster[0]!.type}${selected === cluster[0]!.id ? " sel" : ""}${playhead !== null && cluster[0]!.time > playhead ? " future" : ""}`}
             data-testid="trace-tick"
             data-id={cluster[0]!.id}
             aria-label={`${cluster[0]!.type ?? "message"} at ${clockText(cluster[0]!.time, true)}`}
@@ -198,7 +204,7 @@ function Lane({
           <button
             key={cluster[0]!.id}
             type="button"
-            className={`cv-cluster${cluster.some((tick) => tick.id === selected) ? " sel" : ""}`}
+            className={`cv-cluster${cluster.some((tick) => tick.id === selected) ? " sel" : ""}${playhead !== null && cluster[0]!.time > playhead ? " future" : ""}`}
             data-testid="trace-cluster"
             data-ids={cluster.map((tick) => tick.id).join(" ")}
             aria-label={`${cluster.length} messages from ${clockText(cluster[0]!.time, true)}`}
@@ -228,6 +234,8 @@ export function Trace({
   cursor,
   expanded,
   onToggle,
+  playhead,
+  pulse,
 }: Props) {
   const trace = useMemo(
     () => buildTrace(conversation, full, expanded),
@@ -235,6 +243,7 @@ export function Trace({
   );
   const rowIndex = new Map(trace.rows.map((row, at) => [row.key, at]));
   const picked = trace.ticks.find((tick) => tick.id === selected) ?? null;
+  const pulsed = trace.ticks.find((tick) => tick.id === pulse?.id) ?? null;
   const width = view.end - view.start;
   const seconds = width < 10 * 60_000;
   const labels = [0, 0.25, 0.5, 0.75, 1].map((fraction) => view.start + fraction * width);
@@ -324,6 +333,7 @@ export function Trace({
               selected={selected}
               onPick={pickTick}
               onZoomCluster={zoomCluster}
+              playhead={playhead}
             />
             {row.kind === "chief"
               ? conversation.answers.map((answer) => {
@@ -352,29 +362,46 @@ export function Trace({
         ))}
         <svg className="cv-overlay" aria-hidden="true" height={trace.rows.length * rowHeight}>
           <ArrowMarker id="cv-arrowhead" />
-          {picked && picked.time >= view.start && picked.time <= view.end
-            ? (() => {
-                const x = percent(share(picked.time, view));
-                const fromY = (rowIndex.get(picked.row) ?? 0) * rowHeight + rowHeight / 2;
-                const toY = (rowIndex.get(picked.toRow) ?? 0) * rowHeight + rowHeight / 2;
+          {[
+            { tick: picked, className: "cv-arrow", key: "picked" },
+            { tick: pulsed, className: "cv-arrow pulse", key: `pulse:${pulse?.nonce}` },
+          ].map(({ tick, className, key }) =>
+            tick && tick.time >= view.start && tick.time <= view.end ? (
+              <line
+                key={key}
+                data-testid={key === "picked" ? "trace-arrow" : "trace-pulse"}
+                data-from={tick.row}
+                data-to={tick.toRow}
+                className={className}
+                x1={percent(share(tick.time, view))}
+                y1={(rowIndex.get(tick.row) ?? 0) * rowHeight + rowHeight / 2}
                 // Sender and receiver on one row: a short arrow along the row.
-                const same = fromY === toY;
-                return (
-                  <line
-                    data-testid="trace-arrow"
-                    data-from={picked.row}
-                    data-to={picked.toRow}
-                    className="cv-arrow"
-                    x1={x}
-                    y1={fromY}
-                    x2={same ? percent(share(picked.time, view) + 0.02) : x}
-                    y2={toY}
-                    markerEnd="url(#cv-arrowhead)"
-                  />
-                );
-              })()
-            : null}
+                x2={percent(share(tick.time, view) + (tick.row === tick.toRow ? 0.02 : 0))}
+                y2={(rowIndex.get(tick.toRow) ?? 0) * rowHeight + rowHeight / 2}
+                markerEnd="url(#cv-arrowhead)"
+              />
+            ) : null,
+          )}
         </svg>
+        {playhead !== null && playhead >= view.start && playhead <= view.end ? (
+          <>
+            <div
+              className="cv-future"
+              data-testid="trace-future"
+              style={{
+                left: `calc(var(--label) + (100% - var(--label)) * ${share(playhead, view)})`,
+              }}
+            />
+            <div
+              className="cv-playhead"
+              data-testid="trace-playhead"
+              data-time={playhead}
+              style={{
+                left: `calc(var(--label) + (100% - var(--label)) * ${share(playhead, view)})`,
+              }}
+            />
+          </>
+        ) : null}
         {cursor !== null && cursor >= view.start && cursor <= view.end ? (
           <div
             className="cv-cursor"

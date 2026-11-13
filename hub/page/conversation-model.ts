@@ -302,3 +302,22 @@ export function buildFeed(
   }
   return joined;
 }
+
+// ---------- replay ----------
+
+/**
+ * The conversation as it was at `playhead`: later messages, events and answers are gone, and a question
+ * answered after the playhead is waiting again. Spans are kept: the trace dims what follows the playhead.
+ */
+export function atPlayhead(conversation: RunConversation, playhead: number): RunConversation {
+  const before = (iso: string | null) => iso !== null && Date.parse(iso) <= playhead;
+  return {
+    ...conversation,
+    messages: conversation.messages.filter((message) => sentAt(message) <= playhead),
+    events: conversation.events?.filter((event) => before(event.time)),
+    answers: conversation.answers.filter((answer) => before(answer.time)),
+    questions: conversation.questions.map((question) =>
+      before(question.answered) ? question : { ...question, answered: null },
+    ),
+  };
+}

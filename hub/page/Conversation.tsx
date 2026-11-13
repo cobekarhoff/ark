@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ConversationReply, RoleGroup, RunConversation } from "../conversation.ts";
-import { clampView, runRange, sentAt, type Range } from "./conversation-model.ts";
+import type { PlanStepView, SessionFile } from "../types.ts";
+import { atPlayhead, clampView, runRange, sentAt, type Range } from "./conversation-model.ts";
 import { Feed } from "./ConversationFeed.tsx";
+import { Inspector } from "./ConversationInspector.tsx";
+import { Player, useReplay } from "./ConversationReplay.tsx";
 import { Trace } from "./ConversationTrace.tsx";
 
 type State =
@@ -65,22 +68,52 @@ function Notices({ reply }: { reply: ConversationReply }) {
 }
 
 /** The trace and the feed, linked: a selected message marks its tick and arrow, and the trace cursor follows the feed. */
-function Linked({ conversation }: { conversation: RunConversation }) {
+function Linked({
+  conversation,
+  sessions,
+  plan,
+}: {
+  conversation: RunConversation;
+  sessions: SessionFile[] | null;
+  plan: PlanStepView[] | null;
+}) {
   const full = useMemo(() => runRange(conversation), [conversation]);
   const [zoomed, setZoomed] = useState<Range | null>(null);
   const view = zoomed ? clampView(zoomed, full) : full;
   const [selected, setSelected] = useState<string | null>(null);
+  const [agent, setAgent] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ id: string; nonce: number } | null>(null);
   const [cursor, setCursor] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<RoleGroup>>(new Set());
+  const replay = useReplay(
+    full,
+    useMemo(
+      () =>
+        conversation.messages.flatMap((message) =>
+          Number.isFinite(sentAt(message)) ? [{ id: message.id, time: sentAt(message) }] : [],
+        ),
+      [conversation],
+    ),
+  );
+  const shown = useMemo(
+    () => (replay.playhead === null ? conversation : atPlayhead(conversation, replay.playhead)),
+    [conversation, replay.playhead],
+  );
+  // The feed follows the newest message of a playing replay.
+  const { pulse } = replay;
+  useEffect(() => {
+    if (pulse) setReveal(pulse);
+  }, [pulse]);
 
   const fromTrace = (id: string) => {
     setSelected(id);
+    setAgent(null);
     setReveal((previous) => ({ id, nonce: (previous?.nonce ?? 0) + 1 }));
   };
   // A click in the feed moves the trace only when the message is out of view.
   const fromFeed = (id: string) => {
     setSelected(id);
+    setAgent(null);
     const message = conversation.messages.find((candidate) => candidate.id === id);
     const time = message ? sentAt(message) : NaN;
     if (Number.isFinite(time) && (time < view.start || time > view.end)) {
@@ -90,6 +123,7 @@ function Linked({ conversation }: { conversation: RunConversation }) {
   };
   return (
     <>
+      <Player full={full} replay={replay} />
       <Trace
         conversation={conversation}
         full={full}
@@ -106,19 +140,44 @@ function Linked({ conversation }: { conversation: RunConversation }) {
             return next;
           })
         }
+        playhead={replay.playhead}
+        pulse={replay.pulse}
       />
-      <Feed
-        conversation={conversation}
-        selected={selected}
-        reveal={reveal}
-        onSelect={fromFeed}
-        onTop={setCursor}
-      />
+      <div className="cv-main">
+        <Feed
+          conversation={shown}
+          selected={selected}
+          reveal={reveal}
+          onSelect={fromFeed}
+          onAgent={setAgent}
+          onTop={setCursor}
+        />
+        <Inspector
+          conversation={conversation}
+          selected={selected}
+          agent={agent}
+          sessions={sessions}
+          plan={plan}
+          onSelect={fromFeed}
+          onAgent={setAgent}
+        />
+      </div>
     </>
   );
 }
 
-export function Conversation({ run, refreshKey }: { run: string; refreshKey: string }) {
+export function Conversation({
+  run,
+  refreshKey,
+  sessions,
+  plan,
+}: {
+  run: string;
+  refreshKey: string;
+  /** The run's session files, null while the run detail loads. */
+  sessions: SessionFile[] | null;
+  plan: PlanStepView[] | null;
+}) {
   const state = useConversation(run, refreshKey);
   if (state.status === "loading") return <p className="mut">Reading the conversation…</p>;
   if (state.status === "failed")
@@ -131,7 +190,7 @@ export function Conversation({ run, refreshKey }: { run: string; refreshKey: str
   return (
     <section data-testid="conversation" aria-label="Conversation">
       <Notices reply={reply} />
-      <Linked conversation={reply} />
+      <Linked conversation={reply} sessions={sessions} plan={plan} />
     </section>
   );
 }

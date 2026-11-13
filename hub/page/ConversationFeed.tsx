@@ -24,7 +24,7 @@ export function roleClass(agent: ConversationAgent | undefined): string {
   return agent.group ? `r-${agent.group}` : "r-other";
 }
 
-function nameOf(agent: ConversationAgent | undefined): { name: string; badge: string } {
+export function nameOf(agent: ConversationAgent | undefined): { name: string; badge: string } {
   if (!agent) return { name: "unknown", badge: "unknown" };
   switch (agent.kind) {
     case "chief":
@@ -114,12 +114,14 @@ function Message({
   reply = false,
   selected,
   onSelect,
+  onAgent,
 }: {
   conversation: RunConversation;
   message: ConversationMessage;
   reply?: boolean;
   selected: string | null;
   onSelect: (id: string) => void;
+  onAgent: (id: string) => void;
 }) {
   const agents = new Map(conversation.agents.map((agent) => [agent.id, agent]));
   const from = agents.get(message.from);
@@ -148,7 +150,17 @@ function Message({
       <Avatar agent={from} />
       <div className="cv-content">
         <header className="cv-head">
-          <strong className="cv-name">{name}</strong>
+          <button
+            type="button"
+            className="cv-name"
+            data-testid="feed-agent"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (from) onAgent(from.id);
+            }}
+          >
+            {name}
+          </button>
           <span className={`cv-badge ${roleClass(from)}`}>{badge}</span>
           <span className="mut">to {nameOf(to).name}</span>
           <span className="mut mono end">
@@ -223,12 +235,14 @@ export function Feed({
   selected,
   reveal,
   onSelect,
+  onAgent,
   onTop,
 }: {
   conversation: RunConversation;
   selected: string | null;
   reveal: { id: string; nonce: number } | null;
   onSelect: (id: string) => void;
+  onAgent: (id: string) => void;
   onTop: (time: number | null) => void;
 }) {
   const [active, setActive] = useState<ReadonlySet<string>>(new Set());
@@ -336,6 +350,7 @@ export function Feed({
                 message={item.message}
                 selected={selected}
                 onSelect={onSelect}
+                onAgent={onAgent}
               />
               {item.replies.length > 0 ? (
                 <>
@@ -363,6 +378,7 @@ export function Feed({
                           reply
                           selected={selected}
                           onSelect={onSelect}
+                          onAgent={onAgent}
                         />
                       ))
                     : null}

@@ -585,7 +585,12 @@ export function Run({
         </a>
       </nav>
       {sub?.kind === "conversation" ? (
-        <Conversation run={run.run} refreshKey={open?.updated_at ?? ""} />
+        <Conversation
+          run={run.run}
+          refreshKey={open?.updated_at ?? ""}
+          sessions={detail?.sessions ?? null}
+          plan={run.plan}
+        />
       ) : (
         <Body run={run} detail={detail} loading={state.status === "loading"} open={open !== null} />
       )}

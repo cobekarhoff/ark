@@ -4050,3 +4050,140 @@ button.cv-label:disabled {
   color: var(--mute);
   font-size: 12px;
 }
+
+/* ---------- Conversation tab: inspector and replay ---------- */
+.cv-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .cv-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+button.cv-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.cv-name:hover {
+  text-decoration: underline;
+}
+.cv-inspector {
+  position: sticky;
+  top: 8px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--c, var(--line-3));
+  border-radius: 8px;
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.cv-inspector h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.cv-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0 0 8px;
+}
+.cv-facts dt {
+  color: var(--mute);
+}
+.cv-facts dd {
+  margin: 0;
+}
+.cv-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.cv-thread-list {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.cv-thread-list button {
+  width: 100%;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-thread-list button[aria-current="true"] {
+  background: var(--sel);
+  font-weight: 600;
+}
+.cv-player {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.cv-scrubber {
+  flex: 1 1 240px;
+  min-width: 120px;
+  accent-color: var(--blue);
+}
+.cv-future {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  pointer-events: none;
+}
+.cv-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid var(--text);
+  pointer-events: none;
+}
+.cv-tick.future {
+  opacity: 0.45;
+}
+.cv-cluster.future {
+  border-style: dashed;
+}
+/* A replay arrow shows only while its animation runs; under reduced motion none is made. */
+.cv-arrow.pulse {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cv-arrow.pulse {
+    animation: cv-pulse 700ms var(--ease) forwards;
+  }
+  @keyframes cv-pulse {
+    from {
+      opacity: 1;
+      stroke-width: 3;
+    }
+    to {
+      opacity: 0;
+      stroke-width: 1.5;
+    }
+  }
+}
