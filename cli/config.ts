@@ -71,6 +71,8 @@ export type ProjectConfig = {
   /** The `pr_writing:` block with defaults filled in. */
   pr_writing: PrWriting;
   round_budget: number;
+  /** The most extra rounds `gates.escalation: auto` grants in one run. */
+  escalation_rounds: number;
   /** Each gate is answered by the human or by Ark. A missing key is human. */
   gates: Record<(typeof gateNames)[number], "human" | "auto">;
 };
@@ -298,6 +300,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     test_max_swap_gb: integer(fields, "test_max_swap_gb", 0, defaultMaximumSwapGigabytes),
     concurrency: integer(fields, "concurrency", 1, 2),
     round_budget: integer(fields, "round_budget", 0, 2),
+    escalation_rounds: integer(fields, "escalation_rounds", 0, 2),
     pr_writing: prWriting,
     gates,
   };

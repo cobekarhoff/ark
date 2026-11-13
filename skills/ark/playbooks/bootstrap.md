@@ -134,7 +134,7 @@ Without `roles.designer`, `ark strategy record` refuses such a ticket and names 
 
 `ark status` then checks that each role can run.
 
-Leave out `concurrency` and `round_budget`. Their defaults are 2 and 2.
+Leave out `concurrency`, `round_budget` and `escalation_rounds`. Their defaults are 2, 2 and 2.
 
 ### UI
 
@@ -278,7 +278,7 @@ Rules for the file:
 
 - `workspace` is an existing absolute directory.
 - `suites` has at least one entry, and each `name` is unique.
-- Put `concurrency` and `round_budget` in only when the human asked for non-default values.
+- Put `concurrency`, `round_budget` and `escalation_rounds` in only when the human asked for non-default values.
 - Keep the file valid YAML with 2-space indentation and no tabs.
 
 Show the human the written file.

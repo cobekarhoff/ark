@@ -1,5 +1,5 @@
 import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import {
@@ -56,6 +56,15 @@ const planWith = (decisions: unknown[] = []) => ({
       needs: [],
       criteria: criteria.map(({ id }) => id),
     },
+    {
+      id: "review",
+      role: "reviewer",
+      repo: ".",
+      harness: "omp",
+      model: "pi/validate",
+      needs: ["build"],
+      criteria: criteria.map(({ id }) => id),
+    },
   ],
   test_cases: criteria.map(({ id }) => ({
     id: `case-${id}`,
@@ -79,8 +88,12 @@ beforeEach(() => {
 });
 
 /** Writes the project with the given gates and starts a run; the evaluation is not recorded yet. */
-function startRun(gates?: Record<string, unknown>) {
-  projectDirectory = writeProject("demo", { ...baseConfig(), ...(gates ? { gates } : {}) });
+function startRun(gates?: Record<string, unknown>, settings: Record<string, unknown> = {}) {
+  projectDirectory = writeProject("demo", {
+    ...baseConfig(),
+    ...settings,
+    ...(gates ? { gates } : {}),
+  });
   expect(ark("run", "start", writeTicket("demo", "ARK-902", criteria)).code).toBe(0);
   const runId = readdirSync(join(projectDirectory, "runs"))[0];
   const directory = join(projectDirectory, "runs", runId);
@@ -243,8 +256,8 @@ test("ARK-234-AC5 an answer from before the by field reads as human", () => {
 // ARK-288: gates.escalation auto answers a spent budget or a post-MR implementer start, at most twice.
 
 /** A building run whose plan has one implementer step `build` (the plan gate is auto). */
-function buildingRun(gates: Record<string, unknown>) {
-  const run = startRun({ plan: "auto", ...gates });
+function buildingRun(gates: Record<string, unknown>, settings: Record<string, unknown> = {}) {
+  const run = startRun({ plan: "auto", ...gates }, settings);
   recordEvaluation(run.directory);
   expect(checkPlan(run.runId, run.directory).code).toBe(0);
   expect(deriveState(eventsOf(run.directory)).phase).toBe("building");
@@ -273,8 +286,8 @@ function failTest(directory: string) {
  * Starts and finishes `build` twice: the default budget of 2 is then spent. A failing `ark test`
  * follows, so the phase is escalation as in a real run; `failing: false` leaves the phase building.
  */
-function spendRounds(runId: string, directory: string, failing = true) {
-  for (let index = 0; index < 2; index++) {
+function spendRounds(runId: string, directory: string, failing = true, rounds = 2) {
+  for (let index = 0; index < rounds; index++) {
     expect(start(runId).code).toBe(0);
     expect(finish(runId).code).toBe(0);
   }
@@ -466,3 +479,71 @@ for (const [label, gates] of [
     expect(types(directory).filter((type) => type === "step.started")).toHaveLength(1);
   });
 }
+
+// ARK-T351 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T351`
+test("ARK-T351 escalation_rounds loads as 2 by default, accepts 4, and a value of -1 or many fails the load naming the field", () => {
+  const load = (settings: Record<string, unknown>) => {
+    writeProject("demo", { ...baseConfig(), ...settings });
+    return ark("status");
+  };
+  expect(load({}).code).toBe(0);
+  expect(load({ escalation_rounds: 4 }).code).toBe(0);
+  expect(load({ escalation_rounds: 0 }).code).toBe(0);
+  for (const bad of [-1, "many"]) {
+    const result = load({ escalation_rounds: bad });
+    expect(result.code).toBe(1);
+    expect(result.out + result.err).toContain("escalation_rounds");
+  }
+});
+
+// ARK-T352 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T352`
+test("ARK-T352 escalation_rounds 4 grants four extra rounds by auto and refuses the fifth", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" }, { escalation_rounds: 4 });
+  spendRounds(runId, directory);
+  for (let count = 1; count <= 4; count++) {
+    const result = start(runId);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(`escalation one_more_round by auto (${count} of 4)`);
+    expect(finish(runId).code).toBe(0);
+    failTest(directory);
+  }
+  const before = eventsOf(directory).length;
+  const refused = start(runId);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("record gate escalation");
+  expect(eventsOf(directory).length).toBe(before);
+  expect(autoAnswers(directory)).toHaveLength(4);
+});
+
+// ARK-T353 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T353`
+test("ARK-T353 a P0 or P1 with no Repro line in the newest reviewer file holds the auto answer", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" }, { escalation_rounds: 4 });
+  spendRounds(runId, directory);
+  const file = join(directory, "findings", "review.md");
+  const finding = (rank: string, repro: boolean) =>
+    `### ${rank}: title\n\n- **File:** \`a.ts\`\n${repro ? "- **Repro:** bun test\n" : ""}- **Problem:** x\n\n`;
+  const attempt = (text: string) => {
+    mkdirSync(join(directory, "findings"), { recursive: true });
+    writeFileSync(file, text);
+    const before = autoAnswers(directory).length;
+    const result = start(runId);
+    return { result, answered: autoAnswers(directory).length - before };
+  };
+  // A P1 with Repro hides nothing: the later P0 without it still holds the answer.
+  const held = attempt(`Reviewed head: abc\n\n${finding("P1", true)}${finding("P0", false)}`);
+  expect(held.result.code).toBe(1);
+  expect(held.result.err).toContain("record gate escalation");
+  expect(held.answered).toBe(0);
+  const merge = start(runId, "--merge");
+  expect(merge.code).toBe(1);
+  expect(autoAnswers(directory)).toHaveLength(0);
+  // A P2 with no Repro is legal, and so is a file with no findings.
+  expect(attempt(`${finding("P2", false)}`).answered).toBe(1);
+  expect(finish(runId).code).toBe(0);
+  failTest(directory);
+  expect(attempt("Reviewed head: abc\n\nNo findings.\n").answered).toBe(1);
+  expect(finish(runId).code).toBe(0);
+  failTest(directory);
+  const fixed = attempt(`${finding("P1", true)}${finding("P0", true)}`);
+  expect(fixed.result.out).toContain("(3 of 4)");
+});

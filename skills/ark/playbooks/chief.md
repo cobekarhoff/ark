@@ -179,7 +179,7 @@ A `status` message whose subject starts with `Brainstorm handoff:` is a request 
 
 Tell the human one line per queued ticket: that you queued it from a brainstorm handoff, with the approval line and its time quoted. Do not ask the human again. A handoff is never a gate answer. Never use it for a `criteria`, `plan`, `strategy` or `escalation` gate. When the handoff has no approval line, or the line does not list a ticket, pass it to the human as a notice and queue nothing for it.
 
-A `status` message from a run lead is a notice, not a question. Pass it to the human. When it says a Plannotator review is open, tell the human to answer there. The run lead records that answer itself. When its subject starts with `Escalation answered by auto:`, Ark answered the `escalation` gate with `gates.escalation: auto`: pass it on as one line (`<ticket>: auto granted extra round <round> (<n> of 2). No action needed.`) and ask nothing.
+A `status` message from a run lead is a notice, not a question. Pass it to the human. When it says a Plannotator review is open, tell the human to answer there. The run lead records that answer itself. When its subject starts with `Escalation answered by auto:`, Ark answered the `escalation` gate with `gates.escalation: auto`: pass it on as one line (`<ticket>: auto granted extra round <round> (<n> of <cap>). No action needed.`) and ask nothing.
 
 ### A busy agent
 
@@ -189,8 +189,8 @@ When the agent is still busy after 5 times, tell the human the target, the subje
 
 ### A `question` from a run lead
 
-Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. The `plan` and `strategy` gates, when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`), are answered by Ark with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, and no `ask` arrives for it. The `escalation` gate with `gates.escalation: auto` is answered by Ark too, up to 2 times in a run: the run lead sends a `status` for each one, which you pass to the human as a notice and never relay as a question.
-The third spent budget, and any escalation that `ark escalate` requested, still arrive as an `ask` for the human. The `criteria` gate stays with the human even when set to `auto`, because nothing answers it yet. Setting `plan` and `strategy` to `auto` is the Foundry setup; it leaves `criteria` with the human, and `escalation` too unless `gates.escalation` is `auto`.
+Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. The `plan` and `strategy` gates, when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`), are answered by Ark with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, and no `ask` arrives for it. The `escalation` gate with `gates.escalation: auto` is answered by Ark too, up to `escalation_rounds` times in a run (default 2): the run lead sends a `status` for each one, which you pass to the human as a notice and never relay as a question.
+The spent budget past the cap, a P0 or P1 in the newest reviewer findings file with no `Repro:` line, and any escalation that `ark escalate` requested, still arrive as an `ask` for the human. The `criteria` gate stays with the human even when set to `auto`, because nothing answers it yet. Setting `plan` and `strategy` to `auto` is the Foundry setup; it leaves `criteria` with the human, and `escalation` too unless `gates.escalation` is `auto`.
 
 1. Read the question and its options. Say which run and ticket it is for.
 2. Put it to the human as chat text (see "Asking the human"). Keep the run lead's options and recommended answer. If the question points to `plan.md` or a findings file, tell the human the path. Add it to the open-gate list and end the turn.
