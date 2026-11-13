@@ -1,33 +1,139 @@
 # Command reference
 
-This page describes the `ark` CLI. The command section is generated from `ark --help` by `scripts/cli-reference.ts`. Run `bun scripts/cli-reference.ts` after you change a help text. The sections after it are written by hand.
+This page is the reference for the `ark` CLI and for the files it reads and writes. The command section is generated from `ark --help` by `scripts/cli-reference.ts`. Run `bun scripts/cli-reference.ts` after you change a help text. The other sections are written by hand.
 
-Every command except `ark run start` takes a run id. `ark` finds the run by scanning `$ARK_HOME/projects/*/runs/<run>`. `ARK_HOME` defaults to `~/.ark`. A run id looks like `2026-10-29-CLARA-512-1`: the date, the ticket id, and the next free number for that ticket and date. Each of these commands takes `--project <name>`: `ark` then looks for the run in that project only, and exits 1 when the project does not exist or does not hold the run. Without it, `ark` scans every project and refuses a run id that exists in several. Only `ark run start` and `ark status` read `ARK_PROJECT`.
+| Section                                                                                                         | What it holds                                          |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| [Commands](#commands)                                                                                           | Every command, by job, with its full help text.        |
+| [Which command in which phase](#which-command-in-which-phase)                                                   | The phases in which each command can record its event. |
+| [Run folder](#run-folder)                                                                                       | Every file of a run and of a project.                  |
+| [`ticket.md` format](#ticketmd-format)                                                                          | The front matter that `ark run start` reads.           |
+| [`evaluation.md`](#evaluationmd-format), [`strategies.md`](#strategiesmd-format), [`plan.yml`](#planyml-fields) | The files that agents write and `ark` reads.           |
+| [`ark.yml` fields](#arkyml-fields)                                                                              | The project config.                                    |
+| [Events](#events)                                                                                               | The event log of a run.                                |
 
-`ark run start` finds the project in this order: the `--project <name>` flag, the `ARK_PROJECT` environment variable, then the project whose folder contains the ticket file.
+## Runs, projects and exit codes
 
-Every command prints a short result and exits 0 on success. On failure, a command prints `ark: <reason>` to stderr and exits 1. Every command rebuilds `state.json` from the event log before it runs.
+Commands that act on a run take `<run>`, a run id like `2026-10-29-CLARA-512-1`: the date, the ticket id, and the next free number for that ticket and date. `ark` finds the run by scanning `$ARK_HOME/projects/*/runs/<run>`. `ARK_HOME` defaults to `~/.ark`. `--project <name>` limits the scan to one project and exits 1 if the project or the run does not exist. Without it, `ark` refuses a run id that exists in several projects. A command with a run ignores `ARK_PROJECT`.
+
+Commands with no run take the project from `--project`, else from the `ARK_PROJECT` environment variable:
+
+| Command                                                                                      | Project                                                                               |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `run start`                                                                                  | `--project`, else `ARK_PROJECT`, else the project whose folder holds the ticket file. |
+| `status` without a run, `run close --sweep`                                                  | `--project`, else `ARK_PROJECT`, else every project.                                  |
+| `chief state`, `chief handover`, `services install`, `services uninstall`, `services status` | `--project`, else `ARK_PROJECT`. With neither, the command exits 1.                   |
+| `test-audit inventory`                                                                       | `--project` is required. `ARK_PROJECT` is ignored.                                    |
+| `test-case new`                                                                              | The git repo you run it in, or `--run <run>`.                                         |
+| `ui`, `ui install`, `ui uninstall`                                                           | None. They take no `--project`.                                                       |
+
+A command prints a short result and exits 0 on success. On failure it prints `ark: <reason>` to stderr and exits 1. An unknown command prints the whole help and exits 1. `ark` reads the event log, never `state.json`. It rewrites `state.json` after each event it appends.
 
 ## Commands
 
 <!-- generated:commands:start -->
+
+| Job              | Command                                         | What it does                                                                                         |
+| ---------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Start and close  | [`run start`](#run-start)                       | Starts a run from a ticket file                                                                      |
+|                  | [`run close`](#run-close)                       | Closes a run                                                                                         |
+|                  | [`status`](#status)                             | Prints the state of one run                                                                          |
+|                  | [`retro`](#retro)                               | Computes the run's cost, time, rework and intervention metrics and writes metrics.json               |
+| Plan             | [`evaluation record`](#evaluation-record)       | Reads evaluation.md in the run folder and records its blockers, risks and surfaces                   |
+|                  | [`criteria amend`](#criteria-amend)             | Writes the text in \<file> as the new text of one criterion in the run's ticket.md                   |
+|                  | [`strategy record`](#strategy-record)           | Reads strategies.md in the run folder and records its strategy cards                                 |
+|                  | [`ui-skills`](#ui-skills)                       | Prints the UI skills of the run, one line for each                                                   |
+|                  | [`plan check`](#plan-check)                     | Checks plan.yml in the run folder and renders plan.md                                                |
+| Build and test   | [`run step`](#run-step)                         | Records that a plan step started, finished or was interrupted                                        |
+|                  | [`worktree anchor`](#worktree-anchor)           | Makes the run's worktree early, for the first repo of the workspace, with the same branch            |
+|                  | [`worktree create`](#worktree-create)           | Builds the run's workspace mirror                                                                    |
+|                  | [`test`](#test)                                 | Runs the project's suites on the run's workspace mirror and records which ACs have a passing test    |
+|                  | [`test-case new`](#test-case-new)               | Run in a git repo, or anywhere with `--run <run>`                                                    |
+|                  | [`test-audit inventory`](#test-audit-inventory) | Lists every test declaration of the project's bun suites                                             |
+|                  | [`worktree sync`](#worktree-sync)               | Fetches and merges origin's target branch                                                            |
+|                  | [`workspace sync`](#workspace-sync)             | Fetches and fast-forwards the target branch                                                          |
+| Gates            | [`gate record`](#gate-record)                   | Records your answer to a gate                                                                        |
+|                  | [`escalate`](#escalate)                         | Opens the escalation gate when the round budget is spent, also when the last ark test passed         |
+| Merge requests   | [`merge-request open`](#merge-request-open)     | Pushes each repo's branch and posts one ready MR                                                     |
+|                  | [`merge-request status`](#merge-request-status) | For a project with `merge_requests: none` it prints `merge requests: none`                           |
+|                  | [`bump refresh`](#bump-refresh)                 | Records `bump.refreshed` for a bump step of the plan                                                 |
+| Master Chief     | [`chief state`](#chief-state)                   | Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a file |
+|                  | [`chief handover`](#chief-handover)             | Starts a new Master Chief for the project with `orca agent launch --surface terminal`                |
+| Hub and services | [`ui`](#ui)                                     | Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise                          |
+|                  | [`ui install`](#ui-install)                     | Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents and loads them       |
+|                  | [`ui uninstall`](#ui-uninstall)                 | Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy                                   |
+|                  | [`services install`](#services-install)         | Writes one LaunchAgent for each background job of the project in ~/Library/LaunchAgents and loads it |
+|                  | [`services uninstall`](#services-uninstall)     | Unloads and deletes the three LaunchAgents of the project                                            |
+|                  | [`services status`](#services-status)           | Prints one line for each service of the project                                                      |
 
 ### run start
 
 ```text
 ark run start <ticket-file> [--project <name>]
 
-Starts a run from a ticket file. It creates the run folder, copies the ticket and records the first event. It prints the run ID.
+Starts a run from a ticket file. It creates the run folder, copies the ticket and records the first
+event. It prints the run ID.
 
-Where the project has `ticket_source: local`, it also sets the first `status:` line of the ticket file to `in_progress` and changes no other line. A refused start leaves the file unchanged. A ticket may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`); any other value exits 1 and names the allowed kinds. When a `kind: bug` or `kind: refactor` ticket has no `method: test` AC, it prints one line on stderr, `warning: kind <kind> has no method: test AC, so its red-test or base-pass rule does not apply`, and still starts the run. The kind is in `run.started`. Every new run waits in the phase `awaiting_criteria`, also with ACs and no blockers, until the human records `ark gate record <run> criteria accept`; the event has `criteria_gate: true`, and a log without it keeps its old phase. An AC id may be local to its ticket (`AC1`) or the old `<ticket id>-AC<k>`; the run names it `<ticket id>/AC<k>`. An AC has `method` (`test`, `demonstration`, `inspection` or `analysis`; default `test`; `manual: true` reads as `demonstration`) and `verified_by`, a list of test case ids. The start refuses an unknown method, a duplicate AC id and a `verified_by` that is not a list of strings.
+Where the project has `ticket_source: local`, it also sets the first `status:` line of the ticket
+file to `in_progress` and changes no other line. A refused start leaves the file unchanged. A ticket
+may set `kind: bug`, `perf`, `refactor` or `feature` (default `feature`); any other value exits 1
+and names the allowed kinds. When a `kind: bug` or `kind: refactor` ticket has no `method: test` AC,
+it prints one line on stderr, `warning: kind <kind> has no method: test AC, so its red-test or
+base-pass rule does not apply`, and still starts the run. The kind is in `run.started`. Every new
+run waits in the phase `awaiting_criteria`, also with ACs and no blockers, until the human records
+`ark gate record <run> criteria accept`; the event has `criteria_gate: true`, and a log without it
+keeps its old phase. An AC id may be local to its ticket (`AC1`) or the old `<ticket id>-AC<k>`; the
+run names it `<ticket id>/AC<k>`. An AC has `method` (`test`, `demonstration`, `inspection` or
+`analysis`; default `test`; `manual: true` reads as `demonstration`) and `verified_by`, a list of
+test case ids. The start refuses an unknown method, a duplicate AC id and a `verified_by` that is
+not a list of strings.
 ```
 
 ### run step
 
 ```text
-ark run step <run> <step> start|finish|interrupted [--failed] [--not-started] [--merge] [--project <name>]
+ark run step <run> <step> start|finish|interrupted [--failed] [--not-started] [--merge] [--project
+    <name>]
 
-Records that a plan step started, finished or was interrupted. `ark run step <run> <step> start` also starts the worker of a plan step (not a --merge start) through `orca orchestration worker-start` in the step's worktree, as the run lead (`--from` names the run lead's Orca session), with the harness and model that `roles` of ark.yml gives the step's role (the pair of plan.yml when `roles` has none), and a spec it builds: the role and step id in words, the `Risks` of evaluation.md, each line of the `# Learnings applied` comment of plan.yml, each backticked string of the ACs the step serves, the `UI skills:` line, the rules in `rules.md` of the run folder when it exists and, for a reviewer, `Last reviewed head: <sha>`. It refuses before any Orca call when the start is not allowed, so a refused start launches no worker. It records step.started, then worker.started with the dispatch, the terminal, the harness and the session file (the new session file whose cwd is the worktree; `unknown` when none shows in 60 s). When worker-start fails it records step.finished with not_started (the round goes back), prints `ark: <step> not started: orca worker-start failed: <message>` and exits 1. The next start of an interrupted step runs `omp --restore <session>` in a terminal of the step's worktree and binds it as a supervised worker; with no session recorded, a harness with no restore command, or a failed terminal create or bind (the failed terminal is closed), it starts a fresh worker whose spec says an earlier worker was interrupted and that it must read `git status` and `git diff` before it goes on. Use --failed with finish when the step failed. Use --not-started with finish --failed when the worker never ran (worker-start exited non-zero and no worker is running): it records not_started: true on step.finished, takes back the round of that start, and the retro does not count the step. It is a usage error without --failed, and with start or --merge. Use `ark run step <run> <step> interrupted` when the worker of a running step is gone: it records step.finished with outcome interrupted, gives the round of that start back like not_started, changes no file in the worktree (it runs no git command) and lets the step start again at the same round. It is refused unless the step is running, while Orca lists the terminal of its worker in any state (disconnected too), and when Orca does not answer: it never guesses a worker dead. The terminal comes from the step's worker.started event; a running step with no worker.started event (an old run, a worker started by hand) is accepted without an Orca call, and any other step with no recorded terminal is refused. The retro counts no round for an interrupted start but keeps its time as working time, and `ark status` shows the step as interrupted. A step can start only after you approve the plan. Use --merge with start to run an implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree sync for the step repo. With `gates.escalation: auto` in ark.yml, an implementer start that is refused only because the round budget is spent, or because the MRs are open and no escalation answer exists, records gate escalation one_more_round by auto first and prints `escalation one_more_round by auto (<n> of 2)`; at most 2 such answers per run (a --merge answer prints `(merge, not counted)` and does not count), never while escalation.requested is pending, and the third refusal is the usual one. For a `bug` run with a `method: test` AC it refuses an implementer start with `bug run: record a failing ark test of the ACs before the fix` until a `test.completed` has every non-manual AC `failing`; a bug run with no `method: test` AC has no such rule.
+Records that a plan step started, finished or was interrupted. `ark run step <run> <step> start`
+also starts the worker of a plan step (not a --merge start) through `orca orchestration
+worker-start` in the step's worktree, as the run lead (`--from` names the run lead's Orca session),
+with the harness and model that `roles` of ark.yml gives the step's role (the pair of plan.yml when
+`roles` has none), and a spec it builds: the role and step id in words, the `Risks` of
+evaluation.md, each line of the `# Learnings applied` comment of plan.yml, each backticked string of
+the ACs the step serves, the `UI skills:` line, the rules in `rules.md` of the run folder when it
+exists and, for a reviewer, `Last reviewed head: <sha>`. It refuses before any Orca call when the
+start is not allowed, so a refused start launches no worker. It records step.started, then
+worker.started with the dispatch, the terminal, the harness and the session file (the new session
+file whose cwd is the worktree; `unknown` when none shows in 60 s). When worker-start fails it
+records step.finished with not_started (the round goes back), prints `ark: <step> not started: orca
+worker-start failed: <message>` and exits 1. The next start of an interrupted step runs `omp
+--restore <session>` in a terminal of the step's worktree and binds it as a supervised worker; with
+no session recorded, a harness with no restore command, or a failed terminal create or bind (the
+failed terminal is closed), it starts a fresh worker whose spec says an earlier worker was
+interrupted and that it must read `git status` and `git diff` before it goes on. Use --failed with
+finish when the step failed. Use --not-started with finish --failed when the worker never ran
+(worker-start exited non-zero and no worker is running): it records not_started: true on
+step.finished, takes back the round of that start, and the retro does not count the step. It is a
+usage error without --failed, and with start or --merge. Use `ark run step <run> <step> interrupted`
+when the worker of a running step is gone: it records step.finished with outcome interrupted, gives
+the round of that start back like not_started, changes no file in the worktree (it runs no git
+command) and lets the step start again at the same round. It is refused unless the step is running,
+while Orca lists the terminal of its worker in any state (disconnected too), and when Orca does not
+answer: it never guesses a worker dead. The terminal comes from the step's worker.started event; a
+running step with no worker.started event (an old run, a worker started by hand) is accepted without
+an Orca call, and any other step with no recorded terminal is refused. The retro counts no round for
+an interrupted start but keeps its time as working time, and `ark status` shows the step as
+interrupted. A step can start only after you approve the plan. Use --merge with start to run an
+implementer step that fixes a sync conflict: it costs no round, and it needs a failed ark worktree
+sync for the step repo. With `gates.escalation: auto` in ark.yml, an implementer start that is
+refused only because the round budget is spent, or because the MRs are open and no escalation answer
+exists, records gate escalation one_more_round by auto first and prints `escalation one_more_round
+by auto (<n> of 2)`; at most 2 such answers per run (a --merge answer prints `(merge, not counted)`
+and does not count), never while escalation.requested is pending, and the third refusal is the usual
+one. For a `bug` run with a `method: test` AC it refuses an implementer start with `bug run: record
+a failing ark test of the ACs before the fix` until a `test.completed` has every non-manual AC
+`failing`; a bug run with no `method: test` AC has no such rule.
 ```
 
 ### run close
@@ -35,9 +141,38 @@ Records that a plan step started, finished or was interrupted. `ark run step <ru
 ```text
 ark run close [<run> <outcome>] [--sweep] [--project <name>]
 
-Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that does not fit the run, such as merged with no MRs. For merged it deletes each repo's branch when its MR is merged (or, with no MR, when the branch is in the target branch); when `git fetch` fails and the MR state is unknown it keeps the branch and prints `kept     <repo>  <branch>: <reason>`. For handed_off Ark first applies the refusals of `ark merge-request open`, before it appends the event or removes a worktree: a non-manual criterion not `passing` in the last test, a manual criterion with no ok, a repo head changed since the last test, a counted AC string in no tracked file or a `not:` string still in one, a `kind: perf` run with a missing result file, a `kind: refactor` run with a `method: test` AC whose base did not pass, and missing, malformed or stale evidence (`evidence missing: <AC id> (<method>)`, `evidence malformed: <AC id>: <reason>`, `test evidence missing: <AC id> <test case id> (<base|head>)`, `test evidence stale: <AC id> <test case id>`). Only a string a file can hold counts: not one with a placeholder (`<`), a `*`, `...`, a `:<line>` suffix or the id of its own AC, and no string of a manual AC. A string also passes when it names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty path never counts). A string that starts with `not:` is a removed string: it must be in no tracked file and name no tracked path, and the refusal names it without the prefix. For handed_off it keeps each branch with commits beyond its base (the base is in `worktree.created`) and prints `kept     <repo>  <branch>: handed off, <n> commit(s) ahead of <base>` for each; it deletes a branch with no commit beyond its base. An aborted run keeps a branch with commits the same way and prints `kept     <repo>  <branch>: aborted, <n> commit(s) ahead of <base>`; an aborted branch with no commit beyond its base is deleted. After the close it releases the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each; it prints `<dispatch id> still active, not released` for an active one, and one `orca: workers not released: <reason>` line when Orca fails, and the close still exits 0. `ark run close --sweep [--project <name>]` does the same release for every closed run of the project (ARK_PROJECT when --project is not given), records no event, and prints nothing for a run with nothing to report. --sweep takes no run argument.
+Closes a run. The outcome is merged, abandoned, aborted or handed_off. Ark refuses an outcome that
+does not fit the run, such as merged with no MRs. For merged it deletes each repo's branch when its
+MR is merged (or, with no MR, when the branch is in the target branch); when `git fetch` fails and
+the MR state is unknown it keeps the branch and prints `kept <repo> <branch>: <reason>`. For
+handed_off Ark first applies the refusals of `ark merge-request open`, before it appends the event
+or removes a worktree: a non-manual criterion not `passing` in the last test, a manual criterion
+with no ok, a repo head changed since the last test, a counted AC string in no tracked file or a
+`not:` string still in one, a `kind: perf` run with a missing result file, a `kind: refactor` run
+with a `method: test` AC whose base did not pass, and missing, malformed or stale evidence
+(`evidence missing: <AC id> (<method>)`, `evidence malformed: <AC id>: <reason>`, `test evidence
+missing: <AC id> <test case id> (<base|head>)`, `test evidence stale: <AC id> <test case id>`). Only
+a string a file can hold counts: not one with a placeholder (`<`), a `*`, `...`, a `:<line>` suffix
+or the id of its own AC, and no string of a manual AC. A string also passes when it names a tracked
+file or folder at HEAD (one trailing `/` is dropped; an empty path never counts). A string that
+starts with `not:` is a removed string: it must be in no tracked file and name no tracked path, and
+the refusal names it without the prefix. For handed_off it keeps each branch with commits beyond its
+base (the base is in `worktree.created`) and prints `kept <repo> <branch>: handed off, <n> commit(s)
+ahead of <base>` for each; it deletes a branch with no commit beyond its base. An aborted run keeps
+a branch with commits the same way and prints `kept <repo> <branch>: aborted, <n> commit(s) ahead of
+<base>`; an aborted branch with no commit beyond its base is deleted. After the close it releases
+the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each; it
+prints `<dispatch id> still active, not released` for an active one, and one `orca: workers not
+released: <reason>` line when Orca fails, and the close still exits 0. `ark run close --sweep
+[--project <name>]` does the same release for every closed run of the project (ARK_PROJECT when
+--project is not given), records no event, and prints nothing for a run with nothing to report.
+--sweep takes no run argument.
 
-Where the project has `ticket_source: local`, it then sets the first `status:` line of the run's ticket file (`ticket_file` of `run.started`) to `done` for merged and to `ready` for aborted and abandoned, and changes no other line. handed_off leaves the file as it is. For a run with 2 or more repos, handed_off lists the branches in repo order, with `pending bump <step>` for each bump step that has not finished. A missing ticket file prints a `warning:` line and the close still succeeds.
+Where the project has `ticket_source: local`, it then sets the first `status:` line of the run's
+ticket file (`ticket_file` of `run.started`) to `done` for merged and to `ready` for aborted and
+abandoned, and changes no other line. handed_off leaves the file as it is. For a run with 2 or more
+repos, handed_off lists the branches in repo order, with `pending bump <step>` for each bump step
+that has not finished. A missing ticket file prints a `warning:` line and the close still succeeds.
 ```
 
 ### evaluation record
@@ -45,15 +180,38 @@ Where the project has `ticket_source: local`, it then sets the first `status:` l
 ```text
 ark evaluation record <run> [--project <name>]
 
-Reads evaluation.md in the run folder and records its blockers, risks and surfaces (web_ui, cli_output, document or none). It refuses a missing file, a file with no Blockers, Risks or Surfaces list, an unknown surface, and a project whose ark.yml has no roles.evaluator. Blockers open the criteria gate; no blockers send the run to planning.
+Reads evaluation.md in the run folder and records its blockers, risks and surfaces (web_ui,
+cli_output, document or none). It refuses a missing file, a file with no Blockers, Risks or Surfaces
+list, an unknown surface, and a project whose ark.yml has no roles.evaluator. Blockers open the
+criteria gate; no blockers send the run to planning.
 ```
 
 ### criteria amend
 
 ```text
-ark criteria amend <run> <criterion id> (<file> [--carry-manual <words>] | --verified-by <case ids>) --reason <text> [--project <name>]
+ark criteria amend <run> <criterion id> (<file> [--carry-manual <words>] | --verified-by <case ids>)
+    --reason <text> [--project <name>]
 
-Writes the text in <file> as the new text of one criterion in the run's ticket.md (frontmatter and table row) and records criteria.amended with the criterion, the old text, the new text, `by: human` and the required --reason (the human's reason for the new text). Use it for an amendment the human approved, when an AC wording is wrong after planning, instead of aborting the run. It works in every phase before merge_requests_open (awaiting_strategy, planning, building, escalation) and refuses a run in merge_requests_open or closed (naming the phase), an unknown criterion, an empty file, and a missing or empty --reason. It clears the manual answer of the criterion, unless the call also gives `--carry-manual <the human's words>`: that keeps the answer and records the words in the event as `carry_manual` (it needs a manual criterion and non-blank words, and works with the text form only). Second form, no file: `--verified-by <case ids>` (comma separated) replaces the `verified_by` list of the criterion in ticket.md and records criteria.amended with `verified_by_old`, `verified_by_new`, `by: human` and --reason. The text does not change and every manual answer stays. It refuses an id that has no active `test/cases/<id>.md` at HEAD of the run's worktree (a file only in the working tree or the index, or a retired case, is refused; the message names the id), an empty entry, a repeated id and the same phase, criterion and --reason cases as the text form, and it writes nothing on a refusal. Use it when test case ids are renumbered. Before the plan is approved it also clears the plan check: run ark plan check again so plan.md lists the amendment. After plan approval the run keeps its phase and approval and the next ark test judges the new text: do not run ark plan check again, it can change the plan hash and reset the approval. ark status lists each amendment with its reason.
+Writes the text in <file> as the new text of one criterion in the run's ticket.md (frontmatter and
+table row) and records criteria.amended with the criterion, the old text, the new text, `by: human`
+and the required --reason (the human's reason for the new text). Use it for an amendment the human
+approved, when an AC wording is wrong after planning, instead of aborting the run. It works in every
+phase before merge_requests_open (awaiting_strategy, planning, building, escalation) and refuses a
+run in merge_requests_open or closed (naming the phase), an unknown criterion, an empty file, and a
+missing or empty --reason. It clears the manual answer of the criterion, unless the call also gives
+`--carry-manual <the human's words>`: that keeps the answer and records the words in the event as
+`carry_manual` (it needs a manual criterion and non-blank words, and works with the text form only).
+Second form, no file: `--verified-by <case ids>` (comma separated) replaces the `verified_by` list
+of the criterion in ticket.md and records criteria.amended with `verified_by_old`,
+`verified_by_new`, `by: human` and --reason. The text does not change and every manual answer stays.
+It refuses an id that has no active `test/cases/<id>.md` at HEAD of the run's worktree (a file only
+in the working tree or the index, or a retired case, is refused; the message names the id), an empty
+entry, a repeated id and the same phase, criterion and --reason cases as the text form, and it
+writes nothing on a refusal. Use it when test case ids are renumbered. Before the plan is approved
+it also clears the plan check: run ark plan check again so plan.md lists the amendment. After plan
+approval the run keeps its phase and approval and the next ark test judges the new text: do not run
+ark plan check again, it can change the plan hash and reset the approval. ark status lists each
+amendment with its reason.
 ```
 
 ### strategy record
@@ -61,7 +219,15 @@ Writes the text in <file> as the new text of one criterion in the run's ticket.m
 ```text
 ark strategy record <run> [--project <name>]
 
-Reads strategies.md in the run folder and records its strategy cards: the count, the recommended card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs, a mockup link to a file that is not in the run folder, a run with no evaluation record, one card with no reason, and, when the evaluation lists a surface other than none, a card with no mockup link, and, when the surfaces include web_ui, a card with no Skills line or a Skills line that names a skill `ark ui-skills <run>` does not list, or a project whose ark.yml has no roles.designer. A mockup and roles.designer are not needed when the surface is only none, or when there is one card and the surfaces are only cli_output, document or none. A Skills line is needed only when the surfaces include web_ui. Two or more cards open the strategy gate; one card opens no gate.
+Reads strategies.md in the run folder and records its strategy cards: the count, the recommended
+card and the card IDs. It refuses a missing file, a card with no approach, interfaces or tradeoffs,
+a mockup link to a file that is not in the run folder, a run with no evaluation record, one card
+with no reason, and, when the evaluation lists a surface other than none, a card with no mockup
+link, and, when the surfaces include web_ui, a card with no Skills line or a Skills line that names
+a skill `ark ui-skills <run>` does not list, or a project whose ark.yml has no roles.designer. A
+mockup and roles.designer are not needed when the surface is only none, or when there is one card
+and the surfaces are only cli_output, document or none. A Skills line is needed only when the
+surfaces include web_ui. Two or more cards open the strategy gate; one card opens no gate.
 ```
 
 ### ui-skills
@@ -69,7 +235,12 @@ Reads strategies.md in the run folder and records its strategy cards: the count,
 ```text
 ark ui-skills <run> [--project <name>]
 
-Prints the UI skills of the run, one line for each. When the Surfaces list in the recorded evaluation includes web_ui, it prints the required skills, then one more line for the React skill, which is only for a change that touches React code. For any other Surfaces list (none, cli_output or document alone), it prints none. It exits 1 for a run with no recorded evaluation. The Designer, the implementer, the validator and the reviewer read these skills; strategy record and plan check refuse a Skills line or a skills list that names any other skill.
+Prints the UI skills of the run, one line for each. When the Surfaces list in the recorded
+evaluation includes web_ui, it prints the required skills, then one more line for the React skill,
+which is only for a change that touches React code. For any other Surfaces list (none, cli_output or
+document alone), it prints none. It exits 1 for a run with no recorded evaluation. The Designer, the
+implementer, the validator and the reviewer read these skills; strategy record and plan check refuse
+a Skills line or a skills list that names any other skill.
 ```
 
 ### plan check
@@ -77,9 +248,45 @@ Prints the UI skills of the run, one line for each. When the Surfaces list in th
 ```text
 ark plan check <run> [--project <name>]
 
-Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits 1 when the plan is invalid. A plan with no summary is invalid, and so is a summary with no row for an AC of the ticket. A plan with no `design.interfaces` is invalid, and so is an interface with no name or with no `callers`, or with a blank caller. A plan with a cycle, an unknown `needs`, a duplicate step id, an unknown role, or a step with no id, role, repo, harness or model is invalid. A summary with no why, no changes, or a change with no criterion, where, now or fix is invalid. A decision with no id, a duplicate id, no question, an option with no label, or a `recommended` or `chosen` that is not an option, is invalid. A test case with a level other than integration or e2e is invalid. A criterion with no integration or e2e test case is invalid, and so is a test case with an empty list or no expected sentence. A decision with fewer than 2 or more than 4 options is invalid. A step whose harness and model are not the pair of any entry in roles in ark.yml is invalid: the problem names the step, its pair and the allowed pairs. It refuses a run with no strategy record or with an open strategy gate. When the evaluation lists web_ui, it also needs a skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation, or with no web_ui surface, needs no skills list. It records the number of open decisions. For `kind: bug` the first step must be a validator step that serves every AC, a manual one too. For `kind: perf` the `goal` of the first step must name `results/baseline.md` and the `goal` of the last step must name `results/compare.md`. `goal` is an optional step text. A test case has an `id` of the shape `<KEY>-T<n>` and an `action` of `add`, `update`, `reuse` or `retire`; only add and update need `given`, `when` and `then`, and retire needs `reason`. It refuses an unknown action, a retire with no reason, a reuse, update or retire whose id has no entry in `test/cases/` of a repo of the workspace, a `verified_by` id that is no active entry there and no add entry of the plan, and a new-scheme AC with `method: test` whose `verified_by` holds no integration or e2e case. A plan test case in the old shape (free id, one `criterion`, no action) still loads and keeps the old rule. It also refuses any bad entry in `test/cases/` and names its file; an absent folder is valid. plan.md lists each case with its action.
+Checks plan.yml in the run folder and renders plan.md. It prints one line for each problem and exits
+1 when the plan is invalid. A plan with no summary is invalid, and so is a summary with no row for
+an AC of the ticket. A plan with no `design.interfaces` is invalid, and so is an interface with no
+name or with no `callers`, or with a blank caller. A plan with a cycle, an unknown `needs`, a
+duplicate step id, an unknown role, or a step with no id, role, repo, harness or model is invalid. A
+summary with no why, no changes, or a change with no criterion, where, now or fix is invalid. A
+decision with no id, a duplicate id, no question, an option with no label, or a `recommended` or
+`chosen` that is not an option, is invalid. A test case with a level other than integration or e2e
+is invalid. A criterion with no integration or e2e test case is invalid, and so is a test case with
+an empty list or no expected sentence. A decision with fewer than 2 or more than 4 options is
+invalid. A step whose harness and model are not the pair of any entry in roles in ark.yml is
+invalid: the problem names the step, its pair and the allowed pairs. It refuses a run with no
+strategy record or with an open strategy gate. When the evaluation lists web_ui, it also needs a
+skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required
+skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation,
+or with no web_ui surface, needs no skills list. It records the number of open decisions. For `kind:
+bug` the first step must be a validator step that serves every AC, a manual one too. For `kind:
+perf` the `goal` of the first step must name `results/baseline.md` and the `goal` of the last step
+must name `results/compare.md`. `goal` is an optional step text. A test case has an `id` of the
+shape `<KEY>-T<n>` and an `action` of `add`, `update`, `reuse` or `retire`; only add and update need
+`given`, `when` and `then`, and retire needs `reason`. It refuses an unknown action, a retire with
+no reason, a reuse, update or retire whose id has no entry in `test/cases/` of a repo of the
+workspace, a `verified_by` id that is no active entry there and no add entry of the plan, and a
+new-scheme AC with `method: test` whose `verified_by` holds no integration or e2e case. A plan test
+case in the old shape (free id, one `criterion`, no action) still loads and keeps the old rule. It
+also refuses any bad entry in `test/cases/` and names its file; an absent folder is valid. plan.md
+lists each case with its action.
 
-The optional `repos` block holds the repo edges of a plan that touches 2 or more repos: a list of `{ repo, why, depends_on }`, where `depends_on` is a list of edges `{ repo, kind, pin, evidence, bump }`. `kind` is `submodule`, `package`, `compose` or `api`; `pin` says how the repo holds the upstream repo; `evidence` is the file and line that show the edge; `bump` is the id of the bump step in the repo, for a `submodule` or `package` edge that the ticket changes upstream. ark does not parse manifests: the run lead finds each edge. With a `repos` block, the merge order comes from its edges and step `needs` make no repo edge; a plan with no block (an old plan) takes the edges from step `needs`. The command refuses a repo listed twice or outside the workspace, an unknown `kind`, an edge with no `pin` or no `evidence`, a `bump` that is no step of the repo, a step of a repo that is not in the block, a cycle between repos, and a step of a downstream repo with no `needs` path from an implementer step of an upstream repo. plan.md lists the repos in merge order.
+The optional `repos` block holds the repo edges of a plan that touches 2 or more repos: a list of `{
+repo, why, depends_on }`, where `depends_on` is a list of edges `{ repo, kind, pin, evidence, bump
+}`. `kind` is `submodule`, `package`, `compose` or `api`; `pin` says how the repo holds the upstream
+repo; `evidence` is the file and line that show the edge; `bump` is the id of the bump step in the
+repo, for a `submodule` or `package` edge that the ticket changes upstream. ark does not parse
+manifests: the run lead finds each edge. With a `repos` block, the merge order comes from its edges
+and step `needs` make no repo edge; a plan with no block (an old plan) takes the edges from step
+`needs`. The command refuses a repo listed twice or outside the workspace, an unknown `kind`, an
+edge with no `pin` or no `evidence`, a `bump` that is no step of the repo, a step of a repo that is
+not in the block, a cycle between repos, and a step of a downstream repo with no `needs` path from
+an implementer step of an upstream repo. plan.md lists the repos in merge order.
 ```
 
 ### worktree anchor
@@ -87,7 +294,13 @@ The optional `repos` block holds the repo edges of a plan that touches 2 or more
 ```text
 ark worktree anchor <run> [--project <name>]
 
-Makes the run's worktree early, for the first repo of the workspace, with the same branch, `setup` and `worktree.created` event as `worktree create`. It prints one line, `path:<absolute path>`, the folder to start the run lead and its first workers in. A second call prints the same line and records nothing. A later `worktree create` prints `exists` for that repo. A repo with `repos.<repo>.base` in ark.yml starts from `origin/<base>` after `git fetch origin <base>`, not from the clone's HEAD; a failed fetch exits 1, names the repo and makes no worktree. If `setup` exits non-zero it removes the worktree and exits 1, as `worktree create` does. It refuses a closed run.
+Makes the run's worktree early, for the first repo of the workspace, with the same branch, `setup`
+and `worktree.created` event as `worktree create`. It prints one line, `path:<absolute path>`, the
+folder to start the run lead and its first workers in. A second call prints the same line and
+records nothing. A later `worktree create` prints `exists` for that repo. A repo with
+`repos.<repo>.base` in ark.yml starts from `origin/<base>` after `git fetch origin <base>`, not from
+the clone's HEAD; a failed fetch exits 1, names the repo and makes no worktree. If `setup` exits
+non-zero it removes the worktree and exits 1, as `worktree create` does. It refuses a closed run.
 ```
 
 ### worktree create
@@ -95,7 +308,23 @@ Makes the run's worktree early, for the first repo of the workspace, with the sa
 ```text
 ark worktree create <run> [<repo>...] [--allow-dirty] [--project <name>]
 
-Builds the run's workspace mirror. A repo with `repos.<repo>.base` in ark.yml gets its worktree from `origin/<base>` after `git fetch origin <base>`, not from the clone's HEAD; if that fetch fails the command exits 1, names the repo and the fetch error, and makes no worktree for it. Each named repo, or every repo the plan uses, gets a worktree on the branch `ark/<ticket id>-<slug>`, or on the lowest free `-2`, `-3`, ... suffix when that name exists locally or on origin; `worktree.created` records the branch. Before it adds any worktree it checks every nested repo that has none yet for uncommitted changes: it prints the changed paths and exits 1, and makes nothing. With `--allow-dirty` it prints the paths as a warning and branches from HEAD without those changes. The root repo `.` is never refused and needs no flag: when the command makes the root worktree and the root has uncommitted changes, it prints `warning  .        <workspace> has <n> uncommitted changes, not in the worktree` and the paths on stderr, once per run, and exits 0. Every other path is a symlink to the workspace. When `ark.yml` sets `setup`, the command runs it with `sh -c` in each new worktree. If `setup` exits non-zero, the command removes that worktree and its branch, prints the repo, the exit code and the last 10 lines of stderr (of stdout when stderr is empty), and exits 1. If the removal fails, the output names each `left behind` worktree path and branch. It records the worktree only after `setup` passes. A repo folder with a `.git` and no recorded worktree is a stale leftover: the next create removes it, then runs `setup` again.
+Builds the run's workspace mirror. A repo with `repos.<repo>.base` in ark.yml gets its worktree from
+`origin/<base>` after `git fetch origin <base>`, not from the clone's HEAD; if that fetch fails the
+command exits 1, names the repo and the fetch error, and makes no worktree for it. Each named repo,
+or every repo the plan uses, gets a worktree on the branch `ark/<ticket id>-<slug>`, or on the
+lowest free `-2`, `-3`, ... suffix when that name exists locally or on origin; `worktree.created`
+records the branch. Before it adds any worktree it checks every nested repo that has none yet for
+uncommitted changes: it prints the changed paths and exits 1, and makes nothing. With
+`--allow-dirty` it prints the paths as a warning and branches from HEAD without those changes. The
+root repo `.` is never refused and needs no flag: when the command makes the root worktree and the
+root has uncommitted changes, it prints `warning . <workspace> has <n> uncommitted changes, not in
+the worktree` and the paths on stderr, once per run, and exits 0. Every other path is a symlink to
+the workspace. When `ark.yml` sets `setup`, the command runs it with `sh -c` in each new worktree.
+If `setup` exits non-zero, the command removes that worktree and its branch, prints the repo, the
+exit code and the last 10 lines of stderr (of stdout when stderr is empty), and exits 1. If the
+removal fails, the output names each `left behind` worktree path and branch. It records the worktree
+only after `setup` passes. A repo folder with a `.git` and no recorded worktree is a stale leftover:
+the next create removes it, then runs `setup` again.
 ```
 
 ### test
@@ -103,7 +332,82 @@ Builds the run's workspace mirror. A repo with `repos.<repo>.base` in ark.yml ge
 ```text
 ark test <run> [--quick] [--wait] [--stop] [--project <name>]
 
-Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. A criterion with `manual: true` in ticket.md has no test: it shows `manual pending`, `manual ok` or `manual problem` from the manual gate, even when a test is tagged with it. It exits 1 unless every AC is passing or manual ok. `passed` in test.completed counts the automated criteria only, so a manual pending never opens the escalation gate. It first runs each entry of `checks` in `ark.yml` (`{ name, repo, command }`) in its repo worktree, before the suites. A check that exits non-zero prints `check <name> failed` and the last 20 lines of its output, and records `passed: false`. On every `ark test` it also runs suites on a throwaway checkout at the base commit of each worktree (an untouched repo runs as at head). A `kind: refactor` run runs every suite whole there. For another kind, a suite with `base_files` and `base_command` runs only the test files of the run's own commits (`git log --first-parent --no-merges --name-only <base>..HEAD`, merge-in files left out, files that exist at head, matching `base_files`) through `base_command`; a suite with none prints `skipped  (no changed test file)`, and when every suite is skipped there is no base checkout, `setup` or compose. A suite with no `base_files` runs whole. Before it runs, it copies the head's version of each file that the diff adds or changes under a `test`, `tests` or `features` folder at any depth into that checkout, so a new test meets the base build. A deleted or renamed file stays at base. A failure at base is data and does not fail `ark test`, except for a `kind: refactor` run with a `method: test` AC, where the suites must pass at base: `ark test` exits 1 and records `base_passed`. Each suite runs with `ARK_EVIDENCE_DIR` set to a scratch folder, and the `checkpoint` helper of `test/pw/helpers.ts` writes `screenshots/<checkpoint name>.png` under it (nothing when the variable is not set). After the parsers find the test case ids, it writes `results/evidence/<test case id>/base/` and `results/evidence/<test case id>/head/` in the run folder, each with `result.json` (the case id, the JUnit name, the status passed, failed or skipped, and the commit SHA of the checkout that ran), `command.log` (the first line is the suite command with `{report}` replaced, then the whole output of the suite, and the last line `exit <code>`; every case of one suite shares it) and `screenshots/`. A case that the head run reports and the base run does not, because its suite crashed or its test file was deleted at head, gets a failed base `result.json`; a case whose suite or test file the base did not run gets the status `not run`, with no `sha` and no `command.log`. A criterion whose cases have no result because a suite was skipped reads `not run` and does not fail `ark test`. A folder of a case that no longer appears is removed. The suite logs stay in `<suite>.log` and `base-<suite>.log`. An AC with a non-empty `verified_by` list is decided by its test cases at every level, unit included: passing when each has a passing result, failing when one has a failing result, missing when one has no result. An AC with no `verified_by` still reads the integration and e2e results tagged with its AC id. A method other than `test` shows through the manual gate, as `manual: true` does; its evidence file `results/evidence/<AC id>.md` is checked by `ark merge-request open`. Each criterion line ends with `via <case> <result>, ...`, `via tag` or `method <method>`, and one `evidence   results/evidence/<test case id>/{base,head}` line follows for each case. It refuses a bad entry in `test/cases/` and names its file. `--quick` runs, at head only and with no base run, the changed own-commit test files of each suite that `paths` selects (a suite with no `base_files` runs whole); it records `mode: quick` and a `duration` in test.completed, a pass reads `not run` for each AC, and it prints `mode: quick (not a gate: run ark test <run> before the MR)`. A plain `ark test` records `mode: full`, and an event with no `mode` reads as full. `ark merge-request open` and `ark run close <run> handed_off` refuse unless the last test at the current head is full, and name `ark test <run>`. `ark test` starts a detached runner process and prints what the runner prints, so a lost connection does not stop the tests: the runner takes the host lock itself, holds it until it ends, and writes `results/runner.json` (pid, mode, state, exit code), `results/runner.out` and `results/runner.err` in the run folder. A signal to the `ark test` caller does not stop the suites. `--wait` prints what the runner of the run printed, from the start, and exits with its code, whether the runner still runs or has ended; with no runner it exits 1. After a lost connection run `ark test <run> --wait`, never `ark test` again. A second `ark test` of a run with a live runner of the same mode attaches to it; one of another mode (`--quick` against full) exits 1 and names `--wait` and `--stop`. A runner whose pid is dead or whose start time changed is stale: `--wait` prints its output and exits 1, and the next `ark test` starts a new runner. `--stop` sends SIGTERM to the runner, which stops every suite process group, records the state `stopped` and releases the lock; the command returns when the runner is gone, and an attached caller exits 128 plus the signal number. A passed suite result is kept per project and printed `reused`: the head result is keyed by the HEAD of every repo, the mode and the suite command (a checkout with uncommitted changes reads and stores nothing); the base result by the base commits, a hash of the copied test files and the suite command, and with every base suite stored there is no checkout, `setup` or compose. A reused result keeps its evidence, its `base_passed` and its flaky files; a failed result is never stored; `checks` run on every call. At head, a failed test file runs once more through `base_command` with that one file (a failure at base is data and is not retried). A pass counts and the file is listed as `flaky` in the output, in `test.completed` (`flaky`, and `reused` for the reused suites), in the retro metrics and in the MR body; a second failure fails the suite. A suite with no `base_command`, or a failed test whose report names no file, is not retried. It prints `tests      <passed> passed, <skipped> skipped (base <n>), <deleted> deleted` and one `deleted    <file>  <title>` line for each test the base has and the head lacks, and records `passed_count`, `skipped`, `base_skipped` and `deleted` (a list of `{ file, name }`) in test.completed; the counts cover every test, not only the ones with a test case ID, and the MR body shows them. The base side comes from a census: before the base run, on the same base checkout and before the head's test files are copied in, a suite with `base_files` runs the run's own test files that exist at base, and any other suite runs whole (replayed from the cache when its key is stored). Its logs go to `results/census/`, and the base run's own results never feed the counts. A renamed test counts as deleted. A quick run counts the skipped tests at head only and has no `base_skipped` and no `deleted`. This only reports: it never changes the exit code.
+Runs the project's suites on the run's workspace mirror and records which ACs have a passing test. A
+criterion with `manual: true` in ticket.md has no test: it shows `manual pending`, `manual ok` or
+`manual problem` from the manual gate, even when a test is tagged with it. It exits 1 unless every
+AC is passing or manual ok. `passed` in test.completed counts the automated criteria only, so a
+manual pending never opens the escalation gate. It first runs each entry of `checks` in `ark.yml`
+(`{ name, repo, command }`) in its repo worktree, before the suites. A check that exits non-zero
+prints `check <name> failed` and the last 20 lines of its output, and records `passed: false`. On
+every `ark test` it also runs suites on a throwaway checkout at the base commit of each worktree:
+the `target_commit` of its newest `worktree.synced` event that has one (a conflict event has none),
+else the `worktree.created` base (an untouched repo runs as at head). A `kind: refactor` run runs
+every suite whole there. For another kind, a suite with `base_files` and `base_command` runs only
+the test files of the run's own commits (`git log --first-parent --no-merges --name-only
+<base>..HEAD`, merge-in files left out, files that exist at head, matching `base_files`) through
+`base_command`; a suite with none prints `skipped (no changed test file)`, and when every suite is
+skipped there is no base checkout, `setup` or compose. A suite with no `base_files` runs whole.
+Before it runs, it copies the head's version of each file that the diff adds or changes under a
+`test`, `tests` or `features` folder at any depth into that checkout, so a new test meets the base
+build. A deleted or renamed file stays at base. A failure at base is data and does not fail `ark
+test`, except for a `kind: refactor` run with a `method: test` AC, where the suites must pass at
+base: `ark test` exits 1 and records `base_passed`. Each suite runs with `ARK_EVIDENCE_DIR` set to a
+scratch folder, and the `checkpoint` helper of `test/pw/helpers.ts` writes `screenshots/<checkpoint
+name>.png` under it (nothing when the variable is not set). After the parsers find the test case
+ids, it writes `results/evidence/<test case id>/base/` and `results/evidence/<test case id>/head/`
+in the run folder, each with `result.json` (the case id, the JUnit name, the status passed, failed
+or skipped, and the commit SHA of the checkout that ran), `command.log` (the first line is the suite
+command with `{report}` replaced, then the whole output of the suite, and the last line `exit
+<code>`; every case of one suite shares it) and `screenshots/`. A case that the head run reports and
+the base run does not, because its suite crashed or its test file was deleted at head, gets a failed
+base `result.json`; a case whose suite or test file the base did not run gets the status `not run`,
+with no `sha` and no `command.log`. A criterion whose cases have no result because a suite was
+skipped reads `not run` and does not fail `ark test`. A folder of a case that no longer appears is
+removed. The suite logs stay in `<suite>.log` and `base-<suite>.log`. An AC with a non-empty
+`verified_by` list is decided by its test cases at every level, unit included: passing when each has
+a passing result, failing when one has a failing result, missing when one has no result. An AC with
+no `verified_by` still reads the integration and e2e results tagged with its AC id. A method other
+than `test` shows through the manual gate, as `manual: true` does; its evidence file
+`results/evidence/<AC id>.md` is checked by `ark merge-request open`. Each criterion line ends with
+`via <case> <result>, ...`, `via tag` or `method <method>`, and one `evidence results/evidence/<test
+case id>/{base,head}` line follows for each case. It refuses a bad entry in `test/cases/` and names
+its file. `--quick` runs, at head only and with no base run, the changed own-commit test files of
+each suite that `paths` selects (a suite with no `base_files` runs whole); it records `mode: quick`
+and a `duration` in test.completed, a pass reads `not run` for each AC, and it prints `mode: quick
+(not a gate: run ark test <run> before the MR)`. A plain `ark test` records `mode: full`, and an
+event with no `mode` reads as full. `ark merge-request open` and `ark run close <run> handed_off`
+refuse unless the last test at the current head is full, and name `ark test <run>`. `ark test`
+starts a detached runner process and prints what the runner prints, so a lost connection does not
+stop the tests: the runner takes the host lock itself, holds it until it ends, and writes
+`results/runner.json` (pid, mode, state, exit code), `results/runner.out` and `results/runner.err`
+in the run folder. A signal to the `ark test` caller does not stop the suites. `--wait` prints what
+the runner of the run printed, from the start, and exits with its code, whether the runner still
+runs or has ended; with no runner it exits 1. After a lost connection run `ark test <run> --wait`,
+never `ark test` again. A second `ark test` of a run with a live runner of the same mode attaches to
+it; one of another mode (`--quick` against full) exits 1 and names `--wait` and `--stop`. A runner
+whose pid is dead or whose start time changed is stale: `--wait` prints its output and exits 1, and
+the next `ark test` starts a new runner. `--stop` sends SIGTERM to the runner, which stops every
+suite process group, records the state `stopped` and releases the lock; the command returns when the
+runner is gone, and an attached caller exits 128 plus the signal number. A passed suite result is
+kept per project and printed `reused`: the head result is keyed by the HEAD of every repo, the mode
+and the suite command (a checkout with uncommitted changes reads and stores nothing); the base
+result by the base commits, a hash of the copied test files and the suite command, and with every
+base suite stored there is no checkout, `setup` or compose. A reused result keeps its evidence, its
+`base_passed` and its flaky files; a failed result is never stored; `checks` run on every call. At
+head, a failed test file runs once more through `base_command` with that one file (a failure at base
+is data and is not retried). A pass counts and the file is listed as `flaky` in the output, in
+`test.completed` (`flaky`, and `reused` for the reused suites), in the retro metrics and in the MR
+body; a second failure fails the suite. A suite with no `base_command`, or a failed test whose
+report names no file, is not retried. It prints `tests <passed> passed, <skipped> skipped (base
+<n>), <deleted> deleted` and one `deleted <file> <title>` line for each test the base has and the
+head lacks, and records `passed_count`, `skipped`, `base_skipped` and `deleted` (a list of `{ file,
+name }`) in test.completed; the counts cover every test, not only the ones with a test case ID, and
+the MR body shows them. The base side comes from a census: before the base run, on the same base
+checkout and before the head's test files are copied in, a suite with `base_files` runs the run's
+own test files that exist at base, and any other suite runs whole (replayed from the cache when its
+key is stored). Its logs go to `results/census/`, and the base run's own results never feed the
+counts. A renamed test counts as deleted. A quick run counts the skipped tests at head only and has
+no `base_skipped` and no `deleted`. This only reports: it never changes the exit code.
 ```
 
 ### test-case new
@@ -111,7 +415,20 @@ Runs the project's suites on the run's workspace mirror and records which ACs ha
 ```text
 ark test-case new <KEY> [--run <run>] [--project <name>]
 
-Run in a git repo, or anywhere with `--run <run>` (with `--project <name>` when the run ID is in several projects), which writes into the root repo worktree of that run and refuses a closed run or one with no worktree. Without `--run` it refuses in the `workspace:` checkout of a project, since that file belongs to no run. It allocates the next test case ID `<KEY>-T<n>`, one above the highest of a counter file per key in the git common directory, the `<KEY>-T*` entries in `test/cases/` and the entries on the last fetched origin target branch (a missing origin counts as none; it never fetches), and writes `test/cases/<KEY>-T<n>.md` with status `active`. It holds a lock in the git directory while it reads the highest number, writes the counter and then the file, so parallel runs and worktrees of one repo get different IDs. It prints the ID alone on stdout and the path of the file on stderr. An entry is one Markdown file with the frontmatter `id`, `title` (starts with the id), `level` (unit, integration or e2e), `technique`, `priority`, `risk` (the defect the case catches), `status` (active or retired; a retired entry also has `retired_reason`) and `changed_by`, and the sections Objective, Preconditions, Steps, Expected results and Screenshot checkpoints. `test_case_source` in ark.yml accepts `local` only. Outside a git repo it exits 1.
+Run in a git repo, or anywhere with `--run <run>` (with `--project <name>` when the run ID is in
+several projects), which writes into the root repo worktree of that run and refuses a closed run or
+one with no worktree. Without `--run` it refuses in the `workspace:` checkout of a project, since
+that file belongs to no run. It allocates the next test case ID `<KEY>-T<n>`, one above the highest
+of a counter file per key in the git common directory, the `<KEY>-T*` entries in `test/cases/` and
+the entries on the last fetched origin target branch (a missing origin counts as none; it never
+fetches), and writes `test/cases/<KEY>-T<n>.md` with status `active`. It holds a lock in the git
+directory while it reads the highest number, writes the counter and then the file, so parallel runs
+and worktrees of one repo get different IDs. It prints the ID alone on stdout and the path of the
+file on stderr. An entry is one Markdown file with the frontmatter `id`, `title` (starts with the
+id), `level` (unit, integration or e2e), `technique`, `priority`, `risk` (the defect the case
+catches), `status` (active or retired; a retired entry also has `retired_reason`) and `changed_by`,
+and the sections Objective, Preconditions, Steps, Expected results and Screenshot checkpoints.
+`test_case_source` in ark.yml accepts `local` only. Outside a git repo it exits 1.
 ```
 
 ### test-audit inventory
@@ -119,7 +436,19 @@ Run in a git repo, or anywhere with `--run <run>` (with `--project <name>` when 
 ```text
 ark test-audit inventory [--json] [--summary] [--changed <base>] --project <name>
 
-Lists every test declaration of the project's bun suites, read with the TypeScript AST from the project workspace. It changes no file. One row each, tab-separated, with the columns file, line, title, kind, id, acs and last: the kind is `case` (the title or its describe holds a test case id <KEY>-T<n>), `old` (an old AC id <KEY>-<n>-AC<k>) or `none`; acs are the criteria whose verified_by names the case, from the project tickets; last is the JUnit time of the newest results/<suite>.report, joined by file and title. A `test.each` table is one row marked `[table xN]`, a `skipIf`, `only` or `skip` declaration is marked with its modifier, and test syntax inside a string is no row. A file that two suites select is counted once. A suite with another parser prints a `skip:` line on stderr. --json prints the same rows as JSON (durationMs is null with no match). --summary prints the counts by kind, the total declarations and test lines, and the counts by file. --changed <base> lists only the declarations that the diff from <base> to HEAD changes in their title, table or body (a deleted file has none; a renamed file is compared at its old path), and prints `old id touched: <file>:<line> <title>` for each one with an old AC id. It exits 0.
+Lists every test declaration of the project's bun suites, read with the TypeScript AST from the
+project workspace. It changes no file. One row each, tab-separated, with the columns file, line,
+title, kind, id, acs and last: the kind is `case` (the title or its describe holds a test case id
+<KEY>-T<n>), `old` (an old AC id <KEY>-<n>-AC<k>) or `none`; acs are the criteria whose verified_by
+names the case, from the project tickets; last is the JUnit time of the newest
+results/<suite>.report, joined by file and title. A `test.each` table is one row marked `[table
+xN]`, a `skipIf`, `only` or `skip` declaration is marked with its modifier, and test syntax inside a
+string is no row. A file that two suites select is counted once. A suite with another parser prints
+a `skip:` line on stderr. --json prints the same rows as JSON (durationMs is null with no match).
+--summary prints the counts by kind, the total declarations and test lines, and the counts by file.
+--changed <base> lists only the declarations that the diff from <base> to HEAD changes in their
+title, table or body (a deleted file has none; a renamed file is compared at its old path), and
+prints `old id touched: <file>:<line> <title>` for each one with an old AC id. It exits 0.
 ```
 
 ### gate record
@@ -127,7 +456,17 @@ Lists every test declaration of the project's bun suites, read with the TypeScri
 ```text
 ark gate record <run> <gate> [<criterion id>] <answer> [--note <text>] [--project <name>]
 
-Records your answer to a gate. The gates are criteria, strategy, plan, escalation and manual. The strategy gate takes the ID of a card in the latest strategy record, or abort. The manual gate proves one criterion whose method is not `test` (`manual: true` reads as `demonstration`): `ark gate record <run> manual <criterion id> ok|problem [--note <text>]` records gate.answered with the field `criterion`; it refuses an ID that is not in the ticket or not manual, and the answer is never automatic. For a `demonstration` criterion, `ok` also leaves the line `human: ok` once, as the last line of `results/evidence/<AC id>.md`, when that file exists; `problem` and the other methods change no file. Ark refuses an answer that the run's state does not allow, and refuses plan approve while the plan has an open decision. Both `<ticket id>/AC<k>` and `<ticket id>-AC<k>` name a criterion. `criteria accept` re-reads the ticket and refuses a new-scheme AC with `method: test` and an empty `verified_by` list, and names the AC.
+Records your answer to a gate. The gates are criteria, strategy, plan, escalation and manual. The
+strategy gate takes the ID of a card in the latest strategy record, or abort. The manual gate proves
+one criterion whose method is not `test` (`manual: true` reads as `demonstration`): `ark gate record
+<run> manual <criterion id> ok|problem [--note <text>]` records gate.answered with the field
+`criterion`; it refuses an ID that is not in the ticket or not manual, and the answer is never
+automatic. For a `demonstration` criterion, `ok` also leaves the line `human: ok` once, as the last
+line of `results/evidence/<AC id>.md`, when that file exists; `problem` and the other methods change
+no file. Ark refuses an answer that the run's state does not allow, and refuses plan approve while
+the plan has an open decision. Both `<ticket id>/AC<k>` and `<ticket id>-AC<k>` name a criterion.
+`criteria accept` re-reads the ticket and refuses a new-scheme AC with `method: test` and an empty
+`verified_by` list, and names the AC.
 ```
 
 ### escalate
@@ -135,7 +474,10 @@ Records your answer to a gate. The gates are criteria, strategy, plan, escalatio
 ```text
 ark escalate <run> --reason <text> [--project <name>]
 
-Opens the escalation gate when the round budget is spent, also when the last ark test passed. Use it for an unresolved review P0 or P1. It records escalation.requested with the reason. It refuses a run that is not in phase building, a round budget that is not spent, and an empty reason. Answer the gate with ark gate record.
+Opens the escalation gate when the round budget is spent, also when the last ark test passed. Use it
+for an unresolved review P0 or P1. It records escalation.requested with the reason. It refuses a run
+that is not in phase building, a round budget that is not spent, and an empty reason. Answer the
+gate with ark gate record.
 ```
 
 ### merge-request open
@@ -143,7 +485,54 @@ Opens the escalation gate when the round budget is spent, also when the last ark
 ```text
 ark merge-request open <run> [--summary <text>] [--project <name>]
 
-Pushes each repo's branch and posts one ready MR (not Draft) for each repo, in merge order: the order of the `repos` graph of plan.yml, upstream first. A plan with no `repos` block (an old plan) takes the order from step `needs`. Each `merge_request.opened` event has the fields `order` (the place of its repo in the merge order) and `waits_for` (the upstream repos whose MRs it waits for). Title and body come from the run: the title is `<ticket id>: <summary>`, 72 characters or less in total, where `summary` is the ticket's `summary:` field, else the ticket title, each used only when the whole title fits, else the text of `--summary`; with none it exits 1 before any push with `ticket has no summary: pass --summary`. A `pr_writing.title_prefix` rule in ark.yml wins over that form. The body is written from the run folder and linted before the push, and a lint `fail` refuses. The plan gate answer is the go-ahead: no confirm flag. A repo that already has an open MR gets the new head pushed and the text between `<!-- pr-writing:begin -->` and `<!-- pr-writing:end -->` in its body replaced; text outside the markers stays, an old body with no markers is rewritten whole once and the output says so, a body that did not change is left alone, and a merged or closed MR is skipped. Run it again after each post-MR round. It refuses, with exit 1 and before any push, when a repo head changed since the last test, and ends the error with `run ark test <run> again`. It also refuses, before any push, when a criterion with `manual: true` has no manual ok, and names each one. The MR targets `repos.<repo>.base` when ark.yml sets it (`--base <base>` on GitHub, `--target-branch <base>` on GitLab), else the branch origin/HEAD names. No command merges. For a project with `merge_requests: none` in ark.yml it exits 1 before any command runs and prints `project <project> has merge_requests: none: close the run with ark run close <run> handed_off`. It also refuses, before any push, when a non-manual AC is not `passing` in the last test (it names each), when a string in backticks in an AC text is in no tracked file of a run worktree at HEAD (it names the AC and the string; Only a string a file can hold counts: not one with a placeholder (`<`), a `*`, `...`, a `:<line>` suffix or the id of its own AC, and no string of a manual AC. A string also passes when it names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty path never counts). A string that starts with `not:` is a removed string: it must be in no tracked file and name no tracked path, and the refusal names it without the prefix.), for `kind: perf` when `results/baseline.md` or `results/compare.md` is missing or empty, and for a `kind: refactor` run with a `method: test` AC unless `base_passed` is true. Last, it checks the evidence and refuses, before any push and before any event, with `refused: evidence is not complete` and one line for each AC or case that fails. A non-test AC needs one file `results/evidence/<AC id>.md` in the run folder (`<AC id>` is the local id such as `AC6`; an old `manual: true` AC reads as `demonstration`). The line is `evidence missing: <AC id> (<method>)` for a missing file and `evidence malformed: <AC id>: <reason>` for a file without a section of its method, naming it. `demonstration`: the sections What the human did, What the human saw, Before and After (each with a screenshot path, checked for shape, not for existence), and the last line `human: ok`, which `ark gate record <run> manual <AC id> ok` writes. `inspection`: the sections Files (each `path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`. `analysis`: the sections Command, Output, Threshold and Result, each given for Base and for Head. For an AC with `method: test`, each case in its `verified_by` needs `results/evidence/<test case id>/base/` and `head/` (`test evidence missing: <AC id> <test case id> (<base|head>)`), and the commit SHA in the `head` `result.json` must be the current head of a repo of the run (`test evidence stale: <AC id> <test case id>`). An AC with no `verified_by` needs no test evidence. Before any push, lint or event it runs `git fetch origin` and `git merge-tree --write-tree HEAD origin/<target>` in each repo it pushes, a new MR or an open one it refreshes (changing no file and no ref), and refuses when the head does not merge cleanly: it names the repo, records worktree.synced with a conflict so that `ark run step <run> <step> start --merge` is allowed, and pushes nothing for any repo. A merge-tree error that is not a conflict (no common history, no origin/<target>, git older than 2.38) is a refusal that shows git's text.
+Pushes each repo's branch and posts one ready MR (not Draft) for each repo, in merge order: the
+order of the `repos` graph of plan.yml, upstream first. A plan with no `repos` block (an old plan)
+takes the order from step `needs`. Each `merge_request.opened` event has the fields `order` (the
+place of its repo in the merge order) and `waits_for` (the upstream repos whose MRs it waits for).
+Title and body come from the run: the title is `<ticket id>: <summary>`, 72 characters or less in
+total, where `summary` is the ticket's `summary:` field, else the ticket title, each used only when
+the whole title fits, else the text of `--summary`; with none it exits 1 before any push with
+`ticket has no summary: pass --summary`. A `pr_writing.title_prefix` rule in ark.yml wins over that
+form. The body is written from the run folder and linted before the push, and a lint `fail` refuses.
+The plan gate answer is the go-ahead: no confirm flag. A repo that already has an open MR gets the
+new head pushed and the text between `<!-- pr-writing:begin -->` and `<!-- pr-writing:end -->` in
+its body replaced; text outside the markers stays, an old body with no markers is rewritten whole
+once and the output says so, a body that did not change is left alone, and a merged or closed MR is
+skipped. Run it again after each post-MR round. It refuses, with exit 1 and before any push, when a
+repo head changed since the last test, and ends the error with `run ark test <run> again`. It also
+refuses, before any push, when a criterion with `manual: true` has no manual ok, and names each one.
+The MR targets `repos.<repo>.base` when ark.yml sets it (`--base <base>` on GitHub, `--target-branch
+<base>` on GitLab), else the branch origin/HEAD names. No command merges. For a project with
+`merge_requests: none` in ark.yml it exits 1 before any command runs and prints `project <project>
+has merge_requests: none: close the run with ark run close <run> handed_off`. It also refuses,
+before any push, when a non-manual AC is not `passing` in the last test (it names each), when a
+string in backticks in an AC text is in no tracked file of a run worktree at HEAD (it names the AC
+and the string; Only a string a file can hold counts: not one with a placeholder (`<`), a `*`,
+`...`, a `:<line>` suffix or the id of its own AC, and no string of a manual AC. A string also
+passes when it names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty path
+never counts). A string that starts with `not:` is a removed string: it must be in no tracked file
+and name no tracked path, and the refusal names it without the prefix.), for `kind: perf` when
+`results/baseline.md` or `results/compare.md` is missing or empty, and for a `kind: refactor` run
+with a `method: test` AC unless `base_passed` is true. Last, it checks the evidence and refuses,
+before any push and before any event, with `refused: evidence is not complete` and one line for each
+AC or case that fails. A non-test AC needs one file `results/evidence/<AC id>.md` in the run folder
+(`<AC id>` is the local id such as `AC6`; an old `manual: true` AC reads as `demonstration`). The
+line is `evidence missing: <AC id> (<method>)` for a missing file and `evidence malformed: <AC id>:
+<reason>` for a file without a section of its method, naming it. `demonstration`: the sections What
+the human did, What the human saw, Before and After (each with a screenshot path, checked for shape,
+not for existence), and the last line `human: ok`, which `ark gate record <run> manual <AC id> ok`
+writes. `inspection`: the sections Files (each `path:start-end`), Checked against and Verdict, with
+the line `reviewer: pass` or `reviewer: fail`. `analysis`: the sections Command, Output, Threshold
+and Result, each given for Base and for Head. For an AC with `method: test`, each case in its
+`verified_by` needs `results/evidence/<test case id>/base/` and `head/` (`test evidence missing: <AC
+id> <test case id> (<base|head>)`), and the commit SHA in the `head` `result.json` must be the
+current head of a repo of the run (`test evidence stale: <AC id> <test case id>`). An AC with no
+`verified_by` needs no test evidence. Before any push, lint or event it runs `git fetch origin` and
+`git merge-tree --write-tree HEAD origin/<target>` in each repo it pushes, a new MR or an open one
+it refreshes (changing no file and no ref), and refuses when the head does not merge cleanly: it
+names the repo, records worktree.synced with a conflict so that `ark run step <run> <step> start
+--merge` is allowed, and pushes nothing for any repo. A merge-tree error that is not a conflict (no
+common history, no origin/<target>, git older than 2.38) is a refusal that shows git's text.
 ```
 
 ### merge-request status
@@ -151,7 +540,22 @@ Pushes each repo's branch and posts one ready MR (not Draft) for each repo, in m
 ```text
 ark merge-request status <run> [--since <time>] [--json] [--project <name>]
 
-For a project with `merge_requests: none` it prints `merge requests: none`, exits 0 and calls no gh and no glab. Otherwise it prints each MR of the run as `<repo>  <state>  <url>`, then `ci: passed|failed|running|none|unknown`, `conflict` when the MR cannot merge into its target branch (`conflict: unknown` when the host cannot say), and `checks failing: <names>`, read from gh or glab. Under an MR that lists upstreams in `waits_for` it prints `  waits for !N (<state>)` for each, then `  bump <step>  <kind> <upstream repo>  pin <pin>  <state>` for each bump step of its repo in the plan. The bump state is `refreshed to <value>` once `ark bump refresh` recorded it (8 characters for a submodule); else for a submodule `points at upstream branch <8 characters>` (the pointer in the downstream worktree), and for any other kind `waits for upstream merge` or, with the upstream MR merged, `waits for upstream publish`. Ark asks no package registry. With --since <ISO 8601 time> it also lists each human comment written after that time (bots and the logged-in Ark user left out), indented under its MR with author, file:line, body and URL; `comments: unknown` when they cannot be read. With --json it prints one array of {repo,url,state,ci,failedChecks:[{name,url}],conflict,comments}; conflict and comments are null when unknown. A value gh or glab cannot answer prints `unknown` and the command exits 0; unknown is never a pass. It changes nothing.
+For a project with `merge_requests: none` it prints `merge requests: none`, exits 0 and calls no gh
+and no glab. Otherwise it prints each MR of the run as `<repo> <state> <url>`, then `ci:
+passed|failed|running|none|unknown`, `conflict` when the MR cannot merge into its target branch
+(`conflict: unknown` when the host cannot say), and `checks failing: <names>`, read from gh or glab.
+Under an MR that lists upstreams in `waits_for` it prints ` waits for !N (<state>)` for each, then `
+bump <step> <kind> <upstream repo> pin <pin> <state>` for each bump step of its repo in the plan.
+The bump state is `refreshed to <value>` once `ark bump refresh` recorded it (8 characters for a
+submodule); else for a submodule `points at upstream branch <8 characters>` (the pointer in the
+downstream worktree), and for any other kind `waits for upstream merge` or, with the upstream MR
+merged, `waits for upstream publish`. Ark asks no package registry. With --since <ISO 8601 time> it
+also lists each human comment written after that time (bots and the logged-in Ark user left out),
+indented under its MR with author, file:line, body and URL; `comments: unknown` when they cannot be
+read. With --json it prints one array of
+{repo,url,state,ci,failedChecks:[{name,url}],conflict,comments}; conflict and comments are null when
+unknown. A value gh or glab cannot answer prints `unknown` and the command exits 0; unknown is never
+a pass. It changes nothing.
 ```
 
 ### bump refresh
@@ -159,7 +563,15 @@ For a project with `merge_requests: none` it prints `merge requests: none`, exit
 ```text
 ark bump refresh <run> <step> [--to <value>] [--project <name>]
 
-Records `bump.refreshed` for a bump step of the plan (a step named in the `bump` field of a repo edge) and prints `refreshed <step> to <value>`. For a submodule edge it fetches the submodule in the downstream worktree, moves its pointer (the `pin` path) to the merge commit of the upstream MR (`merge_commit_sha` or `squash_commit_sha` on GitLab, `mergeCommit` on GitHub), never to the branch head, commits the pointer and records the commit. It refuses when the upstream MR is not merged or names no merge commit. `--to <commit>` replaces the merge commit. For any other edge kind `--to <value>` is required and the command only records it: the pin edit is an implementer round. It refuses a step that is not a bump step. `ark merge-request status` then shows `refreshed to <value>` (8 characters for a submodule).
+Records `bump.refreshed` for a bump step of the plan (a step named in the `bump` field of a repo
+edge) and prints `refreshed <step> to <value>`. For a submodule edge it fetches the submodule in the
+downstream worktree, moves its pointer (the `pin` path) to the merge commit of the upstream MR
+(`merge_commit_sha` or `squash_commit_sha` on GitLab, `mergeCommit` on GitHub), never to the branch
+head, commits the pointer and records the commit. It refuses when the upstream MR is not merged or
+names no merge commit. `--to <commit>` replaces the merge commit. For any other edge kind `--to
+<value>` is required and the command only records it: the pin edit is an implementer round. It
+refuses a step that is not a bump step. `ark merge-request status` then shows `refreshed to <value>`
+(8 characters for a submodule).
 ```
 
 ### worktree sync
@@ -167,7 +579,23 @@ Records `bump.refreshed` for a bump step of the plan (a step named in the `bump`
 ```text
 ark worktree sync <run> [--project <name>]
 
-Fetches and merges origin's target branch (`repos.<repo>.base` when set, else the branch origin/HEAD names) into each worktree of the run, and pushes the branch of each repo that has an MR (never for a project with `merge_requests: none`). It records worktree.synced for each repo. Before the merge it checks that no `test/cases/<id>.md` the branch added since the merge-base exists on the target with other content; if one does, it records a conflict, skips the merge and the push, and goes on to the next repo. On a merge conflict it records it, undoes the merge and goes on to the next repo. After the last repo it exits 1, printing `test case id taken on the target branch: <id>` for each taken id and naming every conflicting repo. After a clean merge, when `setup` is set in ark.yml and the merge changed `package.json` or `bun.lock`, or the marker `.omp/setup-pending` exists in the worktree (also when the merge changes nothing), it runs `setup` with `sh -c` in the worktree before the push. The marker is written before setup and removed when setup succeeds. If setup fails it keeps the marker, skips the push for that repo, records no conflict, goes on to the next repo, and after the last repo exits 1 naming the repo; the next sync retries setup. Setup lines and output go to stderr. With no `setup`, it runs nothing and writes no marker. A closed run gets a phase error and its worktrees stay unchanged. It never merges an MR.
+Fetches and merges origin's target branch (`repos.<repo>.base` when set, else the branch origin/HEAD
+names) into each worktree of the run, and pushes the branch of each repo that has an MR (never for a
+project with `merge_requests: none`). It records worktree.synced for each repo; a clean merge also
+records `target_commit`, the origin tip it merged, and `ark test` runs the base side at it. A
+finished `--merge` step records the same event. Before the merge it checks that no
+`test/cases/<id>.md` the branch added since the merge-base exists on the target with other content;
+if one does, it records a conflict, skips the merge and the push, and goes on to the next repo. On a
+merge conflict it records it, undoes the merge and goes on to the next repo. After the last repo it
+exits 1, printing `test case id taken on the target branch: <id>` for each taken id and naming every
+conflicting repo. After a clean merge, when `setup` is set in ark.yml and the merge changed
+`package.json` or `bun.lock`, or the marker `.omp/setup-pending` exists in the worktree (also when
+the merge changes nothing), it runs `setup` with `sh -c` in the worktree before the push. The marker
+is written before setup and removed when setup succeeds. If setup fails it keeps the marker, skips
+the push for that repo, records no conflict, goes on to the next repo, and after the last repo exits
+1 naming the repo; the next sync retries setup. Setup lines and output go to stderr. With no
+`setup`, it runs nothing and writes no marker. A closed run gets a phase error and its worktrees
+stay unchanged. It never merges an MR.
 ```
 
 ### workspace sync
@@ -175,7 +603,9 @@ Fetches and merges origin's target branch (`repos.<repo>.base` when set, else th
 ```text
 ark workspace sync <run> [--project <name>]
 
-Fetches and fast-forwards the target branch (`repos.<repo>.base` when set, else the branch origin/HEAD names) of the workspace checkout of each repo the run touched. It exits 1 and names the repo when git refuses, for example on a conflicting local change. It prints repo, branch and head.
+Fetches and fast-forwards the target branch (`repos.<repo>.base` when set, else the branch
+origin/HEAD names) of the workspace checkout of each repo the run touched. It exits 1 and names the
+repo when git refuses, for example on a conflicting local change. It prints repo, branch and head.
 ```
 
 ### status
@@ -183,11 +613,26 @@ Fetches and fast-forwards the target branch (`repos.<repo>.base` when set, else 
 ```text
 ark status [<run>] [--project <name>]
 
-Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, test head, MRs and cost. The test head line is `test head: current` when every worktree is at the head of the last test, and one `test head: stale (<repo> tested <8 characters>, now <8 characters>)` line for each repo that changed. There is no test head line before the first test. For a project with `merge_requests: none` it prints `merge requests: none (local only)` in place of the MR lines, then `branch   <order>  <repo>  <branch>  <n> commit(s) ahead of <base, 8 characters>` for each worktree whose branch has commits beyond its base, in merge order, also after `ark run close <run> handed_off`. Without a run, it lists every open run. --project limits the config check to one project, like ARK_PROJECT, and with a run it looks for the run in that project only.
+Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, test
+head, MRs and cost. The test head line is `test head: current` when every worktree is at the head of
+the last test, and one `test head: stale (<repo> tested <8 characters>, now <8 characters>)` line
+for each repo that changed. There is no test head line before the first test. For a project with
+`merge_requests: none` it prints `merge requests: none (local only)` in place of the MR lines, then
+`branch <order> <repo> <branch> <n> commit(s) ahead of <base, 8 characters>` for each worktree whose
+branch has commits beyond its base, in merge order, also after `ark run close <run> handed_off`.
+Without a run, it lists every open run. --project limits the config check to one project, like
+ARK_PROJECT, and with a run it looks for the run in that project only.
 
-The list adds the age of the newest event of each open run after the step, as `Nm`, `Nh` or `Nd` (largest whole unit; hours up to 47), and ends the line with `  stale` when that age is over 24 hours: `<run>  <phase>  <step>  <age>[  stale]`. It prints the `kind` of the run after the ticket line.
+The list adds the age of the newest event of each open run after the step, as `Nm`, `Nh` or `Nd`
+(largest whole unit; hours up to 47), and ends the line with ` stale` when that age is over 24
+hours: `<run> <phase> <step> <age>[ stale]`. It prints the `kind` of the run after the ticket line.
 
-For a `merge_requests: none` run with a `repos` block it prints, after the branch line of a repo (or after the last branch line when the repo has none), `pending bump: <step> (<kind> <upstream repo>, <pin>) needs <value>` for each bump step of that repo that has not succeeded. The value is 8 characters of the head of the upstream worktree for a submodule, and `<published version>` for any other kind. A plan with several repos and no `repos` block takes the order from step `needs` and prints `order: from step needs (no repos list)` once above the branches.
+For a `merge_requests: none` run with a `repos` block it prints, after the branch line of a repo (or
+after the last branch line when the repo has none), `pending bump: <step> (<kind> <upstream repo>,
+<pin>) needs <value>` for each bump step of that repo that has not succeeded. The value is 8
+characters of the head of the upstream worktree for a submodule, and `<published version>` for any
+other kind. A plan with several repos and no `repos` block takes the order from step `needs` and
+prints `order: from step needs (no repos list)` once above the branches.
 ```
 
 ### retro
@@ -195,7 +640,30 @@ For a `merge_requests: none` run with a `repos` block it prints, after the branc
 ```text
 ark retro <run> [--project <name>]
 
-Computes the run's cost, time, rework and intervention metrics and writes metrics.json. The `time` object holds `wall_seconds`, `by_step` and four parts that add up to `wall_seconds`: `waiting_on_you_seconds` (gate waits; an escalation wait starts at the last step.finished or test.completed before the escalation request or answer, and an open gate runs to the end), `working_seconds` (step windows), `waiting_to_merge_seconds` (from the first merge request) and `idle_seconds` (the rest); a moment in two parts goes to the first in that order. The `rework` object holds `rounds` (highest round of a non-merge step; a start finished as not_started or interrupted counts no round), `escalations` (escalation gate answers) and `findings_sent_back` (lines in each `findings/round-<n>.md` file that start, after optional `#` marks, one list marker (`N.`, `-` or `*`) and bold marks, with `P0`, `P1`, `P2` or `P3`; no findings folder counts 0). `rework.findings_left_p0p1` counts the P0 and P1 list lines under `## Run lead decision` in each findings file whose first of the words `leave` and `send back` is `leave`. `rework.merge_steps` counts steps started with `--merge`. `human_intervention.plan_changes` counts the plan `change` answers plus every plan `approve` answer after the first, whoever gave it (`by` human or auto): `plan_changes: 0` for a plan approved once, `plan_changes: 2` for one change and a second approve. `actual_models` maps each plan step ID to the sorted, unique models of its sessions (an empty list when no session was found). For each step whose session models differ from its model in plan.yml (compared without a provider prefix, so `anthropic/claude-x` matches `claude-x`), it prints `model changed: step <step> planned <plan model>, ran <models>`; a run with no readable plan.yml prints none. `same_vendor_review` is true when a reviewer step ran all of its models on one vendor that an implementer step in the same repo also ran (`claude-` is anthropic, `gpt-` is openai, any other model has no vendor). A reviewer step that ran models of two vendors is `mixed`: it is not same vendor, `ark retro` prints `mixed review steps: <steps>`. It prints `same vendor review: true (<steps>)` or `false`. Both are reports only.
+Computes the run's cost, time, rework and intervention metrics and writes metrics.json. The `time`
+object holds `wall_seconds`, `by_step` and four parts that add up to `wall_seconds`:
+`waiting_on_you_seconds` (gate waits; an escalation wait starts at the last step.finished or
+test.completed before the escalation request or answer, and an open gate runs to the end),
+`working_seconds` (step windows), `waiting_to_merge_seconds` (from the first merge request) and
+`idle_seconds` (the rest); a moment in two parts goes to the first in that order. The `rework`
+object holds `rounds` (highest round of a non-merge step; a start finished as not_started or
+interrupted counts no round), `escalations` (escalation gate answers) and `findings_sent_back`
+(lines in each `findings/round-<n>.md` file that start, after optional `#` marks, one list marker
+(`N.`, `-` or `*`) and bold marks, with `P0`, `P1`, `P2` or `P3`; no findings folder counts 0).
+`rework.findings_left_p0p1` counts the P0 and P1 list lines under `## Run lead decision` in each
+findings file whose first of the words `leave` and `send back` is `leave`. `rework.merge_steps`
+counts steps started with `--merge`. `human_intervention.plan_changes` counts the plan `change`
+answers plus every plan `approve` answer after the first, whoever gave it (`by` human or auto):
+`plan_changes: 0` for a plan approved once, `plan_changes: 2` for one change and a second approve.
+`actual_models` maps each plan step ID to the sorted, unique models of its sessions (an empty list
+when no session was found). For each step whose session models differ from its model in plan.yml
+(compared without a provider prefix, so `anthropic/claude-x` matches `claude-x`), it prints `model
+changed: step <step> planned <plan model>, ran <models>`; a run with no readable plan.yml prints
+none. `same_vendor_review` is true when a reviewer step ran all of its models on one vendor that an
+implementer step in the same repo also ran (`claude-` is anthropic, `gpt-` is openai, any other
+model has no vendor). A reviewer step that ran models of two vendors is `mixed`: it is not same
+vendor, `ark retro` prints `mixed review steps: <steps>`. It prints `same vendor review: true
+(<steps>)` or `false`. Both are reports only.
 ```
 
 ### chief state
@@ -203,7 +671,15 @@ Computes the run's cost, time, rework and intervention metrics and writes metric
 ```text
 ark chief state [--project <name>]
 
-Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a file: open runs with phase and current step, run leads (live ones only, dispatch and terminal) from `orca orchestration worker-list`, which reads Master Chief's own Orca Run; `task-list` reads the same Run for the queue, queued Orca Tasks (`ready` and `pending`), the head of the workspace's main branch, `gates` and `concurrency` from ark.yml, the number of closed runs since the last interview (`(due)` at 10 or more) and free disk space. It reads every page of the Run list, so a Master Chief Run past the first page is found. A source that fails prints `unavailable: <command> failed: <reason>` under its heading, and the other sections still print. An empty source prints `none`. --project falls back to ARK_PROJECT.
+Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a
+file: open runs with phase and current step, run leads (live ones only, dispatch and terminal) from
+`orca orchestration worker-list`, which reads Master Chief's own Orca Run; `task-list` reads the
+same Run for the queue, queued Orca Tasks (`ready` and `pending`), the head of the workspace's main
+branch, `gates` and `concurrency` from ark.yml, the number of closed runs since the last interview
+(`(due)` at 10 or more) and free disk space. It reads every page of the Run list, so a Master Chief
+Run past the first page is found. A source that fails prints `unavailable: <command> failed:
+<reason>` under its heading, and the other sections still print. An empty source prints `none`.
+--project falls back to ARK_PROJECT.
 ```
 
 ### chief handover
@@ -211,7 +687,13 @@ Prints a Markdown snapshot of Master Chief's state, read live from its sources a
 ```text
 ark chief handover [--project <name>]
 
-Starts a new Master Chief for the project with `orca agent launch --surface terminal`, using `roles.chief` from ark.yml, and prints the new terminal handle. The prompt names the old Master Chief terminal (found with the live Master Chief of the project), tells the agent to wait until that terminal is gone, and then to run `run-use` on the existing Master Chief Run. It never closes the old terminal: Master Chief does that after the command returns. It exits 1 and starts nothing when no live Master Chief exists, when Orca does not answer or when `roles.chief` is not set. --project falls back to ARK_PROJECT.
+Starts a new Master Chief for the project with `orca agent launch --surface terminal`, using
+`roles.chief` from ark.yml, and prints the new terminal handle. The prompt names the old Master
+Chief terminal (found with the live Master Chief of the project), tells the agent to wait until that
+terminal is gone, and then to run `run-use` on the existing Master Chief Run. It never closes the
+old terminal: Master Chief does that after the command returns. It exits 1 and starts nothing when
+no live Master Chief exists, when Orca does not answer or when `roles.chief` is not set. --project
+falls back to ARK_PROJECT.
 ```
 
 ### ui
@@ -219,7 +701,23 @@ Starts a new Master Chief for the project with `orca agent launch --surface term
 ```text
 ark ui [--port <number>] [--name <host>]
 
-Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port). --name <host> (such as ark.localhost) also lets the hub answer to that name. One background reader builds a snapshot of the runs, plans, models, MRs, usage cost, tickets and roadmap; the page gets it over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). A closed run, its decisions, files and agent transcripts are read when the page asks, not kept in the snapshot. Views: Home (tiles for what needs you, then blockers, the review queue and run progress with usage), Runs (every run on one board and a cross-run dependency graph; #/map redirects here), a run page (any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts) and Roadmap (grouped table; a ticket opens as a full page with its dependency graph; the ticket text is read when the page asks, GET /api/ticket/<project>/<id>). The hub's one action is POST /api/open-in-orca, which runs orca terminal switch for a live terminal; it sends no text to a terminal, changes no run state and steers no agent. One hub runs per Ark repo: a second hub for the same repo (any port) prints `Ark hub already runs on http://127.0.0.1:<port>` with the port of the running hub and exits 0 (lock file in ARK_HOME; a lock of a dead pid is taken over). The reader runs only while a page is connected to /events: an idle hub runs no Orca, Plannotator or GitHub read and watches no Ark folder (GET /api/snapshot does not wake it), and it reads Plannotator only while an open run has an open gate.
+Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port).
+--name <host> (such as ark.localhost) also lets the hub answer to that name. One background reader
+builds a snapshot of the runs, plans, models, MRs, usage cost, tickets and roadmap; the page gets it
+over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). A closed run,
+its decisions, files and agent transcripts are read when the page asks, not kept in the snapshot.
+Views: Home (tiles for what needs you, then blockers, the review queue and run progress with usage),
+Runs (every run on one board and a cross-run dependency graph; #/map redirects here), a run page
+(any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts) and Roadmap
+(grouped table; a ticket opens as a full page with its dependency graph; the ticket text is read
+when the page asks, GET /api/ticket/<project>/<id>). The hub's one action is POST /api/open-in-orca,
+which runs orca terminal switch for a live terminal; it sends no text to a terminal, changes no run
+state and steers no agent. One hub runs per Ark repo: a second hub for the same repo (any port)
+prints `Ark hub already runs on http://127.0.0.1:<port>` with the port of the running hub and exits
+0 (lock file in ARK_HOME; a lock of a dead pid is taken over). The reader runs only while a page is
+connected to /events: an idle hub runs no Orca, Plannotator or GitHub read and watches no Ark folder
+(GET /api/snapshot does not wake it), and it reads Plannotator only while an open run has an open
+gate.
 ```
 
 ### ui install
@@ -227,7 +725,18 @@ Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 p
 ```text
 ark ui install [--port <number>]
 
-Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents and loads them (proxy first), so the name proxy (portless proxy start --unprivileged) starts at login and the hub starts at login and restarts after a crash (KeepAlive SuccessfulExit false: not after a clean exit, such as a refused second hub) (port 4317 unless --port says otherwise). When portless is found (ARK_PORTLESS, else PATH; it needs Node 24+ on the PATH of the shell that runs install), the hub runs through it as http://ark.localhost and install prints the line '  name:   http://ark.localhost'. When it is not found, install writes no proxy agent, keeps the plain hub, prints 'portless not found: the hub stays at http://127.0.0.1:<port>' and exits 0. A second run with the same settings changes nothing; with a new port or a switch between the two forms it rewrites the plist and reloads. If loading an agent fails, install restores and reloads the previous plist of that agent only (or removes a new plist), reports any reload failure, and exits 1. See docs/how-to/local-names.md.
+Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents and loads them
+(proxy first), so the name proxy (portless proxy start --unprivileged) starts at login and the hub
+starts at login and restarts after a crash (KeepAlive SuccessfulExit false: not after a clean exit,
+such as a refused second hub) (port 4317 unless --port says otherwise). When portless is found
+(ARK_PORTLESS, else PATH; it needs Node 24+ on the PATH of the shell that runs install), the hub
+runs through it as http://ark.localhost and install prints the line ' name: http://ark.localhost'.
+When it is not found, install writes no proxy agent, keeps the plain hub, prints 'portless not
+found: the hub stays at http://127.0.0.1:<port>' and exits 0. A second run with the same settings
+changes nothing; with a new port or a switch between the two forms it rewrites the plist and
+reloads. If loading an agent fails, install restores and reloads the previous plist of that agent
+only (or removes a new plist), reports any reload failure, and exits 1. See
+docs/how-to/local-names.md.
 ```
 
 ### ui uninstall
@@ -235,7 +744,9 @@ Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents 
 ```text
 ark ui uninstall
 
-Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy, so the hub stops and neither starts at login. It does not stop the shared portless proxy: that keeps running until you run `portless proxy stop`. It does nothing, and exits 0, when neither agent is installed.
+Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy, so the hub stops and neither
+starts at login. It does not stop the shared portless proxy: that keeps running until you run
+`portless proxy stop`. It does nothing, and exits 0, when neither agent is installed.
 ```
 
 ### services install
@@ -243,7 +754,17 @@ Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy, so the hub s
 ```text
 ark services install [--project <name>]
 
-Writes one LaunchAgent for each background job of the project in ~/Library/LaunchAgents and loads it: dev.ark.<project>.auto-merger (scripts/auto-merger.sh, every 60 s), dev.ark.<project>.temp-cleaner (scripts/temp-cleaner.sh, every 300 s) and dev.ark.<project>.sweep (scripts/sweep.sh, every 300 s). They start at login (RunAtLoad), restart after any exit (KeepAlive true, ThrottleInterval 30) and log to ~/.ark/projects/<project>/services/<service>.log. The scripts run from this clone (resolved from the module, not the workspace) and get the PATH, HOME, TMPDIR, ARK_HOME and ARK_PROJECT of the shell that runs install; it warns when ark, gh, orca or jq is not on that PATH. A second run with the same plists loads nothing again; a changed plist is unloaded and loaded again. A project with `merge_requests: none` gets no auto-merger, and one loaded from an earlier setting is unloaded and deleted. The labels carry the project, so they never collide with dev.ark.hub or dev.ark.proxy. Exits 1 when a load fails. --project falls back to ARK_PROJECT.
+Writes one LaunchAgent for each background job of the project in ~/Library/LaunchAgents and loads
+it: dev.ark.<project>.auto-merger (scripts/auto-merger.sh, every 60 s),
+dev.ark.<project>.temp-cleaner (scripts/temp-cleaner.sh, every 300 s) and dev.ark.<project>.sweep
+(scripts/sweep.sh, every 300 s). They start at login (RunAtLoad), restart after any exit (KeepAlive
+true, ThrottleInterval 30) and log to ~/.ark/projects/<project>/services/<service>.log. The scripts
+run from this clone (resolved from the module, not the workspace) and get the PATH, HOME, TMPDIR,
+ARK_HOME and ARK_PROJECT of the shell that runs install; it warns when ark, gh, orca or jq is not on
+that PATH. A second run with the same plists loads nothing again; a changed plist is unloaded and
+loaded again. A project with `merge_requests: none` gets no auto-merger, and one loaded from an
+earlier setting is unloaded and deleted. The labels carry the project, so they never collide with
+dev.ark.hub or dev.ark.proxy. Exits 1 when a load fails. --project falls back to ARK_PROJECT.
 ```
 
 ### services uninstall
@@ -251,7 +772,9 @@ Writes one LaunchAgent for each background job of the project in ~/Library/Launc
 ```text
 ark services uninstall [--project <name>]
 
-Unloads and deletes the three LaunchAgents of the project (auto-merger, temp-cleaner, sweep). It leaves the logs and the other projects alone, and it does nothing, and exits 0, when none is installed. --project falls back to ARK_PROJECT.
+Unloads and deletes the three LaunchAgents of the project (auto-merger, temp-cleaner, sweep). It
+leaves the logs and the other projects alone, and it does nothing, and exits 0, when none is
+installed. --project falls back to ARK_PROJECT.
 ```
 
 ### services status
@@ -259,31 +782,135 @@ Unloads and deletes the three LaunchAgents of the project (auto-merger, temp-cle
 ```text
 ark services status [--project <name>]
 
-Prints one line for each service of the project: `not installed`, `loaded` (loaded, no process) or `running` with `pid <n>` (from `launchctl list <label>`), and `last log: <last line of its log>`. `ark chief state` prints the same lines under its Services heading. A project with `merge_requests: none` shows the auto-merger as not installed. --project falls back to ARK_PROJECT.
+Prints one line for each service of the project: `not installed`, `loaded` (loaded, no process) or
+`running` with `pid <n>` (from `launchctl list <label>`), and `last log: <last line of its log>`.
+`ark chief state` prints the same lines under its Services heading. A project with `merge_requests:
+none` shows the auto-merger as not installed. --project falls back to ARK_PROJECT.
 ```
 
 <!-- generated:commands:end -->
 
+## Which command in which phase
+
+A command that records an event is refused outside the phases of that event. The table comes from `eventPhases` and `gateAnswerPhases` in `cli/lifecycle.ts`. `ark run start` creates the run in `awaiting_criteria`. No event follows `closed`, so that phase has no column. Each event also has its own rules in `cli/transitions.ts`. For example, `ark plan check` needs a recorded evaluation, and in `planning` a recorded strategy.
+
+| Command                              | `awaiting_criteria` | `awaiting_strategy` | `planning` | `building` | `escalation` | `merge_requests_open` |
+| ------------------------------------ | :-----------------: | :-----------------: | :--------: | :--------: | :----------: | :-------------------: |
+| `evaluation record`                  |         yes         |                     |    yes     |            |              |                       |
+| `strategy record`                    |                     |         yes         |    yes     |            |              |                       |
+| `plan check`                         |                     |                     |    yes     |    yes     |     yes      |                       |
+| `gate record` for `criteria`         |         yes         |                     |            |            |              |                       |
+| `gate record` for `strategy`         |                     |         yes         |            |            |              |                       |
+| `gate record` for `plan`             |                     |                     |    yes     |            |              |                       |
+| `gate record` for `escalation`       |                     |                     |            | auto only  |     yes      |          yes          |
+| `gate record` for `manual`           |                     |                     |            |    yes     |     yes      |                       |
+| `criteria amend`                     |                     |         yes         |    yes     |    yes     |     yes      |                       |
+| `worktree anchor`, `worktree create` |         yes         |         yes         |    yes     |    yes     |     yes      |          yes          |
+| `worktree sync`                      |                     |                     |    yes     |    yes     |     yes      |          yes          |
+| `run step`, `test`, `bump refresh`   |                     |                     |            |    yes     |     yes      |          yes          |
+| `escalate`                           |                     |                     |            |    yes     |              |                       |
+| `merge-request open`                 |                     |                     |            |    yes     |              |          yes          |
+| `run close`                          |         yes         |         yes         |    yes     |    yes     |     yes      |          yes          |
+
+"auto only" means that Ark records the answer when `gates.escalation` is `auto` and a step start finds the round budget spent. A person cannot answer there. The commands `status`, `ui-skills`, `retro`, `test-case new`, `workspace sync`, `merge-request status`, `chief ...`, `ui ...` and `services ...` record no event, so no phase limits them. See [Architecture](../explanation/architecture.md) for what moves a run from one phase to the next.
+
 ## Run folder
 
-A run lives at `$ARK_HOME/projects/<project>/runs/<run>/`:
+A run lives at `$ARK_HOME/projects/<project>/runs/<run>/`. The project folder around it holds the files that outlive a run. This tree lists every file and folder that Ark and its agents write there, and who writes it.
 
 ```text
-ticket.md          copy of the ticket file
-events.ndjson      append-only event log
-state.json         derived from the events, rebuilt by any command
-evaluation.md      written by the evaluator
-strategies.md      written by the run lead (strategy cards)
-mockups/           written by the Designer, never in an MR
-plan.yml           written by the run lead
-plan.md            rendered by ark plan check
-workspace/         the workspace mirror
-results/           test output and test reports
-metrics.json       written by ark retro
-retro.md           written by the run lead
+$ARK_HOME/projects/<project>/
+├── ark.yml                  your project config (see "ark.yml fields")
+├── tickets/<ticket id>.md   local tickets, when ticket_source is local
+├── ROADMAP.md               optional ranked milestones; the hub reads it
+├── learnings.md             lessons from retros; run leads read it at plan time
+├── verify.md                how to start the product and reach each feature
+├── handoff.md               standing rules for Master Chief
+├── escaped-defects.yml      defects that got past review; ark retro counts them
+├── interviews/<date>.md     proposals from a deep interview
+├── services/<service>.log   log of each background service
+├── test-cache/              passed suite results that ark test replays
+└── runs/<run>/
+    ├── ticket.md            copy of the ticket file, made by ark run start
+    ├── events.ndjson        append-only event log
+    ├── state.json           derived from the events, rewritten after each event
+    ├── evaluation.md        evaluator
+    ├── strategies.md        run lead; the designer adds the mockup links
+    ├── mockups/             designer; never in an MR
+    ├── test-design.md       test case writer
+    ├── plan.yml             run lead
+    ├── plan.md              rendered by ark plan check
+    ├── rules.md             optional; extra rules that go into the spec of every worker
+    ├── gates/               results of the Plannotator reviews: plan-<n>.json, strategy-<n>.json
+    ├── findings/            test-case-review-<n>.md, round-<n>.md and <step>.md
+    ├── results/             test output (see below)
+    ├── workspace/           the workspace mirror, with a worktree for each repo the run touches
+    ├── scratch/<name>       temporary clones of another commit (git clone --shared)
+    ├── mr-poll.txt          time of the last poll for MR comments, written by the run lead
+    ├── metrics.json         written by ark retro
+    └── retro.md             written by the run lead
 ```
 
-`workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<ticket id>-<slug>` (slug: the ticket title in lowercase with hyphens, at most 40 characters; the lowest free `-2`, `-3`, ... is added when the name exists locally or on origin) at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace.
+`results/` holds the output of `ark test`:
+
+| Path                                     | Content                                                                                                          |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `<suite>.log`, `<suite>.report`          | Output and report of a suite at head. At base the names start with `base-`.                                      |
+| `check-<name>.log`                       | Output of a project check.                                                                                       |
+| `evidence/<case id>/{base,head,census}/` | The evidence of each test case, with its `result.json`.                                                          |
+| `evidence/AC<k>.md`                      | The evidence file of an AC that a person proves with the manual gate.                                            |
+| `census/`                                | Output of the census run: the run's own test files at the pristine base, run only to list and count their tests. |
+| `runner.json`, `runner.out`              | State and output of the background runner that `ark test` starts.                                                |
+
+`workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<ticket id>-<slug>` (slug: the ticket title in lowercase with hyphens, at most 40 characters; the lowest free `-2`, `-3`, ... is added when the name exists locally or on origin) at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace. `ark run close` removes each worktree and its local branch. It keeps a worktree with uncommitted changes, an unmerged branch of a merged run, and the branch of a handed-off or aborted run that has commits ahead of its base.
+
+Other folders in a project, such as `prototypes/` from brainstorm sessions, are not read by the `ark` command.
+
+## `ticket.md` format
+
+A ticket is a Markdown file with YAML front matter between two `---` lines. `ark run start` reads it and copies it to `ticket.md` in the run folder. The parser is `readTicket` and `parseCriteria` in `cli/ticket.ts`. The `ark` command ignores the body. The hub shows the sections `Problem` (or `Why`) from it.
+
+| Field                 | Required | Meaning                                                                                                                          |
+| --------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                  | yes      | The ticket id, a non-empty string such as `ARK-156`.                                                                             |
+| `title`               | yes      | A non-empty string.                                                                                                              |
+| `summary`             | no       | A non-empty string when present. The MR title is `<ticket id>: <summary>`; without a usable summary it is built from `title`.    |
+| `kind`                | no       | `bug`, `perf`, `refactor` or `feature`. The default is `feature`. Any other value is refused.                                    |
+| `status`              | no       | `proposed`, `ready`, `in_progress`, `done` or `superseded`. Another word only prints a warning, and the hub shows it as written. |
+| `acceptance_criteria` | no       | A list of criteria. `ark gate record <run> criteria accept` refuses a ticket with none.                                          |
+| `milestone`           | no       | A milestone id. Only the hub reads it (see [Roadmap file format](roadmap.md)).                                                   |
+| `depends_on`          | no       | A list of ticket ids. Only the hub reads it.                                                                                     |
+
+Each entry of `acceptance_criteria`:
+
+| Field         | Required | Meaning                                                                                                                                                                                                 |
+| ------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`          | yes      | `AC1`, `AC2`, ... Ark names the criterion `<ticket id>/AC1` everywhere else. An id must be unique in the ticket.                                                                                        |
+| `text`        | yes      | The statement of the criterion.                                                                                                                                                                         |
+| `method`      | no       | `test` (the default), `demonstration`, `inspection` or `analysis`. Any method but `test` is proved by a person at the manual gate.                                                                      |
+| `verified_by` | no       | A list of test case IDs (`<KEY>-T<n>`) that prove the criterion. `criteria accept` refuses a criterion with `method: test`, the case-ID scheme (`verified_by` set, or an `AC<k>` id) and an empty list. |
+| `manual`      | no       | Old form. `manual: true` with no `method` reads as `method: demonstration`.                                                                                                                             |
+
+```markdown
+---
+id: ARK-156
+title: "Router skill and playbooks"
+summary: "Router skill and playbooks open each run"
+kind: feature
+status: ready
+acceptance_criteria:
+  - id: AC1
+    text: "The router skill opens the playbook that fits the first word."
+    method: test
+    verified_by: [ARK-T12]
+---
+
+## Problem
+
+What is wrong, and who it affects.
+```
+
+Where `ticket_source` is `local`, put the file in `$ARK_HOME/projects/<project>/tickets/<ticket id>.md`. `ark run start` sets the first `status:` line to `in_progress`, and `ark run close` sets `done` for `merged` and `ready` for `abandoned` or `aborted`. It leaves the file alone for `handed_off`. See [Run a ticket](../how-to/run-a-ticket.md) for how a run starts.
 
 ## `evaluation.md` format
 
@@ -299,11 +926,28 @@ The run lead writes `strategies.md` in the run folder, and the Designer adds moc
 
 Top level:
 
-| Field        | Type | Meaning                                       |
-| ------------ | ---- | --------------------------------------------- |
-| `steps`      | list | The steps of the plan.                        |
-| `test_cases` | list | The test cases that prove the criteria.       |
-| `design`     | map  | The approach, the interfaces and the example. |
+| Field        | Required | Type | Meaning                                                                                 |
+| ------------ | -------- | ---- | --------------------------------------------------------------------------------------- |
+| `summary`    | yes      | map  | Why the change is needed, and one row of change for each AC.                            |
+| `design`     | yes      | map  | The approach, the interfaces and the example.                                           |
+| `steps`      | yes      | list | The steps of the plan.                                                                  |
+| `test_cases` | yes      | list | The test cases that prove the criteria.                                                 |
+| `repos`      | no       | list | The merge-order graph of the repos. Required when the steps work in more than one repo. |
+| `decisions`  | no       | list | Open questions that you answer at the plan gate.                                        |
+
+`summary` has `why` (a string) and `changes` (a list). Each entry in `changes` has four strings, `criterion`, `where`, `now` and `fix`. `ark plan check` refuses a plan with no `summary.why`, no `summary.changes`, a change with an empty field, a `criterion` that is not in the ticket, and a ticket criterion with no row. `where` names the file or folder the change touches. The PR-writing lint reads `where` to find a changed file that no change lists. `plan.md` has a Summary section and a Changes table.
+
+`repos` has one entry for each repo of the plan: `repo`, `why` (a string) and `depends_on` (a list of edges). Each edge points at an upstream repo:
+
+| Field      | Required | Meaning                                                                                                                              |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `repo`     | yes      | The upstream repo, as a path relative to the workspace.                                                                              |
+| `kind`     | yes      | `submodule`, `package`, `compose` or `api`.                                                                                          |
+| `pin`      | yes      | What pins the upstream version: for a submodule, its path in the downstream repo.                                                    |
+| `evidence` | yes      | A file and line that show the dependency.                                                                                            |
+| `bump`     | no       | The id of a step of the downstream repo that moves the pin. `ark bump refresh <run> <step>` records it after the upstream MR merges. |
+
+`ark plan check` refuses a repo listed twice, a repo or an upstream that is not a repo of the workspace, a step in a repo that `repos` does not list, a cycle, and an edge with a bad `kind` or no `pin` or `evidence`. A step of a downstream repo must follow, through `needs`, an implementer step of its upstream repo; the `bump` step must follow an implementer of the edge's repo. `ark merge-request open` opens the MRs in the order of this graph, upstream first.
 
 `design` has `interfaces` (required) and two optional fields, `approach` (string) and `example` (string). Each entry in `interfaces` has a `name` and a `callers` list of strings. An interface is a command, a playbook section, an event, a file format or an exported function. `ark plan check` rejects a plan with no `design.interfaces` and an interface with no `callers`; the error names the interface. `plan.md` has a Design section before the steps: the approach, a table of interfaces and callers, and the example in a code block. A missing `approach` or `example` shows as `No approach given.` or `No example given.`
 
@@ -321,6 +965,7 @@ Each entry in `steps`:
 | `needs`    | list of step ids | Steps that must finish first. An empty list means the step can start at once.                                                                                                                                                                                                           |
 | `criteria` | list of strings  | The AC the step serves.                                                                                                                                                                                                                                                                 |
 | `skills`   | list of strings  | Optional. UI skills the step applies, from `ark ui-skills <run>`. When the evaluation lists `web_ui`, `ark plan check` needs it on at least one step, accepts only skills that command lists, and needs every required skill in a non-empty list. `plan.md` then has a `Skills` column. |
+| `goal`     | string           | Optional. What the step does. In a perf run the first step's goal names `results/baseline.md` and the last step's goal names `results/compare.md`; `ark plan check` refuses a plan where they do not.                                                                                   |
 
 Each entry in `test_cases`:
 
@@ -343,6 +988,13 @@ In `plan.md`, each group starts with Given, When or Then, in that order. Later l
 Example:
 
 ```yaml
+summary:
+  why: Exports drop the unit, so people cannot read the values.
+  changes:
+    - criterion: CLARA-512/AC1
+      where: repos/shared/packages
+      now: The export has no unit column.
+      fix: Add a unit field to each exported result.
 steps:
   - id: core-package
     role: implementer
@@ -379,25 +1031,57 @@ design:
   example: |
     result,value,unit
     glucose,5.4,mmol/L
+decisions:
+  - id: D1
+    question: Where does the unit go in the export?
+    options:
+      - label: New column
+        tradeoffs: Easy to parse, but the file shape changes.
+      - label: Value cell
+        tradeoffs: The shape stays, but a reader must split the cell.
+    recommended: New column
+```
+
+A plan with steps in two repos also lists the repos. This example makes `repos/app` depend on `repos/lib` through a submodule, and `app-bump` moves the pin:
+
+```yaml
+repos:
+  - repo: repos/lib
+    why: Holds the export code.
+    depends_on: []
+  - repo: repos/app
+    why: Pins repos/lib as a submodule.
+    depends_on:
+      - repo: repos/lib
+        kind: submodule
+        pin: vendor/lib
+        evidence: .gitmodules:3
+        bump: app-bump
 ```
 
 ## `ark.yml` fields
 
 `ark.yml` lives at `~/.ark/projects/<project>/ark.yml`. It is personal to you. The bootstrap playbook writes it, and every command that needs the project reads it. When a field is wrong, the error names it, for example `ark.yml: suites[1].parser must be one of bun, pytest, behave`.
 
-| Field            | Required | Type    | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ---------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `workspace`      | yes      | path    | The absolute path of the workspace directory. It must exist. It is one repo or a meta-repo.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `ticket_source`  | yes      | string  | Where agents fetch tickets: `local`, `github`, or `jira`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `merge_requests` | no       | string  | `open` (the default) or `none`. With `none` the project is local-only: `ark merge-request open` refuses, `ark worktree sync` never pushes, `ark status` lists the local branches, and the run ends `ark run close <run> handed_off`. An Ark older than this key ignores it and pushes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `repos`          | no       | map     | The base and target branch of a repo, keyed by repo path relative to the workspace, exactly as `ark worktree create` names it: `.` or `repos/a`, with no `./` prefix and no trailing slash. Each value is `{ base: <branch name> }`; an entry with no `base`, or a `base` that is not a non-empty string, makes `ark status` exit 1 and name the key. For a repo with a `base`, `ark worktree create` and `ark worktree anchor` run `git fetch origin <base>` and start the worktree from `origin/<base>`, `ark worktree sync` merges `origin/<base>`, `ark merge-request open` targets `<base>` (`gh pr create --base <base>`, `glab mr create --target-branch <base>`), and `ark worktree cleanup` and `ark workspace sync` use it as the target. A repo with no entry keeps the clone's HEAD as base and the branch `origin/HEAD` names as target. Example: `repos: { repos/app: { base: release/9.1.0 }, repos/lib: { base: main } }`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `compose`        | no       | string  | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `setup`          | no       | string  | A shell command that prepares a new worktree, for example `bun install --frozen-lockfile`. `ark worktree create` runs it with `sh -c` in each new worktree, so the suites find the dependencies. It must be a non-empty string when set. A failure exits 1 and removes the worktree; if the removal fails, the output names what was left behind.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `suites`         | yes      | list    | The test suites. You need at least one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `roles`          | yes      | map     | The default `harness` and `model` for each of `implementer`, `validator`, and `reviewer`. The optional `evaluator` role is needed by `ark evaluation record`. The optional `designer` role is needed by `ark strategy record` when the evaluation lists a surface other than `none`, unless the surface is only `none`, or there is one card and the surface is only `document`, `cli_output` or `none`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `concurrency`    | no       | integer | The most workers that run at once. It must be 1 or more. The default is 2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `round_budget`   | no       | integer | How many rounds an implementer step may restart before escalation. It must be 0 or more. The default is 2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `gates`          | no       | map     | Who answers each gate. Keys: `criteria`, `strategy`, `plan`, `escalation`; each `human` (the default for a missing key) or `auto`. Any other key or value makes `ark status` exit 1 and name the field. `plan: auto` makes `ark plan check` answer `approve` with `by: auto` when the plan is valid with no open decision. `strategy: auto` makes `ark strategy record` answer with the recommended card. `escalation: auto` makes `ark run step <run> <step> start` answer `one_more_round` with `by: auto` for a spent round budget (in phase `building` or `escalation`, whether or not the last test failed) or a post-MR implementer start, and print `escalation one_more_round by auto (<n> of 2)`. It answers at most 2 times in a run. The third spent budget is refused as without the setting, and the gate waits for the human. It never answers after `escalation.requested` (`ark escalate`). A `--merge` start is answered too, prints `escalation one_more_round by auto (merge, not counted)` and does not count toward the 2. `criteria` is validated and shown only; nothing acts on it yet, so it stays with the human even when set to `auto`. An auto `plan`, `strategy` or `escalation` gate needs no Plannotator review and no relay; the run lead sends Master Chief a `status`, not an `ask`, for an auto `escalation`. `plan` and `strategy` auto, with `criteria` human (and `escalation` human unless it is `auto` too), is the Foundry setup. `gate.answered` records `by: human` or `by: auto`; `ark status <run>`, the hub run detail and `metrics.json` (`gates.auto_answers`) show it. |
+| Field                          | Required | Type    | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workspace`                    | yes      | path    | The absolute path of the workspace directory. It must exist. It is one repo or a meta-repo.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `ticket_source`                | yes      | string  | Where agents fetch tickets: `local`, `github`, or `jira`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `merge_requests`               | no       | string  | `open` (the default) or `none`. With `none` the project is local-only: `ark merge-request open` refuses, `ark worktree sync` never pushes, `ark status` lists the local branches, and the run ends `ark run close <run> handed_off`. An Ark older than this key ignores it and pushes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `repos`                        | no       | map     | The base and target branch of a repo, keyed by repo path relative to the workspace, exactly as `ark worktree create` names it: `.` or `repos/a`, with no `./` prefix and no trailing slash. Each value is `{ base: <branch name> }`; an entry with no `base`, or a `base` that is not a non-empty string, makes `ark status` exit 1 and name the key. For a repo with a `base`, `ark worktree create` and `ark worktree anchor` run `git fetch origin <base>` and start the worktree from `origin/<base>`, `ark worktree sync` merges `origin/<base>`, `ark merge-request open` targets `<base>` (`gh pr create --base <base>`, `glab mr create --target-branch <base>`), and `ark run close` (when it removes worktrees) and `ark workspace sync` use it as the target. A repo with no entry keeps the clone's HEAD as base and the branch `origin/HEAD` names as target. Example: `repos: { repos/app: { base: release/9.1.0 }, repos/lib: { base: main } }`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `compose`                      | no       | string  | The docker compose command for multi-repo projects, for example `docker compose`. When set, `ark test` runs `<compose> --project-directory <mirror> -p <run-id-lowercase> up -d --wait` before the suites and `... down` after them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `setup`                        | no       | string  | A shell command that prepares a new worktree, for example `bun install --frozen-lockfile`. `ark worktree create` runs it with `sh -c` in each new worktree, so the suites find the dependencies. It must be a non-empty string when set. A failure exits 1 and removes the worktree; if the removal fails, the output names what was left behind.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `suites`                       | yes      | list    | The test suites. You need at least one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `roles`                        | yes      | map     | The default `{ harness: claude\|codex\|omp\|pi, model: <name> }` of each role. `implementer`, `validator` and `reviewer` are required. The other keys are optional in the file, but a command or the run lead needs them: `evaluator` for `ark evaluation record` (every run); `designer` for `ark strategy record` when the run needs mockups (the evaluation lists a surface other than `none`, except one card with only `document`, `cli_output` or `none`); `test_writer` and `test_reviewer` before the plan (the run lead stops without them); `chief` for `ark chief handover`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `concurrency`                  | no       | integer | The most runs open at once. Master Chief starts a new run lead only while fewer than this many runs are open; `ark chief state` prints `concurrency: <n> (<m> open)`. The `ark` command does not enforce it. It must be 1 or more. The default is 2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `round_budget`                 | no       | integer | How many rounds an implementer step may restart before escalation. It must be 0 or more. The default is 2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `gates`                        | no       | map     | Who answers each gate. Keys: `criteria`, `strategy`, `plan`, `escalation`; each `human` (the default for a missing key) or `auto`. Any other key or value makes `ark status` exit 1 and name the field. `plan: auto` makes `ark plan check` answer `approve` with `by: auto` when the plan is valid with no open decision. `strategy: auto` makes `ark strategy record` answer with the recommended card. `escalation: auto` makes `ark run step <run> <step> start` answer `one_more_round` with `by: auto` for a spent round budget (in phase `building` or `escalation`, whether or not the last test failed) or a post-MR implementer start, and print `escalation one_more_round by auto (<n> of 2)`. It answers at most 2 times in a run. The third spent budget is refused as without the setting, and the gate waits for the human. It never answers after `escalation.requested` (`ark escalate`). A `--merge` start is answered too, prints `escalation one_more_round by auto (merge, not counted)` and does not count toward the 2. `criteria` is validated and shown only; nothing acts on it yet, so it stays with the human even when set to `auto`. An auto `plan`, `strategy` or `escalation` gate needs no Plannotator review and no relay; the run lead sends Master Chief a `status`, not an `ask`, for an auto `escalation`. `plan` and `strategy` auto, with `criteria` human (and `escalation` human unless it is `auto` too), is the Foundry setup. `gate.answered` records `by: human` or `by: auto`; `ark status <run>`, the hub run detail and `metrics.json` (`gates.auto_answers`) show it. |
+| `checks`                       | no       | list    | Commands `ark test` runs in a repo's worktree before the suites. Each entry has a unique `name`, a `repo` of the workspace, a `command` and an optional `cores` (1 or more, default 1). `<cores>` in `command` becomes the number of cores the check takes. A check must not write files. See [Add project checks](../how-to/project-checks.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `pr_writing`                   | no       | map     | How `ark merge-request open` writes the MRs. `reviewers`: a list of user names. `tier_floor`: an integer from 0 to 3, default 0, the lowest tier of the MR body. `sensitive_paths`: a list of paths; a changed file under one makes the tier at least 1. `one_way_paths`: a list of paths that are hard to undo; a changed file under one marks the MR as one-way in its risk. `agent_authored`: true (the default) or false; the first line of the body says an agent wrote it. `title_prefix`: a string, the rule for the MR title, for example `feat(TICKET): desc`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `test_budget_cores`            | no       | integer | The CPU cores that the suites and checks of all `ark test` runs on the host share. It must be 1 or more. The default is 60% of the host's cores, rounded down, and at least 1. A suite or check takes its `cores` from it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `test_min_free_memory_percent` | no       | integer | `ark test` starts no suite while free memory is below this percent. It must be 0 or more. The default is 20.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `test_max_swap_gb`             | no       | integer | `ark test` starts no suite while swap use is above this many GB. It must be 0 or more. The default is 8.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `test_case_source`             | no       | string  | Where test case entries live. Only `local` (`test/cases/` of each repo) exists, and it is the default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Each entry in `suites`:
 
@@ -411,6 +1095,7 @@ Each entry in `suites`:
 | `base_files`   | string | Optional glob of the repo's test files (`test/**/*.test.ts`), relative to the repo. With `base_command`.                                                                                                                                                                                          |
 | `base_command` | string | Optional command that runs a list of test files at the base. Needs `{files}`, replaced with the shell-quoted file list; `{report}` as in `command`. Needed with `base_files`, which must come with it.                                                                                            |
 | `paths`        | list   | Optional repo paths the suite covers. An entry ending in `/` is a folder; any other is a file. In a quick `ark test`, the suite is skipped with `diff touches none of: <paths>` when `git diff --name-only <base>..HEAD` touches none of them (merge-in files count). A full run ignores `paths`. |
+| `cores`        | number | Optional. The CPU cores the suite takes from `test_budget_cores` (1 or more), and the value of `<cores>` in its commands. Without it the suite takes the whole budget.                                                                                                                            |
 
 At the base, a run of kind `feature`, `bug` or `perf` runs a suite that has `base_files` and `base_command` only on the test files of the run's own commits (`git log --first-parent --no-merges --name-only <base>..HEAD`) that exist at head and match `base_files`. A suite with none is skipped with the reason `no changed test file`, and when every suite is skipped `ark test` makes no base checkout and runs no `setup` or `compose` there. A `refactor` run, and a suite with no `base_files`, run the whole suite at the base. A head case that did not run at the base has the status `not run` in `base/result.json`; `failed` stays for a case that ran at the base and failed or went missing.
 
@@ -434,15 +1119,22 @@ suites:
     repo: repos/platform
     command: PLAYWRIGHT_JUNIT_OUTPUT_FILE={report} bunx playwright test --reporter=junit
     parser: bun
-    paths: [hub/, cli/, test/pw/, package.json, bun.lock]
+    paths: [src/, test/pw/, package.json, bun.lock]
 roles:
   implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
   validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
   reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
   evaluator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
   designer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-concurrency: 2
-round_budget: 2
+concurrency: 2 # the default
+round_budget: 2 # the default
+checks:
+  - name: typecheck
+    repo: repos/platform
+    command: bun run typecheck
+pr_writing:
+  reviewers: [your-github-name]
+  sensitive_paths: [src/auth/]
 gates:
   plan: auto
   strategy: auto
@@ -450,27 +1142,30 @@ gates:
 
 A browser suite runs Playwright Test. Playwright's JUnit reporter writes the test title in `name`, so the `bun` parser reads it unchanged, and `PLAYWRIGHT_JUNIT_OUTPUT_FILE` carries the `{report}` path. The `setup` above also installs Chromium, so each new worktree can run the suite; the download is cached in `~/.cache/ms-playwright`.
 
+`gates.plan: auto` approves a valid plan without you, and `gates.strategy: auto` picks the recommended card. Use them only after you trust the plans of the project.
+
 An AC is written `AC1` in its ticket and `CLARA-512/AC1` elsewhere; the old form `CLARA-512-AC1` is the same AC. Each AC has a `method` (`test`, the default, `demonstration`, `inspection` or `analysis`) and a `verified_by` list of test case IDs. A test carries its case ID at the start of its title, for example `CLARA-T7`. `ark test` decides an AC with a `verified_by` list from the results of its cases at every level: `passing` when all pass, `failing` when one fails, `missing` when one has no result. An old-scheme AC with no `verified_by` is proven when its name or tags contain the AC id, for example `CLARA-512-AC1`, and only integration and E2E results count. For such an AC, `ark test` reports `passing` when at least one tagged integration or E2E test passed and none failed. It reports `failing` when any tagged test failed, and `missing` when no tagged test ran. An AC with `manual: true` or a `method` other than `test` in the run's `ticket.md` is decided by the `manual` gate alone: `manual pending` until a person answers, then `manual ok` or `manual problem`. `ark test` exits 0 only when every other AC is `passing` and every manual AC is `manual ok`.
 
 ## Events
 
 `events.ndjson` holds one JSON object for each line: `{ "seq": 1, "time": "<ISO time>", "type": "<type>", "data": { ... } }`. `seq` counts up from 1. Every command checks that an event is allowed in the run's current state before it appends the event, then rewrites `state.json`.
 
-| Type                   | Data                                                                                                                                                                                                                      | Written by                                         |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `run.started`          | `project`, `ticket` (`id`, `title`), `criteria` (ids), `ticket_file`                                                                                                                                                      | `ark run start`                                    |
-| `criteria.updated`     | `criteria` (ids)                                                                                                                                                                                                          | `ark gate record` for the `criteria` gate          |
-| `criteria.amended`     | `criterion` (id), `old`, `new` (text form; `carry_manual` when kept), or `verified_by_old`, `verified_by_new`                                                                                                             | `ark criteria amend`                               |
-| `evaluation.recorded`  | `blockers` (strings), `risks` (strings), `surfaces` (strings)                                                                                                                                                             | `ark evaluation record`                            |
-| `strategy.recorded`    | `count`, `recommended`, `cards` (ids), optional `reason`                                                                                                                                                                  | `ark strategy record`                              |
-| `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`), `open_decisions`                                                                                                                   | `ark plan check`                                   |
-| `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, `escalation`, `manual`), optional `criterion`, `answer`, `by` (`human` or `auto`), optional `note`, optional `merge`                                                              | `ark gate record`; `ark run step ... start` (auto) |
-| `escalation.requested` | `reason`                                                                                                                                                                                                                  | `ark escalate`                                     |
-| `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                                                                                                          | `ark worktree create`                              |
-| `worktree.synced`      | `repo`, `conflict`                                                                                                                                                                                                        | `ark worktree sync`                                |
-| `step.started`         | `step`, `role`, `repo`, `round`, optional `merge` (true)                                                                                                                                                                  | `ark run step ... start`                           |
-| `step.finished`        | `step`, `outcome` (`succeeded`, `failed` or `interrupted`), optional `merge` (true), optional `not_started` (true: the worker never ran, so the start costs no round)                                                     | `ark run step ... finish\|interrupted`             |
-| `worker.started`       | `step`, `dispatch`, `terminal`, `harness`, `session`                                                                                                                                                                      | none yet                                           |
-| `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, `missing`, or `manual …`), optional `checks` (`name`, `passed` of each project check that ran) | `ark test`                                         |
-| `merge_request.opened` | `repo`, `url`, `number`                                                                                                                                                                                                   | `ark merge-request open`                           |
-| `run.closed`           | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`)                                                                                                                                                             | `ark run close`                                    |
+| Type                   | Data                                                                                                                                                                                                                      | Written by                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `run.started`          | `run`, `project`, `ticket` (`id`, `title`), `kind`, `criteria` (ids), `criteria_gate` (always true), `ticket_file`, `round_budget`                                                                                        | `ark run start`                                                                                                         |
+| `criteria.updated`     | `criteria` (ids)                                                                                                                                                                                                          | `ark gate record` for the `criteria` gate                                                                               |
+| `criteria.amended`     | `criterion` (id), `old`, `new` (text form; `carry_manual` when kept), or `verified_by_old`, `verified_by_new`                                                                                                             | `ark criteria amend`                                                                                                    |
+| `evaluation.recorded`  | `blockers` (strings), `risks` (strings), `surfaces` (strings)                                                                                                                                                             | `ark evaluation record`                                                                                                 |
+| `strategy.recorded`    | `count`, `recommended`, `cards` (ids), optional `reason`                                                                                                                                                                  | `ark strategy record`                                                                                                   |
+| `plan.checked`         | `valid`, `problems`, `plan_hash`, `steps` (`id`, `role`, `repo`, `needs`, `criteria`), `open_decisions`                                                                                                                   | `ark plan check`                                                                                                        |
+| `gate.answered`        | `gate` (`criteria`, `strategy`, `plan`, `escalation`, `manual`), optional `criterion`, `answer`, `by` (`human` or `auto`), optional `note`, optional `merge`                                                              | `ark gate record`; `ark run step ... start` (auto)                                                                      |
+| `escalation.requested` | `reason`                                                                                                                                                                                                                  | `ark escalate`                                                                                                          |
+| `worktree.created`     | `repo`, `path`, `branch`, `base`                                                                                                                                                                                          | `ark worktree create`                                                                                                   |
+| `worktree.synced`      | `repo`, `conflict`, `target_commit` (optional: the merged origin tip, set only when the merge was clean)                                                                                                                  | `ark worktree sync`; also `ark run step ... finish` of a `--merge` step (clean) and `ark merge-request open` (conflict) |
+| `step.started`         | `step`, `role`, `repo`, `round`, optional `merge` (true)                                                                                                                                                                  | `ark run step ... start`                                                                                                |
+| `step.finished`        | `step`, `outcome` (`succeeded`, `failed` or `interrupted`), optional `merge` (true), optional `not_started` (true: the worker never ran, so the start costs no round)                                                     | `ark run step ... finish\|interrupted`                                                                                  |
+| `worker.started`       | `step`, `dispatch`, `terminal`, `harness`, `session`                                                                                                                                                                      | `ark run step ... start` (not a `--merge` start)                                                                        |
+| `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`), `criteria` (AC id to `passing`, `failing`, `missing`, or `manual …`), optional `checks` (`name`, `passed` of each project check that ran) | `ark test`                                                                                                              |
+| `merge_request.opened` | `repo`, `url`, `number`, `order` (position in merge order), `waits_for` (numbers of the upstream MRs)                                                                                                                     | `ark merge-request open`                                                                                                |
+| `bump.refreshed`       | `step` (the bump step), `value` (the pin: for a submodule the commit its pointer now names, for any other edge kind the `--to` value)                                                                                     | `ark bump refresh`                                                                                                      |
+| `run.closed`           | `outcome` (`merged`, `abandoned`, `aborted`, or `handed_off`)                                                                                                                                                             | `ark run close`                                                                                                         |

@@ -6,7 +6,7 @@ technique: "state transition (merge requests open, validator and reviewer steps)
 priority: medium
 risk: "A post-MR validator or reviewer start is not recorded, or its finish or the suite result is lost"
 status: active
-changed_by: "2026-11-10-ARK-359-1"
+changed_by: "2026-11-12-ARK-426-1"
 ---
 
 ## Objective
@@ -22,11 +22,11 @@ Prove that after the merge requests open, a validator and a reviewer step each p
 ## Steps
 
 1. Build the run as the preconditions say, with the `ark` commands.
-2. Run the `ark` commands the objective names and read the exit codes, the output and the run events.
+2. Run the `ark` commands the objective names and read the exit codes, the output and the run events. Before the reviewer finish, make one real commit in the worktree beyond the review start (ARK-426: a reviewer finish with an empty review range is refused).
 
 ## Expected results
 
-- For each role the start exits 0 and the event before `worker.started` is `step.started` with the step and role; the finish records `succeeded`; `ark test` records `test.completed` passed and the phase stays merge_requests_open.
+- For each role the start exits 0 and the event before `worker.started` is `step.started` with the step and role; the finish records `succeeded` (the reviewer finish succeeds only after that commit; validator unchanged); `ark test` records `test.completed` passed and the phase stays merge_requests_open.
 
 ## Screenshot checkpoints
 

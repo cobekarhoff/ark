@@ -1,10 +1,12 @@
 # Orca spikes: ARK-150 and ARK-151
 
+> Spike report, measured 2026-10-29 with Orca 1.4.237. A snapshot, not current behavior. Outcome: both adopted. The run folder layout shipped as `<run>/workspace/` (see [architecture](../explanation/architecture.md)), not the `<run>/repos/<name>` layout the spike tested.
+
 Run on 2026-10-29 with Orca 1.4.237, Docker 29.6.1 and Docker Compose 5.3.0. Both spikes are a **go**. They also changed two parts of the design: how a run folder is laid out, and where Master Chief runs.
 
 ## ARK-150: side-by-side worktrees for a Clara run
 
-**Question:** can Ark create worktrees at `<run>/repos/<name>` for two Clara repos, have Orca launch an agent into each, and have docker compose resolve against them?
+**Question:** can Ark create worktrees at `<run>/repos/<name>` (the spike's layout; shipped, each worktree sits at the repo's usual path under `<run>/workspace/`) for two Clara repos, have Orca launch an agent into each, and have docker compose resolve against them?
 
 **Result: go.**
 
@@ -31,7 +33,7 @@ The fix is for `ark worktree create` to build the run folder as a mirror:
 With the mirror:
 
 - An agent launched in `repos/platform` loaded the Clara root `AGENTS.md` and `platform/CLAUDE.md`.
-- `docker compose --project-directory <run>` resolved every `./repos/*` path into the run with no override file, and the service saw both changes.
+- `docker compose --project-directory <run>` (shipped as `--project-directory <run>/workspace`) resolved every `./repos/*` path into the run with no override file, and the service saw both changes.
 
 ### Open items
 
@@ -58,9 +60,9 @@ With the mirror:
 - **Read history with `inbox`.** `check` consumes deliveries, so a message read by one `check` doesn't reappear. Use `orca orchestration inbox` to see history.
 - **`run-use` takes `--id`,** not `--run`.
 
-## Tickets that change
+## Tickets this changed (all shipped)
 
-- **ARK-154:** `worktree create` builds the workspace mirror, and `ark test` runs compose with `--project-directory <run>`. There is no compose override.
+- **ARK-154:** `worktree create` builds the workspace mirror, and `ark test` runs compose with `--project-directory <run>/workspace`. There is no compose override.
 - **ARK-156:** the `chief` playbook must run inside an Orca terminal.
 - **ARK-158:** bootstrap checks the nesting depth, registers each nested repo in Orca with non-Orca worktrees shown, and makes workspace skills reachable.
 

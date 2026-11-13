@@ -1,5 +1,5 @@
 ---
-description: Authoring gate for every new or changed test, adapted from openclaw's test-audit skill. The Ark validator audits each AC-tagged test against it as its last step.
+description: Authoring gate for every new or changed test, adapted from openclaw's test-audit skill. The Ark validator audits each test that carries a test case id or an AC id against it as its last step.
 ---
 
 # Test authoring gate

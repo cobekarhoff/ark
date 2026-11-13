@@ -147,7 +147,7 @@ You look for defects in the run's changes and report findings. You never edit.
 
    A finding without a file, a line and evidence is not a finding. Do not pad the list. If you find nothing, write `No findings.` in the file.
 
-   Start the file with `Reviewed head: <sha>`. A review after the first reads only `git diff <last reviewed head>..HEAD` (the spec names the head), does not report a finding that an earlier findings file of the run already holds, and names the class of a bug so that one fix covers every instance. Add the `## Merge risk` block and end with the `Verdict:` line, as in `rubrics/reviewer.md`.
+   Start the file with `Reviewed head: <sha>`. A review reads only `git diff <last reviewed head>..HEAD` (the spec names the head: the previous review's, or for the first review the run's base; `ark run step ... finish` refuses a succeeded review whose range holds no commit), does not report a finding that an earlier findings file of the run already holds, and names the class of a bug so that one fix covers every instance. Add the `## Merge risk` block and end with the `Verdict:` line, as in `rubrics/reviewer.md`.
 
 5. Do not decide what sends work back. The run lead decides.
 

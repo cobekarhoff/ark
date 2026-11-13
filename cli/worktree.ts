@@ -549,6 +549,10 @@ export function worktreeSync(runId: string, inProject?: string): void {
     appendEvent(directory, "worktree.synced", {
       repo: worktree.repo,
       conflict: merged.exitCode !== 0,
+      // the merged tip, not HEAD (the merge commit); a conflict merged nothing
+      ...(merged.exitCode === 0
+        ? { target_commit: git(worktree.path, "rev-parse", `origin/${target}`) }
+        : {}),
     });
     if (merged.exitCode !== 0) {
       Bun.spawnSync(["git", "-C", worktree.path, "merge", "--abort"]);

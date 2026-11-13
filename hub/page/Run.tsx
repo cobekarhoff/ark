@@ -534,7 +534,7 @@ export function Run({ run: wanted, sub }: { run: string; sub: Route["sub"] }) {
         empty={
           detail && !detail.sessions_ready
             ? "The session files are not indexed yet. Try again in a few seconds."
-            : "No session file maps here. A worker that starts before its step is recorded shows under Unassigned session files."
+            : "No session file maps here. A worker whose session is not recorded and starts before its step shows under Unassigned session files."
         }
       />
     );

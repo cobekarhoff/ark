@@ -58,7 +58,8 @@ export type RunState = {
   } | null;
   steps: { id: string; role: string; repo: string; status: StepStatus }[];
   current_step: string | null;
-  worktrees: { repo: string; path: string; branch: string; base?: string }[];
+  /** `base` is the worktree.created base; `synced` the target commit of the newest worktree.synced event that has one. Only the base side of `ark test` reads `synced`. */
+  worktrees: { repo: string; path: string; branch: string; base?: string; synced?: string }[];
   sync_conflicts: string[];
   /** Value of the last `bump.refreshed` of each bump step. */
   bump_refreshed: Record<string, string>;
@@ -272,6 +273,10 @@ export function deriveState(events: ArkEvent[]): RunState {
       case "worktree.synced":
         if (data.conflict) syncConflicts.add(data.repo);
         else syncConflicts.delete(data.repo);
+        if (data.target_commit) {
+          const synced = worktrees.find((worktree) => worktree.repo === data.repo);
+          if (synced) synced.synced = data.target_commit;
+        }
         break;
       case "step.started":
         stepStatus.set(data.step, "running");
@@ -423,6 +428,8 @@ export type StepWindow = {
   repo: string;
   start: number;
   end: number | null;
+  /** Session file of the last worker.started of this window (a path); absent in the older event form or when unknown. */
+  session?: string;
 };
 
 export type StageTimes = { evaluationEnd?: number; designStart?: number; designEnd?: number };
@@ -445,6 +452,10 @@ export function stepWindows(events: ArkEvent[]): StepWindow[] {
         (window) => window.id === event.data.step && window.end === null,
       );
       if (open) open.end = Date.parse(event.time);
+    }
+    if (event.type === "worker.started" && event.data.session && event.data.session !== "unknown") {
+      const window = windows.findLast((candidate) => candidate.id === event.data.step);
+      if (window) window.session = event.data.session;
     }
   }
   return windows;
