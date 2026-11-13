@@ -666,3 +666,19 @@ export function nowAt(
     latest: messages.slice(0, latestCount),
   };
 }
+
+/** The fractional slot of any time on the axis (a span start or the playhead holds no slot of its own). */
+export function slotOf(axis: Axis, time: number): number {
+  const { times } = axis;
+  if (times.length === 0) return 0;
+  if (time <= times[0]) return 0;
+  if (time >= times[times.length - 1]) return times.length - 1;
+  let low = 0;
+  let high = times.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if (times[middle] <= time) low = middle;
+    else high = middle;
+  }
+  return low + (time - times[low]) / (times[high] - times[low]);
+}

@@ -30,7 +30,8 @@ export function GraphViewport({
   scrollClass: string;
   /** Unscaled y of a spot to keep in the middle of the box, such as the running step. */
   focusY?: number | null;
-  children: ReactNode;
+  /** A function receives the zoom mode, for a graph that draws fewer marks at Fit. */
+  children: ReactNode | ((mode: "fit" | "actual") => ReactNode);
 }) {
   const [full, setFull] = useState(false);
   const [mode, setMode] = useState<"fit" | "actual">("fit");
@@ -159,7 +160,7 @@ export function GraphViewport({
             className="gv-graph"
             style={{ width, height, transform: `scale(${scale})`, transformOrigin: "0 0" }}
           >
-            {children}
+            {typeof children === "function" ? children(mode) : children}
           </div>
         </div>
       </div>
