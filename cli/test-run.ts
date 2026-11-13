@@ -23,7 +23,8 @@ import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts
 import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
-import { oldIdsTouched } from "./test-audit.ts";
+import { caseIdsOutsidePlan, oldIdsTouched } from "./test-audit.ts";
+import { loadPlan } from "./plan.ts";
 import { findRun } from "./paths.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
 import { openTestBudget, type TestBudget } from "./test-lock.ts";
@@ -1097,6 +1098,42 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
         console.log(
           "fix       write a test case (ark test-case new <KEY>), start the title with its id, name it in the plan",
         );
+      }
+    }
+    // ARK-431: a changed test must hold only case ids that plan.yml test_cases lists. Ids only, any action passes.
+    let planned: Set<string> | undefined;
+    try {
+      planned = new Set(loadPlan(directory).test_cases.map((testCase) => testCase.id));
+    } catch (err) {
+      console.log(`plan-membership check  skipped  (${String(err)})`);
+    }
+    for (const suite of planned === undefined ? [] : config.suites) {
+      const label = `plan-membership suite ${suite.name} (${suite.parser})`;
+      const base = state.worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+      if (suite.parser !== "bun" || base === undefined) continue;
+      let missing: string[];
+      try {
+        missing = await caseIdsOutsidePlan(
+          join(mirror, suite.repo),
+          base,
+          suite,
+          config.suites,
+          planned!,
+        );
+      } catch (err) {
+        console.log(`${label}  skipped  (scan failed: ${String(err)})`);
+        continue;
+      }
+      writeFileSync(
+        join(resultsDirectory, `check-plan-membership-${suite.name}.log`),
+        missing.join("\n"),
+      );
+      checks.push({ name: `plan-membership ${suite.name}`, passed: missing.length === 0 });
+      if (missing.length === 0) console.log(`${label}  passed  (0 case ids outside the plan)`);
+      else {
+        console.log(`${label}  failed`);
+        console.log(missing.join("\n"));
+        console.log("fix       add the id to test_cases with the action reuse, update or retire");
       }
     }
     const repos = discoverRepos(config.workspace);

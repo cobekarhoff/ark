@@ -247,7 +247,7 @@ describe("ark test base selection", () => {
     const run = startRun({
       workspace,
       suites: [suiteOf("cli", "test"), suiteOf("pw", "e2e")],
-      cases: ["FAKE-T1"],
+      cases: ["FAKE-T1", "FAKE-T3"],
       setup: `pwd -P >> ${setupLog}`,
     });
     // Own commits: add a test, add one and delete it. Main then gains a test, and the branch merges main.
@@ -371,13 +371,13 @@ describe("ark test suite paths and quick mode", () => {
   function pathsRun(): PathsRun {
     const fixture = markerFixture();
     const workspace = repoWith(fixture, {
-      "test/existing.test.ts": ["FAKE-T8 existing cli"],
+      "test/existing.test.ts": ["FAKE-T8 existing cli", "FAKE-T9 existing cli"],
       "e2e/existing.test.ts": ["FAKE-T2 existing pw"],
     });
     const run = startRun({
       workspace,
       suites: [suiteOf("cli", "test"), suiteOf("pw", "e2e", { paths: ["hub/", "package.json"] })],
-      cases: ["FAKE-T2"],
+      cases: ["FAKE-T2", "FAKE-T9"],
     });
     return { fixture, workspace, ...run };
   }

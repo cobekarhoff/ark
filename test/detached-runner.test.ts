@@ -311,7 +311,17 @@ function makeFixture(options: {
           needs: [],
           criteria: [`${ticketId}-AC1`],
         })),
-        test_cases: [],
+        // ARK-431: the ids that the fixture's head commits touch.
+        test_cases: ["DET-T1", "DET-T3"].map((id) => ({
+          id,
+          criterion: `${ticketId}-AC1`,
+          level: "e2e",
+          given: [],
+          when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+          then: ["it works"],
+          expected: "it works",
+        })),
       }),
     );
     for (const args of [

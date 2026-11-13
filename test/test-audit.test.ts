@@ -548,18 +548,17 @@ describe("ark test old-id gate", () => {
             criteria: ["FAKE-1-AC1"],
           },
         ],
-        test_cases: [
-          {
-            id: "proves",
-            criterion: "FAKE-1-AC1",
-            level: "e2e",
-            given: [],
-            when: ["run it"],
-            // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`
-            then: ["it works"],
-            expected: "it works",
-          },
-        ],
+        // ARK-431: ARK-T1 is the converted id of head (b) and must be listed.
+        test_cases: ["proves", "ARK-T1"].map((id) => ({
+          id,
+          criterion: "FAKE-1-AC1",
+          level: "e2e",
+          given: [],
+          when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`
+          then: ["it works"],
+          expected: "it works",
+        })),
       }),
     );
     for (const args of [

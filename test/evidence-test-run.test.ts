@@ -157,20 +157,33 @@ function startBuildingRun(options: {
         goal: "Write results/baseline.md first and results/compare.md last.",
         criteria: options.testCriterion ? ["FAKE-1-AC1", "FAKE-1-AC2"] : ["FAKE-1-AC1"],
       })),
-      test_cases: options.testCriterion
-        ? [
-            {
-              id: "proves-AC2",
-              criterion: "FAKE-1-AC2",
-              level: "integration",
-              given: [],
-              when: ["run it"],
-              // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
-              then: ["it works"],
-              expected: "it works",
-            },
-          ]
-        : [],
+      test_cases: [
+        // ARK-431: every case id that a head commit of these fixtures touches is listed (ids only, any action).
+        ...["ARK-T1", "FAKE-T4"].map((id) => ({
+          id,
+          criterion: "FAKE-1-AC1",
+          level: "integration",
+          given: [],
+          when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+          then: ["it works"],
+          expected: "it works",
+        })),
+        ...(options.testCriterion
+          ? [
+              {
+                id: "proves-AC2",
+                criterion: "FAKE-1-AC2",
+                level: "integration",
+                given: [],
+                when: ["run it"],
+                // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+                then: ["it works"],
+                expected: "it works",
+              },
+            ]
+          : []),
+      ],
     }),
   );
   for (const args of [
