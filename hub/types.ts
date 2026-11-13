@@ -29,6 +29,18 @@ export type SourceName =
   | "agentWait"
   | "evidence"
   | "queue";
+/** What a stale source leaves wrong on the page: the stale chip lists it. Exhaustive over SourceName. */
+export const sourceAffects: Record<SourceName, string> = {
+  ark: "Runs, gates, steps and the review queue",
+  orca: "Agents, stuck agents and terminals",
+  plannotator: "Plannotator review links and answers",
+  github: "Merge requests and checks",
+  usage: "Cost and token usage",
+  providerLimits: "Provider limits in the header",
+  agentWait: "Time agents waited on you",
+  evidence: "Test evidence of a run",
+  queue: "Orca task queue and merge order",
+};
 export type SourceStatus = { ok: boolean; read_at: string | null };
 
 export type { StepStatus };

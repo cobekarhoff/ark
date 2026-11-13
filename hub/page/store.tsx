@@ -2,11 +2,12 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { Snapshot, SourceName } from "../types.ts";
+import { sourceAffects, type Snapshot, type SourceName } from "../types.ts";
 
 /** `connecting` until the first snapshot; `reconnecting` when the stream dropped after one, which stays on screen. */
 type Connection = "connecting" | "live" | "reconnecting";
@@ -27,11 +28,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const source = new EventSource("/events");
     source.onmessage = (message) =>
       setLive({ snapshot: JSON.parse(message.data), receivedAt: Date.now(), connection: "live" });
+    // Fires on every reconnect attempt: return the same object when nothing changes, so no re-render.
     source.onerror = () =>
-      setLive((previous) => ({
-        ...previous,
-        connection: previous.snapshot ? "reconnecting" : "connecting",
-      }));
+      setLive((previous) =>
+        previous.snapshot && previous.connection !== "reconnecting"
+          ? { ...previous, connection: "reconnecting" }
+          : previous,
+      );
     return () => source.close();
   }, []);
   return <Context value={live}>{children}</Context>;
@@ -45,31 +48,86 @@ const subscribeSecond = (notify: () => void) => {
 };
 const wholeSecond = () => Math.floor(Date.now() / 1000) * 1000;
 
+const subscribeMinute = (notify: () => void) => {
+  const timer = setInterval(notify, 60_000);
+  return () => clearInterval(timer);
+};
+const wholeMinute = () => Math.floor(Date.now() / 60_000) * 60_000;
+
 /**
- * `<source> as of N s ago` when that source did not answer its last read, `<source> unknown`
- * before its first good read. N = snapshot generated_at - read_at (server clock) + time since the
- * page got the snapshot (browser clock): no clock of the browser is compared with the server's.
+ * One chip for every stale source: `<oldest source> stale N min`, plus `+K` for the others. Click
+ * lists what each stale source affects. N = snapshot generated_at - read_at (server clock) + time
+ * since the page got the snapshot (browser clock), whole minutes, ticking per minute. While the
+ * stream is down the age freezes at the last snapshot: the banner says so. A source never read has
+ * no age: `<source> unknown`.
  */
-export function Stale({ name }: { name: SourceName }) {
-  const { snapshot, receivedAt } = useLive();
-  const now = useSyncExternalStore(subscribeSecond, wholeSecond);
-  const status = snapshot?.sources[name];
-  if (!snapshot || !status || status.ok) return null;
-  const label =
-    status.read_at === null
-      ? `${name} unknown`
-      : `${name} as of ${Math.max(
+export function StaleChip() {
+  const { snapshot, receivedAt, connection } = useLive();
+  const tick = useSyncExternalStore(subscribeMinute, wholeMinute);
+  const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  if (!snapshot) return null;
+  const stale = (Object.keys(sourceAffects) as SourceName[]).filter(
+    (n) => !snapshot.sources[n]?.ok,
+  );
+  if (stale.length === 0) return null;
+  const since = connection === "live" ? Math.max(0, tick - receivedAt) : 0;
+  const minutes = (name: SourceName) => {
+    const readAt = snapshot.sources[name]?.read_at;
+    return readAt
+      ? Math.max(
           0,
-          Math.floor(
-            (Date.parse(snapshot.generated_at) -
-              Date.parse(status.read_at) +
-              Math.max(0, now - receivedAt)) /
-              1000,
-          ),
-        )} s ago`;
+          Math.floor((Date.parse(snapshot.generated_at) - Date.parse(readAt) + since) / 60_000),
+        )
+      : null;
+  };
+  // Oldest first: never-read sources have no age and lead.
+  const sorted = [...stale].sort((x, y) => (minutes(y) ?? Infinity) - (minutes(x) ?? Infinity));
+  const first = sorted[0]!;
+  const age = minutes(first);
+  const label = `${first} ${age === null ? "unknown" : `stale ${age} min`}${stale.length > 1 ? ` +${stale.length - 1}` : ""}`;
+  const close = () => {
+    setOpen(false);
+    button.current?.focus();
+  };
   return (
-    <span className="asof" data-testid="stale-label" data-source={name}>
-      {label}
+    <span
+      className="stale"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          close();
+        }
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
+      <button
+        ref={button}
+        type="button"
+        className="stale-chip"
+        data-testid="stale-chip"
+        aria-expanded={open}
+        aria-controls="stale-list"
+        onClick={() => setOpen(!open)}
+      >
+        {label}
+      </button>
+      {open ? (
+        <ul id="stale-list" className="stale-list" data-testid="stale-list">
+          {sorted.map((name) => {
+            const m = minutes(name);
+            return (
+              <li key={name} data-source={name}>
+                <b>{name}</b>
+                <span>{m === null ? "unknown" : `${m} min`}</span>
+                <span className="affects">{sourceAffects[name]}</span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </span>
   );
 }
