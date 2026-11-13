@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
+import { now } from "../cli/clock.ts";
 import { exec } from "../cli/exec.ts";
 import { proxyPort } from "../cli/proxy.ts";
+import type { ConversationReply } from "./conversation.ts";
 import { resolveEvidenceImage, resolveRunFile } from "./run-detail.ts";
 import type { SnapshotReader } from "./snapshot.ts";
 
@@ -71,7 +73,10 @@ const switchTimeoutMilliseconds = 5000;
  * `GET /api/run/<run>/evidence` (plan cases with base and head results, evidence files of non-test
  * ACs), `GET /api/run/<run>/image?path=` (an image under `results/evidence/`, ADR 0009) and
  * `GET /api/ticket/<project>/<ticket>` (the document of one ticket) and
- * `GET /api/ticket/<project>/<ticket>/cases` (the test cases of a ticket). The one POST
+ * `GET /api/ticket/<project>/<ticket>/cases` (the test cases of a ticket), and the conversation
+ * (ARK-344): `GET /api/run/<run>/conversation` (agents, spans, events, messages with bodies,
+ * human answers, question times), `GET /api/conversation?since=&until=` (the same for every run in
+ * a window, no bodies) and `GET /api/conversation/message/<id>` (one body). The one POST
  * route is `POST /api/open-in-orca` (ADR 0009): it focuses a live terminal in Orca and does nothing
  * else. Any other method gets 405, any other path 404.
  *
@@ -122,6 +127,10 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
     return output === null ? text("orca failed", 502) : json({ ok: true });
   }
 
+  /** 503 until the inbox has been read once (it is read only while a page is connected to /events). A worker failure is 502. */
+  const conversationReply = (reply: ConversationReply | null) =>
+    reply ? json(reply) : text("no inbox read yet: open the hub page, then retry", 503);
+
   async function runRoute(url: URL, runName: string, rest: string): Promise<Response> {
     await reader.ready();
     const directory = reader.runDirectory(runName);
@@ -161,6 +170,13 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       );
     }
     if (rest === "/evidence") return json(reader.runEvidence(runName));
+    if (rest === "/conversation") {
+      try {
+        return conversationReply(await reader.conversation({ kind: "run", run: runName }));
+      } catch {
+        return text("the usage worker could not build the conversation", 502);
+      }
+    }
     if (rest === "/image") {
       const image = resolveEvidenceImage(directory, url.searchParams.get("path") ?? "");
       if (image === null) return text("not found", 404);
@@ -217,7 +233,7 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       }
 
       const run = pathname.match(
-        /^\/api\/run\/([^/]+)(\/transcript\/result|\/transcript|\/file|\/evidence|\/image)?$/,
+        /^\/api\/run\/([^/]+)(\/transcript\/result|\/transcript|\/file|\/evidence|\/image|\/conversation)?$/,
       );
       if (run) {
         try {
@@ -225,6 +241,31 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
         } catch {
           return text("bad request", 400);
         }
+      }
+
+      if (pathname === "/api/conversation") {
+        // `since` and `until` are ISO instants; the window is the last 24 hours by default.
+        const until = url.searchParams.has("until")
+          ? Date.parse(url.searchParams.get("until")!)
+          : now();
+        const since = url.searchParams.has("since")
+          ? Date.parse(url.searchParams.get("since")!)
+          : until - 24 * 3_600_000;
+        if (Number.isNaN(since) || Number.isNaN(until) || since >= until)
+          return text("since and until must be ISO times, since before until", 400);
+        try {
+          await reader.ready();
+          return conversationReply(await reader.conversation({ kind: "project", since, until }));
+        } catch {
+          return text("the usage worker could not build the conversation", 502);
+        }
+      }
+
+      const message = pathname.match(/^\/api\/conversation\/message\/([^/]+)$/);
+      if (message) {
+        // The id only selects a message held in memory: never a path or a command.
+        const found = reader.conversationMessage(decodeURIComponent(message[1]));
+        return found ? json(found) : text("no such message", 404);
       }
 
       if (pathname === "/api/snapshot")

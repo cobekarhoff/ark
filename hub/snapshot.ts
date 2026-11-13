@@ -10,11 +10,15 @@ import {
   parseAgentTitle,
   readAgentWait,
   readGithub,
+  readDirectory,
+  readInbox,
   readOrca,
   readPlannotator,
   readProviderLimits,
   readQueues,
   signatureOf,
+  type InboxRead,
+  type RunWorkers,
   type QueueRead,
   type ArkRun,
   type ArkValue,
@@ -26,6 +30,14 @@ import {
   type PsAgent,
   readTicketDocument,
 } from "./sources.ts";
+import type {
+  ConversationInput,
+  ConversationQuery,
+  ConversationReply,
+  Directory,
+  InboxMessage,
+  RunEvents,
+} from "./conversation.ts";
 import type {
   Agent,
   ClosedBand,
@@ -65,6 +77,8 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   evidence: allIntervalMilliseconds || 5000,
   queue: allIntervalMilliseconds || 3000, // its own source: a slow Orca queue never delays another source
 };
+/** The full inbox read (ARK-344): its own loop, never a snapshot source, so a failure never touches `orca` and no message reaches `/events`. */
+const conversationIntervalMilliseconds = allIntervalMilliseconds || 15_000;
 
 const usageTimeoutMilliseconds = 30_000;
 
@@ -132,6 +146,16 @@ export function createSnapshotReader() {
   let queueReads: Map<string, QueueRead> | null = null;
   const costs = new Map<string, { key: string; cost: RunCost }>();
   const listeners = new Set<(json: string) => void>();
+  // The last good full inbox, outside `slots` and `compose()`: bodies never reach `json()`, `/api/snapshot` or `/events`.
+  let conversation: {
+    version: string;
+    messages: Map<string, InboxMessage>;
+    input: ConversationInput;
+    truncated: boolean;
+    stale: boolean;
+  } | null = null;
+  const closedWorkers = new Map<string, RunWorkers>();
+  let conversationRead: Promise<void> | undefined;
   const watchers = new Map<string, FSWatcher>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let stopped = false;
@@ -584,6 +608,41 @@ export function createSnapshotReader() {
       }),
   };
 
+  /** One full inbox read. A failure keeps the last good value and marks it stale; a read of an older generation is dropped. */
+  async function readConversation(): Promise<void> {
+    const started = generation;
+    let inbox: InboxRead | null = null;
+    let directory: Directory | null = null;
+    try {
+      inbox = await readInbox();
+      directory = inbox
+        ? await readDirectory(
+            (slots.ark.value?.runs ?? []).map((run) => ({
+              run: run.state.run,
+              closed: run.state.phase === "closed",
+            })),
+            inbox.messages,
+            closedWorkers,
+          )
+        : null;
+    } catch {
+      // A failed read is the stale case below.
+    }
+    if (started !== generation) return;
+    if (!inbox || !directory) {
+      if (conversation) conversation.stale = true;
+      return;
+    }
+    const version = new Date().toISOString();
+    conversation = {
+      version,
+      messages: new Map(inbox.messages.map((message) => [message.id, message])),
+      input: { version, messages: inbox.messages, directory },
+      truncated: inbox.truncated,
+      stale: false,
+    };
+  }
+
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
   let arkSoon: ReturnType<typeof setTimeout> | undefined;
   function syncWatchers(): void {
@@ -609,14 +668,14 @@ export function createSnapshotReader() {
     }
   }
 
-  function loop(name: SourceName, started: number): void {
+  function loop(read: () => Promise<void>, intervalMilliseconds: number, started: number): void {
     const tick = async () => {
-      await readers[name]();
+      await read();
       if (generation !== started) return;
       const timer = setTimeout(() => {
         timers.delete(timer);
         void tick();
-      }, intervalMilliseconds[name]);
+      }, intervalMilliseconds);
       timers.add(timer);
     };
     void tick();
@@ -645,7 +704,15 @@ export function createSnapshotReader() {
       "evidence",
       "queue",
     ] as const)
-      loop(name, started);
+      loop(() => readers[name](), intervalMilliseconds[name], started);
+    loop(
+      () => {
+        conversationRead = readConversation();
+        return conversationRead;
+      },
+      conversationIntervalMilliseconds,
+      started,
+    );
   }
 
   /** Idempotent. A read in flight finishes into nothing: `generation` changed, so it neither publishes nor re-arms. */
@@ -798,6 +865,37 @@ export function createSnapshotReader() {
     ): Promise<TranscriptResult | null> {
       const session = this.runDetail(run)?.sessions.find((candidate) => candidate.file === file);
       return session ? usage.transcriptResult(file, session.harness, callId) : null;
+    },
+    /**
+     * The conversation of one run or of a window, built in the usage worker thread from the last good inbox read. Waits only for the
+     * first read of a connected page. Null when no read has succeeded (no page connected, or Orca down), or for a run with no events.
+     */
+    async conversation(query: ConversationQuery): Promise<ConversationReply | null> {
+      if (!conversation) await conversationRead;
+      const held = conversation;
+      if (!held) return null;
+      const wanted = (slots.ark.value?.runs ?? []).filter(
+        (run) => query.kind === "project" || run.state.run === query.run,
+      );
+      const runs: RunEvents[] = wanted.map((run) => ({
+        run: run.state.run,
+        project: run.state.project,
+        // The project answer needs only the human answers and the step spans.
+        events:
+          query.kind === "run"
+            ? run.events
+            : run.events.filter((event) =>
+                ["gate.answered", "step.started", "step.finished"].includes(event.type),
+              ),
+      }));
+      const answer = await usage.conversation(held.input, runs, query);
+      return answer
+        ? { truncated: held.truncated, stale: held.stale, read_at: held.version, ...answer }
+        : null;
+    },
+    /** One message with its body, looked up by id in memory: the id never builds a path or a command. */
+    conversationMessage(id: string): InboxMessage | null {
+      return conversation?.messages.get(id) ?? null;
     },
   };
 }
