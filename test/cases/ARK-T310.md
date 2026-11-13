@@ -16,17 +16,17 @@ Prove that when the event stream stops, the hub shows 'Disconnected: data frozen
 ## Preconditions
 
 - Playwright spec in `test/pw/hub.pw.ts`, hub with project `p` and the fake tools, viewport of the other hub specs.
-- A way to stop and restore the `/events` stream mid-page (route fulfil then close, or hub restart), checked to fire `EventSource.onerror` in Chromium.
-- A hold gate as in ARK-T117 keeps 4 or more sources stale until released.
+- A proxy in front of the hub, owned by the test: it destroys the open `/events` connection and refuses new ones until restored, so Chromium's real `EventSource` fires `onerror` and reconnects (a route fulfil cannot drop a stream that is already open).
+- Fake Orca and Plannotator answer twice and then fail, so 4 or more sources are stale and have an age; the page clock starts at 14:02:05.
 
 ## Steps
 
-1. Open Home with the stream up and the tools held (4 or more stale); assert no banner and content not dimmed; read the header height as `h`; assert one chip reads like 'orca stale 28 min' (fixture clock) and no per-source labels show.
-2. Click the chip; assert a list names each stale source with what it affects; assert the header height is `h`. Press Esc; assert the list closes and focus returns to the chip. Reopen it with the keyboard.
-3. Stop the stream. Assert the banner reads 'Disconnected: data frozen at <time of the last snapshot>' and the content is dimmed; assert the banner does not flicker across 3 reconnect attempts; assert the header height is `h` with the banner showing and with the list open.
-4. Advance the clock one minute; assert the chip age moves by whole minutes only, not each second.
-5. Restore the stream; assert the banner and dimming are gone and ages move again.
-6. Release the tools, wait for the chip to vanish, stop the stream again: assert the banner shows with no chip.
+1. Open Home through the proxy; wait for one chip that reads like 'orca stale 0 min +3'; assert no per-source label, no banner and content not dimmed (opacity 1); read the header height as `h` and the top of `main`.
+2. Open the list; advance the page clock 3 minutes; assert the `orca` row reads 2 or more minutes (whole minutes). Assert the rows name what each source affects and the header height is `h`. Press Esc; assert the list closes and focus returns to the chip. Reopen it with the keyboard.
+3. Cut the stream. Assert the banner reads 'Disconnected: data frozen at <time of the last snapshot>' and the content is dimmed (opacity 0.55); assert the header height is `h`, the top of `main` is unchanged and the list is still open.
+4. Wait for 3 refused reconnect attempts; assert the banner never went missing.
+5. Restore the stream; assert the banner and dimming are gone and the header height is `h`.
+6. Make the fake tools answer; wait for the chip to vanish; cut the stream again: assert the banner shows with no chip and the height is `h`.
 
 ## Expected results
 

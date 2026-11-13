@@ -25,8 +25,8 @@ Prove that with prefers-reduced-motion set no highlight fade, pulse, dash flow, 
 2. Emulate reduced motion and open Home with a running step on screen; assert `document.getAnimations()` is empty.
 3. Push a snapshot with a new gate; wait one frame past the push; assert `document.getAnimations()` is empty and the new item still shows (no highlight animation).
 4. Push a snapshot that swaps two runs on the Runs board; assert `document.getAnimations()` is empty and the items are at the new place.
-5. Change view by link; assert no view transition (`document.activeViewTransition` is null) and `getAnimations()` is empty.
-6. Without reduced motion: press `j` then Enter from the keyboard to change view; assert no view transition and no animation on its result; do the same change by pointer click and assert the view transition runs.
+5. Change view; assert `document.startViewTransition` was never called (the page wraps it and counts calls) and `getAnimations()` is empty.
+6. Without reduced motion (emulation switched live, so the same page is the control): press `j` then Enter from the keyboard to change view; assert no `startViewTransition` call and no keyframe, FLIP or view-transition animation on its result (a control's own colour transition is not the result); do the same change by pointer click and assert one `startViewTransition` call.
 
 ## Expected results
 
