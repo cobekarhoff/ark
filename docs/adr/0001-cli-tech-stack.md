@@ -1,6 +1,10 @@
+---
+status: "accepted, amended by ADR 0004 (the hook shim, the ledger and `ark doctor` were removed; the FR and NFR ids belong to the retired spec)"
+date: 2026-10-21
+---
+
 # Architecture decision record (ADR) 0001: TypeScript on Bun for the Ark command-line interface (CLI)
 
-Status: accepted, 2026-10-21
 Evidence: ARK-101 spike (plugin install from Git, CLI on PATH, typed tools)
 
 ## Context

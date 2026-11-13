@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { StageTimes, StepWindow } from "../events.ts";
 import { isInside } from "../paths.ts";
@@ -33,6 +34,8 @@ export function stageOf(times: number[], stages: StageTimes): "evaluator" | "des
 }
 
 export type OwnableFile = {
+  /** The session file path, matched against `worker.started.session`. */
+  file: string;
   cwd: string;
   /** First timestamp of the file, or null when its head holds none. */
   start: number | null;
@@ -40,6 +43,14 @@ export type OwnableFile = {
   mtime: number;
   /** Times of the parsed messages; empty when the file is not parsed. */
   times: number[];
+};
+
+const realPathOf = (path: string): string => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 };
 
 export type Owner =
@@ -50,8 +61,10 @@ export type Owner =
 /**
  * The owner of each session file (same order as `files`), every file whole to one owner, never
  * message by message. Rules in this order:
- * 1. a step, when the file starts inside that step's window and its cwd is in that step's worktree
- *    (of two overlapping windows, the later one);
+ * 1. a step, when `worker.started` of that step recorded this file as its session (of several
+ *    windows, the latest); else when the file starts inside that step's window and its cwd is in
+ *    that step's worktree (of two overlapping windows, the later one). The recorded session comes
+ *    first because a worker's file starts before its `step.started`;
  * 2. the run lead: the one file that starts before the first step and was last written at or
  *    after it (the earliest-starting if several do). While no step has started there is no first
  *    step: the lead is then the earliest-starting file last written at or after the run's first event.
@@ -70,8 +83,15 @@ export function ownersOf(
   const firstStep = Math.min(...windows.map((window) => window.start));
   const owners = files.map((file): Owner => {
     const start = file.start;
+    const recorded = windows.findLast(
+      (candidate) =>
+        candidate.session !== undefined &&
+        (candidate.session === file.file ||
+          realPathOf(candidate.session) === realPathOf(file.file)),
+    );
     const window =
-      start === null
+      recorded ??
+      (start === null
         ? undefined
         : windows.findLast(
             (candidate) =>
@@ -80,7 +100,7 @@ export function ownersOf(
               parents.some((parent) =>
                 isInside(file.cwd, join(parent, "workspace", candidate.repo)),
               ),
-          );
+          ));
     return window ? { kind: "step", step: window.id, window } : { kind: "unassigned" };
   });
   const leadFrom = windows.length > 0 ? firstStep : runStarted;

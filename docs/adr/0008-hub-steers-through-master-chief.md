@@ -1,10 +1,11 @@
 ---
-status: superseded by ADR 0009
+status: "superseded in part by ADR 0009. Still in force: the name hub, and one Master Chief per project (the Master Chief: <project> tickets Run)"
+date: 2026-11-01
 ---
 
 # The hub steers agents through Master Chief
 
-ADR 0007 made the control center read-only. The human now wants to guide agents from the same page, and nothing made sure a project has one Master Chief. A hub that writes run state would duplicate Master Chief and break ADR 0002 and ADR 0003. Orca already has `orca terminal send`, which types into a terminal.
+ADR 0007 made the control center read-only. The human now wants to guide agents from the same page, and nothing made sure a project has one Master Chief. A hub that writes run state would duplicate Master Chief and put gate answers behind a new surface (ADR 0004 names Master Chief's session and Plannotator as the places to answer; ADR 0002 and ADR 0003 are superseded). Orca already has `orca terminal send`, which types into a terminal.
 
 ## Decision
 

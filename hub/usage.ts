@@ -265,7 +265,8 @@ export class UsageIndex {
       ([, entry]) => entry.cwd !== null && parents.some((parent) => isInside(entry.cwd!, parent)),
     );
     const owners = ownersOf(
-      inside.map(([, entry]) => ({
+      inside.map(([file, entry]) => ({
+        file,
         cwd: entry.cwd!,
         start: entry.start,
         mtime: entry.mtime,
