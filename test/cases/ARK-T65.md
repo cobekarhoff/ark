@@ -24,6 +24,7 @@ Expected: When a run lead session overlaps a reviewer step window in the same wo
   - File R: reviewer, starts inside its window, OpenAI replies only.
   - File U: starts before `step.started` of the reviewer (the ARK-284 gap), OpenAI replies with a known cost.
 - The ARK-310 fixtures in `test/retro.test.ts` rewritten one file per step (no file holds the messages of two steps), and their titles carry test case ids.
+- Old-form variant (ARK-425): the same run with no `worker.started` for the implementer step and `session: unknown` for the reviewer step.
 
 ## Steps
 
@@ -40,6 +41,7 @@ Expected: When a run lead session overlaps a reviewer step window in the same wo
 - File U counts for no step; its cost is shown as its own unassigned line in the output and in `metrics.json`.
 - `by_role` keys (evaluator, designer, orchestration) and `cost.by_step` keys are the same as before the change.
 - The same fixtures, given to the shared owner function, give the same owners the hub gets (see ARK-T75).
+- Old-form variant: `ark retro` gives the same step models, vendors and cost and the same unassigned line for file U as the base fixture.
 - `bun test test/retro.test.ts` exits 0.
 
 ## Screenshot checkpoints

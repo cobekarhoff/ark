@@ -1,5 +1,6 @@
 ---
-status: superseded by ADR-0004
+status: superseded by ADR 0004
+date: 2026-10-26
 ---
 
 # Human answers require an Oh My Pi (OMP) ask or a controlling terminal

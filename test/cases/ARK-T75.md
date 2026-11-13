@@ -19,6 +19,7 @@ Expected: When the owner rule moves, the system shall give the run lead, each st
 
 - The existing hub usage and snapshot fixtures, unchanged.
 - Extra fixtures: a lead file that starts after the first step (unassigned for the lead), a rework step with a file in a later round and one in a gap between rounds, an evaluator and a designer stage file.
+- Old-form fixtures (ARK-425): a run with no `worker.started` event for a step, and a run whose `worker.started.session` is `unknown`; each has a file that starts inside its step window.
 
 ## Steps
 
@@ -32,6 +33,7 @@ Expected: When the owner rule moves, the system shall give the run lead, each st
 - Existing hub tests pass unchanged.
 - The lead gets a file only when it starts before the first step; a later-round file goes to the later round; a gap file is unassigned; evaluator and designer files stay `unassigned` in `sessionsOf` and are never picked as the lead.
 - `modelsOf` reports the evaluator and designer file models under the keys `evaluator` and `designer`, and the lead, step and rework models under `lead` and the step ids.
+- Old-form runs (no `worker.started`, or `session: unknown`) give each step the file that starts inside its window, with the owners the window rule gave before ARK-425; the session mapping adds to the rule and does not replace it.
 - No file under `cli/` imports `hub/`.
 
 ## Screenshot checkpoints

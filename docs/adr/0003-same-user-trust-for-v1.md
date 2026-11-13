@@ -1,5 +1,6 @@
 ---
-status: superseded by ADR-0004
+status: superseded by ADR 0004
+date: 2026-10-26
 ---
 
 # v1 trusts the operator's operating system (OS) user; integrity checks catch mistakes, not forgery
