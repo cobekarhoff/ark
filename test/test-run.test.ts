@@ -1100,3 +1100,160 @@ describe("git automatic maintenance in the suites (ARK-423)", () => {
     }
   }, 180_000);
 });
+
+describe("ark test runs only the suites of the repos in the run (ARK-416)", () => {
+  /** A workspace of repos/a and repos/b with a suite for each and one for `.`; the suites touch markers in `markers`. */
+  function repoFilterRun(options: { worktrees: string[]; kind?: string; bCommand: string }) {
+    const arkHome = tempArkHome();
+    const markers = mkdtempSync(join(tmpdir(), "ark-markers-"));
+    // The workspace is itself a repo (`.`) with the two repos nested in it.
+    const workspace = tempGitRepo({ "dot.txt": "dot" });
+    mkdirSync(join(workspace, "repos"));
+    const files = { "e2e.test.ts": suiteTests([passing("FAKE-T0 runs in a")]) };
+    renameSync(tempGitRepo(files), join(workspace, "repos/a"));
+    renameSync(
+      tempGitRepo({ "e2e.test.ts": suiteTests([passing("FAKE-T1 runs in b")]) }),
+      join(workspace, "repos/b"),
+    );
+    const report = "--reporter=junit --reporter-outfile={report} ./e2e.test.ts";
+    writeProject("demo", {
+      workspace,
+      ticket_source: "local",
+      test_min_free_memory_percent: 0,
+      test_max_swap_gb: 1000,
+      suites: [
+        {
+          name: "suite-a",
+          level: "e2e",
+          repo: "repos/a",
+          command: `sh -c 'touch ${markers}/a.marker; bun test ${report}'`,
+          parser: "bun",
+        },
+        {
+          name: "suite-b",
+          level: "e2e",
+          repo: "repos/b",
+          command: options.bCommand.replaceAll("MARKERS", markers).replaceAll("REPORT", report),
+          parser: "bun",
+        },
+        {
+          name: "suite-dot",
+          level: "e2e",
+          repo: ".",
+          command: `sh -c 'touch ${markers}/dot.marker; echo "<testsuites/>" > {report}'`,
+          parser: "bun",
+        },
+      ],
+      roles,
+    });
+    const ticket = writeTicket(
+      "demo",
+      "FAKE-1",
+      [{ id: "AC1", text: "b is proved", method: "test", verified_by: ["FAKE-T1"] }],
+      "Ticket",
+      options.kind,
+    );
+    const runId = ark("run", "start", ticket, "--project", "demo").out.match(
+      /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
+    )![0];
+    const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
+    recordStartedRun({ runId, runDirectory });
+    recordEvaluation(runDirectory);
+    writeFileSync(
+      join(runDirectory, "plan.yml"),
+      JSON.stringify({
+        design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
+        summary: {
+          why: "Test the repo filter.",
+          changes: [{ criterion: "FAKE-1/AC1", where: "a", now: "x", fix: "y" }],
+        },
+        steps: [
+          {
+            id: "build",
+            role: "implementer",
+            repo: "repos/a",
+            harness: "claude",
+            model: "claude-sonnet",
+            needs: [],
+            criteria: ["FAKE-1/AC1"],
+          },
+        ],
+        test_cases: [
+          {
+            id: "FAKE-T1",
+            action: "add",
+            level: "e2e",
+            given: [],
+            when: ["run it"],
+            // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+            then: ["it works"],
+            expected: "it works",
+          },
+        ],
+      }),
+    );
+    for (const args of [
+      ["plan", "check", runId],
+      ["gate", "record", runId, "plan", "approve"],
+      ...[".", ...options.worktrees].map((repo) => ["worktree", "create", runId, repo]),
+    ])
+      expect(ark(...args).code).toBe(0);
+    return { runId, runDirectory, markers };
+  }
+  const bFails = "sh -c 'touch MARKERS/b.marker; exit 1'";
+  const bPasses = "sh -c 'touch MARKERS/b.marker; bun test REPORT'";
+
+  test("ARK-T323 the head pass of ark test skips the suite of a repo the run has no worktree for, prints the skipped line, and runs nothing there", () => {
+    const { runId, runDirectory, markers } = repoFilterRun({
+      worktrees: ["repos/a"],
+      bCommand: bPasses,
+    });
+    const result = ark("test", runId);
+
+    expect(result.out).toContain("skipped suite-b (repo repos/b not in run)");
+    expect(result.out).not.toContain("suite suite-b head");
+    expect(result.out).toContain("via FAKE-T1 missing");
+    expect(existsSync(join(markers, "a.marker"))).toBe(true);
+    expect(existsSync(join(markers, "dot.marker"))).toBe(true);
+    expect(existsSync(join(markers, "b.marker"))).toBe(false);
+    const [event] = testCompleted(runDirectory);
+    expect(event.suites.map((suite: { name: string }) => suite.name).toSorted()).toEqual([
+      "suite-a",
+      "suite-dot",
+    ]);
+    for (const log of ["suite-b.log", "base-suite-b.log"])
+      expect(existsSync(join(runDirectory, "results", log))).toBe(false);
+    expect(existsSync(join(runDirectory, "results/suite-a.log"))).toBe(true);
+    expect(existsSync(join(runDirectory, "results/suite-dot.log"))).toBe(true);
+  });
+
+  test("ARK-T324 the base pass of ark test passes when only an untouched repo has a failing suite, and does not run that suite", () => {
+    const { runId, runDirectory, markers } = repoFilterRun({
+      worktrees: ["repos/a"],
+      kind: "refactor",
+      bCommand: bFails,
+    });
+    const result = ark("test", runId);
+
+    expect(result.out).toContain("base      passed");
+    expect(result.out).toContain("skipped suite-b (repo repos/b not in run)");
+    expect(existsSync(join(markers, "b.marker"))).toBe(false);
+    const [event] = testCompleted(runDirectory);
+    expect(event.base_passed).toBe(true);
+    expect(event.suites.some((suite: { name: string }) => suite.name === "suite-b")).toBe(false);
+    for (const log of ["suite-b.log", "base-suite-b.log"])
+      expect(existsSync(join(runDirectory, "results", log))).toBe(false);
+
+    // Control: with a worktree for b, the same suite runs and fails the base.
+    const control = repoFilterRun({
+      worktrees: ["repos/a", "repos/b"],
+      kind: "refactor",
+      bCommand: bFails,
+    });
+    const failed = ark("test", control.runId);
+    expect(existsSync(join(control.markers, "b.marker"))).toBe(true);
+    expect(failed.out).toContain("base      failed");
+    expect(testCompleted(control.runDirectory)[0].base_passed).toBe(false);
+    expect(failed.err).toContain("refactor run: the suites fail at the base commit");
+  });
+});
