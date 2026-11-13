@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -127,6 +128,8 @@ type RunSpec = {
   findings?: Record<string, string>;
   /** `null`: no `results/evidence/`. Else one folder for each test case. */
   evidence?: Record<string, { base: string; head: string; sha?: string; shots?: string[] }> | null;
+  /** The plan's `test_cases` ids (default: every case with an evidence folder). */
+  planCases?: string[];
   repos?: {
     name: string;
     base?: Record<string, string>;
@@ -206,7 +209,9 @@ function makeRun(spec: RunSpec = {}) {
     join(directory, "plan.yml"),
     JSON.stringify({
       steps: steps.map((step) => ({ harness: "omp", model: "m", criteria: [], ...step })),
-      test_cases: [],
+      test_cases: (spec.planCases ?? Object.keys(spec.evidence ?? { "ARK-T1": 0 })).map(
+        (testCase) => ({ id: testCase, action: "reuse", level: "integration" }),
+      ),
       design: { interfaces: spec.interfaces ?? [] },
       summary: {
         why: "Bodies went stale.",
@@ -486,6 +491,10 @@ test("ARK-T53 the run ledger holds the last test result, the open findings, evid
     ["ARK-T1", "fail", "pass", evidenceSha],
     ["ARK-T2", "fail", "fail", evidenceSha],
   ]);
+  // ARK-446: the plan's case ids reach the ledger; no plan.yml leaves the field absent.
+  expect(ledger).toMatchObject({ planCases: ["ARK-T1", "ARK-T2"] });
+  rmSync(join(run.directory, "plan.yml"));
+  expect(run.ledger()).not.toHaveProperty("planCases");
   expect(ledger.findings.map((finding) => `${finding.rank} ${finding.title}`)).toEqual([
     "P2 Slow path",
     "P3 Naming",
@@ -2395,6 +2404,148 @@ test("ARK-T47 a run with no results/evidence/ needs no Evidence section", () => 
   expect(
     result(lintBody({ body: withoutSection, title: defaultTitle, ledger }), "EVID04").result,
   ).toBe("fail");
+});
+
+// --- ARK-T363, ARK-T364: the body shows the plan's cases and fits GitHub's limit ---------------
+
+const bodyLimit = 65_536;
+const caseIds = (count: number) => Array.from({ length: count }, (_, i) => `ARK-T${i + 1}`);
+const caseBlocks = (body: string) => body.match(/<details><summary>`ARK-T\d+`: base/g) ?? [];
+const keptLogLines = (body: string) => body.match(/^ARK-T\d+ log line \d+$/gm)?.length ?? 0;
+
+/** A run with an evidence folder, a screenshot and a log for each of `count` cases, and AC evidence files for AC2 and AC3. */
+function suiteRun(count: number, options: { planCases?: string[] } = {}) {
+  const ids = caseIds(count);
+  const run = makeRun({
+    criteria: [
+      { id: "AC1", status: "passing", verifiedBy: [ids[0]] },
+      { id: "AC2", status: "passing", verifiedBy: [] },
+      { id: "AC3", status: "passing", verifiedBy: [] },
+    ],
+    evidence: Object.fromEntries(
+      ids.map((id) => [
+        id,
+        {
+          base: "fail",
+          head: "pass",
+          shots: [`${id === "ARK-T7" ? "zz" : "aa"}-${id}.png`],
+        },
+      ]),
+    ),
+    planCases: options.planCases ?? ids,
+    prWriting: { ...sensitiveConfig, tier_floor: 1 },
+  });
+  const evidenceDirectory = join(run.directory, "results/evidence");
+  for (const id of ids)
+    writeFileSync(
+      join(evidenceDirectory, id, "head/command.log"),
+      Array.from({ length: 20 }, (_, k) => `${id} log line ${k + 1}`).join("\n") + "\n",
+    );
+  for (const id of ["AC2", "AC3"])
+    writeFileSync(join(evidenceDirectory, `${id}.md`), `${id} live check 1\n${id} live check 2\n`);
+  return { ...run, ids, evidenceDirectory };
+}
+
+test("ARK-T363 the MR body holds evidence blocks and screenshots only for the plan's test cases, though results/evidence/ holds the whole suite", () => {
+  const named = ["ARK-T7", "ARK-T150", "ARK-T299"];
+  const body = buildBody(suiteRun(300, { planCases: named }).ledger());
+  const section = evidenceSection(body);
+
+  expect(caseBlocks(section)).toHaveLength(3);
+  for (const id of named) expect(section).toContain(`\`${id}\`: base fail, head pass`);
+  // The non-plan cases sort first by flow name, so five shots from them would show if nothing filtered.
+  const shots = section.match(/results\/evidence\/ARK-T\d+\/head\/screenshots\/[^\s)]+/g) ?? [];
+  expect(shots.length).toBeGreaterThan(0);
+  for (const path of shots)
+    expect(named.some((id) => path.startsWith(`results/evidence/${id}/`))).toBe(true);
+  expect(keptLogLines(section)).toBe(3 * 20);
+  expect(section).toContain("`ARK-9/AC2`: evidence");
+  expect(section).toContain("`ARK-9/AC3`: evidence");
+  expect(body.length).toBeLessThan(bodyLimit);
+
+  // The same 300 folders with a plan that names no case: the section stays, with the AC blocks and no case block.
+  const none = suiteRun(300, { planCases: [] });
+  const noneLedger = none.ledger();
+  const noneBody = buildBody(noneLedger);
+  expect(evidenceSection(noneBody)).toContain("`ARK-9/AC2`: evidence");
+  expect(caseBlocks(evidenceSection(noneBody))).toHaveLength(0);
+  expect(evidenceSection(noneBody)).not.toMatch(/log line|\.png/);
+  expect(noneBody).not.toContain("the run has no `results/evidence/`");
+  expect(noneBody.length).toBeLessThan(bodyLimit);
+  expect(
+    result(lintBody({ body: noneBody, title: defaultTitle, ledger: noneLedger }), "EVID04"),
+  ).toMatchObject({
+    result: "pass",
+    reason: "Evidence section present, 0 screenshots named",
+  });
+
+  // A ledger saved before planCases existed, and a run with no plan.yml: nothing is filtered.
+  const small = suiteRun(12, { planCases: ["ARK-T1"] });
+  const old = small.ledger() as unknown as Record<string, unknown>;
+  delete old.planCases;
+  expect(caseBlocks(evidenceSection(buildBody(old as unknown as Ledger)))).toHaveLength(12);
+  rmSync(join(small.directory, "plan.yml"));
+  expect(caseBlocks(evidenceSection(buildBody(small.ledger())))).toHaveLength(12);
+});
+
+test("ARK-T364 a body over the GitHub limit from plan cases alone has its log tails cut first, says how many lines were left out, and keeps the AC evidence", () => {
+  const big = suiteRun(150);
+  // A secret-like last line is always in the tail, so `fenced` drops it: it is shown nowhere and is not counted as left out.
+  writeFileSync(
+    join(big.evidenceDirectory, "ARK-T1/head/command.log"),
+    `${Array.from({ length: 19 }, (_, k) => `ARK-T1 log line ${k + 1}`).join("\n")}\nARK-T1 token=hunter2zz\n`,
+  );
+  const ledger = big.ledger();
+  const body = buildBody(ledger);
+
+  expect(body.length).toBeLessThanOrEqual(bodyLimit);
+  const kept = keptLogLines(body);
+  const note = body.match(/([\d,]+) (?:log )?lines? left out/);
+  expect(note).not.toBeNull();
+  expect(body).not.toContain("hunter2zz");
+  expect(Number(note![1].replaceAll(",", ""))).toBe(150 * 20 - kept - 1);
+  expect(kept).toBeGreaterThan(0);
+  const section = evidenceSection(body);
+  for (const id of big.ids) expect(section).toContain(`\`${id}\`: base fail, head pass @ abc1234`);
+  for (const id of ["AC2", "AC3"])
+    expect(section).toContain(
+      `Evidence file results/evidence/ARK-9/${id}.md:\n\n\`\`\`\n${id} live check 1\n${id} live check 2\n\`\`\``,
+    );
+  // The note is not a result claim and names no screenshot.
+  const results = lintBody({ body, title: defaultTitle, ledger });
+  expect(result(results, "EVID03").result).toBe("pass");
+  expect(result(results, "EVID04").result).toBe("pass");
+
+  // Boundary: pad the AC2 evidence line so the uncut body is 65,535, 65,536 and 65,537 characters.
+  const small = suiteRun(3);
+  const uncut = buildBody(small.ledger()).length;
+  expect(uncut).toBeLessThan(bodyLimit - 100);
+  const padded = (length: number) => {
+    writeFileSync(
+      join(small.evidenceDirectory, "AC2.md"),
+      `AC2 live check 1${"x".repeat(length - uncut)}\nAC2 live check 2\n`,
+    );
+    return buildBody(small.ledger());
+  };
+  for (const length of [bodyLimit - 1, bodyLimit]) {
+    const text = padded(length);
+    expect(text).toHaveLength(length);
+    expect(text).not.toMatch(/lines? left out/);
+    expect(keptLogLines(text)).toBe(3 * 20);
+  }
+  const over = padded(bodyLimit + 1);
+  expect(over.length).toBeLessThanOrEqual(bodyLimit);
+  expect(over).toMatch(/lines? left out/);
+  expect(over).toContain("AC2 live check 1xxx");
+  expect(over).toContain("AC2 live check 2");
+
+  // Only keeping no lines fits: no log line and no "last 20 lines" label stay, and the note counts every line.
+  const huge = suiteRun(400);
+  const hugeBody = buildBody(huge.ledger());
+  expect(hugeBody.length).toBeLessThanOrEqual(bodyLimit);
+  expect(keptLogLines(hugeBody)).toBe(0);
+  expect(hugeBody).not.toContain("Log (last");
+  expect(hugeBody).toContain("8,000 log lines left out");
 });
 
 // --- ARK-T150, ARK-T151: one run, two repos, one branch name ----------------------------------

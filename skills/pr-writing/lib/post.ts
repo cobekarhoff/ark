@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
-import { beginMarker, endMarker } from "./body.ts";
+import { beginMarker, endMarker, githubBodyLimit } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
 import { hashBody, lintBody, maxTitleLength, type LintResult } from "./lint.ts";
 
@@ -355,7 +355,6 @@ function writeCommand(input: PostInput, existing: Existing | null, bodyFile: str
       ];
 }
 
-const githubBodyLimit = 65_536;
 const imageTarget = /(!\[[^\]]*\]\()(?:<([^>\n]+)>|([^)\s]+))(\))/g;
 const mediaFile = /\.(png|jpe?g|gif|webp|svg|mp4|mov|webm)$/i;
 
