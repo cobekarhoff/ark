@@ -60,7 +60,9 @@ Write about the system. The subject of a sentence is the code, the command, the 
 
 - Every claim of "tested", "passed" or "verified" carries the command and its result line, or a file in the repo. "Self-review completed" with no command is not evidence. Lint fails a body with no `- [ ]` verify item (VAL01) and warns on an item with no command or no `Expect` (VAL02).
 - Numbers carry bounds: n, the date, the base and head, what was excluded.
-- Name at most 5 screenshots (EVID04 warns). Captures and structure diagrams are not built yet: attach screenshots by hand.
+- Name at most 5 screenshots as Markdown images (EVID04 warns). `post_mr.ts` uploads each local image or video on both hosts: GitHub needs `gh` 2.99.0 or newer (`--attach`) and write access, GitLab uploads with `glab api`. A failed upload exits 2 and posts nothing.
+- Text evidence (the last 20 lines of the head `command.log` of each test case, secret-like lines dropped, and each `results/evidence/<AC id>.md`) goes in `<details>` blocks of the Evidence section. SIZE01 skips them. Evidence is never committed to the repo.
+- Diagrams: not built (ARK-400).
 - The full list of lint checks and what each wants: `references/evidence.md`.
 
 ## 6 Keep it honest
@@ -87,5 +89,5 @@ Write about the system. The subject of a sentence is the code, the command, the 
 - A new MR or PR is a Draft. `--ready` opens it ready. An update keeps the state of the open one.
 - An update replaces only the text between `<!-- pr-writing:begin -->` and `<!-- pr-writing:end -->`. An old body with no markers is rewritten once, with a note on stderr.
 - It re-runs the lint on the final body and refuses on a `fail` or STALE01 (head moved, or body edited after lint).
-- `post_mr.ts --confirmed` is the only way to post. Do not call `gh` or `glab` to create or edit the MR yourself.
+- `skills/pr-writing/scripts/post_mr.ts --confirmed` is the only way to post. Do not call `gh` or `glab` to create or edit the MR yourself.
 - Print the URL from stdout to the human. Host commands and quirks: `references/gitlab.md`, `references/github.md`.
