@@ -1,0 +1,19 @@
+import { test } from "bun:test";
+// Holds about 200 MB here and 30 MB in a child for about 2.5 s, burns about 0.3 s of CPU, then exits 0.
+test("FAKE-1-AC1 holds memory", async () => {
+  const touch = (megabytes: number) => {
+    const bytes = new Uint8Array(megabytes * 1024 * 1024);
+    for (let at = 0; at < bytes.length; at += 4096) bytes[at] = 1;
+    return bytes;
+  };
+  const held = touch(200);
+  const child = Bun.spawn([
+    "bun",
+    "-e",
+    "const b = new Uint8Array(30 * 1024 * 1024); for (let i = 0; i < b.length; i += 4096) b[i] = 1; await Bun.sleep(2500)",
+  ]);
+  const end = performance.now() + 300;
+  while (performance.now() < end);
+  await child.exited;
+  if (held[0] !== 1) throw new Error("memory was dropped");
+});

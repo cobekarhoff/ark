@@ -138,7 +138,7 @@ Do these steps in order for one ready ticket.
 
 Never start more run leads than `concurrency` allows. Start the next ready ticket when a run closes.
 
-Before each run start, read the `## Host` section of `ark chief state --project <project>`. Start no run while its last line says `hold new runs: <reason>` (it says `hold new runs: no` when the host is clear). The reasons are free memory, swap, load and free disk. When the hold lasts, tell the human what holds memory: name the processes that use it, for example the running `ark test` runs in `tests: running <n>`, and let the human decide what to stop.
+Before each run start, read the `## Host` section of `ark chief state --project <project>`. Start no run while its last line says `hold new runs: <reason>` (it says `hold new runs: no` when the host is clear). The reasons are free memory, swap, load and free disk. When the hold lasts, tell the human what holds memory: name the processes that use it, for example the running `ark test` runs in `tests: running <n>`, and the hub's Resources page (`#/resources`), which lists processes by run, agent and leftover from closed runs, and let the human decide what to stop.
 
 ## 7. Supervise
 

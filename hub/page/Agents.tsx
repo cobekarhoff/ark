@@ -3,7 +3,7 @@ import { OpenInOrca } from "./OrcaButton.tsx";
 import type { Agent } from "../types.ts";
 
 /** What Orca or a session reports wins; the plan or `ark.yml` fills a gap and says so. */
-function Field({
+export function Field({
   reported,
   planned,
   source,
