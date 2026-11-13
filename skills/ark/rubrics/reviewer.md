@@ -56,7 +56,7 @@ If you find nothing, say "No findings" and name the areas you checked. End with 
 
 ## Review rounds and verdict
 
-Start the findings file with the line `Reviewed head: <sha>` (`git rev-parse HEAD`). The spec gives `Last reviewed head: <sha>` for a review after the first. Then read only `git diff <last reviewed head>..HEAD`, not the full diff. Do not report a finding that an earlier findings file of the run already holds. Name the class of a bug (for example "every caller ignores the error") so that one fix covers every instance.
+Start the findings file with the line `Reviewed head: <sha>` (`git rev-parse HEAD`). The spec gives `Last reviewed head: <sha>`: the previous review's head, or for the first review the run's base. Then read only `git diff <last reviewed head>..HEAD`, not the full diff. Do not report a finding that an earlier findings file of the run already holds. Name the class of a bug (for example "every caller ignores the error") so that one fix covers every instance.
 
 Before the verdict, write a `## Merge risk` block:
 
