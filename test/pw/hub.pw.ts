@@ -8559,14 +8559,17 @@ test("ARK-T281 Full screen shows the one graph in a dialog over the window at fi
 
     if (kind.key === "ticket") {
       // The page behind does not scroll under the wheel.
+      // The route change of show() runs in a view transition that resets the scroll ~100 ms in, and
+      // getAnimations() does not see it start: no view transition, so nothing takes the position.
+      await page.emulateMedia({ reducedMotion: "reduce" });
       await show();
-      await finiteAnimationsEnded(page); // a view transition in flight would take the scroll position
       await page.evaluate(() => window.scrollTo(0, 120));
       await openOverlay();
       await page.mouse.move(720, 450);
       await page.mouse.wheel(0, 600);
       expect(await page.evaluate(() => scrollY)).toBe(120);
       await page.keyboard.press("Escape");
+      await page.emulateMedia({ reducedMotion: "no-preference" });
     }
     if (kind.key === "roadmap") {
       // Esc with the search box focused behind the overlay closes the overlay, not the field's focus.
