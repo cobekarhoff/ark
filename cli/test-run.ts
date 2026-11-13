@@ -520,6 +520,10 @@ async function runSuite(
   }
 }
 
+/** The commit the base side of `ark test` runs at: the newest synced target commit, else the worktree.created base. `base` itself stays the created base for every other reader. */
+const baseSide = (worktree?: RunState["worktrees"][number]): string | undefined =>
+  worktree?.synced ?? worktree?.base;
+
 const testFolder = /(^|\/)(test|tests|features)\//;
 
 /** The head files that go into the base checkout: each the diff adds or changes under a test folder, and each selected test file wherever it lives, that exists at head. Deleted and renamed-from files stay at base. */
@@ -616,7 +620,7 @@ function composeFor(config: ProjectConfig, root: string, runId: string): string[
 }
 
 /**
- * Runs suites on a throwaway checkout of each touched repo at its worktree.created base, after the head's
+ * Runs suites on a throwaway checkout of each touched repo at its base side (the commit of the newest worktree.synced event that has one, else its worktree.created base), after the head's
  * test files are copied in, so a new test meets the base build. Untouched repos run on the workspace checkout,
  * as in the head run. A refactor run, and a suite with no `base_files`, run the whole suite; any other run
  * runs `base_command` on the test files of its own commits and skips a suite with none, and with every
@@ -642,7 +646,7 @@ async function baseSuitesPassed(
   for (const suite of config.suites) {
     if (refactor || suite.base_files === undefined) {
       // A refactor runs whole, but its added test files still need to reach base.
-      const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+      const base = baseSide(worktrees.find((worktree) => worktree.repo === suite.repo));
       const files =
         suite.base_files === undefined || base === undefined
           ? undefined
@@ -650,7 +654,7 @@ async function baseSuitesPassed(
       plan.push({ suite, command: suite.command, files });
       continue;
     }
-    const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+    const base = baseSide(worktrees.find((worktree) => worktree.repo === suite.repo));
     const files = base === undefined ? [] : await ownTestFiles(suite, base, mirror);
     if (files.length === 0) {
       baseRun.skipped.set(suite.name, "no changed test file");
@@ -667,7 +671,7 @@ async function baseSuitesPassed(
   // run's own files as the base has them.
   const census: PlanEntry[] = [];
   for (const suite of config.suites) {
-    const base = worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+    const base = baseSide(worktrees.find((worktree) => worktree.repo === suite.repo));
     if (base === undefined) continue;
     if (refactor || suite.base_files === undefined) {
       census.push({ suite, command: suite.command });
@@ -709,8 +713,14 @@ async function runAtBase(
   // What gets copied into the base checkout, per repo, and what the plan's keys hash.
   const plan = phases.find((phase) => phase.copyHead)!.plan;
   const copied = new Map<string, string[]>();
-  for (const { repo, base } of worktrees) {
+  for (const entry of worktrees) {
+    const { repo } = entry;
+    const base = baseSide(entry);
     if (base === undefined) throw new ArkError(`worktree.created of ${repo} has no base commit`);
+    if ((await run(["git", "cat-file", "-e", `${base}^{commit}`], join(mirror, repo))).code !== 0)
+      throw new ArkError(
+        `base commit ${base} of ${repo} is not in the worktree: run \`ark worktree sync ${runId}\` to fetch the target branch again`,
+      );
     copied.set(
       repo,
       await headTestPaths(
@@ -721,7 +731,7 @@ async function runAtBase(
     );
   }
   const bases = [...worktrees]
-    .map(({ repo, base }) => [repo, base])
+    .map((entry) => [entry.repo, baseSide(entry)])
     .sort(([a], [b]) => a!.localeCompare(b!));
   const touched = new Set(worktrees.map((worktree) => worktree.repo));
   // ponytail: an untouched repo is keyed by its workspace head, not by uncommitted edits in it
@@ -767,9 +777,9 @@ async function runAtBase(
   const compose = root === null ? null : composeFor(config, root, `${runId}-base`);
   try {
     if (root !== null)
-      for (const { repo, path: source, base } of [...worktrees].sort((a, b) =>
-        a.repo.localeCompare(b.repo),
-      )) {
+      for (const entry of [...worktrees].sort((a, b) => a.repo.localeCompare(b.repo))) {
+        const { repo, path: source } = entry;
+        const base = baseSide(entry);
         if (base === undefined)
           throw new ArkError(`worktree.created of ${repo} has no base commit`);
         const path = join(root, repo);
@@ -831,7 +841,7 @@ async function runAtBase(
           join(root ?? "", suite.repo),
           phase.directory,
           phase.run,
-          worktrees.find((worktree) => worktree.repo === suite.repo)?.base ??
+          baseSide(worktrees.find((worktree) => worktree.repo === suite.repo)) ??
             (await headOf(suite.repo, config.workspace, mirror)),
           command,
           files,
