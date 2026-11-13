@@ -1120,6 +1120,7 @@ function baseLedger(overrides: Record<string, any> = {}): Ledger {
     evidence: null,
     findings: [],
     hasReviewerStep: false,
+    reviewerStep: null,
     flaky: [],
     tests: null,
     checks: [],
@@ -2562,6 +2563,6 @@ test("ARK-T270 the run-lead playbook's analysis evidence example and Not in plan
   expect(riskOf(`### P3: Naming\n\n${block(true)}`).result).toBe("pass");
   expect(riskOf(`### P3: Naming\n\n${block(false)}\n${block(true)}`)).toMatchObject({
     result: "fail",
-    reason: expect.stringContaining("no reason given"),
+    reason: expect.stringContaining("an unplanned file has no reason"),
   });
 });
