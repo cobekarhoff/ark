@@ -1,6 +1,8 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { isoAt } from "./pw/helpers.ts";
+import { countDateReads } from "./wallclock-dates";
 
 setDefaultTimeout(30_000);
 
@@ -10,8 +12,6 @@ setDefaultTimeout(30_000);
 //   ARK_WALLCLOCK_PRINT=1 bun test test/wallclock.test.ts
 // wallclock-base.json holds the counts of the base commit (16b4198). The allowed list may never
 // exceed it, so it cannot be raised to make the guard pass.
-// Playwright specs also may not read the date (ARK-433): the hub clock is frozen by ARK_NOW, so a
-// spec takes its instants from `isoAt` in pw/helpers.ts. The limit is 0, with no allowance file.
 // ponytail: line-pattern scan, not an AST; a sleep hidden behind a helper escapes it.
 const forbidden = [
   /\bwaitForTimeout\(/,
@@ -19,8 +19,6 @@ const forbidden = [
   /\bsetTimeout\(/,
   /\.toBeLessThan\(\s*\d[\d_]{2,}\s*\)/,
 ];
-
-const dateReads = [/\bnew Date\(/, /\bDate\.now\(/];
 
 const testRoot = resolve(import.meta.dir);
 const readCounts = (name: string): Record<string, number> =>
@@ -30,14 +28,6 @@ export function countUses(text: string): number {
   return text
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("//") && forbidden.some((p) => p.test(line)))
-    .length;
-}
-
-/** Lines of a `*.pw.ts` text that read the date; comment lines are skipped. */
-export function countDateReads(text: string): number {
-  return text
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("//") && dateReads.some((p) => p.test(line)))
     .length;
 }
 
@@ -147,8 +137,7 @@ test("ARK-T349 no playwright spec reads the wall clock", () => {
   ).toEqual([]);
 });
 
-test("ARK-T349 isoAt follows ARK_NOW", async () => {
-  const { isoAt } = await import("./pw/helpers.ts");
+test("ARK-T349 isoAt follows ARK_NOW", () => {
   const saved = process.env.ARK_NOW;
   try {
     for (const instant of ["2026-11-04T23:30:00Z", "2026-02-01T00:00:00Z"]) {
