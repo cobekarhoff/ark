@@ -32,10 +32,11 @@ import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
 import { runnerStatusLines } from "./test-runner.ts";
 import { assertAllowed } from "./transitions.ts";
-import { commitsAhead, submoduleLines, worktreeCleanup } from "./worktree.ts";
+import { commitsAhead, submoduleLines, worktreeCleanup, worktreeDirtyLines } from "./worktree.ts";
 import { repoBase, targetBranch } from "./workspace.ts";
 import { loadPlan, repoGraph, type Plan, type PlanStep } from "./plan.ts";
 import { hasTestCriterion, manualCriteria, readTicket, setTicketStatus } from "./ticket.ts";
+import { unplannedWithoutReason } from "../skills/pr-writing/lib/ledger.ts";
 
 const runIdPattern = /^(\d{4}-\d{2}-\d{2})-(.+)-(\d+)$/;
 
@@ -433,6 +434,19 @@ export async function runStep(
   if (action === "finish") {
     const planned = state.steps.find((step) => step.id === stepId);
     const worktree = state.worktrees.find((entry) => entry.repo === planned?.repo)?.path;
+    if (planned && !failed && worktree && existsSync(worktree)) {
+      // fails closed: a git status failure throws and no step.finished is recorded
+      const dirty = worktreeDirtyLines(
+        loadConfig(project),
+        state.worktrees,
+        planned.repo,
+        worktree,
+      );
+      if (dirty.length > 0)
+        throw new ArkError(
+          `step ${stepId} refused: ${planned.repo} has uncommitted changes:\n${dirty.map((line) => `  ${line}`).join("\n")}\ncommit them, then finish again (use --failed to close a step that did not finish its work)`,
+        );
+    }
     if (planned?.role === "reviewer" && !failed && worktree && existsSync(worktree)) {
       const start = reviewRangeStart(directory, state, planned, false);
       // An uncountable range (unknown sha) is not read as empty.
@@ -444,6 +458,13 @@ export async function runStep(
           `step ${stepId} refused: the review range ${start}..${end} has no commits; a reviewer needs code to review (use --failed to close a step that did not review)`,
         );
       }
+      const unplanned = unplannedWithoutReason(directory, planned.repo);
+      if (unplanned.length > 0)
+        throw new ArkError(
+          `step ${stepId} refused: a changed file is not in the plan and has no reason: ${unplanned.join(", ")}.\n` +
+            `Write one line per file in the first ## Merge risk block of findings/${stepId}.md:\n` +
+            unplanned.map((file) => `  - Not in plan: ${file} — <reason>`).join("\n"),
+        );
     }
     const outcome = failed ? "failed" : "succeeded";
     const last = events.findLast(

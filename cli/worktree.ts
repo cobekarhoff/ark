@@ -640,6 +640,35 @@ function dirtyLines(
   return dirty;
 }
 
+/** Dirty entries of the worktree of `repo` at `path`, ignoring what Ark made itself and submodule folders still at the commit Ark composed. */
+export function worktreeDirtyLines(
+  config: ProjectConfig,
+  worktrees: RunState["worktrees"],
+  repo: string,
+  path: string,
+): string[] {
+  const composedHead = (folder: string): string | undefined => {
+    const submodule = submodulesOf(path).find((entry) => entry.path === folder);
+    const library = submodule && libraryOf(config, worktrees, repo, submodule);
+    if (!library) return undefined;
+    const head = existsSync(library.path)
+      ? Bun.spawnSync(["git", "-C", library.path, "rev-parse", "HEAD"])
+      : Bun.spawnSync([
+          "git",
+          "-C",
+          join(config.workspace, library.repo),
+          "rev-parse",
+          library.branch,
+        ]);
+    return head.exitCode === 0 ? head.stdout.toString().trim() : undefined;
+  };
+  return dirtyLines(
+    path,
+    worktrees.map((other) => other.path),
+    composedHead,
+  );
+}
+
 /** Commits of `branch` beyond `base`, counted in the source repo; undefined when the count fails. */
 export function commitsAhead(source: string, branch: string, base?: string): number | undefined {
   if (!base) return undefined;
@@ -684,28 +713,7 @@ export function worktreeCleanup(runId: string, inProject?: string): void {
         continue;
       }
     } else {
-      const composedHead = (folder: string): string | undefined => {
-        const submodule = submodulesOf(path).find((entry) => entry.path === folder);
-        const library = submodule && libraryOf(config, state.worktrees, repo, submodule);
-        if (!library) return undefined;
-        const head = existsSync(library.path)
-          ? Bun.spawnSync(["git", "-C", library.path, "rev-parse", "HEAD"])
-          : Bun.spawnSync([
-              "git",
-              "-C",
-              join(workspace, library.repo),
-              "rev-parse",
-              library.branch,
-            ]);
-        return head.exitCode === 0 ? head.stdout.toString().trim() : undefined;
-      };
-      if (
-        dirtyLines(
-          path,
-          state.worktrees.map((other) => other.path),
-          composedHead,
-        ).length > 0
-      ) {
+      if (worktreeDirtyLines(config, state.worktrees, repo, path).length > 0) {
         keep("uncommitted changes");
         continue;
       }
