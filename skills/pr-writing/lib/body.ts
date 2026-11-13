@@ -109,9 +109,15 @@ const flowOf = (path: string) =>
     .replace(/\.[^.]+$/, "")
     .replace(/[-_]\d+$/, "");
 
+/** The evidence entries the body shows: the plan's test cases, or every entry when the ledger has no plan cases. `ledger.evidence` stays complete for the lint checks. */
+const shownEvidence = (ledger: Ledger) =>
+  (ledger.evidence ?? []).filter(
+    (entry) => ledger.planCases === undefined || ledger.planCases.includes(entry.testCase),
+  );
+
 /** One screenshot for each flow of a test case and side (`login-1.png` and `login-2.png` are one flow), five at most; `omitted` counts the flows cut. */
 function screenshotFlows(ledger: Ledger): { shown: string[]; omitted: number } {
-  const paths = [...new Set((ledger.evidence ?? []).flatMap((entry) => entry.screenshots))].sort();
+  const paths = [...new Set(shownEvidence(ledger).flatMap((entry) => entry.screenshots))].sort();
   // The directory holds the test case and the side, so equal file names in two cases stay apart.
   const flows = new Map<string, { flow: string; path: string }>();
   for (const path of paths) {
@@ -187,15 +193,24 @@ const details = (summary: string, inner: string[]) => [
   "",
 ];
 
-function evidenceBlock(ledger: Ledger): Block {
+const logLines = 20;
+
+/** `keep` is how many of the last log lines each case block holds. */
+function evidenceBlock(ledger: Ledger, keep = logLines): Block {
   const kind = ledger.ticket?.kind;
   const { shown, omitted } = screenshotFlows(ledger);
   const lines: string[] = [];
-  for (const entry of ledger.evidence ?? []) {
+  let leftOut = 0;
+  for (const entry of shownEvidence(ledger)) {
     const prefix = `results/evidence/${entry.testCase}/`;
     const result = `base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`;
     const pictures = shown.filter((path) => path.startsWith(prefix));
-    const log = fenced(entry.log ?? []);
+    const allLog = entry.log ?? [];
+    // `slice(-0)` keeps everything, so keep 0 is its own case.
+    const logTail = keep === 0 ? [] : allLog.slice(-keep);
+    // The left-out count is lines cut off the tail, taken before secret filtering: a secret-like line kept in the tail is dropped by `fenced` and not counted.
+    leftOut += allLog.length - logTail.length;
+    const log = fenced(logTail);
     lines.push(
       ...details(`\`${entry.testCase}\`: ${result}`, [
         `Result: ${result}`,
@@ -223,10 +238,20 @@ function evidenceBlock(ledger: Ledger): Block {
                 ];
               }),
             ]),
-        ...(log.length === 0 ? [] : ["Log (last 20 lines of the head command.log):", "", ...log]),
+        ...(log.length === 0
+          ? []
+          : [
+              `Log (last ${keep} ${keep === 1 ? "line" : "lines"} of the head command.log):`,
+              "",
+              ...log,
+            ]),
       ]),
     );
   }
+  if (leftOut > 0)
+    lines.push(
+      `- Log tails: ${leftOut.toLocaleString("en-US")} log lines left out so the body fits GitHub's ${githubBodyLimit.toLocaleString("en-US")}-character limit.`,
+    );
   if (omitted > 0)
     lines.push(`- Screenshots: ${omitted} more flow(s) left out, five are shown at most.`);
   for (const { id, text } of ledger.acEvidence ?? []) {
@@ -512,10 +537,32 @@ function renderBlocks(blocks: Block[], template: Heading[] | null, bare: boolean
   return lines;
 }
 
+/** The body length GitHub accepts. */
+export const githubBodyLimit = 65_536;
+
+/** The body, with the log tails of the case blocks cut when it is over `githubBodyLimit`: the most lines each block keeps that fit, down to none. The AC evidence blocks and the result lines stay whole. */
 export function buildBody(ledger: Ledger): string {
+  const body = buildBodyKeeping(ledger, logLines);
+  if (body.length <= githubBodyLimit) return body;
+  // ponytail: binary search on one per-case line count; per-case weighting if blocks differ a lot.
+  let low = 0;
+  let high = logLines - 1;
+  let best = buildBodyKeeping(ledger, 0);
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const attempt = buildBodyKeeping(ledger, middle);
+    if (attempt.length <= githubBodyLimit) {
+      best = attempt;
+      low = middle + 1;
+    } else high = middle - 1;
+  }
+  return best;
+}
+
+function buildBodyKeeping(ledger: Ledger, keep: number): string {
   const { tier } = tierOfLedger(ledger);
   const blocks: Block[] = [problemBlock(ledger), differentBlock(ledger)];
-  if (ledger.source === "run") blocks.push(evidenceBlock(ledger));
+  if (ledger.source === "run") blocks.push(evidenceBlock(ledger, keep));
   blocks.push(verifyBlock(ledger), notDoneBlock(ledger), riskBlock(ledger, tier));
   if (ledger.ticket) blocks.push(acsBlock(ledger));
   const intro = [
