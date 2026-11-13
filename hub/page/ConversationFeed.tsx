@@ -3,7 +3,7 @@ import type { ArkEvent } from "../../cli/events.ts";
 import type { ConversationAgent, ConversationMessage, RunConversation } from "../conversation.ts";
 import {
   buildFeed,
-  clockText,
+  useClockText,
   eventsChip,
   foldEventsAt,
   sentAt,
@@ -88,6 +88,7 @@ function Answer({
   conversation: RunConversation;
   message: ConversationMessage;
 }) {
+  const clockAt = useClockText();
   if (message.type !== "question" && message.type !== "escalation") return null;
   const question = conversation.questions.find((candidate) => candidate.id === message.id);
   const toChief = conversation.agents.find((agent) => agent.id === message.to)?.kind === "chief";
@@ -96,7 +97,7 @@ function Answer({
     return (
       <p className="cv-answer" data-testid="feed-answer">
         You answered {answer?.gate ?? "the gate"}: {answer?.answer ?? "(no text)"}
-        <span className="mut"> at {clockText(Date.parse(question.answered), true)}</span>
+        <span className="mut"> at {clockAt(Date.parse(question.answered))}</span>
       </p>
     );
   }
@@ -127,6 +128,7 @@ function Message({
   const from = agents.get(message.from);
   const to = agents.get(message.to);
   const { name, badge } = nameOf(from);
+  const clockAt = useClockText();
   const time = sentAt(message);
   const card = message.type === "question" || message.type === "escalation";
   const choose = (event: KeyboardEvent) => {
@@ -164,7 +166,7 @@ function Message({
           <span className={`cv-badge ${roleClass(from)}`}>{badge}</span>
           <span className="mut">to {nameOf(to).name}</span>
           <span className="mut mono end">
-            {Number.isFinite(time) ? clockText(time, true) : "time unknown"}
+            {Number.isFinite(time) ? clockAt(time) : "time unknown"}
           </span>
         </header>
         <div className="cv-subject">
@@ -188,6 +190,7 @@ function eventText(event: ArkEvent): string {
 }
 
 function Events({ events }: { events: ArkEvent[] }) {
+  const clockAt = useClockText();
   const [open, setOpen] = useState(false);
   const folded = events.length >= foldEventsAt && !open;
   return (
@@ -199,8 +202,8 @@ function Events({ events }: { events: ArkEvent[] }) {
           aria-expanded={false}
           onClick={() => setOpen(true)}
         >
-          {events.length} Ark events, {clockText(Date.parse(events[0]!.time), true)}–
-          {clockText(Date.parse(events.at(-1)!.time), true)}
+          {events.length} Ark events, {clockAt(Date.parse(events[0]!.time))}–
+          {clockAt(Date.parse(events.at(-1)!.time))}
         </button>
       ) : (
         <>
@@ -216,8 +219,7 @@ function Events({ events }: { events: ArkEvent[] }) {
           ) : null}
           {events.map((event) => (
             <p className="cv-event" key={event.seq} data-testid="feed-event">
-              <span className="mono">{clockText(Date.parse(event.time), true)}</span>{" "}
-              {eventText(event)}
+              <span className="mono">{clockAt(Date.parse(event.time))}</span> {eventText(event)}
             </p>
           ))}
         </>
@@ -326,7 +328,7 @@ export function Feed({
         <input
           type="search"
           value={search}
-          placeholder="Search subject and body"
+          placeholder="Search subject and body…"
           aria-label="Search messages"
           data-testid="feed-search"
           onChange={(event) => setSearch(event.target.value)}

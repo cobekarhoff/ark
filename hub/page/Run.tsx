@@ -527,6 +527,7 @@ export function Run({
       );
     return (
       <Transcript
+        key={sessions.length}
         run={run.run}
         ticket={run.ticket.id}
         title={
@@ -588,7 +589,7 @@ export function Run({
         <Conversation
           run={run.run}
           refreshKey={open?.updated_at ?? ""}
-          sessions={detail?.sessions ?? null}
+          sessions={detail?.sessions_ready ? detail.sessions : null}
           plan={run.plan}
         />
       ) : (

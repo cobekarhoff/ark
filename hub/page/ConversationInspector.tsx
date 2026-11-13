@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ConversationAgent, ConversationMessage, RunConversation } from "../conversation.ts";
 import type { PlanStepView, SessionFile } from "../types.ts";
-import { clockText, sentAt, typeOf } from "./conversation-model.ts";
+import { sentAt, typeOf, useClockText } from "./conversation-model.ts";
 import { nameOf, roleClass } from "./ConversationFeed.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { transcriptHref } from "./RunDetail.tsx";
@@ -57,8 +57,6 @@ function TranscriptButton({
 }
 
 const minutes = (seconds: number) => `${(seconds / 60).toFixed(1)} min`;
-const time = (iso: string | null) =>
-  iso === null ? "not recorded" : clockText(Date.parse(iso), true);
 
 /** One body, read from the hub when the run answer did not carry it. Null: none, or still loading. */
 function useBody(message: ConversationMessage): string | null {
@@ -112,6 +110,8 @@ function MessageView({
     (candidate) => candidate.id === threadId || candidate.thread_id === threadId,
   );
   const body = useBody(message);
+  const clockAt = useClockText();
+  const time = (iso: string | null) => (iso === null ? "not recorded" : clockAt(Date.parse(iso)));
   return (
     <>
       <h3 className="cv-subject">{message.subject ?? "(no subject)"}</h3>
@@ -185,7 +185,7 @@ function MessageView({
                 onClick={() => onSelect(candidate.id)}
               >
                 <span className="mono mut">
-                  {Number.isFinite(sentAt(candidate)) ? clockText(sentAt(candidate), true) : "?"}
+                  {Number.isFinite(sentAt(candidate)) ? clockAt(sentAt(candidate)) : "?"}
                 </span>{" "}
                 {candidate.subject ?? "(no subject)"}
               </button>
@@ -216,10 +216,11 @@ function AgentView({
   );
   const sent = conversation.messages.filter((message) => message.from === agent.id).length;
   const received = conversation.messages.filter((message) => message.to === agent.id).length;
-  const costs = spans.flatMap((span) => {
-    const cost = plan?.find((step) => step.id === span.step)?.cost_usd;
+  const costs = [...new Set(spans.map((span) => span.step))].flatMap((stepId) => {
+    const cost = plan?.find((step) => step.id === stepId)?.cost_usd;
     return typeof cost === "number" ? [cost] : [];
   });
+  const clockAt = useClockText();
   return (
     <>
       <h3 className="cv-subject">{nameOf(agent).name}</h3>
@@ -236,10 +237,8 @@ function AgentView({
                 <li key={`${span.step}:${span.start}`}>
                   <span className="mono">{span.step}</span>{" "}
                   <span className="mut">
-                    {clockText(Date.parse(span.start), true)}–
-                    {span.end === null
-                      ? "still running or crashed"
-                      : clockText(Date.parse(span.end), true)}
+                    {clockAt(Date.parse(span.start))}–
+                    {span.end === null ? "still running or crashed" : clockAt(Date.parse(span.end))}
                   </span>
                 </li>
               ))}
@@ -250,7 +249,7 @@ function AgentView({
         <dd data-testid="inspector-counts">
           {sent} sent, {received} received
         </dd>
-        <dt>Cost</dt>
+        <dt>Step cost, all rounds</dt>
         <dd data-testid="inspector-cost">
           {costs.length === 0
             ? "not recorded"

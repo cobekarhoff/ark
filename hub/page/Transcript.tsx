@@ -502,6 +502,24 @@ function SessionPages({
   );
 }
 
+/** The index of the session whose window holds `at`, else the nearest window; 0 without an anchor. */
+function sessionIndexAt(sessions: SessionFile[], at: string | null): number {
+  const target = at === null ? NaN : Date.parse(at);
+  if (Number.isNaN(target)) return 0;
+  let best = 0;
+  let bestDistance = Infinity;
+  sessions.forEach((candidate, position) => {
+    const end = Date.parse(candidate.end);
+    const start = candidate.start === null ? end : Date.parse(candidate.start);
+    const distance = target < start ? start - target : target > end ? target - end : 0;
+    if (distance < bestDistance) {
+      best = position;
+      bestDistance = distance;
+    }
+  });
+  return best;
+}
+
 /** The transcript of a step, the run lead or one unassigned file. A step with several files lists them. */
 export function Transcript({
   run,
@@ -521,7 +539,7 @@ export function Transcript({
   at: string | null;
   empty: string;
 }) {
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(() => sessionIndexAt(sessions, at));
   const session = sessions[Math.min(index, sessions.length - 1)];
   return (
     <>

@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react";
 import type { ArkEvent } from "../../cli/events.ts";
 import type {
   ConversationAgent,
@@ -237,6 +238,13 @@ export const spansDays = (range: Range) =>
 export const clockText = (time: number, seconds = false, dated = false) => {
   const text = (seconds ? clockSeconds : clock).format(time);
   return dated ? `${dayFormat.format(time)} ${text}` : text;
+};
+
+/** True when the run spans days: every clock label of the tab then carries its date. */
+export const DatedContext = createContext(false);
+export const useClockText = () => {
+  const dated = useContext(DatedContext);
+  return (time: number) => clockText(time, true, dated);
 };
 
 // ---------- feed ----------

@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ConversationReply, RoleGroup, RunConversation } from "../conversation.ts";
 import type { PlanStepView, SessionFile } from "../types.ts";
-import { atPlayhead, clampView, runRange, sentAt, type Range } from "./conversation-model.ts";
+import {
+  atPlayhead,
+  clampView,
+  DatedContext,
+  runRange,
+  sentAt,
+  spansDays,
+  type Range,
+} from "./conversation-model.ts";
 import { Feed } from "./ConversationFeed.tsx";
 import { Inspector } from "./ConversationInspector.tsx";
 import { Player, useReplay } from "./ConversationReplay.tsx";
@@ -10,7 +18,7 @@ import { Trace } from "./ConversationTrace.tsx";
 type State =
   | { status: "loading" }
   | { status: "failed"; reason: string }
-  | { status: "ok"; reply: ConversationReply & RunConversation };
+  | { status: "ok"; reply: ConversationReply & RunConversation; failure: string | null };
 
 /**
  * Reads `GET /api/run/<run>/conversation` (read only). `refreshKey` changes when the run logged a new
@@ -42,11 +50,17 @@ export function useConversation(run: string, refreshKey: string): State {
                 ? "the hub has not read the inbox yet; open any page of the hub, then retry"
                 : `the hub answered ${response.status}`,
           };
-        return { status: "ok", reply: await response.json() };
+        return { status: "ok", reply: await response.json(), failure: null };
       })
       .catch((err): State => ({ status: "failed", reason: String(err) }))
       .then((value) => {
-        if (!controller.signal.aborted) setState({ run, value });
+        if (controller.signal.aborted) return;
+        // A failed read after a good one keeps the good reply on screen (replay, selection, zoom stay).
+        setState((previous) =>
+          value.status === "failed" && previous.run === run && previous.value.status === "ok"
+            ? { run, value: { ...previous.value, failure: value.reason } }
+            : { run, value },
+        );
       });
     return () => controller.abort();
   }, [run, refreshKey, retry]);
@@ -198,8 +212,16 @@ export function Conversation({
   const { reply } = state;
   return (
     <section data-testid="conversation" aria-label="Conversation">
+      {state.failure === null ? null : (
+        <p className="warn-box" role="alert" data-testid="conversation-refetch-failed">
+          The hub could not read the conversation just now ({state.failure}): this shows the last
+          read.
+        </p>
+      )}
       <Notices reply={reply} />
-      <Linked conversation={reply} sessions={sessions} plan={plan} />
+      <DatedContext.Provider value={spansDays(runRange(reply))}>
+        <Linked conversation={reply} sessions={sessions} plan={plan} />
+      </DatedContext.Provider>
     </section>
   );
 }

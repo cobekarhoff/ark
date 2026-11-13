@@ -18,6 +18,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -10260,6 +10261,16 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
     "step.jsonl",
     transcriptText("omp", { cwd, start: new Date(stepStart), extra }),
   );
+  // A second file of the same step, written after the first one ended (a rework round).
+  const lateStart = started.getTime() + 400_000;
+  writeSessionFile(
+    sessions,
+    "step-late.jsonl",
+    transcriptText("omp", { cwd, start: new Date(lateStart), extra }),
+  );
+  // A file's window ends at its last write: close the first step file before the second begins.
+  const stepEnd = new Date(stepStart + 30_000);
+  utimesSync(join(sessions, "step.jsonl"), stepEnd, stepEnd);
   installFakeTools({});
   const baseUrl = await launch();
 
@@ -10295,6 +10306,9 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
       delivered_at: null,
     }),
     messageOf("from-worker", worker.id, "lead", stepSent, { subject: "Step done" }),
+    messageOf("from-worker-late", worker.id, "lead", lateStart + 22_200, {
+      subject: "Round two done",
+    }),
     messageOf("from-ghost", ghost.id, "lead", leadSent + 40 * 60_000, { subject: "Who am I" }),
   ];
   const page = await conversationPage(browser);
@@ -10394,6 +10408,16 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
   await expect(nearestRow).toContainText("extra c");
   await page.goBack();
 
+  // A step with a second session file (a rework round): the button opens the file that holds the sent time.
+  await select("from-worker-late");
+  await inspector.getByTestId("inspector-transcript-from").click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${run}/step/work\\?at=`));
+  await expect(page.getByTestId("transcript-file")).toHaveCount(2);
+  await expect(page.getByTestId("transcript-file").nth(1)).toHaveAttribute("aria-pressed", "true");
+  // The first file's last entry is "extra c": only the second file's entry at 22 s is "extra b".
+  await expect(nearestRow).toContainText("extra b");
+  await page.goBack();
+
   // A sender with no session file: its button is disabled; the receiver's still works.
   await select("from-ghost");
   await expect(inspector.getByTestId("inspector-transcript-from")).toBeDisabled();
@@ -10407,7 +10431,7 @@ test("ARK-T344 the inspector shows a selected question with sent, delivered, wai
   await expect(inspector.getByTestId("inspector-steps")).toContainText(
     `work ${clockOf(started.getTime() + 60_000)}–${clockOf(started.getTime() + 600_000)}`,
   );
-  await expect(inspector.getByTestId("inspector-counts")).toHaveText("1 sent, 0 received");
+  await expect(inspector.getByTestId("inspector-counts")).toHaveText("2 sent, 0 received");
   await expect(inspector.getByTestId("inspector-cost")).toHaveText("$1.50");
   await expectReadableInBothThemes(page);
 });
