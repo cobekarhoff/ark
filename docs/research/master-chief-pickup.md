@@ -1,6 +1,8 @@
 # Why Master Chief reads some messages late
 
-ARK-347 spike. Measurement and recommendation only: no product code, playbook or setting changed.
+> Spike report, measured 2026-11-07. A snapshot, not current behavior. Outcome: Fix 1 shipped as ARK-352, so `skills/ark/playbooks/chief.md` now says to never use the blocking `ask` tool for a gate. The note below that `chief.md` still tells Master Chief to `--ack` is obsolete.
+
+ARK-347 spike. Measurement and recommendation only: the spike itself changed no product code, playbook or setting.
 
 ## Summary
 

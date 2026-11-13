@@ -1,5 +1,7 @@
 ---
 status: accepted
+date: 2026-11-05
+supersedes: ADR 0006
 ---
 
 # Test cases describe the product, and an AC is proven through them
