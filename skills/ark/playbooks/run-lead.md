@@ -201,13 +201,66 @@ For a project app, start `portless <project> --app-port <port> <command>` and st
 
 1. Read the workspace in `ark.yml`. It is one repo or a meta-repo.
    - Find the repos: every folder with a `.git` within four levels, except `node_modules`. A repo is named by its path from the workspace, such as `repos/platform`. A single-repo workspace has one repo, named `.`.
-   - Read the root context: `AGENTS.md`, `CLAUDE.md`, `README.md`, `knowledge/`, the compose file.
+   - Gather the repo context: follow `### Gather the context` below.
    - Read the ticket and each AC. Decide which repos the ticket changes.
-   - For a ticket that touches 2 or more repos, find each repo edge from the workspace before you write the plan. A repo edge says that one repo builds against another. Look in `.gitmodules` for submodules, in the package manifests (`package.json`, `pyproject.toml`, `go.mod`) for package pins, in the compose file for services, and in schemas or clients for APIs. ark does not parse manifests: you read them. Write each edge with its evidence, the file and line that show it.
+   - For a ticket that touches 2 or more repos, find each repo edge before you write the plan: follow `### Find the repo edges` below. ark does not parse manifests: you read them. Write each edge with its evidence, the file and line that show it.
    - For each submodule or package edge that the ticket changes upstream, add one bump step in the downstream repo. A bump step is an implementer step that moves the pin to the new upstream commit or version.
      - Tell the bump step what to write. Submodule edge: point the submodule at the upstream branch head, and the MR body says "the pointer moves after !N merges". Package edge: keep the old pin, and the MR body says "the pin moves after !N merges and publishes". `!N` is the upstream MR number.
+     - Package edge in a project with `merge_requests: none`: the run cannot publish a version, so a registry pin cannot move. The bump step points the dependency at the upstream worktree with a path source and updates the lock file. For uv: `[tool.uv.sources] <package> = { path = "<relative path to the upstream worktree>" }`, then `uv lock`. Other package tools have no stated form: ask the human at the criteria gate if it is still open, otherwise with `orca orchestration ask` to Master Chief, and wait. The hand-off report says `swap to ==<version> after publish` for that bump (section 11, step 3). A project with merge requests keeps the rule above.
 2. Read `$ARK_HOME/projects/<project>/learnings.md` if it exists. It holds lessons from earlier runs. Apply each one that fits this ticket: for example, a step layout to avoid, a test case to add, or a model to choose. Note each one you apply, and each one you decide does not fit and why, for section 4.
 3. Look for work that overlaps this ticket in the project's recent MRs, open and merged: `gh pr list --state all --limit 10` (`glab mr list` on GitLab). When `ark.yml` says `merge_requests: none`, skip `gh pr list` and `glab mr list`: the project has no MRs to read. Note each overlapping file or concept in the plan `summary`, so that two runs do not build the same thing.
+
+### Gather the context
+
+The ticket comes from a product owner. It names a behavior, a product and a release. It does not name repos, files, edges or an order. You find them. Do these steps before `### Find the repo edges`.
+
+1. **Find the workspace kind.**
+   - A single repo: `ark.yml` `repos` has only `.`, and no folder within four levels below the root, except `node_modules`, has a `.git`. Read its `AGENTS.md`, `CLAUDE.md`, `README.md` and manifests. Find the modules with a search. There are no repo edges; skip `### Find the repo edges`.
+   - An agentic environment: the root holds the knowledge and the agent setup, and the product code is in nested repos (`repos/<x>` or `repos/<group>/<x>`). Signs: a `knowledge/` folder with a master reference (for example `knowledge/00-master-reference.md` or `knowledge/01-quick-reference.md`), analysis and planning skills in `.claude/skills/`, and many `.git` folders below `repos/`.
+2. **Read the environment's own method.** Read the root `AGENTS.md` and `CLAUDE.md`. Find the analysis and planning skills in `.claude/skills/` (for example `analyze`, `plan`, `factory-analyze`, `factory-plan`). Read them in full, and read each knowledge file that they name for repo selection and order. Use their lookup steps: keyword tables, glossary, product-to-repo maps, change-type patterns. Do not do their steps that call Jira, create subtasks, write to `.claude/scratch/`, push or open MRs. Ark owns those. A project has Jira when `.mcp.json` or `AGENTS.md` says so.
+3. **Translate the ticket.** For each domain word in the ticket, find it in the glossary or keyword table, then the product, the component and the candidate repos. Record each candidate with the file and line that names it, and a confidence.
+4. **Choose the base.** The ticket's release (the Jira Fix Version, or the release it names) sets the base of an application repo, for example `release/10.0.0`. A library repo uses `main`, unless the environment's skill says otherwise. Compare with `repos.<repo>.base` in `ark.yml`. When they differ, ask the human at the criteria gate if it is still open, otherwise with `orca orchestration ask` to Master Chief, and wait.
+5. **Confirm each candidate in the code.** Run `git -C <repo> fetch origin <base>`, then search at the base: `git -C <repo> grep -n <term> origin/<base>`. When the fetch fails (for example a project with `merge_requests: none` and no reachable origin), record that in the plan `summary` and search the local ref: `git -C <repo> grep -n <term> <base>`. Remove a candidate with no match. Add a repo that the search finds and the docs do not name. Record a wrong or missing doc as a learning.
+6. **Compare with the expected order.** The environment's pattern docs give an expected repo order. `### Find the repo edges` proves the real edges. When they disagree, the edges win. Record the difference as a learning.
+7. **Ask when it is not clear.** When a word maps to 2 products, or a candidate stays at low confidence, ask the human at the criteria gate if it is still open, otherwise with `orca orchestration ask` to Master Chief, and wait. Do not guess.
+
+### Find the repo edges
+
+Do these steps for each ticket that changes 2 or more repos. Do them before you write the plan. Read the files. Do not guess from repo names.
+
+1. **Make the repo identity table.** For each repo in the workspace, record:
+   - The path, for example `repos/qcmetrics-db-models`.
+   - The origin URL: `git -C <repo> remote get-url origin`.
+   - Each package name that the repo publishes. Read `[project].name` and `[tool.poetry].name` in each `pyproject.toml`, `name` in each `package.json`, and `module` in `go.mod`. Read every manifest in the repo, not only the root one.
+   - The version source: a static `version`, `dynamic = ["version"]` with `source = "vcs"`, or `poetry-dynamic-versioning`. For a dynamic version, record the newest tag: `git -C <repo> tag --sort=-creatordate`.
+2. **Find the submodule edges.** For each repo, read its own `.gitmodules`. A nested repo can have one, also when the workspace root has none.
+   - For each entry, match `url` to an origin URL in the identity table. Resolve a relative URL (`../x`) against the origin URL of the repo that holds it. If the URLs differ only in `.git` or in the protocol, they match.
+   - Run `git -C <repo> submodule status`. Record the gitlink commit as the pin. A `-` prefix means not initialized. The edge is still real.
+   - Record the evidence as `<repo>/.gitmodules:<line of path =>`.
+3. **Find the package edges.** For each package name in the identity table, search every manifest of every other repo. Exclude `.venv`, `node_modules` and submodule folders. Look in these places:
+   - `pyproject.toml`: `[project].dependencies`, `[project.optional-dependencies]`, `[dependency-groups]`, `[tool.poetry.dependencies]` and `[tool.poetry.group.*.dependencies]`.
+   - `requirements*.txt`.
+   - `package.json`: `dependencies`, `devDependencies` and `peerDependencies`.
+   - `go.mod`: `require` and `replace`.
+
+   For each match, read the source of the dependency. Read `[tool.uv.sources]`, `[[tool.poetry.source]]`, the `source =` key or the URL in the line.
+
+4. **Classify the package source.** Use this table:
+
+   | Source                                             | Kind        | Pin to record                                                                             |
+   | -------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------- |
+   | A registry index (PyPI, GitLab, CodeArtifact, npm) | `package`   | The version spec, for example `==0.3.0`, and the resolved version from the lock file line |
+   | A git URL                                          | `package`   | The git ref or commit in the URL                                                          |
+   | A path into a submodule folder of the same repo    | `submodule` | The gitlink of that submodule (step 2). Do not record a second `package` edge             |
+   | A path to a sibling repo in the workspace          | `package`   | The path                                                                                  |
+   | A workspace member of the same repo                | No edge     | None                                                                                      |
+
+5. **Find the compose edges.** Read each compose file. A service whose `build.context` or volume is in another repo is a `compose` edge. Record the service name and the line.
+6. **Find the api edges.** A repo that calls another repo's HTTP or event API, or reads its message schema, with no build pin, has an `api` edge. Look for client base URLs, topic names and copied schema files. An `api` edge has no bump step.
+7. **Check that the edge is live for this ticket.** Search the downstream repo for the imports or calls of the upstream code that the ticket changes. Record one `file:line`. When the downstream does not use the changed code, keep the edge for the merge order, but add no bump step.
+8. **Follow the chain.** When the ticket also changes the downstream repo, do steps 2 to 7 again with that repo as the upstream. A submodule inside a submodule makes a chain: each level needs its own bump step, in its own repo, upstream first.
+9. **Choose one kind for each edge.** When two kinds show the same pair of repos, use this order: `submodule`, then `package`, then `compose`, then `api`. When one package is pinned in several manifests of the same repo, write one edge with all evidence lines and one bump step that changes all of them.
+10. **Write the edge.** Write `repo`, `kind`, `pin` and `evidence` in the `repos` block. Write `bump` for each `submodule` or `package` edge that the ticket changes upstream and that step 7 found live.
 
 ## 4. Write the plan
 
@@ -599,7 +652,7 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 
 1. Run `ark retro <run>`. It writes `<run folder>/metrics.json`.
 2. Write `<run folder>/retro.md` on top of those numbers. Read `playbooks/retro.md` and follow "Part 1: Write retro.md", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
-3. Send your final report to Master Chief. For a `none` project, list the branches from `ark status <run>` in place of MR links, and list each pending bump with the value it needs (the `pending bump` lines). Use the exact `worker_done` command in your Orca preamble. Use `--outcome succeeded`, and write three sentences: what changed, the MR links in the order to merge them (for a `none` project, the branches from `ark status <run>` in place of MR links, and each pending bump with its needed value), and what remains for the human. Use `--outcome failed` if the human aborted or you could not finish, and say why.
+3. Send your final report to Master Chief. For a `none` project, list the branches from `ark status <run>` in place of MR links, and list each pending bump with the value it needs (the `pending bump` lines). Also list each `package` bump that wrote a path source (find them in the plan `repos` block): `ark status` drops a bump that succeeded, so write `<package>: swap to ==<version> after publish` for each. Use the exact `worker_done` command in your Orca preamble. Use `--outcome succeeded`, and write three sentences: what changed, the MR links in the order to merge them (for a `none` project, the branches from `ark status <run>` in place of MR links, and each pending bump with its needed value), and what remains for the human. Use `--outcome failed` if the human aborted or you could not finish, and say why.
 4. End your turn and idle.
 
 ## Rules
