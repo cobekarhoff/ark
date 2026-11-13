@@ -6,7 +6,7 @@ technique: equivalence classes (accepted shape vs refused shape), example extrac
 priority: medium
 risk: the playbook example of an analysis evidence section or of a `Not in plan` line is shaped so the real check refuses it (wrong heading level, empty Base or Head, wrong separator, reason in a later Merge risk block), so a lead who copies it is refused by `ark merge-request open` anyway
 status: active
-changed_by: 2026-11-11-ARK-421-1
+changed_by: 2026-11-13-ARK-430-1
 ---
 
 ## Objective
@@ -33,7 +33,7 @@ Prove that the example sections that section 8 of `skills/ark/playbooks/run-lead
 - Where step 2 applies, the same-level Base heading shall report `section "<name>" has no Base`.
 - The control with the example's Base paragraph removed shall report `section "<name>" has no Base`.
 - The example `Not in plan` line in the first block shall give the file a reason, and RISK04 shall not fail.
-- The same line in a second block shall be ignored, and RISK04 shall fail with `no reason given`, so the playbook's statement that the lint reads the first block is true.
+- The same line in a second block shall be ignored, and RISK04 shall fail with the message `an unplanned file has no reason`, naming the file, the `Not in plan:` line and the findings file `findings/<step>.md`, so the playbook's statement that the lint reads the first block is true.
 
 ## Screenshot checkpoints
 

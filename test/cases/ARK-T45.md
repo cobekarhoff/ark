@@ -4,9 +4,9 @@ title: ARK-T45 merge risk block shows script and reviewer levels
 level: integration
 technique: boundary values on the weighted mean (1.5 and 2.25, on legal score tuples either side), isolated category inputs, and a decision table on level disagreement and reviewer file order
 priority: high
-risk: the risk level is wrong at a threshold, a category is scored from the wrong input, an older reviewer file is read, the lower reviewer level hides a higher script level, the unplanned file lacks its reason, or the door and blast radius lines are missing
+risk: the risk level is wrong at a threshold, a category is scored from the wrong input, an older reviewer file is read for the level, the lower reviewer level hides a higher script level, the unplanned file lacks its reason because only the latest findings file was read, or the door and blast radius lines are missing
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-13-ARK-430-1
 ---
 
 ## Objective
@@ -19,7 +19,7 @@ Expected: When the script and reviewer levels differ, the system shall show the 
 
 - Weighted mean = (2·Verification + 2·Impact + 1.5·Rollback cost + Alignment) / 6.5. Only multiples of 1/13 are reachable, so 1.5 and 2.25 themselves are not; the legal tuples either side of each threshold are used. Tuples are (Verification, Impact, Rollback cost, Alignment).
 - Main fixture run: one file in the diff that no `plan.yml` step lists under `where:` (`cli/helpers.ts`), one unlisted file under `test/` and one under `docs/`, one `sensitive_paths` hit (`cli/gate.ts`), one `one_way_paths` hit (`cli/events.ts`), a deleted file, `design.interfaces` callers, all ACs passing with evidence for each.
-- Reviewer files: `findings/review-1.md` (older) with a `## Merge risk` block of level `high`; `findings/review-2.md` (latest) with a block of level `low` and a reason for `cli/helpers.ts`.
+- Reviewer files: `findings/review-1.md` (older) with a `## Merge risk` block of level `high` and the reason line `Not in plan: cli/helpers.ts — <reason>`; `findings/review-2.md` (latest) with a block of level `low` and no line for `cli/helpers.ts`.
 - Category inputs used by this case (the oracle for scores; each row changes one input of a baseline run with all ACs passing and evidenced, no unplanned file, no sensitive hit, no `design.interfaces` callers, no one-way hit, no deleted file, which scores 1/1/1/1):
   - Verification: all ACs passing with evidence = good (1); all passing, one AC without evidence = decent (2); one AC not passing = poor (3).
   - Alignment: 0 unplanned source files = good (1); 1 = decent (2); 3 = poor (3). Files under `test/` and `docs/` do not count.
@@ -50,7 +50,7 @@ Expected: When the script and reviewer levels differ, the system shall show the 
 - One bullet each for Verification, Alignment, Impact and Rollback cost, with the gaps. Scores are `good` 1, `decent` 2, `poor` 3.
 - `Door: one-way` appears for the `one_way_paths` hit and names its recovery. `Door: two-way` appears for a run without a hit.
 - `Blast radius: <phrase>` is present.
-- `Also changed, not in plan:` lists `cli/helpers.ts` with the reason from the reviewer block, and does not list the files under `test/` or `docs/`.
+- `Also changed, not in plan:` lists `cli/helpers.ts` with the reason from `review-1.md` (every reviewer findings file is read, so the latest file need not repeat it; no `no reason given` marker), and does not list the files under `test/` or `docs/`.
 - `bun test test/pr-writing.test.ts` exits 0.
 
 ## Screenshot checkpoints
