@@ -2,7 +2,7 @@
 id: ARK-T328
 title: "ARK-T328 an untouched file that fails at the run's head and passes at the tip of the target branch still fails the run and prints no red on main line"
 level: integration
-technique: equivalence class (untouched, passes on main) with a state-change cause: a helper changed by the run
+technique: "equivalence class (untouched, passes on main) with a state-change cause: a helper changed by the run"
 priority: high
 risk: every untouched failure is treated as red on main, so a run that breaks a file through a changed helper merges with a broken test
 status: active
