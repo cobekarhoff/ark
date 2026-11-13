@@ -14,8 +14,9 @@ import {
 } from "./orca.ts";
 import { cpus } from "node:os";
 import { holdReasons, readHost } from "./host.ts";
+import { servicesStatusText } from "./services.ts";
 import { readTestLock } from "./test-lock.ts";
-import { listProjects, projectDirectory, runsDirectory } from "./paths.ts";
+import { projectDirectory, resolveProject, runsDirectory } from "./paths.ts";
 
 type OrcaRunRow = { id: string; objective?: string; coordinator_handle?: string };
 /** A `worker-list --json` row. A structured worker has `liveness: "unverifiable"` and no terminal handle; its `workspace` is `<host>::<run folder>/workspace`. */
@@ -23,14 +24,6 @@ type WorkerRow = { dispatchId: string; terminal?: string; workspace?: string };
 
 const unavailable = (verb: string, reason: string): string =>
   `unavailable: orca orchestration ${verb} failed: ${reason}`;
-
-function resolveProject(project: string | undefined): string {
-  const chosen = project ?? process.env.ARK_PROJECT;
-  if (!chosen)
-    throw new ArkError("cannot tell the project: pass --project <name> or set ARK_PROJECT");
-  if (!listProjects().includes(chosen)) throw new ArkError(`project ${chosen} does not exist`);
-  return chosen;
-}
 
 function table(headers: string[], rows: string[][]): string {
   const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
@@ -170,6 +163,8 @@ export async function chiefState(inProject?: string): Promise<void> {
       .join(", ")}`,
     `- concurrency: ${config.concurrency} (${openRuns.length} open)`,
   );
+
+  sections.push("## Services", servicesStatusText(project));
 
   const interviews = join(projectDirectory(project), "interviews");
   const lastInterview = existsSync(interviews)
