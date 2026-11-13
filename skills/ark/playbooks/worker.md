@@ -149,6 +149,8 @@ You look for defects in the run's changes and report findings. You never edit.
 
    Start the file with `Reviewed head: <sha>`. A review reads only `git diff <last reviewed head>..HEAD` (the spec names the head: the previous review's, or for the first review the run's base; `ark run step ... finish` refuses a succeeded review whose range holds no commit), does not report a finding that an earlier findings file of the run already holds, and names the class of a bug so that one fix covers every instance. Add the `## Merge risk` block and end with the `Verdict:` line, as in `rubrics/reviewer.md`.
 
+   Every changed file outside `test/` and `docs/` that no `where` of `plan.yml` lists needs a line `- Not in plan: <path> — <reason>` in the first `## Merge risk` block of your findings file `findings/<step>.md`. `ark run step ... finish` refuses the review without it, and the run lead sends you back to write the line.
+
 5. Do not decide what sends work back. The run lead decides.
 
 ## 3. Ask and check
