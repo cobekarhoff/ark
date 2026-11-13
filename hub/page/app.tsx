@@ -177,7 +177,7 @@ function Shell() {
       <main id="main" tabIndex={-1} data-frozen={frozen || undefined}>
         {route.view === "home" ? <Home /> : null}
         {route.view === "runs" ? <Runs /> : null}
-        {route.view === "run" ? <Run run={route.run!} sub={route.sub} /> : null}
+        {route.view === "run" ? <Run run={route.run!} sub={route.sub} at={route.at} /> : null}
         {route.view === "roadmap" ? <Roadmap /> : null}
         {route.view === "ticket" ? <TicketPage id={route.arg!} /> : null}
       </main>
