@@ -107,10 +107,10 @@ function MessageView({
   const waited = question?.answered
     ? (Date.parse(question.answered) - Date.parse(question.delivered ?? question.sent ?? "")) / 1000
     : NaN;
-  const thread =
-    message.thread_id === null
-      ? []
-      : conversation.messages.filter((candidate) => candidate.thread_id === message.thread_id);
+  const threadId = message.thread_id ?? message.id;
+  const thread = conversation.messages.filter(
+    (candidate) => candidate.id === threadId || candidate.thread_id === threadId,
+  );
   const body = useBody(message);
   return (
     <>
