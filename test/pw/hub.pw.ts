@@ -8559,6 +8559,7 @@ test("ARK-T281 Full screen shows the one graph in a dialog over the window at fi
     if (kind.key === "ticket") {
       // The page behind does not scroll under the wheel.
       await show();
+      await finiteAnimationsEnded(page); // a view transition in flight would take the scroll position
       await page.evaluate(() => window.scrollTo(0, 120));
       await openOverlay();
       await page.mouse.move(720, 450);
