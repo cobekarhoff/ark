@@ -200,6 +200,7 @@ export function Criteria({
         return (
           <li
             key={criterion.id}
+            id={`crit-${criterion.id}`}
             className={warn ? "flag" : undefined}
             data-testid="ticket-criterion"
             data-id={criterion.id}

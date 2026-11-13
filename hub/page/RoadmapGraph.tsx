@@ -1,4 +1,5 @@
 import { layoutGraph, roundedPath, type GraphInput } from "./roadmap-graph.ts";
+import { GraphViewport } from "./GraphViewport.tsx";
 import { StatusChip, type RoadmapData, entryOf } from "./RoadmapParts.tsx";
 import { ticketHref } from "./store.tsx";
 import type { RoadmapMilestone } from "../roadmap.ts";
@@ -68,7 +69,12 @@ export function RoadmapGraph({
     };
   const boxOf = new Map(graph.nodes.map((entry) => [entry.id, entry.box]));
   return (
-    <div className="rm-graph-scroll">
+    <GraphViewport
+      width={graph.width}
+      height={graph.height}
+      label="Open tickets by milestone"
+      scrollClass="rm-graph-scroll"
+    >
       <div
         className="rm-graph"
         style={{ width: graph.width, height: graph.height }}
@@ -168,6 +174,6 @@ export function RoadmapGraph({
           );
         })}
       </div>
-    </div>
+    </GraphViewport>
   );
 }
