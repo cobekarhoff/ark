@@ -137,6 +137,23 @@ function unfenced(body: string): { text: string; number: number }[] {
   return lines;
 }
 
+/** `unfenced` lines minus each `<details>` block, open to its matching close. An unclosed block hides nothing. */
+function outsideDetails(lines: { text: string; number: number }[]) {
+  const hidden = new Set<number>();
+  let depth = 0;
+  let start = 0;
+  lines.forEach((line, index) => {
+    const opens = (line.text.match(/<details[\s>]/gi) ?? []).length;
+    const closes = (line.text.match(/<\/details>/gi) ?? []).length;
+    const before = depth;
+    if (before === 0 && opens > 0) start = index;
+    depth = Math.max(0, before + opens - closes);
+    if (depth === 0 && (before > 0 || opens > 0))
+      for (let at = start; at <= index; at++) hidden.add(at);
+  });
+  return lines.filter((_, index) => !hidden.has(index));
+}
+
 const isProse = (line: string) =>
   line.trim() !== "" &&
   !isHeading(line) &&
@@ -294,7 +311,7 @@ const ceilings = [3, 12, 40, 150];
 
 const SIZE01: Check = ({ body, ledger, raise }) => {
   const { tier, reason } = tierOfLedger(ledger, raise);
-  const count = unfenced(body).filter((line) => isProse(line.text)).length;
+  const count = outsideDetails(unfenced(body)).filter((line) => isProse(line.text)).length;
   return count > ceilings[tier]
     ? fail(`${count} prose lines, tier ${tier} allows ${ceilings[tier]} (${reason})`)
     : pass(`${count} prose lines, tier ${tier} allows ${ceilings[tier]}`);
@@ -304,7 +321,7 @@ const SIZE02: Check = ({ body, ledger, raise }) => {
   const { tier } = tierOfLedger(ledger, raise);
   if (tier !== 0) return skip(`tier ${tier} may have headings`);
   if (ledger.template !== null) return skip("the repo template names the headings");
-  const heading = unfenced(body).find((line) => isHeading(line.text));
+  const heading = outsideDetails(unfenced(body)).find((line) => isHeading(line.text));
   return heading
     ? fail(`tier 0 has no headings: line ${heading.number} is "${heading.text.trim()}"`)
     : pass("no headings at tier 0");
@@ -491,7 +508,7 @@ const RISK04: Check = ({ body, ledger }) => {
 const FMT01: Check = ({ body }) => {
   const paragraphs: { text: string; number: number }[][] = [];
   let current: { text: string; number: number }[] = [];
-  for (const line of unfenced(body)) {
+  for (const line of outsideDetails(unfenced(body))) {
     if (isProse(line.text)) current.push(line);
     else {
       if (current.length > 0) paragraphs.push(current);
