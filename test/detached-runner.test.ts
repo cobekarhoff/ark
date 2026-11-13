@@ -1168,7 +1168,27 @@ describe("ark test red on main", () => {
     const result = await arkDone(fixture, "test", fixture.runId);
     expect(result.code).toBe(1);
     expect(redOnMainLine(result.out, "test/red.test.ts")).toBe(false);
-    expect(result.out).toContain("not checked on main");
+    expect(result.out).toContain("not red on main");
+    const event = completedEvents(fixture).at(-1);
+    expect(event.passed).toBe(false);
+    expect(event.red_on_main).toBeUndefined();
+  });
+
+  test("ARK-T339 a file where a test that failed at head passes at the tip still counts, although another test of it is red on main", async () => {
+    const fixture = makeFixture({ forge: true, suites: () => [wholeSuite()] });
+    // test "a" fails at head and main passes it; test "mixed" fails at head and at the tip
+    commitFiles(fixture.workspace, {
+      "test/mixed.test.ts": `${sidedFile(fixture.directory, "mixed", redBody)}test("a", () => { if (side === "head") throw new Error("broken by the run"); });\n`,
+    });
+    git(fixture.workspace, "push", "origin", "HEAD:refs/heads/main");
+    Object.assign(fixture, fixture.startRun("DET-2"));
+    commitSided(fixture, fixture.mirrorOf("."), { other: "" });
+
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code).toBe(1);
+    expect(sideStarts(fixture, "mixed", "main")).toBe(1);
+    expect(redOnMainLine(result.out, "test/mixed.test.ts")).toBe(false);
+    expect(result.out).toContain("not red on main");
     const event = completedEvents(fixture).at(-1);
     expect(event.passed).toBe(false);
     expect(event.red_on_main).toBeUndefined();

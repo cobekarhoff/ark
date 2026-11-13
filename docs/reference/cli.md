@@ -403,20 +403,22 @@ suite, unless the file is red on main. A file that still fails after its retry a
 own commits did not touch (first-parent, no merge commits: a file that came in through `ark worktree
 sync` is untouched) runs once through `base_command` at the tip of the target branch (`git fetch
 origin`, then `origin/<target>`, in a throwaway `git clone --shared` made like the base checkout,
-with `setup` and compose). When it fails there too, the output prints a line that starts with `red
-on main` and names the file, `test.completed` lists it in `red_on_main` (omitted when empty and in a
-quick run), and the file is not counted as a failure: `passed` is true when that is the only
-failure, so it spends no round, opens no escalation gate and does not block `ark merge-request
-open`. A file that fails twice at head and once on main is red on main. A touched file that fails is
-never run on main and always counts. A suite with no `base_command`, a failed test whose report
-names no file, a repo with no `origin` and a failed `git fetch origin` are not retried or not
-checked on main: the failure counts and the output says `not checked on main`. A test case tagged in
-a red on main file still reads `failing`. A reused suite replays its `red on main` line from the
-cache, which does not hold the main tip. It prints `tests <passed> passed, <skipped> skipped (base
-<n>), <deleted> deleted` and one `deleted <file> <title>` line for each test the base has and the
-head lacks, and records `passed_count`, `skipped`, `base_skipped` and `deleted` (a list of `{ file,
-name }`) in test.completed; the counts cover every test, not only the ones with a test case ID, and
-the MR body shows them. The base side comes from a census: before the base run, on the same base
+with `setup` and compose). When each test that failed at head also fails there (matched by name),
+the output prints a line that starts with `red on main` and names the file, `test.completed` lists
+it in `red_on_main` (omitted when empty and in a quick run), and the file is not counted as a
+failure: `passed` is true when that is the only failure, so it spends no round, opens no escalation
+gate and does not block `ark merge-request open`. A file that fails twice at head and once on main
+is red on main. A touched file that fails is never run on main and always counts. A suite with no
+`base_command`, a failed test whose report names no file, a repo with no `origin` and a failed `git
+fetch origin` are not retried or not checked on main: the failure counts and the output says `not
+checked on main`. A file that ran at the tip but has a head-failing test that does not fail there
+(it passes, or the file is gone) counts and prints `not red on main`. A test case tagged in a red on
+main file still reads `failing`. A reused suite replays its `red on main` line from the cache, which
+does not hold the main tip. It prints `tests <passed> passed, <skipped> skipped (base <n>),
+<deleted> deleted` and one `deleted <file> <title>` line for each test the base has and the head
+lacks, and records `passed_count`, `skipped`, `base_skipped` and `deleted` (a list of `{ file, name
+}`) in test.completed; the counts cover every test, not only the ones with a test case ID, and the
+MR body shows them. The base side comes from a census: before the base run, on the same base
 checkout and before the head's test files are copied in, a suite with `base_files` runs the run's
 own test files that exist at base, and any other suite runs whole (replayed from the cache when its
 key is stored). Its logs go to `results/census/`, and the base run's own results never feed the

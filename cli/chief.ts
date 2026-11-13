@@ -159,6 +159,9 @@ export async function chiefState(inProject?: string): Promise<void> {
         [
           rows.length === 0 ? "" : table(["Run", "Dispatch", "Terminal"], rows),
           ...leadless.map((state) => `Note: open run ${state.run} has no live run lead.`),
+          ...unreadable.map(
+            (run) => `Note: run ${run} cannot be read, so its run lead cannot be matched.`,
+          ),
         ]
           .filter(Boolean)
           .join("\n\n") || "none";
@@ -188,7 +191,7 @@ export async function chiefState(inProject?: string): Promise<void> {
     `- gates: ${Object.entries(config.gates)
       .map(([gate, answerer]) => `${gate}: ${answerer}`)
       .join(", ")}`,
-    `- concurrency: ${config.concurrency} (${openRuns.length} open)`,
+    `- concurrency: ${config.concurrency} (${openRuns.length} open${unreadable.length > 0 ? `, ${unreadable.length} unreadable: ${unreadable.join(", ")}` : ""})`,
   );
 
   sections.push("## Services", servicesStatusText(project));

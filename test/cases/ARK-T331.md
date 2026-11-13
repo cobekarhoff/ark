@@ -26,7 +26,7 @@ Prove that `ark chief state` shows the red on main files of each run exactly as 
 ## Expected results
 
 - Step 1: the section holds one row per file with the run id: `<run A> red.test`, `<run A> other.test`, each once; no row for run B or run C; the quick run does not remove A's rows. A state with no red on main file anywhere prints `none` or no section, in the form of the other sections of `test/chief.test.ts`.
-- Step 2: the section reads `unavailable`, not an empty list.
+- Step 2: the section reads `unavailable`, not an empty list. The Config concurrency line counts the unreadable run (`N open, 1 unreadable: <run A>`) and the Run leads section holds a note for it.
 
 ## Screenshot checkpoints
 

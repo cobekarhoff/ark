@@ -294,6 +294,10 @@ test("ARK-T331 chief state lists each red on main file with its run id once, fro
   expect(section(broken.out, "Red on main")).toContain("unavailable");
   expect(section(broken.out, "Open runs")).toContain(`unavailable: events of ${openRun}`);
   expect(section(broken.out, "Interview")).toContain("unavailable");
+  expect(section(broken.out, "Run leads")).toContain(`run ${openRun} cannot be read`);
+  expect(section(broken.out, "Config")).toMatch(
+    new RegExp(`concurrency: \\d+ \\(\\d+ open, 1 unreadable: ${openRun}\\)`),
+  );
 });
 
 test("ARK-T297 chief state prints the services block of ark services status, with the pid of a running one and the last log line", () => {

@@ -486,7 +486,7 @@ async function runSuite(
       const checked =
         reason !== null
           ? { reason }
-          : await mainCheck.check(suite, [...new Set(stillFailed.map((result) => result.file!))], {
+          : await mainCheck.check(suite, stillFailed, {
               scratch,
               tmp: suiteTmpdir,
               cores: taken.cores,
@@ -498,7 +498,7 @@ async function runSuite(
         redOnMain.push(...checked.red);
         for (const file of checked.unchecked)
           console.log(
-            `suite      ${suite.name} head  not checked on main  (${file} does not fail at the tip)`,
+            `suite      ${suite.name} head  not red on main  (${file}: not every test that failed at head fails at the tip)`,
           );
         output += checked.log;
         log += checked.log;
@@ -778,10 +778,10 @@ async function prepareCheckout(
 }
 
 type MainCheck = {
-  /** The files of `files` that the run did not touch and whose tests fail at the tip of the target branch (`red`), the ones the tip run did not show failing, e.g. renamed or deleted there (`unchecked`), and the command log; or why none was checked. */
+  /** The files of the `failed` tests that the run did not touch and in which every test that failed at head also fails at the tip of the target branch, matched by name (`red`), the other files, e.g. renamed or deleted there, or with a test that passes there (`unchecked`), and the command log; or why none was checked. */
   check(
     suite: Suite,
-    files: string[],
+    failed: TestResult[],
     env: { scratch: string; tmp: string; cores: number; reportBase: string },
   ): Promise<{ red: string[]; unchecked: string[]; log: string } | { reason: string }>;
   close(): Promise<void>;
@@ -791,7 +791,7 @@ type MainCheck = {
  * ARK-428: runs one test file at the tip of the target branch (`origin/<target>` after `git fetch origin`) in a lazy
  * throwaway checkout, made like the base checkout (`git clone --shared`, never a worktree; setup, compose). The
  * checkout appears on the first file to check and is removed by `close`. A file the run touched is never run
- * there. A file that fails there once is red on main, also when it was flaky at head.
+ * there. A file is red on main when each test that failed at head also fails there, matched by name, also when the file was flaky at head.
  */
 function mainCheckOf(
   config: ProjectConfig,
@@ -828,11 +828,13 @@ function mainCheckOf(
     }
   };
   return {
-    async check(suite, files, env) {
+    async check(suite, failed, env) {
       const base = baseSide(worktrees.find((worktree) => worktree.repo === suite.repo));
       if (base === undefined) return { reason: `the run has no base commit for ${suite.repo}` };
       const touched = await touchedPaths(base, join(mirror, suite.repo));
-      const candidates = files.filter((file) => !touched.has(file));
+      const candidates = [...new Set(failed.map((result) => result.file!))].filter(
+        (file) => !touched.has(file),
+      );
       if (candidates.length === 0) return { red: [], unchecked: [], log: "" };
       ready ??= prepare();
       const reason = await ready;
@@ -855,8 +857,12 @@ function mainCheckOf(
         const again = parsers[suite.parser]({ report, stdout: outcome.stdout });
         const separator = output === "" || output.endsWith("\n") ? "" : "\n";
         log += `main ${file}\n${command}\n${output}${separator}exit ${outcome.code}\n`;
-        if (again.some((result) => result.status === "failed" && result.file === file))
-          red.push(file);
+        const sameFailures = failed
+          .filter((result) => result.file === file)
+          .every((original) =>
+            again.some((result) => result.name === original.name && result.status === "failed"),
+          );
+        if (sameFailures) red.push(file);
         else unchecked.push(file);
       }
       return { red, unchecked, log };
