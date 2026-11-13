@@ -1,14 +1,16 @@
 # Reach the hub by a local name
 
+macOS only. This page uses launchd. On Linux, run `ark ui` directly and open `http://127.0.0.1:4317`.
+
 This page shows you how to open the Ark hub as `http://ark.localhost` instead of `http://127.0.0.1:4317`, and how to check and remove the names. The names are HTTP only: there is no certificate.
 
 ## What the names are
 
-| Name                      | What it serves                                      |
-| ------------------------- | --------------------------------------------------- |
-| `ark.localhost`           | The main hub, started at login by `ark ui install`. |
-| `hub.<slug>.localhost`    | The hub of one project, named by `<slug>`.          |
-| `<topic>.proto.localhost` | A prototype that a run lead starts for one topic.   |
+| Name                      | What it serves                                                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `ark.localhost`           | The main hub, started at login by `ark ui install`.                                                                        |
+| `hub.<slug>.localhost`    | A hub that a run lead starts from a run's worktree to check the change live. `<slug>` names that run, such as `ark-291-1`. |
+| `<topic>.proto.localhost` | A prototype that a run lead starts for one topic.                                                                          |
 
 A local proxy (`portless`) owns these names and sends each one to the port of the process that registered it.
 
@@ -31,13 +33,13 @@ ark ui install
 
 ```text
 Installed LaunchAgent dev.ark.proxy
-  plist:  ~/Library/LaunchAgents/dev.ark.proxy.plist
-  log:    ~/.ark/hub/proxy.log
+  plist:  /Users/you/Library/LaunchAgents/dev.ark.proxy.plist
+  log:    /Users/you/.ark/hub/proxy.log
 Installed LaunchAgent dev.ark.hub
-  plist:  ~/Library/LaunchAgents/dev.ark.hub.plist
+  plist:  /Users/you/Library/LaunchAgents/dev.ark.hub.plist
   hub:    http://127.0.0.1:4317
   name:   http://ark.localhost
-  log:    ~/.ark/hub/hub.log
+  log:    /Users/you/.ark/hub/hub.log
 The proxy starts at login. The hub starts at login and restarts after a crash. Both are running now.
 Remove them with: ark ui uninstall
 ```
@@ -50,7 +52,15 @@ If portless is not found, install writes only the plain hub agent, prints this l
 portless not found: the hub stays at http://127.0.0.1:4317
 ```
 
-Run `ark ui install` again after you install portless. A second run with the same settings changes nothing.
+Run `ark ui install` again after you install portless. A second run with the same settings changes nothing and prints:
+
+```text
+LaunchAgents dev.ark.proxy and dev.ark.hub are already installed. Nothing changed.
+  plist:  /Users/you/Library/LaunchAgents/dev.ark.proxy.plist
+  plist:  /Users/you/Library/LaunchAgents/dev.ark.hub.plist
+  hub:    http://127.0.0.1:4317
+  name:   http://ark.localhost
+```
 
 The hub may start before the proxy at login. This is accepted: portless then starts a proxy by itself, and the live check shows the result.
 
@@ -62,7 +72,15 @@ portless list
 curl -sf http://ark.localhost/api/snapshot
 ```
 
-`portless list` shows `ark.localhost`. A name that no route owns gets 404 from the proxy:
+`portless doctor` ends with `Summary: 0 failures, 0 warnings.` `portless list` shows `ark.localhost`:
+
+```text
+Active routes:
+
+  http://ark.localhost  ->  localhost:4317  (pid 45066) up 2h
+```
+
+The `curl` prints the hub's snapshot as JSON. A name that no route owns gets 404 from the proxy:
 
 ```sh
 curl -s -o /dev/null -w '%{http_code}' http://nope.localhost/
@@ -76,7 +94,17 @@ This prints `404`.
 ark ui uninstall
 ```
 
-This unloads and deletes both LaunchAgents. The hub stops and neither agent starts at login. The shared portless proxy keeps running, because it is a detached background process that launchd does not own. Stop it with `portless proxy stop`.
+This unloads and deletes both LaunchAgents. The hub stops and neither agent starts at login. The shared portless proxy keeps running, because it is a detached background process that launchd does not own. Stop it with `portless proxy stop`. Expected output:
+
+```text
+Removed LaunchAgent dev.ark.hub
+  plist:  /Users/you/Library/LaunchAgents/dev.ark.hub.plist (deleted)
+Removed LaunchAgent dev.ark.proxy
+  plist:  /Users/you/Library/LaunchAgents/dev.ark.proxy.plist (deleted)
+The hub is stopped and neither agent starts at login. The shared portless proxy keeps running until you run: portless proxy stop
+```
+
+With nothing installed it prints `LaunchAgents dev.ark.hub and dev.ark.proxy are not installed. Nothing changed.`
 
 ## Who can reach the proxy
 

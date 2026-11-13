@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: "accepted, amended by ADR 0007 and ADR 0009 (the Ark Console became a read-only hub)"
+date: 2026-10-29
 ---
 
 # Orca hosts and connects agents; Plannotator is the review surface
@@ -15,6 +16,6 @@ Master Chief, run leads and workers need their own sessions, a way to message ea
 ## Consequences
 
 - The Orca app or `orca serve` must be running. Bootstrap checks for it.
-- Two spikes tested the decision, and both passed (`docs/explanation/orca-spikes.md`). They showed that Orca's nesting depth must be set to 2, that Master Chief must run in an Orca terminal, and that a run folder must mirror its workspace.
-- The planned Ark Console is dropped unless Orca's UI falls short.
+- Two spikes tested the decision, and both passed ([Orca spikes](../research/orca-spikes.md)). They showed that Orca's nesting depth must be set to 2, that Master Chief must run in an Orca terminal, and that a run folder must mirror its workspace.
+- The planned Ark Console is dropped unless Orca's UI falls short. Amended by ADR 0007 and ADR 0009: the hub is that overview, and it is read-only.
 - Each gate has one place it is answered. The plan gate goes through Plannotator or chat. Criteria and escalation go through Master Chief, using Orca's `ask`.

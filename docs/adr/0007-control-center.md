@@ -1,12 +1,13 @@
 ---
-status: superseded in part by ADR 0008 and ADR 0009; the hub shows Home, Runs and Roadmap
+status: "superseded in part by ADR 0008 and ADR 0009. Still in force: three tools, three jobs. The name is now hub (ADR 0008); the hub is read-only again, with one action, Open in Orca (ADR 0009), and shows Home, Runs and Roadmap"
+date: 2026-10-30
 ---
 
 # A read-only control center gives the high-level view
 
 Orca shows agents and terminals, but not tickets, run phases, steps, waiting gates, test results or MRs. To see Ark as a whole, the human had to ask Master Chief or open many files. ADR 0005 dropped the planned Ark Console "unless Orca's UI falls short". On 2026-10-30 the human found that it falls short for the high-level view, while Orca stays the right place to watch an agent work.
 
-> ADR 0008 supersedes the read-only rule and the name "control center" in this ADR. The page is now the hub, and it steers agents through Master Chief. The rest stays: three tools, three jobs.
+> ADR 0008 renamed the control center to the hub and let it steer; ADR 0009 made it read-only again, with one action, "Open in Orca". The hub is that page now, and you steer through Master Chief. The rest stays: three tools, three jobs.
 
 ## Decision
 
@@ -24,5 +25,5 @@ Three tools, three jobs:
 ## Consequences
 
 - ADR 0005 stays accepted. Its line about the Ark Console is narrowed by this ADR to a read-only overview.
-- ADR 0002 is unchanged.
+- ADR 0004 governs trust. ADR 0002 and ADR 0003 are superseded.
 - `ark ui` adds a command to the CLI.

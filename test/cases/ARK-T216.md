@@ -20,6 +20,7 @@ Prove that the retro usage attribution gives each omp session file to exactly on
 - A scratch `ARK_HOME` with a run folder, `ticket.md`, `evaluation.md`, `plan.yml` and a git worktree. Every child process the case starts is killed in teardown, and the scratch folders are removed.
 - A fake session folder in `ARK_OMP_SESSIONS` with session files built by the test: restore case, one file with turns in both windows; fresh case, two files, one per window.
 - The run events from the start commands of cases 210 and 212 (the fake Orca), with each worker event's `session` path.
+- ARK-425: each `worker.started` records its `session`. Restore: both windows' events name the same file. Fresh: the second window's event names the second file; the first file starts before its `step.started`.
 
 ## Steps
 
@@ -31,6 +32,7 @@ Prove that the retro usage attribution gives each omp session file to exactly on
 
 - Restore: the usage shall list the file once, with one owner, and its tokens shall be counted once.
 - Fresh: the usage shall list two files, each with one owner, and no token shall be counted twice or dropped.
+- Restore with the session recorded in both windows: the file is listed once under the step, not doubled and not moved to Unassigned. Fresh: the later round's file maps to the step and the earlier round's file stays with its own round. This case owns restore and fresh attribution after ARK-425.
 - The `session` path of each worker event shall match a file in the fake session folder.
 
 ## Screenshot checkpoints
