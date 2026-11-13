@@ -3921,21 +3921,8 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
 const repoUrl = (repo: string, number: number) =>
   `https://github.com/example/${repo}/pull/${number}`;
 
-/** Polls `/api/run/<run>` until `ready` holds (the git facts of a repo graph come from a background read). */
-async function runDetailWhen(
-  baseUrl: string,
-  run: string,
-  ready: (detail: RunDetail) => boolean,
-): Promise<RunDetail> {
-  const deadline = Date.now() + 20_000;
-  let detail: RunDetail;
-  do {
-    await Bun.sleep(100);
-    detail = (await (await fetch(`${baseUrl}/api/run/${run}`)).json()) as RunDetail;
-    if (ready(detail)) return detail;
-  } while (Date.now() < deadline);
-  throw new Error(`the run never reached the state: ${JSON.stringify(detail.view.repos)}`);
-}
+const detailOf = async (baseUrl: string, run: string): Promise<RunDetail> =>
+  (await (await fetch(`${baseUrl}/api/run/${run}`)).json()) as RunDetail;
 
 test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGraph order, step repos, MR waits and bump states, and a run with no usable graph carries none", async () => {
   isolatedEnvironment();
@@ -4085,11 +4072,13 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
   ]);
 
   // A closed handed_off run has no MR card but keeps its repos, in hand-off order, with the branch of each.
-  const closed = await runDetailWhen(
-    baseUrl,
-    handedOff,
-    (detail) => detail.view.repos?.every((entry) => entry.branch?.ahead != null) === true,
+  // The ticket chain is set from the same background read as the run's branches: once it shows, the facts are in.
+  const chained = await snapshotWhen(baseUrl, (next) =>
+    Array.isArray(next.ticket_runs)
+      ? next.ticket_runs.find((entry) => entry.ticket === "ARK-902")?.chain?.[0].state === "ahead"
+      : false,
   );
+  const closed = await detailOf(baseUrl, handedOff);
   expect(closed.view.merge_requests).toEqual([]);
   expect(
     closed.view.repos?.map((entry) => [entry.repo, entry.state, entry.branch, entry.mr]),
@@ -4100,11 +4089,6 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
     ["e2e", "ahead", { name: branch, ahead: 1 }, null],
   ]);
   // The ticket chain of a closed newest run holds the same order and states.
-  const chained = await snapshotWhen(baseUrl, (next) =>
-    Array.isArray(next.ticket_runs)
-      ? next.ticket_runs.find((entry) => entry.ticket === "ARK-902")?.chain?.[0].state === "ahead"
-      : false,
-  );
   const newest = Array.isArray(chained.ticket_runs)
     ? chained.ticket_runs.find((entry) => entry.ticket === "ARK-902")
     : undefined;
@@ -4116,7 +4100,7 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
   ]);
 
   // No ark.yml: the branch shows, its state is unknown, never a guess.
-  const unknown = await runDetailWhen(baseUrl, unknownRun, (detail) => detail.view.repos !== null);
+  const unknown = await detailOf(baseUrl, unknownRun);
   expect(unknown.view.repos?.map((entry) => [entry.state, entry.branch])).toEqual([
     ["unknown", { name: branch, ahead: null }],
     ["unknown", { name: branch, ahead: null }],
