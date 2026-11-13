@@ -337,6 +337,8 @@ export type FakeToolOptions = {
     runs?: unknown[];
     workers?: unknown[];
     tasks?: unknown[];
+    /** `worker-list --run <id>` answers `workersByRun[id]` when it has one, else `workers`: a run lead is only in Master Chief's list. */
+    workersByRun?: Record<string, unknown[]>;
     /** `inbox` messages; none by default. */
     messages?: unknown[];
     /** `worktree ps` worktrees, each with a path and agents. */
@@ -358,6 +360,8 @@ export type FakeToolOptions = {
   mergeRequestViews?: Record<string, unknown>;
   /** `orca worktree ps --agent-wait --json` exits 1. */
   orcaPsFails?: boolean;
+  /** The full `orca orchestration inbox` read (any `--limit` but the liveness read's 200) exits 1; every other call still answers. */
+  orcaInboxFails?: boolean;
   /** `up` answers `omp usage --json`, `down` fails, `once` answers once and then exits 1. */
   ompMode?: "up" | "down" | "once";
   /** The JSON `omp usage --json` prints. */
@@ -397,6 +401,9 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   put("orca.workers", wrap(options.orca?.workers, "workers"));
   put("orca.tasks", wrap(options.orca?.tasks, "tasks"));
   put("orca.inbox", wrap(options.orca?.messages, "messages"));
+  put("orca.inboxfails", options.orcaInboxFails ? "1" : "0");
+  for (const [orcaRun, workers] of Object.entries(options.orca?.workersByRun ?? {}))
+    put(`orca.workers.${orcaRun}`, wrap(workers, "workers"));
   put("orca.sleep", String(options.orcaSleepSeconds ?? 0));
   put("orca.switchfails", options.orcaSwitchFails ? "1" : "0");
   put("orca.mode", options.orcaMode ?? "up");
@@ -464,13 +471,14 @@ cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
 # The hub's queue source reads task-list with --ready or --status: its own count, so it never uses up the agents' two answers.
 case " $* " in *" --ready "*|*" --status "*) cmd="\${cmd}_queue" ;; esac
 ${modeGate(state, "orca", "$cmd")}
+run=""; previous=""; for argument in "$@"; do [ "$previous" = --run ] && run="$argument"; previous="$argument"; done
 case "$1 $2" in
   "terminal list") cat '${state}/orca.terminals' ;;
   "terminal switch") [ "$(cat '${state}/orca.switchfails')" = 1 ] && exit 1; echo '{"result":{}}' ;;
   "orchestration run-list") cat '${state}/orca.runs' ;;
-  "orchestration worker-list") cat '${state}/orca.workers' ;;
+  "orchestration worker-list") if [ -f "${state}/orca.workers.$run" ]; then cat "${state}/orca.workers.$run"; else cat '${state}/orca.workers'; fi ;;
   "orchestration task-list") cat '${state}/orca.tasks' ;;
-  "orchestration inbox") cat '${state}/orca.inbox' ;;
+  "orchestration inbox") case " $* " in *" --limit 200 "*) ;; *) [ "$(cat '${state}/orca.inboxfails')" = 1 ] && exit 1 ;; esac; cat '${state}/orca.inbox' ;;
   "worktree ps") [ "$(cat '${state}/orca.psfails')" = 1 ] && exit 1; cat '${state}/orca.ps' ;;
   *) exit 1 ;;
 esac`,
