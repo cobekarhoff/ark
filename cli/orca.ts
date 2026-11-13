@@ -66,7 +66,8 @@ export const orcaTimeoutMilliseconds = orcaTimeout(10_000);
 
 /** One `orca <words> --json` call: its `result`, or why it failed. */
 async function orcaCommand<T>(words: string[], timeoutMilliseconds: number): Promise<OrcaRead<T>> {
-  if (!Bun.which("orca")) return { ok: false, reason: "orca not found on PATH" };
+  if (!Bun.which("orca", { PATH: process.env.PATH }))
+    return { ok: false, reason: "orca not found on PATH" };
   const answer = await execResult(["orca", ...words, "--json"], timeoutMilliseconds);
   if (answer.timedOut || answer.code !== 0)
     return { ok: false, reason: failureReason(answer, timeoutMilliseconds) };

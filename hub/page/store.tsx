@@ -164,7 +164,7 @@ export function useAge(): (time: string) => number {
 
 /** Hash routes: client-side, so a view change never reaches the server. */
 export type Route = {
-  view: "home" | "runs" | "run" | "roadmap" | "ticket";
+  view: "home" | "runs" | "run" | "roadmap" | "ticket" | "resources";
   run: string | null;
   /**
    * `#/run/<run>/step/<id>`, `/lead`, `/session/<file>` open a transcript; `/file/<path>` shows a run
@@ -244,6 +244,7 @@ export function parseRoute(hash: string): Route {
   }
   if (view === "runs" || view === "run" || view === "map") return { ...none, view: "runs" };
   if (view === "roadmap" && arg === null) return { ...none, view };
+  if (view === "resources" && arg === null) return { ...none, view };
   if ((view === "ticket" || view === "roadmap") && arg !== null)
     return { ...none, view: "ticket", arg };
   return { ...none, view: "home" };

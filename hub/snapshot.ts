@@ -51,6 +51,7 @@ import type {
   RunProgress,
   RunView,
   Snapshot,
+  ResourcesView,
   SourceName,
   StepStatus,
   TicketRunView,
@@ -62,6 +63,7 @@ import { roleTimesOf } from "./progress.ts";
 import { readRunEvidence, readTicketCases } from "./evidence.ts";
 import { escapedDefects } from "../cli/retro.ts";
 import { isProved, listRunFiles, timelineOf } from "./run-detail.ts";
+import { createResourcesReader } from "./resources.ts";
 import { UsageIndex, readMetricsCost, readMetricsRounds, type RunCost } from "./usage.ts";
 
 // ARK_HUB_INTERVAL_MS sets every source interval in ms (tests); ARK_PROVIDER_LIMITS_MS, when set, wins for providerLimits.
@@ -76,6 +78,7 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   agentWait: allIntervalMilliseconds || 3000,
   evidence: allIntervalMilliseconds || 5000,
   queue: allIntervalMilliseconds || 3000, // its own source: a slow Orca queue never delays another source
+  resources: allIntervalMilliseconds || 5000, // one ps and one lsof: about 0.2 s of CPU, so slower than Orca
 };
 /** The full inbox read (ARK-344): its own loop, never a snapshot source, so a failure never touches `orca` and no message reaches `/events`. */
 const conversationIntervalMilliseconds = allIntervalMilliseconds || 15_000;
@@ -155,7 +158,9 @@ export function createSnapshotReader() {
     agentWait: emptySlot<Map<string, PsAgent[]>>(),
     evidence: emptySlot<EvidenceValue>(),
     queue: emptySlot<true>(),
+    resources: emptySlot<ResourcesView>(),
   };
+  const resourcesReader = createResourcesReader();
   const evidenceReader = createEvidenceReader();
   let githubFacts = new Map<string, MergeRequestFacts>();
   // The latest queue read of each project, failures included: the reason is data (AC4), so it lives beside the slot, not in it.
@@ -428,6 +433,7 @@ export function createSnapshotReader() {
     const ark = slots.ark.value;
     if (!ark)
       return {
+        resources: slots.resources.value ?? "unknown",
         sources,
         runs: "unknown",
         gates: "unknown",
@@ -495,6 +501,7 @@ export function createSnapshotReader() {
       });
     }
     return {
+      resources: slots.resources.value ?? "unknown",
       sources,
       runs,
       gates,
@@ -614,6 +621,20 @@ export function createSnapshotReader() {
             })),
         ),
       ),
+    // The host and every process: one `ps` and one `lsof` for each sample. Needs the runs, so never before the first Ark read.
+    resources: () =>
+      read("resources", async () => {
+        const ark = slots.ark.value;
+        if (!ark) return null;
+        return resourcesReader.read({
+          runs: ark.runs.map((run) => ({
+            run: run.state.run,
+            directory: run.directory,
+            closed: run.state.phase === "closed",
+          })),
+          agents: slots.orca.value?.agents ?? new Map(),
+        });
+      }),
     // Failed (stale chip) when any project's queue could not be read; the reason is in `queueReads`.
     queue: () =>
       read("queue", async () => {
@@ -739,6 +760,7 @@ export function createSnapshotReader() {
       "agentWait",
       "evidence",
       "queue",
+      "resources",
     ] as const)
       loop(() => readers[name](), intervalMilliseconds[name], started);
     loop(
@@ -761,6 +783,11 @@ export function createSnapshotReader() {
     clearTimeout(arkSoon);
     for (const watcher of watchers.values()) watcher.close();
     watchers.clear();
+    try {
+      resourcesReader.flush();
+    } catch {
+      // A run folder that cannot be written keeps no pause time: the next sample records no gap.
+    }
   }
 
   return {
@@ -801,6 +828,8 @@ export function createSnapshotReader() {
       };
     },
     usage,
+    /** The 24-hour history of each host signal, kept in memory only: what `GET /api/resources/history` sends. */
+    resourcesHistory: () => resourcesReader.history(),
     /** Run folder of a run the hub knows (open or closed), or null. The URL names a run, never a path. */
     runDirectory(run: string): string | null {
       return (
