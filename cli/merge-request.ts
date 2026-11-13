@@ -911,27 +911,35 @@ function dependencyLines(
     .filter((edge) => edge.bump)
     .map((edge) => {
       const worktree = state.worktrees.find((candidate) => candidate.repo === merge.repo);
-      return `  bump ${edge.bump}  ${edge.kind} ${edge.repo}  pin ${edge.pin}  ${bumpState(edge, worktree?.path, state, upstreamState(edge.repo))}`;
+      return `  bump ${edge.bump}  ${edge.kind} ${edge.repo}  pin ${edge.pin}  ${bumpState(edge, submodulePointer(edge, worktree?.path), state, upstreamState(edge.repo))}`;
     });
   return [...waits, ...bumps];
 }
 
-/** `refreshed to <value>` once recorded; else a submodule shows its pointer, a package waits on its upstream MR. No registry is asked. */
-function bumpState(
+/** The commit the downstream worktree records for a submodule edge's pin (`git ls-tree HEAD <pin>`), or undefined. */
+export function submodulePointer(
   edge: PlanRepoEdge,
   downstreamPath: string | undefined,
-  state: RunState,
+): string | undefined {
+  if (edge.kind !== "submodule" || !downstreamPath) return undefined;
+  return spawn(["git", "ls-tree", "HEAD", edge.pin], downstreamPath).stdout.split(/\s+/)[2];
+}
+
+/**
+ * `refreshed to <value>` once recorded; else a submodule shows its pointer (from `submodulePointer`), a package waits
+ * on its upstream MR. No registry is asked. The CLI status and the hub run page both word the bump through this.
+ */
+export function bumpState(
+  edge: PlanRepoEdge,
+  pointer: string | undefined,
+  state: Pick<RunState, "bump_refreshed">,
   upstreamMr: string | undefined,
 ): string {
   const refreshed = state.bump_refreshed[edge.bump];
   if (refreshed !== undefined)
     return `refreshed to ${edge.kind === "submodule" ? refreshed.slice(0, 8) : refreshed}`;
-  if (edge.kind === "submodule") {
-    const pointer = downstreamPath
-      ? spawn(["git", "ls-tree", "HEAD", edge.pin], downstreamPath).stdout.split(/\s+/)[2]
-      : undefined;
+  if (edge.kind === "submodule")
     return `points at upstream branch ${pointer?.slice(0, 8) || "unknown"}`;
-  }
   return upstreamMr === "merged" ? "waits for upstream publish" : "waits for upstream merge";
 }
 

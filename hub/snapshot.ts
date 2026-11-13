@@ -61,6 +61,7 @@ import { stageTimes } from "../cli/events.ts";
 import { roleTimesOf } from "./progress.ts";
 import { readRunEvidence, readTicketCases } from "./evidence.ts";
 import { escapedDefects } from "../cli/retro.ts";
+import { chainOf, needsRepoFacts, readRepoFacts, repoViews, type RepoFacts } from "./repos.ts";
 import { isProved, listRunFiles, timelineOf } from "./run-detail.ts";
 import { UsageIndex, readMetricsCost, readMetricsRounds, type RunCost } from "./usage.ts";
 
@@ -78,6 +79,7 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   queue: allIntervalMilliseconds || 3000, // its own source: a slow Orca queue never delays another source
 };
 /** The full inbox read (ARK-344): its own loop, never a snapshot source, so a failure never touches `orca` and no message reaches `/events`. */
+const repoFactsIntervalMilliseconds = allIntervalMilliseconds || 3000;
 const conversationIntervalMilliseconds = allIntervalMilliseconds || 15_000;
 
 const usageTimeoutMilliseconds = 30_000;
@@ -161,6 +163,9 @@ export function createSnapshotReader() {
   // The latest queue read of each project, failures included: the reason is data (AC4), so it lives beside the slot, not in it.
   let queueReads: Map<string, QueueRead> | null = null;
   const costs = new Map<string, { key: string; cost: RunCost }>();
+  // Git facts of multi-repo runs (branch commits ahead, submodule pointers), by run directory. Read by `repoFactsLoop`, never in `viewOf`.
+  // `key` is the event count: a closed run is read once; an open run's branches move without an event, so its entry is read again each tick.
+  const repoFacts = new Map<string, { key: number; facts: RepoFacts }>();
   const listeners = new Set<(json: string) => void>();
   // The last good full inbox, outside `slots` and `compose()`: bodies never reach `json()`, `/api/snapshot` or `/events`.
   let conversation: {
@@ -363,6 +368,28 @@ export function createSnapshotReader() {
     };
   }
 
+  /** The MRs of a run as the page draws them. A handed_off run's MR stays with a person, so the page shows no card. */
+  function mergeRequestsOf(run: ArkRun, closed: boolean): MergeRequestView[] {
+    const { state } = run;
+    return (closed && state.outcome === "handed_off" ? [] : state.merge_requests).map(
+      ({ order, waits_for, ...request }) => {
+        const facts = githubFacts.get(request.url);
+        return {
+          ...request,
+          order: order ?? null,
+          waits_for: waits_for ?? [],
+          state: closed ? closedMrState(state.outcome) : (facts?.state ?? "unknown"),
+          ci: facts?.ci ?? "unknown",
+          checks: facts?.checks ?? [],
+          additions: facts?.additions ?? null,
+          deletions: facts?.deletions ?? null,
+          changed_files: facts?.changed_files ?? null,
+          created_at: facts?.created_at ?? null,
+        };
+      },
+    );
+  }
+
   /** One run as the page draws it. A closed run has no Orca agents and nothing it waits for. */
   function viewOf(run: ArkRun, closed: boolean): RunView {
     const { state, events } = run;
@@ -374,6 +401,7 @@ export function createSnapshotReader() {
       return start === undefined ? null : new Date(start).toISOString();
     };
     const waiting = closed ? [] : (slots.orca.value?.waits.get(state.run) ?? []);
+    const mergeRequests = mergeRequestsOf(run, closed);
     return {
       run: state.run,
       project: state.project,
@@ -386,6 +414,7 @@ export function createSnapshotReader() {
         run.plan?.map((step) => ({
           id: step.id,
           role: step.role,
+          repo: step.repo,
           harness: step.harness,
           model: step.model,
           needs: step.needs,
@@ -394,22 +423,8 @@ export function createSnapshotReader() {
           started_at: startOf(step.id),
           waiting: waiting.find((wait) => wait.step === step.id) ?? null,
         })) ?? null,
-      // handed_off: the MR stays with a person, so the page shows no card.
-      merge_requests: (closed && state.outcome === "handed_off" ? [] : state.merge_requests).map(
-        (request) => {
-          const facts = githubFacts.get(request.url);
-          return {
-            ...request,
-            state: closed ? closedMrState(state.outcome) : (facts?.state ?? "unknown"),
-            ci: facts?.ci ?? "unknown",
-            checks: facts?.checks ?? [],
-            additions: facts?.additions ?? null,
-            deletions: facts?.deletions ?? null,
-            changed_files: facts?.changed_files ?? null,
-            created_at: facts?.created_at ?? null,
-          };
-        },
-      ),
+      repos: repoViews(run, repoFacts.get(run.directory)?.facts, mergeRequests),
+      merge_requests: mergeRequests,
       agents: closed ? [] : agentsOf(run),
       waiting,
       progress: progressOf(run, startOf),
@@ -491,6 +506,9 @@ export function createSnapshotReader() {
         phase: run.state.phase,
         waiting: !closed && (slots.orca.value?.waits.get(run.state.run)?.length ?? 0) > 0,
         cost_usd: costOf(run, closed).total,
+        chain: chainOf(
+          repoViews(run, repoFacts.get(run.directory)?.facts, mergeRequestsOf(run, closed)),
+        ),
         all: [allEntry(run)],
       });
     }
@@ -626,6 +644,22 @@ export function createSnapshotReader() {
       }),
   };
 
+  /** Git facts of the multi-repo runs (hub/repos.ts). Not a source: it has no slot and no stale chip, and an unread fact shows as unknown. */
+  async function readRepoFactsOnce(): Promise<void> {
+    const started = generation;
+    let changed = false;
+    for (const run of (slots.ark.value?.runs ?? []).filter(needsRepoFacts)) {
+      const known = repoFacts.get(run.directory);
+      if (run.state.phase === "closed" && known?.key === run.state.events) continue;
+      const facts = readRepoFacts(run);
+      if (started !== generation) return;
+      if (JSON.stringify(known?.facts) !== JSON.stringify(facts)) changed = true;
+      repoFacts.set(run.directory, { key: run.state.events, facts });
+      await new Promise((resolve) => setTimeout(resolve)); // git is read with spawnSync: let a request run between two runs
+    }
+    if (changed) publish();
+  }
+
   /** One full inbox read. A failure keeps the last good value and marks it stale; a read of an older generation is dropped. */
   async function readConversation(): Promise<void> {
     const started = generation;
@@ -741,6 +775,7 @@ export function createSnapshotReader() {
       "queue",
     ] as const)
       loop(() => readers[name](), intervalMilliseconds[name], started);
+    loop(readRepoFactsOnce, repoFactsIntervalMilliseconds, started);
     loop(
       () => {
         return readConversation();

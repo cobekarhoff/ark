@@ -10,6 +10,8 @@ export type FixtureStep = {
   harness: string;
   model: string;
   needs: string[];
+  /** The step's repo; default `.`. */
+  repo?: string;
   /** Seconds after the run started that the step started and finished. `finishedAfter` undefined: still running. */
   startedAfter?: number;
   finishedAfter?: number;
@@ -23,7 +25,23 @@ export type FixtureRun = {
   ticket: { id: string; title: string };
   phase: "awaiting_criteria" | "planning" | "building" | "merge_requests_open" | "closed";
   steps?: FixtureStep[];
-  mergeRequests?: { repo: string; url: string; number: number }[];
+  mergeRequests?: {
+    repo: string;
+    url: string;
+    number: number;
+    order?: number;
+    waits_for?: number[];
+  }[];
+  /** The `repos` block of `plan.yml` (ARK-336). */
+  repos?: {
+    repo: string;
+    why: string;
+    depends_on?: { repo: string; kind: string; pin: string; evidence: string; bump?: string }[];
+  }[];
+  /** `worktree.created` events: `base` is a commit of the repo at `path`. */
+  worktrees?: { repo: string; path: string; branch: string; base?: string }[];
+  /** `bump.refreshed` events by bump step id. */
+  bumpRefreshed?: Record<string, string>;
   /** Closed runs only: written as `metrics.json`. */
   metricsCostUsd?: number;
   /** Start of the run. Default: one hour ago. */
@@ -83,10 +101,11 @@ export function writeRun(fixture: FixtureRun): string {
       writeFileSync(
         join(directory, "plan.yml"),
         `${JSON.stringify({
+          ...(fixture.repos ? { repos: fixture.repos } : {}),
           steps: steps.map((step) => ({
             id: step.id,
             role: step.role,
-            repo: ".",
+            repo: step.repo ?? ".",
             harness: step.harness,
             model: step.model,
             needs: step.needs,
@@ -98,16 +117,17 @@ export function writeRun(fixture: FixtureRun): string {
     add(20, "plan.checked", {
       valid: true,
       plan_hash: "fixture",
-      steps: steps.map((step) => ({ id: step.id, role: step.role, repo: "." })),
+      steps: steps.map((step) => ({ id: step.id, role: step.role, repo: step.repo ?? "." })),
     });
     if (fixture.phase !== "planning") {
       add(30, "gate.answered", { gate: "plan", answer: "approve" });
+      for (const worktree of fixture.worktrees ?? []) add(31, "worktree.created", worktree);
       for (const step of steps) {
         if (step.startedAfter === undefined) continue;
         add(step.startedAfter, "step.started", {
           step: step.id,
           role: step.role,
-          repo: ".",
+          repo: step.repo ?? ".",
           round: 1,
         });
         if (step.finishedAfter !== undefined)
@@ -116,6 +136,8 @@ export function writeRun(fixture: FixtureRun): string {
             outcome: step.outcome ?? "succeeded",
           });
       }
+      for (const [step, value] of Object.entries(fixture.bumpRefreshed ?? {}))
+        add(2900, "bump.refreshed", { step, value });
       for (const request of fixture.mergeRequests ?? []) add(3000, "merge_request.opened", request);
       if (fixture.statuses)
         add(3400, "test.completed", {

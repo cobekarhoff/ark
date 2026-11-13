@@ -7,7 +7,8 @@ import { Markdown, ViewSwitch } from "./Markdown.tsx";
 import { OpenInOrca } from "./OrcaButton.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { hashOf, ticketHref, useLive } from "./store.tsx";
-import type { TicketDocument, TicketView } from "../types.ts";
+import { toneOfState } from "./repo-layout.ts";
+import type { ChainRepo, TicketDocument, TicketView } from "../types.ts";
 
 const node = (entry: TicketEntry): GraphTicket => ({
   key: entry.key,
@@ -240,6 +241,34 @@ function Relation({
   );
 }
 
+/** The repos of the newest run on one line in merge or hand-off order, each linked to its card on the run page. */
+function RepoChain({ run, chain }: { run: string; chain: ChainRepo[] }) {
+  return (
+    <ol className="repo-chain" data-testid="repo-chain" aria-label="Repo chain">
+      {chain.map((item, index) => (
+        <li key={item.repo}>
+          {index > 0 ? (
+            <span className="chain-arrow" aria-hidden="true">
+              →
+            </span>
+          ) : null}
+          <a
+            className="chain-item"
+            data-testid="chain-repo"
+            data-repo={item.repo}
+            data-state={item.state}
+            href={runHref(run, "repo", item.repo)}
+          >
+            <i className={`dot t-${toneOfState(item.state)}`} aria-hidden="true" />
+            <span className="rname">{item.repo}</span>
+            <span className="st">{item.state}</span>
+          </a>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export function TicketPage({ id }: { id: string }) {
   const { snapshot } = useLive();
   const entries = snapshot ? ticketEntries(snapshot) : null;
@@ -318,6 +347,7 @@ export function TicketPage({ id }: { id: string }) {
         ) : null}
         {lead ? <OpenInOrca agent={lead} /> : null}
       </div>
+      {run && entry.newest?.chain ? <RepoChain run={run.run} chain={entry.newest.chain} /> : null}
       <section className="panel ticket-band">
         <header>
           <h2>Dependency graph</h2>
