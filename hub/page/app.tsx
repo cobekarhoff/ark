@@ -15,7 +15,7 @@ import { Run } from "./Run.tsx";
 import { Runs } from "./Runs.tsx";
 import {
   LiveProvider,
-  Stale,
+  StaleChip,
   applyTheme,
   hashOf,
   parseRoute,
@@ -27,19 +27,6 @@ import {
   type ThemeChoice,
 } from "./store.tsx";
 import { TicketPage } from "./Ticket.tsx";
-import type { SourceName } from "../types.ts";
-
-const sourceNames: SourceName[] = [
-  "ark",
-  "orca",
-  "plannotator",
-  "github",
-  "usage",
-  "providerLimits",
-  "agentWait",
-  "evidence",
-  "queue",
-];
 
 const views = [
   ["home", "#/", "Home"],
@@ -103,7 +90,12 @@ function ProjectFilter({ projects, project }: { projects: string[]; project: str
 function Shell() {
   const hash = useHash();
   const route = parseRoute(hash);
-  const { snapshot: whole, connection } = useLive();
+  const { snapshot: whole, connection, receivedAt } = useLive();
+  const frozen = connection === "reconnecting";
+  const frozenAt = new Date(receivedAt).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   // The Map is gone: its old links land on Runs. Backlog is now Roadmap. Both keep the query and the tail.
   useEffect(() => {
     const target = retiredTarget(location.hash);
@@ -172,13 +164,17 @@ function Shell() {
           )}
           <ThemeSwitch />
         </div>
-        <span className="asof-list" role="status" aria-label="Stale sources">
-          {sourceNames.map((name) => (
-            <Stale key={name} name={name} />
-          ))}
-        </span>
+        <div className="asof-list">
+          {frozen ? (
+            <div className="banner" role="status">
+              <i className="dot" />
+              Disconnected: data frozen at <time>{frozenAt}</time>
+            </div>
+          ) : null}
+          <StaleChip />
+        </div>
       </header>
-      <main id="main" tabIndex={-1}>
+      <main id="main" tabIndex={-1} data-frozen={frozen || undefined}>
         {route.view === "home" ? <Home /> : null}
         {route.view === "runs" ? <Runs /> : null}
         {route.view === "run" ? <Run run={route.run!} sub={route.sub} /> : null}
