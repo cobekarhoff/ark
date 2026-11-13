@@ -72,6 +72,8 @@ export type RunState = {
     /** Test files that failed once and passed on retry, with their suite. */
     flaky?: { suite: string; file: string }[];
   } | null;
+  /** Files of the last full test.completed that failed at head and at the tip of the target branch, and were not counted. A quick test leaves it as it was. */
+  red_on_main: string[];
   /** Some test.completed had every non-manual criterion failing: the bug run's proof that the tests fail before the fix. */
   red_test: boolean;
   /** Suites at the base commit of a refactor run: undefined until `ark test` ran them. */
@@ -169,6 +171,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   const syncConflicts = new Set<string>();
   const bumpRefreshed: Record<string, string> = {};
   let lastTest: RunState["last_test"] = null;
+  let redOnMain: string[] = [];
   let kind: TicketKind = "feature";
   const testRuns: Record<string, string>[] = [];
   let basePassed: boolean | undefined;
@@ -314,6 +317,8 @@ export function deriveState(events: ArkEvent[]): RunState {
           ...(typeof data.duration === "number" ? { duration: data.duration } : {}),
           ...(Array.isArray(data.flaky) ? { flaky: data.flaky } : {}),
         };
+        if (data.mode !== "quick")
+          redOnMain = Array.isArray(data.red_on_main) ? data.red_on_main : [];
         basePassed = data.base_passed ?? basePassed;
         testRuns.push(criteriaStatus);
         if (mergeRequests.length === 0 && escalation === "answered") escalation = "none";
@@ -404,6 +409,7 @@ export function deriveState(events: ArkEvent[]): RunState {
     sync_conflicts: [...syncConflicts],
     bump_refreshed: bumpRefreshed,
     last_test: lastTest,
+    red_on_main: redOnMain,
     red_test: redTest,
     ...(basePassed === undefined ? {} : { base_passed: basePassed }),
     merge_requests: mergeRequests,

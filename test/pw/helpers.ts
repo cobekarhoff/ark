@@ -245,3 +245,17 @@ export async function checkpoint(page: Page, name: string): Promise<void> {
     writeFileSync(join(folder, `${name}.png`), picture);
   }
 }
+
+/**
+ * Resolves when every animation and transition of the page has ended. An animation that never ends
+ * (`iterations: Infinity`, a spinner) is skipped: it would hold the wait for ever.
+ */
+export const finiteAnimationsEnded = (page: Page): Promise<unknown> =>
+  page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );

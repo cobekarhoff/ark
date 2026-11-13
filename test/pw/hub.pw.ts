@@ -11,11 +11,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { request as httpRequest } from "node:http";
+import type { Socket } from "node:net";
 import { dirname, join } from "node:path";
+import type { Gate, ProjectQueue, RunView, Snapshot, TicketView } from "../../hub/types.ts";
 import { crc32, deflateSync } from "node:zlib";
 import {
   appendRawEvent,
   fakeGateEnvironment,
+  fakeToolGateEnvironment,
   commitCase,
   ompMessagesText,
   orcaAnswersFor,
@@ -36,7 +39,9 @@ import {
 import {
   ark,
   checkpoint,
+  finiteAnimationsEnded,
   installFakeTools,
+  serve,
   startHub,
   stopHub,
   type StartedHub,
@@ -46,6 +51,8 @@ import {
   writeFakeOrca,
   writeProject,
 } from "./helpers.ts";
+
+type QueuedProject = Extract<ProjectQueue, { tasks: unknown }>;
 
 useCleanup();
 // useCleanup freezes ARK_NOW for the hub clock; the hub reads real time here, as the fixtures do.
@@ -59,6 +66,7 @@ test.afterEach(async () => {
   // Release held fake tools, so a failing case leaves no waiting process behind.
   for (const gate of gates.splice(0)) writeFileSync(gate, "");
   delete process.env[fakeGateEnvironment];
+  for (const tool of fakeTools) delete process.env[fakeToolGateEnvironment(tool)];
   await Promise.all(started.splice(0).map((hub) => stopHub(hub.process)));
 });
 
@@ -68,6 +76,28 @@ function holdFakeTools(): () => void {
   process.env[fakeGateEnvironment] = gate;
   gates.push(gate);
   return () => writeFileSync(gate, "");
+}
+
+const fakeTools = ["orca", "gh", "omp", "plannotator"] as const;
+/** Holds each fake tool on a gate of its own: the returned functions release them one at a time. Call it before `launch`. */
+function holdFakeToolsOneByOne(): Record<(typeof fakeTools)[number], () => void> {
+  const directory = tempDirectory("ark-gate-");
+  const releases = {} as Record<(typeof fakeTools)[number], () => void>;
+  for (const tool of fakeTools) {
+    const gate = join(directory, tool);
+    process.env[fakeToolGateEnvironment(tool)] = gate;
+    gates.push(gate);
+    releases[tool] = () => writeFileSync(gate, "");
+  }
+  return releases;
+}
+
+/** The row of one source in the stale chip's list; opens the list when it is closed (ARK-335: one chip for every stale source). */
+async function staleRow(page: Page, source: string): Promise<Locator> {
+  const chip = page.getByTestId("stale-chip");
+  await expect(chip).toBeVisible();
+  if ((await chip.getAttribute("aria-expanded")) !== "true") await chip.click();
+  return page.locator(`[data-testid="stale-list"] [data-source="${source}"]`);
 }
 
 async function launch(): Promise<string> {
@@ -216,7 +246,7 @@ test("ARK-T133 ARK-277-AC4 the page sends no request but its first load and one 
   page.on("request", (request) => requests.push(request));
   await open(page, baseUrl, "");
   await expect(page.getByTestId("run")).toHaveCount(1);
-  await expect(page.getByTestId("stale-label")).toHaveCount(0); // every source answered: the first load is complete
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0); // every source answered: the first load is complete
   const firstLoad = requests.length;
 
   const firstLoadPaths = requests.map((request) => new URL(request.url()).pathname);
@@ -584,7 +614,7 @@ test("ARK-T260 Runs draws one node for each ticket and one edge for each depends
 
 // ---------------------------------------------------------------- AC11
 
-test("ARK-277-AC11 a source that stops answering keeps its last good value and shows its age; before a first read the page says unknown", async ({
+test("ARK-T315 ARK-277-AC11 a source that stops answering keeps its last good value and shows its age on the stale chip; before a first read the page says unknown", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -611,24 +641,29 @@ test("ARK-277-AC11 a source that stops answering keeps its last good value and s
     ],
   });
   const baseUrl = await launch();
+  await page.clock.install(); // before the load: the chip's minute timer must be the clock's
   await open(page, baseUrl, "");
 
   // The agents are on the run page: a second page in the same browser shows them.
   const runPage = await page.context().newPage();
   await open(runPage, baseUrl, `run/${run}`);
   const agents = runPage.getByTestId("agents");
-  const label = (source: string) =>
-    page.locator(`[data-testid="stale-label"][data-source="${source}"]`);
+  const age = async (source: string) => (await staleRow(page, source)).locator("span").first();
 
   // Before the first good read: unknown, not an empty list.
-  await expect(label("orca")).toHaveText("orca unknown");
-  await expect(label("plannotator")).toHaveText("plannotator unknown");
+  await expect(await age("orca")).toHaveText("unknown");
+  await expect(await age("plannotator")).toHaveText("unknown");
   await expect(agents).toHaveText("unknown");
   await expect(agents).not.toContainText("no live agent");
 
-  // Each source now answers each command twice and then fails.
-  writeFileSync(join(state, "orca.mode"), "twice");
-  writeFileSync(join(state, "plannotator.mode"), "twice");
+  // Every source reads once (the chip vanishes), then each fails: the stale sources have a last
+  // read and so an age, never "unknown", however slow the runner is.
+  writeFileSync(join(state, "orca.mode"), "up");
+  writeFileSync(join(state, "plannotator.mode"), "up");
+  await expect(agents).toContainText("openai/gpt-worker-model", { timeout: 20_000 });
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0, { timeout: 30_000 });
+  writeFileSync(join(state, "orca.mode"), "down");
+  writeFileSync(join(state, "plannotator.mode"), "down");
   await expect(agents).toContainText("openai/gpt-worker-model", { timeout: 20_000 });
   await expect(page.getByTestId("gate-link")).toHaveAttribute(
     "href",
@@ -637,18 +672,15 @@ test("ARK-277-AC11 a source that stops answering keeps its last good value and s
   );
 
   // The third read of each fails: the last good value stays, with its age.
-  await expect(label("orca")).toHaveText(/^orca as of \d+ s ago$/, { timeout: 30_000 });
-  await expect(label("plannotator")).toHaveText(/^plannotator as of \d+ s ago$/, {
-    timeout: 30_000,
-  });
+  await expect(await age("orca")).toHaveText(/^\d+ min$/, { timeout: 30_000 });
+  await expect(await age("plannotator")).toHaveText(/^\d+ min$/, { timeout: 30_000 });
   await expect(agents).toContainText("openai/gpt-worker-model");
   await expect(agents).toContainText("anthropic/claude-lead-model");
   await expect(page.getByTestId("gate-link")).toHaveCount(1);
 
-  const ageOf = async () =>
-    Number((await label("orca").textContent())!.match(/as of (\d+) s ago/)![1]);
-  const first = await ageOf();
-  await expect.poll(ageOf, { timeout: 10_000 }).toBeGreaterThan(first);
+  // The age moves by whole minutes: 3 minutes on the page clock show as 2 or more.
+  await page.clock.fastForward(180_000);
+  await expect(await age("orca")).toHaveText(/^([2-9]|\d\d+) min$/);
 });
 
 // ---------------------------------------------------------------- Regressions of the QE review (F1, F2, F3)
@@ -1448,10 +1480,7 @@ test("ARK-T273 the transcript opens as a list and an inspector: one-line rows of
   expect(dialogs).toEqual([]);
 
   // Both themes: the text of the list and the inspector keeps its contrast, measured once a fade has ended.
-  const settled = () =>
-    page.evaluate(() =>
-      Promise.all(document.getAnimations().map((fade) => fade.finished.catch(() => undefined))),
-    );
+  const settled = () => finiteAnimationsEnded(page);
   await failed.nth(1).click();
   await settled();
   const dark = await weakContrast(page);
@@ -1768,7 +1797,8 @@ test("ARK-T275 the chips filter the list into messages, tools, thinking and erro
 
   // Leaving the page removes the key handler.
   await open(page, baseUrl, "");
-  expect(await keydownListeners()).toBe(withoutTranscript);
+  // The route change runs in a view transition: the old page unmounts a frame later.
+  await expect.poll(keydownListeners).toBe(withoutTranscript);
 });
 
 test("ARK-T276 a context entry of 114 lines and a user message of more than 40 lines are one list row and show in full in the inspector, thinking is folded until a click, and the run files are pinned below the list and open in the same inspector", async ({
@@ -2638,7 +2668,7 @@ function roadmapOf44(): void {
   });
 }
 
-test("ARK-T117 Esc from a ticket page returns the Roadmap to the scroll position read while the nav source labels showed, after the labels vanish", async ({
+test("ARK-T117 Esc from a ticket page returns the Roadmap to the scroll position read while the stale chip showed, after the chip vanishes", async ({
   page,
 }) => {
   isolate();
@@ -2654,18 +2684,19 @@ test("ARK-T117 Esc from a ticket page returns the Roadmap to the scroll position
   installFakeTools({});
   const baseUrl = await launch();
   await open(page, baseUrl, "roadmap");
-  const labels = page.getByTestId("stale-label");
-  await expect.poll(() => labels.count()).toBeGreaterThanOrEqual(4);
+  const chip = page.getByTestId("stale-chip");
+  // 4 or more sources behind the one chip: its label counts the others as `+3` or more.
+  await expect(chip).toHaveText(/ \+([3-9]|\d\d+)$/);
   const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
   await expect(selected).toHaveAttribute("data-ticket", "ARK-701");
   for (let press = 0; press < 30; press++) await page.keyboard.press("j");
   const before = await page.evaluate(() => window.scrollY);
   expect(before).toBeGreaterThan(100);
-  // The read above had 4 or more labels; they vanish now, before Enter and Esc.
-  expect(await labels.count()).toBeGreaterThanOrEqual(4);
+  // The read above had the chip; it vanishes now, before Enter and Esc.
+  await expect(chip).toBeVisible();
   const target = (await selected.getAttribute("data-ticket"))!;
   release();
-  await expect(labels).toHaveCount(0);
+  await expect(chip).toHaveCount(0);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`#/ticket/${target}$`));
   await expect(page.getByTestId("ticket-page")).toBeVisible();
@@ -2675,7 +2706,7 @@ test("ARK-T117 Esc from a ticket page returns the Roadmap to the scroll position
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 });
 
-test("ARK-T118 The hub header has the same height with 4 or more stale source labels in the nav as with none", async ({
+test("ARK-T118 The hub header has the same height with 0, 1 and 4 or more stale sources", async ({
   page,
 }) => {
   isolate();
@@ -2687,37 +2718,35 @@ test("ARK-T118 The hub header has the same height with 4 or more stale source la
     ticket: { id: "ARK-707", title: "Gate" },
     phase: "awaiting_criteria",
   });
-  const release = holdFakeTools();
+  const release = holdFakeToolsOneByOne();
   installFakeTools({});
   const baseUrl = await launch();
   await open(page, baseUrl, "roadmap");
-  const labels = page.getByTestId("stale-label");
-  await expect.poll(() => labels.count()).toBeGreaterThanOrEqual(4);
+  const chip = page.getByTestId("stale-chip");
+  await expect(chip).toHaveText(/ \+([3-9]|\d\d+)$/); // 4 or more stale sources
   const header = page.locator("header.top");
   const heightOf = async () => (await header.boundingBox())!.height;
-  await checkpoint(page, "header-with-labels");
-  const withLabels = await heightOf();
-  // Every label and every chip of the nav lies inside the header box.
+  await checkpoint(page, "header-with-chip");
+  const heightAtFour = await heightOf();
+  // The chip and every chip of the nav lie inside the header box.
   const box = (await header.boundingBox())!;
-  const parts = page.locator(".nav-right > *, [data-testid=stale-label]");
-  for (const part of await parts.all()) {
+  for (const part of await page.locator(".nav-right > *, [data-testid=stale-chip]").all()) {
     const inner = await part.boundingBox();
     if (!inner) continue; // an empty wrapper has no box
     expect(inner.y).toBeGreaterThanOrEqual(box.y);
     expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + box.height + 0.5);
   }
-  // Narrow window: overflowing labels start at the scroll origin, so every one is reachable.
-  const wideViewport = page.viewportSize()!;
-  await page.setViewportSize({ width: 320, height: 800 });
-  const row = page.locator(".asof-list");
-  const rowLeft = (await row.boundingBox())!.x;
-  const firstLabel = (await labels.first().boundingBox())!;
-  expect(firstLabel.x).toBeGreaterThanOrEqual(rowLeft);
-  await page.setViewportSize(wideViewport);
-  release();
-  await expect(labels).toHaveCount(0);
-  await checkpoint(page, "header-without-labels");
-  expect(await heightOf()).toBe(withLabels);
+  // Orca (orca, agent wait and queue) and omp (usage and provider limits) answer: Plannotator alone is stale.
+  release.orca();
+  release.omp();
+  await expect(chip).toHaveText(/^plannotator /);
+  await expect(chip).not.toContainText("+");
+  expect(await heightOf()).toBe(heightAtFour);
+  release.gh();
+  release.plannotator();
+  await expect(chip).toHaveCount(0);
+  await checkpoint(page, "header-without-chip");
+  expect(await heightOf()).toBe(heightAtFour);
 });
 
 test("ARK-T26 Roadmap lists the tickets by horizon, keys move and open them, a ticket opens as a full page with its graph and lists, and Esc returns to the same scroll position", async ({
@@ -3186,9 +3215,7 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
       if (hash === "runs") await expect(page.getByTestId("lane")).toHaveCount(5);
       if (hash.startsWith("ticket")) await expect(page.getByTestId("ticket-problem")).toBeVisible();
       // A color that still fades from the other theme is not the color the page rests on.
-      await page.evaluate(() =>
-        Promise.all(document.getAnimations().map((fade) => fade.finished.catch(() => undefined))),
-      );
+      await finiteAnimationsEnded(page);
       const { checked, weak } = await weakContrast(page);
       expect(checked, `text checked on ${name} in ${choice}`).toBeGreaterThan(20);
       expect(weak, `${name} in ${choice}`).toEqual([]);
@@ -3350,7 +3377,7 @@ test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a
     "6 pass · 0 fail",
     { timeout: 30_000 },
   );
-  await expect(page.getByTestId("stale-label")).toHaveCount(0);
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0);
   const firstLoad = requests.splice(0);
   expect(firstLoad.filter((path) => path === "/events")).toHaveLength(1);
   for (const path of firstLoad)
@@ -4075,7 +4102,7 @@ test("ARK-291-AC8 a warning shows in a notice with its ticket IDs, an error repl
   expect(requests.filter((request) => request.path === "/events")).toHaveLength(1);
 });
 
-test("ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same scroll position, and text keeps 4.5:1 (3:1 large) in light and dark", async ({
+test("ARK-T316 ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same scroll position, and text keeps 4.5:1 (3:1 large) in light and dark", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -4112,7 +4139,7 @@ test("ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same s
   await open(page, baseUrl, "roadmap");
   const rows = page.getByTestId("ticket-row");
   await expect(rows).toHaveCount(44);
-  await expect(page.getByTestId("stale-label")).toHaveCount(0); // the nav stops growing once every source has answered
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0); // the nav stops growing once every source has answered
   const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
 
   // j and k move the selection, / goes to the search box, Esc leaves it.
@@ -4183,9 +4210,7 @@ test("ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same s
       if (view === "graph") await expect(page.getByTestId("roadmap-graph")).toBeVisible();
       await expect(page.getByTestId("roadmap-warning").first()).toBeVisible();
       // A color that still fades from the other theme is not the color the page rests on.
-      await page.evaluate(() =>
-        Promise.all(document.getAnimations().map((fade) => fade.finished.catch(() => undefined))),
-      );
+      await finiteAnimationsEnded(page);
       const { checked, weak } = await weakContrast(page);
       expect(checked, `text checked on ${view} in ${choice}`).toBeGreaterThan(30);
       expect(weak, `${view} in ${choice}`).toEqual([]);
@@ -4672,7 +4697,7 @@ test("ARK-T136 ARK-309-AC5 a ticket and a run of another project open by direct 
 
   // From a ticket of the filter's project, Esc returns to the same scroll position.
   await open(page, baseUrl, "roadmap?project=alpha");
-  await expect(page.getByTestId("stale-label")).toHaveCount(0); // the layout settles once every source has answered
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0); // the layout settles once every source has answered
   const item = page.locator('[data-testid="review-item"][data-ticket="ARK-939"]');
   await item.evaluate((node) => node.scrollIntoView({ block: "center" }));
   // Click only on the final geometry: no animation runs and the box is equal across two frames.
@@ -4791,7 +4816,7 @@ test("ARK-309-AC7 the Project group is named, has aria-pressed buttons set with 
   }
 });
 
-test("ARK-309-AC8 a filter change on Home, Runs and Roadmap sends no request, and / and /nope answer with a p95 under 200 ms", async ({
+test("ARK-T317 ARK-309-AC8 a filter change on Home, Runs and Roadmap sends no request, and / and /nope answer with a p95 under 200 ms", async ({
   page,
 }) => {
   filterWorld();
@@ -4806,7 +4831,7 @@ test("ARK-309-AC8 a filter change on Home, Runs and Roadmap sends no request, an
   for (const [hash, ready] of views) {
     await open(page, baseUrl, hash);
     await ready();
-    await expect(page.getByTestId("stale-label")).toHaveCount(0); // the first load is complete
+    await expect(page.getByTestId("stale-chip")).toHaveCount(0); // the first load is complete
     requests.length = 0;
     for (const name of ["alpha", "beta", "All projects"]) {
       await projectButton(page, name).click();
@@ -4955,7 +4980,7 @@ test("ARK-293-AC3 a run page row shows the model of Orca or of the session witho
   await expect(page.getByTestId("agent")).toHaveCount(6);
 });
 
-test("ARK-293-AC5 with session models on the run page, / and /nope answer with a p95 under 200 ms and the page sends no request but the ones ARK-285 allows", async ({
+test("ARK-T318 ARK-293-AC5 with session models on the run page, / and /nope answer with a p95 under 200 ms and the page sends no request but the ones ARK-285 allows", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -4966,7 +4991,7 @@ test("ARK-293-AC5 with session models on the run page, / and /nope answer with a
 
   await open(page, baseUrl, "");
   await expect(page.getByTestId("run")).toHaveCount(1);
-  await expect(page.getByTestId("stale-label")).toHaveCount(0);
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0);
   for (const path of requests.splice(0))
     expect(path === "/" || path === "/events" || path.startsWith("/assets/"), path).toBe(true);
 
@@ -5855,10 +5880,7 @@ test("ARK-T22 new page parts keep accessibility, request limits and speed", asyn
         path !== `/api/run/${run}`,
     );
   };
-  const settled = () =>
-    page.evaluate(() =>
-      Promise.all(document.getAnimations().map((fade) => fade.finished.catch(() => undefined))),
-    );
+  const settled = () => finiteAnimationsEnded(page);
   const headings = () =>
     page
       .locator("h1, h2, h3, h4, h5, h6")
@@ -6770,14 +6792,17 @@ async function settledBoxes(page: Page, selectors: string[]): Promise<Box[]> {
       );
     const frame = () => new Promise((done) => requestAnimationFrame(done));
     let last = "";
+    // An animation that never ends (a spinner) is skipped: the loop would not end.
+    const finite = () =>
+      document
+        .getAnimations()
+        .filter((fade) => fade.effect?.getComputedTiming().iterations !== Infinity);
     for (;;) {
       await document.fonts.ready;
-      await Promise.all(
-        document.getAnimations().map((fade) => fade.finished.catch(() => undefined)),
-      );
+      await Promise.all(finite().map((fade) => fade.finished.catch(() => undefined)));
       await frame();
       const now = read();
-      if (now === last && document.getAnimations().length === 0) return JSON.parse(now);
+      if (now === last && finite().length === 0) return JSON.parse(now);
       last = now;
     }
   }, selectors);
@@ -7783,8 +7808,7 @@ async function unreadableQueue(page: Page, queue: ChiefQueue, reason: RegExp): P
   await expect(page.getByTestId("not-queued-row")).toHaveCount(0);
   await expect(page.getByTestId("not-queued")).toHaveCount(0);
   // A failed or slow call is a failed read, so its source shows a stale chip.
-  if (!queue.noRun)
-    await expect(page.locator('[data-testid="stale-label"][data-source="queue"]')).toBeVisible();
+  if (!queue.noRun) await expect(await staleRow(page, "queue")).toBeVisible();
 }
 
 test("ARK-T256 An unreadable queue shows 'Queue unavailable: <reason>' with no ticket when Master Chief has no Run", async ({
@@ -7862,7 +7886,7 @@ test("ARK-T257 An unreadable queue marks no ready ticket as approved, not queued
 
   await open(page, baseUrl, "roadmap");
   await expect(rowOf(page, "ARK-852")).toBeVisible();
-  await expect(page.locator('[data-testid="stale-label"][data-source="queue"]')).toBeVisible();
+  await expect(await staleRow(page, "queue")).toBeVisible();
   await expect(rowState(page, "ARK-852")).not.toHaveText("approved, not queued");
   await open(page, baseUrl, "roadmap/ARK-852");
   await expect(pageState(page)).not.toHaveText("approved, not queued");
@@ -8542,6 +8566,9 @@ test("ARK-T281 Full screen shows the one graph in a dialog over the window at fi
 
     if (kind.key === "ticket") {
       // The page behind does not scroll under the wheel.
+      // The route change of show() runs in a view transition that resets the scroll ~100 ms in, and
+      // getAnimations() does not see it start: no view transition, so nothing takes the position.
+      await page.emulateMedia({ reducedMotion: "reduce" });
       await show();
       await page.evaluate(() => window.scrollTo(0, 120));
       await openOverlay();
@@ -8549,6 +8576,7 @@ test("ARK-T281 Full screen shows the one graph in a dialog over the window at fi
       await page.mouse.wheel(0, 600);
       expect(await page.evaluate(() => scrollY)).toBe(120);
       await page.keyboard.press("Escape");
+      await page.emulateMedia({ reducedMotion: "no-preference" });
     }
     if (kind.key === "roadmap") {
       // Esc with the search box focused behind the overlay closes the overlay, not the field's focus.
@@ -8656,4 +8684,823 @@ test("ARK-T282 a ticket-graph edge that skips a column runs in a lane above the 
   for (const [index, lane] of lanes.entries())
     for (const other of lanes.slice(index + 1))
       expect(Math.abs(lane - other), "two skip edges share a lane").toBeGreaterThanOrEqual(4);
+});
+
+// ---------------------------------------------------------------- ARK-335 live changes
+
+type LiveWindow = Window & {
+  __stream?: { onmessage?: (message: { data: string }) => void; onerror?: () => void };
+  __push: (snapshot: unknown) => void;
+  /** Calls of `document.startViewTransition`, and the durations of its pseudo-element animations once it is ready. */
+  __viewTransitionCalls: number;
+  __viewTransitions: number[][];
+  /** Times the banner went missing after it showed, and when the last snapshot arrived (T310). */
+  __gaps: number;
+  __lastSnapshotAt: number;
+};
+
+/**
+ * Swaps the page's EventSource for one the test feeds (`push`), and records every view transition.
+ * The page, the store and the hub that serves them are real. Call before `goto`.
+ */
+async function fakeStream(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const live = window as unknown as LiveWindow;
+    class FakeStream {
+      onmessage?: (message: { data: string }) => void;
+      onerror?: () => void;
+      constructor() {
+        live.__stream = this;
+      }
+      close() {}
+    }
+    window.EventSource = FakeStream as unknown as typeof EventSource;
+    live.__push = (snapshot) => live.__stream?.onmessage?.({ data: JSON.stringify(snapshot) });
+    live.__viewTransitionCalls = 0;
+    live.__viewTransitions = [];
+    const start = document.startViewTransition?.bind(document);
+    if (start)
+      document.startViewTransition = (update) => {
+        live.__viewTransitionCalls++;
+        const transition = start(update);
+        void transition.ready.then(() =>
+          live.__viewTransitions.push(
+            document
+              .getAnimations()
+              .filter((animation) =>
+                (animation.effect as KeyframeEffect).pseudoElement?.startsWith("::view-transition"),
+              )
+              .map((animation) => Number(animation.effect!.getTiming().duration)),
+          ),
+        );
+        return transition;
+      };
+  });
+}
+
+const push = (page: Page, snapshot: Snapshot) =>
+  page.evaluate((next) => (window as unknown as LiveWindow).__push(next), snapshot);
+
+/** Opens the page on the fed stream and waits until the first snapshot is on screen. */
+async function openFed(page: Page, baseUrl: string, hash: string, first: Snapshot): Promise<void> {
+  await fakeStream(page);
+  await page.goto(`${baseUrl}/#/${hash}`);
+  await page.waitForFunction(() => "__stream" in window);
+  await push(page, first);
+  await expect(page.locator("main h1").first()).toBeVisible();
+}
+
+const frames = (page: Page, count: number) =>
+  page.evaluate(async (total) => {
+    for (let frame = 0; frame < total; frame++)
+      await new Promise((done) => requestAnimationFrame(done));
+  }, count);
+
+/** Waits 600 ms of page time: clear of the page's keyboard window (a route change soon after a key is a keyboard action). */
+const pastKeyWindow = (page: Page) =>
+  page.evaluate(async () => {
+    const start = performance.now();
+    while (performance.now() - start < 600)
+      await new Promise((done) => requestAnimationFrame(done));
+  });
+
+/** Every animation and transition of the page, named for a failure message: `<name or property> on <tag.class>`. */
+const animationsOf = (page: Page) =>
+  page.evaluate(() =>
+    document.getAnimations().map((animation) => {
+      const target = (animation.effect as KeyframeEffect).target;
+      const name =
+        animation instanceof CSSTransition
+          ? animation.transitionProperty
+          : (animation as CSSAnimation).animationName;
+      return `${name} on ${target?.tagName.toLowerCase()}.${target?.className}`;
+    }),
+  );
+
+/** The animations of the page that are not CSS transitions: keyframes, FLIP and view transitions. */
+const motionOf = (page: Page) =>
+  page.evaluate(() =>
+    document
+      .getAnimations()
+      .filter((animation) => !(animation instanceof CSSTransition))
+      .map((animation) => (animation as CSSAnimation).animationName ?? "script animation"),
+  );
+
+/**
+ * Runs for the six Home lists and the Runs board: two runs for each, so each list can swap its pair.
+ * 901, 902 wait at the criteria gate (older first); 903, 904 are stuck agents; 905, 906 hold a
+ * question; 907, 908 wait in the review queue. 903 has a running step behind a finished one.
+ */
+function liveWorld(): void {
+  const steps = [
+    {
+      id: "a",
+      role: "implementer",
+      harness: "omp",
+      model: "m",
+      needs: [],
+      startedAfter: 40,
+      finishedAfter: 100,
+    },
+    { id: "b", role: "validator", harness: "omp", model: "m", needs: ["a"], startedAfter: 200 },
+  ];
+  const world: [number, FixtureRun["phase"], number][] = [
+    [901, "awaiting_criteria", 4 * 3600],
+    [902, "awaiting_criteria", 3 * 3600],
+    [903, "building", 600], // a recent event: its running step is not idle, so it pulses
+    [904, "building", 2 * 3600 - 60],
+    [905, "building", 2 * 3600 - 120],
+    [906, "building", 2 * 3600 - 180],
+    [907, "merge_requests_open", 2 * 3600 - 240],
+    [908, "merge_requests_open", 2 * 3600 - 300],
+  ];
+  for (const [number, phase, secondsAgo] of world) {
+    const ticket = `ARK-${number}`;
+    writeRun({
+      project: "p",
+      run: runId(ticket),
+      ticket: { id: ticket, title: `Ticket ${number}` },
+      phase,
+      startedAt: ago(secondsAgo),
+      steps: phase === "awaiting_criteria" ? undefined : steps,
+      mergeRequests:
+        phase === "merge_requests_open"
+          ? [{ repo: ".", url: `https://github.com/example/repo/pull/${number}`, number }]
+          : undefined,
+    });
+    writeBacklogTicket({ project: "p", id: ticket, title: `Ticket ${number}`, status: "ready" });
+  }
+}
+
+/**
+ * The snapshot of the hub that serves `liveWorld`, with what the fixtures cannot make added (stuck
+ * agents, questions, MR creation times, a queue, a provider limit), and the same snapshot with the
+ * order of every list reversed. The hub reads only while a stream is open, so one is held while
+ * the snapshot is taken.
+ */
+async function liveSnapshots(baseUrl: string): Promise<{ first: Snapshot; swapped: Snapshot }> {
+  const read = async () => (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
+  const reading = new AbortController();
+  const stream = await fetch(`${baseUrl}/events`, { signal: reading.signal });
+  let base = await read();
+  try {
+    await expect
+      .poll(async () => {
+        base = await read();
+        return base.runs === "unknown" ? 0 : base.runs.length;
+      })
+      .toBeGreaterThanOrEqual(8);
+  } finally {
+    reading.abort();
+    await stream.body?.cancel().catch(() => undefined);
+  }
+  const first = structuredClone(base);
+  const runs = first.runs as RunView[];
+  const runOf = (number: number) => runs.find((run) => run.ticket.id === `ARK-${number}`)!;
+  for (const number of [903, 904])
+    runOf(number).agents = [
+      {
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        title: "b (implementer, .)",
+        step: "b",
+        planned: null,
+        terminal: `term-${number}`,
+        presence: "live",
+        activity: { kind: "waiting", text: "waiting on a prompt", last_line: "Proceed?" },
+      },
+    ];
+  first.sources.agentWait = { ok: true, read_at: first.generated_at };
+  for (const number of [905, 906])
+    runOf(number).waiting = [
+      { step: "b", reason: `Question of ${number}`, since: first.generated_at },
+    ];
+  runOf(907).merge_requests[0].created_at = ago(7200).toISOString();
+  runOf(908).merge_requests[0].created_at = ago(3600).toISOString();
+  first.queues = [
+    {
+      project: "p",
+      open: 6,
+      concurrency: 8,
+      tasks: [
+        { id: "task-1", title: "ARK-911", status: "ready", ticket: "ARK-911" },
+        { id: "task-2", title: "ARK-912", status: "ready", ticket: "ARK-912" },
+      ],
+    },
+  ];
+  first.provider_limits = [
+    { provider: "openai", window: "5h", used_fraction: 0.2, resets_at: null, fetched_at: null },
+  ];
+  const swapped = structuredClone(first);
+  (swapped.gates as Gate[]).reverse();
+  (swapped.runs as RunView[]).reverse();
+  (swapped.tickets as TicketView[]).reverse();
+  const swappedRuns = swapped.runs as RunView[];
+  const swappedRun = (number: number) =>
+    swappedRuns.find((run) => run.ticket.id === `ARK-${number}`)!;
+  swappedRun(907).merge_requests[0].created_at = ago(3600).toISOString();
+  swappedRun(908).merge_requests[0].created_at = ago(7200).toISOString();
+  (swapped.queues as QueuedProject[])[0].tasks[0].status = "pending"; // ready rows first: 912, then 911
+  return { first, swapped };
+}
+
+/** `first` with one more gate (the Needs me count changes from 4 to 5). */
+function withExtraGate(first: Snapshot): Snapshot {
+  const next = structuredClone(first);
+  const gates = next.gates as Gate[];
+  gates.push({ ...gates[0], id: "gate:extra:criteria", run: "extra", ticket: "ARK-909" });
+  return next;
+}
+
+test("ARK-T312 A pushed new gate or changed count shows a fading amber highlight and a polite live count, and no animation loops forever", async ({
+  page,
+}) => {
+  test.slow();
+  isolate();
+  liveWorld();
+  installFakeTools({});
+  const baseUrl = await launch();
+  const { first } = await liveSnapshots(baseUrl);
+  await openFed(page, baseUrl, "", first);
+
+  const gates = page.getByTestId("gate");
+  const tile = page.locator('[data-testid="tile"][data-tile="needs-me"]');
+  const count = page.getByTestId("live-count");
+  const highlighted = /(^|\s)hl(\s|$)/;
+  // The first snapshot highlights nothing; the count sits in a polite live region.
+  await expect(gates).toHaveCount(2);
+  await expect(count).toHaveAttribute("aria-live", "polite");
+  await expect(count).toHaveText("4");
+  await expect(page.locator(".hl")).toHaveCount(0);
+
+  // A push that changes nothing highlights nothing and leaves the live text alone.
+  await push(page, first);
+  await frames(page, 3);
+  await expect(page.locator(".hl")).toHaveCount(0);
+  await expect(count).toHaveText("4");
+
+  // A new gate: the item and the tile count flash amber; the live count reads the new total.
+  const extra = withExtraGate(first);
+  await push(page, extra);
+  const added = page.locator('[data-testid="gate"][data-gate="gate:extra:criteria"]');
+  await expect(added).toHaveClass(highlighted);
+  await expect(tile).toHaveClass(highlighted);
+  await expect(count).toHaveText("5");
+  await checkpoint(page, "needs-me-highlight");
+  const fade = await added.evaluate((element) =>
+    element.getAnimations().map((animation) => ({
+      name: (animation as CSSAnimation).animationName,
+      duration: animation.effect!.getTiming().duration,
+      easing: (animation.effect as KeyframeEffect).getKeyframes()[0].easing,
+      from: (animation.effect as KeyframeEffect).getKeyframes()[0].backgroundColor,
+      to: getComputedStyle(element.previousElementSibling!).backgroundColor, // an item at rest
+    })),
+  );
+  expect(fade).toHaveLength(1);
+  expect(fade[0]).toMatchObject({ name: "highlight-fade", duration: 600, easing: "ease-out" });
+  expect(fade[0].from).toMatch(/^(rgb|color)/); // an amber start colour: neither unset nor transparent
+  expect(fade[0].from).not.toBe(fade[0].to);
+  await expect(page.locator(".hl")).toHaveCount(0, { timeout: 3000 });
+  await checkpoint(page, "needs-me-settled");
+
+  // A changed existing gate (same id, same count): the item flashes, the tile and the live text do not.
+  const edited = structuredClone(extra);
+  (edited.gates as Gate[])[0].question = "A new question for the first gate";
+  await push(page, edited);
+  await expect(gates.first()).toHaveClass(highlighted);
+  await expect(tile).not.toHaveClass(highlighted);
+  await expect(count).toHaveText("5");
+  await checkpoint(page, "needs-me-changed-item");
+  await expect(page.locator(".hl")).toHaveCount(0, { timeout: 3000 });
+
+  // A step done and a meter value: the segment changes colour and the meter width over 200 ms.
+  const moved = structuredClone(edited);
+  const run903 = (moved.runs as RunView[]).find((run) => run.ticket.id === "ARK-903")!;
+  run903.progress!.steps_done = 2;
+  moved.provider_limits = [
+    { provider: "openai", window: "5h", used_fraction: 0.6, resets_at: null, fetched_at: null },
+  ];
+  const transitions = await page.evaluate(async (next) => {
+    (window as unknown as LiveWindow).__push(next);
+    const read = () =>
+      [
+        ...document.querySelectorAll(
+          '[data-testid="run"][data-run$="ARK-903-1"] .steps i, .meter i',
+        ),
+      ].flatMap((element) =>
+        element
+          .getAnimations()
+          .filter((animation) => animation instanceof CSSTransition)
+          .map((animation) => [
+            (animation as CSSTransition).transitionProperty,
+            animation.effect!.getTiming().duration,
+          ]),
+      );
+    for (let frame = 0; frame < 20; frame++) {
+      await new Promise((done) => requestAnimationFrame(done));
+      if (read().length >= 2) break;
+    }
+    return read();
+  }, moved);
+  expect(transitions).toContainEqual(["background-color", 200]);
+  expect(transitions).toContainEqual(["width", 200]);
+
+  // The run page: the running step pulses and its incoming edge flows, both for a few cycles, and
+  // a hidden tab pauses them. Nothing loops for ever.
+  await page.evaluate((hash) => (location.hash = hash), `#/run/${runId("ARK-903")}`);
+  const node = page.locator('[data-testid="step-node"][data-status="running"] .box');
+  const edge = page.locator('[data-testid="step-edge"].into-running');
+  await expect(node).toHaveCount(1);
+  await expect(edge).toHaveCount(1);
+  const loops = (locator: Locator) =>
+    locator.evaluate((element) =>
+      element.getAnimations().map((animation) => ({
+        name: (animation as CSSAnimation).animationName,
+        iterations: animation.effect!.getTiming().iterations,
+        state: animation.playState,
+      })),
+    );
+  expect(await loops(node)).toEqual([{ name: "step-pulse", iterations: 4, state: "running" }]);
+  expect(await loops(edge)).toEqual([{ name: "edge-flow", iterations: 5, state: "running" }]);
+  const endless = () =>
+    page.evaluate(
+      () =>
+        document
+          .getAnimations()
+          .filter((animation) => animation.effect?.getComputedTiming().iterations === Infinity)
+          .length,
+    );
+  expect(await endless()).toBe(0);
+  const hide = (hidden: boolean) =>
+    page.evaluate((value) => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, hidden);
+  await hide(true);
+  await expect(page.locator("html")).toHaveAttribute("data-hidden", "");
+  expect((await loops(node))[0].state).toBe("paused");
+  expect((await loops(edge))[0].state).toBe("paused");
+  await hide(false);
+  await expect(page.locator("html")).not.toHaveAttribute("data-hidden", "");
+  expect((await loops(node))[0].state).toBe("running");
+  // Every animation ends: this wait is bounded (4 pulses of 1.6 s, 5 flows of 1.2 s).
+  await expect
+    .poll(() => animationsOf(page).then((names) => names.length), { timeout: 20_000 })
+    .toBe(0);
+});
+
+/** The items of each list, in page order, with their top edge and what animates them. */
+const listsOf = (page: Page, selectors: Record<string, string>) =>
+  page.evaluate((lists) => {
+    const key = (element: Element) =>
+      element.getAttribute("data-gate") ??
+      element.getAttribute("data-ticket") ??
+      element.getAttribute("data-run")!;
+    return Object.fromEntries(
+      Object.entries(lists).map(([name, selector]) => [
+        name,
+        [...document.querySelectorAll<HTMLElement>(selector)].map((element) => ({
+          key: key(element),
+          top: element.getBoundingClientRect().top,
+          transform: getComputedStyle(element).transform,
+          moving: element
+            .getAnimations()
+            .filter(
+              (animation) => (animation.effect as KeyframeEffect).getKeyframes()[0]?.transform,
+            )
+            .map((animation) => Number(animation.effect!.getTiming().duration)),
+        })),
+      ]),
+    );
+  }, selectors);
+
+type Lists = Awaited<ReturnType<typeof listsOf>>;
+
+/**
+ * Pushes `snapshot`, waits (up to 20 frames) until some list changed its order, and reads the
+ * lists at that moment: the FLIP animations of the moved items are running now.
+ */
+async function pushAndRead(
+  page: Page,
+  snapshot: Snapshot,
+  selectors: Record<string, string>,
+  settle: boolean,
+): Promise<{ before: Lists; during: Lists }> {
+  const before = await listsOf(page, selectors);
+  await push(page, snapshot);
+  let during = await listsOf(page, selectors);
+  const order = (lists: Lists) =>
+    JSON.stringify(Object.values(lists).map((l) => l.map((i) => i.key)));
+  for (let frame = 0; frame < 20 && settle && order(during) === order(before); frame++) {
+    await frames(page, 1);
+    during = await listsOf(page, selectors);
+  }
+  if (!settle) {
+    await frames(page, 5);
+    during = await listsOf(page, selectors);
+  }
+  return { before, during };
+}
+
+const homeLists = {
+  gates: '[data-testid="gate"]',
+  waiting: '[data-testid="waiting"]',
+  stuck: '[data-testid="stuck"]',
+  review: '[data-testid="review"]',
+  starts: '[data-testid="starts-next-row"]',
+  progress: '[data-testid="run"]',
+};
+
+test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most 250 ms and end in the new place, and a view change transitions in at most 200 ms", async ({
+  page,
+}) => {
+  test.slow();
+  isolate();
+  roadmapOf44();
+  liveWorld();
+  installFakeTools({});
+  const baseUrl = await launch();
+  const { first, swapped } = await liveSnapshots(baseUrl);
+  await openFed(page, baseUrl, "runs", first);
+  const board = { cards: '[data-testid="run-card"][data-lane="Needs me"]' };
+  await expect(page.locator(board.cards)).toHaveCount(4);
+  await checkpoint(page, "runs-before-reorder");
+
+  // The Runs board: the cards of the lane swap, each by a transform animation of 250 ms or less.
+  const reorder = async (selectors: Record<string, string>, snapshot: Snapshot) => {
+    const { before, during } = await pushAndRead(page, snapshot, selectors, true);
+    await finiteAnimationsEnded(page);
+    const after = await listsOf(page, selectors);
+    for (const [name, items] of Object.entries(after)) {
+      const keys = items.map((item) => item.key);
+      expect(keys, name).toEqual(before[name].map((item) => item.key).reverse());
+      expect(keys, `${name} did not change again`).toEqual(during[name].map((item) => item.key));
+      const moved = items.filter(
+        (item) => Math.abs(item.top - before[name].find((old) => old.key === item.key)!.top) > 0.5,
+      );
+      expect(moved.length, `${name} moved items`).toBeGreaterThanOrEqual(2);
+      for (const item of items) {
+        const running = during[name].find((started) => started.key === item.key)!.moving;
+        if (moved.includes(item)) {
+          expect(running.length, `${name} ${item.key} animates`).toBeGreaterThan(0);
+          for (const duration of running) expect(duration).toBeLessThanOrEqual(250);
+        } else expect(running, `${name} ${item.key} stays`).toEqual([]);
+        expect(item.transform, `${name} ${item.key} ends in place`).toBe("none");
+        expect(item.moving, `${name} ${item.key} stopped`).toEqual([]);
+      }
+      const tops = items.map((item) => item.top);
+      expect(tops, `${name} tops`).toEqual([...tops].sort((left, right) => left - right));
+    }
+  };
+  await reorder(board, swapped);
+  await checkpoint(page, "runs-after-reorder");
+
+  // Every Home list: the same reorder, one snapshot.
+  await page.evaluate(() => (location.hash = "#/"));
+  await expect(page.getByTestId("gate")).toHaveCount(2);
+  await finiteAnimationsEnded(page);
+  await reorder(homeLists, first);
+  await checkpoint(page, "home-after-reorder");
+
+  // The same order again: nothing animates.
+  const { during: still } = await pushAndRead(page, first, homeLists, false);
+  for (const [name, items] of Object.entries(still))
+    for (const item of items) expect(item.moving, `${name} ${item.key}`).toEqual([]);
+
+  // A list above grows and pushes the lists below down the page: they did not reorder, so nothing
+  // in them slides (a place is measured in its own container).
+  const { before: shifted, during: grown } = await pushAndRead(
+    page,
+    withExtraGate(first),
+    homeLists,
+    false,
+  );
+  expect(grown.gates.length).toBe(shifted.gates.length + 1);
+  const pushed = Object.keys(shifted).filter(
+    (name) =>
+      !["gates", "waiting"].includes(name) &&
+      shifted[name].length > 0 &&
+      grown[name][0].top > shifted[name][0].top + 0.5,
+  );
+  expect(pushed.length, "lists pushed down by the new gate").toBeGreaterThan(0);
+  for (const [name, items] of Object.entries(grown))
+    if (!["gates", "waiting"].includes(name))
+      // waiting shares the Needs me container with the gates
+      for (const item of items)
+        expect(item.moving, `${name} ${item.key} did not reorder`).toEqual([]);
+
+  // A view change is a view transition of 200 ms or less, and the new view is in the DOM.
+  const views: [string, Locator][] = [
+    ["#/runs", page.getByTestId("lane").first()],
+    [`#/run/${runId("ARK-903")}`, page.getByTestId("step-node").first()],
+    ["#/roadmap", page.getByTestId("ticket-row").first()],
+    ["#/ticket/ARK-701", page.getByTestId("ticket-page")],
+  ];
+  const recorded = () =>
+    page.evaluate(() => (window as unknown as LiveWindow).__viewTransitions.length);
+  await finiteAnimationsEnded(page); // the change to Home above has recorded its transition
+  const already = await recorded();
+  for (const [index, [hash, marker]] of views.entries()) {
+    await pastKeyWindow(page);
+    await page.evaluate((next) => (location.hash = next), hash);
+    await expect(marker).toBeVisible();
+    await expect.poll(recorded).toBe(already + index + 1);
+    const durations = await page.evaluate(
+      (at) => (window as unknown as LiveWindow).__viewTransitions[at],
+      already + index,
+    );
+    expect(durations.length, hash).toBeGreaterThan(0);
+    for (const duration of durations) expect(duration, hash).toBeLessThanOrEqual(200);
+  }
+
+  // The keys act while a view change is still running, and Esc restores the scroll position (ARK-T26).
+  await page.evaluate(() => (location.hash = "#/roadmap"));
+  const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
+  await expect(selected).toHaveAttribute("data-ticket", "ARK-701");
+  await page.keyboard.press("j");
+  await expect(selected).not.toHaveAttribute("data-ticket", "ARK-701");
+  for (let press = 0; press < 29; press++) await page.keyboard.press("j");
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(100);
+  const target = (await selected.getAttribute("data-ticket"))!;
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`#/ticket/${target}$`));
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/roadmap$/);
+  await expect(selected).toHaveAttribute("data-ticket", target);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+});
+
+test("ARK-T314 With prefers-reduced-motion, or for a keyboard action's result, no element animates or transitions", async ({
+  page,
+}) => {
+  test.slow();
+  isolate();
+  roadmapOf44();
+  liveWorld();
+  installFakeTools({});
+  const baseUrl = await launch();
+  const { first, swapped } = await liveSnapshots(baseUrl);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openFed(page, baseUrl, "", first);
+  const gates = page.getByTestId("gate");
+  await expect(gates).toHaveCount(2);
+
+  // Reduced motion: a running step on screen, a new gate, a reorder and a view change animate nothing.
+  const settledAnimations = async () => {
+    await frames(page, 4);
+    return animationsOf(page);
+  };
+  expect(await settledAnimations()).toEqual([]);
+  await push(page, withExtraGate(first));
+  await expect(gates).toHaveCount(3); // the new item shows, with no highlight animation
+  expect(await settledAnimations()).toEqual([]);
+  const before = await listsOf(page, homeLists);
+  await push(page, swapped);
+  await expect(gates.first()).toHaveAttribute("data-gate", /ARK-902/);
+  expect(await settledAnimations()).toEqual([]);
+  const after = await listsOf(page, homeLists);
+  expect(after.progress.map((item) => item.key)).toEqual(
+    before.progress.map((item) => item.key).reverse(),
+  );
+  for (const [name, items] of Object.entries(after))
+    for (const item of items) expect(item.moving, `${name} ${item.key}`).toEqual([]);
+  await page.evaluate(() => (location.hash = "#/runs"));
+  await expect(page.getByTestId("lane").first()).toBeVisible();
+  await page.evaluate((hash) => (location.hash = hash), `#/run/${runId("ARK-903")}`);
+  await expect(page.locator('[data-testid="step-node"][data-status="running"]')).toHaveCount(1);
+  expect(await settledAnimations()).toEqual([]); // the pulse and the dash are off
+  expect(await page.evaluate(() => (window as unknown as LiveWindow).__viewTransitionCalls)).toBe(
+    0,
+  );
+
+  // Control: with motion allowed the same page animates, so the empty lists above are the rule.
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.evaluate(() => (location.hash = "#/"));
+  await expect(gates).toHaveCount(2);
+  await push(page, withExtraGate(swapped));
+  await expect.poll(() => animationsOf(page).then((names) => names.length)).toBeGreaterThan(0);
+
+  // A key just pressed: the reorder and the new gate that follow are its result, so no FLIP slide
+  // and no highlight.
+  await finiteAnimationsEnded(page);
+  await page.keyboard.press("Shift");
+  await push(page, withExtraGate(first));
+  await expect(gates).toHaveCount(3);
+  await frames(page, 4);
+  expect(await motionOf(page)).toEqual([]);
+  await expect(page.locator(".hl")).toHaveCount(0);
+
+  // A key starts the change: no view transition. A click on the same link starts one.
+  await finiteAnimationsEnded(page);
+  await page.evaluate(() => (location.hash = "#/roadmap"));
+  const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
+  await expect(selected).toBeVisible();
+  const calls = () => page.evaluate(() => (window as unknown as LiveWindow).__viewTransitionCalls);
+  await finiteAnimationsEnded(page); // the change above was not a key: its transition must end first
+  const callsBefore = await calls();
+  await page.keyboard.press("j");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await frames(page, 4);
+  // No view transition, keyframe or script motion on the result. A control's own colour transition
+  // (hover, pressed) is not the result of the route change.
+  expect(await motionOf(page)).toEqual([]);
+  expect(await calls()).toBe(callsBefore);
+  await pastKeyWindow(page);
+  await page
+    .getByRole("navigation", { name: "Views" })
+    .getByRole("link", { name: "Roadmap" })
+    .click();
+  await expect(page.getByTestId("ticket-row").first()).toBeVisible();
+  expect(await calls()).toBe(callsBefore + 1);
+});
+
+/** A proxy in front of the hub that the test can cut: the open event stream is destroyed and new ones are refused, so the page sees a real connection loss. */
+async function proxyHub(hubUrl: string) {
+  const hub = new URL(hubUrl);
+  const streams = new Set<Socket>();
+  let down = false;
+  let refused = 0;
+  const { url } = await serve((request, response) => {
+    if (down && request.url === "/events") {
+      refused++;
+      request.socket.destroy();
+      return;
+    }
+    const headers = { ...request.headers, host: hub.host };
+    delete headers.origin;
+    const upstream = httpRequest(
+      { host: hub.hostname, port: hub.port, path: request.url, method: request.method, headers },
+      (reply) => {
+        response.writeHead(reply.statusCode ?? 502, reply.headers);
+        reply.pipe(response);
+      },
+    );
+    if (request.url === "/events") streams.add(request.socket);
+    upstream.on("error", () => response.destroy());
+    response.on("close", () => upstream.destroy()); // the request's own `close` fires when it is read, not when the client leaves
+    request.pipe(upstream);
+  });
+  return {
+    url,
+    refused: () => refused,
+    cut() {
+      down = true;
+      for (const socket of streams) socket.destroy();
+      streams.clear();
+    },
+    restore() {
+      down = false;
+    },
+  };
+}
+
+test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the page, and keeps the stale chip list working without moving the header", async ({
+  page,
+}) => {
+  test.slow();
+  isolate();
+  const run = runId("ARK-111");
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-111", title: "Run with live agents" },
+    phase: "building",
+  });
+  const waiting = writeRun({
+    project: "p",
+    run: runId("ARK-112"),
+    ticket: { id: "ARK-112", title: "Run at a gate" },
+    phase: "awaiting_criteria",
+  });
+  const state = installFakeTools({
+    orca: orcaAnswersFor(run),
+    orcaMode: "down",
+    plannotatorMode: "down",
+    plannotatorSessions: [
+      { index: 1, target: join(waiting, "ticket.md"), url: "http://localhost:20000/review/xyz" },
+    ],
+  });
+  const hubUrl = await launch();
+  const proxy = await proxyHub(hubUrl);
+  // The page clock starts at 14:02:05 and runs. The page notes when each snapshot arrived: the
+  // banner shows the time of the last one.
+  await page.clock.install({ time: new Date(2026, 10, 4, 14, 2, 5) });
+  await page.addInitScript(() => {
+    const Native = window.EventSource;
+    window.EventSource = class extends Native {
+      constructor(url: string | URL) {
+        super(url);
+        this.addEventListener("message", () => {
+          (window as unknown as LiveWindow).__lastSnapshotAt = Date.now();
+        });
+      }
+    };
+  });
+  await open(page, proxy.url, "");
+  // The chip is absent until the first snapshot: wait for it, or the count-0 wait below passes at once.
+  await expect(page.getByTestId("stale-chip")).toBeVisible({ timeout: 60_000 });
+  // Every source reads once (the chip vanishes), then each fails: the stale sources have a last
+  // read and so an age, never "unknown", however slow the runner is.
+  writeFileSync(join(state, "orca.mode"), "up");
+  writeFileSync(join(state, "plannotator.mode"), "up");
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0, { timeout: 60_000 });
+  writeFileSync(join(state, "orca.mode"), "down");
+  writeFileSync(join(state, "plannotator.mode"), "down");
+
+  const chip = page.getByTestId("stale-chip");
+  const list = page.getByTestId("stale-list");
+  const banner = page.locator(".banner");
+  const main = page.locator("main");
+  const header = page.locator("header.top");
+  const heightOf = async () => (await header.boundingBox())!.height;
+  const mainTop = async () => (await main.boundingBox())!.y;
+  await expect(chip).toHaveText(/ \+([3-9]|\d\d+)$/, { timeout: 60_000 });
+  await expect(chip).toHaveText(/^\w+ (unknown|stale \d+ min)/);
+  await expect(page.getByTestId("stale-label")).toHaveCount(0);
+  await expect(banner).toHaveCount(0);
+  await expect(main).toHaveCSS("opacity", "1");
+  await checkpoint(page, "stale-chip");
+  const height = await heightOf();
+  const top = await mainTop();
+
+  // The age moves by whole minutes: 3 minutes on the page clock show as 2 or more.
+  await expect(chip).toContainText("stale", { timeout: 60_000 });
+  await chip.click();
+  const orcaAge = list.locator('[data-source="orca"] span').first();
+  await expect(orcaAge).toHaveText(/^\d+ min$/, { timeout: 60_000 });
+  await page.clock.fastForward(180_000);
+  await expect(orcaAge).toHaveText(/^([2-9]|\d\d+) min$/);
+
+  // The list names what each stale source affects, opens and closes from the keyboard, and does not move the header.
+  await expect(list.locator('[data-source="orca"]')).toContainText("Agents");
+  await expect(list.locator('[data-source="plannotator"]')).toContainText("Plannotator");
+  expect(await heightOf()).toBe(height);
+  await checkpoint(page, "chip-list-open");
+  // The list is visible, not clipped by an ancestor: the point at its centre hits the list.
+  await expect
+    .poll(() =>
+      list.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return !!hit && element.contains(hit);
+      }),
+    )
+    .toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(list).toHaveCount(0);
+  await expect(chip).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(list).toBeVisible();
+  expect(await heightOf()).toBe(height);
+
+  // The stream drops: a banner with the frozen time, dimmed content, the list still open, nothing moved.
+  await page.evaluate(() => {
+    const live = window as unknown as LiveWindow;
+    let seen = false;
+    live.__gaps = 0;
+    new MutationObserver(() => {
+      if (document.querySelector(".banner")) seen = true;
+      else if (seen) live.__gaps++;
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  proxy.cut();
+  await expect(banner).toBeVisible();
+  const frozenAt = await page.evaluate(() =>
+    new Date((window as unknown as LiveWindow).__lastSnapshotAt).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  );
+  await expect(banner).toHaveText(`Disconnected: data frozen at ${frozenAt}`);
+  await expect(main).toHaveCSS("opacity", "0.55");
+  await expect(list).toBeVisible();
+  expect(await heightOf()).toBe(height);
+  expect(await mainTop()).toBe(top);
+  // The banner sits in the reserved header row: it covers no content.
+  const bannerBox = (await banner.boundingBox())!;
+  expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual((await mainTop()) + 0.5);
+  await checkpoint(page, "disconnected-banner");
+  // EventSource retries about every 3 s: the banner stays through 3 attempts.
+  await expect.poll(() => proxy.refused(), { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
+  expect(await page.evaluate(() => (window as unknown as LiveWindow).__gaps)).toBe(0);
+  await expect(banner).toHaveCount(1);
+
+  // The stream returns: the banner and the dimming go.
+  proxy.restore();
+  await expect(banner).toHaveCount(0, { timeout: 30_000 });
+  await expect(main).toHaveCSS("opacity", "1");
+  await checkpoint(page, "reconnected");
+  expect(await heightOf()).toBe(height);
+
+  // No stale source: dropping the stream shows the banner with no chip.
+  writeFileSync(join(state, "orca.mode"), "up");
+  writeFileSync(join(state, "plannotator.mode"), "up");
+  await expect(chip).toHaveCount(0, { timeout: 60_000 });
+  proxy.cut();
+  await expect(banner).toHaveText(/^Disconnected: data frozen at /);
+  expect(await heightOf()).toBe(height);
 });

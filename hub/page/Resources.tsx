@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Unknown, known, duration } from "./format.tsx";
-import { Stale, useLive } from "./store.tsx";
+import { useLive } from "./store.tsx";
 import { runHref } from "./RunDetail.tsx";
 import { Field } from "./Agents.tsx";
 import type { Agent, HostLevel, ResourceProcess, ResourcesHistory } from "../types.ts";
@@ -146,7 +146,6 @@ export function Resources() {
       <>
         <h1>Resources</h1>
         <Unknown />
-        <Stale name="resources" />
       </>
     );
   const runs = known(snapshot.runs) ? snapshot.runs : [];
@@ -163,9 +162,7 @@ export function Resources() {
   ] as const;
   return (
     <>
-      <h1>
-        Resources <Stale name="resources" />
-      </h1>
+      <h1>Resources</h1>
       {resources.degraded ? (
         <p className="amber small" role="status">
           lsof failed: only the Orca handle and the ark test admission give a process an owner.
