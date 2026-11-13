@@ -25,6 +25,11 @@ import {
 import { retroCommand } from "./commands/retro.ts";
 import { chiefHandoverCommand, chiefStateCommand } from "./commands/chief.ts";
 import { uiCommand, uiInstallCommand, uiUninstallCommand } from "./commands/ui.ts";
+import {
+  servicesInstallCommand,
+  servicesStatusCommand,
+  servicesUninstallCommand,
+} from "./commands/services.ts";
 import type { Command, Flags } from "./commands/types.ts";
 
 // Listed in the order `ark --help` prints them.
@@ -56,6 +61,9 @@ const commands: Command[] = [
   uiCommand,
   uiInstallCommand,
   uiUninstallCommand,
+  servicesInstallCommand,
+  servicesUninstallCommand,
+  servicesStatusCommand,
 ];
 
 const helpText = ["Usage: ark <command>", ...commands.map((command) => `  ${command.usage}`)].join(

@@ -13,6 +13,8 @@ const failSideOnly: Record<string, { minimum: number; maximum: number }> = {
   ui: { minimum: 0, maximum: 0 },
   "ui install": { minimum: 0, maximum: 0 },
   "ui uninstall": { minimum: 0, maximum: 0 },
+  "services install": { minimum: 0, maximum: 0 },
+  "services uninstall": { minimum: 0, maximum: 0 },
   "run close": { minimum: 0, maximum: 2 },
 };
 const probeLimit = 5;
@@ -111,7 +113,7 @@ test("ARK-T283 the command table is the same as at base - order, usage, descript
       writeFileSync(snapshotPath, `${JSON.stringify(records, null, 2)}\n`);
     }
     expect(records).toEqual(JSON.parse(readFileSync(snapshotPath, "utf8")));
-    expect(records).toHaveLength(27);
+    expect(records).toHaveLength(30);
     // Longest match: a command that is a prefix of another still prints its own usage.
     for (const command of ["ui", "ui install", "test", "test-case new", "test-audit inventory"]) {
       expect((await ark(...command.split(" "), "--help")).out).toStartWith(`ark ${command} `);
