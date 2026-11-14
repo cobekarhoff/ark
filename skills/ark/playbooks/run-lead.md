@@ -18,7 +18,7 @@ Throughout this playbook:
 2. Read `<run folder>/ticket.md` and the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Note `workspace`, `suites`, `roles`, `concurrency` and `round_budget`.
 3. Look for an existing Orca Run for this Ark run before you create one. A replaced lead's Run still holds its workers and messages.
    - Read your Orca inbox with the `check` command from your preamble. A consuming check marks the batch handled, so run it again until `count` is 0. Master Chief's message may name a `run_...` ID.
-   - Search the run folder for a `run_...` ID: `grep -rhoE 'run_[0-9a-f]+' <run folder> --include='*.md' --include='*.yml'`. Never search `events.ndjson` or `state.json`. Treat an ID found there as a candidate only.
+   - Search the run folder for a `run_...` ID, without the workspace folder (it holds the repo, which can quote a Run id in its docs): `grep -rhoE 'run_[0-9a-f]+' <run folder> --include='*.md' --include='*.yml' --exclude-dir=workspace`. Never search `events.ndjson` or `state.json`. Treat an ID found there as a candidate only.
 4. If step 3 found no ID, list the Orca Runs and look for the objective `Ark run <run>`:
 
    ```sh
@@ -86,7 +86,7 @@ Skip this part when `ark status <run>` shows that the run has an `evaluation.rec
 
    The command refuses when `evaluation.md` has no `Blockers` list, no `Risks` list or no `Surfaces` list, or when `Surfaces` holds a value other than `web_ui`, `cli_output`, `document` and `none`. An empty `Blockers` or `Risks` list is valid. Never write the event by hand.
 
-4. Run `ark status <run>`. The phase is `awaiting_criteria` on every run, also with no blockers and a ticket with ACs: go to the criteria gate below. Never record a gate answer for the human. Carry each risk into your plan: a step, a test case or a line in `summary`. `plan.md` lists them.
+4. Run `ark status <run>`. The phase is `awaiting_criteria` on every run, also with no blockers and a ticket with ACs: go to the criteria gate below. Never record a gate answer for the human. Carry each risk into your plan: a step, a test case or a line in `summary`. `plan.md` lists them. When `evaluation.md` says that an AC conflicts with other code or with another AC (a `Blockers` item; treat the same words under `Risks` as one), never choose a side in your plan: follow the AC text as written, or add the conflict to the criteria ask (step 2 of the criteria gate) so that the human decides.
 
 ### Criteria gate
 
@@ -99,10 +99,10 @@ The gate opens on every run, because the phase is `awaiting_criteria` for each n
    orca orchestration ask --question "Run <run>: <the ticket has no testable ACs | the evaluator found blockers: <list, one per line>>. Proposed ACs, each with its `method` and `verified_by`: <list, one per line>. Accept them?" --options "accept,edit,abort"
    ```
 
-   Add your recommendation to the question. The ask returns at once: end your turn, and the answer arrives as mail (`check --wait`). Never send a second question.
+   Add your recommendation to the question. The ask returns at once: end your turn, and the answer arrives as mail. Wait for it with `orca orchestration check --wait --json` and no message-type filter (never `--types`), because the answer arrives as a `status` message. Never send a second question.
 
-3. On `edit`, the human's reply holds the changes. Revise the draft, and ask again.
-4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`. Put them in its frontmatter as `acceptance_criteria: [{id, text, method, verified_by}]`. Keep `manual: true` on every criterion that has it. Then record the answer:
+3. On `edit`, the human's reply holds the changes. Revise the draft, and ask again. When the human changes a method, rewrite each sentence of the AC text that names the old method before `ark gate record <run> criteria accept`, so that the text and the `method` agree. That rewrite is an edit of the ticket: use the path of step 4.
+4. On `accept`, write the criteria into the ticket file. The `run.started` event on the first line of `<run folder>/events.ndjson` names it in `ticket_file`: that is the absolute path of the ticket file, and every edit of the ticket uses that path, the rewrite of AC text in step 3 too. `<run folder>/ticket.md` is only a copy that `ark gate record` overwrites: never edit it. Put them in its frontmatter as `acceptance_criteria: [{id, text, method, verified_by}]`. Keep `manual: true` on every criterion that has it. Then record the answer:
 
    ```sh
    ark gate record <run> criteria accept
@@ -149,7 +149,7 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    orca orchestration ask --question "Run <run>: strategies ready in <run folder>/strategies.md (mockups in <run folder>/mockups/). Cards: <one line per card: id and approach>. Which card? Say a card id, or abort. To mix cards or change one, write the note." --options "<card ids>,abort"
    ```
 
-   Add your recommendation.
+   Add your recommendation. Wait for the answer as in step 2 of the criteria gate: `orca orchestration check --wait --json` with no message-type filter.
 
 7. **Design round.** If the human writes notes or annotations and does not pick a card, send them to the same Designer (`orca orchestration send` to its terminal, or start it again with the notes). Revise `strategies.md` with the Designer's changes, run `ark strategy record <run>` again, and show it again. Each new `strategy.recorded` before the answer is one design round. Design rounds have no budget. They never use the build round budget, and they never open the escalation gate. To mix two strategies, write a mixed card from the human's note and record again.
 8. Record the human's answer with the exact card ID, or `abort`:
@@ -177,11 +177,19 @@ Use this when the human must try a running thing: a prototype for the strategy g
 
 1. Slug, stated once: the run's ticket id and counter in lowercase, without the date. Run `2026-11-03-ARK-284-1` gives `ark-284-1`.
 2. Pick a free `<port>` first: the proxy needs it before the server starts.
-3. In the run worktree, start the hub in a background terminal (a background process, not a worker, so the rule on starting agents does not bar it):
+3. In the run worktree, start the hub in a background terminal (a background process, not a worker, so the rule on starting agents does not bar it). For a project other than Ark, use the installed `ark`:
 
    ```sh
    portless hub.<slug> --app-port <port> ark ui --port <port> --name hub.<slug>.localhost
    ```
+
+   In the Ark repo only, to show the hub of the run's change, start the CLI of the run worktree instead:
+
+   ```sh
+   portless hub.<slug> --app-port <port> bun cli/ark.ts ui --port <port> --name hub.<slug>.localhost
+   ```
+
+   This is a preview. Gate and shipping commands (`ark gate`, `ark test`, `ark merge-request open`, `ark run`) stay on the installed `ark`, which runs main: the change under review never chooses the guardrail that approves it. A new command of the run is tried with `bun cli/ark.ts <command>` in the worktree, and its output is a check, never a gate.
 
 4. Preflight:
 
@@ -189,7 +197,7 @@ Use this when the human must try a running thing: a prototype for the strategy g
    curl -sf http://hub.<slug>.localhost/api/snapshot
    ```
 
-   If it fails, use the printed `http://127.0.0.1:<port>` and say so in the report.
+   If it fails (the portless URL gets no answer, or answers 403), the human gets the printed `http://127.0.0.1:<port>` at once, in the ask text, and you say so in the report.
 
 5. Open the page: `orca tab create --worktree path:<run worktree> --url http://hub.<slug>.localhost`. Put the same URL in the `orca orchestration ask` text.
 6. In the evidence file, name the URL, not a port.
@@ -330,6 +338,7 @@ Rules for the plan:
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the reviewer uses a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
 - When `Surfaces` includes `web_ui`, give a `skills` list (the UI skills of `ark ui-skills <run>`) to every implementer, validator and reviewer step that touches the UI. Add the React skill that command lists to a step that touches React code. You decide which steps touch the UI and React code.
 - Keep each step small enough for one worker. Do not put two repos in one step.
+- A step that writes a doc from learnings or tickets: list each sentence it takes from a learning or a ticket, with its source, and tell the implementer to check each one with a command at head (`grep`, `ls`, or `--help` of a command) and to fix each one that fails. `ark` builds the worker spec from fixed parts and does not copy `goal`, so send the list to the worker in a message at the start of the step (section 7, step 1).
 - Read `kind` in `ticket.md` (`ark status <run>` shows it; a missing `kind` is `feature`). It sets the first and last steps. `steps` may have an optional `goal` text; `ark plan check` reads it for `perf`.
   - `bug`: the first step is a validator step that serves every AC, a manual one too. It writes the AC tests before the fix, and `ark test` must show each non-manual AC `failing` in one run. `ark run step <run> <implementer step> start` refuses with `bug run: record a failing ark test of the ACs before the fix` until then.
   - `perf`: the first step `goal` names `results/baseline.md` (the measure before the change) and the last step `goal` names `results/compare.md` (the measure after it). `ark merge-request open` refuses when either file is missing or empty. `results/baseline.md` and `results/compare.md` each record these points, in this order:
@@ -361,7 +370,7 @@ No code is written before the human approves the plan.
 Read your mail with the `check` command from your preamble before you open the gate, and again before you record the human's answer. A message from Master Chief can change the plan, for example a new model policy or a merge that changes the plan schema. If one does, change `plan.yml`, run `ark plan check` again and open a new gate.
 
 When Master Chief sends an amendment the human approved, write the new text to a file and run `ark criteria amend <run> <criterion id> <file> --reason <text>`. Use it when an AC wording is wrong after planning, instead of aborting the run, and only with the human's approval relayed through Master Chief: never amend on your own. The command works in every phase before `merge_requests_open`. Before the plan is approved, run `ark plan check <run>` again.
-After the approval, do not run `ark plan check` again: it can change the plan hash and reset the approval; the run keeps its phase and the next `ark test` judges the new text. Re-read the test cases of that criterion and change `plan.yml` when the new text no longer matches them. A text amend of a manual criterion clears the human's answer; keep it only when the human decides to, with `--carry-manual <the human's words>`.
+After the approval, do not run `ark plan check` again, except to revise the plan after a worker report (section 7): it can change the plan hash and reset the approval; the run keeps its phase and the next `ark test` judges the new text. Re-read the test cases of that criterion and change `plan.yml` when the new text no longer matches them. A text amend of a manual criterion clears the human's answer; keep it only when the human decides to, with `--carry-manual <the human's words>`.
 When test case ids are renumbered, do not edit `ticket.md`: run `ark criteria amend <run> <criterion id> --verified-by <case ids> --reason <text>` (comma separated, no file; each case file must be committed and active). It changes no text and keeps every manual answer.
 
 If `gates.plan` is `auto` in `ark.yml` and `ark plan check` printed `recorded plan approve by auto`, the gate is answered: it needs no Plannotator review and no relay. Check with `ark status <run>` and go to section 6. When the plan has an open decision, the gate stays open and the rules below apply.
@@ -460,7 +469,14 @@ ark run step <run> <step> start
 
    If the command refuses with `round budget spent`, go to section 9. If it names a missing event, record that event first. It prints the dispatch id and the terminal of the worker: keep both. When Orca fails to start the worker, `start` gives the round back itself: read its message, and when the error names a model, harness or ACP model, read `roles` in `ark.yml` again, fix `harness` and `model` in `plan.yml` to a pair that `roles` has, and run `ark plan check <run>`. Then decide what to do. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
 
-   Anything the spec cannot know (for example the path of the findings file of a rework round) goes to the worker in a message (`orca orchestration send` to its terminal).
+   Anything the spec cannot know (for example the path of the findings file of a rework round) goes to the worker in a message (`orca orchestration send` to its terminal). Write the message to a file with a quoted heredoc and send it with `--body` and the contents of the file, so that backticks and dollar signs reach the worker unchanged:
+
+   ```sh
+   cat > "<run folder>/message.txt" <<'EOF'
+   <the message>
+   EOF
+   orca orchestration send --to dispatch:<dispatch id> --subject "<subject>" --body "$(cat "<run folder>/message.txt")"
+   ```
 
 2. Use the terminal and the dispatch id that `start` printed. About 2 minutes after the first dispatch on each model starts, wait once for 120 seconds, then read its terminal, without waiting for the long wait below:
 
@@ -491,6 +507,8 @@ ark run step <run> <step> start
    - `escalation` from a worker: read it, and fix the cause or take it to Master Chief.
    - `worker_done`: check that it comes from the dispatch you started. Read its report.
 
+   When a worker report shows that `design.approach` or a `summary.changes` row is wrong in a way that changes the approach or the scope, revise `plan.yml`, run `ark plan check <run>`, and show the plan again at the plan gate (section 5) before the next step starts. This is the exception to the rule of section 5 that you do not run `ark plan check` again after the approval. A new plan hash clears the approval and the phase goes to `planning`, where `ark run step ... start` and `finish` are refused. So first run `ark run step <run> <step> finish` for every step whose worker is done. A step whose worker still runs stays `running`: finish it after the new approval.
+
 4. Record the result:
 
    ```sh
@@ -499,10 +517,11 @@ ark run step <run> <step> start
    ```
 
    Use `--failed` when the worker reported `--outcome failed` or the report shows the step did not finish. Release a worker with `orca orchestration worker-release --dispatch <dispatch id> --json` only after it sent `worker_done`, whether it succeeded or failed, the evaluator and the designer too.
+   When `worker-release` fails with `dispatch_inactive`, the worker is idle and not settled. Its `worker_done` is the proof that it finished, so stop it with `orca orchestration worker-stop --dispatch <dispatch id> --json` and the same dispatch id.
    A worker that exited abnormally sent no `worker_done` and its dispatch is not settled. Do not release it: run `orca orchestration worker-stop --dispatch <dispatch id> --json` (only with proof that it exited), or leave it to `ark run close`.
    Run `finish` for every step a worker completed, reviewer steps too, before you start the same step again: `ark run step ... start` refuses a step that is still `running`.
 
-If a step fails, read the worker's output with `orca orchestration worker-read --dispatch <dispatch id> --json`, and decide: start the step again, change the plan (run `ark plan check <run>` and go back to section 5), or ask Master Chief.
+If a step fails, read the worker's output with `orca orchestration worker-read --dispatch <dispatch id> --json`, and decide: start the step again, change the plan (first `finish` every step whose worker is done, then run `ark plan check <run>` and go back to section 5, as in the paragraph on worker reports above), or ask Master Chief.
 
 ## 8. Test, review and rework
 
@@ -518,15 +537,18 @@ ark test <run> --quick
 A suite that passed on the same heads, mode and command prints `reused` and does not run again; a test file that failed once and passed on retry prints `flaky`, and the retro and the MR body list it.
 A suite that fails prints, after its `suite ... failed` line, its exit code, the log path `results/<suite>.log` and the last 20 lines of the log; a test case that reads `missing` gets the line `no test title starts with <test case id>` after its criterion line, except on a quick run that selected test files for a suite with `base_files`.
 
+**Interim: one owner for the full `ark test`.** Delete this paragraph when ARK-411 and ARK-366 are merged. Run the full `ark test <run>` as a background job with no time limit, and read its exit code from the log of the job: a tool deadline then ends only your wait, never the test. Before the start, check that no implementer step of the run is `running` in `ark status <run>`, and that the section `## ark test budget` of `ark chief state` has no line `- running: <run>` or `- waiting: <run>` for this run (the section prints only while a ticket runs or waits; without it no `ark test` is counted). Never start a second `ark test` of the run while the first is alive: wait for it with `ark test <run> --wait`, as above. A validator step owns its own `ark test` call, so you start none while it runs. A reviewer step starts only `ark test <run> --quick`, and you start the final full test only when no reviewer step is running.
+
 The full `ark test <run>` (the final gate, not the build round) runs the integration and E2E suites on the composed workspace, then runs the suites again at the base commit with the head's test files copied in, for every `kind`: a suite with `base_files` runs only the test files of the run's own commits there (a case in an unselected file reads `not run`), any other suite runs whole, and a `refactor` run runs every suite whole even with `base_files` (the files `base_files` matches that the run added are still copied in).
 It writes `results/evidence/<test case id>/{base,head}/` (`result.json`, `command.log`, `screenshots/`). A new test that fails at base is expected: only a failure at head fails the run (a `refactor` run also fails when its suites fail at base). Exit 0 of the full run means every AC without `manual: true` has a passing tagged test, and every criterion with `manual: true` is `manual ok`. Exit 1 lists the failing or missing AC and each manual criterion that is not `manual ok`.
 
 - **A tagged test fails.** Read `<run folder>/results/`. Decide whether the product code or the test is wrong. If the code is wrong, send the implementer step back: write the failing test names and output into `<run folder>/findings/round-<round>.md`, then start the implementer step again (section 7). That is a new round. If the test is wrong, start the validator step again. A validator restart is not a round.
+- **A send-back round names a file that no `where` lists.** When a finding or a failing test of the round names a file that no `where` of `summary.changes` in `plan.yml` lists, add the path to the `where` of that criterion and run `ark plan check <run>` before the implementer finishes. The new plan hash reopens the plan gate: the implementer's `finish` is refused until the plan is shown again and approved, as in section 7 (the paragraph on worker reports).
 - **An AC is `missing`.** No tagged test passed for it. Start the validator step again.
-- **A criterion is `manual pending`.** A person proves it, so a validator step has no test to write: never restart the validator for it. Ask the human through Master Chief to check each criterion with `manual: true`, one question for each criterion id, and wait for the answer. Record it as the human's answer, never your own: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]`. Then run `ark test <run> --quick` again (the full run is the final gate before the MR). `manual ok` counts as proved.
+- **A criterion is `manual pending`.** A person proves it, so a validator step has no test to write: never restart the validator for it. Ask the human through Master Chief for each criterion with `manual: true` and each `analysis` criterion, one question for each criterion id, before the last full `ark test <run>` and never after it: the full run exits 0 only when each one is `manual ok`. Wait for the answer with `orca orchestration check --wait --json` and no message-type filter, because the answer arrives as a `status` message. Record it as the human's answer, never your own: `ark gate record <run> manual <criterion id> ok|problem [--note <text>]`. `manual ok` counts as proved at once, because `ark merge-request open` reads the gate answers: run no `ark test <run>` after it.
   `manual problem` is a defect: write the human's note into `<run folder>/findings/round-<round>.md` and send the implementer step back (section 7). The wait for the human counts as gate wait in `ark retro`. A `manual pending` never opens the escalation gate and `ark merge-request open` refuses until each manual criterion is `manual ok`. In the validator spec, say that a manual criterion gets no test. Tell the implementer the literal strings `manual: true`, `manual pending`, `manual ok` and `manual problem`.
-- **A non-test AC needs an evidence file.** `ark merge-request open` and `ark run close <run> handed_off` refuse, before any push and any event, an AC with a method other than `test` (a `manual: true` AC reads as `demonstration`) that has no well-formed `<run folder>/results/evidence/<AC id>.md` (`evidence missing: <AC id> (<method>)`, `evidence malformed: <AC id>: <reason>`, listed under `refused: evidence is not complete`). Write it from what was done and seen, before you ask the human.
-  `demonstration`: the sections What the human did, What the human saw, Before and After (each with screenshot paths); `ark gate record <run> manual <AC id> ok` appends the last line `human: ok`. `inspection`: Files (`path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`. `analysis`: Command, Output, Threshold and Result, each given for Base and for Head.
+- **A non-test AC needs an evidence file.** `ark merge-request open` and `ark run close <run> handed_off` refuse, before any push and any event, an AC with a method other than `test` (a `manual: true` AC reads as `demonstration`) that has no well-formed `<run folder>/results/evidence/<AC id>.md` (`evidence missing: <AC id> (<method>)`, `evidence malformed: <AC id>: <reason>`, listed under `refused: evidence is not complete`). The validator step writes it from what was done and seen, before you ask the human (no test, and the run lead writes none).
+  `demonstration`: the sections What the human did, What the human saw, Before and After (each with screenshot paths). `ark gate record <run> manual <AC id> ok` appends the last line `human: ok` to that file, which must exist; a later rewrite of the file keeps `human: ok` as its last line. An `inspection` or `analysis` file gets no such line. `inspection`: Files (each line is `path:start-end` and nothing else; text goes under Checked against), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`: the validator writes it after it reads the diff against the AC, because the validator runs before the reviewer. `analysis`: Command, Output, Threshold and Result, each given for Base and for Head.
   They also refuse an AC with `method: test` when a `verified_by` case has no `base` or `head` folder in `results/evidence/<test case id>/` (`test evidence missing: <AC id> <test case id> (<base|head>)`) or when the `head` SHA is not the repo head (`test evidence stale: <AC id> <test case id>`): run `ark test <run>` again after the last commit.
 - **Check the refusals of open early, by stage.** `ark merge-request check <run> --stage head|step|final [--step <step id>] [--summary <text>]` prints each problem that `ark merge-request open` would refuse, one line each, with the text of open, and exits 1 when there is one; it changes no file, event or ref and fetches nothing. The three stages are:
   - `head` checks what needs only the current head: each backticked AC string against the tracked files, the MR title (pass the same `--summary` you will give open) and the shape of each evidence file that exists, without the last line `human: ok` of a demonstration file and the `reviewer:` line of an inspection file (a person or the reviewer writes those later). `ark test <run>` and `ark test <run> --quick` run it at their end and print the problems under `merge-request check`; it prints nothing when there is none, and never changes the exit code or `passed`.
@@ -570,7 +592,7 @@ Run the reviewer steps after the tests pass. Each reviewer writes its findings t
 
 To send work back, write the findings you accept into `<run folder>/findings/round-<round>.md`, start the implementer step again, and run `ark test <run> --quick` when it finishes. Start a second or later reviewer step only when the last review sent at least one P0 or P1 back to the implementer. A review whose P0 and P1 findings were all dropped sent none back, so it starts no second review. When only P2 or P3 went back, the implementer round ends with `ark test <run> --quick`, and no reviewer step follows. Stop when a review sends nothing back and the tests pass.
 
-A review ends with a `Verdict:` line. On `Verdict: human_decision_needed`, send the text under `## Question for the human` to Master Chief with `ask`, hold the step that the question blocks, and keep running the other steps. It is not a send-back and counts no round, and it holds even when every finding of the file is dropped. Record the human's answer under `## Run lead decision`, then go on as it says (start the implementer step again for a change, or leave the code). On `Verdict: revision_needed` with every finding dropped, nothing goes back: treat the review as one that sends nothing back.
+A review ends with a `Verdict:` line. On `Verdict: human_decision_needed`, send the text under `## Question for the human` to Master Chief with `ask`, wait for the answer with `orca orchestration check --wait --json` and no message-type filter (it arrives as a `status` message), hold the step that the question blocks, and keep running the other steps. It is not a send-back and counts no round, and it holds even when every finding of the file is dropped. Record the human's answer under `## Run lead decision`, then go on as it says (start the implementer step again for a change, or leave the code). On `Verdict: revision_needed` with every finding dropped, nothing goes back: treat the review as one that sends nothing back.
 
 `ark retro` counts `rework.findings_sent_back` from these files. Only files named `round-` plus digits plus `.md` count. It counts each line that starts, after optional `#` marks, one list marker (`N.`, `-` or `*`) and bold marks, with `P0`, `P1`, `P2` or `P3`. Start every accepted finding with its rank, for example `### P1: export drops the unit` or `- P2 (cli/report.ts): wrong label`. Lines without a rank (test failures, CI logs) count 0. No findings folder counts 0.
 
@@ -672,6 +694,8 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 
 ## Rules
 
+- Run a gating command (`ark run step ... start`, `ark worktree sync`, `ark test`, `ark merge-request open`) alone and read its exit code before the next command. Never pipe it through `tail` or `grep`, and never join two with a semicolon. Never pipe `orca orchestration worker-start` through `grep`.
+- Stop only a process you started, by the pid you saved, and never by name. Stop an `ark test` with `ark test <run> --stop`, never with a kill of the caller pid or by name. Never stash in a worktree.
 - Never write product code. Never edit a worktree except to read it.
 - Never start an agent except through `ark run step <run> <step> start` (plan steps) or `orca orchestration worker-start` (evaluator, designer, test-case writer and test-case reviewer). Never start more workers at once than `concurrency` in `ark.yml`.
 - Never write to `events.ndjson` or `state.json`. Use the `ark` commands.

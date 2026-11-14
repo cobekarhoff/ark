@@ -98,6 +98,10 @@ The next number is one above the highest `ARK-*.md` in the tickets folder.
 
 - Every AC with `method: test` is provable by at least one integration or E2E test case (ADR 0010); any other method is proved by the `manual` gate. A done ticket's ACs never change.
 - A string in backticks in an AC passes when a tracked file contains it or when it names a tracked file or folder at head, except one with a placeholder, a `*`, `...`, a `:<line>` suffix or the AC's own id, and any string of a manual AC. Put a path or string that the run removes in `not:` (`` `not:docs/old/` ``): it must then be in no tracked file. Put a string that the run rewrites, or that only describes the old state, outside backticks.
+- An AC names no value that the run reads from live data at test time (a current rank, the newest ticket id, today's count, the time of day), and names the rule that selects it instead. A fixed regression id or a fixture constant is allowed.
+- An AC about a page, a list or a report says which project, account or scope it shows and how the human selects it.
+- Every AC can be proved before the MR opens. An effect that exists only after the merge is an `analysis` AC about the mechanism, or a follow-up ticket.
+- In the Ark repo, an AC that names a command checks that `cli/ark.ts` registers or lists it (it imports each command from `cli/commands/`), or says that the ticket adds it.
 - Evidence quotes the human's words and the date, and names the brainstorm choices.
 
 ## UI ideas
