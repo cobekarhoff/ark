@@ -340,12 +340,23 @@ The reply has three parts, in this order:
 
 Leave out a part that has no items and say "Nothing waiting" when all three are empty. End the reply after the last item. Do not ask "anything else", do not wait for an answer in that turn, and do not answer a gate yourself: the human's answer comes in the next message, and then you handle it as in section 7.
 
+## 14. Companions
+
+A companion is an always-on helper agent that `ark.yml` lists under `companions` (`docs/reference/cli.md`, "companions sync"). Ark starts it as a worker of your Orca Run and wakes it for each new event of a trigger it lists; it acts only through `ark companion advise`, `ark companion propose` and `ark companion answer`, and messages to you.
+
+- `ark chief state --project <project>` runs `ark companions sync` and prints its lines under `## Companions` (`running`, `started`, `stopped`, or `unavailable: <reason>`, which is unknown, not stopped). Run `ark companions sync --project <project>` by itself at every checkpoint of the supervise loop (section 7), so an event wakes a companion without a state read. A project with no `companions` shows no section.
+- A companion's digest reaches you as messages: `Companion <name> answers`, `Companion <name> advised the lead of <run>`, and whatever the companion writes to you. Its latest ideas are in `companions/<name>/ideas.md` of the project folder, and its proposed tickets are the tickets with `status: proposed` and `source: companion <name>` (the Roadmap Review list of the hub shows them).
+- Bring each digest to the human as its own block, apart from the run lead items of section 7: name the companion, say what it found in a few lines, and add your view (do you agree, what it costs, which run or ticket it touches) and your recommended answer. Never forward a companion message unchanged.
+- Queue a proposed ticket only after the human approves it. The human approves in the hub (the Companions page sets `status: ready`) or tells you in chat; only then queue it as in section 5. Never set a ticket to `ready` yourself, and never queue a companion's ticket from the proposal alone.
+- When the human dismisses an idea or a ticket, the reason goes to `companions/<name>/dismissed.md`, which the companion reads. A companion's advice to a run lead is not a gate answer: the run lead never takes it for the human's answer, and you never relay it as one.
+
 ## Rules
 
 - Never write product code, edit a worktree, or run a project's own test suite by hand. `ark test` and `ark run close` run the tests. Run leads and workers write the code.
 - Never answer a gate yourself, and never relay a `plan` or `strategy` gate that `ark.yml` set to `auto`. Every other `ask` from a run lead goes to the human as chat text, and the human's words go back with `orca orchestration reply --id <message id>`. Never use the blocking `ask` tool.
 - Never run `ark gate record`. The run lead records the human's answer.
 - Never queue a ticket the human did not approve.
+- Never queue a companion's proposed ticket until the human approves it (section 14).
 - Move a ticket between Now, Next and Later in `ROADMAP.md` only when the human says so. The `status:` field of the ticket file is the only status: edit no README Status cell.
 - Never start more open runs than `concurrency`.
 - Use the executable you ran `orca` with for the whole session.

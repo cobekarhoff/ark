@@ -908,24 +908,29 @@ over one Server-Sent Events stream (/events; GET /api/snapshot returns the same 
 its decisions, files and agent transcripts are read when the page asks, not kept in the snapshot.
 Views: Home (tiles for what needs you, then blockers, the review queue and run progress with usage),
 Runs (every run on one board and a cross-run dependency graph; #/map redirects here), a run page
-(any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts) and Roadmap
+(any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts), Roadmap
 (grouped table; a ticket opens as a full page with its dependency graph; the ticket text is read
-when the page asks, GET /api/ticket/<project>/<id>). A run whose steps work in 2 or more repos draws
-its repo graph instead of the step DAG: one card per repo in merge order (hand-off order when no MR
-exists) with the repo's why, its MR, CI and `waits for !N` or its hand-off branch, a ring and a dot
-per step, repo edges labelled with kind and pin (evidence and bump state on hover or focus), and, in
-an open card, the steps in the columns Implement, Bump, Validate and Review. Cards start closed from
-4 repos. Cross-repo step edges show only while a step has hover or focus. The ticket page shows the
-repo chain of its newest run; a click opens `#/run/<run>/repo/<repo>`. A run with one step repo, a
-dependency cycle between repos, or no plan keeps the step DAG and no chain. Branch commits and
-submodule pointers are read by git in the background, never per request. The hub's one action is
-POST /api/open-in-orca, which runs orca terminal switch for a live terminal; it sends no text to a
-terminal, changes no run state and steers no agent. One hub runs per Ark repo: a second hub for the
-same repo (any port) prints `Ark hub already runs on http://127.0.0.1:<port>` with the port of the
-running hub and exits 0 (lock file in ARK_HOME; a lock of a dead pid is taken over). The reader runs
-only while a page is connected to /events: an idle hub runs no Orca, Plannotator or GitHub read and
-watches no Ark folder (GET /api/snapshot does not wake it), and it reads Plannotator only while an
-open run has an open gate.
+when the page asks, GET /api/ticket/<project>/<id>) and Companions (one row for each companion of
+ark.yml with its state, last wake, trigger and cost, then its latest ideas and proposed tickets; GET
+/api/companions). A run whose steps work in 2 or more repos draws its repo graph instead of the step
+DAG: one card per repo in merge order (hand-off order when no MR exists) with the repo's why, its
+MR, CI and `waits for !N` or its hand-off branch, a ring and a dot per step, repo edges labelled
+with kind and pin (evidence and bump state on hover or focus), and, in an open card, the steps in
+the columns Implement, Bump, Validate and Review. Cards start closed from 4 repos. Cross-repo step
+edges show only while a step has hover or focus. The ticket page shows the repo chain of its newest
+run; a click opens `#/run/<run>/repo/<repo>`. A run with one step repo, a dependency cycle between
+repos, or no plan keeps the step DAG and no chain. Branch commits and submodule pointers are read by
+git in the background, never per request. The hub has four writes, each a POST from the hub's own
+page only: /api/open-in-orca, which runs orca terminal switch for a live terminal, and the three of
+the Companions page, /api/companions/approve (a proposed ticket of a companion goes to `ready`),
+/api/companions/dismiss (a reason is appended to companions/<name>/dismissed.md) and
+/api/companions/ask (runs `ark companion ask`). It sends no text to a terminal, queues no work and
+steers no run; Master Chief queues. One hub runs per Ark repo: a second hub for the same repo (any
+port) prints `Ark hub already runs on http://127.0.0.1:<port>` with the port of the running hub and
+exits 0 (lock file in ARK_HOME; a lock of a dead pid is taken over). The reader runs only while a
+page is connected to /events: an idle hub runs no Orca, Plannotator or GitHub read and watches no
+Ark folder (GET /api/snapshot does not wake it), and it reads Plannotator only while an open run has
+an open gate.
 ```
 
 ### ui install
@@ -1293,6 +1298,7 @@ repos:
 | `test_min_free_memory_percent` | no       | integer | `ark test` starts no suite while free memory is below this percent. It must be 0 or more. The default is 20.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `test_max_swap_gb`             | no       | integer | `ark test` starts no suite while swap use is above this many GB. It must be 0 or more. The default is 8.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `test_case_source`             | no       | string  | Where test case entries live. Only `local` (`test/cases/` of each repo) exists, and it is the default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `companions`                   | no       | list    | Always-on helper agents, one Orca worker each, kept alive by `ark companions sync` (see [companions sync](#companions-sync)). Each entry has `name` (unique, no `/`, `\`, `..` or whitespace: it names the folder `companions/<name>/` of the project), `instructions` (a file of the project folder, for example `companions/cortana.md`; an absolute path, a `..` or a missing file is refused), `harness` (`claude`, `codex`, `omp` or `pi`), `model`, and `on` (a non-empty list of `run.merged`, `run.started`, `criteria.opened`, `escalation` and `ci.failed`; the companion is woken once for each new event of a trigger it lists). Ark puts a fixed preamble before the instructions text; a companion acts only through `ark companion answer`, `advise` and `propose`, and messages to Master Chief. Without the key `ProjectConfig` has no `companions` field, and every command works as before. An Ark older than this key refuses it: add it to the live `ark.yml` after the change that adds it has merged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Each entry in `suites`:
 
@@ -1357,6 +1363,12 @@ security:
 gates:
   plan: auto
   strategy: auto
+companions:
+  - name: cortana
+    instructions: companions/cortana.md
+    harness: omp
+    model: anthropic/claude-sonnet-5-5
+    on: [run.merged, escalation]
 ```
 
 A browser suite runs Playwright Test. Playwright's JUnit reporter writes the test title in `name`, so the `bun` parser reads it unchanged, and `PLAYWRIGHT_JUNIT_OUTPUT_FILE` carries the `{report}` path. The `setup` above also installs Chromium, so each new worktree can run the suite; the download is cached in `~/.cache/ms-playwright`.
