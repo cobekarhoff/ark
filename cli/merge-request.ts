@@ -16,6 +16,7 @@ import {
   runCriteria,
 } from "./ticket.ts";
 import { manualStatus } from "./lifecycle.ts";
+import { securityScan } from "./security.ts";
 import { discoverRepos, repoBase, targetBranch } from "./workspace.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import {
@@ -339,7 +340,8 @@ function evidenceProblems(
 /**
  * The refusals shared by `ark merge-request open` and `ark run close <run> handed_off`: the test result, the
  * manual and non-manual ACs, the head of every repo, the AC strings, and the `perf` and `refactor` rules.
- * Returns the head of each repo and the repos whose head moved from the tested head only by clean sync merges.
+ * Then the security scan (`securityScan`), which refuses on a secret or a high or critical vulnerability and on a missing scanner.
+ * Returns the head of each repo, the repos whose head moved from the tested head only by clean sync merges, and the rows of the Security section for each repo.
  */
 export function assertShippable(
   runId: string,
@@ -347,7 +349,7 @@ export function assertShippable(
   directory: string,
   events: ArkEvent[],
   state: RunState,
-): { heads: Map<string, string>; cleanSyncs: CleanSync[] } {
+): { heads: Map<string, string>; cleanSyncs: CleanSync[]; security: Map<string, string[]> } {
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
   if (lastTest.data.mode === "quick")
@@ -415,7 +417,11 @@ export function assertShippable(
   const evidence = evidenceProblems(directory, lastTest, evidenceHeads);
   if (evidence.length > 0)
     throw new ArkError(`refused: evidence is not complete\n${evidence.join("\n")}`);
-  return { heads, cleanSyncs };
+  const security = securityScan(
+    [...worktrees.values()],
+    loadConfig(project).security?.accepted ?? [],
+  );
+  return { heads, cleanSyncs, security };
 }
 
 /**
@@ -438,7 +444,7 @@ export function mergeRequestOpen(
     throw new ArkError(`cannot open merge requests while the run is in phase ${state.phase}`);
   }
 
-  const { heads, cleanSyncs } = assertShippable(runId, project, directory, events, state);
+  const { heads, cleanSyncs, security } = assertShippable(runId, project, directory, events, state);
 
   const ledger = buildLedger({ runFolder: directory, heads: Object.fromEntries(heads) });
   const worktrees = worktreeMap(events);
@@ -548,6 +554,7 @@ export function mergeRequestOpen(
         host,
         tokenOwner: tokenOwner(host, worktree.path),
         template: findTemplate(worktree.path),
+        security: security.get(repo),
         // A repo with no commits opens no MR, so the merge order leaves it out.
         mergeOrder: graphOrder.filter((name) =>
           ledger.repos.some((entry) => entry.repo === name && entry.commits.length > 0),

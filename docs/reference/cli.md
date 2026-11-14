@@ -153,22 +153,24 @@ with no ok, a repo head changed since the last test, a counted AC string in no t
 `not:` string still in one, a `kind: perf` run with a missing result file, a `kind: refactor` run
 with a `method: test` AC whose base did not pass, and missing, malformed or stale evidence
 (`evidence missing: <AC id> (<method>)`, `evidence malformed: <AC id>: <reason>`, `test evidence
-missing: <AC id> <test case id> (<base|head>)`, `test evidence stale: <AC id> <test case id>`). Only
-a string a file can hold counts: not one with a placeholder (`<`), a `*`, `...`, a `:<line>` suffix
-or the id of its own AC, and no string of a manual AC. A string also passes when it names a tracked
-file or folder at HEAD (one trailing `/` is dropped; an empty path never counts). A string that
-starts with `not:` is a removed string: it must be in no tracked file and name no tracked path, and
-the refusal names it without the prefix. For handed_off it keeps each branch with commits beyond its
-base (the base is in `worktree.created`) and prints `kept <repo> <branch>: handed off, <n> commit(s)
-ahead of <base>` for each; it deletes a branch with no commit beyond its base. An aborted run keeps
-a branch with commits the same way and prints `kept <repo> <branch>: aborted, <n> commit(s) ahead of
-<base>`; an aborted branch with no commit beyond its base is deleted. After the close it releases
-the settled Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each; it
-prints `<dispatch id> still active, not released` for an active one, and one `orca: workers not
-released: <reason>` line when Orca fails, and the close still exits 0. `ark run close --sweep
-[--project <name>]` does the same release for every closed run of the project (ARK_PROJECT when
---project is not given), records no event, and prints nothing for a run with nothing to report.
---sweep takes no run argument.
+missing: <AC id> <test case id> (<base|head>)`, `test evidence stale: <AC id> <test case id>`), and
+the security scan (a secret, a high or critical vulnerability, a scanner that fails, or gitleaks or
+osv-scanner not installed, also for `merge_requests: none`: the refusals are those of `ark
+merge-request open`). Only a string a file can hold counts: not one with a placeholder (`<`), a `*`,
+`...`, a `:<line>` suffix or the id of its own AC, and no string of a manual AC. A string also
+passes when it names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty path
+never counts). A string that starts with `not:` is a removed string: it must be in no tracked file
+and name no tracked path, and the refusal names it without the prefix. For handed_off it keeps each
+branch with commits beyond its base (the base is in `worktree.created`) and prints `kept <repo>
+<branch>: handed off, <n> commit(s) ahead of <base>` for each; it deletes a branch with no commit
+beyond its base. An aborted run keeps a branch with commits the same way and prints `kept <repo>
+<branch>: aborted, <n> commit(s) ahead of <base>`; an aborted branch with no commit beyond its base
+is deleted. After the close it releases the settled Orca workers of the run (Orca Run `Ark run
+<run>`) and prints one line for each; it prints `<dispatch id> still active, not released` for an
+active one, and one `orca: workers not released: <reason>` line when Orca fails, and the close still
+exits 0. `ark run close --sweep [--project <name>]` does the same release for every closed run of
+the project (ARK_PROJECT when --project is not given), records no event, and prints nothing for a
+run with nothing to report. --sweep takes no run argument.
 
 Where the project has `ticket_source: local`, it then sets the first `status:` line of the run's
 ticket file (`ticket_file` of `run.started`) to `done` for merged and to `ready` for aborted and
@@ -549,12 +551,28 @@ and Result, each given for Base and for Head. For an AC with `method: test`, eac
 `verified_by` needs `results/evidence/<test case id>/base/` and `head/` (`test evidence missing: <AC
 id> <test case id> (<base|head>)`), and the commit SHA in the `head` `result.json` must be the
 current head of a repo of the run (`test evidence stale: <AC id> <test case id>`). An AC with no
-`verified_by` needs no test evidence. Before any push, lint or event it runs `git fetch origin` and
-`git merge-tree --write-tree HEAD origin/<target>` in each repo it pushes, a new MR or an open one
-it refreshes (changing no file and no ref), and refuses when the head does not merge cleanly: it
-names the repo, records worktree.synced with a conflict so that `ark run step <run> <step> start
---merge` is allowed, and pushes nothing for any repo. A merge-tree error that is not a conflict (no
-common history, no origin/<target>, git older than 2.38) is a refusal that shows git's text.
+`verified_by` needs no test evidence. Then it runs the security scan, before any push or event, and
+on every call, also the refresh of an open MR: gitleaks (`--redact`) on the commits that the run
+branch added (`--first-parent --no-merges <base>..HEAD`, so a commit merged in from the target is
+not scanned), and osv-scanner on each lockfile of the head, with its licences. It refuses with
+`refused: security scan found <n> problems` and one line for each finding, `secret: <rule> in
+<file>:<line> (commit <8 characters>)` or `vulnerability: <id> <SEVERITY>, <package> <version>,
+<lockfile>`, for a secret and for a high or critical vulnerability, also one that the base already
+has, and never prints a secret value. A finding that `security.accepted` of ark.yml lists (`id` and
+`reason`; `id` is the vulnerability id, one of its aliases, or the gitleaks fingerprint
+`<commit>:<file>:<rule>:<line>`) does not block. A scanner that exits with an unexpected code,
+prints a report that cannot be read or cannot reach the network (osv-scanner needs osv.dev and
+deps.dev) refuses with its stderr: a failed scan never reads as clean. When gitleaks or osv-scanner
+is not installed it refuses first, with the lines that `ark status` prints (`scanner: <tool> is not
+installed: brew install <tool>`), whatever the repo holds. Medium and low vulnerabilities, accepted
+findings and the licences of the packages that are new at the head against the base lockfile do not
+block: the body lists them in a `Security` section (`**Security**` at tier 0), and no section when
+there is nothing to list. Before any push, lint or event it runs `git fetch origin` and `git
+merge-tree --write-tree HEAD origin/<target>` in each repo it pushes, a new MR or an open one it
+refreshes (changing no file and no ref), and refuses when the head does not merge cleanly: it names
+the repo, records worktree.synced with a conflict so that `ark run step <run> <step> start --merge`
+is allowed, and pushes nothing for any repo. A merge-tree error that is not a conflict (no common
+history, no origin/<target>, git older than 2.38) is a refusal that shows git's text.
 ```
 
 ### merge-request status
@@ -650,8 +668,11 @@ for each repo that changed. There is no test head line before the first test. Fo
 `merge_requests: none` it prints `merge requests: none (local only)` in place of the MR lines, then
 `branch <order> <repo> <branch> <n> commit(s) ahead of <base, 8 characters>` for each worktree whose
 branch has commits beyond its base, in merge order, also after `ark run close <run> handed_off`.
-Without a run, it lists every open run. --project limits the config check to one project, like
-ARK_PROJECT, and with a run it looks for the run in that project only.
+Without a run, it lists every open run. When gitleaks or osv-scanner is not on PATH it prints a line
+`scanner: <tool> is not installed: brew install <tool>` for each, after the role lines, and still
+exits 0: `ark merge-request open` and `ark run close <run> handed_off` refuse with the same lines.
+--project limits the config check to one project, like ARK_PROJECT, and with a run it looks for the
+run in that project only.
 
 The list adds the age of the newest event of each open run after the step, as `Nm`, `Nh` or `Nd`
 (largest whole unit; hours up to 47), and ends the line with ` stale` when that age is over 24
@@ -1125,6 +1146,7 @@ repos:
 | `gates`                        | no       | map     | Who answers each gate. Keys: `criteria`, `strategy`, `plan`, `escalation`; each `human` (the default for a missing key) or `auto`. Any other key or value makes `ark status` exit 1 and name the field. `plan: auto` makes `ark plan check` answer `approve` with `by: auto` when the plan is valid with no open decision. `strategy: auto` makes `ark strategy record` answer with the recommended card. `escalation: auto` makes `ark run step <run> <step> start` answer `one_more_round` with `by: auto` for a spent round budget (in phase `building` or `escalation`, whether or not the last test failed) or a post-MR implementer start, and print `escalation one_more_round by auto (<n> of <cap>)`. It answers at most `escalation_rounds` times in a run. The spent budget past the cap is refused as without the setting, and the gate waits for the human. It never answers after `escalation.requested` (`ark escalate`). A `--merge` start is answered too, prints `escalation one_more_round by auto (merge, not counted)` and does not count toward the cap. It answers nothing while the newest reviewer findings file holds a P0 or P1 finding with no `Repro:` line, a `--merge` start included. `criteria` is validated and shown only; nothing acts on it yet, so it stays with the human even when set to `auto`. An auto `plan`, `strategy` or `escalation` gate needs no Plannotator review and no relay; the run lead sends Master Chief a `status`, not an `ask`, for an auto `escalation`. `plan` and `strategy` auto, with `criteria` human (and `escalation` human unless it is `auto` too), is the Foundry setup. `gate.answered` records `by: human` or `by: auto`; `ark status <run>`, the hub run detail and `metrics.json` (`gates.auto_answers`) show it. |
 | `checks`                       | no       | list    | Commands `ark test` runs in a repo's worktree before the suites. Each entry has a unique `name`, a `repo` of the workspace, a `command` and an optional `cores` (1 or more, default 1). `<cores>` in `command` becomes the number of cores the check takes. A check must not write files. See [Add project checks](../how-to/project-checks.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `pr_writing`                   | no       | map     | How `ark merge-request open` writes the MRs. `reviewers`: a list of user names. `tier_floor`: an integer from 0 to 3, default 0, the lowest tier of the MR body. `sensitive_paths`: a list of paths; a changed file under one makes the tier at least 1. `one_way_paths`: a list of paths that are hard to undo; a changed file under one marks the MR as one-way in its risk. `agent_authored`: true (the default) or false; the first line of the body says an agent wrote it. `title_prefix`: a string, the rule for the MR title, for example `feat(TICKET): desc`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `security`                     | no       | map     | Findings of the security scan of `ark merge-request open` that do not block it. `accepted`: a list of `{ id, reason }`, both non-empty strings, no `id` twice. `id` is the id of a vulnerability (`GHSA-...`, `CVE-...`, `OSV-...`) or one of its aliases, or the gitleaks fingerprint of a secret, `<commit>:<file>:<rule>:<line>`. A finding that is accepted does not refuse the open and shows as `accepted` with its reason in the `Security` section of the MR body. An entry that matches no finding does nothing. A fingerprint names a commit, so a rebase that rewrites it needs a new entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `test_budget_cores`            | no       | integer | The CPU cores that the suites and checks of all `ark test` runs on the host share. It must be 1 or more. The default is 60% of the host's cores, rounded down, and at least 1. A suite or check takes its `cores` from it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `test_min_free_memory_percent` | no       | integer | `ark test` starts no suite while free memory is below this percent. It must be 0 or more. The default is 20.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `test_max_swap_gb`             | no       | integer | `ark test` starts no suite while swap use is above this many GB. It must be 0 or more. The default is 8.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -1186,6 +1208,10 @@ checks:
 pr_writing:
   reviewers: [your-github-name]
   sensitive_paths: [src/auth/]
+security:
+  accepted:
+    - id: GHSA-xxxx-xxxx-xxxx
+      reason: dev tool only, not reachable from the CLI
 gates:
   plan: auto
   strategy: auto

@@ -83,6 +83,8 @@ export type RiskScore = {
 export type Ledger = {
   source: "run" | "git";
   host: Host;
+  /** Rows of the Security section, each a finished bullet: medium and low vulnerabilities, accepted findings, licences of new packages. Absent or empty: no section. Absent in an old ledger. */
+  security?: string[];
   /** Login of the host token owner, or `unknown`. */
   tokenOwner: string;
   /** Git source only: what each base probe answered (a name, `none` or `unknown`) and which one won. */

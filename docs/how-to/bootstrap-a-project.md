@@ -96,7 +96,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
    ARK_PROJECT=ark ark status
    ```
 
-   `ark status` reads `ark.yml`, then checks that each role's harness is on your PATH and that each omp role's model is in `omp models --json`. If everything passes, it exits 0 and lists your open runs, or prints this:
+   `ark status` reads `ark.yml`, then checks that each role's harness is on your PATH and that each omp role's model is in `omp models --json`. It also checks that `gitleaks` and `osv-scanner` are on your PATH: `ark merge-request open` and `ark run close <run> handed_off` scan for secrets and vulnerable dependencies with them, and refuse without them. If everything passes, it exits 0 and lists your open runs, or prints this:
 
    ```text
    no open runs
@@ -109,6 +109,16 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
    no open runs
    ark: 1 project config(s) invalid
    ```
+
+   A missing scanner prints one line for each tool, with the command that installs it, and still exits 0. `ark merge-request open` refuses with the same lines until you install them:
+
+   ```text
+   no open runs
+   scanner: gitleaks is not installed: brew install gitleaks
+   scanner: osv-scanner is not installed: brew install osv-scanner
+   ```
+
+   Install both once, with `brew install gitleaks` and `brew install osv-scanner`. osv-scanner reads vulnerabilities and licences from osv.dev and deps.dev, so a scan needs the network. To let a finding through, list it under `security.accepted` in `ark.yml` with a reason, as the [`ark.yml` fields](../reference/cli.md#arkyml-fields) describe.
 
    A key that Ark does not know is an error too, and it names the nearest valid key: `merge_request is not a key; did you mean merge_requests?`. A suite `command` with no `{report}` is refused with `suites[0].command must write its JUnit report to {report}`.
 

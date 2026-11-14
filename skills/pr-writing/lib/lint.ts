@@ -558,7 +558,7 @@ const DIFF01: Check = ({ body, ledger }) => {
   const stated = unfenced(body)
     .map((line) => line.text)
     .filter((line) => !/^\s*[-*] .*\bfindings\//.test(line));
-  const skipped = /^(Evidence|How to verify|Testing|Not done|Risk|Acceptance)/i;
+  const skipped = /^(Evidence|How to verify|Testing|Not done|Security|Risk|Acceptance)/i;
   const text: string[] = [];
   let skipping = false;
   for (const line of stated) {

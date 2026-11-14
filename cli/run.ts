@@ -38,6 +38,7 @@ import { ticketStatusAfter } from "./lifecycle.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
 import { assertShippable, staleHeads } from "./merge-request.ts";
+import { missingScannerLines } from "./security.ts";
 import { runnerStatusLines } from "./test-runner.ts";
 import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, submoduleLines, worktreeCleanup, worktreeDirtyLines } from "./worktree.ts";
@@ -671,6 +672,9 @@ export function status(runId?: string, project?: string): void {
   console.log(lines.length > 0 ? lines.join("\n") : "no open runs");
   const roleCheck = checkRoles(configs);
   if (roleCheck.lines.length > 0) console.log(roleCheck.lines.join("\n"));
+  // A missing scanner is not a bad ark.yml: status stays exit 0, and `merge-request open` refuses with these lines.
+  const scannerLines = missingScannerLines();
+  if (scannerLines.length > 0) console.log(scannerLines.join("\n"));
   if (invalidCount > 0) throw new ArkError(`${invalidCount} project config(s) invalid`);
   if (roleCheck.failures > 0) throw new ArkError(`${roleCheck.failures} role(s) cannot run`);
 }
