@@ -217,27 +217,45 @@ const pages = new WeakMap<object, AbortController>();
 /**
  * Starts `bun hub/main.ts --port 0` and resolves once it prints its address. The hub reads only
  * while a page is connected, so a page (an open `/events` stream) stays connected until `stopHub`.
+ * With `limitMs`, a hub that has not printed its address by then is killed and the call throws
+ * with the command line, the limit and the stderr read so far; without it the wait has no limit.
  */
-export async function startHub(): Promise<StartedHub> {
+export async function startHub(limitMs?: number): Promise<StartedHub> {
   const hub = Bun.spawn(["bun", join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
     env: process.env,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
   });
-  let output = "";
-  for await (const chunk of hub.stdout) {
-    output += new TextDecoder().decode(chunk);
-    const port = output.match(/127\.0\.0\.1:(\d+)/)?.[1];
-    if (port) {
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const page = new AbortController();
-      pages.set(hub, page);
-      fetch(`${baseUrl}/events`, { signal: page.signal }).catch(() => {});
-      return { process: hub, baseUrl };
+  let timedOut = false;
+  const timer =
+    limitMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true;
+          hub.kill("SIGKILL");
+        }, limitMs);
+  try {
+    let output = "";
+    for await (const chunk of hub.stdout) {
+      output += new TextDecoder().decode(chunk);
+      const port = output.match(/127\.0\.0\.1:(\d+)/)?.[1];
+      if (port) {
+        const baseUrl = `http://127.0.0.1:${port}`;
+        const page = new AbortController();
+        pages.set(hub, page);
+        fetch(`${baseUrl}/events`, { signal: page.signal }).catch(() => {});
+        return { process: hub, baseUrl };
+      }
     }
+    if (timedOut)
+      throw new Error(
+        `bun hub/main.ts --port 0 timed out after ${limitMs} ms: ${await new Response(hub.stderr).text()}`,
+      );
+    throw new Error(`the hub exited before serving: ${output}`);
+  } finally {
+    clearTimeout(timer);
   }
-  throw new Error(`the hub exited before serving: ${output}`);
 }
 
 export async function stopHub(hub: { kill(): void; exited: Promise<number> }): Promise<void> {
