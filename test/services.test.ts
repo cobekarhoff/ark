@@ -279,8 +279,10 @@ test("ARK-T297 ark services status shows each service as not installed, loaded o
   expect(arkServices({}, "services", "install", "--project", "ark").code).toBe(0);
   setLoaded("ark", "temp-cleaner", "4242");
   setLoaded("ark", "sweep", null);
+  setLoaded("ark", "project-autocommit", "555");
   const logs = join(arkHomeDirectory, "projects", "ark", "services");
   writeFileSync(join(logs, "temp-cleaner.log"), "first\nsecond\nlast line\n\n");
+  writeFileSync(join(logs, "project-autocommit.log"), "autocommit failed at 12:00:00\n");
   const mixed = status();
   expect(mixed.code, mixed.err).toBe(0);
   expect(line(mixed.out, "auto-merger")).toMatch(/^auto-merger\s+loaded\s+pid -\s+last log: none$/);
@@ -288,6 +290,9 @@ test("ARK-T297 ark services status shows each service as not installed, loaded o
     /^temp-cleaner\s+running\s+pid 4242\s+last log: last line$/,
   );
   expect(line(mixed.out, "sweep")).toMatch(/^sweep\s+not installed$/);
+  expect(line(mixed.out, "project-autocommit")).toMatch(
+    /^project-autocommit\s+running\s+pid 555\s+last log: autocommit failed at 12:00:00$/,
+  );
 
   // 4. Running with pid 777 and the last non-empty log line.
   setLoaded("ark", "sweep", "777");
