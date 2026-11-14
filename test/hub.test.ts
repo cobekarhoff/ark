@@ -3107,6 +3107,35 @@ test("ARK-291-AC2 the snapshot has roadmap per project (the readRoadmap result, 
   expect(why("ARK-704")).toBe("Run ark chief state first");
 });
 
+test("ARK-T659 the hub snapshot lists a ticket written by ark companion propose, with its source key, once, in Review", async () => {
+  const { folder } = scenario([entry("cortana", ["run.merged"])]);
+  writeRoadmap("p");
+  const draft = join(scratch("ark-draft-"), "draft.md");
+  writeFileSync(
+    draft,
+    '---\nid: ARK-901\ntitle: "A companion idea"\nstatus: ready\nacceptance_criteria:\n  - id: AC1\n    text: "The idea works"\n---\n## Why\n\nBecause the suite is slow.\n',
+  );
+  expect(arkP("companion", "propose", "cortana", draft).code).toBe(0);
+  expect(readFileSync(join(folder, "tickets", "ARK-901.md"), "utf8")).toMatch(
+    /^source: .*cortana/m,
+  );
+
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) => current.tickets !== "unknown" && current.roadmap !== "unknown",
+  );
+  if (snapshot.tickets === "unknown" || snapshot.roadmap === "unknown")
+    throw new Error("unreachable");
+  expect(snapshot.tickets.find((ticket) => ticket.id === "ARK-901")?.status).toBe("proposed");
+  const roadmap = snapshot.roadmap.p;
+  if (!roadmap || !("review" in roadmap)) throw new Error(`no roadmap: ${JSON.stringify(roadmap)}`);
+  expect(roadmap.review.map((item) => item.id)).toEqual(["ARK-901"]);
+  const elsewhere = [roadmap.now, roadmap.next, roadmap.later, roadmap.unranked].flat();
+  expect(elsewhere.map((item) => item.id)).not.toContain("ARK-901");
+  expect(roadmap.shipped).toEqual([]);
+});
+
 test("ARK-291-AC2 a change to ROADMAP.md reaches a client of the event stream within 5 s", async () => {
   isolatedEnvironment();
   installFakeTools({});

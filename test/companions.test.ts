@@ -14,8 +14,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readTicket } from "../cli/ticket.ts";
-import { readRoadmap } from "../hub/roadmap.ts";
-import { parseTicket } from "../hub/sources.ts";
 import { runDirectoryOf, writeRun } from "./hub-fixtures.ts";
 import { writeTicket } from "./helpers.ts";
 import {
@@ -797,39 +795,16 @@ test("ARK-T659 propose never overwrites a ticket, and a draft with no id, an unk
   expect(tickets()).toEqual(listed);
 });
 
-test("ARK-T659 a proposed ticket with a source key reads without a warning and the hub roadmap lists it once, in Review", () => {
+test("ARK-T659 a ticket proposed with a source key reads with no warning and no error", () => {
   const { folder } = adviceProject();
   expect(
     arkP("companion", "propose", "cortana", writeDraft("draft.md", draft("ARK-901"))).code,
   ).toBe(0);
-  const file = join(folder, "tickets", "ARK-901.md");
-
   const warn = spyOn(console, "warn").mockImplementation(() => {});
   try {
-    expect(readTicket(file).id).toBe("ARK-901");
+    expect(readTicket(join(folder, "tickets", "ARK-901.md")).id).toBe("ARK-901");
     expect(warn).not.toHaveBeenCalled();
   } finally {
     warn.mockRestore();
   }
-
-  const viewed = parseTicket(project, "ARK-901.md", "", readFileSync(file, "utf8")).ticket;
-  expect(viewed.status).toBe("proposed");
-  const result = readRoadmap(
-    "## Vision\n\nOne vision.\n\n## Milestones\n\n| id | name | outcome | state |\n| --- | --- | --- | --- |\n| M1 | One | Out | active |\n\n## Now\n\n## Next\n\n## Later\n",
-    [
-      {
-        id: viewed.id,
-        title: viewed.title ?? "",
-        status: viewed.status,
-        milestone: null,
-        depends_on: [],
-      },
-    ],
-  );
-  if (!result.ok) throw new Error(JSON.stringify(result.errors));
-  const { roadmap } = result;
-  expect(roadmap.review.map((item) => item.id)).toEqual(["ARK-901"]);
-  const elsewhere = [roadmap.now, roadmap.next, roadmap.later, roadmap.unranked].flat();
-  expect(elsewhere.map((item) => item.id)).not.toContain("ARK-901");
-  expect(roadmap.shipped).toEqual([]);
 });

@@ -102,7 +102,7 @@ async function describe(line: string): Promise<Row> {
   return { command, usage: line, description, flags, ...(await probeBounds(words, command)) };
 }
 
-test("ARK-T283 the command table is the same as at base - order, usage, description, usage-advertised flags with arity, argument counts", async () => {
+test("ARK-T283 the command table is the same as at base except the companions commands - order, usage, description, usage-advertised flags with arity, argument counts", async () => {
   try {
     const help = (await ark("--help")).out.trim().split("\n");
     expect(help[0]).toBe("Usage: ark <command>");
