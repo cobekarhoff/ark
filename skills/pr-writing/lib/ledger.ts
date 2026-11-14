@@ -20,7 +20,7 @@ export type Level = "low" | "medium" | "high";
 export type Host = "github" | "gitlab" | "unknown";
 export type Finding = { rank: "P0" | "P1" | "P2" | "P3"; title: string; file: string };
 
-/** The `## Merge risk` block of a reviewer findings file. Format: `skills/ark/rubrics/reviewer.md`. */
+/** The `## Merge risk` block of a reviewer findings file. Format: `skills/ark-reviewer/rubrics/reviewer.md`. */
 export type ReviewerBlock = {
   ratings: Partial<Record<"Verification" | "Alignment" | "Impact" | "Rollback cost", Rating>>;
   door: "one-way" | "two-way" | null;

@@ -1,9 +1,18 @@
-# Retro playbook
+---
+name: ark-retro
+description: Close out a run, or interview the human across several runs. Use /skill:ark-retro <run> when the run lead writes retro.md for a closed run, and /skill:ark-retro interview when Master Chief interviews the human, on request or after every 10 closed runs. It writes no product code.
+---
 
-Ark improves only if each run teaches something and the human controls what changes. This playbook has two parts:
+# Ark retro
 
-- **Write retro.md** (`retro <run>`): runs after every run closes. Master Chief closes the run and computes the numbers, and the run lead writes `retro.md`. It asks the human nothing.
-- **Deep interview** (`retro interview`): runs after every 10 closed runs, or on request. Master Chief interviews the human and brings the open improvement proposals for approval.
+Arguments: `<run>` (Part 1: write retro.md) or `interview` (Part 2: deep interview).
+
+Read [`skills/shared/rules.md`](../shared/rules.md) first.
+
+Ark improves only if each run teaches something and the human controls what changes. This skill has two parts:
+
+- **Write retro.md** (`/skill:ark-retro <run>`): runs after every run closes. Master Chief closes the run and computes the numbers, and the run lead writes `retro.md`. It asks the human nothing.
+- **Deep interview** (`/skill:ark-retro interview`): runs after every 10 closed runs, or on request. Master Chief interviews the human and brings the open improvement proposals for approval.
 
 Master Chief runs the interview. The run lead writes `retro.md`. Neither role writes product code.
 
@@ -36,7 +45,7 @@ A run is not closed until `retro.md` exists. `ark run close` records the outcome
 Ask the run lead to write it:
 
 ```sh
-orca orchestration send --to <run-lead-handle> --subject "Write retro.md for <run>" --type handoff --body "Read metrics.json and events.ndjson in <run-folder>. Write retro.md as the retro playbook describes." --json
+orca orchestration send --to <run-lead-handle> --subject "Write retro.md for <run>" --type handoff --body "Read metrics.json and events.ndjson in <run-folder>. Write retro.md as the ark-retro skill describes." --json
 ```
 
 If the send answers `already processing`, the agent is in the middle of a turn: wait 30 seconds, then send again with the request UUID that Orca printed, up to 5 times. Never treat the message as delivered until a send succeeds.
@@ -106,7 +115,7 @@ Create a ticket on the Ark backlog in `~/.ark/projects/ark/tickets/`:
 
 A skill change is a diff to the skill wherever it lives.
 
-1. Find the skill's directory: `read skill://<name>` resolves it, and in a shell `realpath` of `skill://<name>` prints the physical path. The Ark skill lives in the Ark repo under `skills/ark/`. A project skill lives under the workspace, such as `<workspace>/.claude/skills/<name>/`. A user skill lives under `~/.omp/agent/skills/` or `~/.claude/skills/`.
+1. Find the skill's directory: `read skill://<name>` resolves it, and in a shell `realpath` of `skill://<name>` prints the physical path. An Ark skill lives in the Ark repo under `skills/ark-<role>/`; a skill proposal names that one folder. A project skill lives under the workspace, such as `<workspace>/.claude/skills/<name>/`. A user skill lives under `~/.omp/agent/skills/` or `~/.claude/skills/`.
 2. Make the edit in that place, with the `edit` tool.
 3. Show the human the diff (`git -C <directory> diff` when the directory is in a git repository) before you tell them it is applied. If the skill is in a repository, leave the change uncommitted for the human to commit.
 
@@ -114,7 +123,7 @@ A skill change is a diff to the skill wherever it lives.
 
 Master Chief runs a deep interview in two cases:
 
-- **On request.** The human says so, for example `/skill:ark retro interview`.
+- **On request.** The human says so, for example `/skill:ark-retro interview`.
 - **Every 10 closed runs.** `ark chief state` prints `## Interview` with `Closed runs since the last interview: <n>`, and ` (due)` when n is 10 or more. Master Chief reads it at the start and at each ticket. When it says due, offer one: "You have closed <n> runs since the last deep interview. Do one now? Recommended: yes." Do not start it until the human says yes. The count is of runs closed after the newest file in `~/.ark/projects/<project>/interviews/`, so the interview file written in step 3 restarts it.
 
 ### 1. Read across the retros

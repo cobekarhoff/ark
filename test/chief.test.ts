@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent } from "../cli/events";
-import { ark, tempArkHome, tempGitRepo, writeProject } from "./helpers";
+import { ark, skillName, tempArkHome, tempGitRepo, writeProject } from "./helpers";
 
 // ark chief keeps its process alive until the 10 s Orca reader timer fires, so each call takes about 10 s.
 setDefaultTimeout(60_000);
@@ -494,6 +494,25 @@ test("ARK-244-AC2 chief handover starts a new Master Chief in a terminal and pri
   expect(prompt).toContain("run-use");
   expect(prompt).toContain("run_chief");
   expect(callsTo("terminal", "close")).toHaveLength(0);
+});
+
+test("ARK-T407 the prompt that ark chief handover gives the new Master Chief starts the skill ark-chief by its own name, and that name is a skill that exists", () => {
+  setScenario({
+    runs: [chiefOrcaRun],
+    terminals: [{ handle: "term_chief", worktreePath: workspace, connected: true }],
+    launch: { kind: "terminal", handle: "term_new" },
+  });
+
+  const result = ark("chief", "handover", "--project", project);
+  expect(result.code).toBe(0);
+  expect(result.out.trim()).toBe("term_new");
+
+  const launches = callsTo("agent", "launch");
+  expect(launches).toHaveLength(1);
+  const argv = launches[0]!;
+  const prompt = argv[argv.indexOf("--prompt") + 1]!;
+  expect(prompt).toContain(`/skill:${skillName("ark-chief")}.`);
+  expect(prompt).not.toMatch(/\/skill:ark\s+chief/);
 });
 
 test("ARK-244-AC2 chief handover refuses and starts nothing when no Master Chief is live", () => {

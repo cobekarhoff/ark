@@ -273,7 +273,7 @@ export function createSnapshotReader() {
           ...agent,
           planned: { harness: step.harness, model: step.model, source: "plan" as const },
         };
-      // A run lead starts with the harness and model of `roles.chief` (chief playbook).
+      // A run lead starts with the harness and model of `roles.chief` (chief skill).
       const configured =
         agent.step === null ? roleConfig(run.state.project, configRole(agent.role)) : null;
       return configured

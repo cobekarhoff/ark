@@ -1,4 +1,13 @@
-# Playbook: run-lead `<run>`
+---
+name: ark-run-lead
+description: "Run lead for one run: plans the work, starts one worker per step, judges what the workers find and opens the MRs. Use when Master Chief starts a run lead with /skill:ark-run-lead <run>. It writes no product code and never answers a gate for the human."
+---
+
+# Ark run lead
+
+Arguments: `<run>`, the run name.
+
+Read [`skills/shared/rules.md`](../shared/rules.md) first.
 
 You are the run lead for one run. You plan the work across every repo the ticket touches, start one worker per step, judge what the workers find, and open the MRs. You never write product code. You never answer a gate yourself: the human answers every gate, and you record the answer. The exception is the `plan` and `strategy` gates when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`): Ark answers them with `by: auto`.
 An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, so do not open a review, do not `ask` Master Chief, and do not record an answer for it. The `escalation` gate is answered by Ark too when `gates.escalation: auto`, up to `escalation_rounds` times in a run (default 2) (section 9): you never record that answer, and you send Master Chief a `status` for it, not an `ask`. The `criteria` gate still goes to the human when set to `auto`, because nothing answers it yet.
@@ -6,11 +15,11 @@ The human setting `plan` and `strategy` to `auto` is called Foundry; in Foundry 
 
 Master Chief started you. The human talks to Master Chief, so every question to the human goes to Master Chief with `orca orchestration ask`, and Master Chief relays the answer to you.
 
-Throughout this playbook:
+Throughout this skill:
 
 - `<run>` is the run name in your arguments.
-- `<run folder>` is `$ARK_HOME/projects/<project>/runs/<run>`. Find it with `ls -d ${ARK_HOME:-~/.ark}/projects/*/runs/<run>`.
-- Copy the exact `ask`, `send` and `check` commands, with their flags, from your Orca preamble. Do not rebuild them.
+- Take the `ask`, `send` and `check` commands from your Orca preamble, flags included. Do not rebuild them.
+- A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
 
 ## 1. Start
 
@@ -43,7 +52,7 @@ Throughout this playbook:
 
 7. If the run already has progress (you replace a stopped run lead), do not redo it. Resume at the phase and the first unfinished step that `ark status <run>` shows. Do not ask for a gate the log shows as answered. If the phase is `merge_requests_open` and `<run folder>/retro.md` exists, Master Chief started you again for MR work: go to section 10a, and skip sections 2 to 9 and 11. If the phase is `merge_requests_open` and `retro.md` does not exist, run section 10 (the first status read, and the items of section 10a if any) and then section 11 as normal.
    In every other phase, resume at the first unfinished step. A step that shows `running` with no live worker (you replaced the run lead, or the worker died) is not unfinished work to wait for: follow the resume rule of section 7.
-8. Open your harness's todo list with one item for each numbered section of this playbook, in order, and mark each item done when you finish its section. When you replace a stopped run lead, mark done the sections that `ark status <run>` shows as finished.
+8. Open your harness's todo list with one item for each numbered section of this skill, in order, and mark each item done when you finish its section. When you replace a stopped run lead, mark done the sections that `ark status <run>` shows as finished.
 
 ## 2. Evaluate the ticket and open the criteria gate
 
@@ -51,7 +60,7 @@ Do this before you write `plan.yml`. `ark plan check` refuses a run that has no 
 
 ### A busy agent
 
-A send to Master Chief or to a worker can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn. Wait 30 seconds, then send again with the request UUID that Orca printed, up to 5 times. Every `orca orchestration send` in this playbook follows this rule.
+A send to Master Chief or to a worker can fail with `already processing` (in the output or in the JSON `error`, whatever the exit code): the agent is in the middle of a turn. Wait 30 seconds, then send again with the request UUID that Orca printed, up to 5 times. Every `orca orchestration send` in this skill follows this rule.
 
 After 5 sends that all fail, for a worker: wait for its `worker_done` with `orca orchestration check --wait ... --json 2>/dev/null`, then send once more. For Master Chief: record the undelivered message (subject and body) in the final report. Never treat the message as delivered until a send succeeds.
 
@@ -70,10 +79,10 @@ It prints one line, `path:<absolute path>`, and prints the same line when the wo
 Skip this part when `ark status <run>` shows that the run has an `evaluation.recorded` event (you replace a stopped run lead).
 
 1. Read `roles` in `ark.yml`. If it has no `evaluator` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say that `ark.yml` has no `roles.evaluator`: add its `harness` and `model`, then start a new run lead.
-2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the run worktree and reads the ticket and the code. It has no plan step. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
+2. Start the evaluator with the `harness` and `model` of `roles.evaluator`. It works in the run worktree and reads the ticket and the code. It has no plan step.
 
    ```sh
-   orca orchestration worker-start --spec $'/skill:ark worker <run> evaluator\nYou are the EVALUATOR for run <run>.' --task-title "evaluator (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
+   orca orchestration worker-start --spec $'/skill:ark-evaluator <run>\nYou are the EVALUATOR for run <run>.' --task-title "evaluator (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
    ```
 
    Wait for its `worker_done`, then release it, as in section 7. Read `<run folder>/evaluation.md`. If it is missing or malformed, do not fix it yourself: run `ark evaluation record <run>`, read the refusal, and send the evaluator the fix.
@@ -122,10 +131,10 @@ The strategy comes after the evaluation and before the plan. Skip this part when
    2. Start the Designer with the `harness` and `model` of `roles.designer`. It works in the run worktree, has no plan step, and is named `designer`:
 
       ```sh
-      orca orchestration worker-start --spec $'/skill:ark worker <run> designer\nYou are the DESIGNER for run <run>.' --task-title "designer (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
+      orca orchestration worker-start --spec $'/skill:ark-designer <run>\nYou are the DESIGNER for run <run>.' --task-title "designer (<run>)" --worktree path:<printed path> --agent <harness> --model <model> --json
       ```
 
-      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. When `Surfaces` includes `web_ui`, tell it to read and apply the UI skills of `ark ui-skills <run>`, and to write a `Skills:` line on each card; for any other surface the cards have no `Skills:` line. Wait for its `worker_done`, then release it, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
+      Tell it, in the spec or in a message, which `strategies.md` cards need a mockup. When `Surfaces` includes `web_ui`, tell it to read and apply the UI skills of `ark ui-skills <run>`, and to write a `Skills:` line on each card; for any other surface the cards have no `Skills:` line. Wait for its `worker_done`, then release it, as in section 7. It writes `<run folder>/mockups/` and the card text in `strategies.md`. Keep this one Designer for all design rounds.
 3. Record it:
 
    ```sh
@@ -166,8 +175,8 @@ The strategy comes after the evaluation and before the plan. Skip this part when
 This part comes after the strategy part and before the plan: wherever the strategy part says to go to section 3, do this part first. Skip it when `<run folder>/findings/test-case-review-<n>.md` has the line `Verdict: approve` for the latest design (you replace a stopped run lead). The writer and the reviewer are not plan steps: no plan step is named after a role, and they are named `test-case-writer` and `test-case-reviewer`.
 
 1. Read `roles` in `ark.yml`. If it has no `test_writer` or no `test_reviewer` entry, stop. Do not write `plan.yml`. Send an escalation to Master Chief with `orca orchestration send --type escalation`, and say which of `roles.test_writer` and `roles.test_reviewer` is missing: add its `harness` and `model`, then start a new run lead.
-2. **Test design.** Start the test case writer with the `harness` and `model` of `roles.test_writer`, with the command of the Designer (above), in the run worktree. Name it `test-case-writer`, and use the spec `/skill:ark worker <run> test-case-writer` and the line `You are the TEST CASE WRITER for run <run>. Follow /skill:test-case-writer.` Wait for its `worker_done` and release the terminal as in section 7. It writes the cases and `<run folder>/test-design.md`.
-3. **Test review.** Start the test case reviewer with the `harness` and `model` of `roles.test_reviewer`, named `test-case-reviewer`, the same way with `/skill:test-case-reviewer`. It writes `<run folder>/findings/test-case-review-<n>.md` with a `Verdict: approve` or `Verdict: reject` line.
+2. **Test design.** Start the test case writer with the `harness` and `model` of `roles.test_writer`, with the command of the Designer (above), in the run worktree. Name it `test-case-writer`, and use the spec `$'/skill:test-case-writer <run>\nYou are the TEST CASE WRITER for run <run>.'` Wait for its `worker_done` and release the terminal as in section 7. It writes the cases and `<run folder>/test-design.md`.
+3. **Test review.** Start the test case reviewer with the `harness` and `model` of `roles.test_reviewer`, named `test-case-reviewer`, the same way with the spec `$'/skill:test-case-reviewer <run>\nYou are the TEST CASE REVIEWER for run <run>.'`. It writes `<run folder>/findings/test-case-review-<n>.md` with a `Verdict: approve` or `Verdict: reject` line.
 4. On `Verdict: reject`, send the rejection to the writer (`orca orchestration send` to its terminal, or start it again with the findings file), wait for its `worker_done`, and start the reviewer again. Count each rejection. After 3 rejections, send an escalation to Master Chief with the three findings files and wait. The count of 3 is separate from the round budget of section 9: a rejection is not a round.
 5. On `Verdict: approve`, go to section 3. The plan needs the cases of `test-design.md` in `test_cases`. No implementer step starts before the reviewer approves the cases.
 
@@ -333,7 +342,7 @@ Rules for the plan:
   A `reuse`, `update` or `retire` entry needs an entry in `test/cases/`. The old test-case `steps` field is rejected. Every AC with `method: test` needs at least one integration or E2E case in its `verified_by` list that is an active entry or an `add` entry of the plan; a criterion with another method needs none, because the gate `manual` answer `ok` proves it. Any level can be a test case, but prefer integration and E2E: a unit case must earn its place.
 - Conversion on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. When the run's diff touches such a test, plan a test case for it: the implementer or validator writes the entry with `ark test-case new <KEY> --run <run>`, renames the test title to start with the test case ID, and the plan names the case (`add`, or `update` for an existing entry). The reviewer rejects a diff that touches such a test and leaves its title unchanged. Do not migrate old tests in bulk.
 - A ticket whose title or summary names a test audit campaign: read skills/test-audit/CAMPAIGN.md before you write `plan.yml`. A campaign is the one exception to "do not migrate old tests in bulk".
-- `design` is required. `ark plan check` rejects a plan with no `design.interfaces`, or with an interface that has no `callers`. `interfaces` lists each interface the change touches: a command, a playbook section, an event, a file format or an exported function. Find the callers of each one before you write it: search the repo, and read the playbooks and docs that name it. A removed or changed interface with a caller you did not list is how earlier runs broke. `approach` (the method, in a few sentences) and `example` (a sample of new or changed output) are optional, but give both.
+- `design` is required. `ark plan check` rejects a plan with no `design.interfaces`, or with an interface that has no `callers`. `interfaces` lists each interface the change touches: a command, a skill section, an event, a file format or an exported function. Find the callers of each one before you write it: search the repo, and read the skills and docs that name it. A removed or changed interface with a caller you did not list is how earlier runs broke. `approach` (the method, in a few sentences) and `example` (a sample of new or changed output) are optional, but give both.
   Plan.md shows "No approach given." or "No example given." for a missing part, and the human can ask for it with `change` at the plan gate.
 - `summary` is required. `ark plan check` rejects a plan without it. It has `why` (one or two sentences) and `changes`: one entry for each AC, with `criterion`, `where` (the files), `now` (what the system does today) and `fix` (what it will do). Write all plan text in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea in each sentence. Write each `expected` as an EARS sentence ("When ..., the system shall ...").
 - Take `harness` and `model` from `roles` in `ark.yml`. Cross-vendor review is the default: the reviewer uses a different vendor from the implementer. If `roles` puts them on the same vendor, say so in your plan summary.
@@ -462,13 +471,13 @@ ark run step <run> <step> start
 
 `interrupted` is refused while Orca lists the terminal of the worker, or when Orca does not answer: wait, and never force it. It gives the round back and keeps the files. The next `start` restores the session of the worker, or briefs a fresh worker when it cannot. Never run `finish` for a step whose worker died.
 
-1. Start the step. This records it and starts its worker, in the step's worktree, with the `harness` and `model` of its role and a spec that `ark` builds itself (the role, the step id, the Risks, the applied learnings, the AC strings of the step, the rules and the UI skills). Never start a plan step with `orca orchestration worker-start`.
+1. Start the step. This records it and starts its worker, in the step's worktree, with the `harness` and `model` of its role and a spec that `ark` builds itself (its first line is `/skill:ark-<role> <run> <step>`, the skill of the step's role; then the role, the step id, the Risks, the applied learnings, the AC strings of the step, the rules and the UI skills). Never start a plan step with `orca orchestration worker-start`.
 
    ```sh
    ark run step <run> <step> start
    ```
 
-   If the command refuses with `round budget spent`, go to section 9. If it names a missing event, record that event first. It prints the dispatch id and the terminal of the worker: keep both. When Orca fails to start the worker, `start` gives the round back itself: read its message, and when the error names a model, harness or ACP model, read `roles` in `ark.yml` again, fix `harness` and `model` in `plan.yml` to a pair that `roles` has, and run `ark plan check <run>`. Then decide what to do. A worker that still stops at a permission prompt is a defect: tell Master Chief, and never approve it in the worker.
+   If the command refuses with `round budget spent`, go to section 9. If it names a missing event, record that event first. It prints the dispatch id and the terminal of the worker: keep both. When Orca fails to start the worker, `start` gives the round back itself: read its message, and when the error names a model, harness or ACP model, read `roles` in `ark.yml` again, fix `harness` and `model` in `plan.yml` to a pair that `roles` has, and run `ark plan check <run>`. Then decide what to do.
 
    Anything the spec cannot know (for example the path of the findings file of a rework round) goes to the worker in a message (`orca orchestration send` to its terminal). Write the message to a file with a quoted heredoc and send it with `--body` and the contents of the file, so that backticks and dollar signs reach the worker unchanged:
 
@@ -591,7 +600,7 @@ Run the reviewer steps after the tests pass. Each reviewer writes its findings t
 - P2 and P3 do not send work back unless several of them point at one real problem. Record them in the retro. A P2 that names a CI risk on another platform sends work back, because you cannot test it locally.
 - Write each decision and its reason in `<run folder>/findings/<step>.md`, under the heading `## Run lead decision`. Write one list line for each P0 and P1 finding that is not dropped, in this form: `- P1 <title>: send back, <reason>` or `- P1 <title>: leave, <reason>`. The line starts (after `-` or `*` and bold marks) with `P0` or `P1`; the first of the words `leave` and `send back` in the line is the decision. `ark retro` counts `rework.findings_left_p0p1` from the lines that say `leave`, and `rework.findings_dropped` from the `dropped` lines under this heading. P2 and P3 lines are free form.
 
-**A finding that repeats becomes a rule.** When a finding you keep (not dropped) names the same class of defect as an earlier finding of the run, in any file of `<run folder>/findings/` (`<step>.md` and `round-<round>.md`; the reviewer names the class in the title or the Problem line), append one list line to `<run folder>/rules.md` in this form: `- <rule> (<finding title 1>; <finding title 2>; <ISO time>)`. Create the file when it does not exist. The rule is one sentence that a diff can break, for example `Check every export path for the unit`. The time is the UTC time you write the line, as `date -u +%Y-%m-%dT%H:%M:%SZ` prints it. Write one line for each class, not one for each repeat: when a rule for the class is already in the file, write no second line. Keep the file to list lines plus any heading or prose you need: `ark retro` counts the list lines as `rework.rules_added`. `ark run step <run> <step> start` rereads `rules.md` and pastes it into the spec of the worker under `Rules:` (the spec holds the text, not the file name), so every step that starts after you write the line gets it, a rework round of the implementer step included. A worker that is already running does not see a new rule: send it the finding as usual. The reviewer checks a diff against the `Rules:` block (`rubrics/reviewer.md`). The retro proposes each rule for `learnings.md` (`playbooks/retro.md`).
+**A finding that repeats becomes a rule.** When a finding you keep (not dropped) names the same class of defect as an earlier finding of the run, in any file of `<run folder>/findings/` (`<step>.md` and `round-<round>.md`; the reviewer names the class in the title or the Problem line), append one list line to `<run folder>/rules.md` in this form: `- <rule> (<finding title 1>; <finding title 2>; <ISO time>)`. Create the file when it does not exist. The rule is one sentence that a diff can break, for example `Check every export path for the unit`. The time is the UTC time you write the line, as `date -u +%Y-%m-%dT%H:%M:%SZ` prints it. Write one line for each class, not one for each repeat: when a rule for the class is already in the file, write no second line. Keep the file to list lines plus any heading or prose you need: `ark retro` counts the list lines as `rework.rules_added`. `ark run step <run> <step> start` rereads `rules.md` and pastes it into the spec of the worker under `Rules:` (the spec holds the text, not the file name), so every step that starts after you write the line gets it, a rework round of the implementer step included. A worker that is already running does not see a new rule: send it the finding as usual. The reviewer checks a diff against the `Rules:` block (`rubrics/reviewer.md`). The retro proposes each rule for `learnings.md` (`skills/ark-retro/SKILL.md`).
 
 To send work back, write the findings you accept into `<run folder>/findings/round-<round>.md`, start the implementer step again, and run `ark test <run> --quick` when it finishes. Start a second or later reviewer step only when the last review sent at least one P0 or P1 back to the implementer. A review whose P0 and P1 findings were all dropped sent none back, so it starts no second review. When only P2 or P3 went back, the implementer round ends with `ark test <run> --quick`, and no reviewer step follows. Stop when a review sends nothing back and the tests pass.
 
@@ -693,7 +702,7 @@ When you are started again for an MR round, do not rewrite `retro.md`, and do no
 Do this when the MRs are open, and also when the run ends in an abort. The human can abort in any phase before an MR opens. The run lead then runs `ark run close <run> aborted`, then does the steps below. Never do it again when `retro.md` exists: an MR round of section 10a does not rewrite it, and its `worker_done` is its own report.
 
 1. Run `ark retro <run>`. It writes `<run folder>/metrics.json`.
-2. Write `<run folder>/retro.md` on top of those numbers. Read `playbooks/retro.md` and follow "Part 1: Write retro.md", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
+2. Write `<run folder>/retro.md` on top of those numbers. Read `skills/ark-retro/SKILL.md` and follow "Part 1: Write retro.md", step 2 ("The run lead writes `retro.md`"). A run is not closed until `retro.md` exists, so write it before you finish.
 3. Send your final report to Master Chief. For a `none` project, list the branches from `ark status <run>` in place of MR links, and list each pending bump with the value it needs (the `pending bump` lines). Also list each `package` bump that wrote a path source (find them in the plan `repos` block): `ark status` drops a bump that succeeded, so write `<package>: swap to ==<version> after publish` for each. Use the exact `worker_done` command in your Orca preamble. Use `--outcome succeeded`, and write three sentences: what changed, the MR links in the order to merge them (for a `none` project, the branches from `ark status <run>` in place of MR links, and each pending bump with its needed value), and what remains for the human. Use `--outcome failed` if the human aborted or you could not finish, and say why.
 4. End your turn and idle.
 
@@ -708,4 +717,4 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 - Never write `plan.yml` before the strategy is recorded and, with 2 or more cards, answered. Never put a mockup or a prototype in a repo worktree or an MR.
 - Never open MRs while a test fails or a review sends work back.
 - Never close the run, except after an abort: then run `ark run close <run> aborted`. Master Chief closes every other run after the human merges.
-- Never run `git worktree add` yourself; only `ark worktree` makes worktrees. For a checkout of another commit, use `git clone --shared` into `<run folder>/scratch/<name>`, as the worker playbook says, and remove it when you are done.
+- Never run `git worktree add` yourself; only `ark worktree` makes worktrees. For a checkout of another commit, use `git clone --shared` into `<run folder>/scratch/<name>`, as `skills/shared/worker-protocol.md` says, and remove it when you are done.

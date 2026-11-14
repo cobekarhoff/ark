@@ -1,5 +1,5 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isHubName } from "../cli/proxy.ts";
 import { outcomes, phases } from "../cli/lifecycle.ts";
@@ -7,18 +7,38 @@ import { outcomes, phases } from "../cli/lifecycle.ts";
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
 
-const playbookDirectory = join(import.meta.dir, "../skills/ark/playbooks");
-const runLeadPlaybook = readFileSync(join(playbookDirectory, "run-lead.md"), "utf8");
-const workerPlaybookText = readFileSync(join(playbookDirectory, "worker.md"), "utf8");
+const root = join(import.meta.dir, "..");
+const read = (file: string) => readFileSync(join(root, file), "utf8");
 
-test("ARK-187-AC3 every literal `ark run close <run> <outcome>` in the playbooks uses a known outcome", () => {
+const sharedFiles = [
+  "skills/shared/rules.md",
+  "skills/shared/worker-protocol.md",
+  "skills/shared/principles.md",
+];
+const workerSkillFiles = ["evaluator", "designer", "implementer", "validator", "reviewer"].map(
+  (role) => `skills/ark-${role}/SKILL.md`,
+);
+
+/**
+ * The ten role skills (`skills/ark-<role>/SKILL.md`) and the shared files. Fails when the glob finds
+ * fewer than ten skills or a shared file is missing, so a moved folder cannot make a scan vacuous.
+ */
+function skillAndSharedFiles(): string[] {
+  const skills = [...new Bun.Glob("skills/ark-*/SKILL.md").scanSync({ cwd: root })].sort();
+  expect(skills.length).toBeGreaterThanOrEqual(10);
+  for (const file of sharedFiles) expect(existsSync(join(root, file)), file).toBe(true);
+  return [...skills, ...sharedFiles];
+}
+
+test("ARK-T410 every literal `ark run close <run> <outcome>` in the skills uses a known outcome", () => {
   const closes: { file: string; outcome: string }[] = [];
-  for (const file of readdirSync(playbookDirectory).filter((name) => name.endsWith(".md"))) {
-    const text = readFileSync(join(playbookDirectory, file), "utf8");
-    for (const [, outcome] of text.matchAll(/ark run close <run> ([a-z_]+)/g))
+  for (const file of skillAndSharedFiles()) {
+    for (const [, outcome] of read(file).matchAll(/ark run close <run> ([a-z_]+)/g))
       closes.push({ file, outcome });
   }
-  expect(closes.filter(({ file }) => file === "run-lead.md").length).toBeGreaterThan(0);
+  expect(
+    closes.filter(({ file }) => file === "skills/ark-run-lead/SKILL.md").length,
+  ).toBeGreaterThan(0);
   for (const { file, outcome } of closes) {
     expect({ file, known: (outcomes as readonly string[]).includes(outcome) }).toEqual({
       file,
@@ -27,18 +47,17 @@ test("ARK-187-AC3 every literal `ark run close <run> <outcome>` in the playbooks
   }
 });
 
-test("ARK-T86 every phase the docs and playbooks name is one the reducer emits", () => {
-  const root = join(import.meta.dir, "..");
+test("ARK-T86 every phase the docs and skills name is one the reducer emits", () => {
   const files = [
     "CONTEXT.md",
     "README.md",
     "docs/explanation/architecture.md",
     "docs/reference/cli.md",
-    ...readdirSync(playbookDirectory).map((name) => `skills/ark/playbooks/${name}`),
+    ...skillAndSharedFiles(),
   ].filter((file) => file.endsWith(".md") && existsSync(join(root, file)));
   const named: { file: string; phase: string }[] = [];
   for (const file of files) {
-    const text = readFileSync(join(root, file), "utf8");
+    const text = read(file);
     for (const [, phase] of text.matchAll(/\bphases? (?:is |are |in |of |to )?`([a-z_]+)`/g))
       named.push({ file, phase });
     const diagram = text.match(/```mermaid\nstateDiagram-v2\n([\s\S]*?)```/)?.[1] ?? "";
@@ -55,14 +74,13 @@ test("ARK-286-AC6 package.json defines the typecheck, lint and format:check scri
   const { scripts } = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8"));
   for (const name of ["typecheck", "lint", "format:check"]) expect(scripts[name]).toBeTruthy();
 });
-test("ARK-289-AC5 changed playbooks and tests pass oxfmt --check", () => {
-  const root = join(import.meta.dir, "..");
+test("ARK-T411 changed skills and tests pass oxfmt --check", () => {
   const files = [
-    "skills/ark/playbooks/brainstorm.md",
-    "skills/ark/playbooks/chief.md",
+    "skills/ark-brainstorm/SKILL.md",
+    "skills/ark-chief/SKILL.md",
     "test/playbooks.test.ts",
-    "test/brainstorm.test.ts",
-  ].filter((file) => existsSync(join(root, file)));
+  ];
+  for (const file of files) expect(existsSync(join(root, file)), file).toBe(true);
   const result = Bun.spawnSync(["bunx", "oxfmt", "--check", ...files], { cwd: root });
   expect(result.exitCode).toBe(0);
 });
@@ -110,9 +128,13 @@ const commandProblems = (text: string): string[] => {
   return problems;
 };
 
-test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead.md and worker.md has a form the CLI accepts", () => {
-  expect(commandProblems(runLeadPlaybook)).toEqual([]);
-  expect(commandProblems(workerPlaybookText)).toEqual([]);
+test("ARK-T412 every portless, orca tab create and ark ui command in the run-lead skill, the worker skills and the worker protocol has a form the CLI accepts", () => {
+  const commandFiles = [
+    "skills/ark-run-lead/SKILL.md",
+    ...workerSkillFiles,
+    "skills/shared/worker-protocol.md",
+  ];
+  for (const file of commandFiles) expect(commandProblems(read(file)), file).toEqual([]);
   // rejected forms, through the same checker
   for (const bad of [
     "orca tab create --url --worktree",
@@ -131,7 +153,7 @@ test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead
   for (const good of ["1", "65535", "<port>"])
     expect(commandProblems(`\`portless a.proto --app-port ${good} bun app.ts\``), good).toEqual([]);
   // the check sees the commands: not vacuously empty
-  const commands = [...quotedCommands(runLeadPlaybook), ...quotedCommands(workerPlaybookText)];
+  const commands = commandFiles.flatMap((file) => quotedCommands(read(file)));
   expect(
     commands.filter((command) => /^portless \S+ --app-port/.test(command)).length,
   ).toBeGreaterThanOrEqual(4);
@@ -144,13 +166,13 @@ test("ARK-299-AC3 every portless, orca tab create and ark ui command in run-lead
 });
 
 test("ARK-T85 every link in principles.md points to a file and heading that exist", () => {
-  const skillDirectory = join(import.meta.dir, "../skills/ark");
+  const skillDirectory = join(root, "skills/shared");
   const slug = (heading: string) =>
     heading
       .toLowerCase()
       .replace(/[^\p{L}\p{N} _-]/gu, "")
       .replace(/ /g, "-");
-  const principles = readFileSync(join(skillDirectory, "principles.md"), "utf8");
+  const principles = read("skills/shared/principles.md");
   const links = [...principles.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]!);
   expect(links.length).toBeGreaterThan(0);
   for (const link of links) {

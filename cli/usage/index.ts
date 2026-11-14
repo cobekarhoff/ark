@@ -152,24 +152,53 @@ function isAssistantRecord(line: string): boolean {
   }
 }
 
+/** The skills whose spec line ends with the step id: `/skill:<skill> <run id> <step id>`. */
+const stepSkills = ["ark-implementer", "ark-validator", "ark-reviewer"];
+
+/** The word of a skill whose spec line has no step id. A run lead line gives null. */
+const fixedSpecWords: Record<string, string | null> = {
+  "ark-evaluator": "evaluator",
+  "ark-designer": "designer",
+  "test-case-writer": "test-case-writer",
+  "test-case-reviewer": "test-case-reviewer",
+  "ark-run-lead": null,
+};
+
 /**
- * The word after the id of this run in the worker spec line (`worker <run id> <word>`), read from
- * the prompt records of a session file: every record before the first assistant record, inside the
- * first 64 KiB. Null when no such line is there, or when `run-lead <run id>` comes first (a run lead
- * head holds placeholder lines and may name a worker it starts). The id must be followed by a space,
- * so `<run id>0` is another run. The word ends at a space, a backslash or a quote (the line sits in
- * a JSON string, so `\n` follows it as two characters).
+ * The word of the spec line of this run, read from the prompt records of a session file: every
+ * record before the first assistant record, inside the first 64 KiB. The line is
+ * `/skill:<role skill> <run id>`, and for the implementer, validator and reviewer skills
+ * `/skill:<role skill> <run id> <step id>`: the word is the step id, or `evaluator`, `designer`,
+ * `test-case-writer` or `test-case-reviewer` for a skill that has no plan step. Null when no such
+ * line is there, or when the first one is the `ark-run-lead` line (a run lead head holds
+ * placeholder lines and may name a worker it starts). The id must be followed by a space, a
+ * backslash, a quote or a line end, so `<run id>0` is another run. The step id ends at a space, a
+ * backslash or a quote (the line sits in a JSON string, so `\n` follows it as two characters).
+ * Clean cutover: the old `worker <run id> <word>` form is not read, so a session of a run that
+ * started before the skills split places as unassigned.
  */
 export function readSpecWord(file: string, runId: string): string | null {
   const lines = headText(file).split("\n");
   const firstAssistant = lines.findIndex(isAssistantRecord);
   const prompt = (firstAssistant === -1 ? lines : lines.slice(0, firstAssistant)).join("\n");
-  const worker = prompt.indexOf(`worker ${runId} `);
-  const runLead = prompt.indexOf(`run-lead ${runId}`);
-  if (worker === -1 || (runLead !== -1 && runLead < worker)) return null;
-  const rest = prompt.slice(worker + `worker ${runId} `.length);
-  const end = rest.search(/[\s\\"]/);
-  return end > 0 ? rest.slice(0, end) : null;
+  let first: { skill: string; start: number; end: number } | undefined;
+  for (const skill of [...stepSkills, ...Object.keys(fixedSpecWords)]) {
+    const prefix = `/skill:${skill} ${runId}`;
+    for (
+      let start = prompt.indexOf(prefix);
+      start !== -1;
+      start = prompt.indexOf(prefix, start + 1)
+    ) {
+      const end = start + prefix.length;
+      if (end < prompt.length && !/[\s\\"]/.test(prompt[end])) continue;
+      if (!first || start < first.start) first = { skill, start, end };
+      break;
+    }
+  }
+  if (!first) return null;
+  if (!stepSkills.includes(first.skill)) return fixedSpecWords[first.skill];
+  const step = /^ ([^\s\\"]+)/.exec(prompt.slice(first.end));
+  return step ? step[1] : null;
 }
 
 /**

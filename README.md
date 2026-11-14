@@ -150,7 +150,7 @@ omp plugin link .   # install this repo as an OMP plugin
 
 1. Teach Ark your project once: [Bootstrap a project](docs/how-to/bootstrap-a-project.md).
 2. Run `ark ui` to open the hub.
-3. In an Orca terminal that runs `omp`, type `/skill:ark chief`, then name a ticket. [Run a ticket](docs/how-to/run-a-ticket.md) walks through it.
+3. In an Orca terminal that runs `omp`, type `/skill:ark-chief`, then name a ticket. [Run a ticket](docs/how-to/run-a-ticket.md) walks through it.
 
 ## Where to go next
 
@@ -167,7 +167,7 @@ omp plugin link .   # install this repo as an OMP plugin
 | Look up a command or a file format                     | [Command reference](docs/reference/cli.md)                                           |
 | Know what Ark promises, with the tickets that prove it | [Requirements](docs/prd.md), in EARS form                                            |
 | Know why each design choice was made                   | [Decision records](docs/adr/)                                                        |
-| Know what agents are told                              | [Playbooks](skills/ark/playbooks/)                                                   |
+| Know what agents are told                              | [Skills](skills/)                                                                    |
 | Know where Ark is going                                | [Vision](docs/explanation/vision.md)                                                 |
 | Find any other page                                    | [Documentation index](docs/README.md)                                                |
 

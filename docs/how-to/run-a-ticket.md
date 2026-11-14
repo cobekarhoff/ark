@@ -33,8 +33,8 @@ Amber is you. Teal is an agent. Grey is the `ark` command. Merging is not a gate
 
 ## Before you start
 
-- **Ark installed.** Follow the install steps in the [README](../../README.md). `bun link` puts the `ark` command on your PATH, and `omp plugin link .` makes `/skill:ark` available in OMP. Check with `ark --help`.
-- **OMP.** `/skill:ark chief` is OMP syntax. Start your agent with `omp` in an Orca terminal.
+- **Ark installed.** Follow the install steps in the [README](../../README.md). `bun link` puts the `ark` command on your PATH, and `omp plugin link .` makes the Ark skills available in OMP (`/skill:ark-chief`, `/skill:ark-bootstrap` and the others). Check with `ark --help`.
+- **OMP.** `/skill:ark-chief` is OMP syntax. Start your agent with `omp` in an Orca terminal.
 - **Orca.** Orca runs, and Settings → Orchestration → Nested worker depth is 2. Ark needs this so Master Chief can start run leads and run leads can start workers.
 - **A bootstrapped project.** Do [Bootstrap a project](bootstrap-a-project.md) once. It writes `~/.ark/projects/<project>/ark.yml`.
 - **A git host login.** Sign in to `gh` for GitHub or `glab` for GitLab.
@@ -51,7 +51,7 @@ Amber is you. Teal is an agent. Grey is the `ark` command. Merging is not a gate
 3. Run:
 
    ```text
-   /skill:ark chief
+   /skill:ark-chief
    ```
 
 Master Chief must run inside an Orca terminal. If it does not, it stops and tells you why. Open `omp` from an Orca terminal and run the command again.
@@ -68,7 +68,7 @@ Master Chief then suggests related tickets: blockers, tickets blocked by this on
 
 ### Create a local ticket
 
-For `ticket_source: local`, a ticket is one Markdown file at `~/.ark/projects/<project>/tickets/<ticket id>.md`. Either write it yourself, or open `omp` in the project and run `/skill:ark brainstorm`: it talks the idea through with you and writes the tickets you keep, with `status: proposed`. Both ways follow the format in section 6 of the [Master Chief playbook](../../skills/ark/playbooks/chief.md): front matter (`id`, `title`, `summary`, `kind`, `acceptance_criteria`), then `## Problem`, `## Change` and `## Acceptance criteria`. A minimal ticket:
+For `ticket_source: local`, a ticket is one Markdown file at `~/.ark/projects/<project>/tickets/<ticket id>.md`. Either write it yourself, or open `omp` in the project and run `/skill:ark-brainstorm`: it talks the idea through with you and writes the tickets you keep, with `status: proposed`. Both ways follow the format in section 6 of the [Master Chief skill](../../skills/ark-chief/SKILL.md): front matter (`id`, `title`, `summary`, `kind`, `acceptance_criteria`), then `## Problem`, `## Change` and `## Acceptance criteria`. A minimal ticket:
 
 ```markdown
 ---
@@ -276,7 +276,7 @@ See [Project checks, ticket kinds and proof](project-checks.md) for each. On a r
 
 While the MRs are open, before merge or close, the run lead runs `ark retro` and writes `retro.md` for the run: the numbers (cost, time, rework) and proposals for improvement, one for each rule in `rules.md` (a rule the run lead wrote when a finding repeated). Nobody asks you questions after a single run.
 
-Every 10 closed runs, or when you ask (`/skill:ark retro interview`), Master Chief runs a deep interview. It asks at most 8 questions, one at a time. You approve or reject each proposal. Nothing changes without your approval.
+Every 10 closed runs, or when you ask (`/skill:ark-retro interview`), Master Chief runs a deep interview. It asks at most 8 questions, one at a time. You approve or reject each proposal. Nothing changes without your approval.
 
 ## If something goes wrong
 

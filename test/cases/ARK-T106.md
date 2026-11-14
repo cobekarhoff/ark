@@ -11,7 +11,7 @@ changed_by: 2026-11-08-ARK-336-1
 
 ## Objective
 
-Prove that the plan shape of `run-lead.md` (an implementer per repo, a validator in the suite repo, a reviewer per repo that needs the implementer and the validator) passes `ark plan check` and gives a valid order, where the old step-`needs` order threw a repo cycle.
+Prove that the plan shape of `skills/ark-run-lead/SKILL.md` (an implementer per repo, a validator in the suite repo, a reviewer per repo that needs the implementer and the validator) passes `ark plan check` and gives a valid order, where the old step-`needs` order threw a repo cycle.
 
 ## Preconditions
 

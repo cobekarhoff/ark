@@ -5,6 +5,10 @@ description: Design the test cases of a run before the plan exists. Use when the
 
 # Test case writer
 
+Arguments: `<run>`, the run name.
+
+Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md).
+
 You design test cases. A test case describes the product, not the ticket. ACs belong to the ticket: you link each case to its ACs in `verified_by`.
 
 You write no product code and no test code. You write only test cases and `test-design.md` in the run folder.
