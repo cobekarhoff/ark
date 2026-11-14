@@ -675,10 +675,16 @@ export function status(runId?: string, project?: string): void {
   if (roleCheck.failures > 0) throw new ArkError(`${roleCheck.failures} role(s) cannot run`);
 }
 
-function testHeadLines(directory: string): string[] {
+function testHeadLines(project: string, directory: string): string[] {
   const events = readEvents(directory);
   if (!events.some((event) => event.type === "test.completed")) return [];
-  const stale = staleHeads(events);
+  let config: ProjectConfig | undefined;
+  try {
+    config = loadConfig(project);
+  } catch {
+    // ark status stays readable without a valid ark.yml: the target branch is then the one origin names
+  }
+  const stale = staleHeads(events, config);
   if (stale.length === 0) return ["test head: current"];
   return stale.map(
     ({ repo, tested, current }) =>
@@ -842,7 +848,7 @@ function printRun(runId: string, inProject?: string): void {
     ...statusSubmoduleLines(project, state.worktrees),
     `last test: ${state.last_test ? (state.last_test.passed ? "passed" : "failed") + (state.last_test.mode === "quick" ? " (quick, not a gate)" : "") : "none"}`,
     ...runnerStatusLines(directory),
-    ...testHeadLines(directory),
+    ...testHeadLines(project, directory),
     ...(statusMergeRequestsMode(project) === "none"
       ? localOnlyLines(project, directory, state)
       : [
