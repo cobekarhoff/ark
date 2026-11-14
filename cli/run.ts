@@ -37,7 +37,7 @@ import {
 import { ticketStatusAfter } from "./lifecycle.ts";
 import { arkHome, findRun, listProjects, runsDirectory } from "./paths.ts";
 import { runningCost } from "./retro.ts";
-import { assertShippable, staleHeads } from "./merge-request.ts";
+import { assertShippable, checkStage, staleHeads } from "./merge-request.ts";
 import { runnerStatusLines } from "./test-runner.ts";
 import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, submoduleLines, worktreeCleanup, worktreeDirtyLines } from "./worktree.ts";
@@ -470,6 +470,27 @@ export async function runStep(
       if (dirty.length > 0)
         throw new ArkError(
           `step ${stepId} refused: ${planned.repo} has uncommitted changes:\n${dirty.map((line) => `  ${line}`).join("\n")}\ncommit them, then finish again (use --failed to close a step that did not finish its work)`,
+        );
+    }
+    const plan =
+      planned?.role === "validator" ? readablePlan(directory, state.ticket.id) : undefined;
+    const served = plan?.steps.find((step) => step.id === stepId);
+    if (plan && served && !failed && (worktree === undefined || existsSync(worktree))) {
+      // The first validator of a bug run runs before the fix: an AC string counts once every implementer step that serves its AC has finished.
+      const implementers = plan.steps.filter((step) => step.role === "implementer");
+      const literalDue = (criterionId: string) =>
+        implementers
+          .filter((step) => step.criteria.includes(criterionId))
+          .every(
+            (step) => state.steps.find((entry) => entry.id === step.id)?.status === "succeeded",
+          );
+      const { problems, evidence } = checkStage(runId, project, directory, events, state, "step", {
+        finish: { serves: served.criteria, literalDue },
+      });
+      const lines = [...problems, ...evidence];
+      if (lines.length > 0)
+        throw new ArkError(
+          `step ${stepId} refused: stage step of the merge-request check lists a problem (use --failed to close a step that did not finish its work)\n${lines.join("\n")}`,
         );
     }
     if (planned?.role === "reviewer" && !failed && worktree && existsSync(worktree)) {

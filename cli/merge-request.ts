@@ -14,6 +14,7 @@ import {
   hasTestCriterion,
   manualCriteria,
   runCriteria,
+  type Method,
 } from "./ticket.ts";
 import { manualStatus } from "./lifecycle.ts";
 import { discoverRepos, repoBase, targetBranch } from "./workspace.ts";
@@ -306,15 +307,23 @@ function evidenceProblems(
   directory: string,
   lastTest: ArkEvent | undefined,
   currentHeadOf: Map<string, string>,
-  { strict, reportMissing }: { strict: boolean; reportMissing: (criterionId: string) => boolean },
+  {
+    strict,
+    reportMissing,
+    includes,
+  }: {
+    strict: boolean;
+    reportMissing: (criterionId: string, method: Method) => boolean;
+    includes: (criterionId: string) => boolean;
+  },
 ): string[] {
   const lines: string[] = [];
   const criteria = runCriteria(directory);
   for (const { id, method } of criteria) {
-    if (method === "test") continue;
+    if (method === "test" || !includes(id)) continue;
     const file = evidenceFile(directory, id);
     if (!existsSync(file)) {
-      if (reportMissing(id)) lines.push(`evidence missing: ${localId(id)} (${method})`);
+      if (reportMissing(id, method)) lines.push(`evidence missing: ${localId(id)} (${method})`);
       continue;
     }
     const problem = evidenceProblem(method, readFileSync(file, "utf8"), { lastLine: strict });
@@ -367,6 +376,12 @@ export type StageCheck = {
 };
 
 /**
+ * What a validator finish owns: only the ACs the step serves, an AC string only once every implementer step
+ * that serves it has finished (`literalDue`), no MR title, and a missing evidence file only for an analysis AC.
+ */
+export type FinishScope = { serves: string[]; literalDue: (criterionId: string) => boolean };
+
+/**
  * The problems of one stage. Reads files, git and the run folder; writes nothing and never fetches.
  * `step` names the plan step whose non-test ACs must have an evidence file (every AC when it is absent). `summary`
  * is the `--summary` of `ark merge-request open`. `title: false` leaves the MR title out and `firstOnly` stops at
@@ -379,9 +394,15 @@ export function checkStage(
   events: ArkEvent[],
   state: RunState,
   stage: Stage,
-  options: { step?: string; summary?: string; title?: boolean; firstOnly?: boolean } = {},
+  options: {
+    step?: string;
+    summary?: string;
+    title?: boolean;
+    firstOnly?: boolean;
+    finish?: FinishScope;
+  } = {},
 ): StageCheck {
-  const { step, summary, title = true, firstOnly = false } = options;
+  const { step, summary, title = true, firstOnly = false, finish } = options;
   const final = stage === "final";
   const problems: string[] = [];
   const warnings: string[] = [];
@@ -455,14 +476,21 @@ export function checkStage(
   const repoPaths = discoverRepos(config.workspace).map(
     (repo) => worktrees.get(repo)?.path ?? join(config.workspace, repo),
   );
-  const { absent, present } = absentLiterals(criterionTexts(directory), repoPaths);
+  const allTexts = criterionTexts(directory);
+  const texts =
+    finish === undefined
+      ? allTexts
+      : new Map(
+          [...allTexts].filter(([id]) => finish.serves.includes(id) && finish.literalDue(id)),
+        );
+  const { absent, present } = absentLiterals(texts, repoPaths);
   const list = (items: typeof absent) =>
     items.map(({ criterion, literal }) => `${criterion} \`${literal}\``).join("; ");
   if (absent.length > 0) problems.push(`AC string in no tracked file at head: ${list(absent)}`);
   if (present.length > 0)
     problems.push(`AC string still in a tracked file at head: ${list(present)}`);
   if (stop()) return outcome();
-  if (title) {
+  if (title && finish === undefined) {
     const fields = frontmatter(readFileSync(join(directory, "ticket.md"), "utf8")).fields ?? {};
     try {
       makeTitle(
@@ -504,10 +532,19 @@ export function checkStage(
       : loadPlan(directory, state.ticket.id).steps.find(({ id }) => id === step);
   if (step !== undefined && planned === undefined)
     throw new ArkError(`step ${step} is not in plan.yml`);
-  const reportMissing = (id: string) =>
-    final || (stage === "step" && (planned === undefined || planned.criteria.includes(id)));
+  // At a finish only the ACs of the step count, and only an analysis file is missing: the human writes a
+  // demonstration file and the reviewer an inspection file, after the validator.
+  const reportMissing = (id: string, method: Method) =>
+    finish !== undefined
+      ? method === "analysis"
+      : final || (stage === "step" && (planned === undefined || planned.criteria.includes(id)));
+  const includes = (id: string) => finish === undefined || finish.serves.includes(id);
   return outcome(
-    evidenceProblems(directory, lastTest, evidenceHeads, { strict: final, reportMissing }),
+    evidenceProblems(directory, lastTest, evidenceHeads, {
+      strict: final,
+      reportMissing,
+      includes,
+    }),
   );
 }
 

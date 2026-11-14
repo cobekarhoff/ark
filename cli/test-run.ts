@@ -26,6 +26,7 @@ import { readCaseEntries } from "./test-case.ts";
 import { caseIdsOutsidePlan, oldIdsTouched } from "./test-audit.ts";
 import { loadPlan } from "./plan.ts";
 import { findRun } from "./paths.ts";
+import { checkStage } from "./merge-request.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
 import { openTestBudget, type TestBudget } from "./test-lock.ts";
 import { sampleGroup, updateResources, type SideUse } from "./resources-file.ts";
@@ -1407,6 +1408,18 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
       console.log(`evidence   results/evidence/${id}/{base,head}`);
 
     if (quick) console.log(`mode: quick (not a gate: run ark test ${runId} before the MR)`);
+    // Information only: what `ark merge-request open` would refuse that needs just the head, shown while a fix is cheap.
+    const headEvents = readEvents(directory);
+    const headCheck = checkStage(
+      runId,
+      project,
+      directory,
+      headEvents,
+      deriveState(headEvents),
+      "head",
+    );
+    const headLines = [...headCheck.problems, ...headCheck.evidence];
+    if (headLines.length > 0) console.log(["merge-request check", ...headLines].join("\n"));
     const problems = [
       ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed`),
       ...suites.filter((suite) => !suite.passed).map((suite) => `suite ${suite.name} failed`),

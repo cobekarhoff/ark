@@ -2,7 +2,14 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
-import { evidenceFile, frontmatter, manualCriteria, parseCriteria, runCriteria } from "./ticket.ts";
+import {
+  evidenceFile,
+  evidenceProblem,
+  frontmatter,
+  manualCriteria,
+  parseCriteria,
+  runCriteria,
+} from "./ticket.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { currentHeads } from "./merge-request.ts";
 import { findRun } from "./paths.ts";
@@ -75,6 +82,20 @@ export function gateRecord(
   // Only the awaiting_criteria phase refreshes criteria; in any other phase the transition table refuses the answer.
   if (accepting && deriveState(readEvents(directory)).phase === "awaiting_criteria")
     acceptCriteria(directory);
+  // A demonstration file ends with the human's `human: ok`, once. The other methods' files are the reviewer's or a command's.
+  // The file as it will be after the answer is checked first, so a malformed file writes neither event nor file.
+  const file = criterion === undefined ? undefined : evidenceFile(directory, criterion);
+  const method = runCriteria(directory).find((entry) => entry.id === criterion)?.method;
+  let answered: string | undefined;
+  if (file !== undefined && answer === "ok" && method === "demonstration" && existsSync(file)) {
+    const kept = readFileSync(file, "utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "human: ok");
+    answered = `${kept.join("\n").trimEnd()}\n\nhuman: ok\n`;
+    const problem = evidenceProblem("demonstration", answered);
+    if (problem !== undefined)
+      throw new ArkError(`evidence malformed: ${criterion!.split("/").pop()}: ${problem}`);
+  }
   // A manual answer records the head of each repo it was given at: a later commit may change what was approved.
   const heads =
     criterion === undefined ? new Map<string, string>() : currentHeads(readEvents(directory));
@@ -86,17 +107,7 @@ export function gateRecord(
     ...(note === undefined ? {} : { note }),
     ...(heads.size === 0 ? {} : { heads: Object.fromEntries(heads) }),
   });
-  // A demonstration file ends with the human's `human: ok`, once. The other methods' files are the reviewer's or a command's.
-  if (criterion !== undefined && answer === "ok") {
-    const file = evidenceFile(directory, criterion);
-    const method = runCriteria(directory).find((entry) => entry.id === criterion)?.method;
-    if (method === "demonstration" && existsSync(file)) {
-      const kept = readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => line.trim() !== "human: ok");
-      writeFileSync(file, `${kept.join("\n").trimEnd()}\n\nhuman: ok\n`);
-    }
-  }
+  if (file !== undefined && answered !== undefined) writeFileSync(file, answered);
   console.log(`recorded ${gate} ${answer}`);
 }
 
