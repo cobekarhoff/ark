@@ -1,22 +1,21 @@
 import type { Snapshot } from "../hub/types.ts";
 
 /**
- * A `snapshotWhen` predicate for the named runs: each run shows a merged merge request (github loop) and has
- * its repo facts (repo-facts loop). The two loops publish apart, so a snapshot can hold `merged` while the
- * facts are still unread and every submodule bump reads `unknown`. `branch.ahead` is set in the same read as
- * the bump pointer, so a measured branch means the pointer was read too.
+ * A `snapshotWhen` predicate for the named runs: each run has its repo facts (repo-facts loop). That loop publishes
+ * apart from the github loop, so a snapshot can hold a run whose facts are still unread, and every submodule bump
+ * reads `unknown`. `branch.ahead` is set in the same read as the bump pointer, so a measured branch means the
+ * pointer was read too. A test that also needs a merge request state joins its own predicate to this one.
  */
 export const waitForRepoFacts =
   (...runs: string[]) =>
-  (snapshot: Snapshot): boolean =>
-    Array.isArray(snapshot.runs) &&
-    runs.every((name) => {
-      const view = (snapshot.runs as Exclude<Snapshot["runs"], "unknown">).find(
-        (candidate) => candidate.run === name,
-      );
-      return (
-        view !== undefined &&
-        view.merge_requests.some((mergeRequest) => mergeRequest.state === "merged") &&
-        view.repos?.some((repoView) => repoView.branch?.ahead != null) === true
-      );
-    });
+  (snapshot: Snapshot): boolean => {
+    const views = snapshot.runs;
+    return (
+      Array.isArray(views) &&
+      runs.every((name) =>
+        views
+          .find((candidate) => candidate.run === name)
+          ?.repos?.some((repoView) => repoView.branch?.ahead != null),
+      )
+    );
+  };

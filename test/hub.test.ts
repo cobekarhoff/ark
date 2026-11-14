@@ -62,6 +62,7 @@ import {
   writeSessionFile,
 } from "./hub-fixtures.ts";
 import { installProcessFakes } from "./resources-fixtures.ts";
+import { waitForRepoFacts } from "./hub-facts-wait.ts";
 import {
   installFakeTools,
   startHub,
@@ -3929,17 +3930,24 @@ const detailOf = async (baseUrl: string, run: string): Promise<RunDetail> =>
   (await (await fetch(`${baseUrl}/api/run/${run}`)).json()) as RunDetail;
 
 /**
- * Puts a `git` first on PATH that sleeps 1 s before `ls-tree` and passes every other command through. The hub reads
- * git with spawnSync, so each run that reads a pointer holds its repo facts back by 1 s while the fake `gh` answers
- * at once: the facts of a run publish well after its merge request shows `merged`, on any host.
+ * Starts a hub whose `git` sleeps 1 s before `ls-tree` and passes every other command through. The hub reads git
+ * with spawnSync, so each run that reads a pointer holds its repo facts back by 1 s while the fake `gh` answers at
+ * once: the facts of a run publish well after its merge request shows `merged`, on any host. The shim is on PATH
+ * only while the hub starts (the hub keeps the environment it was started with), so later tests see the real git.
  */
-function delayLsTree(): void {
+async function startWithSlowLsTree() {
   const realGit = Bun.which("git");
   if (!realGit) throw new Error("git is not on PATH");
+  const savedPath = process.env.PATH;
   writeFakeCommand(
     "git",
     `for argument in "$@"; do [ "$argument" = ls-tree ] && sleep 1; done\nexec ${realGit} "$@"`,
   );
+  try {
+    return await start();
+  } finally {
+    process.env.PATH = savedPath;
+  }
 }
 
 /** The `bump_state` of each bump step in a run's repo graph, keyed by the bump step. */
@@ -4046,8 +4054,7 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
       },
     },
   });
-  delayLsTree();
-  const { baseUrl } = await start();
+  const { baseUrl } = await startWithSlowLsTree();
 
   // The MR run: repos in merge order (the plan lists them the other way round), each with its facts.
   // Control: the MR loop shows `merged` while the repo-facts loop still holds its facts back, so the bump reads
@@ -4061,10 +4068,8 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
     "points at upstream branch unknown",
   );
   // The facts of the run are read: a repo of the run has its branch measured, in the read that sets the pointer.
-  // Loaded here, not at the top of the file: the helper is the fix of ARK-468, and a static import of a module that
-  // does not exist yet would fail every test of this file, not only these two.
-  const { waitForRepoFacts } = await import("./hub-facts-wait");
-  const snapshot = await snapshotWhen(baseUrl, waitForRepoFacts(mrRun));
+  const factsRead = waitForRepoFacts(mrRun);
+  const snapshot = await snapshotWhen(baseUrl, (next) => merged(next) && factsRead(next));
   const view = openRunOf(snapshot, mrRun);
   expect(view.repos?.map(({ repo, order, why }) => [repo, order, why])).toEqual([
     ["core-lib", 1, "Shared <b>core</b> types"],
@@ -4081,11 +4086,7 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
   );
   // The upstream MR's state is in the same list: !11 merged, so service's wait is met.
   expect(view.merge_requests.find((request) => request.number === 11)?.state).toBe("merged");
-  const bumps = Object.fromEntries(
-    (view.repos ?? []).flatMap((entry) =>
-      entry.depends_on.map((edge) => [edge.bump, edge.bump_state] as const),
-    ),
-  );
+  const bumps = bumpStates(view);
   // A recorded refresh wins; a submodule not refreshed shows the pointer its worktree records.
   expect(bumps).toEqual({
     "service-bump": "refreshed to 1.4.0",
@@ -4210,12 +4211,7 @@ test("ARK-T393 A submodule bump whose downstream worktree is missing still reads
       "https://github.com/missing/core-lib/pull/11": merged,
     },
   });
-  delayLsTree();
   const { baseUrl } = await start();
-
-  // Loaded here, not at the top of the file: the helper is the fix of ARK-468, and a static import of a module that
-  // does not exist yet would fail every test of this file, not only these two.
-  const { waitForRepoFacts } = await import("./hub-facts-wait");
   const snapshot = await snapshotWhen(baseUrl, waitForRepoFacts(controlRun, missingRun));
 
   // The control proves the facts were read and a pointer can be found; the missing run must not invent one.
