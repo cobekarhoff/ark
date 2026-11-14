@@ -711,6 +711,7 @@ describe("ark retro", () => {
       escalations: 1,
       findings_sent_back: 1,
       findings_left_p0p1: 0,
+      findings_dropped: 0,
       merge_steps: 0,
     });
     expect(metrics.human_intervention).toEqual({
@@ -804,6 +805,58 @@ describe("ark retro", () => {
     rmSync(findings, { recursive: true });
     expect(runRetroProcess().exitCode).toBe(0);
     expect(readMetrics().rework.findings_left_p0p1).toBe(0);
+  });
+
+  test("ARK-T392 retro counts only the dropped lines under Run lead decision into findings_dropped", () => {
+    const findings = join(runDirectory, "findings");
+    mkdirSync(findings, { recursive: true });
+    writeFileSync(
+      join(findings, "reviewer.md"),
+      [
+        "### P2: slow export",
+        "",
+        "- **Evidence:** the reviewer dropped the unit",
+        "",
+        "## Run lead decision",
+        "",
+        "- dropped might be slow: no Line and no Input",
+        "- dropped cleanup helper: no File",
+        "- P1 export drops the unit: send back, the Repro fails",
+        "",
+        "## Notes",
+        "",
+        "- dropped in the notes, not a decision",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(findings, "round-1.md"), "- dropped by hand: not a decision\n");
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(readMetrics().rework).toMatchObject({
+      findings_dropped: 2,
+      findings_left_p0p1: 0,
+      findings_sent_back: 0,
+    });
+
+    writeFileSync(
+      join(findings, "second.md"),
+      [
+        "## Run lead decision",
+        "",
+        "- **dropped bold title: no Input**",
+        "* Dropped star title: no File",
+        "",
+      ].join("\n"),
+    );
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(readMetrics().rework).toMatchObject({
+      findings_dropped: 4,
+      findings_left_p0p1: 0,
+      findings_sent_back: 0,
+    });
+
+    rmSync(findings, { recursive: true });
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(readMetrics().rework.findings_dropped).toBe(0);
   });
 
   test("ARK-282-AC4 a step finished with not_started adds no round and no cost step; a plain failed one still does", () => {

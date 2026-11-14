@@ -2295,7 +2295,8 @@ async function homeWithBlockers(
     createdAgo: 10_800,
     conclusion: "SUCCESS",
     size: { additions: 312, deletions: 41, changedFiles: 6 },
-    findings: "### P1: a\n\n### P2: b\n\n### P2: c\n\n### P3: d\n",
+    findings:
+      "### P1: a\n\n### P1: vague\n\n### P2: b\n\n### P2: c\n\n### P3: d\n\n## Run lead decision\n\n- dropped vague: no Input\n",
   });
   const newer = reviewRun({
     ticket: "ARK-504",
