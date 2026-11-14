@@ -1,0 +1,39 @@
+---
+name: ark-validator
+description: Turn the test cases of one plan step into passing tests that prove its ACs. Use when the run lead starts a validator step with /skill:ark-validator <run> <step>; it writes tests and evidence files, never product code.
+---
+
+# Ark validator
+
+Arguments: `<run> <step>`.
+
+Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md).
+
+You turn the plan's test cases into tests that prove the AC, and you make them pass.
+
+1. Read [`skills/shared/principles.md`](../shared/principles.md) in the Ark repo. Read the project's `ark.yml` in `$ARK_HOME/projects/<project>/`. Find the suite whose `repo` is yours: its `level`, its `command` and its `parser`. Your tests must live where that suite's command finds them. When `verify.md` exists in the same folder, use it for a live check: start the app and reach it as it says, and run each feature of its feature map that the step's criteria touch. Quote what you saw in your report. When `verify.md` is wrong (a command fails or a result differs), say so in your findings file, so the run lead can write a proposal.
+2. Write one or more tests for each test case of your step's criteria. Set up its `given` context, perform its `when` actions, and assert its `then` results and `expected` EARS sentence. Each test:
+   - Is a test at the level the test case names. An AC with `method: test` needs an integration or E2E case among its `verified_by` cases, so a unit test alone is not enough.
+   - Carries its test case ID so the suite's parser can read it. Put the ID at the start of the test name for the `bun` parser, for example `test("ARK-T12 lists the five skills", ...)`. Use the `case` marker for `pytest` and the `@case:<id>` tag for `behave`. For an `add` entry, run `ark test-case new <KEY> --run <run>` first and use the ID it prints; write the entry's fields and sections.
+   - Converts on touch: a test that has an old AC id in its title keeps proving that one AC until a run changes it. When you change such a test, write a test case with `ark test-case new <KEY> --run <run>`, rename the title to start with the test case ID, and name the case in the plan (tell the run lead if the plan lacks it). The reviewer rejects a diff that touches such a test and leaves its title unchanged. Leave an untouched old-id test alone.
+   - Exercises the real system or an emulated dependency you own. Never mock the thing the test proves.
+   - Sets a timeout of 30 s or more when it tests a sync or merge-request command.
+   - Waits for a state in a Playwright test with a retrying expectation. It never reads a one-shot count of elements.
+   - Never reads a commit by hash from the checkout history, because CI checkouts are shallow. It uses a scratch git repo or a frozen fixture.
+3. Run the suites and make the tests pass. In build rounds run `ark test <run> --quick`: it runs the changed test files at head only, with no base run, and is not a gate. Run the full `ark test <run>` once, before the MR opens, unless the plan has no test case (below).
+   The full run runs every suite on the composed workspace, then again at the base commit with your test files copied in (a suite with `base_files` runs only the test files of the run's own commits there, and a case in another file reads `not run`; a `refactor` run runs whole even with `base_files`), and lists each AC as passing, failing, missing, manual pending, manual ok or manual problem. A new test fails at base, and that is expected: only a failure at head fails `ark test`.
+   It writes `results/evidence/<test case id>/{base,head}/` (`result.json`, `command.log`, `screenshots/`) in the run folder. A UI test calls `checkpoint(page, "<name>")` from `test/pw/helpers.ts` before each assertion, so the screenshot exists when the assertion fails; `ark test` sets `ARK_EVIDENCE_DIR`, and `checkpoint` writes nothing without it. `ark test` is the only command that proves an AC.
+   A criterion with a method other than `test` (or `manual: true`) needs no test: its proof is the gate `manual` answer `ok` and its evidence file `results/evidence/<AC id>.md`, and you never write a test for it. An AC with a `verified_by` list is decided by the results of those cases at every level. Commit your tests and any evidence files before the last `ark test <run>`, so that no commit follows that test: a later commit makes the test head stale.
+   When the plan has no test case (`test_cases: []`), run only the checks the repo's `package.json` lists (for this repo `format`, `format:check`, `typecheck` and `lint`) and `ark test <run> --quick`, and leave the full suite to the final `ark test <run>`, which the run lead runs after the last review. Do not start a full `ark test`.
+   For a criterion with a method other than `test`, write `results/evidence/<AC id>.md` with the local id (`AC3`, not `ARK-348/AC3`), in the sections that `skills/ark-run-lead/SKILL.md` section 8 lists for its method. A Files line holds a path and a line range (`path:start-end`) and nothing else: put any text under Checked against. In an `inspection` file, write the Verdict line `reviewer: pass` or `reviewer: fail` yourself, after you read the diff against the AC. In a `demonstration` file, write no `human: ok` line: `ark gate record` appends the human's answer at the end of the file, and a later rewrite keeps it the last line.
+   `ark test` runs in a detached runner: after a lost connection run `ark test <run> --wait` to get its output and exit code, and do not start `ark test` again. A suite shown as `reused` came from the cache of the same heads, and a file shown as `flaky` failed once and passed on retry. A suite shown as `failed` is followed by its exit code, its log path `results/<suite>.log` and the last 20 lines of the log; a criterion line is followed by `no test title starts with <test case id>` for each test case that reads `missing`, so the title of your test must start with that id. A quick run that selected test files for a suite with `base_files` prints no such line, because a test in another file has no result there.
+4. If a test fails because the product code is wrong, do not fix the product code. Write the failing test names, the output and your evidence in `<run folder>/findings/<step>.md`, and report `--outcome failed`. The run lead sends the work back to the implementer.
+5. Audit each test you wrote against the test gate (`rules/test-audit.md` in the Ark repo), as your last step. Answer these for every test:
+   - What observable behavior or contract does it protect?
+   - What credible regression makes it fail?
+   - Does existing proof already cover it? One contract has one owning test, at the strongest boundary that is practical.
+   - Does it need an export, flag or hook that has no production caller? Then test at the real boundary instead.
+
+   Delete or rewrite a test that asserts nothing, compares a value to itself, takes its expected value from the code under test, asserts on call shape or mock calls, uses a mock that supplies the asserted behavior, or has a name that promises more than it checks.
+
+6. Commit the tests on the branch `ark/<ticket id>-<slug>`. Do not push.

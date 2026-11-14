@@ -27,7 +27,7 @@ Expected: When a run has one run lead, one test case writer, one test case revie
     - test case writer: `/skill:test-case-writer <run id>`, then `You are the TEST CASE WRITER for run <run id>.`;
     - test case reviewer: `/skill:test-case-reviewer <run id>`;
     - implementer: `/skill:ark-implementer <run id> <step id>`.
-    The fixtures copy the record shape from a real head (above), with `name`, `args`, `prompt` and the spec line replaced by these forms. A real head of the new forms exists only after the merge: AC5 of ARK-414 shows one, so the first post-merge head is compared with the fixture.
+      The fixtures copy the record shape from a real head (above), with `name`, `args`, `prompt` and the spec line replaced by these forms. A real head of the new forms exists only after the merge: AC5 of ARK-414 shows one, so the first post-merge head is compared with the fixture.
   - The role skill text in `content` holds placeholder lines with the literal `<run>` (the arguments of other skills, such as `/skill:ark-implementer <run> <step>` in the run lead skill text). The ark-run-lead skill states its own run name as the placeholder `<run>`, never as a real run id. The placeholders stay in the copy.
 - Four OMP session files with the run's worktree as `cwd` and a different known cost for each, so that a wrong role gives a wrong number:
   - Run lead: starts before the first step and is written at or after it. Its `skill-prompt` record has `/skill:ark-run-lead <run id>` and no worker spec line.

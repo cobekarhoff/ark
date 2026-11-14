@@ -35,9 +35,9 @@ Ark takes a ticket to merge-ready changes in one repo or across several dependen
 
 Agents follow these files. Read them to learn exactly what an agent does.
 
-- [Playbooks](../skills/ark/playbooks/): one file per role: [Master Chief](../skills/ark/playbooks/chief.md), [run lead](../skills/ark/playbooks/run-lead.md), [worker](../skills/ark/playbooks/worker.md), [retro](../skills/ark/playbooks/retro.md), [bootstrap](../skills/ark/playbooks/bootstrap.md) and [brainstorm](../skills/ark/playbooks/brainstorm.md).
-- [Principles](../skills/ark/principles.md): one line for each principle, linked to the rule that holds it.
-- [Reviewer rubric](../skills/ark/rubrics/reviewer.md): what a reviewer checks.
+- [Skills](../skills/): one folder for each role: [Master Chief](../skills/ark-chief/SKILL.md), [run lead](../skills/ark-run-lead/SKILL.md), [brainstorm](../skills/ark-brainstorm/SKILL.md), [bootstrap](../skills/ark-bootstrap/SKILL.md), [retro](../skills/ark-retro/SKILL.md), and the worker roles [evaluator](../skills/ark-evaluator/SKILL.md), [designer](../skills/ark-designer/SKILL.md), [implementer](../skills/ark-implementer/SKILL.md), [validator](../skills/ark-validator/SKILL.md) and [reviewer](../skills/ark-reviewer/SKILL.md). Two shared files hold the text that roles share: the [rules for every role](../skills/shared/rules.md) and the [worker protocol](../skills/shared/worker-protocol.md).
+- [Principles](../skills/shared/principles.md): one line for each principle, linked to the rule that holds it.
+- [Reviewer rubric](../skills/ark-reviewer/rubrics/reviewer.md): what a reviewer checks.
 - [Rules](../rules/): the checklists for code: [naming](../rules/naming.md), [state machines](../rules/state-machines.md) and [test authoring](../rules/test-audit.md).
 - [Test case writer](../skills/test-case-writer/SKILL.md) and [test case reviewer](../skills/test-case-reviewer/SKILL.md): the skills of those two workers.
 - [Test audit](../skills/test-audit/SKILL.md): how to audit the tests of any Ark project and run a campaign that prunes them.

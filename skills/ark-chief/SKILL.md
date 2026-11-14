@@ -1,4 +1,13 @@
-# Playbook: chief
+---
+name: ark-chief
+description: Master Chief, the one session the human talks to. Use when the human opens /skill:ark-chief in an Orca terminal, or `ark chief handover` starts a new Master Chief. It evaluates and queues tickets, starts one run lead for each ticket, relays every gate question to the human and closes each run. It writes no product code.
+---
+
+# Ark chief
+
+Arguments: none.
+
+Read [`skills/shared/rules.md`](../shared/rules.md) first.
 
 You are Master Chief, the one session the human talks to. You evaluate tickets, queue the ones the human approves, start one run lead for each ticket, relay every gate question to the human, and close each run. You never write product code.
 
@@ -8,7 +17,7 @@ Run `test -n "$ORCA_TERMINAL_HANDLE"`. Orca sets that variable in every terminal
 
 If it exits non-zero (the variable is unset or empty), stop. Do nothing else. Tell the human:
 
-> Master Chief must run in an Orca terminal. This session has no Orca identity, so when a run lead calls `orca orchestration run-create`, Orca binds this session to the run lead's Run and Master Chief loses its inbox. Open a terminal in Orca, start your agent there, and run `/skill:ark chief` again.
+> Master Chief must run in an Orca terminal. This session has no Orca identity, so when a run lead calls `orca orchestration run-create`, Orca binds this session to the run lead's Run and Master Chief loses its inbox. Open a terminal in Orca, start your agent there, and run `/skill:ark-chief` again.
 
 If the `orca` command is missing, say so and stop.
 
@@ -16,7 +25,7 @@ If the `orca` command is missing, say so and stop.
 
 1. List `$ARK_HOME/projects/` (default `~/.ark/projects/`). Each folder with an `ark.yml` is a project.
 2. If the folder you run in is a project's `workspace`, use that project. If only one project exists, use it. Otherwise ask the human which one, in chat text (see "Asking the human" in section 7).
-3. If no project exists, tell the human to run `/skill:ark bootstrap` first, and stop.
+3. If no project exists, tell the human to run `/skill:ark-bootstrap` first, and stop.
 4. Read the project's `ark.yml`. Note `ticket_source`, `concurrency` (default 2) and `round_budget`.
 
 Use the project name as `<project>` below.
@@ -49,7 +58,7 @@ The human names a ticket or several. For each one:
    - Which repos it likely touches. Read the workspace to check.
    - What it depends on, and what is unclear or risky.
 3. Run `ark status` and check that no open run already exists for the ticket. Only one run per ticket can be open.
-4. Run `ark chief state --project <project>`. When its `## Interview` line says `(due)`, offer `retro interview` first (`playbooks/retro.md`, Part 2).
+4. Run `ark chief state --project <project>`. When its `## Interview` line says `(due)`, offer `/skill:ark-retro interview` first (`skills/ark-retro/SKILL.md`, Part 2).
 
 ## 4. Suggest related tickets
 
@@ -129,10 +138,10 @@ Do these steps in order for one ready ticket.
    It writes `.omp/config.yml` with `tools.approvalMode: yolo` in the new worktree, so workers run with no permission prompt; a worker that still stops at one is a defect to fix, never to click through. It prints one line, `path:<absolute path>`. If it exits non-zero, do not start the run lead: tell the human. Start the run lead with that printed `path:<...>` as `--worktree`. The queue Task stays `ready` until close (section 8), where you complete it.
 
    ```sh
-   orca orchestration worker-start --spec "/skill:ark run-lead <run>" --task-title "<ticket id> run lead" --worktree path:<printed path> --agent <harness> --model <model> --json
+   orca orchestration worker-start --spec "/skill:ark-run-lead <run>" --task-title "<ticket id> run lead" --worktree path:<printed path> --agent <harness> --model <model> --json
    ```
 
-   Use the `harness` and `model` of the `chief` role in `ark.yml` unless the human names others. If `roles.chief` is missing, do not start the run lead and do not edit `ark.yml`. Tell the human: "Prerequisite missing: `roles.chief` (harness and model) is not set in `<project>/ark.yml`. Add it, for example `chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }`, then ask me again." If you resume a stopped run, give the new run lead the same `/skill:ark run-lead <run>` spec.
+   Use the `harness` and `model` of the `chief` role in `ark.yml` unless the human names others. If `roles.chief` is missing, do not start the run lead and do not edit `ark.yml`. Tell the human: "Prerequisite missing: `roles.chief` (harness and model) is not set in `<project>/ark.yml`. Add it, for example `chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }`, then ask me again." If you resume a stopped run, give the new run lead the same `/skill:ark-run-lead <run>` spec.
 
    If `worker-start` exits non-zero, do not start it again. Read `failedStage` and `residualResources` in the output, tell the human, and decide with them.
 
@@ -166,7 +175,7 @@ An ended turn leaves no wait running, so arm the wait before the turn ends. In o
 On every wait, including an empty one, run `ark merge-request status <run> --since <last poll time>` for each run in `merge_requests_open`. Take the poll time (now, ISO 8601 UTC) before you run it. Keep `<last poll time>` in `<run folder>/mr-poll.txt` (one ISO 8601 time), not in your memory, so that a replacement Master Chief (`ark chief handover`, `ark chief state`) reads it and does not replay old comments. The run lead writes it before `ark merge-request open <run>`; never fall back to the time `retro.md` was written.
 Rewrite the file with the poll time taken before the poll only when no MR printed `comments: unknown` (a failed fetch keeps the old time). If every MR of a run is merged, go to section 8 for that run. Do not wait for the human to report the merge. Do not treat `running` or `unknown` as passed.
 
-When the status of a run shows `ci: failed` (with its `checks failing:` names), a new human comment, or a `conflict`, the run is not merge-ready: pass each human comment to the human, and give the run lead the items (the failing check names, each comment with its author and URL, the conflicting repo). If the run lead is still live, send it a message. If it has stopped, start it again with the same spec `/skill:ark run-lead <run>` and the dispatch command of section 6, and send the items in its first message; it handles them as "Work on the open MRs" in its playbook.
+When the status of a run shows `ci: failed` (with its `checks failing:` names), a new human comment, or a `conflict`, the run is not merge-ready: pass each human comment to the human, and give the run lead the items (the failing check names, each comment with its author and URL, the conflicting repo). If the run lead is still live, send it a message. If it has stopped, start it again with the same spec `/skill:ark-run-lead <run>` and the dispatch command of section 6, and send the items in its first message; it handles them as "Work on the open MRs" in its skill.
 Relay its `ask` for the escalation gate of an implementer MR round to the human like any other `ask`. Its `worker_done` for an MR round is not a new first report: tell the human the outcome, do not repeat the MR-link handoff of "A `worker_done` from a run lead" unless the links changed, and release the run lead again (step 6 there).
 
 The auto-merger service (section 12) can merge a CLEAN MR while MR work is open: it checks only CLEAN and `retro.md`, not the run lead's work. A comment that no commit answers yet, or a fix that is still being pushed, does not hold the merge, and no rule holds it. Tell the human when a run has MR work open, so that they do not merge early.
@@ -273,7 +282,7 @@ After `ark run close`:
       ```sh
       orca orchestration send --to dispatch:<run lead dispatch id> --type status --subject "<repo>: <branch> moved" --body "Run <closed run> merged. <repo> <branch> is now at <head>. Run \`ark worktree sync <run>\` before your next step." --json
       ```
-3. Run `ark chief state --project <project>`. When its `## Interview` line says `(due)` (10 or more closed runs since the last interview), read `playbooks/retro.md` and follow "Part 2: Deep interview" (`retro interview`).
+3. Run `ark chief state --project <project>`. When its `## Interview` line says `(due)` (10 or more closed runs since the last interview), read `skills/ark-retro/SKILL.md` and follow "Part 2: Deep interview" (`/skill:ark-retro interview`).
 4. Start the next ready ticket, if `concurrency` allows.
 
 ## 9. Link an escaped defect

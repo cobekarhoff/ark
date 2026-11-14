@@ -1,4 +1,13 @@
-# Bootstrap playbook
+---
+name: ark-bootstrap
+description: Teach Ark one project. Use when the human opens /skill:ark-bootstrap once per project, in an Orca terminal, to onboard a workspace. It detects first, asks second, and writes the project's ark.yml, then registers its repos with Orca.
+---
+
+# Ark bootstrap
+
+Arguments: none.
+
+Read [`skills/shared/rules.md`](../shared/rules.md) first.
 
 You teach Ark one project. You run as Master Chief, in an Orca terminal. You detect first and ask second. At the end, `~/.ark/projects/<project>/ark.yml` exists, Orca knows every repo, workers can load the workspace's skills, and `ark status` accepts the file.
 
@@ -130,7 +139,7 @@ roles:
 ```
 
 The test writer designs the test cases before the plan, and the test reviewer checks them before any implementer step starts. The test reviewer uses a different vendor from the implementer and the writer. Without `roles.test_writer` or `roles.test_reviewer`, the run lead stops and escalates to Master Chief. Old configs without them still load. The evaluator checks the ticket before the run lead plans. Without `roles.evaluator`, `ark evaluation record` refuses and no plan passes `ark plan check`. The designer makes mockups for the strategy gate when the ticket changes something a person sees.
-Without `roles.designer`, `ark strategy record` refuses such a ticket and names the role. It needs neither a designer nor a mockup when the surface is only `none`, or when there is one card and the surface is only `document`, `cli_output` or `none`. Old configs without it still load. The chief role sets the harness and model Master Chief uses for run leads, and the hub uses it to spawn Master Chief. Without `roles.chief`, the chief playbook stops before it starts a run lead and names the role.
+Without `roles.designer`, `ark strategy record` refuses such a ticket and names the role. It needs neither a designer nor a mockup when the surface is only `none`, or when there is one card and the surface is only `document`, `cli_output` or `none`. Old configs without it still load. The chief role sets the harness and model Master Chief uses for run leads, and the hub uses it to spawn Master Chief. Without `roles.chief`, the chief skill stops before it starts a run lead and names the role.
 
 `ark status` then checks that each role can run, and that `gitleaks` and `osv-scanner` are installed. It prints `scanner: <tool> is not installed: brew install <tool>` for each missing tool and still exits 0; tell the human to run that command, because `ark merge-request open` refuses without both. A finding of the scan that the human accepts goes under `security.accepted` in `ark.yml`, a list of `id` (a vulnerability id, an alias, or a gitleaks fingerprint) and `reason`; write it only when the human names a finding.
 
@@ -329,7 +338,7 @@ Tell the human, in one short list:
   ```
 - Anything left for the human (a missing `ac` marker hook, a missing `description`, a skipped repo).
 
-The first ticket, `/skill:ark chief` with a ticket ID, is the E2E check of the whole setup.
+The first ticket, `/skill:ark-chief` with a ticket ID, is the E2E check of the whole setup.
 
 ## 12. Write `verify.md`
 
@@ -338,7 +347,7 @@ The first ticket, `/skill:ark chief` with a ticket ID, is the E2E check of the w
 - When the file exists, ask whether to keep, replace or edit it. Never overwrite it without the answer.
 - Detect before you ask, from the README, `package.json` scripts, the compose file, CLI help and the docs. Ask only what you could not detect, as in step 3: one question at a time, each with a recommended answer. A project with no running app (a library) gets a CLI-only `verify.md`, or none, when the human declines.
 - The file has three parts, in this order:
-  1. **Start:** the exact command that starts the app, and how to stop it. Start a server on a free port with `portless <project> --app-port <port> <command>`, as in the Designer section of `worker.md`.
+  1. **Start:** the exact command that starts the app, and how to stop it. Start a server on a free port with `portless <project> --app-port <port> <command>`, as in `skills/ark-designer/SKILL.md`.
   2. **Reach:** the URL or the command that reaches it (a web app at `http://<project>.localhost`, a CLI as `<command> --help`), and the command that proves it is up, such as `curl -sf <url>/<health path>`.
   3. **Feature map:** a table with one row for each feature: the feature, the command or page that exercises it, and what a working result shows (a value, a text, an exit code). Name what you would see, not "it works".
 - Run the start and reach commands once. A part that fails is not written as fact: fix it or mark it `unverified` in the file.

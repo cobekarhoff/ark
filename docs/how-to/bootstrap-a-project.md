@@ -1,6 +1,6 @@
 # Bootstrap a project
 
-Bootstrap teaches Ark one project: its repos, its integration and E2E test suites, how its repos run together, and where its tickets live. You do it once for each project. Master Chief does the work with the bootstrap playbook. It detects what it can from your files and asks you only for the rest.
+Bootstrap teaches Ark one project: its repos, its integration and E2E test suites, how its repos run together, and where its tickets live. You do it once for each project. Master Chief does the work with the bootstrap skill. It detects what it can from your files and asks you only for the rest.
 
 This page covers two cases:
 
@@ -19,14 +19,14 @@ You need:
 
 ## Bootstrap a single repo
 
-1. Open a terminal in Orca in the repo, start `omp`, and run `/skill:ark bootstrap`. This session plays Master Chief for the setup. For Ark:
+1. Open a terminal in Orca in the repo, start `omp`, and run `/skill:ark-bootstrap`. This session plays Master Chief for the setup. For Ark:
 
    ```sh
    cd ~/Dev/abbott/ark
    omp
    ```
 
-   Then, in the `omp` session, run `/skill:ark bootstrap`.
+   Then, in the `omp` session, run `/skill:ark-bootstrap`.
 
 2. Wait while Master Chief detects the project. It asks you nothing yet. It reads:
 
@@ -71,7 +71,7 @@ You need:
 
 A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one: `clara-agentic-environment` holds `repos/platform`, `repos/shared/packages` and more. Follow the steps for a single repo, with these differences.
 
-1. Open an Orca terminal in the meta-repo root, start `omp`, and run `/skill:ark bootstrap`:
+1. Open an Orca terminal in the meta-repo root, start `omp`, and run `/skill:ark-bootstrap`:
 
    ```sh
    cd ~/Dev/abbott/clara-agentic-environment
@@ -157,11 +157,11 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
 
    The real output has more fields for each repo.
 
-3. Start the first ticket with Master Chief: `/skill:ark chief` and a ticket ID. The first run is the E2E check of the whole setup.
+3. Start the first ticket with Master Chief: `/skill:ark-chief` and a ticket ID. The first run is the E2E check of the whole setup.
 
 ## Change a project later
 
-Edit `~/.ark/projects/<project>/ark.yml` by hand, or run `/skill:ark bootstrap` again and answer "edit" when it finds the file. Add lessons for run leads to `~/.ark/projects/<project>/learnings.md`, and fix `~/.ark/projects/<project>/verify.md` when the app starts or behaves differently. The [retro playbook](../../skills/ark/playbooks/retro.md) proposes such changes for your approval.
+Edit `~/.ark/projects/<project>/ark.yml` by hand, or run `/skill:ark-bootstrap` again and answer "edit" when it finds the file. Add lessons for run leads to `~/.ark/projects/<project>/learnings.md`, and fix `~/.ark/projects/<project>/verify.md` when the app starts or behaves differently. The [retro skill](../../skills/ark-retro/SKILL.md) proposes such changes for your approval.
 
 ## Related
 
