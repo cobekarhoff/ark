@@ -56,7 +56,7 @@ Amber is you. Teal is an agent. Grey is the `ark` command and the files it keeps
 | Validator          | Run lead, one plan step                                   | Turns the plan's test cases into tagged integration and E2E tests and makes them pass; audits each against `rules/test-audit.md`                                                                                                                        | Mocks the thing a test proves                                          |
 | Reviewer           | Run lead, after `ark test` passes                         | Reads the diff and its callers; reports P0 to P3 findings with a repro command and evidence                                                                                                                                                             | Edits; reports style the linter owns                                   |
 
-Bootstrap writes one `harness` and `model` per role into `ark.yml` (`roles:`). A plan sets them per step, and you can change them at the plan gate. See [Bootstrap a project](../how-to/bootstrap-a-project.md).
+Bootstrap writes one `harness` and `model` per role into `ark.yml` (`roles:`). A worker with no plan step takes its pair from `roles` when it starts. A plan sets the pair per step, and you can change it at the plan gate; `ark run step start` refuses a step whose pair no role in `ark.yml` lists. See [Bootstrap a project](../how-to/bootstrap-a-project.md).
 
 ## Where each concern lives
 
@@ -128,7 +128,7 @@ stateDiagram-v2
   class awaiting_criteria,awaiting_strategy,escalation waits
 ```
 
-Amber phases wait for a gate answer: yours, unless `ark.yml` sets the gate to `auto`. `planning` waits for the plan gate once `ark plan check` passes. `planning` moves to `awaiting_strategy` when there are two or more strategy cards ("cards") and back when you pick one ("chosen"). `merge_requests_open` has no gate: it waits for your merge on the git host. Source: `cli/lifecycle.ts`, `cli/transitions.ts`, `cli/events.ts`.
+Amber phases wait for a gate answer: yours, unless `ark.yml` sets the strategy, plan or escalation gate to `auto` (the criteria gate is always you). `planning` waits for the plan gate once `ark plan check` passes. `planning` moves to `awaiting_strategy` when there are two or more strategy cards ("cards") and back when you pick one ("chosen"). `merge_requests_open` has no gate: it waits for your merge on the git host. Source: `cli/lifecycle.ts`, `cli/transitions.ts`, `cli/events.ts`.
 
 | Phase                 | The run is here when                                                                               | Waiting gate (`ark status`)        |
 | --------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------- |
@@ -146,7 +146,7 @@ A run closes with one outcome: `merged`, `abandoned`, `aborted` or `handed_off`.
 
 ## Gates
 
-A gate is a point where the run waits for an answer. You answer in Master Chief's session or in Plannotator; the run lead records the answer with `ark gate record`. An agent's decision is never an answer. Where `ark.yml` sets a gate to `auto` under `gates:`, Ark itself answers and the event records `by: auto`.
+A gate is a point where the run waits for an answer. You answer in Master Chief's session or in Plannotator; the run lead records the answer with `ark gate record`. An agent's decision is never an answer. Where `ark.yml` sets the strategy, plan or escalation gate to `auto` under `gates:`, Ark itself answers and the event records `by: auto`. The criteria and manual gates are always you.
 
 | Gate       | Opens when                                                                                                                                | You answer with                                                                                                             | Can Ark answer it?                                                                                                                                   | What it stops                                      |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |

@@ -58,7 +58,7 @@ Each step names the `ark` command or the file it leaves behind. [Scenarios](docs
 6. **Build, test, review.** Implementers and validators work in their own worktrees. `ark test` runs every AC at head. A reviewer returns findings, and the run lead sends fixes back until the round budget is spent. Then you decide at an escalation; with `gates.escalation: auto`, Ark first grants up to `escalation_rounds` more rounds (default two).
 7. **Merge request.** `ark merge-request open` refuses until every AC passes, then opens one MR per repo, upstream first.
 8. **Retro.** While the MRs are open, the run lead runs `ark retro` and writes `retro.md`: cost, time, rework and improvement proposals.
-9. **You merge.** You merge on your git host. Ark's agents and the `ark` command never merge. Optionally, `ark services install` (macOS) installs an auto-merger that merges an MR once the host reports it clean under your branch protection and the run's `retro.md` exists. See [Run background services](docs/how-to/background-services.md).
+9. **You merge.** You merge on your git host. Ark's agents and the `ark` command never merge. Optionally, `ark services install` (macOS) installs an auto-merger that merges an MR once the host reports it clean under your branch protection, the run's `retro.md` exists, the ticket is not done or superseded and the run is still in `merge_requests_open`. See [Run background services](docs/how-to/background-services.md).
 
 A repo that is hand-off only opens no MR: the run ends with your branches, named `ark/<ticket id>-<slug>`.
 
