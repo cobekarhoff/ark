@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   arkWithin,
+  commandLimitMs,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
@@ -22,9 +23,6 @@ const roles = {
   reviewer: { harness: "codex", model: "gpt-codex" },
 };
 const fileProtocol = "protocol.file.allow=always";
-
-/** Per-command limit; below the 60 s test timeout so a stalled command fails with its own message. */
-const commandLimitMs = 45_000;
 
 const ark = (...args: string[]) => arkWithin(commandLimitMs, ...args);
 
@@ -429,6 +427,19 @@ describe("a stalled git or ark command fails at its own limit", () => {
   test("ARK-T400 an ark command that stalls fails with its command line and the limit", () => {
     const { message, elapsedMs } = stalledWith("bun", "exec sleep 90", () => ark("status"));
     expect(message).toContain("ark status timed out after ");
+    expect(limitOf(message)).toBeGreaterThan(0);
+    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+  });
+
+  test("ARK-T400 a stalled git of tempGitRepo fails with its command line, the limit and its stderr", () => {
+    const { message, elapsedMs } = stalledWith(
+      "git",
+      "echo shim-git-stderr-marker >&2\nexec sleep 90",
+      () => tempGitRepo({ "stalled-template.txt": "x\n" }),
+    );
+    expect(message).toContain(" init -q -b main timed out after ");
+    expect(message).toContain("shim-git-stderr-marker");
     expect(limitOf(message)).toBeGreaterThan(0);
     expect(limitOf(message)).toBeLessThan(testTimeoutMs);
     expect(elapsedMs).toBeLessThan(testTimeoutMs);

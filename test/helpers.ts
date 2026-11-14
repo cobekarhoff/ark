@@ -68,10 +68,15 @@ export function writeTicket(
   return file;
 }
 
+/** Per-command limit of the git and ark helpers; below the 60 s test timeout so a stalled command fails with its own message. */
+export const commandLimitMs = 45_000;
+
 function git(directory: string, ...args: string[]): void {
-  const result = Bun.spawnSync(["git", ...args], { cwd: directory });
-  if (result.exitCode !== 0)
-    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+  const result = Bun.spawnSync(["git", "-C", directory, ...args], { timeout: commandLimitMs });
+  const line = `git -C ${directory} ${args.join(" ")}`;
+  if (result.exitedDueToTimeout)
+    throw new Error(`${line} timed out after ${commandLimitMs} ms: ${result.stderr.toString()}`);
+  if (result.exitCode !== 0) throw new Error(`${line} failed: ${result.stderr.toString()}`);
 }
 
 /** One built repo for each distinct file set in this process: repos with the same files share commit ids. */
