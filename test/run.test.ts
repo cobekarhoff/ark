@@ -2436,6 +2436,7 @@ function strictConfig(): Record<string, unknown> {
     concurrency: 1,
     round_budget: 3,
     escalation_rounds: 1,
+    generated: [{ path: "docs/reference/cli.md", command: "bun scripts/cli-reference.ts" }],
   };
 }
 
@@ -2457,6 +2458,7 @@ test("ARK-T389 loadConfig accepts every key that ark.yml knows, at every level, 
     round_budget: 3,
     escalation_rounds: 1,
     gates: { criteria: "auto", escalation: "auto" },
+    generated: [{ path: "docs/reference/cli.md", command: "bun scripts/cli-reference.ts" }],
     repos: { "repos/a": { base: "main" } },
     checks: [{ name: "lint", repo: ".", command: "bun run lint", cores: 2 }],
     pr_writing: {

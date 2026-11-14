@@ -55,6 +55,8 @@ You need:
 
 7. Master Chief writes `~/.ark/projects/ark/ark.yml` and validates it with `ark status`. For Ark, the file has one `bun` integration suite and every role. The keys and an example file are in [the `ark.yml` fields](../reference/cli.md#arkyml-fields).
 
+   `generated` lists files that a command writes. When `ark worktree sync` finds conflicts only in those files, it runs the command, commits the result as the merge and succeeds, with no merge worker. Conflicts in the hand-written parts of such a file still reach a worker: the sync checks that no conflict marker is left, and aborts as before when one is. Add the list to your own `ark.yml` by hand: bootstrap does not write it.
+
    `ark status` fails without `implementer`, `validator` and `reviewer`. The other roles are optional in the file, but each run needs them: the `roles` row of the reference says what stops without each.
 
    If a repo has UI code, Master Chief also offers to make `PRODUCT.md` with impeccable `init` and `DESIGN.md` with impeccable `document` in that repo. With no UI code, it asks one question: is the project designed for a UI that does not exist yet? On yes it offers `PRODUCT.md` only. On no it makes no design file. It never writes over an existing `PRODUCT.md` or `DESIGN.md`: it skips the file and names it in the summary.

@@ -6,7 +6,7 @@ technique: characterization snapshot (golden master) with boundary values on arg
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-12-ARK-372-1
+changed_by: 2026-11-13-ARK-371-1
 ---
 
 ## Objective
@@ -43,6 +43,7 @@ The test reads the table only through the `ark` process, so it passes at base an
 - For each command: usage, description, each usage-advertised flag with its parser-measured arity (`absent`, `switch`, `value`; step 3a) equal the snapshot; each probed bound behaves as in the snapshot; `F --zz-first --zz-second` names `--zz-first` for every advertised switch, `--zz-second` for every advertised value flag; an unknown flag fails with `unknown flag --zz-first`.
 - `test-runner` is absent from `ark --help`.
 - The same test passes at the base commit (before the move) and after it. A command dropped, duplicated or moved, a description edited, a usage-advertised flag deleted from the parser table, a usage-advertised flag changed from switch to value or back in the parser table (even with the usage string unchanged), or a changed probed minimum or finite maximum fails it. A flag added to the parser table but not advertised in usage is not detected.
+- `test/command-table.snapshot.json` holds the `worktree sync` description of ARK-371 (it names `conflicts` and the regeneration of the files `ark.yml` lists under `generated`); the snapshot is updated together with `cli/commands/worktree.ts`, and the case still compares the process output with it.
 
 ## Screenshot checkpoints
 

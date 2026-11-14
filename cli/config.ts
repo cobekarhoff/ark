@@ -43,6 +43,8 @@ export type ProjectConfig = {
   test_case_source: "local";
   compose?: string;
   setup?: string;
+  /** Files a command writes. `ark worktree sync` runs the command in each repo worktree when only listed paths conflict. `path` is relative to the repo root. */
+  generated?: { path: string; command: string }[];
   suites: {
     name: string;
     level: "unit" | "integration" | "e2e";
@@ -110,6 +112,7 @@ const topLevelKeys = keysOf<ProjectConfig>({
   round_budget: true,
   escalation_rounds: true,
   gates: true,
+  generated: true,
 });
 const suiteKeys = keysOf<ProjectConfig["suites"][number]>({
   name: true,
@@ -242,6 +245,20 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     );
   if (fields.compose !== undefined) text(fields, "compose", "compose");
   if (fields.setup !== undefined) text(fields, "setup", "setup");
+  if (fields.generated !== undefined && !Array.isArray(fields.generated))
+    fail("generated must be a list of { path, command }");
+  const generatedPaths = new Set<string>();
+  const generated = ((fields.generated as unknown[] | undefined) ?? []).map((entry, i) => {
+    const generatedEntry = asObject(entry, `generated[${i}]`);
+    const generatedPath = text(generatedEntry, "path", `generated[${i}].path`);
+    if (generatedPaths.has(generatedPath))
+      fail(`generated[${i}].path duplicates another entry: ${generatedPath}`);
+    generatedPaths.add(generatedPath);
+    return {
+      path: generatedPath,
+      command: text(generatedEntry, "command", `generated[${i}].command`),
+    };
+  });
 
   if (!Array.isArray(fields.suites) || fields.suites.length === 0)
     fail("suites is required and needs at least one suite");
@@ -410,5 +427,6 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   if (repos !== undefined) config.repos = repos;
   if (fields.compose !== undefined) config.compose = fields.compose as string;
   if (fields.setup !== undefined) config.setup = fields.setup as string;
+  if (fields.generated !== undefined) config.generated = generated;
   return config;
 }
