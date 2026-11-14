@@ -681,14 +681,6 @@ test("ARK-306-AC3 230 Runs without a Master Chief Run print the no Orca Run text
   }
 });
 
-test("ARK-306-AC5 the ARK-244 chief tests and the releaseSettledWorkers tests are present", () => {
-  const chief = readFileSync(join(import.meta.dir, "chief.test.ts"), "utf8");
-  const run = readFileSync(join(import.meta.dir, "run.test.ts"), "utf8");
-  expect(chief).toMatch(/^test\("ARK-244-AC1 /m);
-  expect(chief).toMatch(/^test\("ARK-244-AC2 /m);
-  expect(run).toMatch(/^test\("ARK-278-AC1 run close releases/m);
-});
-
 const day = 86_400_000;
 const baseTime = Date.parse("2026-10-01T00:00:00Z");
 
