@@ -39,6 +39,7 @@ import {
 import { findRun, projectDirectory, resolveProject, runsDirectory } from "./paths.ts";
 import { frontmatter, readTicket, splitFrontmatter } from "./ticket.ts";
 import { watchSession } from "./usage/index.ts";
+import { discoverRepos } from "./workspace.ts";
 
 /**
  * The rules every companion worker gets before its instructions file. Each companion has the same
@@ -415,14 +416,21 @@ async function applySteps(
   if (previous === null || JSON.stringify([cursor.runs, cursor.ci]) !== before) save();
 }
 
-/** Starts the worker of `companion`: the preamble and its instructions file, in the project folder, kept open, in Master Chief's Run. */
+/**
+ * Starts the worker of `companion`: the preamble and its instructions file, in the repo of the
+ * workspace of ark.yml (the one path Orca knows as a worktree), kept open, in Master Chief's Run.
+ */
 async function startCompanion(
   project: string,
+  workspace: string,
   companion: CompanionConfig,
   directory: string,
   chiefRunId: string,
   sender: () => Promise<string | undefined>,
 ): Promise<OrcaRead<WorkerRecord>> {
+  const [firstRepo] = discoverRepos(workspace);
+  if (firstRepo === undefined) return { ok: false, reason: `${workspace} holds no git repo` };
+  const workspaceRepo = join(workspace, firstRepo);
   const projectFolder = projectDirectory(project);
   const instructionsFile = join(projectFolder, companion.instructions);
   let instructions: string;
@@ -437,14 +445,14 @@ async function startCompanion(
     `Your instructions (${companion.instructions}):`,
     instructions,
   ].join("\n\n");
-  // ponytail: the session is the first new file whose cwd is inside the project folder, so a run
-  // lead that starts in the same seconds could be taken for the companion. Rare; fix by matching
-  // the first prompt if it happens.
-  const watch = watchSession(companion.harness, projectFolder);
+  // ponytail: Master Chief and other workers run in the same repo, so the session is the first new
+  // file there whose first prompt holds the companion's own line. Rare miss: the prompt is not in
+  // the first 64 KiB, then no session is recorded and the cost shows unknown.
+  const watch = watchSession(companion.harness, workspaceRepo, `Your name is ${companion.name}. `);
   const started = await startWorker({
     spec,
     title: `Companion: ${companion.name}`,
-    worktree: projectFolder,
+    worktree: workspaceRepo,
     harness: companion.harness,
     model: companion.model,
     keepOpen: true,
@@ -530,7 +538,14 @@ export async function syncCompanions(
         if (worker !== null && live.has(worker.dispatch))
           result.lines.push(`${companion.name}: running`);
         else {
-          const started = await startCompanion(project, companion, directory, chiefRunId, sender);
+          const started = await startCompanion(
+            project,
+            configuration.workspace,
+            companion,
+            directory,
+            chiefRunId,
+            sender,
+          );
           if (!started.ok) {
             result.problems.push(`companion ${companion.name} not started: ${started.reason}`);
             continue;

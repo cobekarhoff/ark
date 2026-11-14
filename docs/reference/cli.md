@@ -822,9 +822,10 @@ ark companions sync [--project <name>]
 
 Keeps one Orca worker alive for each companion listed under `companions` in ark.yml, and wakes it. A
 companion with no live worker is started with `orca orchestration worker-start --keep-open --run
-<Master Chief's Run>`, with the harness and model of its entry, the project folder as its worktree,
-and a spec made of the fixed companion preamble and the text of its instructions file. A worker is
-live when its recorded dispatch id (`companions/<name>/worker.json`, written only after the start
+<Master Chief's Run>`, with the harness and model of its entry, the repo of the `workspace` of
+ark.yml as its worktree (the only path Orca resolves; the project folder is named in the spec), and
+a spec made of the fixed companion preamble and the text of its instructions file. A worker is live
+when its recorded dispatch id (`companions/<name>/worker.json`, written only after the start
 succeeded) is in `worker-list --terminal-state active` of Master Chief's Run. A `companions/<name>/`
 folder whose companion is no longer listed gets `worker-stop` for its recorded dispatch id; the
 folder keeps its ideas and answers. It prints one line for each companion: `<name>: running`,

@@ -254,9 +254,15 @@ export function readUsage(runDirectory: string): SessionWithKey[] {
 /**
  * Watches for the session file of a worker that has not started yet. The files that exist now are
  * ignored; each call returns the first new top-level file whose cwd is the worktree or below it.
+ * With `promptText`, the first 64 KiB of the file must also hold that text; a file that matches
+ * the cwd but not yet the text is looked at again on the next call.
  * Null when `harness` has no session folder (so there is nothing to wait for).
  */
-export function watchSession(harness: string, worktree: string): (() => string | undefined) | null {
+export function watchSession(
+  harness: string,
+  worktree: string,
+  promptText?: string,
+): (() => string | undefined) | null {
   const source = sessionRoots().find((candidate) => candidate.harness === harness);
   if (!source) return null;
   const parents = [resolve(worktree), ...(existsSync(worktree) ? [realpathSync(worktree)] : [])];
@@ -278,8 +284,13 @@ export function watchSession(harness: string, worktree: string): (() => string |
         continue; // the worker is still writing it: look again on the next call
       }
       if (cwd === null) continue;
+      if (!parents.some((parent) => isInside(cwd, parent))) {
+        seen.add(relativeFile);
+        continue;
+      }
+      if (promptText !== undefined && !headText(file).includes(promptText)) continue;
       seen.add(relativeFile);
-      if (parents.some((parent) => isInside(cwd, parent))) return file;
+      return file;
     }
     return undefined;
   };
