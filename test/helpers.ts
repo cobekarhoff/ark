@@ -98,10 +98,32 @@ export function tempGitRepo(files: Record<string, string> = { "README.md": "# te
   return directory;
 }
 
-export function ark(...args: string[]): { code: number; out: string; err: string } {
-  const result = Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...args], {
+function spawnArk(args: string[], timeout?: number) {
+  return Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...args], {
     env: process.env,
+    timeout,
   });
+}
+
+export function ark(...args: string[]): { code: number; out: string; err: string } {
+  const result = spawnArk(args);
+  return {
+    code: result.exitCode ?? 1,
+    out: result.stdout.toString(),
+    err: result.stderr.toString(),
+  };
+}
+
+/** Like `ark`, but kills the command after `timeoutMs` and throws with the command line, the limit and the stderr read so far. */
+export function arkWithin(
+  timeoutMs: number,
+  ...args: string[]
+): { code: number; out: string; err: string } {
+  const result = spawnArk(args, timeoutMs);
+  if (result.exitedDueToTimeout)
+    throw new Error(
+      `ark ${args.join(" ")} timed out after ${timeoutMs} ms: ${result.stderr.toString()}`,
+    );
   return {
     code: result.exitCode ?? 1,
     out: result.stdout.toString(),

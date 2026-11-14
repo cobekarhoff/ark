@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ark,
+  arkWithin,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
@@ -23,12 +23,24 @@ const roles = {
 };
 const fileProtocol = "protocol.file.allow=always";
 
-function git(directory: string, ...args: string[]): string {
-  const result = Bun.spawnSync(["git", "-C", directory, ...args]);
+/** Per-command limit; below the 60 s test timeout so a stalled command fails with its own message. */
+const commandLimitMs = 45_000;
+
+const ark = (...args: string[]) => arkWithin(commandLimitMs, ...args);
+
+/** Runs a command; throws with the command line and stderr on a timeout or a non-zero exit. Returns trimmed stdout. */
+function run(command: string[]): string {
+  const result = Bun.spawnSync(command, { timeout: commandLimitMs });
+  const line = command.join(" ");
+  if (result.exitedDueToTimeout)
+    throw new Error(`${line} timed out after ${commandLimitMs} ms: ${result.stderr.toString()}`);
   if (result.exitCode !== 0)
-    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+    throw new Error(`${line} failed (exit ${result.exitCode}): ${result.stderr.toString()}`);
   return result.stdout.toString().trim();
 }
+
+const git = (directory: string, ...args: string[]): string =>
+  run(["git", "-C", directory, ...args]);
 
 /** Writes a file and commits it; returns the new HEAD. */
 function commitFile(directory: string, name: string, content: string): string {
@@ -61,16 +73,16 @@ function submoduleMeta(): Meta {
   git(other, "reset", "-q", "--hard", otherRecorded);
   const libraryRepo = tempGitRepo({ "lib.txt": "lib one\n" });
   const first = git(libraryRepo, "rev-parse", "HEAD");
-  Bun.spawnSync(["mv", libraryRepo, library]);
+  run(["mv", libraryRepo, library]);
 
   const consumer = tempGitRepo({ "app.txt": "app\n" });
   git(consumer, "-c", fileProtocol, "submodule", "add", "-q", library, "vendor/lib");
   git(consumer, "-c", fileProtocol, "submodule", "add", "-q", other, "vendor/other");
   git(consumer, "commit", "-q", "-m", "add submodules");
-  Bun.spawnSync(["mv", consumer, join(workspace, "repos/consumer")]);
+  run(["mv", consumer, join(workspace, "repos/consumer")]);
   const second = commitFile(library, "lib.txt", "lib two\n");
   commitFile(other, "other.txt", "other two\n");
-  Bun.spawnSync(["mv", tempGitRepo({ "plain.txt": "plain\n" }), join(workspace, "repos/plain")]);
+  run(["mv", tempGitRepo({ "plain.txt": "plain\n" }), join(workspace, "repos/plain")]);
   return { workspace, first, second, otherRecorded };
 }
 
@@ -175,7 +187,7 @@ describe("worktree create fills submodules", () => {
     const { workspace } = submoduleMeta();
     const broken = join(workspace, "repos/consumer");
     const brokenCopy = join(workspace, "repos/broken");
-    Bun.spawnSync(["git", "clone", "-q", "--no-hardlinks", broken, brokenCopy]);
+    run(["git", "clone", "-q", "--no-hardlinks", broken, brokenCopy]);
     git(brokenCopy, "config", "user.name", "Ark Test");
     git(brokenCopy, "config", "user.email", "ark@example.com");
     git(brokenCopy, "config", "-f", ".gitmodules", "submodule.vendor/lib.url", "/no/such/library");
@@ -215,7 +227,7 @@ describe("worktree create and sync use the run's library head", () => {
     // sync needs origin/HEAD in each repo; the library maps to its worktree by basename, not by origin
     for (const repo of ["lib", "consumer"]) {
       const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
-      Bun.spawnSync(["git", "init", "-q", "--bare", "-b", "main", bare]);
+      run(["git", "init", "-q", "--bare", "-b", "main", bare]);
       const path = join(workspace, "repos", repo);
       git(path, "remote", "add", "origin", bare);
       git(path, "push", "-q", "-u", "origin", "main");
