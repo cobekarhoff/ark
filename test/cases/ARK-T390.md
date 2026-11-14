@@ -1,10 +1,10 @@
 ---
 id: ARK-T390
-title: ARK-T390 ark status exits 1 and prints the unknown-key error when a project's ark.yml holds a typo
+title: "ARK-T390 ark status exits 1 and prints the unknown-key error when a project's ark.yml holds a typo"
 level: e2e
-technique: state transition (valid config exit 0, same config with one typo exit 1), error guessing (the `merge_request: none` typo of the ticket)
+technique: "state transition (valid config exit 0, same config with one typo exit 1), error guessing (the `merge_request: none` typo of the ticket)"
 priority: high
-risk: `loadConfig` throws but `ark status` hides the error, takes the default and exits 0, or the exit code is 1 with no key in the output, so a person who typed `merge_request: none` is told nothing before a run pushes
+risk: "`loadConfig` throws but `ark status` hides the error, takes the default and exits 0, or the exit code is 1 with no key in the output, so a person who typed `merge_request: none` is told nothing before a run pushes"
 status: active
 changed_by: 2026-11-13-ARK-332-1
 ---

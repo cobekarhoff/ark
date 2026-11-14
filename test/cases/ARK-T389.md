@@ -1,10 +1,10 @@
 ---
 id: ARK-T389
-title: ARK-T389 loadConfig refuses an unknown key at the top level, in a role name, in a role, in a suite, in a repo entry, in a check and in pr_writing, and names the file, the key and the nearest valid key
+title: "ARK-T389 loadConfig refuses an unknown key at the top level, in a role name, in a role, in a suite, in a repo entry, in a check and in pr_writing, and names the file, the key and the nearest valid key"
 level: integration
-technique: equivalence classes (one class for each level of ark.yml), boundary of the nearest-key match (one edit away, no near match), error guessing (the two typos that passed before)
+technique: "equivalence classes (one class for each level of ark.yml), boundary of the nearest-key match (one edit away, no near match), error guessing (the two typos that passed before)"
 priority: high
-risk: a typo in ark.yml passes the config check with no word, so `merge_request: none` leaves the default `open` and the first run pushes branches and opens MRs of a project that must stay local; or the check covers the top level only and a typo in a role, a suite, a repo entry, a check or pr_writing still passes; or the error gives a wrong guess for a key with no near match
+risk: "a typo in ark.yml passes the config check with no word, so `merge_request: none` leaves the default `open` and the first run pushes branches and opens MRs of a project that must stay local; or the check covers the top level only and a typo in a role, a suite, a repo entry, a check or pr_writing still passes; or the error gives a wrong guess for a key with no near match"
 status: active
 changed_by: 2026-11-13-ARK-332-1
 ---
