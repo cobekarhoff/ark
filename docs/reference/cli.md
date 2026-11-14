@@ -136,7 +136,12 @@ is pending, never while the newest reviewer findings file holds a P0 or P1 findi
 line (a --merge start too), and the refusal past the cap is the usual one. For a `bug` run with a
 `method: test` AC it refuses an implementer start with `bug run: record a failing ark test of the
 ACs before the fix` until a `test.completed` has every non-manual AC `failing`; a bug run with no
-`method: test` AC has no such rule.
+`method: test` AC has no such rule. A `finish` of a validator step, without --failed and after the
+refusal for uncommitted changes, runs stage `step` of `ark merge-request check` for the ACs of the
+step and is refused, with no event written, when it lists a problem: an AC string in no tracked file
+(counted once every implementer step that serves the AC has finished), a malformed evidence file, or
+a missing evidence file of an `analysis` AC. It never refuses for the MR title, a manual criterion
+with no answer, the last line `human: ok` or `reviewer:`, or an AC the step does not serve.
 ```
 
 ### run close
@@ -426,7 +431,12 @@ checkout and before the head's test files are copied in, a suite with `base_file
 own test files that exist at base, and any other suite runs whole (replayed from the cache when its
 key is stored). Its logs go to `results/census/`, and the base run's own results never feed the
 counts. A renamed test counts as deleted. A quick run counts the skipped tests at head only and has
-no `base_skipped` and no `deleted`. This only reports: it never changes the exit code.
+no `base_skipped` and no `deleted`. This only reports: it never changes the exit code. At its end
+`ark test` runs stage `head` of `ark merge-request check` and, only when it lists a problem (an AC
+string in no tracked file, an MR title problem, a malformed evidence file), prints the heading
+`merge-request check` and one line for each problem, also for a `--quick` or failing run, after the
+lines above and before the failure is thrown. It is information only: it changes neither the exit
+code nor `passed`.
 ```
 
 ### test-case new
@@ -482,10 +492,14 @@ one criterion whose method is not `test` (`manual: true` reads as `demonstration
 `criterion`; it refuses an ID that is not in the ticket or not manual, and the answer is never
 automatic. For a `demonstration` criterion, `ok` also leaves the line `human: ok` once, as the last
 line of `results/evidence/<AC id>.md`, when that file exists; `problem` and the other methods change
-no file. Ark refuses an answer that the run's state does not allow, and refuses plan approve while
-the plan has an open decision. Both `<ticket id>/AC<k>` and `<ticket id>-AC<k>` name a criterion.
-`criteria accept` re-reads the ticket and refuses a new-scheme AC with `method: test` and an empty
-`verified_by` list, and names the AC.
+no file. Before it writes `ok` for a `demonstration` criterion whose file exists, it checks the file
+with `human: ok` added and refuses a malformed file with `evidence malformed: <AC id>: <reason>`,
+the text of `ark merge-request open`, writing no event and no file. A manual answer records `heads`,
+the head of each repo, in gate.answered; stage `final` of `ark merge-request check` warns `manual
+answer older than head: <AC id>` when a head has changed since. Ark refuses an answer that the run's
+state does not allow, and refuses plan approve while the plan has an open decision. Both `<ticket
+id>/AC<k>` and `<ticket id>-AC<k>` name a criterion. `criteria accept` re-reads the ticket and
+refuses a new-scheme AC with `method: test` and an empty `verified_by` list, and names the AC.
 ```
 
 ### escalate

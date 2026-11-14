@@ -89,6 +89,8 @@ A non-test AC has the method `demonstration`, `inspection` or `analysis`. An old
 
 `ark gate record <run> manual <AC id> ok` appends the line `human: ok` once to a `demonstration` file. A `problem` answer appends nothing, and the other methods keep their file as written.
 
+Before it writes the event, `ark gate record <run> manual <AC id> ok` checks the file as it will be with that line added. A malformed file is refused with `evidence malformed: <AC id>: <reason>`, no event and no file change: fix the file and answer again. The answer also records the head of each repo. `ark merge-request check <run> --stage final` prints `warning: manual answer older than head: <AC id>` when a repo head differs from it later (a clean `ark worktree sync` merge is not a difference), and the exit code stays 0.
+
 ### Evidence refusals
 
 `ark merge-request open` and `ark run close <run> handed_off` check the evidence last, before any push and before any event. They name every AC and case that fails, after `refused: evidence is not complete`:
@@ -111,6 +113,14 @@ An AC with no `verified_by` needs no test evidence.
 - A counted string in an AC is in no tracked file. See below.
 - A `not:` string is still in a tracked file. See below.
 - The evidence is missing, malformed or stale. See [Evidence refusals](#evidence-refusals).
+
+### See the refusals before open
+
+`ark merge-request check <run> --stage head|step|final [--step <id>] [--summary <text>]` prints each problem of that stage, one line each with the text of the refusal, and exits 1 when there is one. It writes no file, event or ref and never fetches, so the branch-merge check above is not part of it.
+
+- `head`: the counted AC strings, the MR title and the shape of each evidence file that exists, without the last line `human: ok` and the `reviewer:` line. `ark test` runs it at its end and prints a `merge-request check` section only when there is a problem; its exit code does not change.
+- `step`: adds `evidence missing` for the non-test ACs of the plan step `--step <id>` (all non-test ACs without it). `ark run step <run> <validator step> finish` runs it for the step's `criteria` and refuses a problem with no event. At a finish a missing demonstration or inspection file, a pending manual answer and the MR title are not problems, and an AC string counts only once every implementer step of that AC has finished.
+- `final`: every refusal above in the order of `open`, with the last lines, and the warning above.
 
 ### Counted strings in an AC
 
