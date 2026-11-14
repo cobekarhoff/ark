@@ -13,7 +13,7 @@ function projectConfigFor(workspace: string): Record<string, unknown> {
         name: "cli",
         level: "integration",
         repo: ".",
-        command: "bun test",
+        command: "bun test {report}",
         parser: "bun",
       },
     ],

@@ -13,6 +13,14 @@ const parserNames = ["bun", "pytest", "behave"];
 export const gateNames = ["criteria", "strategy", "plan", "escalation"] as const;
 export const HARNESSES = ["claude", "codex", "omp", "pi"] as const;
 const roleNames = ["implementer", "validator", "reviewer"] as const;
+// The optional roles: ark evaluation record, ark strategy record, the chief playbook and the run lead playbook name them when missing.
+const optionalRoleNames = [
+  "evaluator",
+  "designer",
+  "chief",
+  "test_writer",
+  "test_reviewer",
+] as const;
 
 type Role = (typeof roleNames)[number];
 type RoleConfig = { harness: string; model: string };
@@ -81,6 +89,82 @@ export type ProjectConfig = {
 
 type Fields = Record<string, unknown>;
 
+/** The keys of a type, written once as a record so that a new field of `T` fails to compile until it is listed here. */
+const keysOf = <T>(record: Record<keyof T, true>): string[] => Object.keys(record);
+
+// Known keys per level of ark.yml. `loadConfig` refuses any other key.
+const topLevelKeys = keysOf<ProjectConfig>({
+  workspace: true,
+  ticket_source: true,
+  merge_requests: true,
+  test_case_source: true,
+  compose: true,
+  setup: true,
+  suites: true,
+  checks: true,
+  test_budget_cores: true,
+  test_min_free_memory_percent: true,
+  test_max_swap_gb: true,
+  roles: true,
+  repos: true,
+  concurrency: true,
+  pr_writing: true,
+  round_budget: true,
+  escalation_rounds: true,
+  gates: true,
+  generated: true,
+});
+const suiteKeys = keysOf<ProjectConfig["suites"][number]>({
+  name: true,
+  level: true,
+  repo: true,
+  command: true,
+  parser: true,
+  cores: true,
+  base_files: true,
+  base_command: true,
+  paths: true,
+});
+const checkKeys = keysOf<ProjectConfig["checks"][number]>({
+  name: true,
+  repo: true,
+  command: true,
+  cores: true,
+});
+const roleKeys = keysOf<RoleConfig>({ harness: true, model: true });
+const repoKeys = keysOf<NonNullable<ProjectConfig["repos"]>[string]>({ base: true });
+const prWritingKeys = keysOf<PrWriting>({
+  reviewers: true,
+  tier_floor: true,
+  sensitive_paths: true,
+  one_way_paths: true,
+  agent_authored: true,
+  title_prefix: true,
+});
+
+function editDistance(a: string, b: string): number {
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++)
+      next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+}
+
+/** The valid key that `key` most likely mistypes, or undefined when none is near. */
+function nearestKey(key: string, validKeys: readonly string[]): string | undefined {
+  const limit = Math.max(2, Math.floor(key.length / 3));
+  let best: string | undefined;
+  let bestDistance = limit + 1;
+  for (const valid of validKeys) {
+    const distance = editDistance(key, valid);
+    if (distance < bestDistance) [best, bestDistance] = [valid, distance];
+  }
+  return best;
+}
+
 export function loadConfig(project: string): ProjectConfig {
   const file = join(projectDirectory(project), "ark.yml");
   if (!existsSync(file)) throw new ArkError(`project ${project} has no ark.yml: expected ${file}`);
@@ -126,7 +210,20 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     return value as number;
   };
 
+  const onlyKeys = (fields: Fields, field: string, validKeys: readonly string[]): void => {
+    for (const key of Object.keys(fields)) {
+      if (validKeys.includes(key)) continue;
+      const nearest = nearestKey(key, validKeys);
+      fail(
+        `${field === "" ? key : `${field}.${key}`} is not a key; ${
+          nearest ? `did you mean ${nearest}?` : `use ${validKeys.join(", ")}`
+        }`,
+      );
+    }
+  };
+
   const fields = asObject(raw, "ark.yml");
+  onlyKeys(fields, "", topLevelKeys);
 
   const workspace = text(fields, "workspace", "workspace");
   if (!existsSync(workspace) || !statSync(workspace).isDirectory())
@@ -168,6 +265,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   const names = new Set<string>();
   const suites = (fields.suites as unknown[]).map((entry, i) => {
     const suite = asObject(entry, `suites[${i}]`);
+    onlyKeys(suite, `suites[${i}]`, suiteKeys);
     const name = text(suite, "name", `suites[${i}].name`);
     if (names.has(name)) fail(`suites[${i}].name duplicates another suite: ${name}`);
     names.add(name);
@@ -191,6 +289,9 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
         paths.some((entry) => typeof entry !== "string" || entry.trim() === ""))
     )
       fail(`suites[${i}].paths must be a non-empty list of non-empty strings`);
+    const command = text(suite, "command", `suites[${i}].command`);
+    if (!command.includes("{report}"))
+      fail(`suites[${i}].command must write its JUnit report to {report}`);
     return {
       name,
       level: oneOf(
@@ -200,7 +301,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
         levels,
       ) as ProjectConfig["suites"][number]["level"],
       repo: text(suite, "repo", `suites[${i}].repo`),
-      command: text(suite, "command", `suites[${i}].command`),
+      command,
       parser: oneOf(suite, "parser", `suites[${i}].parser`, parserNames),
       ...(suite.cores !== undefined ? { cores: integer(suite, "cores", 1, 1) } : {}),
       ...(baseFiles !== undefined ? { base_files: baseFiles, base_command: baseCommand } : {}),
@@ -214,6 +315,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   const checkNames = new Set<string>();
   const checks = ((fields.checks as unknown[] | undefined) ?? []).map((entry, i) => {
     const check = asObject(entry, `checks[${i}]`);
+    onlyKeys(check, `checks[${i}]`, checkKeys);
     const name = text(check, "name", `checks[${i}].name`);
     if (checkNames.has(name)) fail(`checks[${i}].name duplicates another check: ${name}`);
     checkNames.add(name);
@@ -231,13 +333,13 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   });
 
   const rolesField = asObject(fields.roles ?? fail("roles is required"), "roles");
+  onlyKeys(rolesField, "roles", [...roleNames, ...optionalRoleNames]);
   const roles = {} as ProjectConfig["roles"];
-  // The optional roles: ark evaluation record, ark strategy record, the chief playbook and the run lead playbook name them when missing.
-  const optionalRoles = ["evaluator", "designer", "chief", "test_writer", "test_reviewer"] as const;
-  for (const role of [...roleNames, ...optionalRoles]) {
-    if ((optionalRoles as readonly string[]).includes(role) && rolesField[role] === undefined)
+  for (const role of [...roleNames, ...optionalRoleNames]) {
+    if ((optionalRoleNames as readonly string[]).includes(role) && rolesField[role] === undefined)
       continue;
     const entry = asObject(rolesField[role] ?? fail(`roles.${role} is required`), `roles.${role}`);
+    onlyKeys(entry, `roles.${role}`, roleKeys);
     const harness = text(entry, "harness", `roles.${role}.harness`);
     if (!(HARNESSES as readonly string[]).includes(harness))
       fail(`roles.${role}.harness must be claude, codex, omp or pi (got ${harness})`);
@@ -262,13 +364,15 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   if (fields.repos !== undefined) {
     const reposField = asObject(fields.repos, "repos");
     repos = {};
-    for (const key of Object.keys(reposField))
-      repos[key] = {
-        base: text(asObject(reposField[key], `repos.${key}`), "base", `repos.${key}.base`),
-      };
+    for (const key of Object.keys(reposField)) {
+      const entry = asObject(reposField[key], `repos.${key}`);
+      onlyKeys(entry, `repos.${key}`, repoKeys);
+      repos[key] = { base: text(entry, "base", `repos.${key}.base`) };
+    }
   }
 
   const prWritingField = asObject(fields.pr_writing ?? {}, "pr_writing");
+  onlyKeys(prWritingField, "pr_writing", prWritingKeys);
   const stringList = (key: string): string[] => {
     const value = prWritingField[key] ?? [];
     if (!Array.isArray(value) || !value.every((item) => typeof item === "string"))

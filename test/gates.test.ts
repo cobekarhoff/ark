@@ -24,7 +24,9 @@ const criteria = [{ id: "ARK-902-AC1", text: "first" }];
 const baseConfig = () => ({
   workspace: tempGitRepo(),
   ticket_source: "local",
-  suites: [{ name: "cli", level: "integration", repo: ".", command: "true", parser: "bun" }],
+  suites: [
+    { name: "cli", level: "integration", repo: ".", command: "true {report}", parser: "bun" },
+  ],
   roles: {
     implementer: { harness: "omp", model: "pi/task" },
     validator: { harness: "omp", model: "pi/validate" },
