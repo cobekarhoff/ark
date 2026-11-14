@@ -771,6 +771,18 @@ test("ARK-T659 propose writes the ticket as proposed with a source line, and sen
   expect(fake.calls()).toEqual([]);
 });
 
+test("propose resolves a relative draft path against the project folder, not the current folder", () => {
+  const { folder } = adviceProject();
+  mkdirSync(join(folder, "companions", "cortana"), { recursive: true });
+  writeFileSync(join(folder, "companions", "cortana", "draft.md"), draft("ARK-905"));
+  const result = arkP("companion", "propose", "cortana", "companions/cortana/draft.md");
+  expect(result.err).toBe("");
+  expect(result.code).toBe(0);
+  expect(readFileSync(join(folder, "tickets", "ARK-905.md"), "utf8")).toMatch(
+    /^status: proposed$/m,
+  );
+});
+
 test("ARK-T659 propose never overwrites a ticket, and a draft with no id, an unknown name or a missing file writes nothing", () => {
   const { folder } = adviceProject();
   writeTicket(project, "ARK-900", [{ id: "AC1", text: "Exists" }]);

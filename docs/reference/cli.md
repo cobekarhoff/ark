@@ -70,7 +70,7 @@ A command prints a short result and exits 0 on success. On failure it prints `ar
 |                  | [`companion ask`](#companion-ask)               | Sends the live worker of the companion one message that holds the question and says it is a question from the… |
 |                  | [`companion answer`](#companion-answer)         | Appends the text and its time to `companions/<name>/answers.md` with one write, then sends Master Chief a copy |
 |                  | [`companion advise`](#companion-advise)         | Sends the run lead of an open run one message of type `status` whose subject starts with…                      |
-|                  | [`companion propose`](#companion-propose)       | Copies the draft ticket to `tickets/<id>.md` of the project with `status: proposed`                            |
+|                  | [`companion propose`](#companion-propose)       | Copies the draft ticket                                                                                        |
 
 ### run start
 
@@ -826,8 +826,9 @@ companion with no live worker is started with `orca orchestration worker-start -
 ark.yml as its worktree (the only path Orca resolves; the project folder is named in the spec), and
 a spec made of the fixed companion preamble and the text of its instructions file. A worker is live
 when its recorded dispatch id (`companions/<name>/worker.json`, written only after the start
-succeeded) is in `worker-list --terminal-state active` of Master Chief's Run. A `companions/<name>/`
-folder whose companion is no longer listed gets `worker-stop` for its recorded dispatch id; the
+succeeded) is a row of `worker-list` of Master Chief's Run with liveness `live`: a kept-open
+companion stays live, and retained, after each turn. A `companions/<name>/` folder whose companion
+is no longer listed gets `worker-stop` and then `worker-release` for its recorded dispatch id; the
 folder keeps its ideas and answers. It prints one line for each companion: `<name>: running`,
 `<name>: started` or `<name>: stopped`. Each live companion then gets one `orca orchestration send
 --to dispatch:<id>` for each new event of a trigger it lists in `on`: `run.merged` is a `run.closed`
@@ -887,13 +888,14 @@ and when only the copy fails the lead keeps the advice. --project falls back to 
 ```text
 ark companion propose <name> <file> [--project <name>]
 
-Copies the draft ticket to `tickets/<id>.md` of the project with `status: proposed` (whatever status
-the draft names) and the front matter line `source: companion <name>`, and prints the path. The
-draft must be a valid ticket with an id like `ARK-123`. It exits 1 with an `ark: ` line and writes
-nothing when the name is not in ark.yml, the file is missing, the draft has no id or is not a valid
-ticket, or a ticket with that id already exists (an existing ticket is never overwritten). It never
-queues the ticket and sends no message: the human approves it, and Master Chief queues it. --project
-falls back to ARK_PROJECT.
+Copies the draft ticket (a relative path is resolved against the project folder, not the current
+folder) to `tickets/<id>.md` of the project with `status: proposed` (whatever status the draft
+names) and the front matter line `source: companion <name>`, and prints the path. The draft must be
+a valid ticket with an id like `ARK-123`. It exits 1 with an `ark: ` line and writes nothing when
+the name is not in ark.yml, the file is missing, the draft has no id or is not a valid ticket, or a
+ticket with that id already exists (an existing ticket is never overwritten). It never queues the
+ticket and sends no message: the human approves it, and Master Chief queues it. --project falls back
+to ARK_PROJECT.
 ```
 
 ### ui

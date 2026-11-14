@@ -155,7 +155,7 @@ function acquireLock(directory: string): () => void {
 type ChiefWorkers = { chiefRunId: string; runs: OrcaRunRow[]; workers: WorkerRow[] };
 
 /** A worker runs while its agent is live: after a worker_done a kept-open companion is live and retained. */
-const isRunning = (worker: WorkerRow): boolean => worker.liveness === "live";
+export const isRunning = (worker: WorkerRow): boolean => worker.liveness === "live";
 
 /**
  * Every worker row of Master Chief's Run, read now: companion workers, run leads and nothing else,
@@ -735,10 +735,14 @@ export async function companionAdvise(
     );
 }
 
-/** `ark companion propose`: copies the draft to `tickets/<id>.md` as `status: proposed` with a `source` line. It never overwrites a ticket and never queues. */
-export function companionPropose(name: string, file: string, inProject?: string): void {
+/**
+ * `ark companion propose`: copies the draft to `tickets/<id>.md` as `status: proposed` with a `source` line. It never overwrites a ticket and never queues.
+ * A relative draft path is resolved against the project folder, not the process cwd: a companion runs in the workspace repo.
+ */
+export function companionPropose(name: string, draft: string, inProject?: string): void {
   const project = resolveProject(inProject);
   listedCompanion(loadConfig(project), name);
+  const file = resolve(projectDirectory(project), draft);
   if (!existsSync(file)) throw new ArkError(`draft not found: ${file}`);
   const text = readFileSync(file, "utf8");
   const { id } = readTicket(file);
