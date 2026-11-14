@@ -8,7 +8,15 @@ import { gapsOf, noRecoveryText, shortId, tierOfLedger } from "./lint.ts";
 export const beginMarker = "<!-- pr-writing:begin -->";
 export const endMarker = "<!-- pr-writing:end -->";
 
-type Key = "problem" | "different" | "evidence" | "verify" | "notdone" | "risk" | "acs";
+type Key =
+  | "problem"
+  | "different"
+  | "evidence"
+  | "verify"
+  | "notdone"
+  | "security"
+  | "risk"
+  | "acs";
 type Block = { key: Key; title: string; lines: string[] };
 
 const ratingOf = (score: number): Rating => (["good", "decent", "poor"] as const)[score - 1];
@@ -497,6 +505,7 @@ const headingRules: Record<Key, RegExp> = {
   evidence: /test|verif|evidence|validation|qa/i,
   verify: /test|verif|evidence|validation|qa/i,
   notdone: /test|verif|evidence|validation|qa/i,
+  security: /secur|risk|rollout|deploy|revert/i,
   risk: /related|link|ticket|issue|depend|risk|rollout|deploy|revert/i,
   acs: /related|link|ticket|issue|depend|risk|rollout|deploy|revert/i,
 };
@@ -563,7 +572,10 @@ function buildBodyKeeping(ledger: Ledger, keep: number): string {
   const { tier } = tierOfLedger(ledger);
   const blocks: Block[] = [problemBlock(ledger), differentBlock(ledger)];
   if (ledger.source === "run") blocks.push(evidenceBlock(ledger, keep));
-  blocks.push(verifyBlock(ledger), notDoneBlock(ledger), riskBlock(ledger, tier));
+  blocks.push(verifyBlock(ledger), notDoneBlock(ledger));
+  if (ledger.security?.length)
+    blocks.push({ key: "security", title: "Security", lines: ledger.security });
+  blocks.push(riskBlock(ledger, tier));
   if (ledger.ticket) blocks.push(acsBlock(ledger));
   const intro = [
     ...(ledger.prWriting.agent_authored ? [provenanceLine(ledger), ""] : []),

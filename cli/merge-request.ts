@@ -17,6 +17,7 @@ import {
   type Method,
 } from "./ticket.ts";
 import { manualStatus } from "./lifecycle.ts";
+import { securityScan } from "./security.ts";
 import { discoverRepos, repoBase, targetBranch } from "./workspace.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import {
@@ -554,10 +555,20 @@ export function checkStage(
   );
 }
 
+/** The security scan of every worktree of the run, with the `security.accepted` list of ark.yml. Throws the refusal. */
+function scanWorktrees(project: string, events: ArkEvent[]): Map<string, string[]> {
+  return securityScan(
+    [...worktreeMap(events).values()],
+    loadConfig(project).security?.accepted ?? [],
+  );
+}
+
 /**
  * The refusals shared by `ark merge-request open` and `ark run close <run> handed_off`: stage `final` without the
- * MR title, which `open` refuses itself. Throws the first problem; the evidence problems are one message.
- * Returns the head of each repo and the repos whose head moved from the tested head only by clean sync merges.
+ * MR title, which `open` refuses itself. Throws the first problem; the evidence problems are one message. Then the
+ * security scan (`securityScan`), which refuses on a secret, a high or critical vulnerability, and a missing scanner.
+ * Returns the head of each repo, the repos whose head moved from the tested head only by clean sync merges, and the
+ * rows of the Security section for each repo.
  */
 export function assertShippable(
   runId: string,
@@ -565,7 +576,7 @@ export function assertShippable(
   directory: string,
   events: ArkEvent[],
   state: RunState,
-): { heads: Map<string, string>; cleanSyncs: CleanSync[] } {
+): { heads: Map<string, string>; cleanSyncs: CleanSync[]; security: Map<string, string[]> } {
   const { problems, evidence, heads, cleanSyncs } = checkStage(
     runId,
     project,
@@ -578,7 +589,8 @@ export function assertShippable(
   if (problems.length > 0) throw new ArkError(problems[0]!);
   if (evidence.length > 0)
     throw new ArkError(`refused: evidence is not complete\n${evidence.join("\n")}`);
-  return { heads, cleanSyncs };
+  const security = scanWorktrees(project, events);
+  return { heads, cleanSyncs, security };
 }
 
 /**
@@ -605,9 +617,19 @@ export function mergeRequestCheck(
     stage as Stage,
     { step, summary },
   );
-  for (const line of [...problems, ...evidence]) console.log(line);
+  // Stage `final` also runs the security scan, as `open` does after the evidence: its refusal is the last problem.
+  const scan: string[] = [];
+  if (stage === "final") {
+    try {
+      scanWorktrees(project, events);
+    } catch (error) {
+      if (!(error instanceof ArkError)) throw error;
+      scan.push(error.message);
+    }
+  }
+  for (const line of [...problems, ...evidence, ...scan]) console.log(line);
   for (const line of warnings) console.log(`warning: ${line}`);
-  if (problems.length + evidence.length > 0) process.exitCode = 1;
+  if (problems.length + evidence.length + scan.length > 0) process.exitCode = 1;
 }
 
 /**
@@ -630,7 +652,7 @@ export function mergeRequestOpen(
     throw new ArkError(`cannot open merge requests while the run is in phase ${state.phase}`);
   }
 
-  const { heads, cleanSyncs } = assertShippable(runId, project, directory, events, state);
+  const { heads, cleanSyncs, security } = assertShippable(runId, project, directory, events, state);
 
   const ledger = buildLedger({ runFolder: directory, heads: Object.fromEntries(heads) });
   const worktrees = worktreeMap(events);
@@ -740,6 +762,7 @@ export function mergeRequestOpen(
         host,
         tokenOwner: tokenOwner(host, worktree.path),
         template: findTemplate(worktree.path),
+        security: security.get(repo),
         // A repo with no commits opens no MR, so the merge order leaves it out.
         mergeOrder: graphOrder.filter((name) =>
           ledger.repos.some((entry) => entry.repo === name && entry.commits.length > 0),
