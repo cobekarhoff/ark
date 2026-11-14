@@ -25,12 +25,14 @@ afterEach(() => {
 
 const created = "`created-by-fix-405`";
 const methods = ["test", "demonstration", "inspection", "demonstration"];
-const criteria = methods.map((method, index) => ({
-  id: `ARK-900-AC${index + 1}`,
-  method,
-  text: method === "test" ? `The fix creates ${created}` : `Criterion ${index + 1}`,
-}));
-const allIds = criteria.map(({ id }) => id);
+const analysisMethods = ["test", "demonstration", "analysis", "demonstration"];
+const criteriaOf = (list: string[]) =>
+  list.map((method, index) => ({
+    id: `ARK-900-AC${index + 1}`,
+    method,
+    text: method === "test" ? `The fix creates ${created}` : `Criterion ${index + 1}`,
+  }));
+const allIds = criteriaOf(methods).map(({ id }) => id);
 
 type Step = Pick<PlanStep, "id" | "role" | "needs" | "criteria">;
 const fix: Step = { id: "fix", role: "implementer", needs: [], criteria: ["ARK-900-AC1"] };
@@ -63,7 +65,14 @@ function validatorRun(
     kind,
     title,
     summary,
-  }: { start: string[]; kind?: "bug"; title?: string; summary?: string },
+    criterionMethods = methods,
+  }: {
+    start: string[];
+    kind?: "bug";
+    title?: string;
+    summary?: string;
+    criterionMethods?: string[];
+  },
 ): ValidatorRun {
   tempArkHome();
   installFakeOrca();
@@ -80,7 +89,7 @@ function validatorRun(
       reviewer: { harness: "omp", model: "test" },
     },
   });
-  const ticketFile = writeTicket("demo", "ARK-900", criteria, title, kind);
+  const ticketFile = writeTicket("demo", "ARK-900", criteriaOf(criterionMethods), title, kind);
   if (summary !== undefined)
     writeFileSync(
       ticketFile,
@@ -275,5 +284,60 @@ test("ARK-T381 a validator that runs after the fix is refused for the AC string 
   expectFinished(run, "fix");
   expectRefused(run, "val-2", `AC string in no tracked file at head: ARK-900/AC1 ${created}`);
   commitFile(run, "fixed.txt", `${created}\n`);
+  expectFinished(run, "val-2");
+});
+
+/** The bug run of variants C and D with `AC3` an analysis criterion; the files lack only the analysis file that a later step writes. */
+function analysisBugRun(steps: Step[], start: string[]) {
+  const run = validatorRun(steps, { start, kind: "bug", criterionMethods: analysisMethods });
+  demonstration(run, "AC2");
+  demonstration(run, "AC4");
+  return run;
+}
+
+test("ARK-T381 the first validator of a bug run finishes with the analysis file missing while a later validator step or an unfinished implementer step can still write it", () => {
+  const laterValidator = analysisBugRun(
+    [
+      validator("val-1", allIds, []),
+      { ...fix, needs: ["val-1"] },
+      validator("val-2", ["ARK-900-AC1", "ARK-900-AC3"]),
+    ],
+    ["val-1"],
+  );
+  expectFinished(laterValidator, "val-1");
+  const laterImplementer = analysisBugRun(
+    [
+      validator("val-1", allIds, []),
+      { ...fix, needs: ["val-1"], criteria: ["ARK-900-AC1", "ARK-900-AC3"] },
+    ],
+    ["val-1"],
+  );
+  expectFinished(laterImplementer, "val-1");
+});
+
+test("ARK-T381 a validator finish refuses a missing analysis file when no later step can write it, and finishes once the file is written", () => {
+  const alone = analysisBugRun(
+    [validator("val-1", allIds, []), { ...fix, needs: ["val-1"] }],
+    ["val-1"],
+  );
+  expectRefused(alone, "val-1", "evidence missing: AC3 (analysis)");
+  writeEvidenceFile(alone.directory, "AC3", "analysis");
+  expectFinished(alone, "val-1");
+
+  const run = analysisBugRun(
+    [
+      validator("val-1", allIds, []),
+      { ...fix, needs: ["val-1"] },
+      validator("val-2", ["ARK-900-AC1", "ARK-900-AC3"]),
+    ],
+    ["val-1"],
+  );
+  expectFinished(run, "val-1");
+  for (const id of ["fix", "val-2"])
+    expect(ark("run", "step", run.runId, id, "start").code).toBe(0);
+  expectFinished(run, "fix");
+  commitFile(run, "fixed.txt", `${created}\n`);
+  expectRefused(run, "val-2", "evidence missing: AC3 (analysis)");
+  writeEvidenceFile(run.directory, "AC3", "analysis");
   expectFinished(run, "val-2");
 });

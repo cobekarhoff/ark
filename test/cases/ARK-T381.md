@@ -33,6 +33,8 @@ Prove `ark run step <run> <step> finish` for a validator step calls stage `step`
 7. Variant E (pending, not due): the shared files; `val-2` serves `AC2` (manual, no answer, file without `human: ok`) and `AC3` (reviewer inspection, no file). Stage `step` for `val-2` may list `evidence missing: AC3 (inspection)`; the test does not assert that line either way. Assert finish exits 0 with one event.
 8. Variant F (not a validator): the shared files, the string absent, `fix` serves `AC1` and `AC4`. Finish `fix` (role `implementer`). Assert exit 0: only the role `validator` runs the check.
 9. Existing refusal order: in variant A with an uncommitted change in the worktree, assert the finish is refused for the dirty worktree with its old text (ARK-T332), not for the evidence.
+10. Variant G (analysis AC, a later step can write the file): the bug run of variant C with `AC3` of method `analysis` and no `AC3.md` (`AC2.md` and `AC4.md` well-formed). In one run a later validator `val-2` serves `AC1` and `AC3` and has not finished; in another the implementer `fix` serves `AC3` and has not finished. Assert `ark run step <run> val-1 finish` exits 0 with one `step.finished` event in both.
+11. Variant H (analysis AC, no later step can write the file): the same bug run where only `val-1` serves `AC3` (`fix` serves `AC1` only). Assert `val-1` finish exits 1 with the line `evidence missing: AC3 (analysis)` and no new event; write a well-formed analysis `AC3.md` and assert it finishes. In the plan where `val-2` also serves `AC3`, finish `val-1` and `fix`, commit a file with the AC string, start `val-2`: the finish exits 1 with the same line (the string is present, so only the missing file refuses), and after the file is written it finishes.
 
 ## Expected results
 
@@ -40,6 +42,7 @@ Prove `ark run step <run> <step> finish` for a validator step calls stage `step`
 - The system shall not refuse a validator finish for a manual criterion with no answer, an evidence file that a later step or the reviewer writes, a problem of an AC the step does not serve, or an AC string whose implementer step has not finished (the first validator of a bug run).
 - When the call has `--failed`, the system shall not run the check and shall finish the step.
 - The system shall not run the check for a step whose role is not `validator`.
+- The system shall not refuse a validator finish for a missing `analysis` file while an unfinished implementer step or another unfinished validator step serves that AC; it shall refuse it once none does.
 
 ## Screenshot checkpoints
 
