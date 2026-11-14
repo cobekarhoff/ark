@@ -124,17 +124,52 @@ function findHead(head: string): { cwd: string | null; start: number | null } {
   return { cwd: cwd ? JSON.parse(`"${cwd[1]}"`) : null, start: Number.isNaN(start) ? null : start };
 }
 
-/** First `cwd` and first timestamp in the first 64 KiB of a session file; every format writes both near the top. */
-export function readHead(file: string): { cwd: string | null; start: number | null } {
-  if (file.endsWith(".zst")) return findHead(readCodexText(file).slice(0, 65536));
+/** The first 64 KiB of a session file as text; a Codex `.zst` file is decompressed first. */
+function headText(file: string): string {
+  if (file.endsWith(".zst")) return readCodexText(file).slice(0, 65536);
   const descriptor = openSync(file, "r");
   try {
     const buffer = Buffer.alloc(65536);
     const length = readSync(descriptor, buffer, 0, buffer.length, 0);
-    return findHead(buffer.toString("utf8", 0, length));
+    return buffer.toString("utf8", 0, length);
   } finally {
     closeSync(descriptor);
   }
+}
+
+/** First `cwd` and first timestamp in the first 64 KiB of a session file; every format writes both near the top. */
+export function readHead(file: string): { cwd: string | null; start: number | null } {
+  return findHead(headText(file));
+}
+
+/** A record of the assistant: omp and Claude put the role in `message`, Codex in `payload`. */
+function isAssistantRecord(line: string): boolean {
+  try {
+    const record = JSON.parse(line);
+    return (record.message?.role ?? record.payload?.role) === "assistant";
+  } catch {
+    return false; // the head ends inside this record
+  }
+}
+
+/**
+ * The word after the id of this run in the worker spec line (`worker <run id> <word>`), read from
+ * the prompt records of a session file: every record before the first assistant record, inside the
+ * first 64 KiB. Null when no such line is there, or when `run-lead <run id>` comes first (a run lead
+ * head holds placeholder lines and may name a worker it starts). The id must be followed by a space,
+ * so `<run id>0` is another run. The word ends at a space, a backslash or a quote (the line sits in
+ * a JSON string, so `\n` follows it as two characters).
+ */
+export function readSpecWord(file: string, runId: string): string | null {
+  const lines = headText(file).split("\n");
+  const firstAssistant = lines.findIndex(isAssistantRecord);
+  const prompt = (firstAssistant === -1 ? lines : lines.slice(0, firstAssistant)).join("\n");
+  const worker = prompt.indexOf(`worker ${runId} `);
+  const runLead = prompt.indexOf(`run-lead ${runId}`);
+  if (worker === -1 || (runLead !== -1 && runLead < worker)) return null;
+  const rest = prompt.slice(worker + `worker ${runId} `.length);
+  const end = rest.search(/[\s\\"]/);
+  return end > 0 ? rest.slice(0, end) : null;
 }
 
 /**
