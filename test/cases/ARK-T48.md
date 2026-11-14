@@ -13,6 +13,8 @@ changed_by: 2026-11-08-ARK-336-1
 
 Prove that merge-request open pushes and posts one ready MR per repo on GitHub in dependency order, with the run title and body. This case replaces the old id ARK-155-AC1 to AC5 (GitHub half), converted when ARK-316 changed the title and body assertions.
 
+It also carries ARK-155-AC7, ARK-276-AC3 and ARK-295-AC2 from copies the ARK-386 campaign removed: no merge, approve or auto-merge call reaches the host (the fake `gh` call log); a repo with no commits opens no MR (`docs`); and the open still pushes and posts on a project with the default `merge_requests: open`.
+
 ## Preconditions
 
 - A fixture run with repos core and app (the plan `repos` block holds the edge app to core; app-impl lists core-impl in `needs` only as a decoy) and docs with no commits, remotes on GitHub, and a fake `gh` that records calls and keeps open PRs.
