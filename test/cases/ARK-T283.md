@@ -6,7 +6,7 @@ technique: characterization snapshot (golden master) with boundary values on arg
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-13-ARK-405-1
+changed_by: 2026-11-14-ARK-392-1
 ---
 
 ## Objective
@@ -42,6 +42,7 @@ The test reads the table only through the `ark` process, so it does not depend o
 - The command lines of `ark --help` equal the snapshot order exactly; the count is 31 (the base table of 30 and `merge-request check`). The snapshot holds the new `merge-request check` command, the new count, the new `ark test` description of ARK-333 (suite failure exit code, log path and last 20 lines; test case hint) and the changed text of `test` (stage `head`), `run step` and `gate record`.
 - For each command: usage, description, each usage-advertised flag with its parser-measured arity (`absent`, `switch`, `value`; step 3a) equal the snapshot; each probed bound behaves as in the snapshot; `F --zz-first --zz-second` names `--zz-first` for every advertised switch, `--zz-second` for every advertised value flag; an unknown flag fails with `unknown flag --zz-first`.
 - `test-runner` is absent from `ark --help`.
+- `test/command-table.snapshot.json` holds the `retro` description with the `rework.rules_added` text (the count of rule lines in `rules.md`, the same text as `cli/commands/retro.ts`); the snapshot record changes together with the description, and the case still compares the process output with it.
 - The snapshot was first captured at the ARK-372 base (27 commands); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test passes after the move with the new description, and fails at this run's base by design (the snapshot holds the new description). A command dropped, duplicated or moved, a description edited away from the snapshot, a usage-advertised flag deleted from the parser table, a usage-advertised flag changed from switch to value or back in the parser table (even with the usage string unchanged), or a changed probed minimum or finite maximum fails it. A flag added to the parser table but not advertised in usage is not detected.
 - `test/command-table.snapshot.json` holds the `worktree sync` description of ARK-371 (it names `conflicts` and the regeneration of the files `ark.yml` lists under `generated`); the snapshot is updated together with `cli/commands/worktree.ts`, and the case still compares the process output with it.
 
