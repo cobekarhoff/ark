@@ -395,7 +395,7 @@ describe("manual gate", () => {
     expect(ark("status", runId).out).toContain("manual pending: ARK-901/AC3");
   });
 
-  test("ARK-283-AC2 gates.manual in ark.yml stays an error: the manual gate is never automatic", () => {
+  test("ARK-T394 gates.manual in ark.yml stays an error, because the manual gate is never automatic", () => {
     writeProject("demo", {
       workspace: tempGitRepo(),
       ticket_source: "local",

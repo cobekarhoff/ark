@@ -819,7 +819,7 @@ test("ARK-T368 an unread question and an escalation of live workers wait on Home
   await expect(page.getByText("Needs me · 2")).toBeVisible();
 });
 
-test("ARK-277-AC7 a run lead without harness and model shows roles.chief of ark.yml, marked configured", async ({
+test("ARK-T398 a run lead without harness and model shows roles.chief of ark.yml, marked configured", async ({
   page,
 }) => {
   isolate();

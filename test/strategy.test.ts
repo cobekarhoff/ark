@@ -232,7 +232,7 @@ test("ARK-173-AC4 strategy record stores card metadata and refuses malformed inp
   }
 });
 
-test("ARK-173-AC5 multiple strategies wait for a valid card choice or abort", () => {
+test("ARK-T397 multiple strategies wait for a valid card choice or abort", () => {
   evaluation();
   strategies(card("S1"), card("S2", "Recommended: no\n"));
   expect(ark("strategy", "record", runId).code).toBe(0);

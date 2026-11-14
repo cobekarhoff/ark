@@ -182,7 +182,7 @@ const invalidConfigs: [string, (config: Record<string, unknown>) => void, string
 ];
 
 for (const [name, mutate, expected] of invalidConfigs) {
-  test(`ARK-152-AC2 run start refuses ${name} and names the field`, () => {
+  test(`ARK-T399 run start refuses an invalid ark.yml and names the field: ${name}`, () => {
     const config = validConfig();
     mutate(config);
     writeProject("broken", config);
@@ -2040,7 +2040,7 @@ const methodTicket = [
   { id: "AC6", text: "method test written out", method: "test", verified_by: ["ARK-T1"] },
 ];
 
-test("ARK-311-AC3 the reader names every AC <ticket>/AC<k>, reads each method, and ark test lists non-test methods through the manual gate with both id forms", () => {
+test("ARK-T396 the reader names every AC as ticket slash AC number, reads each method, and ark test lists non-test methods through the manual gate with both id forms", () => {
   writeProject("methods", {
     ...validConfig(),
     suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
