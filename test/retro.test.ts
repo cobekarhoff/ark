@@ -1515,8 +1515,17 @@ describe("ark retro models and vendors", () => {
     purpose?: string;
   };
 
-  /** One omp session file in the run's worktree: a session head at `start`, then one record per reply. */
-  function writeOwnedSession(name: string, start: string, replies: SessionReply[]): void {
+  /**
+   * One omp session file in the run's worktree: a session head at `start`, then one record per
+   * reply. `prompt` records follow the head (before the first reply, as a real omp head holds
+   * them); `after` records follow the last reply.
+   */
+  function writeOwnedSession(
+    name: string,
+    start: string,
+    replies: SessionReply[],
+    options: { prompt?: Record<string, unknown>[]; after?: Record<string, unknown>[] } = {},
+  ): void {
     const head = {
       type: "session",
       version: 3,
@@ -1556,7 +1565,7 @@ describe("ark retro models and vendors", () => {
     mkdirSync(join(ompRoot, "workspace"), { recursive: true });
     writeFileSync(
       join(ompRoot, "workspace", `${name}.jsonl`),
-      `${[head, ...records].map((record) => JSON.stringify(record)).join("\n")}\n`,
+      `${[head, ...(options.prompt ?? []), ...records, ...(options.after ?? [])].map((record) => JSON.stringify(record)).join("\n")}\n`,
     );
   }
 
@@ -1637,7 +1646,10 @@ describe("ark retro models and vendors", () => {
         "implementer",
         "orchestration",
         "reviewer",
+        "unassigned",
       ]);
+      expect(metrics.cost.by_role.unassigned.usd).toBeCloseTo(0.09, 6);
+      expect(metrics.cost.by_role.orchestration.usd).toBeCloseTo(1.5, 6);
       expect(out).toContain("unassigned: 1 file, $0.09");
       expect(out).toContain("unassigned.jsonl");
     },
@@ -1684,6 +1696,373 @@ describe("ark retro models and vendors", () => {
       expect(steps.unassigned).toBeUndefined();
       expect(out).not.toContain("unassigned:");
       expect(steps.orchestration?.usd ?? 0).toBeCloseTo(withLead ? 0.5 : 0, 6);
+    },
+  );
+
+  // ARK-460: a session is placed by the worker spec line of this run, which sits in its prompt records.
+  const arkSkillText = [
+    '[IMPORTANT: User invoked the "ark" skill; follow its instructions. Full skill below.]',
+    "description: Entry point for Ark. Use `/skill:ark worker <run> <step>` to start a worker.",
+    "|`worker`|`<run> <step>`|`playbooks/worker.md`|A run lead starts it, one per step.|",
+  ].join("\n");
+
+  /** The omp `skill-prompt` record of a started session: the skill text with its placeholder rows, then the task. */
+  function skillPromptRecord(task: string, laterText = ""): Record<string, unknown> {
+    return {
+      type: "custom_message",
+      customType: "skill-prompt",
+      content: `${arkSkillText}\n\n---\n\n=== TASK === ${task}\nYou are working inside Orca.\n${laterText}`,
+      details: {
+        name: "ark",
+        path: "/plugins/ark/skills/ark/SKILL.md",
+        args: `=== TASK === ${task}`,
+        prompt: `=== TASK ===\n/skill:ark ${task}`,
+        lineCount: 40,
+      },
+      display: true,
+      attribution: "user",
+    };
+  }
+  const workerPrompt = (word: string, run = runId) => [skillPromptRecord(`worker ${run} ${word}`)];
+  const runLeadPrompt = () => [skillPromptRecord(`run-lead ${runId}`)];
+
+  /** What the run lead writes after its first reply when it starts a worker by hand. */
+  const workerStartCall = (word: string): Record<string, unknown>[] => [
+    {
+      type: "message",
+      timestamp: day("14:22:30.000"),
+      message: {
+        role: "assistant",
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        content: [
+          {
+            type: "toolCall",
+            id: "call_1",
+            name: "bash",
+            arguments: {
+              command: `orca orchestration worker-start --from lead --spec "=== TASK === worker ${runId} ${word}\\nYou are the worker"`,
+            },
+          },
+        ],
+        usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+      },
+    },
+    {
+      type: "message",
+      timestamp: day("14:22:31.000"),
+      message: {
+        role: "toolResult",
+        toolCallId: "call_1",
+        content: [{ type: "text", text: "started" }],
+      },
+    },
+  ];
+
+  /** Events of a run whose steps all work in the run worktree; `sessionFiles` adds a worker.started per step id. */
+  const placementRows = (
+    steps: [id: string, role: string, start: string, end: string][],
+    sessionFiles: Record<string, string> = {},
+  ): EventRow[] => [
+    [
+      "14:20:00.000",
+      "run.started",
+      {
+        run: runId,
+        project: "demo",
+        ticket: { id: "ARK-901", title: "t" },
+        criteria: [],
+        round_budget: 1,
+      },
+    ],
+    ...steps.flatMap(([id, role, start, end]): EventRow[] => [
+      [start, "step.started", { step: id, role, repo: ".", round: 1 }],
+      ...(sessionFiles[id]
+        ? [
+            [
+              start,
+              "worker.started",
+              {
+                step: id,
+                dispatch: "ctx_1",
+                terminal: "term_1",
+                harness: "omp",
+                session: sessionFiles[id],
+              },
+            ] as EventRow,
+          ]
+        : []),
+      [end, "step.finished", { step: id, outcome: "succeeded" }],
+    ]),
+    ["15:00:00.000", "run.closed", { outcome: "aborted" }],
+  ];
+
+  const rolesTotal = (roles: Record<string, { usd: number }>) =>
+    Object.values(roles).reduce((sum, group) => sum + group.usd, 0);
+
+  test.each([
+    ["run lead first, writer second", "14:22:00.000", false],
+    ["writer first: the earliest lead candidate", "14:20:30.000", false],
+    [
+      "run lead names the writer in a worker-start call after its first reply",
+      "14:22:00.000",
+      true,
+    ],
+  ])(
+    "ARK-T376 ark retro gives the run lead, the test case writer, the test case reviewer and the implementer each its own role, with nothing unassigned and the roles adding up to the total (%s)",
+    (_form, writerStart, leadStartsWriter) => {
+      const implementerFile = join(ompRoot, "workspace", "implementer.jsonl");
+      writeEvents(
+        runDirectory,
+        placementRows([["build", "implementer", "14:24:00.000", "14:25:00.000"]], {
+          build: implementerFile,
+        }),
+      );
+      writeOwnedSession("lead", "14:21:00.000", [anthropicReply("14:21:30.000", 1)], {
+        prompt: runLeadPrompt(),
+        after: leadStartsWriter ? workerStartCall("test-case-writer") : [],
+      });
+      writeOwnedSession("writer", writerStart, [anthropicReply("14:22:30.000", 0.2)], {
+        prompt: workerPrompt("test-case-writer"),
+      });
+      writeOwnedSession(
+        "reviewer",
+        "14:23:00.000",
+        [anthropicReply("14:23:30.000", 0.3, "claude-opus-5-5")],
+        { prompt: workerPrompt("test-case-reviewer") },
+      );
+      writeOwnedSession(
+        "implementer",
+        "14:24:10.000",
+        [anthropicReply("14:24:20.000", 0.04, "claude-haiku-4-5")],
+        { prompt: workerPrompt("build") },
+      );
+
+      const out = runRetro();
+      const metrics = readMetrics();
+      const { by_role: roles, by_step: steps } = metrics.cost;
+      expect(roles.orchestration.usd).toBeCloseTo(1, 6);
+      expect(roles.test_writer.usd).toBeCloseTo(0.2, 6);
+      expect(roles.test_reviewer.usd).toBeCloseTo(0.3, 6);
+      expect(roles.implementer.usd).toBeCloseTo(0.04, 6);
+      expect(metrics.orchestration.master_chief_and_run_lead_cost.usd).toBeCloseTo(1, 6);
+      expect(roles.unassigned).toBeUndefined();
+      expect(steps.unassigned).toBeUndefined();
+      expect(steps.orchestration.usd).toBeCloseTo(1.5, 6);
+      expect(steps.build.usd).toBeCloseTo(0.04, 6);
+      expect(rolesTotal(roles)).toBeCloseTo(metrics.cost.total_usd, 6);
+      expect(out).not.toContain("unassigned:");
+    },
+  );
+
+  // Timeline of ARK-T377: build 14:24-14:30, check 14:34-14:36. Every file below starts in the run worktree.
+  const placementScenario = () =>
+    placementRows([
+      ["build", "implementer", "14:24:00.000", "14:30:00.000"],
+      ["check", "validator", "14:34:00.000", "14:36:00.000"],
+    ]);
+  /** The run lead and the implementer session, which the window rule places by itself. */
+  const writeLeadAndImplementer = () => {
+    writeOwnedSession("lead", "14:21:00.000", [anthropicReply("14:25:00.000", 1)], {
+      prompt: runLeadPrompt(),
+    });
+    writeOwnedSession(
+      "implementer",
+      "14:24:30.000",
+      [anthropicReply("14:25:30.000", 0.04, "claude-haiku-4-5")],
+      { prompt: workerPrompt("build") },
+    );
+  };
+  const validatorReply = anthropicReply("14:31:30.000", 0.3, "claude-opus-5-5");
+
+  test("ARK-T377 ark retro places a session by the worker spec line of this run: a validator before its window goes to its step, a test case writer inside a window does not, a placeholder or another run id places nothing", () => {
+    writeEvents(runDirectory, placementScenario());
+    writeLeadAndImplementer();
+    writeOwnedSession("validator", "14:31:00.000", [validatorReply], {
+      prompt: workerPrompt("check"),
+    });
+    writeOwnedSession("writer", "14:25:00.000", [anthropicReply("14:26:00.000", 0.2)], {
+      prompt: workerPrompt("test-case-writer"),
+    });
+    // Only placeholders: the skill text of a run lead head plus the run lead playbook lines.
+    writeOwnedSession("placeholder", "14:32:00.000", [anthropicReply("14:32:30.000", 0.05)], {
+      prompt: [
+        skillPromptRecord(
+          `run-lead ${runId}`,
+          "/skill:ark worker <run> check\n<run> test-case-writer\n",
+        ),
+      ],
+    });
+    writeOwnedSession("otherrun", "14:32:30.000", [anthropicReply("14:32:45.000", 0.07)], {
+      prompt: workerPrompt("check", "2026-10-29-ARK-999-1"),
+    });
+    // The id of this run followed by a digit: the match stops at the end of the id.
+    writeOwnedSession("prefixrun", "14:33:00.000", [anthropicReply("14:33:30.000", 0.09)], {
+      prompt: workerPrompt("check", `${runId}0`),
+    });
+
+    const out = runRetro();
+    const metrics = readMetrics();
+    const { by_role: roles, by_step: steps } = metrics.cost;
+    expect(steps.check.usd).toBeCloseTo(0.3, 6);
+    expect(roles.validator.usd).toBeCloseTo(0.3, 6);
+    expect(metrics.actual_models.check).toEqual(["claude-opus-5-5"]);
+    expect(roles.test_writer.usd).toBeCloseTo(0.2, 6);
+    expect(steps.orchestration.usd).toBeCloseTo(1.2, 6);
+    expect(steps.build.usd).toBeCloseTo(0.04, 6);
+    expect(roles.implementer.usd).toBeCloseTo(0.04, 6);
+    expect(metrics.actual_models.build).toEqual(["claude-haiku-4-5"]);
+    expect(roles.orchestration.usd).toBeCloseTo(1, 6);
+    expect(roles.unassigned.usd).toBeCloseTo(0.21, 6);
+    expect(steps.unassigned.usd).toBeCloseTo(0.21, 6);
+    expect(rolesTotal(roles)).toBeCloseTo(metrics.cost.total_usd, 6);
+    expect(out).toContain("unassigned: 3 files");
+    for (const name of ["placeholder.jsonl", "otherrun.jsonl", "prefixrun.jsonl"])
+      expect(out).toContain(name);
+  });
+
+  test("ARK-T377 a step id that starts with another step id takes only its own spec line, and a step that never started places nothing", () => {
+    writeEvents(
+      runDirectory,
+      placementRows([
+        ["build", "implementer", "14:24:00.000", "14:25:00.000"],
+        ["check", "validator", "14:28:00.000", "14:29:00.000"],
+        ["check-2", "validator", "14:31:00.000", "14:32:00.000"],
+      ]),
+    );
+    writePlan([
+      ["build", "implementer", ".", "anthropic/claude-sonnet-5-5"],
+      ["check", "validator", ".", "anthropic/claude-sonnet-5-5"],
+      ["check-2", "validator", ".", "anthropic/claude-sonnet-5-5"],
+      ["later", "validator", ".", "anthropic/claude-sonnet-5-5"],
+    ]);
+    writeOwnedSession("lead", "14:21:00.000", [anthropicReply("14:25:00.000", 1)], {
+      prompt: runLeadPrompt(),
+    });
+    writeOwnedSession("implementer", "14:24:30.000", [anthropicReply("14:24:40.000", 0.04)], {
+      prompt: workerPrompt("build"),
+    });
+    writeOwnedSession("first", "14:26:00.000", [anthropicReply("14:26:30.000", 0.3)], {
+      prompt: workerPrompt("check"),
+    });
+    writeOwnedSession("second", "14:30:00.000", [anthropicReply("14:30:30.000", 0.5)], {
+      prompt: workerPrompt("check-2"),
+    });
+    writeOwnedSession("ghost", "14:33:00.000", [anthropicReply("14:33:30.000", 0.07)], {
+      prompt: workerPrompt("later"),
+    });
+
+    const out = runRetro();
+    const { by_step: steps, by_role: roles } = readMetrics().cost;
+    expect(steps.check.usd).toBeCloseTo(0.3, 6);
+    expect(steps["check-2"].usd).toBeCloseTo(0.5, 6);
+    expect(roles.validator.usd).toBeCloseTo(0.8, 6);
+    expect(steps.later).toBeUndefined();
+    expect(steps.unassigned.usd).toBeCloseTo(0.07, 6);
+    expect(roles.unassigned.usd).toBeCloseTo(0.07, 6);
+    expect(out).toContain("unassigned: 1 file");
+    expect(out).toContain("ghost.jsonl");
+  });
+
+  test("ARK-T377 a Codex .zst session whose prompt follows injected context records is placed by its spec line", () => {
+    writeEvents(runDirectory, placementScenario());
+    writeLeadAndImplementer();
+    const record = (time: string, type: string, payload: Record<string, unknown>) => ({
+      timestamp: day(time),
+      type,
+      payload,
+    });
+    const message = (role: string, text: string) =>
+      record("14:31:00.500", "response_item", {
+        type: "message",
+        role,
+        content: [{ type: role === "user" ? "input_text" : "output_text", text }],
+      });
+    const rollout = [
+      record("14:31:00.000", "session_meta", {
+        id: "validator",
+        cwd: join(runDirectory, "workspace"),
+        model_provider: "openai",
+      }),
+      record("14:31:00.100", "turn_context", {
+        cwd: join(runDirectory, "workspace"),
+        model: "gpt-6.1-sol",
+      }),
+      message("user", "<recommended_plugins>\n- github\n</recommended_plugins>"),
+      message(
+        "user",
+        `<environment_context>\n  <cwd>${join(runDirectory, "workspace")}</cwd>\n</environment_context>`,
+      ),
+      message(
+        "user",
+        `${arkSkillText}\n\n=== TASK === worker ${runId} check\nYou are the VALIDATOR.`,
+      ),
+      message("assistant", "Reading the plan."),
+      record("14:31:30.000", "event_msg", {
+        type: "token_count",
+        info: {
+          total_token_usage: { total_tokens: 30 },
+          last_token_usage: { input_tokens: 20, output_tokens: 10 },
+        },
+      }),
+    ];
+    const folder = join(codexRoot, "2026", "10", "29");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(
+      join(folder, "rollout-2026-10-29T14-31-00-validator.jsonl.zst"),
+      Bun.zstdCompressSync(
+        Buffer.from(`${rollout.map((line) => JSON.stringify(line)).join("\n")}\n`),
+      ),
+    );
+
+    const out = runRetro();
+    const metrics = readMetrics();
+    expect(metrics.actual_models.check).toEqual(["gpt-6.1-sol"]);
+    expect(metrics.cost.by_step.check.tokens).toBe(30);
+    expect(metrics.cost.by_role.validator.tokens).toBe(30);
+    expect(metrics.cost.by_step.unassigned).toBeUndefined();
+    expect(metrics.cost.by_role.unassigned).toBeUndefined();
+    expect(out).not.toContain("unassigned:");
+  });
+
+  test.each([
+    ["one file", false],
+    ["two files: a later file does not take the lead slot", true],
+  ])(
+    "ARK-T378 ark retro keeps a session that nothing places as unassigned, apart from the run lead, and names its file in the output (%s)",
+    (_form, withSecondFile) => {
+      writeEvents(
+        runDirectory,
+        placementRows([["build", "implementer", "14:24:00.000", "14:25:00.000"]]),
+      );
+      writeOwnedSession("lead", "14:21:00.000", [anthropicReply("14:26:00.000", 1)], {
+        prompt: runLeadPrompt(),
+      });
+      writeOwnedSession("implementer", "14:24:10.000", [anthropicReply("14:24:20.000", 0.04)], {
+        prompt: workerPrompt("build"),
+      });
+      // Starts in the gap after the build window: no window, no spec line, no worker.started.
+      writeOwnedSession("unassigned", "14:27:00.000", [openAiReply("14:27:30.000", 0.09)], {
+        prompt: [skillPromptRecord("chief")],
+      });
+      if (withSecondFile)
+        writeOwnedSession("unassigned-2", "14:28:00.000", [openAiReply("14:28:30.000", 0.11)], {
+          prompt: [skillPromptRecord("chief")],
+        });
+
+      const out = runRetro();
+      const metrics = readMetrics();
+      const { by_role: roles, by_step: steps } = metrics.cost;
+      const unassignedUsd = withSecondFile ? 0.2 : 0.09;
+      expect(roles.orchestration.usd).toBeCloseTo(1, 6);
+      expect(metrics.orchestration.master_chief_and_run_lead_cost.usd).toBeCloseTo(1, 6);
+      expect(roles.unassigned.usd).toBeCloseTo(unassignedUsd, 6);
+      expect(steps.unassigned.usd).toBeCloseTo(unassignedUsd, 6);
+      expect(steps.orchestration.usd).toBeCloseTo(1, 6);
+      expect(rolesTotal(roles)).toBeCloseTo(metrics.cost.total_usd, 6);
+      expect(out).toContain(withSecondFile ? "unassigned: 2 files" : "unassigned: 1 file, $0.09");
+      expect(out).toContain("unassigned.jsonl");
+      if (withSecondFile) expect(out).toContain("unassigned-2.jsonl");
     },
   );
 

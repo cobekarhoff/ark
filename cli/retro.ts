@@ -13,7 +13,7 @@ import { findRun, projectDirectory, runsDirectory } from "./paths.ts";
 import { readResources } from "./resources-file.ts";
 import { type PlanDecision, type PlanStep, loadPlan } from "./plan.ts";
 import { splitRunTime, withoutInterrupted, withoutNotStarted } from "./time-split.ts";
-import { type SessionWithKey, type UsageMessage, readUsage } from "./usage/index.ts";
+import { type SessionWithKey, type UsageMessage, readSpecWord, readUsage } from "./usage/index.ts";
 import { type Owner, ownersOf, stageOf } from "./usage/owners.ts";
 
 const IDLE_GAP_SECONDS = 600;
@@ -118,14 +118,36 @@ export function runningCost(runDirectory: string): { usd: number | "unknown"; to
 
 type HelperModel = { model: string; purpose: string; usd: number | "unknown"; tokens: number };
 
-/** Where a session file's messages belong: its owner, with an unassigned file told apart as a stage session. */
+/** Where a session file's messages belong: its owner, a test case session by its spec line, or an unassigned file told apart as a stage session. */
 type Placement =
   | { kind: "step"; window: StepWindow }
-  | { kind: "lead" | "evaluator" | "designer" | "unassigned" };
+  | {
+      kind: "lead" | "evaluator" | "designer" | "test_writer" | "test_reviewer" | "unassigned";
+    };
 
-function placementOf(owner: Owner, messages: UsageMessage[], stages: StageTimes): Placement {
-  if (owner.kind === "step") return { kind: "step", window: owner.window };
-  if (owner.kind === "lead") return { kind: "lead" };
+/** The word of the worker spec line that makes a session a test case session, and its role. */
+const testCaseKinds = new Map<string | null, "test_writer" | "test_reviewer">([
+  ["test-case-writer", "test_writer"],
+  ["test-case-reviewer", "test_reviewer"],
+]);
+
+/**
+ * `owner` is undefined for a test case session. An unassigned file whose spec line word is the id of
+ * a step goes to the latest window of that step: a worker starts before its `step.started`.
+ */
+function placementOf(
+  owner: Owner | undefined,
+  messages: UsageMessage[],
+  stages: StageTimes,
+  specWord: string | null,
+  windows: StepWindow[],
+): Placement {
+  const testCaseKind = testCaseKinds.get(specWord);
+  if (testCaseKind) return { kind: testCaseKind };
+  if (owner?.kind === "step") return { kind: "step", window: owner.window };
+  if (owner?.kind === "lead") return { kind: "lead" };
+  const window = windows.findLast((candidate) => candidate.id === specWord);
+  if (window) return { kind: "step", window };
   return {
     kind:
       stageOf(
@@ -517,9 +539,14 @@ export function retro(runId: string, inProject?: string): void {
   const { messages, sessions } = collectMessages(runDirectory);
 
   // Each session file goes whole to one owner (the same rule as the hub); its messages follow it.
+  // A test case session is placed by its spec line first, so it cannot take the run lead slot.
   const stages = stageTimes(events);
+  const specWords = new Map(
+    sessions.map((session) => [session.file, readSpecWord(session.file, runId)]),
+  );
+  const ownable = sessions.filter((session) => !testCaseKinds.has(specWords.get(session.file)!));
   const owners = ownersOf(
-    sessions.map((session) => ({
+    ownable.map((session) => ({
       file: session.file,
       cwd: session.cwd,
       start: session.start,
@@ -531,10 +558,17 @@ export function retro(runId: string, inProject?: string): void {
     firstTime,
     stages,
   );
+  const ownerOfFile = new Map(ownable.map((session, index) => [session.file, owners[index]]));
   const placements = new Map<string, Placement>(
-    sessions.map((session, index) => [
+    sessions.map((session) => [
       session.file,
-      placementOf(owners[index], session.messages, stages),
+      placementOf(
+        ownerOfFile.get(session.file),
+        session.messages,
+        stages,
+        specWords.get(session.file)!,
+        windows,
+      ),
     ]),
   );
   const placementOfMessage = (message: Message): Placement =>
@@ -549,9 +583,9 @@ export function retro(runId: string, inProject?: string): void {
     const placement = placementOfMessage(message);
     return placement.kind === "step"
       ? placement.window.role
-      : placement.kind === "evaluator" || placement.kind === "designer"
-        ? placement.kind
-        : "orchestration";
+      : placement.kind === "lead"
+        ? "orchestration"
+        : placement.kind;
   };
   const orchestrationMessages = messages.filter(
     (message) => placementOfMessage(message).kind === "lead",
