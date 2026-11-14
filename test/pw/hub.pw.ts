@@ -8730,6 +8730,8 @@ type LiveWindow = Window & {
   /** Times the banner went missing after it showed, and when the last snapshot arrived (T310). */
   __gaps: number;
   __lastSnapshotAt: number;
+  /** Script animations started per element since `resetSlides`: their durations. */
+  __slides: Map<Element, number[]>;
 };
 
 /**
@@ -8768,11 +8770,28 @@ async function fakeStream(page: Page): Promise<void> {
         );
         return transition;
       };
+    // Records every script animation (the FLIP slides) when it starts, so no test has to catch it running.
+    live.__slides = new Map();
+    const { animate } = Element.prototype as { animate: Element["animate"] };
+    Element.prototype.animate = function (
+      this: Element,
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+      options?: number | KeyframeAnimationOptions,
+    ) {
+      const animation = animate.call(this, keyframes, options);
+      const durations = live.__slides.get(this) ?? [];
+      durations.push(Number(animation.effect!.getTiming().duration));
+      live.__slides.set(this, durations);
+      return animation;
+    };
   });
 }
 
 const push = (page: Page, snapshot: Snapshot) =>
   page.evaluate((next) => (window as unknown as LiveWindow).__push(next), snapshot);
+
+const resetSlides = (page: Page) =>
+  page.evaluate(() => (window as unknown as LiveWindow).__slides.clear());
 
 /** Opens the page on the fed stream and waits until the first snapshot is on screen. */
 async function openFed(page: Page, baseUrl: string, hash: string, first: Snapshot): Promise<void> {
@@ -9097,6 +9116,7 @@ const listsOf = (page: Page, selectors: Record<string, string>) =>
           key: key(element),
           top: element.getBoundingClientRect().top,
           transform: getComputedStyle(element).transform,
+          slid: (window as unknown as LiveWindow).__slides.get(element) ?? [],
           moving: element
             .getAnimations()
             .filter(
@@ -9111,8 +9131,8 @@ const listsOf = (page: Page, selectors: Record<string, string>) =>
 type Lists = Awaited<ReturnType<typeof listsOf>>;
 
 /**
- * Pushes `snapshot`, waits (up to 20 frames) until some list changed its order, and reads the
- * lists at that moment: the FLIP animations of the moved items are running now.
+ * Pushes `snapshot`, waits until some list changed its order (`settle`) or five frames, and reads
+ * the lists: `slid` holds the FLIP slides the page started since the push, whatever their speed.
  */
 async function pushAndRead(
   page: Page,
@@ -9121,15 +9141,16 @@ async function pushAndRead(
   settle: boolean,
 ): Promise<{ before: Lists; during: Lists }> {
   const before = await listsOf(page, selectors);
+  await resetSlides(page);
   await push(page, snapshot);
-  let during = await listsOf(page, selectors);
   const order = (lists: Lists) =>
     JSON.stringify(Object.values(lists).map((l) => l.map((i) => i.key)));
-  for (let frame = 0; frame < 20 && settle && order(during) === order(before); frame++) {
-    await frames(page, 1);
-    during = await listsOf(page, selectors);
-  }
-  if (!settle) {
+  let during = await listsOf(page, selectors);
+  if (settle)
+    await expect
+      .poll(async () => order((during = await listsOf(page, selectors))))
+      .not.toBe(order(before));
+  else {
     await frames(page, 5);
     during = await listsOf(page, selectors);
   }
@@ -9174,7 +9195,7 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
       );
       expect(moved.length, `${name} moved items`).toBeGreaterThanOrEqual(2);
       for (const item of items) {
-        const running = during[name].find((started) => started.key === item.key)!.moving;
+        const running = during[name].find((started) => started.key === item.key)!.slid;
         if (moved.includes(item)) {
           expect(running.length, `${name} ${item.key} animates`).toBeGreaterThan(0);
           for (const duration of running) expect(duration).toBeLessThanOrEqual(250);
@@ -9199,7 +9220,7 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
   // The same order again: nothing animates.
   const { during: still } = await pushAndRead(page, first, homeLists, false);
   for (const [name, items] of Object.entries(still))
-    for (const item of items) expect(item.moving, `${name} ${item.key}`).toEqual([]);
+    for (const item of items) expect(item.slid, `${name} ${item.key}`).toEqual([]);
 
   // The window resizes a pixel at a time (the grid tracks have fractional widths): the same order
   // still does not animate.
@@ -9208,8 +9229,7 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
     await page.setViewportSize({ width: size.width + step, height: size.height });
     const { during: resized } = await pushAndRead(page, first, homeLists, false);
     for (const [name, items] of Object.entries(resized))
-      for (const item of items)
-        expect(item.moving, `${name} ${item.key} at +${step}px`).toEqual([]);
+      for (const item of items) expect(item.slid, `${name} ${item.key} at +${step}px`).toEqual([]);
   }
   await page.setViewportSize(size);
 
@@ -9233,7 +9253,7 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
     if (!["gates", "waiting"].includes(name))
       // waiting shares the Needs me container with the gates
       for (const item of items)
-        expect(item.moving, `${name} ${item.key} did not reorder`).toEqual([]);
+        expect(item.slid, `${name} ${item.key} did not reorder`).toEqual([]);
 
   // A view change is a view transition of 200 ms or less, and the new view is in the DOM.
   const views: [string, Locator][] = [
@@ -11138,19 +11158,10 @@ test("ARK-T362 The repo graph uses the graph controls and the motion of the othe
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await controls.actual.click(); // cards and steps at full size for the rest
   // A new render after a scale change moves nothing: no card or step slides because the zoom changed.
+  await resetSlides(page);
   await push(page, first);
   await frames(page, 2);
-  expect(
-    await page.evaluate(
-      () =>
-        document
-          .getAnimations()
-          .filter(
-            (animation) =>
-              !(animation instanceof CSSAnimation || animation instanceof CSSTransition),
-          ).length,
-    ),
-  ).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as LiveWindow).__slides.size)).toBe(0);
 
   // The running step pulses, and the edge into its repo flows, each for a few cycles and not for ever.
   await page.waitForFunction(() => document.querySelectorAll(".rstep.s-running").length === 1);
@@ -11209,21 +11220,15 @@ test("ARK-T362 The repo graph uses the graph controls and the motion of the othe
   await finiteAnimationsEnded(page);
   const before = { core: await topOf("core-lib"), service: await topOf("service") };
   expect(before.core).toBeLessThanOrEqual(before.service + 1);
+  await resetSlides(page);
   await push(page, swapped);
-  let moving: number[] = [];
-  for (let frame = 0; frame < 20 && moving.length === 0; frame++) {
-    await frames(page, 1);
-    moving = await cardOf(page, "service").evaluate((card) =>
-      card
-        .getAnimations()
-        .filter(
-          (animation) => !(animation instanceof CSSTransition || animation instanceof CSSAnimation),
-        )
-        .map((animation) => Number(animation.effect!.getTiming().duration)),
+  // Read what the page started, not what runs at a sampled frame: a loaded host can skip the 250 ms slide.
+  const slid = () =>
+    cardOf(page, "service").evaluate(
+      (card) => (window as unknown as LiveWindow).__slides.get(card) ?? [],
     );
-  }
-  expect(moving.length).toBeGreaterThan(0);
-  for (const duration of moving) expect(duration).toBeLessThanOrEqual(250);
+  await expect.poll(async () => (await slid()).length).toBeGreaterThan(0);
+  for (const duration of await slid()) expect(duration).toBeLessThanOrEqual(250);
   await finiteAnimationsEnded(page);
   await expect(cardOf(page, "service")).toHaveAttribute("data-order", "1");
   expect(await topOf("service")).toBeLessThan(await topOf("core-lib"));
@@ -11261,6 +11266,7 @@ test("ARK-T362 The repo graph uses the graph controls and the motion of the othe
     );
     await frames(still, 4);
     expect(await animationsOf(still)).toEqual([]); // no FLIP
+    expect(await still.evaluate(() => (window as unknown as LiveWindow).__slides.size)).toBe(0);
     await checkpoint(still, "reduced-motion-graph");
   } finally {
     await still.close();
