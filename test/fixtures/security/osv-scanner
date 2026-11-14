@@ -1,0 +1,24 @@
+#!/usr/bin/env bun
+// Fake `osv-scanner scan source -L <lockfile> --format json`: prints $FAKE_OSV_DIR/<sha1 of the lockfile's bytes>.json, else
+// default.json, else an empty report. Exit 1 when the report holds a vulnerability, else 0.
+// Overrides: FAKE_OSV_EXIT, FAKE_OSV_STDERR, FAKE_OSV_STDOUT (raw stdout).
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+
+const argv = process.argv.slice(2);
+if (process.env.FAKE_SCAN_LOG) appendFileSync(process.env.FAKE_SCAN_LOG, `osv-scanner ${argv.join(" ")}\n`);
+
+if (process.env.FAKE_OSV_STDERR) console.error(process.env.FAKE_OSV_STDERR);
+if (process.env.FAKE_OSV_STDOUT !== undefined) process.stdout.write(process.env.FAKE_OSV_STDOUT);
+if (process.env.FAKE_OSV_EXIT !== undefined) process.exit(Number(process.env.FAKE_OSV_EXIT));
+
+const lockfile = argv[argv.indexOf("-L") + 1];
+const sha = createHash("sha1").update(readFileSync(lockfile)).digest("hex");
+const directory = process.env.FAKE_OSV_DIR ?? "";
+const answer = [`${sha}.json`, "default.json"].map((name) => `${directory}/${name}`).find(existsSync);
+const text = answer === undefined ? '{"results":[]}' : readFileSync(answer, "utf8");
+process.stdout.write(text);
+const found = (JSON.parse(text).results ?? []).some((result) =>
+  (result.packages ?? []).some((pkg) => (pkg.vulnerabilities ?? []).length > 0),
+);
+process.exit(found ? 1 : 0);
