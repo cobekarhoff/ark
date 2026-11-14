@@ -247,7 +247,7 @@ flowchart LR
   class learn,ticket,skill,check cmd
 ```
 
-The run lead runs `ark retro` and writes `retro.md` while the MRs are open, before merge or close. Nobody asks you questions after a single run. Every 10 closed runs (`ark chief state` shows `(due)`), or when you ask, Master Chief runs a deep interview: it reads the retros, groups repeated problems, and asks you at most 8 questions, one at a time, each with evidence and a recommended answer. You approve or reject each proposal, and nothing changes until you approve it. A learning that a command can check gets an `Enforced by:` line and becomes a refusal in the `ark` command, so the same mistake costs no second round. Most lines in `learnings.md` name the run that taught them.
+The run lead runs `ark retro` and writes `retro.md` while the MRs are open, before merge or close. Nobody asks you questions after a single run. When a finding repeats in a run, the run lead writes a rule to the run's `rules.md`: every worker that starts after that gets it in its spec, and `retro.md` proposes each rule as a `learnings.md` entry. Every 10 closed runs (`ark chief state` shows `(due)`), or when you ask, Master Chief runs a deep interview: it reads the retros, groups repeated problems, and asks you at most 8 questions, one at a time, each with evidence and a recommended answer. You approve or reject each proposal, and nothing changes until you approve it. A learning that a command can check gets an `Enforced by:` line and becomes a refusal in the `ark` command, so the same mistake costs no second round. Most lines in `learnings.md` name the run that taught them.
 
 ## Why this design
 
