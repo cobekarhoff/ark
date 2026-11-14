@@ -1225,6 +1225,8 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     const mainCheck = quick ? undefined : mainCheckOf(config, runId, mirror, state.worktrees);
     const baseRun = newSide("base");
     const censusRun = newSide("census");
+    // A quick run of a suite with base_files runs only the own-commit files, so a test case in another file has no result: `missing` is not proven.
+    let fileSelection = false;
 
     try {
       if (composeBase) {
@@ -1254,6 +1256,7 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
             console.log(`suite      ${suite.name} head  skipped  (no changed test file)`);
             continue;
           }
+          fileSelection = true;
           template = suite.base_command!.replaceAll("{files}", files.map(shellQuote).join(" "));
         }
         const key = cacheKey({
@@ -1316,9 +1319,9 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
         }));
         criterionStatuses[criterion] = quickStatus(verifiedByStatus(cases), quick);
         via[criterion] = `via ${cases.map((entry) => `${entry.id} ${entry.status}`).join(", ")}`;
-        missingCases[criterion] = cases
-          .filter((entry) => entry.status === "missing")
-          .map((entry) => entry.id);
+        missingCases[criterion] = fileSelection
+          ? []
+          : cases.filter((entry) => entry.status === "missing").map((entry) => entry.id);
       } else {
         criterionStatuses[criterion] = quickStatus(
           criterionStatus(criterion, provingResults),
