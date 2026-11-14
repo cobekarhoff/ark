@@ -78,9 +78,14 @@ else if (word === "worker-start") {
   for (const harness of ["omp", "claude", "codex"]) {
     const folder = join(directory, "sessions", harness, "scratch");
     mkdirSync(folder, { recursive: true });
+    // Like the harness: the session file holds the cwd, then the first prompt (the spec). A sync
+    // tells the companion's session from Master Chief's by that prompt.
     writeFileSync(
       join(folder, "session-" + number + ".jsonl"),
-      JSON.stringify({ type: "session", id: "session-" + number, timestamp: new Date().toISOString(), cwd: worktree }) + "\\n",
+      [
+        JSON.stringify({ type: "session", id: "session-" + number, timestamp: new Date().toISOString(), cwd: worktree }),
+        JSON.stringify({ type: "message", id: "prompt-" + number, message: { role: "user", content: flag("--spec") ?? "" } }),
+      ].join("\\n") + "\\n",
     );
   }
   reply({ dispatchId: row.dispatchId, taskId: "task_" + number, runId: flag("--run"), terminal: row.terminal, workspace: worktree });

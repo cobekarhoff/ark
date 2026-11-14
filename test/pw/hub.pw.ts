@@ -12018,21 +12018,17 @@ async function companionsPage(options: { orcaDown?: boolean } = {}): Promise<Com
   expect(synced.out).toBe("cortana: started\ngardener: started\n");
   project.list({ ...triggers, quiet: ["criteria.opened"] });
 
-  const sessions = process.env.ARK_OMP_SESSIONS as string;
-  const giveSession = (name: string, text: string) => {
-    const file = join(sessions, "scratch", `${name}.jsonl`);
-    writeFileSync(file, text);
-    const record = join(project.folder, "companions", name, "worker.json");
-    writeFileSync(
-      record,
-      JSON.stringify({
-        ...JSON.parse(readFileSync(record, "utf8")),
-        session: file,
-      }),
+  // The sync recorded each companion's session (the file the fake's worker-start wrote, found by its
+  // prompt). The priced messages the harness would append go to that file.
+  const addMessages = (name: string, text: string) => {
+    const record = JSON.parse(
+      readFileSync(join(project.folder, "companions", name, "worker.json"), "utf8"),
     );
+    expect(record.session, `${name} session recorded by the sync`).toEqual(expect.any(String));
+    appendFileSync(record.session, text.split("\n").slice(1).join("\n"));
   };
   const when = dateOf(testNow() - 60_000);
-  giveSession(
+  addMessages(
     "cortana",
     ompSessionText(project.folder, [
       { time: when, costUsd: 0.25 },
@@ -12058,7 +12054,7 @@ async function companionsPage(options: { orcaDown?: boolean } = {}): Promise<Com
       stopReason: "stop",
     },
   };
-  giveSession(
+  addMessages(
     "gardener",
     ompSessionText(project.folder, [{ time: when, costUsd: 0.5 }]) +
       `${JSON.stringify(unpriced)}\n`,

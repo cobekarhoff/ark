@@ -519,8 +519,9 @@ test("ARK-T662 with an invalid ark.yml the Companions data route answers its err
   expect(await page.text()).toContain('<div id="root"></div>');
 });
 
-test("ARK-T662 with orca down the data route says unavailable, approve and dismiss still write, and ask answers a refusal and sends nothing", async () => {
+test("ARK-T662 with orca down the data route says unavailable, approve and dismiss still write, and ask answers a refusal and sends nothing, where the same ask with orca back answers 200 and sends", async () => {
   const hub = await companionHub();
+  const actingBefore = actingCalls(hub.fake);
   hub.fake.configure({ failAll: true });
 
   const reply: CompanionsReply = await (await fetch(`${hub.baseUrl}/api/companions`)).json();
@@ -535,8 +536,15 @@ test("ARK-T662 with orca down the data route says unavailable, approve and dismi
   const refusal: { error: string } = await ask.json();
   expect(refusal.error).not.toBe("");
   expect(hub.fake.sent()).toEqual([]);
+  // Not even an attempt: the ask found no worker to send to, so Orca never saw a `send`.
+  expect(actingCalls(hub.fake)).toEqual(actingBefore);
   expect((await ownPost(hub, "dismiss", goodBodies.dismiss)).status).toBe(200);
   expect((await ownPost(hub, "approve", goodBodies.approve)).status).toBe(200);
+
+  // Control: the refusal above came from Orca being down, not from this ask or this companion.
+  hub.fake.configure({ failAll: false });
+  expect((await ownPost(hub, "ask", goodBodies.ask)).status).toBe(200);
+  expect(hub.fake.sent()).toHaveLength(1);
 });
 
 // ---------------------------------------------------------------- ARK-284
@@ -1004,7 +1012,7 @@ const transcriptUrl = (baseUrl: string, run: string, file: string, cursor: numbe
 const resultUrl = (baseUrl: string, run: string, file: string, call: string) =>
   `${baseUrl}/api/run/${run}/transcript/result?file=${encodeURIComponent(file)}&call=${encodeURIComponent(call)}`;
 
-test("ARK-T662 with orca down the hub keeps serving, open-in-orca answers 400, the companion routes act on nothing in Orca, and no run file changes", async () => {
+test("ARK-T662 with orca down the hub keeps serving, open-in-orca answers 400 and runs no terminal switch, and no run file changes", async () => {
   isolatedEnvironment();
   const run = `${today()}-ARK-806-1`;
   const directory = writeRun({
@@ -1042,25 +1050,6 @@ test("ARK-T662 with orca down the hub keeps serving, open-in-orca answers 400, t
     ? readFileSync(join(state, "orca.log"), "utf8")
     : "";
   expect(log).not.toContain("terminal switch");
-  // The companion routes take a request from the hub's own page and refuse it here (this project lists no companion): no worker is started or stopped, no message is sent, no task is made.
-  for (const route of companionRoutes) {
-    const refused = await fetch(`${baseUrl}${route}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: baseUrl },
-      body: JSON.stringify({
-        project: "p",
-        name: "cortana",
-        id: "ARK-806",
-        reason: "x",
-        question: "x",
-      }),
-    });
-    expect(Math.floor(refused.status / 100), route).toBe(4);
-  }
-  const logAfter = existsSync(join(state, "orca.log"))
-    ? readFileSync(join(state, "orca.log"), "utf8")
-    : "";
-  expect(logAfter).not.toMatch(/\bsend\b|task-create|worker-start|worker-stop/);
   expect(readFileSync(join(directory, "events.ndjson"), "utf8")).toBe(events);
 });
 
