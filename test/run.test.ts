@@ -598,6 +598,21 @@ test("ARK-T454 ARK-210-AC2 ark escalate outside phase building exits 1 and names
   expect(escalationRefusal.code).toBe(1);
   expect(escalationRefusal.err).toContain("escalation");
   expect(eventTypes(open.directory)).not.toContain("escalation.requested");
+
+  const opened = startRun("demo", "ARK-904");
+  approvePlan(opened.directory);
+  expect(ark("run", "step", opened.runId, "build", "start").code).toBe(0);
+  expect(ark("run", "step", opened.runId, "build", "finish").code).toBe(0);
+  appendEvent(opened.directory, "merge_request.opened", {
+    repo: ".",
+    url: "https://x/pull/1",
+    number: 1,
+  });
+  expect(ark("status", opened.runId).out).toContain("phase: merge_requests_open");
+  const openedRefusal = ark("escalate", opened.runId, "--reason", "x");
+  expect(openedRefusal.code).toBe(1);
+  expect(openedRefusal.err).toContain("merge_requests_open");
+  expect(eventTypes(opened.directory)).not.toContain("escalation.requested");
 });
 
 test("ARK-T455 ARK-210-AC3 one_more_round after ark escalate returns to building and starts round 3", () => {

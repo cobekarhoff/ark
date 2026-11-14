@@ -15,6 +15,8 @@ Prove `ark chief state` prints the Host readings and one `hold new runs:` line t
 
 The CPU reason and its 90 / 90.1 percent boundary are owned by ARK-T365 and ARK-T366. This case uses CPU only as a healthy reading (step 1) and as one crossed reason in the order check (step 3). The memory and swap limits (each crossed only beyond its value) and the single-reason lines are owned by ARK-T187, which reads the same `memoryReasons`.
 
+The `no free-memory reason above the floor` contract (a free-memory reason is never named while free memory is above the floor) is proved by step 1 (healthy host) and step 5 (unreadable reading), the tests that go red when `cli/host.ts` names it; the test of step 3 crosses both limits and cannot catch it.
+
 ## Preconditions
 
 - Temp project and temp `ARK_HOME` with no test lock tickets, and no live Orca (the sections for Orca print their unavailable lines).

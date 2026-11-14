@@ -11,7 +11,7 @@ changed_by: 2026-11-14-ARK-386-1
 
 ## Objective
 
-Prove that closing handed_off keeps a committed branch, removes the worktree and workspace, and prints a kept line. Converted on touch from ARK-294-AC1 by the ARK-386 campaign. Production owner: `cli/worktree.ts worktreeCleanup, handedOffReason`.
+Prove that closing handed_off keeps a committed branch, removes the worktree and workspace, and prints a kept line. The branch has three commits, so the line also proves the plural `3 commits ahead` (the singular is proved by ARK-T610). Converted on touch from ARK-294-AC1 by the ARK-386 campaign. Production owner: `cli/worktree.ts worktreeCleanup, handedOffReason`.
 
 ## Preconditions
 

@@ -886,6 +886,8 @@ describe("ARK-294 handed_off close keeps branches with commits", () => {
   test("ARK-T599 ARK-294-AC1 closing handed_off keeps a committed branch, removes the worktree and workspace, and prints a kept line", () => {
     const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
     commitIn(a, "work.txt");
+    commitIn(a, "second.txt");
+    commitIn(a, "third.txt");
     const commit = gitOutput(a, "rev-parse", "HEAD");
 
     const closed = closeRun(runId, runDirectory, "handed_off");
@@ -894,7 +896,7 @@ describe("ARK-294 handed_off close keeps branches with commits", () => {
     expect(existsSync(a)).toBe(false);
     expect(existsSync(join(runDirectory, "workspace"))).toBe(false);
     expect(closed.out).toContain(
-      `kept     a  ${branch}: handed off, 1 commit ahead of ${base.slice(0, 8)}\n`,
+      `kept     a  ${branch}: handed off, 3 commits ahead of ${base.slice(0, 8)}\n`,
     );
   });
 
