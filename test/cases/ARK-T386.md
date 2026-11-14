@@ -17,15 +17,15 @@ Expected: The ark.yml example of the Ark project in the docs shall list `docs/re
 
 ## Preconditions
 
-- `docs/how-to/bootstrap-a-project.md`, the section that shows the `ark.yml` of the Ark project (`workspace: /Users/you/Dev/abbott/ark`).
+- `docs/reference/cli.md`, the `generated` row of the `ark.yml` fields table, which shows the entry `{ path: docs/reference/cli.md, command: bun scripts/cli-reference.ts }`.
 - A fixture repo, built in the temp dir with real git and a real origin, that holds every tree `cli/ark.ts` imports at the checked-out head: `cli/`, `scripts/`, `skills/`, `hub/` (without its `node_modules`) and `docs/reference/cli.md`; with a `node_modules` symlink to the real one (`cli/ark.ts` needs `typescript/unstable/*`). A `git clone --shared` of the checked-out head is equivalent. `bun scripts/cli-reference.ts` exits 0 in this fixture (about 7 s).
-- The `ark.yml` of the fixture project is the YAML block of the docs example with `workspace` replaced by the fixture path (`validateConfig` refuses a workspace that is not an existing directory); the `generated` list stays verbatim from the docs, not retyped.
+- The `ark.yml` of the fixture project holds the `generated` entry read from that row, not retyped, and a `workspace` that is the fixture path (`validateConfig` refuses a workspace that is not an existing directory).
 - The run's commit changes `cli/ark.ts` (one hunk) and the description of one command in `cli/commands/*.ts`, and regenerates `cli.md` in its own commit. origin's target commits a change to another hunk of `cli/ark.ts` and to the description of a command whose `cli.md` section is adjacent to the run's, and regenerates `cli.md` too. So `cli/ark.ts` and `cli/commands/*.ts` auto-merge and only the generated block of `cli.md` conflicts. Check that a plain `git merge` of the target in the fixture conflicts only in `docs/reference/cli.md`.
 - Timing: the fixture runs the generator four times (run side, target side, the sync, the re-check), about 7 s each plus the copy, near the 30 s `setDefaultTimeout` of `test/sync.test.ts`. The case needs its own test file or a per-test timeout.
 
 ## Steps
 
-1. Read the YAML block of the Ark example in `bootstrap-a-project.md`, parse it, and read its `generated` list. Check that it is accepted by the `ark.yml` validation (the project file loads in the fixture).
+1. Read the `generated` entry from the row of the reference. Check that it is accepted by the `ark.yml` validation (the project file loads in the fixture).
 2. Run `ark worktree sync <run>` in the fixture. Read the exit code, `git log --merges -1 --format=%P`, `git status --porcelain`, `MERGE_HEAD`, the `worktree.synced` event, and `docs/reference/cli.md`. Run `bun scripts/cli-reference.ts` again in the fixture and diff the file.
 
 ## Expected results
