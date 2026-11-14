@@ -20,6 +20,11 @@ export function droppedLines(text: string): string[] {
   });
 }
 
+/** Rules of a `rules.md` file: its list lines (`-` or `*` marker, then text). Headings, prose and blank lines count 0. */
+export function ruleLines(text: string): string[] {
+  return text.split("\n").filter((line) => /^\s*[-*]\s+\S/.test(line));
+}
+
 /** True when `## Run lead decision` has a dropped line for the finding with this title, matched case-insensitively. */
 export function isDropped(text: string, title: string): boolean {
   const wanted = title.trim().toLowerCase();
