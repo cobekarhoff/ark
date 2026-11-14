@@ -150,7 +150,8 @@ test("ARK-T294 ark services install writes and loads one LaunchAgent per service
     )?.[1],
   );
   expect(interval).toBeGreaterThan(0);
-  expect(interval).toBeLessThan(300);
+  const fiveMinutesInSeconds = 300;
+  expect(interval).toBeLessThan(fiveMinutesInSeconds);
   expect(autocommit).not.toContain("--once");
   expect(launchCalls().filter((call) => call.startsWith("load"))).toHaveLength(4);
 

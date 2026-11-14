@@ -1,16 +1,19 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tempGitRepo } from "./helpers";
+
+// ARK-292: bun resets the default timeout per file, so each file sets it.
+setDefaultTimeout(30_000);
 
 const script = join(import.meta.dir, "..", "scripts", "project-autocommit.sh");
 const ignoredDirectories = ["runs", "services", "test-cache", "qe", "audit", "prototypes"];
@@ -21,25 +24,7 @@ interface PassResult {
   err: string;
 }
 
-// The script's own loop sleeps `interval` real seconds: its pass cadence is the behavior under test, so the waits are
-// real. Every wait for a change uses a deadline (`waitFor`); the two fixed waits only watch for something not to happen.
-async function waitFor(condition: () => boolean, milliseconds: number): Promise<boolean> {
-  const deadline = Date.now() + milliseconds;
-  while (Date.now() < deadline) {
-    if (condition()) return true;
-    await Bun.sleep(100);
-  }
-  return condition();
-}
-
-const isAlive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+// An index.lock is held by a real process, and the loop is observed pass by pass: no wall-clock wait (ARK-T126).
 
 // ARK-T663: launchd gives the job only HOME, PATH, ARK_HOME, ARK_PROJECT and TMPDIR, so the test does too.
 test("ARK-T663 project-autocommit.sh makes the project folder a git repository and commits a changed ticket, once per change, without a push, and its loop outlives a failed commit", async () => {
@@ -86,9 +71,11 @@ test("ARK-T663 project-autocommit.sh makes the project folder a git repository a
   /** A real process that holds `<project>/.git/index.lock` with its own pid in it, like a running `git` command. */
   const holdLock = async (directory: string) => {
     const lock = join(directory, ".git", "index.lock");
-    const holder = Bun.spawn(["sh", "-c", `echo $$ > '${lock}'; exec sleep 120`]);
+    const holder = Bun.spawn(["sh", "-c", `echo $$ > '${lock}'; echo ready; exec sleep 120`], {
+      stdout: "pipe",
+    });
     holders.push(holder);
-    expect(await waitFor(() => existsSync(lock) && statSync(lock).size > 0, 5_000)).toBe(true);
+    await holder.stdout.getReader().read();
     const release = () => {
       holder.kill();
       rmSync(lock, { force: true });
@@ -199,31 +186,59 @@ test("ARK-T663 project-autocommit.sh makes the project folder a git repository a
     expect(once("ark", "--once").code).toBe(0);
     expect(commits(project)).toBe(6);
 
-    // 8. The loop survives the held lock, logs it, and commits on a later pass at interval 1.
+    // 8. The loop survives the held lock, logs it, and commits on later passes. A fake `sleep` on PATH stops the loop
+    // between passes and reports its argument on stderr (the interval), so each pass is observed with no wall-clock wait.
     setTicket(project, "todo");
     const loopHeld = await holdLock(project);
-    const log = join(project, "services", "project-autocommit.log");
-    rmSync(log, { force: true });
-    loop = Bun.spawn(["bash", "-c", `exec bash '${script}' '${scratch}' 1 >> '${log}' 2>&1`], {
-      env: environment("ark"),
+    const fakeBin = join(scratch, "bin");
+    mkdirSync(fakeBin);
+    writeFileSync(join(fakeBin, "sleep"), '#!/bin/sh\necho "sleep $1" >&2\nread go\n');
+    chmodSync(join(fakeBin, "sleep"), 0o755);
+    const loopProcess = Bun.spawn(["bash", script, scratch, "1"], {
+      env: { ...environment("ark"), PATH: `${fakeBin}:${process.env.PATH}` },
+      stdin: "pipe",
+      stdout: "ignore",
+      stderr: "pipe",
     });
-    await Bun.sleep(4_000);
-    expect(isAlive(loop.pid)).toBe(true);
-    expect(readFileSync(log, "utf8")).toContain("autocommit failed");
+    loop = loopProcess;
+    const reader = loopProcess.stderr.getReader();
+    let logged = "";
+    /** Reads the loop's stderr until its next call of `sleep`, and returns what the pass wrote before it. */
+    const untilSleep = async () => {
+      const start = logged.length;
+      while (!logged.slice(start).includes("sleep 1\n")) {
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error(`the loop ended: ${logged}`);
+        logged += new TextDecoder().decode(chunk.value);
+      }
+      return logged.slice(start);
+    };
+    const nextPass = async () => {
+      await loopProcess.stdin.write("go\n");
+      await loopProcess.stdin.flush();
+      return untilSleep();
+    };
+    // Pass 1 fails on the lock, logs it, and the loop goes on to sleep the interval.
+    expect(await untilSleep()).toContain("autocommit failed");
+    expect(loopProcess.exitCode).toBeNull();
     expect(commits(project)).toBe(6);
     expect(readFileSync(loopHeld.lock, "utf8").trim()).toBe(String(loopHeld.pid));
+    // Once the lock is gone the next pass commits the ticket.
     loopHeld.release();
-    expect(await waitFor(() => commits(project) === 7, 10_000)).toBe(true);
-    expect(lastFiles(project)).toEqual(["tickets/ARK-1.md"]);
-    expect(isAlive(loop.pid)).toBe(true);
-    await Bun.sleep(3_000);
+    expect(await nextPass()).not.toContain("autocommit failed");
     expect(commits(project)).toBe(7);
+    expect(lastFiles(project)).toEqual(["tickets/ARK-1.md"]);
+    // A pass with no change makes no empty commit.
+    await nextPass();
+    expect(commits(project)).toBe(7);
+    // The same process commits a later change.
     writeFileSync(join(project, "learnings.md"), "# ark learnings\n- from the loop\n");
-    expect(await waitFor(() => commits(project) === 8, 10_000)).toBe(true);
+    await nextPass();
+    expect(commits(project)).toBe(8);
     expect(lastFiles(project)).toEqual(["learnings.md"]);
-    expect(isAlive(loop.pid)).toBe(true);
-    loop.kill();
-    await loop.exited;
+    expect(loopProcess.exitCode).toBeNull();
+    loopProcess.kill();
+    await loopProcess.exited;
 
     // 9. Two passes at the same moment: one commit, a sound repository, no lock left behind.
     setTicket(project, "in_progress");
@@ -274,4 +289,4 @@ test("ARK-T663 project-autocommit.sh makes the project folder a git repository a
     rmSync(scratch, { recursive: true, force: true });
     rmSync(parent, { recursive: true, force: true });
   }
-}, 90_000);
+});
