@@ -10,6 +10,7 @@ import {
   stopHub,
   tempArkHome,
   tempGitRepo,
+  writeFakeCommand,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -845,4 +846,50 @@ test("ARK-T308 two steps started through the current start path each open their 
   } finally {
     await stopHub(hub.process);
   }
+});
+
+// ARK-T569: a process call of this file that stalls fails at its own limit, below the 30 s test timeout above.
+const testTimeoutMs = 30_000;
+
+/** Runs `call` with a shim named `name` first on PATH; returns the message of the error it threw. */
+function stalledWith(name: string, script: string, call: () => unknown): string {
+  const savedPath = process.env.PATH;
+  try {
+    writeFakeCommand(name, script);
+    call();
+  } catch (error) {
+    return (error as Error).message;
+  } finally {
+    process.env.PATH = savedPath;
+  }
+  throw new Error(`the ${name} call returned and threw nothing`);
+}
+
+const limitOf = (message: string): number => Number(message.match(/timed out after (\d+) ms/)?.[1]);
+const stalledGit = "echo shim-git-stderr-marker >&2\nexec sleep 90";
+
+test("ARK-T569 an ark call that stalls fails with its command line and a limit below the test timeout", () => {
+  const message = stalledWith("bun", "exec sleep 90", () => ark("status"));
+  expect(message).toContain("ark status timed out after ");
+  expect(limitOf(message)).toBeGreaterThan(0);
+  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+});
+
+test("ARK-T569 a git call of tempGitRepo that stalls fails with its command line, a limit below the test timeout and its stderr", () => {
+  const message = stalledWith("git", stalledGit, () =>
+    tempGitRepo({ "worker-start-stalled-template.txt": "x\n" }),
+  );
+  expect(message).toContain(" init -q -b main timed out after ");
+  expect(message).toContain("shim-git-stderr-marker");
+  expect(limitOf(message)).toBeGreaterThan(0);
+  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+});
+
+test("ARK-T569 the git status call of snapshotOf that stalls fails with its command line, a limit below the test timeout and its stderr", () => {
+  const worktree = tempGitRepo();
+  const message = stalledWith("git", stalledGit, () => dirtyWorktree(worktree));
+  expect(message).toContain("git status --porcelain");
+  expect(message).toContain("shim-git-stderr-marker");
+  expect(limitOf(message)).toBeGreaterThan(0);
+  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
 });
