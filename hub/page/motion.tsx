@@ -46,7 +46,7 @@ export function useChanges(values: Map<string, string>): ReadonlySet<string> {
 /**
  * A list container: after each render, a child that moved (its place in the container changed)
  * slides from its old place to the new one (FLIP, `flipMs`). Places are relative to the container, so
- * a list that only shifts with the page does not move. Never nest one `Flip` in another. A child with no earlier place (new)
+ * a list that only shifts with the page does not move, and one inside a scaled graph (Fit, 100%) does not move when only the scale changes: places are kept in the container's own pixels. Never nest one `Flip` in another. A child with no earlier place (new)
  * does not animate, nor does anything under reduced motion. The end state is the real layout: no
  * transform is left.
  */
@@ -58,11 +58,16 @@ export function Flip(props: HTMLAttributes<HTMLDivElement>) {
     if (!element) return;
     const next = new Map<Element, { x: number; y: number }>();
     const origin = element.getBoundingClientRect();
+    // Screen pixels per layout pixel: a CSS scale above the container (the graph viewport) is not a move.
+    const scale = element.offsetWidth > 0 ? origin.width / element.offsetWidth : 1;
     for (const child of Array.from(element.children)) {
       // The box includes a slide in flight: take it off, so a re-render mid-slide sees the real place.
       const box = child.getBoundingClientRect();
       const slide = new DOMMatrixReadOnly(getComputedStyle(child).transform);
-      const place = { x: box.left - slide.m41 - origin.left, y: box.top - slide.m42 - origin.top };
+      const place = {
+        x: (box.left - origin.left) / scale - slide.m41,
+        y: (box.top - origin.top) / scale - slide.m42,
+      };
       next.set(child, place);
       const old = places.current.get(child);
       // Under half a pixel is layout rounding, not a move.

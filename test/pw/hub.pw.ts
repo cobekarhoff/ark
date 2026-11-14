@@ -11125,6 +11125,20 @@ test("ARK-T362 The repo graph uses the graph controls and the motion of the othe
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await controls.actual.click(); // cards and steps at full size for the rest
+  // A new render after a scale change moves nothing: no card or step slides because the zoom changed.
+  await push(page, first);
+  await frames(page, 2);
+  expect(
+    await page.evaluate(
+      () =>
+        document
+          .getAnimations()
+          .filter(
+            (animation) =>
+              !(animation instanceof CSSAnimation || animation instanceof CSSTransition),
+          ).length,
+    ),
+  ).toBe(0);
 
   // The running step pulses, and the edge into its repo flows, each for a few cycles and not for ever.
   await page.waitForFunction(() => document.querySelectorAll(".rstep.s-running").length === 1);
