@@ -4,9 +4,9 @@ title: ARK-T386 the ark.yml example of the Ark project in the docs lists docs/re
 level: integration
 technique: use case (the documented entry run against the real generator)
 priority: high
-risk: "the documented example does not name the file or the command, so the project ark.yml copied from the docs never regenerates and every cli.md conflict still starts a merge worker; the documented entry is not valid for ark.yml; the command fails or reads the wrong tree when it runs mid-merge, so the generated block is stale or empty"
+risk: "the documented example does not name the file or the command, so the project ark.yml copied from the docs never regenerates and every cli.md conflict still starts a merge worker; the documented entry is not valid for ark.yml; the command fails or reads the wrong tree when it runs mid-merge, so the generated block is stale or empty; the fixture directories have no node_modules of their own and the test passes only when Bun can auto-install typescript from the registry, so it fails on the CI runner with a missing module and passes on a rerun"
 status: active
-changed_by: 2026-11-13-ARK-371-1
+changed_by: 2026-11-14-ARK-475-1
 ---
 
 ## Objective
@@ -18,7 +18,8 @@ Expected: The ark.yml example of the Ark project in the docs shall list `docs/re
 ## Preconditions
 
 - `docs/reference/cli.md`, the `generated` row of the `ark.yml` fields table, which shows the entry `{ path: docs/reference/cli.md, command: bun scripts/cli-reference.ts }`.
-- A fixture repo, built in the temp dir with real git and a real origin, that holds every tree `cli/ark.ts` imports at the checked-out head: `cli/`, `scripts/`, `skills/`, `hub/` (without its `node_modules`) and `docs/reference/cli.md`; with a `node_modules` symlink to the real one (`cli/ark.ts` needs `typescript/unstable/*`). A `git clone --shared` of the checked-out head is equivalent. `bun scripts/cli-reference.ts` exits 0 in this fixture (about 7 s).
+- A fixture repo, built in the temp dir with real git and a real origin, that holds every tree `cli/ark.ts` imports at the checked-out head: `cli/`, `scripts/`, `skills/`, `hub/` (without its `node_modules`) and `docs/reference/cli.md`; with a `node_modules` symlink to the real one (`cli/ark.ts` needs `typescript/unstable/*`) in each directory that runs the generator: the workspace, the worktree and the origin clone. The link is ignored by git (a fixture `.gitignore` in the base commit), so it is never committed, pushed, merged or shown in `git status`. A `git clone --shared` of the checked-out head is equivalent. `bun scripts/cli-reference.ts` exits 0 in this fixture (about 7 s).
+- A CI-like environment for every generator run: `BUN_CONFIG_REGISTRY` points at an unreachable URL (for example `http://127.0.0.1:9`) and `BUN_INSTALL_CACHE_DIR` is a new empty temp directory, so Bun cannot auto-install `typescript` and the only source of it is the `node_modules` link. Without the link the test fails with a missing module `typescript`; this is the red baseline.
 - The `ark.yml` of the fixture project holds the `generated` entry read from that row, not retyped, and a `workspace` that is the fixture path (`validateConfig` refuses a workspace that is not an existing directory).
 - The run's commit changes `cli/ark.ts` (one hunk) and the description of one command in `cli/commands/*.ts`, and regenerates `cli.md` in its own commit. origin's target commits a change to another hunk of `cli/ark.ts` and to the description of a command whose `cli.md` section is adjacent to the run's, and regenerates `cli.md` too. So `cli/ark.ts` and `cli/commands/*.ts` auto-merge and only the generated block of `cli.md` conflicts. Check that a plain `git merge` of the target in the fixture conflicts only in `docs/reference/cli.md`.
 - Timing: the fixture runs the generator four times (run side, target side, the sync, the re-check), about 7 s each plus the copy, near the 30 s `setDefaultTimeout` of `test/sync.test.ts`. The case needs its own test file or a per-test timeout.
@@ -31,7 +32,7 @@ Expected: The ark.yml example of the Ark project in the docs shall list `docs/re
 ## Expected results
 
 - Step 1: the list holds the entry `path: docs/reference/cli.md`, `command: bun scripts/cli-reference.ts`, and the validation accepts it.
-- Step 2: exit 0; the head is a merge commit of the earlier head and the target tip; `cli.md` has no conflict marker and holds both description changes (the generated block follows the merged `cli/commands/`); a second run of the generator changes nothing; the tree is clean; the event has `conflict: false` and `target_commit`; `cli/ark.ts` was auto-merged, not listed, and not regenerated.
+- Step 2: exit 0; the head is a merge commit of the earlier head and the target tip; `cli.md` has no conflict marker and holds both description changes (the generated block follows the merged `cli/commands/`); a second run of the generator changes nothing; the tree is clean (the `node_modules` link is not listed); the event has `conflict: false` and `target_commit`; `cli/ark.ts` was auto-merged, not listed, and not regenerated; the merge conflicts in no path other than `docs/reference/cli.md` (the link and `.gitignore` add no conflict). This holds with the unreachable registry and the empty install cache, and in 20 consecutive runs.
 
 ## Screenshot checkpoints
 
