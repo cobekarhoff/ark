@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, beforeEach, expect, onTestFinished, setDefaultTimeout, test } from "bun:test";
 import {
   chmodSync,
   copyFileSync,
@@ -1337,8 +1337,29 @@ test(
     expect(generated).toEqual([
       { path: "docs/reference/cli.md", command: "bun scripts/cli-reference.ts" },
     ]);
+    // CI-like: Bun cannot auto-install a missing package from a registry or a cache.
+    // process.env, because `ark worktree sync` runs the generated command with it too.
+    const ciEnvironment = {
+      BUN_CONFIG_REGISTRY: "http://127.0.0.1:9",
+      BUN_INSTALL_CACHE_DIR: mkdtempSync(join(tmpdir(), "ark-sync-bun-cache-")),
+    };
+    const savedEnvironment = Object.fromEntries(
+      Object.keys(ciEnvironment).map((key) => [key, process.env[key]]),
+    );
+    Object.assign(process.env, ciEnvironment);
+    onTestFinished(() => {
+      for (const [key, value] of Object.entries(savedEnvironment)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
 
+    // Every directory that runs the generator needs `typescript` (cli/test-audit.ts) and the
+    // registry is unreachable: link the repo's node_modules, as test/tooling.test.ts does.
     const generate = (directory: string) => {
+      const dependencies = join(directory, "node_modules");
+      if (!existsSync(dependencies))
+        symlinkSync(join(repositoryRoot, "node_modules"), dependencies);
       const result = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: directory });
       if (result.exitCode !== 0) throw new Error(result.stderr.toString());
     };
@@ -1373,6 +1394,9 @@ test(
         mkdirSync(dirname(join(workspace, file)), { recursive: true });
         copyFileSync(join(repositoryRoot, file), join(workspace, file));
       }
+      // Without the trailing slash the pattern also ignores the symlink. It is in the base commit,
+      // so the run, the clone and the merge all agree on it.
+      writeFileSync(join(workspace, ".gitignore"), "node_modules\n");
       generate(workspace);
       git(workspace, "add", "-A");
       git(workspace, "commit", "-m", "ark tree");
