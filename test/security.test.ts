@@ -692,6 +692,8 @@ test("ARK-T402 a vulnerability with no severity blocks when it is a malicious-pa
   ]);
   const unscored = openMergeRequest();
   expect(unscored.code, said(unscored)).toBe(0);
+  const listedRow = rowWith(section(bodyOf(created()[0]), "Security"), "GHSA-nnnn-5555-6666");
+  expect(listedRow).toContain("left-pad");
 
   const { repositories } = setup({ commits: commitLockfile });
   osvReports(headLockfile, [

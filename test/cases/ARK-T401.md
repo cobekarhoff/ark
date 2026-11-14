@@ -34,6 +34,7 @@ Prove that `ark merge-request open` runs gitleaks on the commits the run branch 
 8. No bypass from the run branch or the worktree. Six run states, each with the marker on line 12 of `src/config.ts`: one with `# gitleaks:allow` on the marker line, one that also commits `.gitleaks.toml` with an `[allowlist]` of `paths = ["src/config.ts"]`, one followed by a commit of `.gitleaksignore` holding the secret's fingerprint, one with that `.gitleaksignore` left untracked in the worktree, and two that commit `.gitattributes` with `src/config.ts -diff` or `src/config.ts binary` beside the marker. For each, assert a non-zero exit naming the finding and nothing shipped.
 9. Base policy. The base holds a `.gitleaks.toml` that allowlists `src/legacy.ts`; the run commits the marker in that file. Assert exit 0 and one `create` call: the allowlist of the base stays in force.
 10. Unknown base. The run records a base that is not in the object store (40 zeros). Run `ark run close <run> handed_off`. With a marker in the history, assert a non-zero exit naming the finding and no `run.closed` event; with a clean history, assert exit 0 and a `run.closed` event: an unknown base scans the whole first-parent history of HEAD and does not refuse by itself.
+11. Final stage. With a marker on the run branch, run `ark merge-request check <run> --stage final`. Assert exit 1, the finding named as `open` names it, no sentinel in the output, and nothing shipped; the same finding comes from `ark merge-request open`.
 
 ## Expected results
 
@@ -42,6 +43,7 @@ Prove that `ark merge-request open` runs gitleaks on the commits the run branch 
 - When a secret sits only in a commit before the base or in a commit merged in from the target, the system shall not refuse.
 - When a merge commit adds a secret in its conflict resolution, the system shall refuse and name the merge commit.
 - When the MR is already open, the system shall run the scan again on each call, and refuse before any push or edit of the MR.
+- When `ark merge-request check --stage final` is called, the system shall refuse with the same finding and ship nothing.
 - When `ark run close <run> handed_off` is called, the system shall refuse the same way and leave the run open.
 - A `gitleaks:allow` comment, a `.gitleaks.toml`, a `.gitleaksignore` (committed or untracked) or a `-diff` or `binary` attribute of `.gitattributes` in the run branch shall not hide a secret; only the `.gitleaks.toml` of the base applies.
 
