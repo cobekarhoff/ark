@@ -68,6 +68,8 @@ function buildingRun(options: {
   kind?: string;
   /** Gives each suite `base_files` that match no test file, so only a refactor run (the whole base) runs it at the base. */
   selectiveBase?: boolean;
+  /** Extra fields for one suite, by suite name (for example `base_files` on the e2e suite only). */
+  suiteOverrides?: Record<string, Record<string, unknown>>;
   checks?: { name: string; repo: string; command: string }[];
   /** Give the repo a GitHub origin whose pushes go to a local bare repo, so `merge-request open` can run against the fake `gh`. */
   forge?: boolean;
@@ -108,7 +110,7 @@ function buildingRun(options: {
     ].map((suite) =>
       options.selectiveBase
         ? { ...suite, base_files: "nomatch/*.test.ts", base_command: `${suite.command} # {files}` }
-        : suite,
+        : { ...suite, ...options.suiteOverrides?.[suite.name] },
     ),
     roles,
   });
@@ -927,6 +929,36 @@ describe("ark test verified_by join", () => {
     const skipped = ark("test", fixture(true).runId, "--quick");
     expect(skipped.out).toMatch(/criterion {2}FAKE-1\/AC1 {2}not run .*FAKE-T2 not run/);
     expect(skipped.out).not.toContain("no test title starts with");
+  });
+
+  test("ARK-T388 ark test --quick prints no missing hint when the suite ran only the own-commit files", () => {
+    // The e2e suite has base_files: a quick run runs only the own-commit file e2e.test.ts. FAKE-T1 passes in other.test.ts, a file of the same suite that the quick run does not select.
+    const suiteCommand = "bun test --reporter=junit --reporter-outfile={report}";
+    const { runId, runDirectory } = buildingRun({
+      criteria: ["FAKE-1/AC1"],
+      ticketCriteria: [{ id: "AC1", verified_by: ["FAKE-T1"] }],
+      testCases: [addCase("FAKE-T1", "e2e")],
+      e2e: [passing("unrelated test")],
+      e2eCommand: `${suiteCommand} ./e2e.test.ts ./other.test.ts`,
+      suiteOverrides: {
+        e2e: { base_files: "e2e.test.ts", base_command: `${suiteCommand} {files}` },
+      },
+    });
+    const mirror = join(runDirectory, "workspace");
+    writeFileSync(join(mirror, "other.test.ts"), suiteTests([passing("FAKE-T1 passes")]));
+    writeFileSync(
+      join(mirror, "e2e.test.ts"),
+      suiteTests([passing("unrelated test"), passing("changed own-commit test")]),
+    );
+    Bun.spawnSync(["git", "-C", mirror, "add", "-A"]);
+    Bun.spawnSync(["git", "-C", mirror, "commit", "-q", "-m", "own test files"]);
+
+    const quick = ark("test", runId, "--quick");
+    expect(quick.out).toMatch(/criterion {2}FAKE-1\/AC1 {2}not run .*via FAKE-T1 missing/);
+    expect(quick.out).not.toContain("no test title starts with");
+
+    const full = ark("test", runId);
+    expect(full.out).toMatch(/criterion {2}FAKE-1\/AC1 {2}passing .*via FAKE-T1 passed/);
   });
 });
 
