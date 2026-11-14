@@ -107,7 +107,7 @@ An AC with no `verified_by` needs no test evidence.
 
 - A non-manual AC is not `passing` in the last `test.completed`.
 - A manual AC has no `ok` answer.
-- A repo head changed since the last test.
+- A repo head changed since the last test. A clean `ark worktree sync` merge does not change it; a merge that regenerated a `generated` file does, so run `ark test` again.
 - A branch does not merge cleanly (`ark merge-request open` only). Ark runs `git fetch origin` and `git merge-tree --write-tree HEAD origin/<target>` in each repo it pushes (a new MR or an open one it refreshes), before any push. The message names the repo and `--merge`, and nothing is pushed for any repo. After the merge step fixes the branch, the same command passes with no new `ark worktree sync`.
 - A counted string in an AC is in no tracked file. See below.
 - A `not:` string is still in a tracked file. See below.
