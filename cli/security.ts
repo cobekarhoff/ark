@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { ArkError } from "./errors.ts";
@@ -262,8 +262,10 @@ export function securityScan(
   const rows = new Map<string, string[]>();
   const refusals: string[] = [];
   try {
+    // ponytail: a worktree directory that is already gone (a handed_off run whose branch stays in the clone) is not scanned; scan the branch in the clone if that gap matters
     const scanned = repos.filter(
       ({ path, base }) =>
+        existsSync(path) &&
         Number(spawn(["git", "rev-list", "--count", `${base}..HEAD`], path).stdout) > 0,
     );
     for (const { repo, path, base } of scanned) {
