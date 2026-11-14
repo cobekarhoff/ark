@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events.ts";
-import { loadConfig, mergeRequestsMode } from "./config.ts";
+import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { findRun } from "./paths.ts";
 import { loadPlan, repoGraph, type Plan, type PlanRepoEdge } from "./plan.ts";
 import {
@@ -203,19 +203,75 @@ function currentHeads(events: ArkEvent[]): Map<string, string> {
   return heads;
 }
 
-/** Repos whose worktree head differs from the head the last test.completed event recorded. */
-export function staleHeads(
+/**
+ * The newest target commit that `tested` reached by clean `ark worktree sync` merges only, else undefined. Each commit
+ * of the first-parent chain `tested..current` has exactly two parents, its second parent is on origin/<target>, and its
+ * tree is what `git merge-tree` makes of its two parents. Any other shape, a git failure and a git older than 2.38
+ * (no `merge-tree --write-tree`) read as not clean, so the caller keeps the head stale and never throws.
+ */
+function cleanSyncMerged(
+  path: string,
+  tested: string,
+  current: string,
+  target: string,
+): string | undefined {
+  const chain = spawn(
+    ["git", "rev-list", "--first-parent", "--parents", `${tested}..${current}`],
+    path,
+  );
+  if (!chain.ok || chain.stdout === "") return undefined;
+  const commits = chain.stdout.split("\n").map((line) => line.split(" "));
+  // The oldest commit hangs off the tested head: a tested head off the first-parent chain is stale.
+  if (commits.at(-1)?.[1] !== tested) return undefined;
+  for (const [commit, firstParent, secondParent, ...otherParents] of commits) {
+    if (secondParent === undefined || otherParents.length > 0) return undefined;
+    if (!spawn(["git", "merge-base", "--is-ancestor", secondParent, `origin/${target}`], path).ok)
+      return undefined;
+    const merged = spawn(["git", "merge-tree", "--write-tree", firstParent, secondParent], path);
+    const tree = spawn(["git", "rev-parse", `${commit}^{tree}`], path);
+    if (!merged.ok || !tree.ok || merged.stdout.split("\n")[0] !== tree.stdout) return undefined;
+  }
+  return commits[0][2];
+}
+
+/** A repo whose head moved from the tested head only by clean `ark worktree sync` merges of origin/<target>. */
+export type CleanSync = { repo: string; tested: string; target: string; merged: string };
+
+/** The repos whose worktree head differs from the head the last test.completed event recorded, split into clean syncs and stale heads. */
+function headChanges(
   events: ArkEvent[],
-  heads: Map<string, string> = currentHeads(events),
-): StaleHead[] {
+  config: ProjectConfig | undefined,
+  heads: Map<string, string>,
+): { stale: StaleHead[]; cleanSyncs: CleanSync[] } {
+  const changes: { stale: StaleHead[]; cleanSyncs: CleanSync[] } = { stale: [], cleanSyncs: [] };
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
-  if (lastTest === undefined) return [];
-  const stale: StaleHead[] = [];
+  if (lastTest === undefined) return changes;
+  const worktrees = worktreeMap(events);
   for (const [repo, current] of heads) {
     const tested: string | undefined = lastTest.data.heads?.[repo];
-    if (tested !== current) stale.push({ repo, tested, current });
+    if (tested === current) continue;
+    let cleanSync: CleanSync | undefined;
+    try {
+      const path = worktrees.get(repo)!.path;
+      const target = targetBranch(path, config && repoBase(config, repo));
+      const merged = tested && cleanSyncMerged(path, tested, current, target);
+      if (merged) cleanSync = { repo, tested: tested!, target, merged };
+    } catch {
+      // no origin or no target branch: nothing to merge from, so the head is stale
+    }
+    if (cleanSync) changes.cleanSyncs.push(cleanSync);
+    else changes.stale.push({ repo, tested, current });
   }
-  return stale;
+  return changes;
+}
+
+/** Repos whose worktree head differs from the head the last test.completed event recorded, unless only clean sync merges moved it. */
+export function staleHeads(
+  events: ArkEvent[],
+  config: ProjectConfig | undefined,
+  heads: Map<string, string> = currentHeads(events),
+): StaleHead[] {
+  return headChanges(events, config, heads).stale;
 }
 
 function worktreeMap(events: ArkEvent[]): Map<string, Worktree> {
@@ -230,7 +286,8 @@ const localId = (criterionId: string): string => criterionId.split("/").pop()!;
 
 /**
  * The evidence refusals: a non-test AC needs a well-formed `results/evidence/<AC id>.md`; each case in the
- * `verified_by` of a `test` AC needs `base/` and `head/` folders, and the head SHA must be the current head of the repo that ran the case.
+ * `verified_by` of a `test` AC needs `base/` and `head/` folders, and the head SHA must be the current head of the repo that ran the case
+ * (the tested head for a repo that is not in `currentHeadOf`: a clean sync moved its head, see `cleanSyncMerged`).
  * One line for each missing or bad item, so the refusal names every AC.
  */
 function evidenceProblems(
@@ -282,6 +339,7 @@ function evidenceProblems(
 /**
  * The refusals shared by `ark merge-request open` and `ark run close <run> handed_off`: the test result, the
  * manual and non-manual ACs, the head of every repo, the AC strings, and the `perf` and `refactor` rules.
+ * Returns the head of each repo and the repos whose head moved from the tested head only by clean sync merges.
  */
 export function assertShippable(
   runId: string,
@@ -289,7 +347,7 @@ export function assertShippable(
   directory: string,
   events: ArkEvent[],
   state: RunState,
-): Map<string, string> {
+): { heads: Map<string, string>; cleanSyncs: CleanSync[] } {
   const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
   if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
   if (lastTest.data.mode === "quick")
@@ -321,7 +379,8 @@ export function assertShippable(
   if (!lastTest.data.passed)
     throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
   const heads = currentHeads(events);
-  const [first] = staleHeads(events, heads);
+  const { stale, cleanSyncs } = headChanges(events, loadConfig(project), heads);
+  const [first] = stale;
   if (first !== undefined) {
     throw new ArkError(
       `repo ${first.repo} changed since the last test run (tested ${first.tested?.slice(0, 8) ?? "nothing"}, now ${first.current.slice(0, 8)}): run ark test ${runId} again`,
@@ -349,10 +408,14 @@ export function assertShippable(
       `refactor run: the suites ${state.base_passed === false ? "fail" : "were not run"} at the base commit: run ark test ${runId}`,
     );
 
-  const evidence = evidenceProblems(directory, lastTest, heads);
+  // A clean sync moved the head, not the tested code: its evidence still names the tested head.
+  const evidenceHeads = new Map(
+    [...heads].filter(([repo]) => !cleanSyncs.some((sync) => sync.repo === repo)),
+  );
+  const evidence = evidenceProblems(directory, lastTest, evidenceHeads);
   if (evidence.length > 0)
     throw new ArkError(`refused: evidence is not complete\n${evidence.join("\n")}`);
-  return heads;
+  return { heads, cleanSyncs };
 }
 
 /**
@@ -375,7 +438,7 @@ export function mergeRequestOpen(
     throw new ArkError(`cannot open merge requests while the run is in phase ${state.phase}`);
   }
 
-  const heads = assertShippable(runId, project, directory, events, state);
+  const { heads, cleanSyncs } = assertShippable(runId, project, directory, events, state);
 
   const ledger = buildLedger({ runFolder: directory, heads: Object.fromEntries(heads) });
   const worktrees = worktreeMap(events);
@@ -445,6 +508,10 @@ export function mergeRequestOpen(
     }
   }
   if (refusals.length > 0) throw new ArkError(refusals.join("\n"));
+  for (const { repo, tested, target, merged } of cleanSyncs)
+    console.log(
+      `head of ${repo} moved from the tested ${tested.slice(0, 8)} only by a clean merge of origin/${target} ${merged.slice(0, 8)}: no new test needed`,
+    );
 
   // The title of the MRs this call creates, before any push: a title the rule refuses must not leave a pushed
   // branch. An open MR keeps its title, so a refresh needs none.
