@@ -1055,8 +1055,7 @@ test("ARK-T662 with orca down the hub keeps serving, open-in-orca answers 400, t
         question: "x",
       }),
     });
-    expect(refused.status, route).toBeGreaterThanOrEqual(400);
-    expect(refused.status, route).toBeLessThan(500);
+    expect(Math.floor(refused.status / 100), route).toBe(4);
   }
   const logAfter = existsSync(join(state, "orca.log"))
     ? readFileSync(join(state, "orca.log"), "utf8")

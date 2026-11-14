@@ -12123,7 +12123,7 @@ const refsOf = (list: Locator) =>
 test("ARK-T660 the Companions page lists a row for each companion with state, last wake, trigger and cost, the proposed tickets and ideas under them, and agent text stays text", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   const { baseUrl } = await companionsPage();
   const writes = watchWrites(page);
 
@@ -12212,7 +12212,7 @@ test("ARK-T660 the Companions page lists a row for each companion with state, la
 test("ARK-T660 with no companions key in ark.yml the page says so and has no table", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   const bare = companionsProject();
   bare.list(undefined);
   await open(page, await launch(), "companions");
@@ -12225,7 +12225,7 @@ test("ARK-T660 with no companions key in ark.yml the page says so and has no tab
 test("ARK-T660 with only quiet listed its row is not running, has no wake and an unknown cost, and has nothing under it", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   const only = companionsProject();
   only.list({ quiet: ["criteria.opened"] });
   await open(page, await launch(), "companions");
@@ -12242,7 +12242,7 @@ test("ARK-T660 with only quiet listed its row is not running, has no wake and an
 test("ARK-T660 with Orca failing every row says unavailable, not stopped, Ask is off and Approve and Dismiss stay on", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   const { baseUrl } = await companionsPage({ orcaDown: true });
   await open(page, baseUrl, "companions");
   await expect(page.getByTestId("companion-row")).toHaveCount(3);
@@ -12266,7 +12266,7 @@ test("ARK-T660 with Orca failing every row says unavailable, not stopped, Ask is
 test("ARK-T660 Approve sets only the clicked ticket to ready, shows approved at once, queues nothing and sends one POST", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   const { project, baseUrl, ticketFile } = await companionsPage();
   const writes = watchWrites(page);
   await open(page, baseUrl, "companions");
@@ -12292,7 +12292,7 @@ test("ARK-T660 Approve sets only the clicked ticket to ready, shows approved at 
 test("ARK-T660 Dismiss refuses an empty reason on the form, then writes the ticket or the idea with its reason and time to dismissed.md, and a reload offers no action on either", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   const { project, baseUrl } = await companionsPage();
   const writes = watchWrites(page);
   const dismissedFile = join(project.folder, "companions", "cortana", "dismissed.md");
@@ -12340,7 +12340,7 @@ test("ARK-T660 Dismiss refuses an empty reason on the form, then writes the tick
 test("ARK-T660 Ask from a ticket and from an idea sends one message each to the worker with the question and the item, and with Orca failing the form shows the refusal and sends nothing", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   const { project, baseUrl } = await companionsPage();
   const writes = watchWrites(page);
   await open(page, baseUrl, "companions");
@@ -12378,7 +12378,7 @@ test("ARK-T660 Ask from a ticket and from an idea sends one message each to the 
 test("ARK-T660 a reason or question of 400 four-byte characters is accepted whole, and one of 401 is refused on the form with the limit named and nothing sent", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.slow();
   const { project, baseUrl } = await companionsPage();
   const bodies: Buffer[] = [];
   page.on("request", (request) => {
