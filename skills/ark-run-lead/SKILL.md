@@ -1,6 +1,6 @@
 ---
 name: ark-run-lead
-description: Run lead for one run: plans the work, starts one worker per step, judges what the workers find and opens the MRs. Use when Master Chief starts a run lead with /skill:ark-run-lead <run>. It writes no product code and never answers a gate for the human.
+description: "Run lead for one run: plans the work, starts one worker per step, judges what the workers find and opens the MRs. Use when Master Chief starts a run lead with /skill:ark-run-lead <run>. It writes no product code and never answers a gate for the human."
 ---
 
 # Ark run lead

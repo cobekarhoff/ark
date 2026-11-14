@@ -33,7 +33,7 @@ Amber is you. Teal is an agent. Grey is the `ark` command. Merging is not a gate
 
 ## Before you start
 
-- **Ark installed.** Follow the install steps in the [README](../../README.md). `bun link` puts the `ark` command on your PATH, and `omp plugin link .` makes `/skill:ark` available in OMP. Check with `ark --help`.
+- **Ark installed.** Follow the install steps in the [README](../../README.md). `bun link` puts the `ark` command on your PATH, and `omp plugin link .` makes the Ark skills available in OMP (`/skill:ark-chief`, `/skill:ark-bootstrap` and the others). Check with `ark --help`.
 - **OMP.** `/skill:ark-chief` is OMP syntax. Start your agent with `omp` in an Orca terminal.
 - **Orca.** Orca runs, and Settings → Orchestration → Nested worker depth is 2. Ark needs this so Master Chief can start run leads and run leads can start workers.
 - **A bootstrapped project.** Do [Bootstrap a project](bootstrap-a-project.md) once. It writes `~/.ark/projects/<project>/ark.yml`.

@@ -1,6 +1,6 @@
 ---
 name: ark-evaluator
-description: Check a ticket before the run lead plans: probe its ACs read-only and write evaluation.md with blockers, risks and surfaces. Use when the run lead starts the evaluator worker with /skill:ark-evaluator <run>. It edits no product code.
+description: "Check a ticket before the run lead plans: probe its ACs read-only and write evaluation.md with blockers, risks and surfaces. Use when the run lead starts the evaluator worker with /skill:ark-evaluator <run>. It edits no product code."
 ---
 
 # Ark evaluator

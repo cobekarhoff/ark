@@ -12,7 +12,7 @@ This page covers two cases:
 You need:
 
 - The Orca desktop app, running, and its `orca` CLI on your PATH. Master Chief must run inside an Orca terminal. Ark runs `orca repo list` and `orca orchestration ...` for you.
-- [Bun](https://bun.sh), [OMP](https://omp.sh) and `git`. Ark is set up as in the [README](../../README.md): `bun link` puts `ark` on your PATH, and `omp plugin link .` makes `/skill:ark` available in OMP.
+- [Bun](https://bun.sh), [OMP](https://omp.sh) and `git`. Ark is set up as in the [README](../../README.md): `bun link` puts `ark` on your PATH, and `omp plugin link .` makes the Ark skills available in OMP (`/skill:ark-chief`, `/skill:ark-bootstrap` and the others).
 - `jq`. The [background services](background-services.md) need it.
 - Any other harness your roles use, such as `claude` or `codex`.
 - For a project with several repos that run together, Docker with Docker Compose.
