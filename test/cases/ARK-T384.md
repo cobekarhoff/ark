@@ -32,6 +32,7 @@ Expected: When `ark worktree sync` finds conflicts only in paths listed under `g
 2. Reset the fixture to the conflicting state and run the sync with each variant command (`true`, `false`, `sh gen.sh && echo x > other.txt`, `sh gen.sh && echo x >> src.txt`). After each, read the exit code, the message, `git rev-parse HEAD` against the head before the sync, `git status --porcelain`, `MERGE_HEAD`, and the `worktree.synced` event.
 3. Run the sync in the repo with the untracked `new.txt` clash, and read the same observables, plus whether the marker file `gen-ran` exists in the worktree and the `worktree.synced` event.
 4. Run `ark status` with each invalid `generated` entry, and read the exit code and the message.
+5. Reset the fixture to the conflicting state with `command: sh gen.sh && touch gen-ran`, write `UNCOMMITTED WORK` into the tracked, unrelated `notes/a.md` without staging it, and run the sync. Read the exit code, `notes/a.md`, `HEAD`, `MERGE_HEAD`, `gen-ran` and the `worktree.synced` event.
 
 ## Expected results
 
@@ -39,6 +40,8 @@ Expected: When `ark worktree sync` finds conflicts only in paths listed under `g
 - Step 2: for each variant the exit code is 1; the merge is aborted: no new commit (`HEAD` equals the head before the sync), no `MERGE_HEAD`, and the tracked files and the index are as before the sync (`GEN.txt` is back to its pre-sync content); the message names the repo and the target. The event has `conflict: true` and no `target_commit`; the repo is in `sync_conflicts`. An untracked file the command wrote (`other.txt` in the third variant) stays, and so do the symlink and `scratch.txt`: the sync never runs `git clean`, so the worktree's own untracked files are never touched. The command that writes a new unlisted file (`other.txt`) and the one that modifies a tracked unlisted file (`src.txt`) each make the tree dirty, so the sync aborts for them, while the untracked entries held before the sync alone never do. A conflict marker left in a listed path is refused even though the command exits 0.
 - Step 3: exit 1; the message names the repo and the target; `HEAD` equals the head before the sync, no merge commit, no `MERGE_HEAD`, and `GEN.txt` still holds its hand-edited content; the marker file `gen-ran` is absent (the command did NOT run: an empty unmerged list never counts as 'only listed paths'), and the tracked files and the index are as before. The event has `conflict: true`, no `target_commit`, and no `conflicts` key (or an empty one: no path conflicted); the repo is in `sync_conflicts`.
 - Step 4: the command exits non-zero and the message names the `generated` field and the entry: an empty `path`, an empty `command` and a duplicate `path` are each refused before any sync runs.
+- Step 5: exit 1 as with no `generated` key; the sync took the plain abort (no command ran, `gen-ran` absent): `notes/a.md` still holds `UNCOMMITTED WORK`, `HEAD` equals the head before the sync, no `MERGE_HEAD`. The event has `conflict: true`, no `target_commit` and `conflicts: ["GEN.txt"]`; the repo is in `sync_conflicts`. A reset to the head before the sync would wipe the edit, so the sync must not regenerate when a tracked path outside the conflict is already modified.
+- Step 1 also: the message of the merge commit has no `# Conflicts:` line.
 
 ## Screenshot checkpoints
 

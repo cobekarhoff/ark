@@ -561,7 +561,7 @@ function regenerateConflicts(
   ];
   if (changed.length > 0)
     return fail(`the commands changed files outside the generated paths: ${changed.join(", ")}`);
-  const committed = Bun.spawnSync(["git", "-C", path, "commit", "--no-edit"]);
+  const committed = Bun.spawnSync(["git", "-C", path, "commit", "--no-edit", "--cleanup=strip"]);
   if (committed.exitCode !== 0)
     return fail(
       `git commit failed: ${committed.stdout.toString().trim()}${committed.stderr.toString().trim()}`,
@@ -610,8 +610,15 @@ export function worktreeSync(runId: string, inProject?: string): void {
     // read before any abort or reset: the index holds the unmerged paths only until then
     const conflicted = merged.exitCode === 0 ? [] : unmergedPaths(worktree.path);
     const generated = config.generated ?? [];
+    // a tracked edit outside the conflict predates the sync: the reset of a failed regeneration would wipe it, so take the plain abort
+    const editedOutside =
+      conflicted.length > 0 &&
+      git(worktree.path, "diff", "--name-only", "-z")
+        .split("\0")
+        .some((file) => file !== "" && !conflicted.includes(file));
     const regenerable =
       conflicted.length > 0 &&
+      !editedOutside &&
       conflicted.every((file) => generated.some((entry) => entry.path === file));
     const regenerationFailure = regenerable
       ? regenerateConflicts(worktree, generated, conflicted, headBefore)

@@ -1138,6 +1138,8 @@ test("ARK-T384 a merge that conflicts only in a generated path is regenerated, c
   expect(synced.err).toContain("sh gen.sh");
   expect(git(worktree, "log", "-1", "--format=%P")).toBe(`${headBefore} ${scenario.tip}`);
   expect(hasMergeHead(worktree)).toBe(false);
+  // git's default message lists the conflicted paths as `# Conflicts:` comments
+  expect(git(worktree, "log", "-1", "--format=%B")).not.toContain("# Conflicts:");
   expect(readFileSync(join(worktree, "GEN.txt"), "utf8")).not.toContain("<<<<<<<");
   expect(readFileSync(join(worktree, "src.txt"), "utf8")).toBe("run\ns2\ns3\ns4\ns5\norigin\n");
   // untracked entries that were there before the sync neither block the commit nor change
@@ -1215,6 +1217,27 @@ test("ARK-T384 a failed merge with no unmerged path never runs the generated com
   expect(hasMergeHead(worktree)).toBe(false);
   expect(readFileSync(join(worktree, "new.txt"), "utf8")).toBe("untracked\n");
   expect(syncedEvents(scenario.runDirectory)).toEqual([{ repo: ".", conflict: true }]);
+  expect(syncConflictRepos(scenario.runDirectory)).toEqual(["."]);
+});
+
+test("ARK-T384 an unstaged edit to an unrelated tracked file survives and the sync fails as a plain conflict", () => {
+  const scenario = generatedScenario(["GEN.txt"], {
+    config: { generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }] },
+  });
+  const worktree = scenario.worktree;
+  writeFileSync(join(worktree, "notes/a.md"), "UNCOMMITTED WORK\n");
+  const headBefore = git(worktree, "rev-parse", "HEAD");
+
+  const synced = ark("worktree", "sync", scenario.runId);
+
+  expect(synced.code).toBe(1);
+  expect(readFileSync(join(worktree, "notes/a.md"), "utf8")).toBe("UNCOMMITTED WORK\n");
+  expect(existsSync(join(worktree, "gen-ran"))).toBe(false);
+  expect(git(worktree, "rev-parse", "HEAD")).toBe(headBefore);
+  expect(hasMergeHead(worktree)).toBe(false);
+  expect(syncedEvents(scenario.runDirectory)).toEqual([
+    { repo: ".", conflict: true, conflicts: ["GEN.txt"] },
+  ]);
   expect(syncConflictRepos(scenario.runDirectory)).toEqual(["."]);
 });
 
