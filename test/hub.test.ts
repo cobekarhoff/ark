@@ -2880,12 +2880,12 @@ const modelMessages = (...models: string[]) =>
     model,
   }));
 
-test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of its newest session file, else the plan model (planned), and a run lead the roles.chief model (configured)", async () => {
+test("ARK-T395 an agent gets the model Orca reports, else the last message of its newest session file, else the plan model, and a run lead gets the roles.chief model", async () => {
   const { sessions } = isolatedEnvironment();
   writeProject("p", {
     workspace: scratch("ark-workspace-"),
     ticket_source: "local",
-    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "omp", model: "m" },
       validator: { harness: "omp", model: "m" },

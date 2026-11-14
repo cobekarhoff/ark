@@ -143,7 +143,9 @@ function startRun(
   });
   writeProject(
     project,
-    config([{ name: "sleeper", level: "integration", repo: ".", command: "true", parser: "bun" }]),
+    config([
+      { name: "sleeper", level: "integration", repo: ".", command: "true {report}", parser: "bun" },
+    ]),
   );
   const ticket = writeTicket(project, ticketId, [
     { id: `${ticketId}-AC1`, text: "A person checks it", manual: true },

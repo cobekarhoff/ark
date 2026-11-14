@@ -47,7 +47,7 @@ function validConfig(overrides: Record<string, unknown> = {}): Record<string, un
   return {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "bun test", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "bun test {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "claude", model: "claude-sonnet" },
       validator: { harness: "codex", model: "gpt-codex" },
@@ -167,7 +167,7 @@ const invalidConfigs: [string, (config: Record<string, unknown>) => void, string
         name: "api",
         level: "integration",
         repo: ".",
-        command: "x",
+        command: "x {report}",
         parser: "junit",
       }),
     "suites[1].parser must be one of bun, pytest, behave",
@@ -182,7 +182,7 @@ const invalidConfigs: [string, (config: Record<string, unknown>) => void, string
 ];
 
 for (const [name, mutate, expected] of invalidConfigs) {
-  test(`ARK-152-AC2 run start refuses ${name} and names the field`, () => {
+  test(`ARK-T399 run start refuses an invalid ark.yml and names the field: ${name}`, () => {
     const config = validConfig();
     mutate(config);
     writeProject("broken", config);
@@ -1359,7 +1359,15 @@ function claraRun(
     validConfig({
       workspace: workspaceWithRepos(Object.values(clara)),
       merge_requests: "none",
-      suites: [{ name: "e2e", level: "e2e", repo: clara.platform, command: "true", parser: "bun" }],
+      suites: [
+        {
+          name: "e2e",
+          level: "e2e",
+          repo: clara.platform,
+          command: "true {report}",
+          parser: "bun",
+        },
+      ],
     }),
   );
   const { runId, directory } = startRun();
@@ -2032,10 +2040,10 @@ const methodTicket = [
   { id: "AC6", text: "method test written out", method: "test", verified_by: ["ARK-T1"] },
 ];
 
-test("ARK-311-AC3 the reader names every AC <ticket>/AC<k>, reads each method, and ark test lists non-test methods through the manual gate with both id forms", () => {
+test("ARK-T396 the reader names every AC as ticket slash AC number, reads each method, and ark test lists non-test methods through the manual gate with both id forms", () => {
   writeProject("methods", {
     ...validConfig(),
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
   });
   const ticketFile = writeTicket("methods", "ARK-910", methodTicket);
   const started = ark("run", "start", ticketFile, "--project", "methods");
@@ -2373,4 +2381,256 @@ test("ARK-T158 ark status for a run and other commands print no role line and ne
     expect(other.out + other.err).not.toContain("role ");
     expect(fake.calls()).toBe(0);
   });
+});
+
+// --- ARK-332: unknown ark.yml keys and a suite command with no {report} --------------------------
+
+const reportCommand = "bun test --reporter=junit --reporter-outfile={report}";
+
+/** Every key that ark.yml knows, written once, so a typo added beside a valid key is the only fault. */
+function strictConfig(): Record<string, unknown> {
+  return {
+    workspace: tempGitRepo(),
+    ticket_source: "local",
+    merge_requests: "none",
+    test_case_source: "local",
+    compose: "docker compose up -d",
+    setup: "bun install",
+    suites: [
+      {
+        name: "e2e",
+        level: "e2e",
+        repo: ".",
+        command: reportCommand,
+        parser: "bun",
+        cores: 2,
+        base_files: "test/*.test.ts",
+        base_command: "bun test {files}",
+        paths: ["test"],
+      },
+    ],
+    checks: [{ name: "lint", repo: ".", command: "bun run lint", cores: 2 }],
+    roles: {
+      implementer: { harness: "claude", model: "claude-sonnet" },
+      validator: { harness: "codex", model: "gpt-codex" },
+      reviewer: { harness: "codex", model: "gpt-codex" },
+      evaluator: { harness: "claude", model: "claude-sonnet" },
+      designer: { harness: "claude", model: "claude-sonnet" },
+      chief: { harness: "claude", model: "claude-sonnet" },
+      test_writer: { harness: "claude", model: "claude-sonnet" },
+      test_reviewer: { harness: "claude", model: "claude-sonnet" },
+    },
+    gates: { criteria: "auto", strategy: "human", plan: "human", escalation: "auto" },
+    repos: { "repos/a": { base: "main" } },
+    pr_writing: {
+      reviewers: ["alice"],
+      tier_floor: 1,
+      sensitive_paths: ["cli/"],
+      one_way_paths: ["migrations/"],
+      agent_authored: false,
+      title_prefix: "ARK",
+    },
+    test_budget_cores: 4,
+    test_min_free_memory_percent: 10,
+    test_max_swap_gb: 3,
+    concurrency: 1,
+    round_budget: 3,
+    escalation_rounds: 1,
+    generated: [{ path: "docs/reference/cli.md", command: "bun scripts/cli-reference.ts" }],
+  };
+}
+
+const asRecord = (value: unknown): Record<string, unknown> => value as Record<string, unknown>;
+const configFile = (project: string): string =>
+  join(process.env.ARK_HOME as string, "projects", project, "ark.yml");
+
+test("ARK-T389 loadConfig accepts every key that ark.yml knows, at every level, as written", () => {
+  writeProject("full", strictConfig());
+  const config = loadConfig("full");
+  expect(config).toMatchObject({
+    merge_requests: "none",
+    compose: "docker compose up -d",
+    setup: "bun install",
+    test_budget_cores: 4,
+    test_min_free_memory_percent: 10,
+    test_max_swap_gb: 3,
+    concurrency: 1,
+    round_budget: 3,
+    escalation_rounds: 1,
+    gates: { criteria: "auto", escalation: "auto" },
+    generated: [{ path: "docs/reference/cli.md", command: "bun scripts/cli-reference.ts" }],
+    repos: { "repos/a": { base: "main" } },
+    checks: [{ name: "lint", repo: ".", command: "bun run lint", cores: 2 }],
+    pr_writing: {
+      reviewers: ["alice"],
+      tier_floor: 1,
+      sensitive_paths: ["cli/"],
+      one_way_paths: ["migrations/"],
+      agent_authored: false,
+      title_prefix: "ARK",
+    },
+  });
+  expect(config.suites[0]).toMatchObject({
+    cores: 2,
+    base_files: "test/*.test.ts",
+    base_command: "bun test {files}",
+    paths: ["test"],
+  });
+  expect(Object.keys(config.roles)).toHaveLength(8);
+});
+
+const unknownKeyRows: [
+  name: string,
+  mutate: (config: Record<string, unknown>) => void,
+  typo: string,
+  nearest: string,
+  where: string,
+][] = [
+  ["a top-level key", (c) => (c.merge_request = "none"), "merge_request", "merge_requests", ""],
+  ["a second top-level key", (c) => (c.concurency = 1), "concurency", "concurrency", ""],
+  [
+    "a role name",
+    (c) => (asRecord(c.roles).reviewr = { harness: "codex", model: "gpt-codex" }),
+    "reviewr",
+    "reviewer",
+    "roles",
+  ],
+  [
+    "a second role name that would skip the run lead's test writer",
+    (c) => (asRecord(c.roles).test_writr = { harness: "claude", model: "claude-sonnet" }),
+    "test_writr",
+    "test_writer",
+    "roles",
+  ],
+  [
+    "a key in a role",
+    (c) => (asRecord(asRecord(c.roles).evaluator).modle = "claude-sonnet"),
+    "modle",
+    "model",
+    "roles.evaluator",
+  ],
+  [
+    "a key in a suite",
+    (c) => ((c.suites as Record<string, unknown>[])[0].comand = reportCommand),
+    "comand",
+    "command",
+    "suites[0]",
+  ],
+  [
+    "a key in a repo entry",
+    (c) => (asRecord(asRecord(c.repos)["repos/a"]).bse = "main"),
+    "bse",
+    "base",
+    "repos.repos/a",
+  ],
+  [
+    "a key in a check",
+    (c) => ((c.checks as Record<string, unknown>[])[0].comand = "bun run lint"),
+    "comand",
+    "command",
+    "checks[0]",
+  ],
+  [
+    "a key in pr_writing",
+    (c) => (asRecord(c.pr_writing).reviwers = ["alice"]),
+    "reviwers",
+    "reviewers",
+    "pr_writing",
+  ],
+];
+
+for (const [name, mutate, typo, nearest, where] of unknownKeyRows) {
+  test(`ARK-T389 loadConfig refuses ${name} and names the file, the key and the nearest valid key`, () => {
+    const config = strictConfig();
+    mutate(config);
+    writeProject("typo", config);
+    const message = loadError("typo");
+    expect(message.startsWith(`${configFile("typo")}: `)).toBe(true);
+    expect(message).toContain(where);
+    expect(message).toContain(typo);
+    expect(message).toContain(`did you mean ${nearest}?`);
+  });
+}
+
+test("ARK-T389 loadConfig refuses a key that is near no valid key and does not guess", () => {
+  const config = strictConfig();
+  config.zzzzzz = 1;
+  writeProject("typo", config);
+  const message = loadError("typo");
+  expect(message.startsWith(`${configFile("typo")}: `)).toBe(true);
+  expect(message).toContain("zzzzzz");
+  expect(message).not.toContain("did you mean");
+});
+
+test("ARK-T390 ark status exits 1 and prints the unknown-key error of a typo, then exits 0 once it is fixed", () => {
+  withControlledPath(
+    "ok",
+    () => {
+      const run = (config: Record<string, unknown>) => {
+        writeProject("demo", config);
+        process.env.ARK_PROJECT = "demo";
+        try {
+          const result = ark("status");
+          return { code: result.code, text: result.out + result.err };
+        } finally {
+          delete process.env.ARK_PROJECT;
+        }
+      };
+      const prefix = `config error: demo: ${configFile("demo")}: `;
+      const valid = strictConfig();
+
+      expect(run(valid).code).toBe(0);
+
+      const typo = run({ ...valid, merge_request: "none" });
+      expect(typo.code).toBe(1);
+      expect(typo.text).toContain(prefix);
+      expect(typo.text).toContain("merge_request is not a key; did you mean merge_requests?");
+
+      const second = run({ ...valid, concurency: 1 });
+      expect(second.code).toBe(1);
+      expect(second.text).toContain(prefix);
+      expect(second.text).toContain("did you mean concurrency?");
+
+      expect(run(valid).code).toBe(0);
+    },
+    ["claude", "codex"],
+  );
+});
+
+test("ARK-T391 loadConfig refuses a suite command with no {report} and says it must write its JUnit report there", () => {
+  writeProject("ok", strictConfig());
+  expect(loadError("ok")).toBe("");
+
+  const config = strictConfig();
+  asRecord((config.suites as unknown[])[0]).command = "bun test";
+  writeProject("bare", config);
+  const message = loadError("bare");
+  expect(message.startsWith(`${configFile("bare")}: `)).toBe(true);
+  expect(message).toMatch(/suites\[0\]|e2e/);
+  expect(message).toContain("must write its JUnit report to {report}");
+});
+
+test("ARK-T391 loadConfig names the second suite when only that suite has no {report}", () => {
+  const config = strictConfig();
+  (config.suites as unknown[]).push({
+    name: "api",
+    level: "integration",
+    repo: ".",
+    command: "bun test test/api",
+    parser: "bun",
+  });
+  writeProject("second", config);
+  const message = loadError("second");
+  expect(message).toMatch(/suites\[1\]|api/);
+  expect(message).toContain("{report}");
+});
+
+test("ARK-T391 loadConfig leaves base_command alone: it needs {files}, not {report}", () => {
+  const config = strictConfig();
+  const suite = asRecord((config.suites as unknown[])[0]);
+  suite.base_command = "bun test {files}";
+  expect(suite.base_command).not.toContain("{report}");
+  writeProject("base-side", config);
+  expect(loadError("base-side")).toBe("");
+  expect(loadConfig("base-side").suites[0].base_command).toBe("bun test {files}");
 });
