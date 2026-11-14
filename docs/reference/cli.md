@@ -64,7 +64,7 @@ A command prints a short result and exits 0 on success. On failure it prints `ar
 |                  | [`ui install`](#ui-install)                     | Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents and loads them                 |
 |                  | [`ui uninstall`](#ui-uninstall)                 | Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy                                             |
 |                  | [`services install`](#services-install)         | Writes one LaunchAgent for each background job of the project in ~/Library/LaunchAgents and loads it           |
-|                  | [`services uninstall`](#services-uninstall)     | Unloads and deletes the three LaunchAgents of the project                                                      |
+|                  | [`services uninstall`](#services-uninstall)     | Unloads and deletes the four LaunchAgents of the project                                                       |
 |                  | [`services status`](#services-status)           | Prints one line for each service of the project                                                                |
 | Other            | [`companions sync`](#companions-sync)           | Keeps one Orca worker alive for each companion listed under `companions` in ark.yml, and wakes it              |
 |                  | [`companion ask`](#companion-ask)               | Sends the live worker of the companion one message that holds the question and says it is a question from the… |
@@ -971,15 +971,19 @@ ark services install [--project <name>]
 
 Writes one LaunchAgent for each background job of the project in ~/Library/LaunchAgents and loads
 it: dev.ark.<project>.auto-merger (scripts/auto-merger.sh, every 60 s),
-dev.ark.<project>.temp-cleaner (scripts/temp-cleaner.sh, every 300 s) and dev.ark.<project>.sweep
-(scripts/sweep.sh, every 300 s). They start at login (RunAtLoad), restart after any exit (KeepAlive
-true, ThrottleInterval 30) and log to ~/.ark/projects/<project>/services/<service>.log. The scripts
-run from this clone (resolved from the module, not the workspace) and get the PATH, HOME, TMPDIR,
-ARK_HOME and ARK_PROJECT of the shell that runs install; it warns when ark, gh, orca or jq is not on
-that PATH. A second run with the same plists loads nothing again; a changed plist is unloaded and
-loaded again. A project with `merge_requests: none` gets no auto-merger, and one loaded from an
-earlier setting is unloaded and deleted. The labels carry the project, so they never collide with
-dev.ark.hub or dev.ark.proxy. Exits 1 when a load fails. --project falls back to ARK_PROJECT.
+dev.ark.<project>.temp-cleaner (scripts/temp-cleaner.sh, every 300 s), dev.ark.<project>.sweep
+(scripts/sweep.sh, every 300 s) and dev.ark.<project>.project-autocommit
+(scripts/project-autocommit.sh, every 120 s: it keeps ~/.ark/projects/<project> in its own git
+repository and commits each change in it, and never pushes). They start at login (RunAtLoad),
+restart after any exit (KeepAlive true, ThrottleInterval 30) and log to
+~/.ark/projects/<project>/services/<service>.log. The scripts run from this clone (resolved from the
+module, not the workspace) and get the PATH, HOME, TMPDIR, ARK_HOME and ARK_PROJECT of the shell
+that runs install; it warns when ark, gh, orca or jq is not on that PATH. A second run with the same
+plists loads nothing again; a changed plist is unloaded and loaded again. A project with
+`merge_requests: none` gets no auto-merger, and one loaded from an earlier setting is unloaded and
+deleted; the other three are installed for every project. The labels carry the project, so they
+never collide with dev.ark.hub or dev.ark.proxy. Exits 1 when a load fails. --project falls back to
+ARK_PROJECT.
 ```
 
 ### services uninstall
@@ -987,9 +991,10 @@ dev.ark.hub or dev.ark.proxy. Exits 1 when a load fails. --project falls back to
 ```text
 ark services uninstall [--project <name>]
 
-Unloads and deletes the three LaunchAgents of the project (auto-merger, temp-cleaner, sweep). It
-leaves the logs and the other projects alone, and it does nothing, and exits 0, when none is
-installed. --project falls back to ARK_PROJECT.
+Unloads and deletes the four LaunchAgents of the project (auto-merger, temp-cleaner, sweep,
+project-autocommit). It leaves the logs, the git repository of the project folder and the other
+projects alone, and it does nothing, and exits 0, when none is installed. --project falls back to
+ARK_PROJECT.
 ```
 
 ### services status
