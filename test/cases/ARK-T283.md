@@ -6,7 +6,7 @@ technique: characterization snapshot (golden master) with boundary values on arg
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-13-ARK-333-1
+changed_by: 2026-11-14-ARK-380-1
 ---
 
 ## Objective
@@ -16,6 +16,8 @@ Prove that each `ark` command's record (usage, description, each flag its usage 
 Expected: When the command table is built from cli/commands, the system shall present the same commands in the same order with the same usage, flags and argument counts, and the new ark test description.
 
 The test reads the table only through the `ark` process, so it does not depend on the file that holds the table, and it does not import `cli/ark.ts` (importing it runs `main`). The snapshot was first captured at the ARK-372 base (27 commands); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test fails at this run's base by design, because the snapshot holds the new description.
+
+ARK-380 changed three descriptions in the snapshot, together with `cli/commands/run.ts` and `cli/commands/merge-request.ts`: `run close` (it now names the security scan as a refusal for `handed_off`), `merge-request open` (the security scan: gitleaks and osv-scanner refusals, the `security.accepted` block of ark.yml, the `Security` section of the body) and `status` (the `scanner: <tool> is not installed: brew install <tool>` line, exit 0). The test compares the process output with the snapshot, so it fails if a description and the snapshot drift apart.
 
 ## Preconditions
 
@@ -44,6 +46,7 @@ The test reads the table only through the `ark` process, so it does not depend o
 - `test-runner` is absent from `ark --help`.
 - The snapshot was first captured at the ARK-372 base (27 commands); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test passes after the move with the new description, and fails at this run's base by design (the snapshot holds the new description). A command dropped, duplicated or moved, a description edited away from the snapshot, a usage-advertised flag deleted from the parser table, a usage-advertised flag changed from switch to value or back in the parser table (even with the usage string unchanged), or a changed probed minimum or finite maximum fails it. A flag added to the parser table but not advertised in usage is not detected.
 - `test/command-table.snapshot.json` holds the `worktree sync` description of ARK-371 (it names `conflicts` and the regeneration of the files `ark.yml` lists under `generated`); the snapshot is updated together with `cli/commands/worktree.ts`, and the case still compares the process output with it.
+- `test/command-table.snapshot.json` holds the ARK-380 descriptions of `run close`, `merge-request open` and `status` (the security scan and its refusals, the `security.accepted` block, the `Security` section of the MR body, and the `scanner: <tool> is not installed` line of `ark status`); the snapshot is regenerated together with `cli/commands/run.ts` and `cli/commands/merge-request.ts`, and the case still compares the process output with it.
 
 ## Screenshot checkpoints
 
