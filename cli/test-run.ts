@@ -471,7 +471,7 @@ async function runSuite(
       for (const file of cached.flaky) sideRun.flaky.push({ suite: suite.name, file });
       const redOnMain = cached.redOnMain ?? [];
       for (const file of redOnMain) sideRun.redOnMain.push({ suite: suite.name, file });
-      return { results: cached.results, passed: true, flaky: cached.flaky, reused: true };
+      return { results: cached.results, passed: true, flaky: cached.flaky, reused: true, code: 0 };
     }
     // ARK-390: a cached suite takes no cores; a suite that runs waits for its cores in the host budget.
     taken = await budget!.take(suite.cores);
@@ -564,7 +564,7 @@ async function runSuite(
         { results, output, log, flaky, ...(redOnMain.length > 0 ? { redOnMain } : {}) },
         scratch,
       );
-    return { results, passed, flaky, reused: false };
+    return { results, passed, flaky, reused: false, code: outcome.code };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
     rmSync(suiteTmpdir, { recursive: true, force: true });
@@ -1214,6 +1214,8 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
       flaky?: string[];
     }[] = [];
     const headKeys = new Map<string, string>();
+    // ARK-333: the exit code of each head suite, printed with a failed suite; not part of the recorded `suites`.
+    const exitCodes = new Map<string, number>();
     // The join through `verified_by` counts every level; the old tag path only integration and e2e.
     const allResults: TestResult[] = [];
     const provingResults: TestResult[] = [];
@@ -1269,7 +1271,7 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
           compose: config.compose,
         });
         headKeys.set(suite.name, key.slice(0, 6));
-        const { results, passed, flaky, reused } = await runSuite(
+        const { results, passed, flaky, reused, code } = await runSuite(
           suite,
           join(mirror, suite.repo),
           resultsDirectory,
@@ -1280,6 +1282,7 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
           dirty ? undefined : { project, key },
           mainCheck,
         );
+        exitCodes.set(suite.name, code);
         allResults.push(...results);
         headResults.set(suite.name, results);
         if (suite.level !== "unit") provingResults.push(...results);
@@ -1298,6 +1301,8 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
 
     const criterionStatuses: Record<string, Status> = {};
     const via: Record<string, string> = {};
+    // ARK-333: the test case ids that read `missing`, one hint line each after the criterion line.
+    const missingCases: Record<string, string[]> = {};
     for (const criterion of criteria) {
       const verifiedBy = ticketCriteria.get(criterion)?.verified_by ?? [];
       if (manual.has(criterion)) {
@@ -1311,6 +1316,9 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
         }));
         criterionStatuses[criterion] = quickStatus(verifiedByStatus(cases), quick);
         via[criterion] = `via ${cases.map((entry) => `${entry.id} ${entry.status}`).join(", ")}`;
+        missingCases[criterion] = cases
+          .filter((entry) => entry.status === "missing")
+          .map((entry) => entry.id);
       } else {
         criterionStatuses[criterion] = quickStatus(
           criterionStatus(criterion, provingResults),
@@ -1388,10 +1396,17 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     });
 
     if (!quick) console.log(`base      ${basePassed ? "passed" : "failed"}`);
-    for (const suite of suites)
+    for (const suite of suites) {
       console.log(
         `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}${suite.reused ? `  reused  head key ${headKeys.get(suite.name)}` : ""}${suite.flaky ? `  flaky: ${suite.flaky.join(", ")} (failed once, passed on retry)` : ""}`,
       );
+      if (suite.passed) continue;
+      // ARK-333: why the suite failed, as a failed check prints it: the exit code, the log, its last 20 lines.
+      console.log(`exit code  ${exitCodes.get(suite.name)}`);
+      console.log(`log        results/${suite.name}.log`);
+      const log = readFileSync(join(resultsDirectory, `${suite.name}.log`), "utf8");
+      console.log(log.trimEnd().split("\n").slice(-20).join("\n"));
+    }
     for (const { suite, file } of headRun.redOnMain)
       console.log(
         `red on main  ${suite}  ${file}  (fails at the tip of the target branch too, not counted)`,
@@ -1401,8 +1416,11 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
     );
     for (const { file, name } of deleted)
       console.log(`deleted    ${file === undefined ? "" : `${file}  `}${name}`);
-    for (const [criterion, status] of Object.entries(criterionStatuses))
+    for (const [criterion, status] of Object.entries(criterionStatuses)) {
       console.log(`criterion  ${criterion}  ${status.padEnd(14)}  ${via[criterion]}`);
+      for (const id of missingCases[criterion] ?? [])
+        console.log(`  no test title starts with ${id}`);
+    }
     for (const id of [...new Set([...headRun.cases.keys(), ...baseRun.cases.keys()])].sort())
       console.log(`evidence   results/evidence/${id}/{base,head}`);
 
