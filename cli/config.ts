@@ -13,7 +13,7 @@ const parserNames = ["bun", "pytest", "behave"];
 export const gateNames = ["criteria", "strategy", "plan", "escalation"] as const;
 export const HARNESSES = ["claude", "codex", "omp", "pi"] as const;
 const roleNames = ["implementer", "validator", "reviewer"] as const;
-// The optional roles: ark evaluation record, ark strategy record, the chief playbook and the run lead playbook name them when missing.
+// The optional roles: ark evaluation record, ark strategy record, the chief skill and the run lead skill name them when missing.
 const optionalRoleNames = [
   "evaluator",
   "designer",

@@ -215,8 +215,9 @@ Orca's own objects. An Orca Run groups a coordinator and the workers it starts, 
 The agent program a role runs in: `claude`, `codex`, `omp` or `pi`. `ark.yml` names one for each role.
 _Avoid_: Runtime, engine
 
-**Skill and playbook**:
-A skill is an entry point, such as `/skill:ark chief`. A playbook is the instructions the skill loads for one role, in `skills/ark/playbooks/`.
+**Skill**:
+The instructions one Ark role loads, started by its own name, such as `/skill:ark-chief`. Each role has one folder, `skills/ark-<role>/`. The text that roles share sits in two files in `skills/shared/`, not in a skill.
+_Avoid_: Playbook, router
 
 ## Projects
 

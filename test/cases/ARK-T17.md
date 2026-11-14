@@ -12,7 +12,7 @@ changed_by: 2026-11-09-ARK-340-1
 
 ## Objective
 
-Prove that the default `roles:` block in `skills/ark/playbooks/bootstrap.md` (the fenced block in section 2 with real harness and model values) loads through `loadConfig` with `test_writer` and `test_reviewer`, and that the reviewer is on a different vendor from the implementer and the test writer. This reads the block, not its prose: wording is proved by inspection.
+Prove that the default `roles:` block in `skills/ark-bootstrap/SKILL.md` (the fenced block in section 2 with real harness and model values) loads through `loadConfig` with `test_writer` and `test_reviewer`, and that the reviewer is on a different vendor from the implementer and the test writer. This reads the block, not its prose: wording is proved by inspection.
 
 ## Preconditions
 

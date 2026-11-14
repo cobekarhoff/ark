@@ -5,6 +5,7 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -15,6 +16,14 @@ import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import { fakeToolScripts, writeFakeToolState, type FakeToolOptions } from "./hub-fixtures.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
+
+/** The `name` in the front matter of `skills/<folder>/SKILL.md`: what omp lists and `/skill:` starts. */
+export function skillName(folder: string): string {
+  const text = readFileSync(join(repositoryRoot, "skills", folder, "SKILL.md"), "utf8");
+  const name = /^---\n(?:.*\n)*?name: (\S+)\n/.exec(text)?.[1];
+  if (!name) throw new Error(`skills/${folder}/SKILL.md has no name in its front matter`);
+  return name;
+}
 
 export function tempArkHome(): string {
   const home = mkdtempSync(join(tmpdir(), "ark-home-"));

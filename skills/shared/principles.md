@@ -5,8 +5,8 @@ One line for each principle that Ark already uses, with a link to the rule that 
 ## Proof
 
 - An AC is proven by the test cases in its `verified_by`, passing at head. Any level can be a test case, but each `method: test` AC needs an integration or E2E one. [ADR 0010](../../docs/adr/0010-test-cases-describe-the-product.md)
-- A test with an old AC id in its title converts when a run touches it: a test case, a renamed title, a plan entry. [Reviewer rubric: Proof](rubrics/reviewer.md#what-to-check)
-- A criterion with a method other than `test` (or `manual: true`) is proven by the human's `manual` gate answer and its evidence file `results/evidence/<AC id>.md`, not by a test. [Reviewer rubric: Proof](rubrics/reviewer.md#what-to-check)
+- A test with an old AC id in its title converts when a run touches it: a test case, a renamed title, a plan entry. [Reviewer rubric: Proof](../ark-reviewer/rubrics/reviewer.md#what-to-check)
+- A criterion with a method other than `test` (or `manual: true`) is proven by the human's `manual` gate answer and its evidence file `results/evidence/<AC id>.md`, not by a test. [Reviewer rubric: Proof](../ark-reviewer/rubrics/reviewer.md#what-to-check)
 - A test asserts observable behavior and fails for a credible regression. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)
 - One contract has one owning test, at the strongest practical boundary. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)
 - Never mock the thing a test proves, and never take the expected value from the code under test. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)
@@ -14,16 +14,16 @@ One line for each principle that Ark already uses, with a link to the rule that 
 
 ## Code
 
-- Do what the ACs need and no more: no abstraction with one user, no option nobody sets, no dead code. [Reviewer rubric: Complexity](rubrics/reviewer.md#what-to-check)
-- Read the callers of changed code, not only the diff. [Reviewer rubric: Correctness](rubrics/reviewer.md#what-to-check)
-- Check input at trust boundaries; keep secrets out of code and logs. [Reviewer rubric: Security](rubrics/reviewer.md#what-to-check)
+- Do what the ACs need and no more: no abstraction with one user, no option nobody sets, no dead code. [Reviewer rubric: Complexity](../ark-reviewer/rubrics/reviewer.md#what-to-check)
+- Read the callers of changed code, not only the diff. [Reviewer rubric: Correctness](../ark-reviewer/rubrics/reviewer.md#what-to-check)
+- Check input at trust boundaries; keep secrets out of code and logs. [Reviewer rubric: Security](../ark-reviewer/rubrics/reviewer.md#what-to-check)
 - Use full words for identifiers, commands, flags, gate names and filenames. [Naming gate](../../rules/naming.md#naming-gate)
 - Keep each set of states, and the moves between them, in one typed list and one table or function; a refusal names the state and what allows the action. [State machine gate](../../rules/state-machines.md#state-machine-gate)
 
 ## Review
 
-- Report each problem once, where it matters most, and never without evidence. [Reviewer rubric: How to report](rubrics/reviewer.md#how-to-report)
-- Rank a finding P0 to P3 by what it breaks. [Reviewer rubric: How to report](rubrics/reviewer.md#how-to-report)
+- Report each problem once, where it matters most, and never without evidence. [Reviewer rubric: How to report](../ark-reviewer/rubrics/reviewer.md#how-to-report)
+- Rank a finding P0 to P3 by what it breaks. [Reviewer rubric: How to report](../ark-reviewer/rubrics/reviewer.md#how-to-report)
 
 ## Design
 

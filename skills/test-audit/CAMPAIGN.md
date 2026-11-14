@@ -29,7 +29,7 @@ Do this before any lane starts.
 
 A lane is a suite, a folder of tests, or a contract area, sized so that one worker can read it. Plan one `reviewer` step for each lane, and put the names of its files and its suite in its `goal`. The worker applies `references/audit.md` to its lane and edits no file.
 
-It writes its ledger into `findings/<step>.md`. The file is a ledger, not a code review: it drops the `Reviewed head:` line that `worker.md` asks for, and holds:
+It writes its ledger into `findings/<step>.md`. The file is a ledger, not a code review: it drops the `Reviewed head:` line that the reviewer skill (`skills/ark-reviewer/SKILL.md`) asks for, and holds:
 
 - the ledger table of `references/audit.md`, section 7, with no extra `#` heading;
 - the line `No findings.` (the ledger is not a list of defects; the run lead reads the table);
@@ -46,7 +46,7 @@ The `keepers` implementer step reads every ledger and writes `<run folder>/findi
 
 ## 4. Cutover
 
-The `cutover` implementer step applies the ledgers, one lane at a time, and runs the project checks (`checks` in `ark.yml`) before each commit, as the worker playbook says. A campaign touches test files in bulk, so conversion on touch applies to every kept test. The ledger marks map to the `test_cases` entries of `plan.yml`:
+The `cutover` implementer step applies the ledgers, one lane at a time, and runs the project checks (`checks` in `ark.yml`) before each commit, as `skills/shared/worker-protocol.md` says. A campaign touches test files in bulk, so conversion on touch applies to every kept test. The ledger marks map to the `test_cases` entries of `plan.yml`:
 
 | Mark | `test_cases` action | Needs                                                                                               |
 | ---- | ------------------- | --------------------------------------------------------------------------------------------------- |
@@ -66,7 +66,7 @@ The `preservation-review` step is a `reviewer` step. It checks that each contrac
 1. Deletions. `ark test-audit inventory --changed` never lists a deleted test: a deleted file has no declaration. Take the list from the baseline snapshot of section 1 instead: `git show <baseline commit>:test/audit-baseline.json` for the rows, and `git diff --name-status <base>..HEAD` for the files the run deleted or renamed. Each baseline row that the ledgers mark `C` or `D` must be gone or merged; each row marked `R` or `F` must still exist. A deleted test with no ledger row, a `C` row whose keeper was deleted or no longer tests the contract, a `D` row that names no junk pattern with its line, or a `D` that protects a retention-bar contract is a P1 finding.
 2. Old ids. `ark test-audit inventory --project <name> --changed <base>` prints `old id touched:` for each changed declaration that still has an old AC id. Use it only for that check. The command reads the `workspace` checkout of `ark.yml`, not the run's worktree: it sees the run's commits only when that checkout is on the run's branch. Check the branch first, and when it is not, read the titles with `git diff <base>..HEAD` instead.
 
-Cross-vendor: a plan step's `harness` and `model` must equal a pair in `roles` in `ark.yml`. A campaign review should use a vendor other than the implementer's. When the project's `roles.reviewer` is on the implementer's vendor, the review is not cross-vendor: say so in the plan summary, as `run-lead.md` already asks. A project that wants the cross-vendor review needs a second vendor in `roles.reviewer`.
+Cross-vendor: a plan step's `harness` and `model` must equal a pair in `roles` in `ark.yml`. A campaign review should use a vendor other than the implementer's. When the project's `roles.reviewer` is on the implementer's vendor, the review is not cross-vendor: say so in the plan summary, as `skills/ark-run-lead/SKILL.md` already asks. A project that wants the cross-vendor review needs a second vendor in `roles.reviewer`.
 
 ## 6. Break and restore
 
@@ -85,6 +85,6 @@ Only an implementer step does this: a reviewer edits nothing, and a validator wr
 
 A failure in the baseline is written as a proposed bug ticket and is never fixed in the campaign run. The source of the list is `red_on_main` in the `test.completed` event of the section 1 run, and the `red on main` lines of its output.
 
-- The run lead writes one ticket file for each baseline failure: `~/.ark/projects/<project>/tickets/<KEY>-<n>.md`, with the next number above the highest `<KEY>-*.md` in that folder, `status: proposed`, `kind: bug`, and the front matter of `skills/ark/playbooks/brainstorm.md` (section "Ticket format"). The run lead names the file in its report to Master Chief.
+- The run lead writes one ticket file for each baseline failure: `~/.ark/projects/<project>/tickets/<KEY>-<n>.md`, with the next number above the highest `<KEY>-*.md` in that folder, `status: proposed`, `kind: bug`, and the front matter of `skills/ark-brainstorm/SKILL.md` (section "Ticket format"). The run lead names the file in its report to Master Chief.
 - A red test file that the run's own commits do not touch is not counted by `ark test`: leave the file out of every lane's cutover. A run that touches a red test counts its failure, so `ark test` fails on a product bug the run must not fix. When a lane cannot avoid the file, do not touch it in this run: move that lane to a later ticket that depends on the proposed bug ticket, or run `ark escalate <run> --reason <text>` so the human decides (the escalation gate answers are `one_more_round`, `take_over` and `abort`: an abort and a follow-up ticket is the human's call). The run never edits that red file and never fixes the product.
 - A ledger row for it reads `R` with `baseline red`.
