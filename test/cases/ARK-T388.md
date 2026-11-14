@@ -17,7 +17,7 @@ Prove that the hint follows the status of the test case, not of the criterion: f
 
 - The fake project of `test/test-run.test.ts` (`buildingRun`, real `ark` process).
 - Ticket criteria: `AC1` verified_by `[FAKE-T1, FAKE-T2, FAKE-T3]`, where `FAKE-T1` has a passing test, and `FAKE-T2` and `FAKE-T3` have no test whose title starts with their id; `AC2` verified_by `[FAKE-T4]`, which has a failing test; `AC3` verified by tag only, with no test (status `missing via tag`).
-- Four runs, each with its own `ark test` process; the first three use the fixture above:
+- Five `ark test` processes, one for each run below; the first three use the fixture above, the last two (quick, then full) use the separate fixture:
   - **Full**: `ark test <run>`. Cases read `FAKE-T1 passed`, `FAKE-T2 missing`, `FAKE-T3 missing`, `FAKE-T4 failed`.
   - **Quick, case missing**: `ark test <run> --quick` on the same fixture, whose suites have no `base_files`. A quick run of such a suite runs the whole suite and skips nothing (`cli/test-run.ts:1248-1261`), so `headRun.skipped` stays empty, no suite ran with a file selection, and `caseStatus` returns `missing` for `FAKE-T2` and `FAKE-T3`. Only the criterion reads `not run`, through `quickStatus`: the `via` text keeps `FAKE-T2 missing`.
   - **Skipped, case not run**: `ark test <run> --quick` on the fixture built with `selectiveBase: true` (each suite has `base_files: nomatch/*.test.ts` and a `base_command`) and no own commit that changes a test file, so each suite is skipped with `no changed test file` and `headRun.skipped` is not empty (`cli/test-run.ts:1254-1257`). `caseStatus` then returns `not run` for every case with no result, and the `via` text reads `FAKE-T2 not run`.
@@ -38,10 +38,10 @@ Prove that the hint follows the status of the test case, not of the criterion: f
 
 ## Expected results
 
-- When a test case in `verified_by` has status `missing`, the system shall print `no test title starts with <test case id>` after the `criterion` line of its criterion, one line for each such case, on a full run and on a quick run where the criterion reads `not run` and no head suite ran with a file selection.
+- When a test case in `verified_by` has status `missing`, the system shall print `no test title starts with <test case id>` after the `criterion` line of its criterion, one line for each such case, on a full run and on a quick run in which no head suite ran with a file selection.
 - When the case reads `passed` or `failed`, or reads `not run` because a skipped suite filled `headRun.skipped`, the system shall print no hint.
 - When the criterion is matched by tag (no test case id), the system shall print no hint and keep the `via tag` line unchanged.
-- When a quick run of a suite with `base_files` runs only the own-commit files, and a test case in `verified_by` has its passing test in a file that run did not select, the system shall print no hint, keep `via <test case id> missing` and the criterion status `not run` as they are, and on the full run of the same fixture read `via <test case id> passed`.
+- When a quick run of a suite with `base_files` runs only the own-commit files, and a test case in `verified_by` has its passing test in a file that run did not select, the system shall print no hint, keep the `via` text and the criterion status as they are (in the fixture of this case, `via FAKE-T1 missing` and `not run`), and on the full run of the same fixture read `via FAKE-T1 passed`.
 - The system shall keep every `criterion  <id>  <status>  via ...` line as it is today.
 
 ## Screenshot checkpoints
