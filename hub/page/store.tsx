@@ -168,11 +168,11 @@ export type Route = {
   run: string | null;
   /**
    * `#/run/<run>/step/<id>`, `/lead`, `/session/<file>` open a transcript; `/file/<path>` shows a run
-   * file; `/conversation` is the run page's Conversation tab (no argument). Each argument is one
-   * URL-encoded segment.
+   * file; `/conversation` is the run page's Conversation tab (no argument); `/repo/<repo>` is the
+   * overview with that repo's card open and focused. Each argument is one URL-encoded segment.
    */
   sub: {
-    kind: "step" | "lead" | "session" | "file" | "conversation";
+    kind: "step" | "lead" | "session" | "file" | "conversation" | "repo";
     arg: string | null;
   } | null;
   /** `?at=<time>` on a transcript route: the transcript opens at the entry nearest this ISO time. */
@@ -235,7 +235,7 @@ export function parseRoute(hash: string): Route {
   const arg = part ? decode(part) : null;
   const none = { run: null, sub: null, at: null, arg: null, project };
   if (view === "run" && arg !== null) {
-    const subKinds = ["step", "lead", "session", "file", "conversation"] as const;
+    const subKinds = ["step", "lead", "session", "file", "conversation", "repo"] as const;
     const subKind = subKinds.find((candidate) => candidate === kind);
     // A file path may hold plain slashes (`/file/findings/a.md`) or encoded ones; both name the same path.
     const subArg = argumentSegments.map(decode).join("/");

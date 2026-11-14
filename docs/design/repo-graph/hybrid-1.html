@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hybrid 1 · repo graph with phase columns · Ark hub prototype</title>
+<!-- PROTOTYPE, throwaway. Hybrid 1 = variant B level 1 (repo cards + labelled repo edges) + variant C phase columns (Implement, Bump, Validate, Review) inside an expanded card.
+     Step needs inside a card are always drawn; cross-repo step needs appear only on hover/focus of a step. Hub nav and tokens as in the live hub.
+     Data: data.js (window.REPO_GRAPH_DATA). The simulated events (Next event) live in EVENT_SCRIPTS below and are prototype-only.
+     URL params for review: ?scenario=clara|smart_qc|ark&theme=auto|light|dark&expand=all|none -->
+<style>
+/* ---------- tokens: copied from hub/page/styles.css ---------- */
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#f6f4ef, #090b0f);
+  --nav: light-dark(#fbfaf6, #0d1015);
+  --panel: light-dark(#ffffff, #11141a);
+  --panel-2: light-dark(#f8f6f0, #171b23);
+  --panel-3: light-dark(#efece4, #1d222c);
+  --line: light-dark(#e6e2d8, #222833);
+  --line-2: light-dark(#d3cdbf, #2e3644);
+  --line-3: light-dark(#8f887a, #6b7789);
+  --text: light-dark(#1d1c1a, #dde2ea);
+  --dim: light-dark(#4f4c45, #a0abba);
+  --mute: light-dark(#65615a, #8591a2);
+  --red: light-dark(#c2371f, #ff6b5e);
+  --amber: light-dark(#c27a0e, #f2b04a);
+  --green: light-dark(#2d8a57, #46c48a);
+  --blue: light-dark(#2f62d8, #6aa6ff);
+  --violet: light-dark(#7048c8, #a58bff);
+  --red-t: light-dark(#b0301a, #ff9a90);
+  --amber-t: light-dark(#85500a, #f5c26b);
+  --green-t: light-dark(#23693f, #74d8a8);
+  --blue-t: light-dark(#2553c7, #94bfff);
+  --violet-t: light-dark(#6a3fc2, #c0acff);
+  --red-bg: light-dark(#fbe9e5, #2a1311);
+  --amber-bg: light-dark(#fbf0dc, #2a2010);
+  --green-bg: light-dark(#e6f3ec, #10241a);
+  --blue-bg: light-dark(#e6edfb, #121f38);
+  --sel: light-dark(#eaf0fd, #162136);
+  --violet-bg: light-dark(#efe9fb, #1e1836);
+  --link: light-dark(#2553c7, #9cc3ff);
+  --primary: light-dark(#1d1c1a, #2d6cdf);
+  --primary-hover: light-dark(#34322e, #3470e4);
+  --on-primary: #ffffff;
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html { background: var(--bg); color: var(--text); scrollbar-color: var(--line-3) transparent; scrollbar-width: thin; }
+body { margin: 0; font: 13px/1.4 var(--sans); font-variant-numeric: tabular-nums; background: var(--bg); color: var(--text); }
+::selection { background: color-mix(in srgb, var(--blue) 32%, transparent); }
+a { color: var(--link); text-decoration: none; }
+button { font: inherit; color: inherit; }
+h1 { font-size: 22px; line-height: 1.25; margin: 0; font-weight: 650; text-wrap: balance; }
+h2, p { margin: 0; }
+.mono { font-family: var(--mono); }
+.mut { color: var(--mute); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+* { scrollbar-color: var(--line-3) transparent; scrollbar-width: thin; }
+
+/* ---------- nav + controls (hub styles) ---------- */
+.top { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 44px; padding: 0 16px; background: var(--nav); border-bottom: 1px solid var(--line); }
+.brand { margin-right: 18px; font-size: 14px; font-family: var(--mono); letter-spacing: -0.02em; }
+.top nav { display: flex; gap: 2px; }
+.tab { position: relative; display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; color: var(--dim); font-weight: 500; }
+.tab[aria-current="page"] { color: var(--text); }
+.tab[aria-current="page"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: var(--blue); border-radius: 2px; }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--dim); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); font-size: 12px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--line-3)); flex: none; }
+.dot.live { --c: var(--green); }
+.seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel-2); }
+.seg button { background: none; border: 0; color: var(--dim); padding: 3px 9px; border-radius: 5px; cursor: pointer; transition: color 120ms var(--ease), background-color 120ms var(--ease); }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--line-2); }
+@media (hover: hover) and (pointer: fine) { .seg button[aria-pressed="false"]:hover { color: var(--text); } }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text); font-weight: 500; cursor: pointer; white-space: nowrap; transition: background-color 120ms var(--ease), transform 120ms var(--ease), border-color 120ms var(--ease); }
+.btn:active, .seg button:active { transform: scale(0.97); }
+.btn.sm { padding: 2px 8px; font-size: 12px; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.btn[aria-pressed="true"] { background: var(--sel); border-color: color-mix(in srgb, var(--blue) 45%, transparent); }
+@media (hover: hover) and (pointer: fine) {
+  .btn:not(.primary):not(:disabled):hover { background: var(--panel-3); }
+  .btn.primary:not(:disabled):hover { background: var(--primary-hover); }
+}
+svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.pill { display: inline-block; padding: 0 7px; border-radius: 99px; font-size: 11.5px; line-height: 17px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text); white-space: nowrap; }
+.pill.ok { color: var(--green-t); background: var(--green-bg); border-color: var(--green); }
+.pill.bad { color: var(--red-t); background: var(--red-bg); border-color: var(--red); }
+.pill.warn { color: var(--amber-t); background: var(--amber-bg); border-color: var(--amber); }
+.pill.build { color: var(--blue-t); background: var(--blue-bg); border-color: var(--blue); }
+.pill.review { color: var(--violet-t); border-color: var(--violet); }
+.pill.unk { color: var(--mute); border-style: dashed; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.panel > header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); min-height: 44px; }
+.panel h2 { font-size: 13px; font-weight: 600; color: var(--text); }
+.count { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 10px; background: var(--panel-3); color: var(--dim); font-size: 12px; text-align: center; }
+
+/* ---------- page ---------- */
+.page { padding: 12px 16px 40px; max-width: 1680px; margin: 0 auto; }
+.crumb { font-size: 12px; color: var(--dim); }
+.khead { display: flex; align-items: baseline; gap: 12px; margin: 8px 0 6px; }
+.khead .id { font: 600 13px var(--mono); }
+.khead h1 { font-size: 20px; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--mute); margin-bottom: 14px; }
+.meta .v { color: var(--text); }
+.frag { margin-bottom: 14px; }
+.frag > header .tag { margin-left: auto; font-size: 11.5px; color: var(--mute); }
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 2px; list-style: none; margin: 0; padding: 12px 14px; }
+.chain li { display: contents; }
+.chain-item { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px 3px 7px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel-2); cursor: pointer; transition: background-color 120ms var(--ease), transform 120ms var(--ease); }
+.chain-item:active { transform: scale(0.97); }
+@media (hover: hover) and (pointer: fine) { .chain-item:hover { background: var(--panel-3); } }
+.chain-item .name { font-weight: 600; }
+.chain-item .st { color: var(--mute); font-size: 11.5px; }
+.chain-arrow { color: var(--line-3); margin: 0 2px; }
+.band { margin-bottom: 14px; }
+.note { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--dim); font-size: 12px; }
+.note b { font-weight: 600; color: var(--amber-t); }
+.note code { font: 11.5px var(--mono); color: var(--text); }
+
+/* ---------- graph panel ---------- */
+.graph-panel { display: flex; flex-direction: column; }
+.graph-panel > header { flex-wrap: wrap; }
+.graph-panel .gtools { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.graph-panel .zoom { font: 12px var(--mono); color: var(--mute); min-width: 34px; text-align: right; }
+.legend-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 6px 12px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 12px; }
+.legend-row > span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-row svg.ln { width: 28px; height: 8px; overflow: visible; }
+.event-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-bottom: 1px solid var(--line); font: 11.5px var(--mono); color: var(--mute); white-space: nowrap; overflow: hidden; }
+.event-row b { color: var(--text); font-weight: 600; }
+.event-row .seq { color: var(--dim); }
+.graph-viewport { overflow: auto; padding: 14px 16px; }
+.graph-stage { margin: auto; position: relative; flex: none; }
+.graph-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.graph-canvas svg.edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.graph-panel.fs { position: fixed; inset: 0; z-index: 100; border-radius: 0; border: 0; background: var(--bg); animation: fs-in 180ms var(--ease); }
+.graph-panel.fs .graph-viewport { flex: 1; min-height: 0; padding: 24px; display: flex; }
+.graph-panel.fs > header, .graph-panel.fs .legend-row { background: var(--nav); }
+@keyframes fs-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
+.empty { display: grid; gap: 6px; padding: 28px 24px; justify-items: start; max-width: 70ch; color: var(--dim); }
+.empty strong { color: var(--text); font-size: 14px; }
+
+/* edges */
+.edge { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; transition: stroke-width 120ms var(--ease), opacity 160ms var(--ease); }
+.edge.sedge { stroke-width: 1.25; }
+.edge.finished { stroke: var(--line-3); }
+.edge.blocking { stroke: var(--amber); stroke-dasharray: 5 4; }
+.edge.flow { stroke: var(--blue); stroke-dasharray: 6 6; animation: flow 2.6s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -12; } }
+.edge.hot { stroke-width: 2.6; }
+.graph-canvas.hotmode .edge:not(.hot) { opacity: 0.22; }
+.hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; }
+.arrow.finished { fill: var(--line-3); } .arrow.blocking { fill: var(--amber); } .arrow.flow { fill: var(--blue); }
+.edge-pill { position: absolute; transform: translate(-50%, -50%); width: 104px; height: 34px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2px 6px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); color: var(--text); cursor: default; transition: border-color 120ms var(--ease), background-color 120ms var(--ease); }
+.edge-pill .kind { display: inline-flex; align-items: center; gap: 4px; font: 600 11px/1.25 var(--sans); }
+.edge-pill .pin { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 10px/1.25 var(--mono); color: var(--mute); }
+.edge-pill.blocking { border-color: var(--amber); }
+.edge-pill.flow { border-color: var(--blue); }
+.edge-pill.hot, .edge-pill:focus-visible { background: var(--sel); }
+.edge-pill svg.i { width: 11px; height: 11px; }
+.bumpc-waits { color: var(--amber-t); } .bumpc-head { color: var(--violet-t); } .bumpc-run { color: var(--blue-t); } .bumpc-done { color: var(--green-t); }
+
+/* repo cards */
+.card { position: absolute; border-radius: 10px; background: color-mix(in srgb, var(--c) 6%, var(--panel-2)); --c: var(--line-3); overflow: hidden; }
+.card::after { content: ""; position: absolute; inset: 0; border: 1.5px solid var(--c); border-radius: inherit; pointer-events: none; }
+.card.s-done { --c: var(--green); } .card.s-running { --c: var(--blue); } .card.s-failed { --c: var(--red); } .card.s-ready { --c: var(--violet); }
+.card.s-pending::after { border-style: dashed; }
+.card-top { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
+.card.open .card-top { border-bottom: 1px solid color-mix(in srgb, var(--c) 35%, var(--line)); }
+@media (hover: hover) and (pointer: fine) { .card-top:has(.card-toggle:hover) { background: color-mix(in srgb, var(--c) 8%, transparent); } }
+.card-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; min-height: 22px; }
+.card-toggle::after { content: ""; position: absolute; inset: 0; }
+.card-toggle:focus-visible { outline: none; }
+.card-toggle:focus-visible::after { outline: 2px solid var(--blue); outline-offset: -3px; border-radius: 9px; }
+.card-toggle .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; font-size: 13px; }
+.card-toggle svg.i { color: var(--mute); transition: transform 180ms var(--ease); }
+.card.open .card-toggle svg.i { transform: rotate(180deg); }
+.badge { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-3); background: var(--panel); font: 600 11px var(--mono); color: var(--text); }
+.why { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 32px; color: var(--dim); font-size: 12px; line-height: 16px; }
+.mr { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; }
+.mr .line { display: flex; align-items: center; gap: 5px; min-height: 18px; white-space: nowrap; overflow: hidden; }
+.mr .num { font: 600 12px var(--mono); }
+.mr .sub { color: var(--mute); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+.mr .sub .met { color: var(--green-t); }
+.mr .sub .unmet { color: var(--amber-t); }
+.mr .branch { font: 11px var(--mono); }
+.card-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; min-height: 28px; font-size: 12px; color: var(--dim); }
+.card-foot .strip { margin-left: auto; display: flex; gap: 5px; align-items: center; }
+.ring .track { fill: none; stroke: var(--line-2); stroke-width: 3; }
+.ring .arc { fill: none; stroke: var(--line-3); stroke-width: 3; stroke-linecap: round; }
+.ring.rg-running .arc { stroke: var(--blue); } .ring.rg-done .arc { stroke: var(--green); }
+.sdot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--c); background: transparent; --c: var(--line-3); }
+.sdot.s-done { --c: var(--green); background: var(--c); } .sdot.s-running { --c: var(--blue); background: var(--c); animation: dotpulse 2.2s ease-in-out infinite; }
+.sdot.s-waiting { --c: var(--amber); } .sdot.s-pending { --c: var(--line-3); }
+.sdot.bump { border-radius: 2px; transform: rotate(45deg) scale(0.9); border-color: var(--violet); }
+.sdot.bump.s-done { background: var(--violet); } .sdot.bump.s-waiting { background: var(--amber-bg); border-color: var(--amber); } .sdot.bump.s-running { background: var(--blue); border-color: var(--blue); animation: none; }
+@keyframes dotpulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue) 45%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 0%, transparent); } }
+
+/* phase columns inside an expanded card, treatment from variant C */
+.phase-head { position: absolute; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mute); white-space: nowrap; }
+.phase-col { position: absolute; border-radius: 8px; border: 1px solid var(--line); background: color-mix(in srgb, var(--line) 35%, transparent); }
+.step { position: absolute; display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--panel-2); font-size: 12px; text-align: left; cursor: default; overflow: hidden; --c: var(--line-3); transition: opacity 160ms var(--ease), box-shadow 160ms var(--ease); }
+.step .sid { font: 600 10px/16px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step .sline { display: flex; align-items: center; gap: 5px; min-height: 16px; }
+.step .sstat { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; line-height: 15px; white-space: nowrap; color: var(--mute); }
+.step .smeta { font: 10.5px/14px var(--mono); color: var(--mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step svg.i { width: 11px; height: 11px; }
+.step.s-done { border-color: color-mix(in srgb, var(--green) 55%, var(--line-2)); background: var(--green-bg); --c: var(--green); }
+.step.s-done .sstat { color: var(--green-t); }
+.step.s-running { border-color: var(--blue); background: var(--blue-bg); --c: var(--blue); }
+.step.s-running .sstat { color: var(--blue-t); }
+.step.s-waiting { border-color: var(--amber); background: var(--amber-bg); --c: var(--amber); }
+.step.s-waiting .sstat { color: var(--amber-t); }
+.step.s-pending { border-style: dashed; border-color: var(--line-3); background: transparent; }
+.step.s-pending .sid { color: var(--dim); }
+.step.bump { border-left: 3px solid var(--violet); padding-left: 6px; }
+.step.bump.s-pending, .step.bump.s-done { background: var(--violet-bg); border-style: solid; border-color: var(--line-2); border-left: 3px solid var(--violet); }
+.step .sstat.bumpc-waits { color: var(--amber-t); } .step .sstat.bumpc-head { color: var(--violet-t); } .step .sstat.bumpc-run { color: var(--blue-t); } .step .sstat.bumpc-done { color: var(--green-t); }
+.step.self, .step:focus-visible { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--blue); outline: none; }
+.step.rel { border-color: var(--blue); }
+.graph-canvas.tracing .step:not(.self):not(.rel), .graph-canvas.tracing .card:not(.relcard), .graph-canvas.tracing .edge-pill, .graph-canvas.tracing .edge.redge, .graph-canvas.tracing .edge.intra:not(.hot) { opacity: 0.38; }
+.edge.cross { stroke: var(--blue); stroke-width: 2.2; opacity: 0; }
+.edge.cross.show { opacity: 1; }
+.sdot.rel { outline: 2px solid var(--blue); outline-offset: 1px; }
+.glyph { flex: none; }
+.glyph .ring { fill: none; stroke: var(--c); stroke-width: 1.6; }
+.glyph .mark { fill: none; stroke: var(--c); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.glyph .fill { fill: var(--c); }
+.glyph .pulse { fill: none; stroke: var(--c); stroke-width: 1.4; opacity: 0; transform-box: fill-box; transform-origin: center; animation: ringpulse 2.2s ease-out infinite; }
+@keyframes ringpulse { 0% { transform: scale(1); opacity: 0.55; } 100% { transform: scale(1.7); opacity: 0; } }
+.glyph.s-done { --c: var(--green); } .glyph.s-running { --c: var(--blue); } .glyph.s-waiting { --c: var(--amber); } .glyph.s-pending { --c: var(--line-3); }
+.glyph.s-failed { --c: var(--red); } .glyph.s-ready { --c: var(--violet); }
+.glyph.s-pending .ring { stroke-dasharray: 3 2.4; }
+.changed::before { content: ""; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none; background: color-mix(in srgb, var(--blue) 34%, transparent); box-shadow: inset 0 0 0 2px var(--blue); animation: flash 600ms ease-out forwards; }
+@keyframes flash { from { opacity: 1; } to { opacity: 0; } }
+.chain-item.changed { position: relative; }
+
+/* tooltip */
+.tip { position: fixed; z-index: 300; width: max-content; max-width: 380px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel); box-shadow: 0 8px 28px rgb(0 0 0 / 0.28); font-size: 12px; pointer-events: none; animation: tip-in 120ms var(--ease); }
+.tip[hidden] { display: none; }
+@keyframes tip-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.tip .t { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-weight: 600; }
+.tip dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 0; }
+.tip dt { color: var(--mute); }
+.tip dd { margin: 0; font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.tip dd.sans { font-family: var(--sans); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .changed::before { opacity: 0.55; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <b class="brand">ark hub</b>
+  <nav aria-label="Views"><a class="tab" href="#/">Home</a><a class="tab" href="#/runs" aria-current="page">Runs</a><a class="tab" href="#/roadmap">Roadmap</a></nav>
+  <div class="nav-right">
+    <span>prototype</span>
+    <span class="seg" role="group" aria-label="Scenario" id="scenarioSeg"></span>
+    <span class="chip"><i class="dot live"></i>Master Chief · 3 runs</span>
+    <span class="seg" role="group" aria-label="Theme" id="themeSeg"></span>
+  </div>
+</header>
+<main class="page" id="page">
+  <div class="crumb" id="crumb"></div>
+  <div class="khead"><span class="id" id="ticketId"></span><h1 id="ticketTitle"></h1></div>
+  <div class="meta" id="meta"></div>
+
+  <section class="panel frag" aria-label="Ticket page fragment: repo chain">
+    <header><h2>Repositories</h2><span class="count" id="chainCount"></span><span class="mut" id="chainOrder"></span><span class="tag">ticket page fragment</span></header>
+    <ol class="chain" id="chain"></ol>
+  </section>
+
+  <div class="band" id="band">
+    <section class="panel graph-panel" id="graphPanel" aria-label="Repo graph">
+      <header>
+        <h2>Repo graph</h2><span class="count" id="repoCount"></span>
+        <span class="chip" id="orderChip"></span>
+        <div class="gtools" id="gtools">
+          <button type="button" class="btn sm" id="expandAll" aria-pressed="false"></button>
+          <button type="button" class="btn sm" id="nextEvent"></button>
+          <button type="button" class="btn sm" id="resetEvents">Reset</button>
+          <span class="zoom" id="zoom"></span>
+          <span class="seg" role="group" aria-label="Graph zoom"><button type="button" id="fitBtn" aria-pressed="true">Fit</button><button type="button" id="fullBtn" aria-pressed="false">100%</button></span>
+          <button type="button" class="btn sm" id="fsBtn" aria-label="Full screen"></button>
+        </div>
+      </header>
+      <div class="legend-row" id="legend"></div>
+      <div class="event-row" id="eventRow" aria-live="polite"></div>
+      <div class="graph-viewport" id="viewport" tabindex="0" role="group" aria-label="Repo graph, scrollable">
+        <div class="graph-stage" id="stage"><div class="graph-canvas" id="canvas"></div></div>
+      </div>
+      <div class="empty" id="empty" hidden></div>
+    </section>
+  </div>
+  <div class="note" id="skew" hidden></div>
+</main>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+
+<script src="data.js"></script>
+<script>
+'use strict';
+const SCENARIOS = window.REPO_GRAPH_DATA.scenarios;
+const SCENARIO_KEYS = ['clara', 'smart_qc', 'ark'];
+const SIZE = { card: 236, top: 164, colGap: 128, lane: 64, itemGap: 20, margin: 8, pad: 10, phaseW: 148, phaseGap: 8, chipH: 62, chipGap: 6, headH: 18 };
+const EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// prototype-only simulated events for the "Next event" button
+const EVENT_SCRIPTS = {
+  clara: [
+    { step: 'platform-reads', to: 'done', text: 'platform-reads finished' },
+    { step: 'bump-platform-core', to: 'running', text: 'clara-core 0.0.6rc1 published, bump starts' },
+    { step: 'bump-platform-core', to: 'done', text: 'platform pin bumped' },
+    { step: 'tenant-retention', to: 'running', text: 'tenant work starts' },
+    { step: 'bump-tenant-core', to: 'running', text: 'tenant pin bump starts' },
+    { step: 'bump-tenant-core', to: 'done', text: 'tenant pin bumped' },
+    { step: 'tenant-retention', to: 'done', text: 'tenant-retention finished' },
+    { step: 'e2e-retention', to: 'running', text: 'E2E starts' },
+    { step: 'e2e-retention', to: 'done', text: 'E2E passed' },
+  ],
+  smart_qc: [
+    { mr: 42, patch: { ci: 'passed' }, text: 'CI passed on !42' },
+    { mr: 42, patch: { state: 'merged' }, text: '!42 merged' },
+    { step: 'bump-mocker-app', to: 'running', text: 'refreshing qc-metrics-app to merged head' },
+    { step: 'bump-mocker-app', to: 'done', text: 'mocker pin refreshed' },
+    { mr: 43, patch: { ci: 'running' }, text: 'CI re-run on !43' },
+    { mr: 43, patch: { ci: 'passed' }, text: 'CI passed on !43' },
+    { mr: 43, patch: { state: 'merged' }, text: '!43 merged' },
+  ],
+  ark: [],
+};
+
+/* ---------- tiny DOM helpers ---------- */
+const NS = 'http://www.w3.org/2000/svg';
+function build(factory, tag, props, kids) {
+  const node = factory(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value == null || value === false) continue;
+    if (key === 'text') node.textContent = value;
+    else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? '' : value);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) node.append(kid);
+  return node;
+}
+const h = (tag, props, ...kids) => build(name => document.createElement(name), tag, props, kids);
+const svgEl = (tag, props, ...kids) => build(name => document.createElementNS(NS, name), tag, props, kids);
+const ICONS = {
+  down: '<path d="m4 6 4 4 4-4"/>',
+  expand: '<path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/>',
+  close: '<path d="m4 4 8 8M12 4 4 12"/>',
+  step: '<path d="M4 3v10l6-5zM12.5 3v10"/>',
+  bump: '<path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5v3h-3"/>',
+  arrow: '<path d="M2 8h11M9 4l4 4-4 4"/>',
+};
+const icon = name => { const node = svgEl('svg', { viewBox: '0 0 16 16', class: 'i', 'aria-hidden': 'true' }); node.innerHTML = ICONS[name]; return node; };
+
+/* ---------- model ---------- */
+const shortRepo = path => path === '.' ? 'ark' : path.replace(/^repos\//, '');
+const shortModel = model => model.split('/').pop();
+function buildModel(key) {
+  const source = SCENARIOS[key];
+  return {
+    key, source,
+    repos: source.merge_order.map((path, index) => ({ path, order: index + 1, ...source.repos.find(repo => repo.repo === path) })),
+    steps: (source.steps || []).map(step => ({ ...step, needs: [...step.needs] })),
+    mrs: (source.merge_requests || []).map(mr => ({ ...mr, waits_for: [...mr.waits_for] })),
+    handoffs: source.handoff || [],
+    eventIndex: 0,
+  };
+}
+const stepById = (model, id) => model.steps.find(step => step.id === id);
+function repoView(model, path) {
+  const steps = model.steps.filter(step => step.repo === path);
+  const done = steps.filter(step => step.status === 'done').length;
+  const running = steps.filter(step => step.status === 'running').length;
+  const mr = model.mrs.find(item => item.repo === path);
+  let state, label;
+  if (mr) {
+    if (mr.state === 'merged') { state = 'done'; label = 'merged'; }
+    else if (mr.ci === 'failed') { state = 'failed'; label = 'CI failed'; }
+    else if (mr.ci === 'running') { state = 'running'; label = 'CI running'; }
+    else { state = 'ready'; label = 'ready to merge'; }
+  } else if (steps.length) {
+    if (done === steps.length) { state = 'done'; label = 'ready'; }
+    else if (running || done) { state = 'running'; label = 'building'; }
+    else { state = 'pending'; label = 'not started'; }
+  } else { state = model.source.run.phase === 'building' ? 'running' : 'pending'; label = model.source.run.phase; }
+  const handoff = model.handoffs.find(item => item.repo === path);
+  return { steps, done, total: steps.length, running, mr, handoff, state, label };
+}
+function repoEdges(model) {
+  const edges = [];
+  for (const repo of model.repos) for (const dep of repo.depends_on) {
+    edges.push({ id: `${dep.repo}>${repo.path}`, from: dep.repo, to: repo.path, kind: dep.kind, pin: dep.pin, evidence: dep.evidence, bump: dep.bump, bumpStep: dep.bump ? stepById(model, dep.bump.step) : null, lanes: [], stepEdges: 0 });
+  }
+  return edges;
+}
+function bumpState(step, edge) {
+  if (step.status === 'waiting') return { cls: 'waits', text: 'waits for publish' };
+  if (step.status === 'running') return { cls: 'run', text: 'refreshing' };
+  if (!step.touched && /refresh after/.test(edge?.bump?.status || '')) return { cls: 'head', text: 'points at branch head', short: 'at branch head' };
+  return { cls: 'done', text: 'refreshed' };
+}
+function bumpEdgeOf(model, step) { return repoEdges(model).find(edge => edge.bump?.step === step.id); }
+const STATUS_RANK = { running: 0, waiting: 1, pending: 2, done: 3 };
+function orderedSteps(model, path) {
+  const own = model.steps.filter(step => step.repo === path);
+  const layer = {};
+  const level = step => layer[step.id] ??= Math.max(0, ...step.needs.map(need => own.find(other => other.id === need)).filter(Boolean).map(dep => level(dep) + 1));
+  own.forEach(level);
+  // topological layers first; inside a layer, active steps float up (this is what the FLIP reorders)
+  return own.map((step, index) => ({ step, index })).sort((a, b) => layer[a.step.id] - layer[b.step.id] || STATUS_RANK[a.step.status] - STATUS_RANK[b.step.status] || a.index - b.index).map(item => item.step);
+}
+function applyEvent(model, event) {
+  const changed = { steps: new Set(), repos: new Set() };
+  if (event.step) { const step = stepById(model, event.step); step.status = event.to; step.touched = true; changed.steps.add(step.id); changed.repos.add(step.repo); }
+  if (event.mr) { const mr = model.mrs.find(item => item.number === event.mr); Object.assign(mr, event.patch); changed.repos.add(mr.repo); }
+  model.eventIndex++;
+  return changed;
+}
+
+/* ---------- layout ---------- */
+const curve = (x1, y1, x2, y2, minBend = 28) => `C${x1 + Math.max(minBend, (x2 - x1) / 2)} ${y1} ${x2 - Math.max(minBend, (x2 - x1) / 2)} ${y2} ${x2} ${y2}`;
+const backCurve = (x1, y1, x2, y2) => { const bend = Math.max(36, (x1 - x2) / 2); return `C${x1 - bend} ${y1} ${x2 + bend} ${y2} ${x2} ${y2}`; };
+const PHASES = [{ key: 'implement', label: 'Implement' }, { key: 'bump', label: 'Bump' }, { key: 'validate', label: 'Validate' }, { key: 'review', label: 'Review' }];
+const phaseOf = step => step.bump ? 'bump' : step.role === 'validator' ? 'validate' : step.role === 'reviewer' ? 'review' : 'implement';
+function computeLayout(model, expanded) {
+  const edges = repoEdges(model);
+  const depth = {};
+  const level = path => depth[path] ??= Math.max(0, ...edges.filter(edge => edge.to === path).map(edge => level(edge.from) + 1));
+  model.repos.forEach(repo => level(repo.path));
+  const columns = Array.from({ length: Math.max(...Object.values(depth)) + 1 }, () => ({ cards: [], lanes: [], width: 0, x: 0 }));
+  const cardOf = {};
+  for (const repo of model.repos) {
+    const open = expanded.has(repo.path);
+    const steps = open ? orderedSteps(model, repo.path) : [];
+    const phases = PHASES.map(phase => ({ ...phase, steps: steps.filter(step => phaseOf(step) === phase.key) })).filter(phase => phase.steps.length);
+    const stack = Math.max(0, ...phases.map(phase => phase.steps.length));
+    const colH = stack * SIZE.chipH + (stack - 1) * SIZE.chipGap + 8;
+    const span = phases.length * SIZE.phaseW + (phases.length - 1) * SIZE.phaseGap;
+    const card = { repo, path: repo.path, open, phases, column: depth[repo.path], span, colH, w: phases.length ? Math.max(SIZE.card, SIZE.pad * 2 + span) : SIZE.card, h: SIZE.top + (phases.length ? 8 + SIZE.headH + colH + 12 : 0), x: 0, y: 0, chips: [], cols: [] };
+    cardOf[repo.path] = card;
+    columns[card.column].cards.push(card);
+  }
+  for (const edge of edges) for (let column = depth[edge.from] + 1; column < depth[edge.to]; column++) {
+    const lane = { edge, column, y: 0 };
+    edge.lanes.push(lane); columns[column].lanes.push(lane);
+  }
+  let x = SIZE.margin;
+  for (const column of columns) { column.width = Math.max(...column.cards.map(card => card.w)); column.x = x; x += column.width + SIZE.colGap; }
+  const width = x - SIZE.colGap + SIZE.margin;
+  let bottom = 0;
+  for (const column of columns) {
+    let y = SIZE.margin;
+    for (const card of column.cards) { card.x = column.x; card.y = y; y += card.h + SIZE.itemGap; }
+    for (const lane of column.lanes) { lane.y = y; y += SIZE.lane + SIZE.itemGap; }
+    bottom = Math.max(bottom, y - SIZE.itemGap);
+  }
+  const chipById = {};
+  for (const card of Object.values(cardOf)) {
+    if (!card.phases.length) continue;
+    const left = card.x + (card.w - card.span) / 2, headY = card.y + SIZE.top + 8, colY = headY + SIZE.headH;
+    card.phases.forEach((phase, index) => {
+      const colX = left + index * (SIZE.phaseW + SIZE.phaseGap);
+      card.cols.push({ label: phase.label, x: colX, headY, colY, h: card.colH });
+      phase.steps.forEach((step, row) => { const chip = { step, col: index, x: colX + 4, y: colY + 4 + row * (SIZE.chipH + SIZE.chipGap), w: SIZE.phaseW - 8, h: SIZE.chipH }; card.chips.push(chip); chipById[step.id] = chip; });
+    });
+  }
+  // ports on the card header: nearest neighbours take the top ports
+  for (const card of Object.values(cardOf)) {
+    edges.filter(edge => edge.from === card.path).sort((a, b) => depth[a.to] - depth[b.to]).forEach((edge, index) => { edge.sx = card.x + card.w; edge.sy = card.y + 24 + index * 12; });
+    edges.filter(edge => edge.to === card.path).sort((a, b) => depth[b.from] - depth[a.from]).forEach((edge, index) => { edge.tx = card.x - 1; edge.ty = card.y + 24 + index * 12; });
+  }
+  const laneRoute = (sx, sy, lanes, tx, ty, offsetY) => {
+    let d = `M${sx} ${sy}`, px = sx, py = sy;
+    for (const lane of lanes) {
+      const column = columns[lane.column], cy = lane.y + SIZE.lane / 2 + offsetY;
+      d += curve(px, py, column.x, cy) + `L${column.x + column.width} ${cy}`; px = column.x + column.width; py = cy;
+    }
+    return d + curve(px, py, tx, ty);
+  };
+  for (const edge of edges) {
+    edge.d = laneRoute(edge.sx, edge.sy, edge.lanes, edge.tx, edge.ty, 0);
+    if (edge.lanes.length) { const lane = edge.lanes[0], column = columns[lane.column]; edge.pill = { x: column.x + column.width / 2, y: lane.y + SIZE.lane / 2 }; }
+    else edge.pill = { x: (edge.sx + edge.tx) / 2, y: (edge.sy + edge.ty) / 2 };
+  }
+  // step needs: inside a card along the phase order (always drawn); across repos (drawn on hover/focus of a step only)
+  const anchor = (stepId, side) => {
+    const chip = chipById[stepId];
+    if (chip) return { x: side === 'in' ? chip.x - 1 : chip.x + chip.w, y: chip.y + chip.h / 2 };
+    const card = cardOf[stepById(model, stepId).repo];
+    return { x: side === 'in' ? card.x - 1 : card.x + card.w, y: card.y + SIZE.top - 24 };
+  };
+  const crossEdges = [], intraEdges = [];
+  for (const step of model.steps) for (const needId of step.needs) {
+    const need = stepById(model, needId);
+    if (!need) continue;
+    const fromCard = cardOf[need.repo], toCard = cardOf[step.repo];
+    if (fromCard === toCard) {
+      if (!fromCard.open) continue;
+      const a = chipById[needId], b = chipById[step.id];
+      let d;
+      if (b.col - a.col > 1) { // skips a phase column: run under the columns so it never reads as coming from the column it passes
+        const ax = a.x + a.w, ay = a.y + a.h / 2, bx = b.x - 1, by = b.y + b.h / 2, ry = fromCard.cols[0].colY + fromCard.colH + 7;
+        d = `M${ax} ${ay}C${ax + 22} ${ay} ${ax + 22} ${ry} ${ax + 46} ${ry}L${bx - 46} ${ry}C${bx - 22} ${ry} ${bx - 22} ${by} ${bx} ${by}`;
+      } else if (a.col < b.col) d = `M${a.x + a.w} ${a.y + a.h / 2}${curve(a.x + a.w, a.y + a.h / 2, b.x - 1, b.y + b.h / 2, 6)}`;
+      else if (a.col > b.col) d = `M${a.x} ${a.y + a.h / 2}${backCurve(a.x, a.y + a.h / 2, b.x + b.w + 1, b.y + b.h / 2)}`;
+      else if (a.y < b.y) d = `M${a.x + a.w / 2} ${a.y + a.h}L${b.x + b.w / 2} ${b.y - 1}`;
+      else d = `M${a.x + a.w / 2} ${a.y}L${b.x + b.w / 2} ${b.y + b.h + 1}`;
+      intraEdges.push({ from: need, to: step, d });
+      continue;
+    }
+    if (!fromCard.open && !toCard.open) continue;
+    const entry = { from: need, to: step };
+    if (toCard.column > fromCard.column) {
+      const start = anchor(needId, 'out'), end = anchor(step.id, 'in');
+      const repoEdge = edges.find(edge => edge.from === need.repo && edge.to === step.repo);
+      const lanes = repoEdge ? repoEdge.lanes : [];
+      entry.d = laneRoute(start.x, start.y, lanes, end.x, end.y, lanes.length ? 22 + 5 * repoEdge.stepEdges++ : 0);
+    } else { // backward (reviews that wait on a later repo): direct curve, only ever visible while hovered
+      const start = anchor(needId, 'in'), end = anchor(step.id, 'out'), ry = bottom + 10;
+      entry.backward = true;
+      entry.d = `M${start.x} ${start.y}C${start.x - 30} ${start.y} ${start.x - 30} ${ry} ${start.x - 60} ${ry}L${end.x + 60} ${ry}C${end.x + 30} ${ry} ${end.x + 30} ${end.y} ${end.x} ${end.y}`;
+    }
+    crossEdges.push(entry);
+  }
+  return { width, height: bottom + SIZE.margin + (crossEdges.some(entry => entry.backward) ? 20 : 0), edges, cardOf, intraEdges, crossEdges, columns };
+}
+
+/* ---------- glyphs, ring ---------- */
+function statusGlyph(status, size = 18) {
+  const glyph = svgEl('svg', { viewBox: '0 0 18 18', width: size, height: size, class: `glyph s-${status}`, 'aria-hidden': 'true' });
+  if (status === 'running') glyph.append(svgEl('circle', { cx: 9, cy: 9, r: 7, class: 'pulse' }));
+  glyph.append(svgEl('circle', { cx: 9, cy: 9, r: 7, class: 'ring' }));
+  if (status === 'done') glyph.append(svgEl('path', { d: 'M5.6 9.2l2.4 2.4 4.4-4.8', class: 'mark' }));
+  if (status === 'running') glyph.append(svgEl('path', { d: 'M9 4.2a4.8 4.8 0 0 1 0 9.6z', class: 'fill' }));
+  if (status === 'waiting') glyph.append(svgEl('path', { d: 'M7.2 6.2v5.6M10.8 6.2v5.6', class: 'mark' }));
+  if (status === 'failed') glyph.append(svgEl('path', { d: 'M6.4 6.4l5.2 5.2M11.6 6.4l-5.2 5.2', class: 'mark' }));
+  if (status === 'ready') glyph.append(svgEl('circle', { cx: 9, cy: 9, r: 2.6, class: 'fill' }));
+  return glyph;
+}
+function progressRing(done, total, running) {
+  const radius = 10, circumference = 2 * Math.PI * radius;
+  return svgEl('svg', { viewBox: '0 0 26 26', width: 26, height: 26, class: `ring ${running ? 'rg-running' : done ? 'rg-done' : ''}`, 'aria-hidden': 'true' },
+    svgEl('circle', { cx: 13, cy: 13, r: radius, class: 'track' }),
+    svgEl('circle', { cx: 13, cy: 13, r: radius, class: 'arc', transform: 'rotate(-90 13 13)', 'stroke-dasharray': `${total ? circumference * done / total : 0} ${circumference}` }));
+}
+
+/* ---------- state ---------- */
+const state = { scenario: 'clara', model: null, expanded: new Set(), layout: null, positions: null, mode: 'fit', lastScale: 0, lastEvent: null };
+const $ = id => document.getElementById(id);
+const panel = $('graphPanel'), viewport = $('viewport'), stage = $('stage'), canvas = $('canvas');
+
+function loadScenario(key) {
+  state.scenario = key;
+  state.model = buildModel(key);
+  state.expanded = new Set(state.model.repos.length >= 4 ? [] : state.model.repos.map(repo => repo.path)); // default: collapsed for 4+ repos
+  const param = new URLSearchParams(location.search).get('expand');
+  if (param === 'all') state.expanded = new Set(state.model.repos.map(repo => repo.path));
+  if (param === 'none') state.expanded = new Set();
+  state.positions = null; state.lastEvent = null;
+  render(new Set(), new Set());
+  document.querySelectorAll('#scenarioSeg button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.key === key)));
+}
+
+/* ---------- render ---------- */
+function render(changedSteps, changedRepos) {
+  const model = state.model, source = model.source;
+  $('crumb').textContent = `Runs / ${source.run.run}`;
+  $('ticketId').textContent = source.ticket.id;
+  $('ticketTitle').textContent = source.ticket.title;
+  const setting = String(source.merge_requests_setting).split(' ')[0];
+  const mrMode = setting !== 'none';
+  $('meta').replaceChildren(
+    ...[['project', source.project], ['phase', source.run.phase], ['round', source.run.round ? `${source.run.round} of ${source.run.round_budget}` : '-'], ['merge requests', setting]].map(([label, value]) => h('span', null, `${label} `, h('span', { class: 'v', text: value }))));
+  renderChain(model, mrMode, changedRepos);
+  const single = model.repos.length < 2;
+  viewport.hidden = single; $('legend').hidden = single; $('eventRow').hidden = single; $('empty').hidden = !single;
+  $('gtools').hidden = single;
+  $('repoCount').textContent = model.repos.length;
+  $('orderChip').textContent = single ? 'single repo' : mrMode ? 'merge order · merge requests open' : 'hand-off order · merge requests: none';
+  renderSkew(source);
+  if (single) {
+    // ponytail: single-repo run hides the repo graph; one card with no edges adds nothing the step DAG on the run page doesn't already show
+    $('empty').replaceChildren(h('strong', { text: 'Single-repo run: the repo graph is hidden' }), h('p', { text: 'One repo means one card and no edges, so there is no order or dependency to show. The ticket chain above collapses to the one repo, and the run page keeps the step DAG as it is today. This panel appears only when a run touches two or more repos.' }));
+    $('zoom').textContent = ''; state.layout = null; renderLegendAndButtons(model);
+    return;
+  }
+  renderLegendAndButtons(model);
+  const layout = computeLayout(model, state.expanded);
+  state.layout = layout;
+  drawCanvas(layout, model, mrMode, changedSteps, changedRepos);
+  applyScale(true);
+}
+function renderLegendAndButtons(model) {
+  const eventCount = EVENT_SCRIPTS[model.key].length;
+  $('expandAll').textContent = state.expanded.size === model.repos.length ? 'Collapse all' : 'Expand all';
+  $('expandAll').setAttribute('aria-pressed', String(state.expanded.size === model.repos.length));
+  $('nextEvent').replaceChildren(icon('step'), h('span', { text: 'Next event' }));
+  $('nextEvent').disabled = model.repos.length < 2 || model.eventIndex >= eventCount;
+  $('resetEvents').disabled = model.eventIndex === 0;
+  const last = state.lastEvent;
+  const sample = (kind) => svgEl('svg', { class: 'ln', viewBox: '0 0 28 8', 'aria-hidden': 'true' }, svgEl('path', { d: 'M0 4H28', class: `edge ${kind}` }));
+  const bumpSample = h('span', { class: 'sdot bump s-waiting', 'aria-hidden': 'true' });
+  $('legend').replaceChildren(
+    ...['done', 'running', 'waiting', 'pending', 'failed', 'ready'].map(status => h('span', null, statusGlyph(status, 14), status)),
+    h('span', null, sample('finished'), 'upstream done'), h('span', null, sample('flow'), 'flowing into running'), h('span', null, sample('blocking'), 'still blocking'),
+    h('span', null, bumpSample, 'bump step (Bump column, violet bar)'));
+  $('eventRow').replaceChildren(...(last ? [h('span', { class: 'seq', text: `event ${model.eventIndex}/${eventCount}` }), h('b', { text: last })] : [h('span', { class: 'seq', text: `simulated events: ${eventCount} queued, press Next event` })]));
+}
+function renderChain(model, mrMode, changedRepos) {
+  $('chainCount').textContent = model.repos.length;
+  $('chainOrder').textContent = model.repos.length < 2 ? 'single repo' : mrMode ? 'merge order' : 'hand-off order';
+  const items = [];
+  model.repos.forEach((repo, index) => {
+    const view = repoView(model, repo.path);
+    const suffix = view.mr ? `!${view.mr.number} ${view.label}` : view.label;
+    const item = h('button', { type: 'button', class: `chain-item${changedRepos.has(repo.path) ? ' changed' : ''}`, 'data-chain': repo.path, title: `${shortRepo(repo.path)}: ${suffix}`, onclick: () => focusRepo(repo.path) },
+      statusGlyph(view.state, 14), h('span', { class: 'name', text: shortRepo(repo.path) }), h('span', { class: 'st', text: suffix }));
+    items.push(h('li', null, index ? h('span', { class: 'chain-arrow', 'aria-hidden': 'true' }, icon('arrow')) : null, item));
+  });
+  $('chain').replaceChildren(...items);
+  $('chain').setAttribute('aria-label', `Repo chain: ${model.repos.map(repo => shortRepo(repo.path)).join(' to ')}`);
+  scheduleClear(document.querySelectorAll('#chain .changed'));
+}
+function renderSkew(source) {
+  const skew = $('skew');
+  skew.hidden = !source.skew;
+  if (!source.skew) return;
+  skew.replaceChildren(...source.skew.flatMap(item => [h('b', { text: 'Version skew' }), h('code', { text: item.package }), h('span', null, Object.entries(item.values).map(([repo, value]) => `${shortRepo(repo)} ${value}`).join(' · ')), h('span', { class: 'mut', text: item.note })]));
+}
+
+function drawCanvas(layout, model, mrMode, changedSteps, changedRepos) {
+  const items = []; // for FLIP
+  canvas.replaceChildren();
+  canvas.className = 'graph-canvas';
+  canvas.style.width = `${layout.width}px`; canvas.style.height = `${layout.height}px`;
+  const cardLayer = h('div'), chipLayer = h('div'), pillLayer = h('div');
+  for (const card of Object.values(layout.cardOf)) {
+    const el = renderCard(model, card, mrMode);
+    el.style.cssText = `left:${card.x}px;top:${card.y}px;width:${card.w}px;height:${card.h}px`;
+    cardLayer.append(el); items.push({ el, key: `repo:${card.path}`, x: card.x, y: card.y, h: card.h });
+    if (changedRepos.has(card.path)) el.classList.add('changed');
+    for (const chip of card.chips) {
+      const chipEl = renderStep(model, chip.step);
+      chipEl.style.cssText = `left:${chip.x}px;top:${chip.y}px;width:${chip.w}px;height:${chip.h}px`;
+      chipEl.addEventListener('mouseenter', () => trace(chip.step.id, true)); chipEl.addEventListener('mouseleave', () => trace(chip.step.id, false));
+      chipEl.addEventListener('focus', () => trace(chip.step.id, true)); chipEl.addEventListener('blur', () => trace(chip.step.id, false));
+      chipLayer.append(chipEl); items.push({ el: chipEl, key: `step:${chip.step.id}`, x: chip.x, y: chip.y, h: chip.h });
+      if (changedSteps.has(chip.step.id)) chipEl.classList.add('changed');
+    }
+  }
+  // edges: intra-card needs sit under the chips, repo edges and hover-only cross-repo needs sit on top
+  const makeSvg = () => svgEl('svg', { class: 'edges', width: layout.width, height: layout.height, 'aria-hidden': 'true' });
+  const intraLayer = makeSvg(), edgeLayer = makeSvg();
+  const defs = svgEl('defs');
+  for (const kind of ['finished', 'blocking', 'flow']) {
+    defs.append(svgEl('marker', { id: `arrow-${kind}`, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 8, markerHeight: 8, markerUnits: 'userSpaceOnUse', orient: 'auto' }, svgEl('path', { d: 'M0 0 10 5 0 10z', class: `arrow ${kind}` })));
+  }
+  edgeLayer.append(defs);
+  const upstreamDone = path => repoView(model, path).state === 'done';
+  const stateOfRepoEdge = edge => !upstreamDone(edge.from) ? 'blocking' : repoView(model, edge.to).state === 'running' ? 'flow' : 'finished';
+  const stateOfStepEdge = entry => entry.from.status !== 'done' ? 'blocking' : entry.to.status === 'running' ? 'flow' : 'finished';
+  const order = ['finished', 'blocking', 'flow'];
+  for (const entry of [...layout.intraEdges].sort((a, b) => order.indexOf(stateOfStepEdge(a)) - order.indexOf(stateOfStepEdge(b)))) {
+    const kind = stateOfStepEdge(entry);
+    intraLayer.append(svgEl('path', { d: entry.d, class: `edge sedge intra ${kind}`, 'marker-end': `url(#arrow-${kind})`, 'data-ends': `${entry.from.id} ${entry.to.id}` }));
+  }
+  const pathOfEdge = new Map();
+  for (const edge of [...layout.edges].sort((a, b) => order.indexOf(stateOfRepoEdge(a)) - order.indexOf(stateOfRepoEdge(b)))) {
+    const kind = stateOfRepoEdge(edge);
+    const path = svgEl('path', { d: edge.d, class: `edge redge ${kind}`, 'marker-end': `url(#arrow-${kind})` });
+    edgeLayer.append(path); pathOfEdge.set(edge.id, { path, kind });
+  }
+  for (const entry of layout.crossEdges) edgeLayer.append(svgEl('path', { d: entry.d, class: 'edge sedge cross', 'marker-end': 'url(#arrow-flow)', 'data-ends': `${entry.from.id} ${entry.to.id}` }));
+  for (const edge of layout.edges) {
+    const { path, kind } = pathOfEdge.get(edge.id);
+    const bumpInfo = edge.bumpStep ? bumpState(edge.bumpStep, edge) : null;
+    const pill = h('button', { type: 'button', class: `edge-pill ${kind}`, style: `left:${edge.pill.x}px;top:${edge.pill.y}px`, 'aria-label': `${shortRepo(edge.to)} depends on ${shortRepo(edge.from)} by ${edge.kind}, ${edge.pin}${bumpInfo ? `, bump ${bumpInfo.text}` : ''}. Evidence ${edge.evidence}` },
+      h('span', { class: 'kind' }, edge.kind, bumpInfo ? h('span', { class: `bumpc-${bumpInfo.cls}`, title: `bump ${bumpInfo.text}` }, icon('bump')) : null),
+      h('span', { class: 'pin', text: pinShort(edge) }));
+    const hit = svgEl('path', { d: edge.d, class: 'hit', style: 'pointer-events:stroke' });
+    const on = () => { path.classList.add('hot'); pill.classList.add('hot'); showTip(edge, bumpInfo, pill); };
+    const off = () => { path.classList.remove('hot'); pill.classList.remove('hot'); hideTip(); };
+    for (const target of [pill, hit]) { target.addEventListener('mouseenter', on); target.addEventListener('mouseleave', off); }
+    pill.addEventListener('focus', on); pill.addEventListener('blur', off);
+    edgeLayer.append(hit); pillLayer.append(pill);
+  }
+  canvas.append(cardLayer, intraLayer, chipLayer, edgeLayer, pillLayer);
+  // FLIP: every card and step chip that moved slides from its old spot; new chips fade in; edges fade back after the move
+  const reduce = reduceMotion(), previous = state.positions, next = new Map();
+  let moved = false;
+  for (const item of items) {
+    next.set(item.key, { x: item.x, y: item.y, h: item.h });
+    const old = previous?.get(item.key);
+    if (!previous) continue;
+    if (!old) { moved = true; if (!reduce) item.el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, delay: 90, fill: 'backwards' }); continue; }
+    if (old.x !== item.x || old.y !== item.y) { moved = true; if (!reduce) item.el.animate([{ transform: `translate(${old.x - item.x}px, ${old.y - item.y}px)` }, { transform: 'none' }], { duration: 320, easing: EASE }); }
+    if (item.h > old.h) { moved = true; if (!reduce) item.el.animate([{ clipPath: `inset(0 0 ${item.h - old.h}px 0)` }, { clipPath: 'inset(0 0 0 0)' }], { duration: 280, easing: EASE }); }
+  }
+  state.positions = next;
+  if (moved && !reduce) for (const layer of [intraLayer, edgeLayer, pillLayer]) layer.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, delay: 140, fill: 'backwards' });
+  scheduleClear(canvas.querySelectorAll('.changed'));
+}
+function scheduleClear(nodes) { nodes.forEach(node => setTimeout(() => node.classList.remove('changed'), reduceMotion() ? 1400 : 650)); }
+function pinShort(edge) {
+  if (edge.kind === 'package') return edge.pin.replace(/^[^<>=]+(?=[<>=])/, '');
+  if (edge.kind === 'submodule') return `@ ${edge.pin.split('@ ')[1]}`;
+  if (edge.kind === 'compose') return edge.pin.replace(/^service /, '');
+  return edge.pin.replace(/^.*?(schema)/, '$1');
+}
+// hover/focus a step: dim the rest, show its needs and dependents, and draw its cross-repo edges
+function trace(stepId, on) {
+  const model = state.model, step = stepById(model, stepId);
+  const related = new Set([stepId, ...step.needs, ...model.steps.filter(other => other.needs.includes(stepId)).map(other => other.id)]);
+  const repos = new Set([...related].map(id => stepById(model, id)?.repo));
+  canvas.classList.toggle('tracing', on);
+  canvas.querySelectorAll('.step').forEach(el => { el.classList.toggle('self', on && el.dataset.step === stepId); el.classList.toggle('rel', on && el.dataset.step !== stepId && related.has(el.dataset.step)); });
+  canvas.querySelectorAll('.sdot').forEach(el => el.classList.toggle('rel', on && el.dataset.step !== stepId && related.has(el.dataset.step)));
+  canvas.querySelectorAll('.card').forEach(el => el.classList.toggle('relcard', on && repos.has(el.dataset.repo)));
+  canvas.querySelectorAll('.edge.intra').forEach(path => path.classList.toggle('hot', on && path.dataset.ends.split(' ').includes(stepId)));
+  canvas.querySelectorAll('.edge.cross').forEach(path => path.classList.toggle('show', on && path.dataset.ends.split(' ').includes(stepId)));
+}
+
+function renderCard(model, card, mrMode) {
+  const view = repoView(model, card.path), repo = card.repo, count = model.repos.length;
+  const toggle = h('button', { type: 'button', class: 'card-toggle', 'aria-expanded': String(card.open), 'aria-label': `${shortRepo(card.path)}, ${card.open ? 'collapse' : 'expand'} steps`, onclick: () => toggleRepo(card.path) },
+    h('span', { class: 'badge', text: repo.order, title: `${repo.order} of ${count} in ${mrMode ? 'merge' : 'hand-off'} order` }),
+    h('span', { class: 'name', text: shortRepo(card.path), title: card.path }), icon('down'));
+  let mrBlock;
+  if (view.mr) {
+    const mr = view.mr;
+    const waits = mr.waits_for.map(number => { const upstream = model.mrs.find(item => item.number === number); return h('span', { class: upstream?.state === 'merged' ? 'met' : 'unmet' }, ` !${number}${upstream?.state === 'merged' ? ' ✓' : ''}`); });
+    mrBlock = h('div', { class: 'mr' },
+      h('div', { class: 'line' }, h('span', { class: 'num', text: `!${mr.number}` }), h('span', { class: `pill ${mr.state === 'merged' ? 'ok' : ''}`, text: mr.state }),
+        h('span', { class: `pill ${{ passed: 'ok', running: 'build', failed: 'bad' }[mr.ci]}`, text: `CI ${mr.ci}` })),
+      h('div', { class: 'sub' }, waits.length ? ['waits for', ...waits] : (mr.note || 'no upstream')));
+  } else {
+    mrBlock = h('div', { class: 'mr' },
+      h('div', { class: 'line' }, h('span', { class: 'mut', text: 'hand-off' }), h('span', { class: `pill ${{ done: 'ok', running: 'build', pending: 'unk' }[view.state] || ''}`, text: view.label })),
+      h('div', { class: 'sub branch', text: view.handoff ? view.handoff.branch : '-', title: 'hand-off branch' }));
+  }
+  const strip = h('span', { class: 'strip', 'aria-hidden': 'true' }, ...view.steps.map(step => h('span', { class: `sdot s-${step.status}${step.bump ? ' bump' : ''}`, 'data-step': step.id, title: `${step.id}: ${step.status}${step.bump ? ' (bump)' : ''}` })));
+  const foot = h('div', { class: 'card-foot' }, view.total ? [progressRing(view.done, view.total, view.running), h('span', { text: `${view.done}/${view.total} steps` }), strip] : [h('span', { class: 'mut', text: 'no steps listed' })]);
+  const decor = card.cols.flatMap(col => [
+    h('span', { class: 'phase-head', style: `left:${col.x - card.x}px;top:${col.headY - card.y}px`, text: col.label }),
+    h('span', { class: 'phase-col', style: `left:${col.x - card.x}px;top:${col.colY - card.y}px;width:${SIZE.phaseW}px;height:${col.h}px` })]);
+  return h('div', { class: `card s-${view.state}${card.open ? ' open' : ''}`, 'data-repo': card.path },
+    h('div', { class: 'card-top', style: `height:${SIZE.top}px` }, toggle, h('p', { class: 'why', text: repo.why }), mrBlock, foot), ...decor);
+}
+function renderStep(model, step) {
+  const edge = step.bump ? bumpEdgeOf(model, step) : null;
+  const info = step.bump ? bumpState(step, edge) : null;
+  const need = step.needs.length ? `needs ${step.needs.join(', ')}` : 'no needs';
+  return h('div', { class: `step s-${step.status}${step.bump ? ' bump' : ''}`, 'data-step': step.id, tabindex: 0, role: 'group', 'aria-label': `${step.id}, ${step.role}, ${info ? `bump ${info.text}` : step.status}, ${need}`, title: `${step.id}\n${step.role} · ${step.model} · ${step.status}\n${need}${info ? `\nbump ${shortRepo(step.bump.edge)} (${step.bump.kind}): ${info.text}` : ''}` },
+    h('span', { class: 'sid', text: step.id }),
+    h('span', { class: 'sline' }, statusGlyph(step.status, 13), info ? h('span', { class: `sstat bumpc-${info.cls}` }, icon('bump'), info.short ?? info.text) : h('span', { class: 'sstat', text: step.status })),
+    h('span', { class: 'smeta', text: shortModel(step.model) }));
+}
+
+/* ---------- tooltip ---------- */
+const tip = $('tip');
+let tipTimer = 0;
+function showTip(edge, bumpInfo, anchorEl) {
+  clearTimeout(tipTimer);
+  tip.replaceChildren(
+    h('div', { class: 't' }, h('span', { class: 'pill', text: edge.kind }), h('span', { text: `${shortRepo(edge.to)} depends on ${shortRepo(edge.from)}` })),
+    h('dl', null, h('dt', { text: 'pin' }), h('dd', { text: edge.pin }), h('dt', { text: 'evidence' }), h('dd', { text: edge.evidence }),
+      h('dt', { text: 'bump' }), edge.bump ? h('dd', { class: 'sans' }, h('span', { class: 'mono', text: edge.bump.step }), ` to ${edge.bump.to}, `, h('span', { class: `bumpc-${bumpInfo.cls}`, text: bumpInfo.text })) : h('dd', { class: 'sans mut', text: 'no bump step for this edge' })));
+  tip.hidden = false;
+  const box = anchorEl.getBoundingClientRect(), tipBox = tip.getBoundingClientRect();
+  const left = Math.max(8, Math.min(innerWidth - tipBox.width - 8, box.left + box.width / 2 - tipBox.width / 2));
+  const top = box.top - tipBox.height - 8 >= 8 ? box.top - tipBox.height - 8 : box.bottom + 8;
+  tip.style.left = `${left}px`; tip.style.top = `${top}px`;
+}
+function hideTip() { clearTimeout(tipTimer); tipTimer = setTimeout(() => { tip.hidden = true; }, 60); }
+
+/* ---------- interactions ---------- */
+function toggleRepo(path) {
+  state.expanded.has(path) ? state.expanded.delete(path) : state.expanded.add(path);
+  render(new Set(), new Set());
+  canvas.querySelector(`.card[data-repo="${CSS.escape(path)}"] .card-toggle`)?.focus({ preventScroll: true });
+}
+function focusRepo(path) {
+  state.expanded.add(path);
+  render(new Set(), new Set([path]));
+  const card = canvas.querySelector(`.card[data-repo="${CSS.escape(path)}"]`);
+  panel.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'nearest' });
+  card?.querySelector('.card-toggle').focus({ preventScroll: true });
+}
+$('expandAll').addEventListener('click', () => {
+  const all = state.expanded.size === state.model.repos.length;
+  state.expanded = new Set(all ? [] : state.model.repos.map(repo => repo.path));
+  render(new Set(), new Set());
+});
+$('nextEvent').addEventListener('click', () => {
+  const event = EVENT_SCRIPTS[state.model.key][state.model.eventIndex];
+  if (!event) return;
+  const changed = applyEvent(state.model, event);
+  state.lastEvent = event.step ? `${event.step} → ${event.to}${event.text ? ` · ${event.text}` : ''}` : event.text;
+  render(changed.steps, changed.repos);
+});
+$('resetEvents').addEventListener('click', () => { const expanded = state.expanded; state.model = buildModel(state.scenario); state.expanded = expanded; state.lastEvent = null; render(new Set(), new Set()); });
+
+/* zoom + full screen, as in hybrid-2 */
+function applyScale(force) {
+  const layout = state.layout;
+  if (!layout) return;
+  const fullscreen = panel.classList.contains('fs');
+  const styles = getComputedStyle(viewport);
+  const availableWidth = viewport.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight);
+  const availableHeight = viewport.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom);
+  let scale = 1;
+  if (state.mode === 'fit') {
+    const fit = fullscreen ? Math.min(availableWidth / layout.width, availableHeight / layout.height) : availableWidth / layout.width;
+    scale = Math.min(fullscreen ? 1.6 : 1, Math.max(0.6, fit)); // scale down to 60%, then the viewport scrolls
+  }
+  scale = Math.round(scale * 1000) / 1000;
+  if (scale === state.lastScale && !force) return;
+  state.lastScale = scale;
+  canvas.style.transform = `scale(${scale})`;
+  stage.style.width = `${layout.width * scale}px`; stage.style.height = `${layout.height * scale}px`;
+  $('zoom').textContent = `${Math.round(scale * 100)}%`;
+}
+function setMode(next) {
+  state.mode = next;
+  $('fitBtn').setAttribute('aria-pressed', String(next === 'fit')); $('fullBtn').setAttribute('aria-pressed', String(next === '100'));
+  applyScale(true);
+}
+$('fitBtn').addEventListener('click', () => setMode('fit'));
+$('fullBtn').addEventListener('click', () => setMode('100'));
+new ResizeObserver(() => applyScale(false)).observe(viewport);
+function setFullscreenLabel(isFullscreen) {
+  $('fsBtn').replaceChildren(icon(isFullscreen ? 'close' : 'expand'), h('span', { text: isFullscreen ? 'Close · Esc' : 'Full screen' }));
+  $('fsBtn').setAttribute('aria-label', isFullscreen ? 'Close full screen' : 'Full screen');
+}
+function toggleFullscreen() {
+  const entering = !panel.classList.contains('fs'), band = $('band');
+  if (entering) { band.style.height = `${band.offsetHeight}px`; panel.classList.add('fs'); document.body.style.overflow = 'hidden'; }
+  else { panel.classList.remove('fs'); band.style.height = ''; document.body.style.overflow = ''; }
+  setFullscreenLabel(entering);
+  applyScale(true);
+  $('fsBtn').focus();
+}
+$('fsBtn').addEventListener('click', toggleFullscreen);
+setFullscreenLabel(false);
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  if (!tip.hidden) { tip.hidden = true; return; }
+  if (panel.classList.contains('fs')) toggleFullscreen();
+});
+
+/* prototype toolbar: scenario + theme */
+$('scenarioSeg').replaceChildren(...SCENARIO_KEYS.map(key => h('button', { type: 'button', 'data-key': key, 'aria-pressed': 'false', text: key, onclick: () => loadScenario(key) })));
+function setTheme(theme) {
+  if (theme === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = theme;
+  document.querySelectorAll('#themeSeg button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.theme === theme)));
+}
+$('themeSeg').replaceChildren(...['auto', 'light', 'dark'].map(theme => h('button', { type: 'button', 'data-theme': theme, 'aria-pressed': 'false', text: theme[0].toUpperCase() + theme.slice(1), onclick: () => setTheme(theme) })));
+const params = new URLSearchParams(location.search);
+setTheme(params.get('theme') || 'auto');
+loadScenario(SCENARIO_KEYS.includes(params.get('scenario')) ? params.get('scenario') : 'clara');
+</script>
+</body>
+</html>
