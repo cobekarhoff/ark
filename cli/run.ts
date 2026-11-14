@@ -477,15 +477,23 @@ export async function runStep(
     const served = plan?.steps.find((step) => step.id === stepId);
     if (plan && served && !failed && (worktree === undefined || existsSync(worktree))) {
       // The first validator of a bug run runs before the fix: an AC string counts once every implementer step that serves its AC has finished.
+      // A missing analysis file counts only when that holds and no other unfinished validator step serves the AC (it can still write the file).
+      const finished = (step: { id: string }) =>
+        state.steps.find((entry) => entry.id === step.id)?.status === "succeeded";
       const implementers = plan.steps.filter((step) => step.role === "implementer");
       const literalDue = (criterionId: string) =>
-        implementers
-          .filter((step) => step.criteria.includes(criterionId))
-          .every(
-            (step) => state.steps.find((entry) => entry.id === step.id)?.status === "succeeded",
-          );
+        implementers.filter((step) => step.criteria.includes(criterionId)).every(finished);
+      const evidenceDue = (criterionId: string) =>
+        literalDue(criterionId) &&
+        !plan.steps.some(
+          (step) =>
+            step.role === "validator" &&
+            step.id !== stepId &&
+            step.criteria.includes(criterionId) &&
+            !finished(step),
+        );
       const { problems, evidence } = checkStage(runId, project, directory, events, state, "step", {
-        finish: { serves: served.criteria, literalDue },
+        finish: { serves: served.criteria, literalDue, evidenceDue },
       });
       const lines = [...problems, ...evidence];
       if (lines.length > 0)

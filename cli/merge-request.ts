@@ -376,10 +376,16 @@ export type StageCheck = {
 };
 
 /**
- * What a validator finish owns: only the ACs the step serves, an AC string only once every implementer step
- * that serves it has finished (`literalDue`), no MR title, and a missing evidence file only for an analysis AC.
+ * What a validator finish owns: only the ACs the step serves, no MR title, an AC string only once every
+ * implementer step that serves the AC has finished (`literalDue`: the first validator of a bug run runs before
+ * the fix), and a missing analysis file only once `evidenceDue` (also no other unfinished validator step serves
+ * the AC, since it can still write the file). A missing demonstration or inspection file never counts.
  */
-export type FinishScope = { serves: string[]; literalDue: (criterionId: string) => boolean };
+export type FinishScope = {
+  serves: string[];
+  literalDue: (criterionId: string) => boolean;
+  evidenceDue: (criterionId: string) => boolean;
+};
 
 /**
  * The problems of one stage. Reads files, git and the run folder; writes nothing and never fetches.
@@ -532,11 +538,11 @@ export function checkStage(
       : loadPlan(directory, state.ticket.id).steps.find(({ id }) => id === step);
   if (step !== undefined && planned === undefined)
     throw new ArkError(`step ${step} is not in plan.yml`);
-  // At a finish only the ACs of the step count, and only an analysis file is missing: the human writes a
-  // demonstration file and the reviewer an inspection file, after the validator.
+  // At a finish only the ACs of the step count, and only an analysis file that no later step can still write is
+  // missing: the human writes a demonstration file and the reviewer an inspection file, after the validator.
   const reportMissing = (id: string, method: Method) =>
     finish !== undefined
-      ? method === "analysis"
+      ? method === "analysis" && finish.evidenceDue(id)
       : final || (stage === "step" && (planned === undefined || planned.criteria.includes(id)));
   const includes = (id: string) => finish === undefined || finish.serves.includes(id);
   return outcome(
