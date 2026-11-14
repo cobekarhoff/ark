@@ -12,8 +12,7 @@ import {
   readChiefTasks,
   readTerminals,
 } from "./orca.ts";
-import { cpus } from "node:os";
-import { holdReasons, readHost } from "./host.ts";
+import { holdReasons, readHost, sampleCpuPercent } from "./host.ts";
 import { servicesStatusText } from "./services.ts";
 import { readTestLock } from "./test-lock.ts";
 import { projectDirectory, resolveProject, runsDirectory } from "./paths.ts";
@@ -212,11 +211,16 @@ export async function chiefState(inProject?: string): Promise<void> {
       : `${sinceInterview}${sinceInterview >= 10 ? " (due)" : ""}`;
   sections.push("## Interview", `- Closed runs since the last interview: ${interviewCount}`);
 
-  const host = await readHost();
+  // The fake seam: a test sets these to give `ark chief state` a known CPU and load.
+  const fakeCpu = process.env.ARK_FAKE_CPU_PERCENT;
+  const fakeLoad = process.env.ARK_FAKE_LOAD;
+  const host = await readHost({
+    cpuPercent: () => (fakeCpu === undefined ? sampleCpuPercent() : Number(fakeCpu)),
+    ...(fakeLoad === undefined ? {} : { loadAverages: () => [0, Number(fakeLoad), 0] }),
+  });
   const reasons = holdReasons(host, {
     minimumFreePercent: config.test_min_free_memory_percent,
     maximumSwapGigabytes: config.test_max_swap_gb,
-    cores: cpus().length,
   });
   const reading = <value>(value: value | null, show: (value: value) => string) =>
     value === null ? "unavailable" : show(value);
@@ -226,6 +230,7 @@ export async function chiefState(inProject?: string): Promise<void> {
       `free memory: ${reading(host.freeMemoryPercent, (percent) => `${percent}%`)}`,
       `swap used: ${reading(host.swapUsedGigabytes, (used) => `${used.toFixed(1)} GB of ${host.swapTotalGigabytes?.toFixed(1) ?? "unavailable"} GB`)}`,
       `load (5 min): ${reading(host.load, (load) => load.toFixed(1))}`,
+      `cpu: ${reading(host.cpuPercent, (percent) => `${percent.toFixed(1)}%`)}`,
       `free disk: ${reading(host.freeDiskGigabytes, (gigabytes) => `${gigabytes} GB`)}`,
       `tests: running ${running.length}, waiting ${waiting.length}`,
       `hold new runs: ${reasons.length === 0 ? "no" : reasons.join("; ")}`,
