@@ -1115,14 +1115,23 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
         console.log(`${label}  skipped  (parser ${suite.parser} has no old-id check)`);
         continue;
       }
-      const base = state.worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+      const base = baseSide(state.worktrees.find((worktree) => worktree.repo === suite.repo));
       if (base === undefined) {
         console.log(`${label}  skipped  (no base commit)`);
         continue;
       }
       let touched: string[];
       try {
-        touched = await oldIdsTouched(join(mirror, suite.repo), base, suite, config.suites);
+        // ARK-463: from the merge base of HEAD and the newest synced target commit, so a target commit that sync merged never counts; a synced commit that HEAD lacks (a reset `--merge` step) leaves the diff at their merge base.
+        const mergeBase = await run(["git", "merge-base", "HEAD", base], join(mirror, suite.repo));
+        if (mergeBase.code !== 0)
+          throw new ArkError(`git merge-base failed: ${mergeBase.stderr.trim()}`);
+        touched = await oldIdsTouched(
+          join(mirror, suite.repo),
+          mergeBase.stdout.trim(),
+          suite,
+          config.suites,
+        );
       } catch (err) {
         // A scan that cannot run is no old-id declaration: say why, and leave the verdict to the suites.
         console.log(`${label}  skipped  (scan failed: ${String(err)})`);
