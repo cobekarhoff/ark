@@ -1454,7 +1454,10 @@ test(
       .filter(Boolean)
       .map((line) => line.split("\t") as [string, string]);
     for (const [name, worktree] of Object.entries(worktrees)) {
-      const own = gitCalls.filter(([cwd]) => realpathSync(cwd) === realpathSync(worktree));
+      // The security scan runs git in a scratch clone it removes afterwards: those calls have no worktree.
+      const own = gitCalls.filter(
+        ([cwd]) => existsSync(cwd) && realpathSync(cwd) === realpathSync(worktree),
+      );
       const count = (args: string) => own.filter(([, argv]) => argv === args).length;
       expect(count("rev-parse HEAD"), `${name} rev-parse HEAD`).toBe(1);
       expect(count("remote get-url origin"), `${name} remote get-url origin`).toBeLessThanOrEqual(

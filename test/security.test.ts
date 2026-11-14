@@ -165,6 +165,8 @@ type Setup = {
   /** The commits of the run branch in one repo. Default: one clean commit. */
   commits?: (repository: Repository) => void;
   config?: Record<string, unknown>;
+  /** The base recorded in `worktree.created`. Default: `main`. */
+  base?: string;
 };
 
 const projectConfig = (workspace: string, extra: Record<string, unknown> = {}) => ({
@@ -206,7 +208,7 @@ function retest(runDirectory: string, repositories: Repository[]) {
 
 /** A run at the point where `ark merge-request open` accepts it: plan approved, a passing test at every head. */
 function setup(options: Setup = {}) {
-  const { names = ["core"], baseFiles, commits, config = {} } = options;
+  const { names = ["core"], baseFiles, commits, config = {}, base = "main" } = options;
   tempArkHome();
   // each setup is a new run on a fresh fake host
   rmSync(`${logFile}.state`, { force: true });
@@ -283,7 +285,7 @@ function setup(options: Setup = {}) {
     repositories.push(repository);
     events.push({
       type: "worktree.created",
-      data: { repo: `repos/${name}`, path: worktree, branch: `ark/${run}`, base: "main" },
+      data: { repo: `repos/${name}`, path: worktree, branch: `ark/${run}`, base },
     });
   }
   events.push({
@@ -432,6 +434,23 @@ test("ARK-T401 a secret in a commit before the base does not block", () => {
   const result = openMergeRequest();
   expect(result.code, said(result)).toBe(0);
   expect(created()).toHaveLength(1);
+});
+
+test("ARK-T401 run close handed_off with a base that is not in the object store scans the whole first-parent history: a secret refuses, a clean history closes", () => {
+  const unknownBase = "0".repeat(40);
+  const leaking = setup({
+    base: unknownBase,
+    baseFiles: { "src/old.ts": markerFile("generic-api-key", 3) },
+  });
+  const refused = ark("run", "close", run, "handed_off");
+  expect(refused.code).not.toBe(0);
+  expect(said(refused)).toContain("generic-api-key in src/old.ts:3");
+  expect(eventTypes(leaking.runDirectory)).not.toContain("run.closed");
+
+  const clean = setup({ base: unknownBase });
+  const closed = ark("run", "close", run, "handed_off");
+  expect(closed.code, said(closed)).toBe(0);
+  expect(eventTypes(clean.runDirectory)).toContain("run.closed");
 });
 
 test("ARK-T401 a run commit cannot switch the secret gate off: an inline allow, a committed allowlist, a committed or untracked ignore file and a `-diff` or `binary` attribute still refuse", () => {

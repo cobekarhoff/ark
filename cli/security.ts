@@ -147,6 +147,14 @@ type GitleaksEntry = {
   Fingerprint: string;
 };
 
+function resolveCommit(path: string, ref: string): string | null {
+  const { exitCode, stdout } = spawn(
+    ["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+    path,
+  );
+  return exitCode === 0 ? stdout.toString().trim() : null;
+}
+
 function revParse(path: string, ref: string): string {
   const { exitCode, stdout, stderr } = spawn(
     ["git", "rev-parse", "--verify", `${ref}^{commit}`],
@@ -159,16 +167,18 @@ function revParse(path: string, ref: string): string {
 function gitleaksFindings(path: string, base: string, folder: string): Finding[] {
   const work = mkdtempSync(join(folder, "gitleaks-"));
   const report = join(work, "report.json");
-  const baseCommit = revParse(path, base);
+  // A base that is not in the object store (a recorded base of an older clone) scans the whole first-parent history of HEAD.
+  const baseCommit = resolveCommit(path, base);
   const headCommit = revParse(path, "HEAD");
+  const range = baseCommit === null ? headCommit : `${baseCommit}..${headCommit}`;
   // The run branch must not switch the gate off: no `gitleaks:allow` comment, and the `.gitleaks.toml` of the base (else
   // the defaults) in place of whatever the run committed. gitleaks also reads `.gitleaksignore` and `.gitattributes` (`-diff`,
   // `binary` hide a file from `git log -p`) from the working tree, so it scans a clone with no working tree.
   const config = join(work, "gitleaks.toml");
-  const baseConfig = gitBlob(path, `${baseCommit}:.gitleaks.toml`);
+  const baseConfig = baseCommit === null ? null : gitBlob(path, `${baseCommit}:.gitleaks.toml`);
   writeFileSync(config, baseConfig ?? "[extend]\nuseDefault = true\n");
   const configSource =
-    baseConfig === null ? "" : `, config: ${baseCommit.slice(0, 8)}:.gitleaks.toml`;
+    baseConfig === null ? "" : `, config: ${baseCommit!.slice(0, 8)}:.gitleaks.toml`;
   const scratch = join(work, "repo");
   const clone = spawn(["git", "clone", "--shared", "--no-checkout", path, scratch], work);
   if (clone.exitCode !== 0)
@@ -180,7 +190,7 @@ function gitleaksFindings(path: string, base: string, folder: string): Finding[]
       [
         "gitleaks",
         "git",
-        `--log-opts=--first-parent --remerge-diff --text --no-textconv ${baseCommit}..${headCommit}`,
+        `--log-opts=--first-parent --remerge-diff --text --no-textconv ${range}`,
         "--redact",
         "--no-banner",
         "--ignore-gitleaks-allow",
@@ -282,11 +292,12 @@ function scanBlob(folder: string, name: string, blob: Buffer): OsvPackage[] | nu
   return osvScan(directory, file, name);
 }
 
-/** Whether the head has commits past the base; a failed `git rev-list` refuses, never reads as none. */
+/** Whether the head has commits past the base; an unknown base counts the whole history, and a failed `git rev-list` refuses, never reads as none. */
 function hasCommitsAhead(path: string, base: string): boolean {
-  const { exitCode, stdout, stderr } = spawn(["git", "rev-list", "--count", `${base}..HEAD`], path);
+  const range = resolveCommit(path, base) === null ? "HEAD" : `${base}..HEAD`;
+  const { exitCode, stdout, stderr } = spawn(["git", "rev-list", "--count", range], path);
   if (exitCode !== 0)
-    throw new ArkError(`git rev-list ${base}..HEAD failed in ${path}: ${tail(stderr)}`);
+    throw new ArkError(`git rev-list ${range} failed in ${path}: ${tail(stderr)}`);
   return Number(stdout) > 0;
 }
 
