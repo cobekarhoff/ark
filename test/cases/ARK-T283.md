@@ -6,14 +6,14 @@ technique: characterization snapshot (golden master) with boundary values on arg
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-13-ARK-333-1
+changed_by: 2026-11-13-ARK-405-1
 ---
 
 ## Objective
 
 Prove that each `ark` command's record (usage, description, each flag its usage advertises with its arity, and its argument counts) and the table order equal the committed snapshot, so a move of the table out of `cli/ark.ts` changes none of them. Serves ARK-372/AC1. Flags in the parser table that the usage string does not advertise are out of scope: the process cannot enumerate them.
 
-Expected: When the command table is built from cli/commands, the system shall present the same commands in the same order with the same usage, flags and argument counts, and the new ark test description.
+Expected: When the command table changes, the system shall match the snapshot of the test, including `ark merge-request check`; the same commands keep the same order, usage, description, usage-advertised flags with their arity, minimum and maximum as the table in `cli/ark.ts` at base.
 
 The test reads the table only through the `ark` process, so it does not depend on the file that holds the table, and it does not import `cli/ark.ts` (importing it runs `main`). The snapshot was first captured at the ARK-372 base (27 commands); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test fails at this run's base by design, because the snapshot holds the new description.
 
@@ -39,7 +39,7 @@ The test reads the table only through the `ark` process, so it does not depend o
 
 ## Expected results
 
-- The command lines of `ark --help` equal the snapshot order exactly; the count is 30. The snapshot holds the new `ark test` description (suite failure exit code, log path and last 20 lines; test case hint) and no other record that differs from this run's base.
+- The command lines of `ark --help` equal the snapshot order exactly; the count is 31 (the base table of 30 and `merge-request check`). The snapshot holds the new `merge-request check` command, the new count, the new `ark test` description of ARK-333 (suite failure exit code, log path and last 20 lines; test case hint) and the changed text of `test` (stage `head`), `run step` and `gate record`.
 - For each command: usage, description, each usage-advertised flag with its parser-measured arity (`absent`, `switch`, `value`; step 3a) equal the snapshot; each probed bound behaves as in the snapshot; `F --zz-first --zz-second` names `--zz-first` for every advertised switch, `--zz-second` for every advertised value flag; an unknown flag fails with `unknown flag --zz-first`.
 - `test-runner` is absent from `ark --help`.
 - The snapshot was first captured at the ARK-372 base (27 commands); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test passes after the move with the new description, and fails at this run's base by design (the snapshot holds the new description). A command dropped, duplicated or moved, a description edited away from the snapshot, a usage-advertised flag deleted from the parser table, a usage-advertised flag changed from switch to value or back in the parser table (even with the usage string unchanged), or a changed probed minimum or finite maximum fails it. A flag added to the parser table but not advertised in usage is not detected.

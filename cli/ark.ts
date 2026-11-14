@@ -20,6 +20,7 @@ import { escalateCommand, gateRecordCommand } from "./commands/gate.ts";
 import {
   bumpRefreshCommand,
   mergeRequestOpenCommand,
+  mergeRequestCheckCommand,
   mergeRequestStatusCommand,
 } from "./commands/merge-request.ts";
 import { retroCommand } from "./commands/retro.ts";
@@ -50,6 +51,7 @@ const commands: Command[] = [
   gateRecordCommand,
   escalateCommand,
   mergeRequestOpenCommand,
+  mergeRequestCheckCommand,
   mergeRequestStatusCommand,
   bumpRefreshCommand,
   worktreeSyncCommand,

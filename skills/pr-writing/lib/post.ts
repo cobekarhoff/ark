@@ -20,11 +20,14 @@ import { beginMarker, endMarker, githubBodyLimit } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
 import { hashBody, lintBody, maxTitleLength, type LintResult } from "./lint.ts";
 
-/** An MR title: `<ticket id>: <summary>`, or the repo `title_prefix` rule when the config has one. */
-export function buildTitle(ledger: Ledger, summaryFlag?: string): string {
-  const ticket = ledger.ticket;
-  if (ticket === null) throw new ArkError("the ledger has no ticket: cannot build an MR title");
-  const rule = ledger.prWriting.title_prefix;
+export type TitleTicket = { id: string; title: string; summary: string | null };
+
+/** An MR title from the ticket and the `title_prefix` rule only: no ledger, so no `git`, `gh` or `glab` call. */
+export function makeTitle(
+  ticket: TitleTicket,
+  rule: string | undefined,
+  summaryFlag?: string,
+): string {
   const titleOf = (summary: string) =>
     rule
       ? rule.replace("TICKET", ticket.id).replace("type", "feat").replace("desc", summary)
@@ -43,6 +46,13 @@ export function buildTitle(ledger: Ledger, summaryFlag?: string): string {
     .find((title) => title.length <= maxTitleLength);
   if (usable === undefined) throw new ArkError("ticket has no summary: pass --summary");
   return usable;
+}
+
+/** An MR title: `<ticket id>: <summary>`, or the repo `title_prefix` rule when the config has one. */
+export function buildTitle(ledger: Ledger, summaryFlag?: string): string {
+  if (ledger.ticket === null)
+    throw new ArkError("the ledger has no ticket: cannot build an MR title");
+  return makeTitle(ledger.ticket, ledger.prWriting.title_prefix, summaryFlag);
 }
 
 export type PostInput = {

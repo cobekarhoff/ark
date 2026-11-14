@@ -298,17 +298,22 @@ const evidenceBodies = {
   ),
 };
 
-/** Writes a well-formed `results/evidence/<AC id>.md` for a non-test AC; `id` ends in `AC<k>`. */
+/**
+ * Writes a well-formed `results/evidence/<AC id>.md` for a non-test AC; `id` ends in `AC<k>`.
+ * `humanOk: false` leaves out the last line `human: ok` of a demonstration file, as before the human's answer.
+ */
 export function writeEvidenceFile(
   runDirectory: string,
   id: string,
   method: keyof typeof evidenceBodies = "demonstration",
+  { humanOk = true }: { humanOk?: boolean } = {},
 ): void {
   const directory = join(runDirectory, "results", "evidence");
   mkdirSync(directory, { recursive: true });
+  const text = `${evidenceBodies[method].join("\n\n")}\n`;
   writeFileSync(
     join(directory, `${id.match(/AC\d+$/)![0]}.md`),
-    `${evidenceBodies[method].join("\n\n")}\n`,
+    humanOk ? text : text.replace("\n\nhuman: ok", ""),
   );
 }
 
