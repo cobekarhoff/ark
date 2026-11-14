@@ -49,7 +49,7 @@ flowchart TB
 
 Amber means you decide or act. Teal is an agent. Grey is the `ark` command. Diamonds are gates; your merge is a rounded node because it is not a gate.
 
-Every run meets two gates, criteria and plan, and ends with your merge on the git host. Three more gates open when needed: strategy (the run lead offers 2 or more approach cards), manual (an AC only a person can judge) and escalation (the round budget is spent). The criteria gate is always a person. A project can set strategy, plan and escalation to `auto` in `ark.yml`: Ark then answers and records `by: auto`. Everything between the gates runs by itself, under a round budget, with a reviewer that must show evidence for every finding.
+Every run meets two gates, criteria and plan, and ends with your merge on the git host. Three more gates open when needed: strategy (the run lead offers 2 or more approach cards), manual (an AC only a person can judge) and escalation (the round budget is spent). The criteria gate is always a person. A project can set strategy, plan and escalation to `auto` in `ark.yml`: Ark then answers and records `by: auto`. For escalation, Ark grants up to `escalation_rounds` extra rounds (default two) and then asks you. Everything between the gates runs by itself, under a round budget, with a reviewer that must show evidence for every finding.
 
 ## What you get
 
