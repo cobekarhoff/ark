@@ -68,7 +68,7 @@ export function useConversation(run: string, refreshKey: string): State {
 }
 
 /** The read's own states: each one is a notice, never a silent gap. */
-function Notices({ reply }: { reply: ConversationReply }) {
+export function Notices({ reply }: { reply: ConversationReply }) {
   return (
     <>
       {reply.directory === "loading" ? (

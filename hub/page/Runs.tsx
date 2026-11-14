@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { ProjectConversation } from "./ProjectConversation.tsx";
 import { DepGraph, type GraphTicket } from "./DepGraph.tsx";
 import {
   isUnknownProject,
@@ -251,10 +252,16 @@ function graphKeys(filter: Filter, entries: Map<string, TicketEntry>): Set<strin
   return shown;
 }
 
+const modeKey = "runs-mode";
+/** Back from a run keeps the mode: the page remounts, the tab session remembers. */
+const storedMode = () =>
+  sessionStorage.getItem(modeKey) === "conversation" ? "conversation" : "list";
+
 export function Runs() {
   const { snapshot: whole } = useLive();
   const project = useProject();
   const [filter, setFilter] = useState<Filter>("Active");
+  const [mode, setMode] = useState<"list" | "conversation">(storedMode);
   if (!whole || !known(whole.tickets) || !known(whole.runs))
     return (
       <>
@@ -311,62 +318,92 @@ export function Runs() {
           {open} open · {counts.Queued} queued · {closedCount} closed. Click a run for its plan.
         </span>
       </h1>
-      <Board snapshot={snapshot} entries={entries} />
-      <section className="panel graph-panel">
-        <header>
-          <h2>Cross-run dependency graph</h2>
-          <div className="seg" role="group" aria-label="Graph filter">
-            {filters.map((name) => (
-              <button
-                key={name}
-                type="button"
-                aria-pressed={filter === name}
-                data-testid="graph-filter"
-                data-filter={name}
-                onClick={() => setFilter(name)}
-              >
-                {name} <span className="count">{counts[name]}</span>
-                {name === "Old" ? <span className="mut small"> tickets</span> : null}
-              </button>
-            ))}
-          </div>
-          <span className="hint legend">
-            <span className="dash" /> still blocking <span className="solid" /> satisfied
-          </span>
-        </header>
-        <div className="graph-split">
-          <div>
-            {graph.length === 0 ? (
-              <p className="mut empty">No ticket in this filter.</p>
-            ) : (
-              <DepGraph tickets={graph} label={`Dependency graph, ${filter}`} />
-            )}
-          </div>
-          <aside className="unblocks-list" aria-label="What finishing unblocks">
-            <h3>What finishing unblocks</h3>
-            {unblocks.length === 0 ? <p className="mut">No open run.</p> : null}
-            {unblocks.map(({ entry, next }) => (
-              <div key={entry.key} data-testid="unblocks" data-ticket={entry.ticket.id}>
-                <a className="mono strong" href={hrefOf(entry)}>
-                  {entry.ticket.id}
-                </a>{" "}
-                <span className="mut">{entry.state}</span>
-                <div className="chips">
-                  {next.length === 0 ? (
-                    <span className="mut">unblocks nothing</span>
-                  ) : (
-                    next.map((other) => (
-                      <a key={other.key} className="chip mono" href={ticketHref(other.ticket.id)}>
-                        {other.ticket.id}
-                      </a>
-                    ))
-                  )}
-                </div>
+      <div className="seg" role="group" aria-label="Runs view">
+        {(["list", "conversation"] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            aria-pressed={mode === name}
+            data-testid="runs-mode"
+            data-mode={name}
+            onClick={() => {
+              setMode(name);
+              sessionStorage.setItem(modeKey, name);
+            }}
+          >
+            {name === "list" ? "List" : "Conversation"}
+          </button>
+        ))}
+      </div>
+      {mode === "conversation" ? (
+        <ProjectConversation
+          project={project}
+          openRuns={known(snapshot.runs) ? snapshot.runs : null}
+        />
+      ) : (
+        <>
+          <Board snapshot={snapshot} entries={entries} />
+          <section className="panel graph-panel">
+            <header>
+              <h2>Cross-run dependency graph</h2>
+              <div className="seg" role="group" aria-label="Graph filter">
+                {filters.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    aria-pressed={filter === name}
+                    data-testid="graph-filter"
+                    data-filter={name}
+                    onClick={() => setFilter(name)}
+                  >
+                    {name} <span className="count">{counts[name]}</span>
+                    {name === "Old" ? <span className="mut small"> tickets</span> : null}
+                  </button>
+                ))}
               </div>
-            ))}
-          </aside>
-        </div>
-      </section>
+              <span className="hint legend">
+                <span className="dash" /> still blocking <span className="solid" /> satisfied
+              </span>
+            </header>
+            <div className="graph-split">
+              <div>
+                {graph.length === 0 ? (
+                  <p className="mut empty">No ticket in this filter.</p>
+                ) : (
+                  <DepGraph tickets={graph} label={`Dependency graph, ${filter}`} />
+                )}
+              </div>
+              <aside className="unblocks-list" aria-label="What finishing unblocks">
+                <h3>What finishing unblocks</h3>
+                {unblocks.length === 0 ? <p className="mut">No open run.</p> : null}
+                {unblocks.map(({ entry, next }) => (
+                  <div key={entry.key} data-testid="unblocks" data-ticket={entry.ticket.id}>
+                    <a className="mono strong" href={hrefOf(entry)}>
+                      {entry.ticket.id}
+                    </a>{" "}
+                    <span className="mut">{entry.state}</span>
+                    <div className="chips">
+                      {next.length === 0 ? (
+                        <span className="mut">unblocks nothing</span>
+                      ) : (
+                        next.map((other) => (
+                          <a
+                            key={other.key}
+                            className="chip mono"
+                            href={ticketHref(other.ticket.id)}
+                          >
+                            {other.ticket.id}
+                          </a>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </aside>
+            </div>
+          </section>
+        </>
+      )}
     </>
   );
 }

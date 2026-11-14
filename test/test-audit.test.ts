@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
+import { appendEvent } from "../cli/events.ts";
 import {
   ark,
   recordEvaluation,
@@ -507,9 +516,9 @@ describe("ark test old-id gate", () => {
   });
 
   /** A building run on a repo whose base commit holds old-id tests; a bun suite and a pytest suite. */
-  function run() {
+  function run(planned = ["proves", "ARK-T1"], source = baseSource) {
     const arkHome = tempArkHome();
-    const workspace = tempGitRepo({ "e2e.test.ts": baseSource });
+    const workspace = tempGitRepo({ "e2e.test.ts": source });
     writeProject("fx", {
       workspace,
       ticket_source: "local",
@@ -548,18 +557,17 @@ describe("ark test old-id gate", () => {
             criteria: ["FAKE-1-AC1"],
           },
         ],
-        test_cases: [
-          {
-            id: "proves",
-            criterion: "FAKE-1-AC1",
-            level: "e2e",
-            given: [],
-            when: ["run it"],
-            // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`
-            then: ["it works"],
-            expected: "it works",
-          },
-        ],
+        // ARK-431: ark test reads the ids of test_cases; the action never matters.
+        test_cases: planned.map((id) => ({
+          id,
+          criterion: "FAKE-1-AC1",
+          level: "e2e",
+          given: [],
+          when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`
+          then: ["it works"],
+          expected: "it works",
+        })),
       }),
     );
     for (const args of [
@@ -569,7 +577,7 @@ describe("ark test old-id gate", () => {
     ])
       expect(ark(...args).code, args.join(" ")).toBe(0);
     const mirror = join(runDirectory, "workspace");
-    return { runId, mirror, base: git(mirror, "rev-parse", "HEAD") };
+    return { runId, runDirectory, mirror, base: git(mirror, "rev-parse", "HEAD") };
   }
 
   test("ARK-T207 ark test fails a bun suite whose diff touches an old-id test, passes its converted form, a new test and a diff with no old-id declaration, and prints a skip line for another parser", () => {
@@ -604,5 +612,135 @@ describe("ark test old-id gate", () => {
       expect(result.out, name).toMatch(/suite e2e \(bun\)\s+passed/);
       expect(result.code, name + result.out + result.err).toBe(0);
     }
+  });
+
+  const membershipSource = e2e(
+    `test("ARK-T1 listed", () => {`,
+    `  const x = 1;`,
+    `});`,
+    `test("ARK-T2 unlisted", () => {`,
+    `  const x = 1;`,
+    `});`,
+    `test("ARK-T3 first twice", () => {`,
+    `  const x = 1;`,
+    `});`,
+    `test("ARK-T3 second twice", () => {`,
+    `  const x = 1;`,
+    `});`,
+    `test("ARK-T5 ARK-T6 two ids in one title", () => {`,
+    `  const x = 1;`,
+    `});`,
+    `describe("ARK-T4 enclosing describe", () => {`,
+    `  test("inner", () => {`,
+    `    const x = 1;`,
+    `  });`,
+    `});`,
+    `test("ARK-T9 untouched", () => {`,
+    `  const untouched = 1;`,
+    `});`,
+  ).replace(`import { test }`, `import { describe, test }`);
+
+  test("ARK-T346 ark test fails a run whose diff touches a test with a case id that the plan's test_cases does not list, and the message names the id, the file and the fix", () => {
+    const { runId, runDirectory, mirror } = run(["ARK-T1"], membershipSource);
+    commitAll(mirror, {
+      "e2e.test.ts": membershipSource.replaceAll("const x = 1;", "const x = 2;"),
+    });
+
+    const refused = ark("test", runId);
+    expect(refused.code).toBe(1);
+    for (const id of ["ARK-T2", "ARK-T3", "ARK-T4", "ARK-T5", "ARK-T6"])
+      expect(refused.out).toContain(`case id not in plan test_cases: ${id} in e2e.test.ts`);
+    expect(refused.out.match(/case id not in plan test_cases: ARK-T3 /g)).toHaveLength(1);
+    expect(refused.out).not.toMatch(/not in plan test_cases: ARK-T(1|9) /);
+    expect(refused.out).toContain(
+      "add the id to test_cases with the action reuse, update or retire",
+    );
+    const completed = readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .findLast((event) => event.type === "test.completed");
+    expect(completed.data.checks).toContainEqual({ name: "plan-membership e2e", passed: false });
+
+    // After a sync the check reads only the run's own change: a case that main changed is not named.
+    const mainChange = commitAll(mirror, {
+      "e2e.test.ts": readFileSync(join(mirror, "e2e.test.ts"), "utf8").replace(
+        "const untouched = 1;",
+        "const untouched = 2;",
+      ),
+    });
+    appendEvent(runDirectory, "worktree.synced", {
+      repo: ".",
+      conflict: false,
+      target_commit: mainChange,
+    });
+    commitAll(mirror, {
+      "e2e.test.ts": readFileSync(join(mirror, "e2e.test.ts"), "utf8").replace(
+        `"ARK-T2 unlisted", () => {\n  const x = 2;`,
+        `"ARK-T2 unlisted", () => {\n  const x = 3;`,
+      ),
+    });
+    const synced = ark("test", runId);
+    expect(synced.out).toContain("case id not in plan test_cases: ARK-T2 in e2e.test.ts");
+    expect(synced.out).not.toMatch(/not in plan test_cases: ARK-T(3|4|5|6|9) /);
+
+    rmSync(join(runDirectory, "plan.yml"));
+    const skipped = ark("test", runId);
+    expect(skipped.out).toMatch(/plan-membership check\s+skipped/);
+    expect(skipped.out).not.toContain("case id not in plan");
+    expect(skipped.err).not.toContain("Error");
+  });
+
+  test("ARK-T347 ark test passes a run whose diff touches case ids that the plan lists, for each of the actions add, update, reuse and retire", () => {
+    const source = e2e(
+      ...["ARK-T1", "ARK-T2", "ARK-T3", "ARK-T4"].flatMap((id) => [
+        `test("${id} works", () => {`,
+        `  const x = 1;`,
+        `});`,
+      ]),
+    );
+    const { runId, runDirectory, mirror } = run(["ARK-T1"], source);
+    // The plan check accepts a reuse or retire entry only with a test/cases file; ark test reads only the ids.
+    const planFile = join(runDirectory, "plan.yml");
+    const plan = JSON.parse(readFileSync(planFile, "utf8"));
+    plan.test_cases = ["add", "update", "reuse", "retire"].map((action, index) => ({
+      ...plan.test_cases[0],
+      id: `ARK-T${index + 1}`,
+      action,
+    }));
+    writeFileSync(planFile, JSON.stringify(plan));
+    commitAll(mirror, { "e2e.test.ts": source.replaceAll("const x = 1;", "const x = 2;") });
+
+    const result = ark("test", runId);
+    expect(result.out).toMatch(/plan-membership suite e2e \(bun\)\s+passed/);
+    expect(result.out).not.toContain("case id not in plan");
+    // The fixture criterion has no tagged test, so ark test exits 1 for it; the check is read from the event.
+    const completed = readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .findLast((event) => event.type === "test.completed");
+    expect(completed.data.checks).toContainEqual({ name: "plan-membership e2e", passed: true });
+  });
+
+  test("ARK-T348 ark test stays silent about a changed test with no case id in the plan-membership check, and the old id check still reports a changed old-id test", () => {
+    const source = e2e(
+      `test("works", () => {`,
+      `  const x = 1;`,
+      `});`,
+      `test("ARK-9-AC2 old", () => {`,
+      `  const x = 1;`,
+      `});`,
+    );
+    const { runId, mirror } = run(["proves"], source);
+    commitAll(mirror, { "e2e.test.ts": source.replaceAll("const x = 1;", "const x = 2;") });
+
+    const result = ark("test", runId);
+    expect(result.out.match(/old id touched: /g)).toHaveLength(1);
+    expect(result.out).toContain("old id touched: e2e.test.ts:5 ARK-9-AC2 old");
+    expect(result.out).not.toContain("old id touched: e2e.test.ts:2");
+    expect(result.out).not.toContain("case id not in plan");
+    expect(result.out).toMatch(/plan-membership suite e2e \(bun\)\s+passed/);
+    expect(result.code).not.toBe(0);
   });
 });
