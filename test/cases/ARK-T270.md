@@ -11,11 +11,11 @@ changed_by: 2026-11-13-ARK-430-1
 
 ## Objective
 
-Prove that the example sections that section 8 of `skills/ark/playbooks/run-lead.md` gives for an analysis evidence file and for a RISK04 reason are accepted by the code that enforces them (`evidenceProblem` in `cli/ticket.ts`, and RISK04 in `skills/pr-writing/lib/lint.ts` through `parseReviewerBlock`), not only well-formed prose.
+Prove that the example sections that section 8 of `skills/ark-run-lead/SKILL.md` gives for an analysis evidence file and for a RISK04 reason are accepted by the code that enforces them (`evidenceProblem` in `cli/ticket.ts`, and RISK04 in `skills/pr-writing/lib/lint.ts` through `parseReviewerBlock`), not only well-formed prose.
 
 ## Preconditions
 
-- The edited `skills/ark/playbooks/run-lead.md` read from disk. No fake: the real functions run.
+- The edited `skills/ark-run-lead/SKILL.md` read from disk. No fake: the real functions run.
 - A complete control evidence file for a `method: analysis` criterion with all four sections (`## Command`, `## Output`, `## Threshold`, `## Result`), each with `Base: ok` and `Head: ok` paragraphs. `evidenceProblem("analysis", control)` reports no problem (checked first, so a later refusal is the example's doing).
 - A fixture reviewer findings file with a changed file outside every plan `where` list.
 

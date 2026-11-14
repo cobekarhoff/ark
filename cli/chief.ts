@@ -242,7 +242,7 @@ export async function chiefState(inProject?: string): Promise<void> {
 
 /**
  * Starts a new Master Chief in a new Orca terminal and prints its handle. It never closes the old
- * terminal: chief.md tells the old Master Chief to do that after this command returns.
+ * terminal: the ark-chief skill tells the old Master Chief to do that after this command returns.
  */
 export async function chiefHandover(inProject?: string): Promise<void> {
   const project = resolveProject(inProject);
@@ -262,10 +262,10 @@ export async function chiefHandover(inProject?: string): Promise<void> {
       `No live Master Chief for project ${project}: no terminal found for the Run "${objective}". Nothing started.`,
     );
   const prompt = [
-    `You are the new Master Chief for project ${project}. Run /skill:ark chief.`,
+    `You are the new Master Chief for project ${project}. Run /skill:ark-chief.`,
     `You replace the Master Chief in terminal ${oldChief.handle}. That terminal is still running. Do not act on any run, ticket or gate yet.`,
     `1. Wait for that terminal to exit. Poll \`orca terminal list --json\` every 10 seconds until the handle ${oldChief.handle} is gone or shows as disconnected. If it is still listed after 10 minutes, ask the human what to do.`,
-    `2. Bind this terminal to the existing Master Chief Run: \`orca orchestration run-use --id ${chiefRun.id}\`. If that Run is not found, find it by the objective "${objective}" and follow chief.md section 2 for a dead handle. Do not create another Run.`,
+    `2. Bind this terminal to the existing Master Chief Run: \`orca orchestration run-use --id ${chiefRun.id}\`. If that Run is not found, find it by the objective "${objective}" and follow section 2 of the ark-chief skill (\`skills/ark-chief/SKILL.md\`) for a dead handle. Do not create another Run.`,
     `3. Run \`ark chief state --project ${project}\` and work from that output. Read \`handoff.md\` for standing rules only.`,
   ].join("\n\n");
   const launched = await execJson<{ result?: { outcome?: { kind?: string; handle?: string } } }>(
