@@ -59,7 +59,11 @@ export function Flip(props: HTMLAttributes<HTMLDivElement>) {
     const next = new Map<Element, { x: number; y: number }>();
     const origin = element.getBoundingClientRect();
     // Screen pixels per layout pixel: a CSS scale above the container (the graph viewport) is not a move.
-    const scale = element.offsetWidth > 0 ? origin.width / element.offsetWidth : 1;
+    // `offsetWidth` is rounded, so within a pixel of the rect width the scale is 1, not 1 ± 0.5/width.
+    const scale =
+      element.offsetWidth > 0 && Math.abs(origin.width - element.offsetWidth) >= 1
+        ? origin.width / element.offsetWidth
+        : 1;
     for (const child of Array.from(element.children)) {
       // The box includes a slide in flight: take it off, so a re-render mid-slide sees the real place.
       const box = child.getBoundingClientRect();

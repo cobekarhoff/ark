@@ -9201,6 +9201,18 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
   for (const [name, items] of Object.entries(still))
     for (const item of items) expect(item.moving, `${name} ${item.key}`).toEqual([]);
 
+  // The window resizes a pixel at a time (the grid tracks have fractional widths): the same order
+  // still does not animate.
+  const size = page.viewportSize()!;
+  for (let step = 1; step <= 8; step++) {
+    await page.setViewportSize({ width: size.width + step, height: size.height });
+    const { during: resized } = await pushAndRead(page, first, homeLists, false);
+    for (const [name, items] of Object.entries(resized))
+      for (const item of items)
+        expect(item.moving, `${name} ${item.key} at +${step}px`).toEqual([]);
+  }
+  await page.setViewportSize(size);
+
   // A list above grows and pushes the lists below down the page: they did not reorder, so nothing
   // in them slides (a place is measured in its own container).
   const { before: shifted, during: grown } = await pushAndRead(
