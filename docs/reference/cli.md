@@ -55,6 +55,7 @@ A command prints a short result and exits 0 on success. On failure it prints `ar
 | Gates            | [`gate record`](#gate-record)                   | Records your answer to a gate                                                                        |
 |                  | [`escalate`](#escalate)                         | Opens the escalation gate when the round budget is spent, also when the last ark test passed         |
 | Merge requests   | [`merge-request open`](#merge-request-open)     | Pushes each repo's branch and posts one ready MR                                                     |
+|                  | [`merge-request check`](#merge-request-check)   | Prints each problem that `ark merge-request open` would refuse, one line for each                    |
 |                  | [`merge-request status`](#merge-request-status) | For a project with `merge_requests: none` it prints `merge requests: none`                           |
 |                  | [`bump refresh`](#bump-refresh)                 | Records `bump.refreshed` for a bump step of the plan                                                 |
 | Master Chief     | [`chief state`](#chief-state)                   | Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a file |
@@ -135,7 +136,13 @@ is pending, never while the newest reviewer findings file holds a P0 or P1 findi
 line and no dropped line for it under `## Run lead decision` (a --merge start too), and the refusal
 past the cap is the usual one. For a `bug` run with a `method: test` AC it refuses an implementer
 start with `bug run: record a failing ark test of the ACs before the fix` until a `test.completed`
-has every non-manual AC `failing`; a bug run with no `method: test` AC has no such rule.
+has every non-manual AC `failing`; a bug run with no `method: test` AC has no such rule. A `finish`
+of a validator step, without --failed and after the refusal for uncommitted changes, runs stage
+`step` of `ark merge-request check` for the ACs of the step and is refused, with no event written,
+when it lists a problem: an AC string in no tracked file (counted once every implementer step that
+serves the AC has finished), a malformed evidence file, or a missing evidence file of an `analysis`
+AC. It never refuses for the MR title, a manual criterion with no answer, the last line `human: ok`
+or `reviewer:`, or an AC the step does not serve.
 ```
 
 ### run close
@@ -431,7 +438,12 @@ checkout and before the head's test files are copied in, a suite with `base_file
 own test files that exist at base, and any other suite runs whole (replayed from the cache when its
 key is stored). Its logs go to `results/census/`, and the base run's own results never feed the
 counts. A renamed test counts as deleted. A quick run counts the skipped tests at head only and has
-no `base_skipped` and no `deleted`. This only reports: it never changes the exit code.
+no `base_skipped` and no `deleted`. This only reports: it never changes the exit code. At its end
+`ark test` runs stage `head` of `ark merge-request check` and, only when it lists a problem (an AC
+string in no tracked file, an MR title problem, a malformed evidence file), prints the heading
+`merge-request check` and one line for each problem, also for a `--quick` or failing run, after the
+lines above and before the failure is thrown. It is information only: it changes neither the exit
+code nor `passed`.
 ```
 
 ### test-case new
@@ -487,10 +499,14 @@ one criterion whose method is not `test` (`manual: true` reads as `demonstration
 `criterion`; it refuses an ID that is not in the ticket or not manual, and the answer is never
 automatic. For a `demonstration` criterion, `ok` also leaves the line `human: ok` once, as the last
 line of `results/evidence/<AC id>.md`, when that file exists; `problem` and the other methods change
-no file. Ark refuses an answer that the run's state does not allow, and refuses plan approve while
-the plan has an open decision. Both `<ticket id>/AC<k>` and `<ticket id>-AC<k>` name a criterion.
-`criteria accept` re-reads the ticket and refuses a new-scheme AC with `method: test` and an empty
-`verified_by` list, and names the AC.
+no file. Before it writes `ok` for a `demonstration` criterion whose file exists, it checks the file
+with `human: ok` added and refuses a malformed file with `evidence malformed: <AC id>: <reason>`,
+the text of `ark merge-request open`, writing no event and no file. A manual answer records `heads`,
+the head of each repo, in gate.answered; stage `final` of `ark merge-request check` warns `manual
+answer older than head: <AC id>` when a head has changed since. Ark refuses an answer that the run's
+state does not allow, and refuses plan approve while the plan has an open decision. Both `<ticket
+id>/AC<k>` and `<ticket id>-AC<k>` name a criterion. `criteria accept` re-reads the ticket and
+refuses a new-scheme AC with `method: test` and an empty `verified_by` list, and names the AC.
 ```
 
 ### escalate
@@ -573,6 +589,33 @@ refreshes (changing no file and no ref), and refuses when the head does not merg
 the repo, records worktree.synced with a conflict so that `ark run step <run> <step> start --merge`
 is allowed, and pushes nothing for any repo. A merge-tree error that is not a conflict (no common
 history, no origin/<target>, git older than 2.38) is a refusal that shows git's text.
+```
+
+### merge-request check
+
+```text
+ark merge-request check <run> --stage <head|step|final> [--step <id>] [--summary <text>] [--project
+    <name>]
+
+Prints each problem that `ark merge-request open` would refuse, one line for each, and exits 1 when
+any exists; with none it prints nothing and exits 0. It changes no file, event or ref and never
+fetches. The text of a line is the text of the open refusal, and the AC strings are the one joined
+line `AC string in no tracked file at head: <AC id> `<string>`; ...`. `--stage head` checks what
+needs only the current head: each backticked AC string against the tracked files, the MR title
+(`ticket has no summary: pass --summary`, or the title of 73 characters or more that `--summary`
+makes), and the shape of each evidence file that exists, except the last line `human: ok` of a
+demonstration file and the `reviewer:` line of an inspection file. `--stage step` adds `evidence
+missing: <AC id> (<method>)` for each non-test AC that the plan step named by `--step <id>` serves,
+or for every non-test AC when no `--step` is given. `--stage final` adds every other refusal of
+open, in its order: no test result, a quick test, a manual criterion without ok, criteria not
+passing, a repo that changed since the last test, the `perf` and `refactor` rules, and every
+evidence problem including the last lines, each on its own line, then the refusal of the security
+scan (a missing scanner, a secret, a high or critical vulnerability) as one message; the scan runs
+gitleaks and osv-scanner, which needs the network. In stage `final` it also prints `warning: manual
+answer older than head: <AC id>` for a manual answer whose recorded head differs from the repo head
+now (a clean `ark worktree sync` merge is not a difference; an answer with no recorded head never
+warns); a warning does not change the exit code. `--summary` is the `--summary` of `ark
+merge-request open`.
 ```
 
 ### merge-request status

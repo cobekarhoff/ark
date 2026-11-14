@@ -366,6 +366,20 @@ test("ARK-T401 merge-request open refuses a secret in a run commit, names rule, 
   expect(eventTypes(runDirectory)).not.toContain("merge_request.opened");
 });
 
+test("ARK-T401 merge-request check --stage final prints the same secret refusal that open gives", () => {
+  const dirty = setup({
+    commits: ({ worktree }) => {
+      commitFiles(worktree, { "src/config.ts": markerFile("generic-api-key") }, "config");
+    },
+  });
+  const check = ark("merge-request", "check", run, "--stage", "final");
+  expect(check.code).toBe(1);
+  expect(said(check)).toContain("generic-api-key in src/config.ts:12");
+  expect(said(check)).not.toContain(sentinel);
+  expect(said(openMergeRequest())).toContain("generic-api-key in src/config.ts:12");
+  expectNothingShipped(dirty.repositories);
+});
+
 test("ARK-T401 merge-request open names every secret of several commits, each with its own file, line and commit", () => {
   let awsCommit = "";
   let keyCommit = "";
