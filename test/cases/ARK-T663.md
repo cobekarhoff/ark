@@ -18,9 +18,9 @@ changed_by: 2026-11-14-ARK-482-1
 - A scratch `ARK_HOME` under a scratch directory that is itself a git repository (`tempGitRepo`, branch named with `--initial-branch=main`), so a script that asks `git rev-parse` instead of looking for `.git` in the project folder acts on the parent. A project `ark` with `tickets/ARK-1.md` (front matter `status: todo`), `ROADMAP.md`, `ark.yml` and `learnings.md`, and no `.git`.
 - Ignored directories with a file each: `runs/`, `services/`, `test-cache/`, `qe/`, `audit/`, `prototypes/`.
 - A second project `other` in the same `ARK_HOME` with its own ticket and no `.git`.
-- `HOME` is a scratch directory with a global git config that has no `user.name` or `user.email`, sets `init.defaultBranch=main` and `push.autoSetupRemote=true`, and sets `commit.gpgsign=true` with a signing program that fails. launchd gives the job only `HOME`, `PATH`, `ARK_HOME`, `ARK_PROJECT` and `TMPDIR`.
+- `HOME` is a scratch directory with a global git config that has no `user.name` or `user.email` and sets `user.useConfigOnly=true` (so git does not guess an identity, and a commit without the script's own identity fails), sets `init.defaultBranch=main` and `push.autoSetupRemote=true`, and sets `commit.gpgsign=true` with a signing program that fails. launchd gives the job only `HOME`, `PATH`, `ARK_HOME`, `ARK_PROJECT` and `TMPDIR`.
 - A bare repository set as `origin` after step 1, as the push target to test against. In step 6 the project branch also gets `branch.main.remote=origin` and `branch.main.merge=refs/heads/main`, so that `git push`, `git push origin` and `git push origin HEAD` each land a ref in it.
-- Real `git`; no fake commands. The script's stdout and stderr are captured apart. The real `~/.ark` and the real LaunchAgents are never read or written: the case runs the script only, and the install of the plist is owned by ARK-T294.
+- Real `git`; the `sleep` that step 8 puts first on `PATH` is the only fake command. The script's stdout and stderr are captured apart. The real `~/.ark` and the real LaunchAgents are never read or written: the case runs the script only, and the install of the plist is owned by ARK-T294.
 
 ## Steps
 

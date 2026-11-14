@@ -33,10 +33,11 @@ test("ARK-T663 project-autocommit.sh makes the project folder a git repository a
   const arkHome = join(parent, "ark-home");
   const home = join(scratch, "home");
   mkdirSync(home);
-  // No identity, a signing key that cannot sign, and a default that would push a new branch to origin.
+  // No identity (useConfigOnly stops git from guessing one, so a commit without the script's own -c identity exits
+  // 128), a signing key that cannot sign, and a default that would push a new branch to origin.
   writeFileSync(
     join(home, ".gitconfig"),
-    "[init]\n\tdefaultBranch = main\n[push]\n\tautoSetupRemote = true\n[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /usr/bin/false\n",
+    "[init]\n\tdefaultBranch = main\n[push]\n\tautoSetupRemote = true\n[user]\n\tuseConfigOnly = true\n[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /usr/bin/false\n",
   );
   const environment = (project?: string): Record<string, string> => ({
     PATH: process.env.PATH as string,
