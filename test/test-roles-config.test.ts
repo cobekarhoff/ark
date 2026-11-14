@@ -8,7 +8,9 @@ function projectConfigFor(roles: Record<string, unknown>): Record<string, unknow
   return {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "cli", level: "integration", repo: ".", command: "bun test", parser: "bun" }],
+    suites: [
+      { name: "cli", level: "integration", repo: ".", command: "bun test {report}", parser: "bun" },
+    ],
     roles: {
       implementer: { harness: "omp", model: "pi/task" },
       validator: { harness: "omp", model: "pi/validate" },

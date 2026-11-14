@@ -118,7 +118,7 @@ function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boo
   writeProject("demo", {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "omp", model },
       validator: { harness: "claude", model: "claude-sonnet" },

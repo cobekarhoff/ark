@@ -129,7 +129,7 @@ import * as os from "node:os";
 mock.module("node:os", () => ({ ...os, cpus: () => Array(${hostCores}).fill({}) }));
 const { validateConfig } = await import(${JSON.stringify(configModule)});
 const roles = { implementer: { harness: "claude", model: "m" }, validator: { harness: "codex", model: "m" }, reviewer: { harness: "codex", model: "m" } };
-const suite = { name: "s", level: "unit", repo: ".", command: "true", parser: "bun" };
+const suite = { name: "s", level: "unit", repo: ".", command: "true {report}", parser: "bun" };
 console.log(validateConfig({ workspace: ${JSON.stringify(tempGitRepo())}, ticket_source: "local", suites: [suite], roles }, "ark.yml").test_budget_cores);`;
       const result = Bun.spawnSync(["bun", "-e", script]);
       expect(result.stderr.toString()).toBe("");

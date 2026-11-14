@@ -167,7 +167,9 @@ function makeRun(spec: RunSpec = {}) {
   writeProject("demo", {
     workspace: base,
     ticket_source: "local",
-    suites: [{ name: "s", level: "integration", repo: ".", command: "true", parser: "bun" }],
+    suites: [
+      { name: "s", level: "integration", repo: ".", command: "true {report}", parser: "bun" },
+    ],
     roles: Object.fromEntries(
       ["implementer", "validator", "reviewer"].map((role) => [
         role,
@@ -635,7 +637,7 @@ function cliRun(
   const projectDirectory = writeProject("demo", {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     pr_writing: { tier_floor: 1, ...(extraConfig.pr_writing as object) },
     roles: Object.fromEntries(
       ["implementer", "validator", "reviewer"].map((role) => [
@@ -1741,7 +1743,7 @@ for (const host of ["github", "gitlab"] as HostName[]) {
 const configBase = () => ({
   workspace: tmpdir(),
   ticket_source: "local",
-  suites: [{ name: "s", level: "unit", repo: ".", command: "c", parser: "bun" }],
+  suites: [{ name: "s", level: "unit", repo: ".", command: "c {report}", parser: "bun" }],
   roles: Object.fromEntries(
     ["implementer", "validator", "reviewer"].map((role) => [role, { harness: "omp", model: "m" }]),
   ),
