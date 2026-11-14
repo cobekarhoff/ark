@@ -844,6 +844,7 @@ describe("ark retro", () => {
         "",
         "- **dropped bold title: no Input**",
         "* Dropped star title: no File",
+        "Dropped the vague ones since they lacked Input.",
         "",
       ].join("\n"),
     );

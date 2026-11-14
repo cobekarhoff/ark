@@ -584,6 +584,11 @@ test("ARK-T353 a dropped P1 without Repro frees the auto answer; an undropped on
   expect(outside.result.code).toBe(1);
   expect(outside.result.err).toContain("record gate escalation");
   expect(outside.answered).toBe(0);
+  // A dropped title that only starts with this finding's title drops nothing.
+  const prefix = attempt(`${noRepro("slow")}${dropped}`);
+  expect(prefix.result.code).toBe(1);
+  expect(prefix.result.err).toContain("record gate escalation");
+  expect(prefix.answered).toBe(0);
 });
 
 /** Two reviewer steps and a run lead file, each with its own findings file and modification time. */
