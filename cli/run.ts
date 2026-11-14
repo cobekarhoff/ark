@@ -1,5 +1,13 @@
 import { now as hubNow, waitFor } from "./clock.ts";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import {
@@ -113,8 +121,22 @@ export function runStart(ticketFile: string, project?: string): void {
   console.log(run);
 }
 
-/** The most extra rounds `gates.escalation: auto` grants in one run. */
-const autoEscalationCap = 2;
+/**
+ * True when the newest reviewer findings file holds a P0 or P1 finding block with no `Repro:` line.
+ * Newest by mtime, as `reviewRangeStart` picks; a run with no reviewer file has none to hold.
+ */
+function reviewerFindingLacksRepro(directory: string, state: RunState): boolean {
+  const newest = state.steps
+    .filter((step) => step.role === "reviewer")
+    .map((step) => join(directory, "findings", `${step.id}.md`))
+    .filter((file) => existsSync(file))
+    .map((file) => ({ file, time: statSync(file).mtimeMs }))
+    .sort((left, right) => right.time - left.time)[0];
+  if (!newest) return false;
+  return readFileSync(newest.file, "utf8")
+    .split(/^(?=#{2,3} )/m)
+    .some((block) => /^### P[01]\b/.test(block) && !/^- \*\*Repro:\*\*/m.test(block));
+}
 
 function refused(action: () => void): boolean {
   try {
@@ -136,8 +158,11 @@ function answerEscalationByAuto(
   events: ArkEvent[],
   state: RunState,
   start: EventData,
+  cap: number,
 ): string | null {
   if (state.escalation_requested || state.implementer === "human") return null;
+  // A P0/P1 with no repro is the human's call, merge start or not.
+  if (reviewerFindingLacksRepro(directory, state)) return null;
   if (!refused(() => assertAllowed(state, "step.started", start, directory))) return null;
   const used = events.filter(
     (event) =>
@@ -146,7 +171,7 @@ function answerEscalationByAuto(
       event.data.by === "auto" &&
       !event.data.merge,
   ).length;
-  if (!start.merge && used >= autoEscalationCap) return null;
+  if (!start.merge && used >= cap) return null;
   const answer = {
     gate: "escalation",
     answer: "one_more_round",
@@ -165,7 +190,7 @@ function answerEscalationByAuto(
   ]);
   if (refused(() => assertAllowed(answered, "step.started", start, directory))) return null;
   appendEvent(directory, "gate.answered", answer);
-  return `escalation one_more_round by auto (${start.merge ? "merge, not counted" : `${used + 1} of ${autoEscalationCap}`})`;
+  return `escalation one_more_round by auto (${start.merge ? "merge, not counted" : `${used + 1} of ${cap}`})`;
 }
 
 /**
@@ -517,8 +542,9 @@ export async function runStep(
     round,
     ...(merge ? { merge: true } : {}),
   };
-  if (planned.role === "implementer" && loadConfig(project).gates.escalation === "auto") {
-    const line = answerEscalationByAuto(directory, events, state, start);
+  const config = loadConfig(project);
+  if (planned.role === "implementer" && config.gates.escalation === "auto") {
+    const line = answerEscalationByAuto(directory, events, state, start, config.escalation_rounds);
     if (line) console.log(line);
   }
   const planStep = readablePlan(directory, state.ticket.id)?.steps.find(

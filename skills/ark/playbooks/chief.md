@@ -138,7 +138,7 @@ Do these steps in order for one ready ticket.
 
 Never start more run leads than `concurrency` allows. Start the next ready ticket when a run closes.
 
-Before each run start, read the `## Host` section of `ark chief state --project <project>`. Start no run while its last line says `hold new runs: <reason>` (it says `hold new runs: no` when the host is clear). The reasons are free memory, swap, load and free disk. When the hold lasts, tell the human what holds memory: name the processes that use it, for example the running `ark test` runs in `tests: running <n>`, and the hub's Resources page (`#/resources`), which lists processes by run, agent and leftover from closed runs, and let the human decide what to stop.
+Before each run start, read the `## Host` section of `ark chief state --project <project>`. Start no run while its last line says `hold new runs: <reason>` (it says `hold new runs: no` when the host is clear). The reasons are free memory, swap, CPU use (over 90%, sampled for about 1 s) and free disk. When the hold lasts, tell the human what holds memory or CPU: name the processes that use it, for example the running `ark test` runs in `tests: running <n>`, and the hub's Resources page (`#/resources`), which lists processes by run, agent and leftover from closed runs, and let the human decide what to stop.
 
 ## 7. Supervise
 
@@ -179,7 +179,7 @@ A `status` message whose subject starts with `Brainstorm handoff:` is a request 
 
 Tell the human one line per queued ticket: that you queued it from a brainstorm handoff, with the approval line and its time quoted. Do not ask the human again. A handoff is never a gate answer. Never use it for a `criteria`, `plan`, `strategy` or `escalation` gate. When the handoff has no approval line, or the line does not list a ticket, pass it to the human as a notice and queue nothing for it.
 
-A `status` message from a run lead is a notice, not a question. Pass it to the human. When it says a Plannotator review is open, tell the human to answer there. The run lead records that answer itself. When its subject starts with `Escalation answered by auto:`, Ark answered the `escalation` gate with `gates.escalation: auto`: pass it on as one line (`<ticket>: auto granted extra round <round> (<n> of 2). No action needed.`) and ask nothing.
+A `status` message from a run lead is a notice, not a question. Pass it to the human. When it says a Plannotator review is open, tell the human to answer there. The run lead records that answer itself. When its subject starts with `Escalation answered by auto:`, Ark answered the `escalation` gate with `gates.escalation: auto`: pass it on as one line (`<ticket>: auto granted extra round <round> (<n> of <cap>). No action needed.`) and ask nothing.
 
 ### A busy agent
 
@@ -189,8 +189,8 @@ When the agent is still busy after 5 times, tell the human the target, the subje
 
 ### A `question` from a run lead
 
-Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. The `plan` and `strategy` gates, when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`), are answered by Ark with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, and no `ask` arrives for it. The `escalation` gate with `gates.escalation: auto` is answered by Ark too, up to 2 times in a run: the run lead sends a `status` for each one, which you pass to the human as a notice and never relay as a question.
-The third spent budget, and any escalation that `ark escalate` requested, still arrive as an `ask` for the human. The `criteria` gate stays with the human even when set to `auto`, because nothing answers it yet. Setting `plan` and `strategy` to `auto` is the Foundry setup; it leaves `criteria` with the human, and `escalation` too unless `gates.escalation` is `auto`.
+Every `ask` from a run lead is a gate or a decision for the human. Relay every one. Do not answer for the human. The `plan` and `strategy` gates, when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`), are answered by Ark with `by: auto`. An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, and no `ask` arrives for it. The `escalation` gate with `gates.escalation: auto` is answered by Ark too, up to `escalation_rounds` times in a run (default 2): the run lead sends a `status` for each one, which you pass to the human as a notice and never relay as a question.
+The spent budget past the cap, a P0 or P1 in the newest reviewer findings file with no `Repro:` line, and any escalation that `ark escalate` requested, still arrive as an `ask` for the human. The `criteria` gate stays with the human even when set to `auto`, because nothing answers it yet. Setting `plan` and `strategy` to `auto` is the Foundry setup; it leaves `criteria` with the human, and `escalation` too unless `gates.escalation` is `auto`.
 
 1. Read the question and its options. Say which run and ticket it is for.
 2. Put it to the human as chat text (see "Asking the human"). Keep the run lead's options and recommended answer. If the question points to `plan.md` or a findings file, tell the human the path. Add it to the open-gate list and end the turn.
@@ -297,7 +297,7 @@ When the human gives you a bug ticket and it traces back to an earlier run, or y
 
 ## 10. Take over from live state
 
-When you take over a Master Chief Run (section 2, step 5) or start as a replacement from `ark chief handover`, run `ark chief state --project <project>` and work from its output. It reads the open runs, run leads, queued Orca Tasks, the main head, gates, concurrency, the closed runs since the last interview and the host (memory, swap, load, free disk) live. A section that says `unavailable` is unknown, not empty: check it yourself before you act.
+When you take over a Master Chief Run (section 2, step 5) or start as a replacement from `ark chief handover`, run `ark chief state --project <project>` and work from its output. It reads the open runs, run leads, queued Orca Tasks, the main head, gates, concurrency, the closed runs since the last interview and the host (memory, swap, load, CPU, free disk) live. A section that says `unavailable` is unknown, not empty: check it yourself before you act.
 
 `handoff.md` keeps only standing rules: decisions of the human that stay true, and how the human wants Master Chief to work. Do not write a State section in it. State goes stale in minutes, and `ark chief state` replaces it.
 
