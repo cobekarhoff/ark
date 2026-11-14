@@ -16,6 +16,27 @@ export type OrcaTerminal = {
   title?: string;
 };
 
+/** A row of `run-list --full`. */
+export type OrcaRunRow = { id: string; objective?: string; coordinator_handle?: string };
+/** A `worker-list --json` row. A structured worker has `liveness: "unverifiable"` and no terminal handle; its `workspace` is `<host>::<run folder>/workspace`. */
+export type WorkerRow = { dispatchId: string; terminal?: string; workspace?: string };
+
+/**
+ * The Ark run a worker of Master Chief's Run leads, or undefined. A run lead is the worker whose
+ * terminal is the coordinator of the Orca Run `Ark run <run>`, or whose workspace is `<run folder>/workspace`.
+ */
+export function runOfLead(runs: OrcaRunRow[], worker: WorkerRow): string | undefined {
+  const led = runs.find(
+    (orcaRun) =>
+      orcaRun.objective?.startsWith("Ark run ") &&
+      orcaRun.coordinator_handle &&
+      orcaRun.coordinator_handle === worker.terminal,
+  );
+  return led
+    ? led.objective!.slice("Ark run ".length)
+    : worker.workspace?.match(/\/runs\/([^/]+)\/workspace$/)?.[1];
+}
+
 /**
  * The live Master Chief of a project: the connected coordinator of the Orca run whose objective is
  * exactly `Master Chief: <project> tickets`, in the project workspace. No other terminal counts.
@@ -215,19 +236,26 @@ const receiptOf = (receipt: Receipt, terminal?: string): StartedWorker => ({
     "unknown",
 });
 
-/** `worker-start --agent`: a fresh supervised worker in `worktree`. */
+/**
+ * `worker-start --agent`: a fresh supervised worker in `worktree`. `keepOpen` keeps it open after its
+ * turn; `run` joins that Orca Run instead of letting Orca create one named after the task.
+ */
 export async function startWorker(options: {
   spec: string;
   title: string;
   worktree: string;
   harness: string;
   model: string;
+  keepOpen?: boolean;
+  run?: string;
 }): Promise<OrcaRead<StartedWorker>> {
   const started = await orcaCommand<Receipt>(
     [
       "orchestration",
       "worker-start",
       ...coordinator(),
+      ...(options.run ? ["--run", options.run] : []),
+      ...(options.keepOpen ? ["--keep-open"] : []),
       "--spec",
       options.spec,
       "--task-title",
@@ -242,6 +270,38 @@ export async function startWorker(options: {
     actionTimeout(),
   );
   return started.ok ? { ok: true, value: receiptOf(started.value) } : started;
+}
+
+/** `worker-stop`: fences one Dispatch and stops its agent. */
+export async function stopWorker(dispatch: string): Promise<OrcaRead<unknown>> {
+  return orcaCommand(["orchestration", "worker-stop", "--dispatch", dispatch], actionTimeout());
+}
+
+/**
+ * `send`: one message to `to` (`dispatch:<id>`, a terminal handle or `run:<id>`). Outside an Orca
+ * session there is no `--from`, so the recipient must be named exactly.
+ */
+export async function sendMessage(options: {
+  to: string;
+  subject: string;
+  body: string;
+  type?: string;
+}): Promise<OrcaRead<unknown>> {
+  return orcaCommand(
+    [
+      "orchestration",
+      "send",
+      ...coordinator(),
+      "--to",
+      options.to,
+      "--subject",
+      options.subject,
+      "--body",
+      options.body,
+      ...(options.type ? ["--type", options.type] : []),
+    ],
+    actionTimeout(),
+  );
 }
 
 /** `terminal create` running `command` in `worktree`: the terminal handle. */

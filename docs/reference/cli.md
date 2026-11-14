@@ -33,39 +33,44 @@ A command prints a short result and exits 0 on success. On failure it prints `ar
 
 <!-- generated:commands:start -->
 
-| Job              | Command                                         | What it does                                                                                         |
-| ---------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Start and close  | [`run start`](#run-start)                       | Starts a run from a ticket file                                                                      |
-|                  | [`run close`](#run-close)                       | Closes a run                                                                                         |
-|                  | [`status`](#status)                             | Prints the state of one run                                                                          |
-|                  | [`retro`](#retro)                               | Computes the run's cost, time, rework and intervention metrics and writes metrics.json               |
-| Plan             | [`evaluation record`](#evaluation-record)       | Reads evaluation.md in the run folder and records its blockers, risks and surfaces                   |
-|                  | [`criteria amend`](#criteria-amend)             | Writes the text in \<file> as the new text of one criterion in the run's ticket.md                   |
-|                  | [`strategy record`](#strategy-record)           | Reads strategies.md in the run folder and records its strategy cards                                 |
-|                  | [`ui-skills`](#ui-skills)                       | Prints the UI skills of the run, one line for each                                                   |
-|                  | [`plan check`](#plan-check)                     | Checks plan.yml in the run folder and renders plan.md                                                |
-| Build and test   | [`run step`](#run-step)                         | Records that a plan step started, finished or was interrupted                                        |
-|                  | [`worktree anchor`](#worktree-anchor)           | Makes the run's worktree early, for the first repo of the workspace, with the same branch            |
-|                  | [`worktree create`](#worktree-create)           | Builds the run's workspace mirror                                                                    |
-|                  | [`test`](#test)                                 | Runs the project's suites on the run's workspace mirror and records which ACs have a passing test    |
-|                  | [`test-case new`](#test-case-new)               | Run in a git repo, or anywhere with `--run <run>`                                                    |
-|                  | [`test-audit inventory`](#test-audit-inventory) | Lists every test declaration of the project's bun suites                                             |
-|                  | [`worktree sync`](#worktree-sync)               | Fetches and merges origin's target branch                                                            |
-|                  | [`workspace sync`](#workspace-sync)             | Fetches and fast-forwards the target branch                                                          |
-| Gates            | [`gate record`](#gate-record)                   | Records your answer to a gate                                                                        |
-|                  | [`escalate`](#escalate)                         | Opens the escalation gate when the round budget is spent, also when the last ark test passed         |
-| Merge requests   | [`merge-request open`](#merge-request-open)     | Pushes each repo's branch and posts one ready MR                                                     |
-|                  | [`merge-request check`](#merge-request-check)   | Prints each problem that `ark merge-request open` would refuse, one line for each                    |
-|                  | [`merge-request status`](#merge-request-status) | For a project with `merge_requests: none` it prints `merge requests: none`                           |
-|                  | [`bump refresh`](#bump-refresh)                 | Records `bump.refreshed` for a bump step of the plan                                                 |
-| Master Chief     | [`chief state`](#chief-state)                   | Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a file |
-|                  | [`chief handover`](#chief-handover)             | Starts a new Master Chief for the project with `orca agent launch --surface terminal`                |
-| Hub and services | [`ui`](#ui)                                     | Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise                          |
-|                  | [`ui install`](#ui-install)                     | Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents and loads them       |
-|                  | [`ui uninstall`](#ui-uninstall)                 | Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy                                   |
-|                  | [`services install`](#services-install)         | Writes one LaunchAgent for each background job of the project in ~/Library/LaunchAgents and loads it |
-|                  | [`services uninstall`](#services-uninstall)     | Unloads and deletes the three LaunchAgents of the project                                            |
-|                  | [`services status`](#services-status)           | Prints one line for each service of the project                                                      |
+| Job              | Command                                         | What it does                                                                                                   |
+| ---------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Start and close  | [`run start`](#run-start)                       | Starts a run from a ticket file                                                                                |
+|                  | [`run close`](#run-close)                       | Closes a run                                                                                                   |
+|                  | [`status`](#status)                             | Prints the state of one run                                                                                    |
+|                  | [`retro`](#retro)                               | Computes the run's cost, time, rework and intervention metrics and writes metrics.json                         |
+| Plan             | [`evaluation record`](#evaluation-record)       | Reads evaluation.md in the run folder and records its blockers, risks and surfaces                             |
+|                  | [`criteria amend`](#criteria-amend)             | Writes the text in \<file> as the new text of one criterion in the run's ticket.md                             |
+|                  | [`strategy record`](#strategy-record)           | Reads strategies.md in the run folder and records its strategy cards                                           |
+|                  | [`ui-skills`](#ui-skills)                       | Prints the UI skills of the run, one line for each                                                             |
+|                  | [`plan check`](#plan-check)                     | Checks plan.yml in the run folder and renders plan.md                                                          |
+| Build and test   | [`run step`](#run-step)                         | Records that a plan step started, finished or was interrupted                                                  |
+|                  | [`worktree anchor`](#worktree-anchor)           | Makes the run's worktree early, for the first repo of the workspace, with the same branch                      |
+|                  | [`worktree create`](#worktree-create)           | Builds the run's workspace mirror                                                                              |
+|                  | [`test`](#test)                                 | Runs the project's suites on the run's workspace mirror and records which ACs have a passing test              |
+|                  | [`test-case new`](#test-case-new)               | Run in a git repo, or anywhere with `--run <run>`                                                              |
+|                  | [`test-audit inventory`](#test-audit-inventory) | Lists every test declaration of the project's bun suites                                                       |
+|                  | [`worktree sync`](#worktree-sync)               | Fetches and merges origin's target branch                                                                      |
+|                  | [`workspace sync`](#workspace-sync)             | Fetches and fast-forwards the target branch                                                                    |
+| Gates            | [`gate record`](#gate-record)                   | Records your answer to a gate                                                                                  |
+|                  | [`escalate`](#escalate)                         | Opens the escalation gate when the round budget is spent, also when the last ark test passed                   |
+| Merge requests   | [`merge-request open`](#merge-request-open)     | Pushes each repo's branch and posts one ready MR                                                               |
+|                  | [`merge-request check`](#merge-request-check)   | Prints each problem that `ark merge-request open` would refuse, one line for each                              |
+|                  | [`merge-request status`](#merge-request-status) | For a project with `merge_requests: none` it prints `merge requests: none`                                     |
+|                  | [`bump refresh`](#bump-refresh)                 | Records `bump.refreshed` for a bump step of the plan                                                           |
+| Master Chief     | [`chief state`](#chief-state)                   | Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a file           |
+|                  | [`chief handover`](#chief-handover)             | Starts a new Master Chief for the project with `orca agent launch --surface terminal`                          |
+| Hub and services | [`ui`](#ui)                                     | Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise                                    |
+|                  | [`ui install`](#ui-install)                     | Writes the LaunchAgents dev.ark.proxy and dev.ark.hub in ~/Library/LaunchAgents and loads them                 |
+|                  | [`ui uninstall`](#ui-uninstall)                 | Unloads and deletes the LaunchAgents dev.ark.hub and dev.ark.proxy                                             |
+|                  | [`services install`](#services-install)         | Writes one LaunchAgent for each background job of the project in ~/Library/LaunchAgents and loads it           |
+|                  | [`services uninstall`](#services-uninstall)     | Unloads and deletes the three LaunchAgents of the project                                                      |
+|                  | [`services status`](#services-status)           | Prints one line for each service of the project                                                                |
+| Other            | [`companions sync`](#companions-sync)           | Keeps one Orca worker alive for each companion listed under `companions` in ark.yml, and wakes it              |
+|                  | [`companion ask`](#companion-ask)               | Sends the live worker of the companion one message that holds the question and says it is a question from the… |
+|                  | [`companion answer`](#companion-answer)         | Appends the text and its time to `companions/<name>/answers.md` with one write, then sends Master Chief a copy |
+|                  | [`companion advise`](#companion-advise)         | Sends the run lead of an open run one message of type `status` whose subject starts with…                      |
+|                  | [`companion propose`](#companion-propose)       | Copies the draft ticket to `tickets/<id>.md` of the project with `status: proposed`                            |
 
 ### run start
 
@@ -790,7 +795,10 @@ Run past the first page is found. A source that fails prints `unavailable: <comm
 <reason>` under its heading, and the other sections still print. An empty source prints `none`. The
 `Red on main` section lists each file that an open run's last full `test.completed` recorded in
 `red_on_main`, with the run id, once; a run whose events cannot be read prints `unavailable` there.
---project falls back to ARK_PROJECT.
+It also runs `ark companions sync` and prints its lines, and each failure as `unavailable:
+<reason>`, under `Companions`; with no `companions` in ark.yml and no recorded companion worker it
+adds no section and no Orca call, and a failing sync never changes the exit code. --project falls
+back to ARK_PROJECT.
 ```
 
 ### chief handover
@@ -804,6 +812,86 @@ Chief terminal (found with the live Master Chief of the project), tells the agen
 terminal is gone, and then to run `run-use` on the existing Master Chief Run. It never closes the
 old terminal: Master Chief does that after the command returns. It exits 1 and starts nothing when
 no live Master Chief exists, when Orca does not answer or when `roles.chief` is not set. --project
+falls back to ARK_PROJECT.
+```
+
+### companions sync
+
+```text
+ark companions sync [--project <name>]
+
+Keeps one Orca worker alive for each companion listed under `companions` in ark.yml, and wakes it. A
+companion with no live worker is started with `orca orchestration worker-start --keep-open --run
+<Master Chief's Run>`, with the harness and model of its entry, the project folder as its worktree,
+and a spec made of the fixed companion preamble and the text of its instructions file. A worker is
+live when its recorded dispatch id (`companions/<name>/worker.json`, written only after the start
+succeeded) is in `worker-list --terminal-state active` of Master Chief's Run. A `companions/<name>/`
+folder whose companion is no longer listed gets `worker-stop` for its recorded dispatch id; the
+folder keeps its ideas and answers. It prints one line for each companion: `<name>: running`,
+`<name>: started` or `<name>: stopped`. Each live companion then gets one `orca orchestration send
+--to dispatch:<id>` for each new event of a trigger it lists in `on`: `run.merged` is a `run.closed`
+event with outcome `merged`, `run.started` is `run.started`, `criteria.opened` is an
+`evaluation.recorded` event with at least one blocker, `escalation` is `escalation.requested`, and
+`ci.failed` is a failed check on an MR of a run in `merge_requests_open`, read live from `gh` or
+`glab` and keyed by run, MR number and check name. The message names the trigger and the run id.
+`companions/<name>/cursor.json` holds the last event of each run and the failures already sent; it
+is written after the send worked, so a failed send is sent again, and a companion's first sync only
+writes it and sends nothing for older events. A run whose events cannot be read is named on a
+`note:` line and skipped. A sync that finds another sync running for a companion refuses that
+companion with an `ark: ` line. It exits 1 after printing an `ark: ` line for each failure, and
+still handles the other companions; it exits 1 and changes nothing when Master Chief's Run or Orca
+cannot be read. With no `companions` key and no recorded worker it prints nothing and makes no Orca
+call. `ark chief state` runs the same sync. --project falls back to ARK_PROJECT.
+```
+
+### companion ask
+
+```text
+ark companion ask <name> <question> [--project <name>]
+
+Sends the live worker of the companion one message that holds the question and says it is a question
+from the human or Master Chief, not a trigger wake; the companion answers with `ark companion
+answer`. It exits 1 with an `ark: ` line, and sends nothing, when the name is not in ark.yml (it
+creates no folder) or the companion has no live worker. --project falls back to ARK_PROJECT.
+```
+
+### companion answer
+
+```text
+ark companion answer <name> <text> [--project <name>]
+
+Appends the text and its time to `companions/<name>/answers.md` with one write, then sends Master
+Chief a copy. Master Chief is the live one of the project, found as `ark chief handover` finds it,
+so it works with no Orca session variable (the hub calls it that way). It exits 1 with an `ark: `
+line when the name is not in ark.yml (it creates no folder), and when the copy fails: then the
+answer is already in the file. --project falls back to ARK_PROJECT.
+```
+
+### companion advise
+
+```text
+ark companion advise <name> <run> <text> [--project <name>]
+
+Sends the run lead of an open run one message of type `status` whose subject starts with `Advice
+from companion <name>:` and whose body says it is advice and not a gate answer, then sends Master
+Chief a copy with the run id. The lead is the worker of Master Chief's Run that leads the run, found
+as `ark chief state` finds it. Nothing is sent unless both the lead and the live Master Chief are
+found. It exits 1 with an `ark: ` line when the name is not in ark.yml, the run does not exist or is
+closed, the run has no live lead, or a send fails; when the send to the lead fails no copy goes out,
+and when only the copy fails the lead keeps the advice. --project falls back to ARK_PROJECT.
+```
+
+### companion propose
+
+```text
+ark companion propose <name> <file> [--project <name>]
+
+Copies the draft ticket to `tickets/<id>.md` of the project with `status: proposed` (whatever status
+the draft names) and the front matter line `source: companion <name>`, and prints the path. The
+draft must be a valid ticket with an id like `ARK-123`. It exits 1 with an `ark: ` line and writes
+nothing when the name is not in ark.yml, the file is missing, the draft has no id or is not a valid
+ticket, or a ticket with that id already exists (an existing ticket is never overwritten). It never
+queues the ticket and sends no message: the human approves it, and Master Chief queues it. --project
 falls back to ARK_PROJECT.
 ```
 

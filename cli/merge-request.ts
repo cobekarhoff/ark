@@ -833,7 +833,7 @@ type MergeRequestComment = {
   url: string;
   createdAt: string;
 };
-type MergeRequestReport = {
+export type MergeRequestReport = {
   repo: string;
   url: string;
   state: string;
@@ -1073,7 +1073,7 @@ function readComments(
 }
 
 /** Reads every signal of one MR. A signal the host cannot answer is `unknown` (`null` for conflict and comments); the others still show. */
-function reportMergeRequest(
+export function reportMergeRequest(
   merge: OpenedMergeRequest,
   cwd: string,
   sinceTime: number | undefined,
