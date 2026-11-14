@@ -33,9 +33,9 @@ changed_by: 2026-11-14-ARK-482-1
 7. Hold the lock: start a real process that creates `<project>/.git/index.lock` and sleeps. Change the ticket. Run the script with `--once` while it sleeps. Record the exit code, stdout, stderr, and check the lock file. End the process, remove its lock as its owner, run the script with `--once`.
 8. The loop: start a real process that holds `<project>/.git/index.lock`. Change the ticket. Start the script without `--once` and with interval 1 in the background, its stdout and stderr appended to `services/project-autocommit.log`, as the plist does. Wait 4 seconds. Check the process is alive, read the log, count the commits, check the lock file. End the lock holder and remove its lock as its owner. Wait up to 10 seconds. Count the commits, check the process is alive. Wait 3 more seconds with no change. Count the commits. Change `learnings.md`, wait up to 10 seconds. Kill the loop.
 9. Change the ticket again. Start two copies of the script with `--once` at the same moment. Wait for both. Count the new commits.
-10. Run the script with `ARK_PROJECT=other`. List the log of `ark` and of `other`, and the log of the parent repository.
-11. Run it with `ARK_PROJECT=missing` (no such folder).
-12. Run it with `--once` and `ARK_PROJECT` set to the empty string, then with `--once` and `ARK_PROJECT` removed from the environment, then both again without `--once`. Look for `.git` under `$ARK_HOME/projects/` and in each project folder, and list the log of the parent repository.
+10. Run the script with `--once` and `ARK_PROJECT=other`. List the log of `ark` and of `other`, and the log of the parent repository.
+11. Run it with `--once` and `ARK_PROJECT=missing` (no such folder).
+12. Count the commits of `ark` and of `other`. Run the script with `--once` and `ARK_PROJECT` set to the empty string, then with `--once` and `ARK_PROJECT` removed from the environment, then both again without `--once`. Check whether `$ARK_HOME/projects/.git` exists, check that `projects/ark/.git` and `projects/other/.git` exist, count the commits of `ark` and of `other` again, and list the log of the parent repository.
 
 ## Expected results
 
@@ -50,7 +50,7 @@ changed_by: 2026-11-14-ARK-482-1
 - Step 9: exactly one new commit for the change, no empty commit, no broken index, `git fsck` clean, and each copy exits 0 or 1 (a copy that finds the index locked by the other may fail its commit with 1; it never leaves a lock behind).
 - Step 10: `other` has one commit with its ticket, `ark` has no new commit, the parent repository has no new commit.
 - Step 11: exit code 1 and a message that names the missing folder; no folder `missing` is created under `projects/`.
-- Step 12: each of the four runs exits 1 at once (the looping runs do not stay alive) with a message on stderr that names `ARK_PROJECT`. No `.git` appears under `$ARK_HOME/projects/`, and the parent repository has no new commit.
+- Step 12: each of the four runs exits 1 at once (the looping runs do not stay alive) with a message on stderr that names `ARK_PROJECT`. `$ARK_HOME/projects/.git` does not exist. `projects/ark/.git` and `projects/other/.git` exist, and the commit counts of `ark` and `other` are the same after the four runs as before them. The parent repository has no new commit.
 
 ## Screenshot checkpoints
 
