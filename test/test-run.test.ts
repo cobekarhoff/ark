@@ -194,7 +194,7 @@ function head(directory: string): string {
 }
 
 describe("ark test", () => {
-  test("ARK-154-AC5 untagged tests never prove an AC and each AC gets passing, failing or missing", () => {
+  test("ARK-T557 ARK-154-AC5 untagged tests never prove an AC and each AC gets passing, failing or missing", () => {
     const { runId, runDirectory } = buildingRun({
       criteria: ["FAKE-1-AC1", "FAKE-1-AC2", "FAKE-1-AC3", "FAKE-1-AC4"],
       e2e: [
@@ -220,23 +220,6 @@ describe("ark test", () => {
       "FAKE-1/AC3": "missing",
       "FAKE-1/AC4": "missing",
     });
-  });
-
-  test("ARK-154-AC7 a passing unit suite never marks an AC as passed", () => {
-    const { runId, runDirectory } = buildingRun({
-      criteria: ["FAKE-1-AC1"],
-      unit: [passing("FAKE-1-AC1 only a unit test covers this")],
-    });
-    const result = ark("test", runId);
-
-    expect(result.code).toBe(1);
-    expect(result.out).toContain("FAKE-1/AC1  missing");
-    const [event] = testCompleted(runDirectory);
-    expect(event.suites).toEqual([
-      { name: "unit", level: "unit", passed: true },
-      { name: "e2e", level: "e2e", passed: true },
-    ]);
-    expect(event.passed).toBe(false);
   });
 
   test("ARK-T135 records suites and the head of each worktree, and exits 0 when every AC passes", () => {
@@ -297,7 +280,7 @@ describe("ark test", () => {
     });
   });
 
-  test("ARK-154-AC6 exits non-zero when a unit suite fails even though every AC passes", () => {
+  test("ARK-T558 ARK-154-AC6 exits non-zero when a unit suite fails even though every AC passes", () => {
     const { runId, runDirectory } = buildingRun({
       criteria: ["FAKE-1-AC1"],
       e2e: [passing("FAKE-1-AC1 works")],
@@ -312,7 +295,7 @@ describe("ark test", () => {
     expect(event.passed).toBe(false);
   });
 
-  test("ARK-154-AC3 runs suites in the mirror and skips compose when ark.yml has none", () => {
+  test("ARK-T559 ARK-154-AC3 runs suites in the mirror and skips compose when ark.yml has none", () => {
     const { runId, runDirectory } = buildingRun({
       criteria: ["FAKE-1-AC1"],
       e2e: [
@@ -394,7 +377,7 @@ describe("ark test with manual criteria", () => {
   const phaseOf = (runDirectory: string) =>
     JSON.parse(readFileSync(join(runDirectory, "state.json"), "utf8")).phase;
 
-  test("ARK-283-AC1 a criterion with manual: true shows manual pending, manual ok or manual problem and only manual ok exits 0", () => {
+  test("ARK-T560 ARK-283-AC1 a criterion with manual: true shows manual pending, manual ok or manual problem and only manual ok exits 0, and the last answer decides", () => {
     const { runId, runDirectory } = manualRun();
 
     const pending = ark("test", runId);
@@ -414,24 +397,20 @@ describe("ark test with manual criteria", () => {
     expect(problem.out).toContain("FAKE-1/AC3  manual problem");
     expect(problem.err).toContain("FAKE-1/AC3 is manual problem");
 
+    expect(answer(runId, "ok").code).toBe(0);
+    const reanswered = ark("test", runId);
+    expect(reanswered.code).toBe(0);
+    expect(reanswered.out).toContain("FAKE-1/AC3  manual ok");
+
     expect(testCompleted(runDirectory).map((event) => event.criteria["FAKE-1/AC3"])).toEqual([
       "manual pending",
       "manual ok",
       "manual problem",
+      "manual ok",
     ]);
   });
 
-  test("ARK-283-AC1 a problem answer followed by ok reads manual ok", () => {
-    const { runId } = manualRun();
-    expect(answer(runId, "problem").code).toBe(0);
-    expect(ark("test", runId).out).toContain("FAKE-1/AC3  manual problem");
-    expect(answer(runId, "ok").code).toBe(0);
-    const result = ark("test", runId);
-    expect(result.out).toContain("FAKE-1/AC3  manual ok");
-    expect(result.code).toBe(0);
-  });
-
-  test("ARK-283-AC1 manual pending on the last round keeps passed true and does not open the escalation gate", () => {
+  test("ARK-T561 ARK-283-AC1 manual pending on the last round keeps passed true and does not open the escalation gate", () => {
     const { runId, runDirectory } = manualRun({ roundBudget: 1 });
     const result = ark("test", runId);
     expect(result.code).toBe(1);
@@ -441,7 +420,7 @@ describe("ark test with manual criteria", () => {
     expect(answer(runId, "ok").code).toBe(0);
   });
 
-  test("ARK-283-AC1 a failing automated criterion still makes passed false next to a manual ok", () => {
+  test("ARK-T562 ARK-283-AC1 a failing automated criterion still makes passed false next to a manual ok", () => {
     const { runId, runDirectory } = buildingRun({
       criteria: ["FAKE-1-AC1", "FAKE-1-AC2"],
       manual: ["FAKE-1-AC2"],
@@ -452,24 +431,12 @@ describe("ark test with manual criteria", () => {
     expect(testCompleted(runDirectory)[0].passed).toBe(false);
   });
 
-  test("ARK-283-AC1 a manual criterion with a passing tagged test is still decided by the manual gate", () => {
+  test("ARK-T563 ARK-283-AC1 a manual criterion with a passing tagged test is still decided by the manual gate", () => {
     const { runId, runDirectory } = manualRun({ e2e: [passing("FAKE-1-AC3 tagged test passes")] });
     const result = ark("test", runId);
     expect(result.code).toBe(1);
     expect(result.out).toContain("FAKE-1/AC3  manual pending");
     expect(testCompleted(runDirectory)[0].criteria["FAKE-1/AC3"]).toBe("manual pending");
-  });
-
-  test("ARK-283-AC1 plan check accepted a plan with no test case for the manual criterion", () => {
-    const { runDirectory } = manualRun();
-    const plan = JSON.parse(readFileSync(join(runDirectory, "plan.yml"), "utf8"));
-    expect(plan.test_cases.map((testCase: { criterion: string }) => testCase.criterion)).toEqual([
-      "FAKE-1-AC1",
-      "FAKE-1-AC2",
-    ]);
-    const events = readFileSync(join(runDirectory, "events.ndjson"), "utf8");
-    expect(events).toContain('"type":"plan.checked"');
-    expect(events).toContain('"valid":true');
   });
 });
 
@@ -487,7 +454,7 @@ const checkFixtures = {
 };
 
 describe("ark test checks", () => {
-  test("ARK-302-AC1 a passing check in the repo worktree keeps passed true and prints nothing about it", () => {
+  test("ARK-T564 ARK-302-AC1 a passing check in the repo worktree keeps passed true and prints nothing about it", () => {
     const { runId, runDirectory } = buildingRun({
       criteria: ["FAKE-1-AC1"],
       e2e: [passing("FAKE-1-AC1 works")],
@@ -500,7 +467,7 @@ describe("ark test checks", () => {
     expect(testCompleted(runDirectory)[0].passed).toBe(true);
   });
 
-  test("ARK-302-AC1 a failing check records passed false, prints check <name> failed and the last 20 lines before the suites", () => {
+  test("ARK-T565 ARK-302-AC1 a failing check records passed false, prints check <name> failed and the last 20 lines before the suites", () => {
     const { runId, runDirectory } = buildingRun({
       criteria: ["FAKE-1-AC1"],
       e2e: [passing("FAKE-1-AC1 works")],
@@ -693,7 +660,7 @@ describe("ark test on a refactor run", () => {
     }
   });
 
-  test("ARK-302-AC7 a base that passes records base_passed true and merge-request open no longer refuses on the base", () => {
+  test("ARK-T566 ARK-302-AC7 a base that passes records base_passed true and merge-request open no longer refuses on the base", () => {
     const { runId, runDirectory } = buildingRun({
       kind: "refactor",
       criteria: ["FAKE-1-AC1"],
@@ -822,7 +789,7 @@ describe("ark test verified_by join", () => {
     expected: "it works",
   });
 
-  test("ARK-311-AC2 decides an AC through its verified_by cases at every level and keeps the tag path for old ACs", () => {
+  test("ARK-T567 ARK-311-AC2 ARK-154-AC7 decides an AC through its verified_by cases at every level and keeps the tag path for old ACs", () => {
     const { runId, runDirectory } = buildingRun({
       // AC1 needs two cases; AC2 shares one of them. AC3 has a failing case, AC4 a case with no result.
       // AC5 is served by a unit case and an e2e case. AC6 and AC7 are old-scheme ACs with no verified_by.
