@@ -713,6 +713,7 @@ describe("ark retro", () => {
       findings_left_p0p1: 0,
       findings_dropped: 0,
       merge_steps: 0,
+      rules_added: 0,
     });
     expect(metrics.human_intervention).toEqual({
       plan_changes: 1,
@@ -805,6 +806,32 @@ describe("ark retro", () => {
     rmSync(findings, { recursive: true });
     expect(runRetroProcess().exitCode).toBe(0);
     expect(readMetrics().rework.findings_left_p0p1).toBe(0);
+  });
+
+  test("ARK-T406 retro counts the rule list lines of rules.md into rework.rules_added", () => {
+    const rulesFile = join(runDirectory, "rules.md");
+    writeFileSync(
+      rulesFile,
+      [
+        "# Rules",
+        "",
+        "Written by the run lead when a finding repeats.",
+        "",
+        "- Check the unit on every export path (export drops the unit; csv export drops the unit; 2026-11-14T10:00:00Z)",
+        "- Never read ARK_HOME at import time (config read at import; path read at import; 2026-11-14T11:00:00Z)",
+        "",
+      ].join("\n"),
+    );
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(readMetrics().rework).toMatchObject({
+      rules_added: 2,
+      findings_dropped: 0,
+      findings_sent_back: 0,
+    });
+
+    rmSync(rulesFile);
+    expect(runRetroProcess().exitCode).toBe(0);
+    expect(readMetrics().rework.rules_added).toBe(0);
   });
 
   test("ARK-T392 retro counts only the dropped lines under Run lead decision into findings_dropped", () => {
