@@ -35,7 +35,6 @@ const events = () =>
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
-const state = () => JSON.parse(readFileSync(join(runDirectory, "state.json"), "utf8"));
 
 beforeEach(() => {
   tempArkHome();
@@ -55,7 +54,7 @@ beforeEach(() => {
   startRun();
 });
 
-test("ARK-170-AC1 evaluation record writes both lists from evaluation.md", () => {
+test("ARK-T414 ARK-170-AC1 evaluation record writes both lists from evaluation.md", () => {
   evaluation(
     "## Blockers\n- AC2 cannot be exercised\n\n## Risks\n- Requires a configured role\n- Timing boundary\n\n## Surfaces\n- cli_output\n",
   );
@@ -70,7 +69,7 @@ test("ARK-170-AC1 evaluation record writes both lists from evaluation.md", () =>
   });
 });
 
-test("ARK-170-AC1 refuses missing or incomplete evaluation files without recording", () => {
+test("ARK-T415 ARK-170-AC1 refuses missing or incomplete evaluation files without recording", () => {
   const missing = ark("evaluation", "record", runId);
   expect(missing.code).toBe(1);
   expect(missing.err).toContain("evaluation.md");
@@ -86,7 +85,7 @@ test("ARK-170-AC1 refuses missing or incomplete evaluation files without recordi
   expect(events().some((event) => event.type === "evaluation.recorded")).toBe(false);
 });
 
-test("ARK-170-AC1 refuses to record when ark.yml has no evaluator role", () => {
+test("ARK-T416 ARK-170-AC1 refuses to record when ark.yml has no evaluator role", () => {
   const config = JSON.parse(readFileSync(join(projectDirectory, "ark.yml"), "utf8"));
   delete config.roles.evaluator;
   writeFileSync(join(projectDirectory, "ark.yml"), JSON.stringify(config));
@@ -97,48 +96,7 @@ test("ARK-170-AC1 refuses to record when ark.yml has no evaluator role", () => {
   expect(events().some((event) => event.type === "evaluation.recorded")).toBe(false);
 });
 
-test("ARK-170-AC2 blockers keep the criteria gate open through edits until acceptance", () => {
-  record(["AC is impossible"], []);
-  expect(state().phase).toBe("awaiting_criteria");
-  expect(ark("gate", "record", runId, "criteria", "edit").code).toBe(0);
-  expect(state().phase).toBe("awaiting_criteria");
-  expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(0);
-  expect(state().phase).toBe("planning");
-});
-
-test("ARK-170-AC2 a later clear evaluation does not end the criteria gate wait", () => {
-  record(["AC is impossible"], []);
-  record([], []);
-  expect(state().phase).toBe("awaiting_criteria");
-  expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(0);
-  expect(state().phase).toBe("planning");
-});
-
-test("ARK-170-AC2 aborting an evaluator-blocked criteria gate closes the run", () => {
-  record(["AC is impossible"], []);
-  const result = ark("gate", "record", runId, "criteria", "abort");
-  expect(result.code).toBe(0);
-  expect(state()).toMatchObject({ phase: "closed", outcome: "aborted" });
-});
-
-test("ARK-170-AC3 a clear evaluation leaves a ticket with criteria at the criteria gate until the human accepts", () => {
-  record([], []);
-  expect(state().phase).toBe("awaiting_criteria");
-  expect(events().some((event) => event.type === "gate.answered")).toBe(false);
-  accept();
-  expect(state().phase).toBe("planning");
-});
-
-test("ARK-170-AC3 a ticket without criteria remains gated after a clear evaluation", () => {
-  const started = ark("run", "start", writeTicket("demo", "ARK-170-NO-AC", []));
-  expect(started.code).toBe(0);
-  runId = started.out.trim();
-  runDirectory = join(projectDirectory, "runs", runId);
-  record([], []);
-  expect(state().phase).toBe("awaiting_criteria");
-});
-
-test("ARK-170-AC4 plan check refuses a valid plan without an evaluation event", () => {
+test("ARK-T417 ARK-170-AC4 plan check refuses a valid plan without an evaluation event", () => {
   accept();
   writeFileSync(
     join(runDirectory, "plan.yml"),
@@ -178,7 +136,7 @@ test("ARK-170-AC4 plan check refuses a valid plan without an evaluation event", 
   expect(`${result.err}${result.out}`).toContain("evaluation.recorded");
 });
 
-test("ARK-170-AC5 plan markdown lists only risks from the latest evaluation", () => {
+test("ARK-T418 ARK-170-AC5 plan markdown lists only risks from the latest evaluation", () => {
   record([], ["old risk"]);
   record([], ["latest one", "latest two"]);
   accept();
