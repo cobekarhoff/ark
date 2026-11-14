@@ -4,14 +4,14 @@ title: ARK-T656 ark companions sync starts a listed companion with no live worke
 level: integration
 technique: state transition (no worker, started, running, entry removed, stopped) with a fake orca that holds a live worker list; equivalence classes on orca failure (no Master Chief run, worker-start fails, worker-stop fails, orca down)
 priority: high
-risk: "sync starts a second worker for a companion that runs (a duplicate Cortana on every chief state); a dead worker is never restarted; a removed companion keeps its worker or its folder is deleted with its ideas; the worker starts without --keep-open and closes after its first turn, or without --run so Orca opens a new Run instead of Master Chief's; a failed start is recorded as running; ark chief state with no companions makes an Orca call or breaks its Red on main, Run leads and Host sections"
+risk: "sync starts a second worker for a companion that runs (a duplicate Cortana on every chief state); a dead worker is never restarted; a removed companion keeps its worker or its folder is deleted with its ideas; the worker starts without --keep-open and closes after its first turn, or without --run so Orca opens a new Run instead of Master Chief's; a failed start is recorded as running; ark chief state with no companions starts, stops or messages a worker, adds a companion-related Orca call, or breaks its Red on main, Run leads and Host sections"
 status: active
 changed_by: 2026-11-14-ARK-480-1
 ---
 
 ## Objective
 
-Prove `ark companions sync` keeps exactly one live Orca worker for each companion of `ark.yml`, stops the worker of a companion that was removed, and prints one line per companion; and that `ark chief state` runs the same sync as its own section and makes no Orca call when no companion is listed. Serves ARK-480/AC2.
+Prove `ark companions sync` keeps exactly one live Orca worker for each companion of `ark.yml`, stops the worker of a companion that was removed, and prints one line per companion; and that `ark chief state` runs the same sync as its own section and, with no companion listed, makes the Orca calls it made before this ticket and no companion-related call. Serves ARK-480/AC2.
 
 ## Preconditions
 
@@ -26,7 +26,7 @@ Prove `ark companions sync` keeps exactly one live Orca worker for each companio
 3. Mark the live row of `beta` as gone (the worker closed) and run it again.
 4. Remove `alpha` from `ark.yml` and run it again. Put a line in `companions/alpha/ideas.md` before this step.
 5. Failures, each from a fresh state with both companions listed: (a) no Master Chief Run in `run-list`; (b) `worker-start` fails for `alpha` only; (c) `worker-stop` fails when a removed companion is stopped; (d) every Orca verb fails.
-6. Remove both companions from `ark.yml` (no `companions` key) and clear the call log, with no `companions/` folder. Run `ark companions sync --project p` and `ark chief state --project p`.
+6. Remove both companions from `ark.yml` (no `companions` key), with no `companions/` folder, and with no live companion worker in the fake. Clear the call log, run `ark companions sync --project p`, read the log, then clear it and run `ark chief state --project p`, and read the log.
 7. Restore both entries, then run `ark chief state --project p` with live workers for both.
 
 ## Expected results
@@ -36,7 +36,7 @@ Prove `ark companions sync` keeps exactly one live Orca worker for each companio
 - Step 3: `beta` says `started` and has a new dispatch id; `alpha` says `running`.
 - Step 4: a line for `alpha` says `stopped` and the log has one `worker-stop` for its recorded dispatch id; `beta` says `running`; `companions/alpha/ideas.md` still holds its line.
 - Step 5: (a) exit 1, `ark: ` line that says there is no Master Chief Run, no `worker-start` call, no record written; (b) exit 1 with an `ark: ` line naming `alpha`, no dispatch id recorded for `alpha` (the next sync starts it again), and `beta` is still handled; (c) exit 1 with an `ark: ` line, and the record of the removed companion is kept so the next sync tries the stop again; (d) exit 1 with an `ark: ` line naming the Orca error, never a line that says `stopped` or `running`.
-- Step 6: both commands make no Orca call (empty log), print no companions section, and `chief state` exits 0 with the same sections as before this ticket.
+- Step 6: `ark companions sync` prints no companions line, exits 0 and makes no Orca call (empty log). `ark chief state` keeps its own `run-list` call, and its `worker-list` and task-list calls when a Master Chief Run exists, exactly as before this ticket; the log has no `worker-start`, `worker-stop` or `send`, and no `worker-list` or `run-list` call beyond those chief state already made (the same verbs, in the same number as on the baseline). It prints no companions section and exits 0 with the same sections as before this ticket.
 - Step 7: `chief state` prints the sync as its own section with `running` for each companion, and its `Red on main`, `Run leads` and `Host` sections are unchanged; with Orca down, the companions section says `unavailable` and the command exits 0 as for the other live sources.
 
 ## Screenshot checkpoints
