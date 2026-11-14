@@ -13,7 +13,7 @@ changed_by: 2026-11-13-ARK-434-1
 
 Prove `ark chief state` prints the Host readings and one `hold new runs:` line that is `no` on a healthy host and names each crossed memory, swap or disk limit otherwise, in the fixed order with CPU between swap and disk.
 
-The CPU reason and its 90 / 90.1 percent boundary are owned by ARK-T365 and ARK-T366. This case uses CPU only as a healthy reading (step 1) and as one crossed reason in the order check (step 6).
+The CPU reason and its 90 / 90.1 percent boundary are owned by ARK-T365 and ARK-T366. This case uses CPU only as a healthy reading (step 1) and as one crossed reason in the order check (step 3). The memory and swap limits (each crossed only beyond its value) and the single-reason lines are owned by ARK-T187, which reads the same `memoryReasons`.
 
 ## Preconditions
 
@@ -23,24 +23,18 @@ The CPU reason and its 90 / 90.1 percent boundary are owned by ARK-T365 and ARK-
 ## Steps
 
 1. Healthy host: 50 percent free, 2 GB swap, CPU 10 percent, disk above the limit. Run the real `ark chief state`.
-2. Free memory 19 percent, the rest healthy.
-3. Swap 8.1 GB, the rest healthy.
-4. Free disk just under the disk limit, the rest healthy.
-5. Free memory, swap and disk each exactly at its value, the rest healthy.
-6. Free memory, swap, CPU (95 percent) and disk all crossed.
-7. Two lock tickets in the temp lock folder (one started, one waiting), healthy host.
-8. A reading that fails (swap unreadable), the rest healthy.
+2. Free disk just under the disk limit, the rest healthy.
+3. Free memory (19 percent), swap (8.1 GB) and CPU (95 percent) crossed together, disk healthy.
+4. Two lock tickets in the temp lock folder (one started, one waiting), healthy host.
+5. A reading that fails (swap unreadable), the rest healthy.
 
 ## Expected results
 
 - Step 1: a `## Host` section with free memory in percent, swap used, the 5-minute load, the CPU use, free disk and `tests: running 0, waiting 0` (the section prints when no test is queued), and the line `hold new runs: no`.
-- Step 2: `hold new runs: free 19% is below the 20% floor`.
-- Step 3: the line names swap and its numbers, for example `hold new runs: swap 8.1 GB is above the 8 GB ceiling`.
-- Step 4: the line names the disk and the limit.
-- Step 5: `hold new runs: no` (a limit is crossed only beyond its value, as in ARK-T187).
-- Step 6: one `hold new runs:` line with the four reasons joined in the fixed order free memory, swap, CPU, disk. There is exactly one such line.
-- Step 7: the Host section says `running 1, waiting 1`, and the `## ark test budget` section still lists both.
-- Step 8: the other readings print, the unreadable one prints `swap used: unavailable`, and it never causes a hold.
+- Step 2: the line names the disk and the limit.
+- Step 3: one `hold new runs:` line with the reasons joined in the fixed order free memory, swap, CPU. There is exactly one such line.
+- Step 4: the Host section says `running 1, waiting 1`, and the `## ark test budget` section still lists both.
+- Step 5: the other readings print, the unreadable one prints `swap used: unavailable`, and it never causes a hold.
 
 ## Screenshot checkpoints
 
