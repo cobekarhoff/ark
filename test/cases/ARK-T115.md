@@ -6,7 +6,7 @@ technique: equivalence classes of live sources (open run, closed run, queued Orc
 priority: medium
 risk: ark chief state omits a live source (open runs, queue, workspace head, gates, concurrency, interview line, disk), lists a closed run as open, or fails when a source is present
 status: active
-changed_by: 2026-11-08-ARK-327-1
+changed_by: 2026-11-14-ARK-482-1
 ---
 
 ## Objective
@@ -21,7 +21,7 @@ Prove that `ark chief state` prints each live source in one Markdown snapshot. T
 ## Steps
 
 1. Run `ark chief state --project <project>`. Assert exit code 0 and empty stderr.
-2. Read the `Open runs`, `Queued Orca Tasks`, `Interview` and `Host` sections and the gates and concurrency lines.
+2. Read the `Open runs`, `Queued Orca Tasks`, `Interview`, `Host` and `Services` sections and the gates and concurrency lines.
 
 ## Expected results
 
@@ -29,6 +29,7 @@ Prove that `ark chief state` prints each live source in one Markdown snapshot. T
 - `Open runs` lists the open run with its phase and step, and does not list the closed run.
 - `Queued Orca Tasks` lists the ready and the pending task.
 - The output holds the short head of `main`, the plan and strategy gates, the concurrency, the interview line and the disk line.
+- With no service installed, the `Services` section lists the four services (auto-merger, temp cleaner, sweep, project autocommit), each as `not installed`: four such lines (ARK-482).
 
 ## Screenshot checkpoints
 
