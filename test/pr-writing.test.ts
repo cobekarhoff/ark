@@ -2689,7 +2689,7 @@ test("ARK-T151 gather.ts refuses a directory that is not a worktree of the run a
 
 // --- ARK-T270 ---------------------------------------------------------------------------------
 
-const runLeadPlaybook = readFileSync(join(root, "skills/ark/playbooks/run-lead.md"), "utf8");
+const runLeadPlaybook = readFileSync(join(root, "skills/ark-run-lead/SKILL.md"), "utf8");
 
 test("ARK-T270 the run-lead playbook's analysis evidence example and Not in plan example pass the real lint", () => {
   const control = ["Command", "Output", "Threshold", "Result"]

@@ -1780,35 +1780,46 @@ describe("ark retro models and vendors", () => {
     },
   );
 
-  // ARK-460: a session is placed by the worker spec line of this run, which sits in its prompt records.
-  const arkSkillText = [
-    '[IMPORTANT: User invoked the "ark" skill; follow its instructions. Full skill below.]',
-    "description: Entry point for Ark. Use `/skill:ark worker <run> <step>` to start a worker.",
-    "|`worker`|`<run> <step>`|`playbooks/worker.md`|A run lead starts it, one per step.|",
-  ].join("\n");
+  // A session is placed by the spec line of this run, which sits in its prompt records.
 
-  /** The omp `skill-prompt` record of a started session: the skill text with its placeholder rows, then the task. */
-  function skillPromptRecord(task: string, laterText = ""): Record<string, unknown> {
+  /**
+   * The text omp inlines for a role skill, cut from the real SKILL.md to what a reader could take for a
+   * spec line: the description and each line that quotes a skill call with `<run>` placeholders.
+   */
+  function skillText(skill: string): string {
+    const lines = readFileSync(join(import.meta.dir, "..", "skills", skill, "SKILL.md"), "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("description:") || line.includes("/skill:"));
+    return [
+      `[IMPORTANT: User invoked the "${skill}" skill; follow its instructions. Full skill below.]`,
+      ...lines,
+    ].join("\n");
+  }
+
+  /** The omp `skill-prompt` record of a started session: the skill text, then the task with the spec line. */
+  function skillPromptRecord(skill: string, args: string, laterText = ""): Record<string, unknown> {
     return {
       type: "custom_message",
       customType: "skill-prompt",
-      content: `${arkSkillText}\n\n---\n\n=== TASK === ${task}\nYou are working inside Orca.\n${laterText}`,
+      content: `${skillText(skill)}\n\n---\n\n=== TASK ===\n/skill:${skill} ${args}\nYou are working inside Orca.\n${laterText}`,
       details: {
-        name: "ark",
-        path: "/plugins/ark/skills/ark/SKILL.md",
-        args: `=== TASK === ${task}`,
-        prompt: `=== TASK ===\n/skill:ark ${task}`,
+        name: skill,
+        path: `/plugins/ark/skills/${skill}/SKILL.md`,
+        args,
+        prompt: `=== TASK ===\n/skill:${skill} ${args}`,
         lineCount: 40,
       },
       display: true,
       attribution: "user",
     };
   }
-  const workerPrompt = (word: string, run = runId) => [skillPromptRecord(`worker ${run} ${word}`)];
-  const runLeadPrompt = () => [skillPromptRecord(`run-lead ${runId}`)];
+  const specPrompt = (skill: string, ...args: string[]) => [
+    skillPromptRecord(skill, args.join(" ")),
+  ];
+  const runLeadPrompt = () => specPrompt("ark-run-lead", runId);
 
   /** What the run lead writes after its first reply when it starts a worker by hand. */
-  const workerStartCall = (word: string): Record<string, unknown>[] => [
+  const workerStartCall = (spec: string): Record<string, unknown>[] => [
     {
       type: "message",
       timestamp: day("14:22:30.000"),
@@ -1822,7 +1833,7 @@ describe("ark retro models and vendors", () => {
             id: "call_1",
             name: "bash",
             arguments: {
-              command: `orca orchestration worker-start --from lead --spec "=== TASK === worker ${runId} ${word}\\nYou are the worker"`,
+              command: `orca orchestration worker-start --from lead --spec "${spec}\\nYou are the worker"`,
             },
           },
         ],
@@ -1901,22 +1912,22 @@ describe("ark retro models and vendors", () => {
       );
       writeOwnedSession("lead", "14:21:00.000", [anthropicReply("14:21:30.000", 1)], {
         prompt: runLeadPrompt(),
-        after: leadStartsWriter ? workerStartCall("test-case-writer") : [],
+        after: leadStartsWriter ? workerStartCall(`/skill:test-case-writer ${runId}`) : [],
       });
       writeOwnedSession("writer", writerStart, [anthropicReply("14:22:30.000", 0.2)], {
-        prompt: workerPrompt("test-case-writer"),
+        prompt: specPrompt("test-case-writer", runId),
       });
       writeOwnedSession(
         "reviewer",
         "14:23:00.000",
         [anthropicReply("14:23:30.000", 0.3, "claude-opus-5-5")],
-        { prompt: workerPrompt("test-case-reviewer") },
+        { prompt: specPrompt("test-case-reviewer", runId) },
       );
       writeOwnedSession(
         "implementer",
         "14:24:10.000",
         [anthropicReply("14:24:20.000", 0.04, "claude-haiku-4-5")],
-        { prompt: workerPrompt("build") },
+        { prompt: specPrompt("ark-implementer", runId, "build") },
       );
 
       const out = runRetro();
@@ -1951,35 +1962,32 @@ describe("ark retro models and vendors", () => {
       "implementer",
       "14:24:30.000",
       [anthropicReply("14:25:30.000", 0.04, "claude-haiku-4-5")],
-      { prompt: workerPrompt("build") },
+      { prompt: specPrompt("ark-implementer", runId, "build") },
     );
   };
   const validatorReply = anthropicReply("14:31:30.000", 0.3, "claude-opus-5-5");
 
-  test("ARK-T377 ark retro places a session by the worker spec line of this run: a validator before its window goes to its step, a test case writer inside a window does not, a placeholder or another run id places nothing", () => {
+  test("ARK-T377 ark retro places a session by the role skill spec line of this run: a validator before its window goes to its step, a test case writer inside a window does not, a placeholder or another run id places nothing", () => {
     writeEvents(runDirectory, placementScenario());
     writeLeadAndImplementer();
     writeOwnedSession("validator", "14:31:00.000", [validatorReply], {
-      prompt: workerPrompt("check"),
+      prompt: specPrompt("ark-validator", runId, "check"),
     });
     writeOwnedSession("writer", "14:25:00.000", [anthropicReply("14:26:00.000", 0.2)], {
-      prompt: workerPrompt("test-case-writer"),
+      prompt: specPrompt("test-case-writer", runId),
     });
-    // Only placeholders: the skill text of a run lead head plus the run lead playbook lines.
+    // Only placeholders: the skill text of the run lead skill states its own run name as `<run>` and
+    // quotes the calls of the workers it starts.
+    const placeholderText = "/skill:ark-validator <run> check\n/skill:test-case-writer <run>\n";
     writeOwnedSession("placeholder", "14:32:00.000", [anthropicReply("14:32:30.000", 0.05)], {
-      prompt: [
-        skillPromptRecord(
-          `run-lead ${runId}`,
-          "/skill:ark worker <run> check\n<run> test-case-writer\n",
-        ),
-      ],
+      prompt: [skillPromptRecord("ark-run-lead", "<run>", placeholderText)],
     });
     writeOwnedSession("otherrun", "14:32:30.000", [anthropicReply("14:32:45.000", 0.07)], {
-      prompt: workerPrompt("check", "2026-10-29-ARK-999-1"),
+      prompt: specPrompt("ark-validator", "2026-10-29-ARK-999-1", "check"),
     });
     // The id of this run followed by a digit: the match stops at the end of the id.
     writeOwnedSession("prefixrun", "14:33:00.000", [anthropicReply("14:33:30.000", 0.09)], {
-      prompt: workerPrompt("check", `${runId}0`),
+      prompt: specPrompt("ark-validator", `${runId}0`, "check"),
     });
 
     const out = runRetro();
@@ -2002,6 +2010,23 @@ describe("ark retro models and vendors", () => {
       expect(out).toContain(name);
   });
 
+  test.each(["ark-reviewer", "ark-implementer"])(
+    "ARK-T377 a %s spec line with a step id places the session on that step",
+    (skill) => {
+      writeEvents(runDirectory, placementScenario());
+      writeLeadAndImplementer();
+      writeOwnedSession("stepworker", "14:31:00.000", [validatorReply], {
+        prompt: specPrompt(skill, runId, "check"),
+      });
+
+      const out = runRetro();
+      const { by_step: steps } = readMetrics().cost;
+      expect(steps.check.usd).toBeCloseTo(0.3, 6);
+      expect(steps.unassigned).toBeUndefined();
+      expect(out).not.toContain("unassigned:");
+    },
+  );
+
   test("ARK-T377 a step id that starts with another step id takes only its own spec line, and a step that never started places nothing", () => {
     writeEvents(
       runDirectory,
@@ -2021,16 +2046,16 @@ describe("ark retro models and vendors", () => {
       prompt: runLeadPrompt(),
     });
     writeOwnedSession("implementer", "14:24:30.000", [anthropicReply("14:24:40.000", 0.04)], {
-      prompt: workerPrompt("build"),
+      prompt: specPrompt("ark-implementer", runId, "build"),
     });
     writeOwnedSession("first", "14:26:00.000", [anthropicReply("14:26:30.000", 0.3)], {
-      prompt: workerPrompt("check"),
+      prompt: specPrompt("ark-validator", runId, "check"),
     });
     writeOwnedSession("second", "14:30:00.000", [anthropicReply("14:30:30.000", 0.5)], {
-      prompt: workerPrompt("check-2"),
+      prompt: specPrompt("ark-validator", runId, "check-2"),
     });
     writeOwnedSession("ghost", "14:33:00.000", [anthropicReply("14:33:30.000", 0.07)], {
-      prompt: workerPrompt("later"),
+      prompt: specPrompt("ark-validator", runId, "later"),
     });
 
     const out = runRetro();
@@ -2076,7 +2101,7 @@ describe("ark retro models and vendors", () => {
       ),
       message(
         "user",
-        `${arkSkillText}\n\n=== TASK === worker ${runId} check\nYou are the VALIDATOR.`,
+        `${skillText("ark-validator")}\n\n=== TASK ===\n/skill:ark-validator ${runId} check\nYou are the VALIDATOR.`,
       ),
       message("assistant", "Reading the plan."),
       record("14:31:30.000", "event_msg", {
@@ -2120,15 +2145,15 @@ describe("ark retro models and vendors", () => {
         prompt: runLeadPrompt(),
       });
       writeOwnedSession("implementer", "14:24:10.000", [anthropicReply("14:24:20.000", 0.04)], {
-        prompt: workerPrompt("build"),
+        prompt: specPrompt("ark-implementer", runId, "build"),
       });
       // Starts in the gap after the build window: no window, no spec line, no worker.started.
       writeOwnedSession("unassigned", "14:27:00.000", [openAiReply("14:27:30.000", 0.09)], {
-        prompt: [skillPromptRecord("chief")],
+        prompt: [skillPromptRecord("ark-chief", "")],
       });
       if (withSecondFile)
         writeOwnedSession("unassigned-2", "14:28:00.000", [openAiReply("14:28:30.000", 0.11)], {
-          prompt: [skillPromptRecord("chief")],
+          prompt: [skillPromptRecord("ark-chief", "")],
         });
 
       const out = runRetro();

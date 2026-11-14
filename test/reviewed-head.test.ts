@@ -10,6 +10,7 @@ import { buildSpec } from "../cli/spec.ts";
 import {
   ark,
   recordEvaluation,
+  skillName,
   tempArkHome,
   tempGitRepo,
   writeProject,
@@ -127,6 +128,22 @@ test("ARK-T302 the first reviewer step's spec starts its range at the run base w
 
   const noBase = specOf(directory, steps[1]!, steps, [{ ...worktree, base: undefined }]);
   expect(noBase).not.toContain("Last reviewed head");
+});
+
+test("ARK-T409 the spec built for a step of each plan role starts that role's own skill by name, and that name is a skill that exists", () => {
+  const steps = [
+    planStep("build", "implementer"),
+    planStep("check", "validator"),
+    planStep("review", "reviewer"),
+  ];
+  const { directory } = openRun(steps);
+
+  for (const step of steps) {
+    const lines = specOf(directory, step, steps).split("\n");
+    expect(lines[0]).toBe(`/skill:${skillName(`ark-${step.role}`)} run ${step.id}`);
+    expect(lines[1]).toBe(`You are the ${step.role.toUpperCase()} for step ${step.id} of run run.`);
+    expect(lines.join("\n")).not.toMatch(/\/skill:ark\s+worker/);
+  }
 });
 
 test("ARK-T303 the next reviewer step's spec starts its range at the head recorded by the previous reviewer step", () => {
