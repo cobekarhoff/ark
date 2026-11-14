@@ -1,6 +1,6 @@
 ---
 id: ARK-T655
-title: ARK-T655 ark.yml companions entries load when each field is valid, and a bad trigger, a missing or escaping instructions file, a duplicate or unsafe name, a bad on list and a missing harness or model each stop the command with one `ark: <reason>` line
+title: "ARK-T655 ark.yml companions entries load when each field is valid, and a bad trigger, a missing or escaping instructions file, a duplicate or unsafe name, a bad on list and a missing harness or model each stop the command with one `ark: <reason>` line"
 level: integration
 technique: equivalence classes (one valid entry, one class for each refusal) and boundary values (on list of 0 and 1 triggers; name with a slash, `..` and a space; instructions path that leaves the project folder)
 priority: high
