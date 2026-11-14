@@ -6,7 +6,7 @@ technique: equivalence classes (run folder, no run folder) and decision table on
 priority: high
 risk: the ledger lists a fixed finding, drops evidence or a gate answer, picks the wrong base, or records a failed host probe as none, so every body built from it misstates the change
 status: active
-changed_by: 2026-11-13-ARK-446-1
+changed_by: 2026-11-14-ARK-391-1
 ---
 
 ## Objective
@@ -18,7 +18,7 @@ Expected: When a host probe fails, the system shall record `unknown` and never `
 ## Preconditions
 
 - Fixture run folder with: `ticket.md` (problem, change, 2 ACs, `kind: bug`, `summary:`), `plan.yml` with a summary and risks, a `test.completed` event (AC1 passing, AC2 failing) and an earlier one with other statuses, `results/evidence/<test case id>/{base,head}/`, two gate answers (criteria, plan) in the events, a merge order with one `Depends on` line, a base and a head SHA.
-- Findings: `findings/round-1.md` holds a P0 that a later `findings/round-2.md` closes with `No findings.`, and a P1 closed by a recorded fix decision. The latest file holds an open P2 and an open P3.
+- Findings: `findings/round-1.md` holds a P0 that a later `findings/round-2.md` closes with `No findings.`, and a P1 closed by a recorded fix decision. The latest file holds an open P2 and an open P3, and a `### P1: slow export` block with no Repro line that its `## Run lead decision` section closes with `- dropped slow export: no Input` (a line with no rank and no `send back`).
 - Fixture git repo with commits ahead of its base and a repo MR template. Two fake `gh`/`glab` modes on PATH: a succeeding mode that answers each probe from a state file (open MR list, default branch), and a failing mode that exits non-zero on every probe.
 
 ## Steps
@@ -41,7 +41,7 @@ Expected: When a host probe fails, the system shall record `unknown` and never `
 ## Expected results
 
 - Run ledger: ticket fields (problem, change, ACs, `kind`, `summary`) are present; plan summary and risks are present; AC status is that of the LAST `test.completed` only (AC1 passing, AC2 failing); evidence lists each test case; SHAs and the shortstat match git; both gate answers are listed; the merge order and the `Depends on` line are present.
-- Open findings hold exactly the latest-file P2 and P3. The P0 closed by a later `No findings.` and the P1 closed by a fix decision are absent.
+- Open findings hold exactly the latest-file P2 and P3. The P0 closed by a later `No findings.`, the P1 closed by a fix decision and the P1 closed by a `- dropped <title>: <reason>` line are absent: a dropped finding is not an open finding, and the open-finding count of the body does not include it.
 - Git ledger has the same shape as the run ledger, with the commit range, the three-dot diff, the template and tracker refs filled from git.
 - Rows a, b and c take base `release/2`, `main` and `develop`. Row d exits 1 with a message that asks for `--base`. In row b the MR field is `none` because the probe succeeded and found no MR.
 - Row e: the base is `main` (from git, no host needed); the MR-target field and the host default branch field are `unknown`; no field holds `none`. Row f exits 1 asking for `--base`, and its host-derived fields are `unknown`, not `none`.
