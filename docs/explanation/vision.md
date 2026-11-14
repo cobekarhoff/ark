@@ -44,7 +44,7 @@ flowchart TB
   class tele,triage,gate,evals future
 ```
 
-Amber is where you act. Teal is agents, grey is the `ark` command, dashed is planned. You decide at the gates inside the run and you merge, which is not a gate. A project can set the plan and escalation gates to `auto`; the criteria gate is always a person.
+Amber is where you act. Teal is agents, grey is the `ark` command, dashed is planned. You decide at the gates inside the run and you merge, which is not a gate. A project can set the strategy, plan and escalation gates to `auto`; the criteria gate is always a person.
 
 ## Where each stage stands
 

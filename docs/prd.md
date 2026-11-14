@@ -14,7 +14,7 @@ This page states what Ark promises, in EARS form, with the tickets that built ea
 
 ## Goals
 
-1. Take a ticket to merge requests, one per repo, with you approving the criteria and the plan and merging on the git host.
+1. Take a ticket to merge requests, one per repo, with you approving the criteria and the plan (the plan gate can be `auto`) and merging on the git host.
 2. Run many tickets at once without one run blocking the others.
 3. Prove each acceptance criterion with test cases that pass at the head of the composed workspace.
 4. Work on a single repo, such as Ark, and on a multi-repo workspace, such as Clara or Smart QC.
@@ -35,7 +35,7 @@ This page states what Ark promises, in EARS form, with the tickets that built ea
 
 | Scenario                                                                                                                 | What happens                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **You, on the Ark repo.** One GitHub repo.                                                                               | You name a ticket, Master Chief queues it, a run lead plans it, you accept the criteria and the plan, workers build and prove it, Ark opens one MR, you merge on the host. [Scenario 1](explanation/scenarios.md) walks through a real run.                                                                                                                |
+| **You, on the Ark repo.** One GitHub repo.                                                                               | You name a ticket, Master Chief queues it, a run lead plans it, you accept the criteria and the plan (or Ark approves the plan, where `gates.plan` is `auto`), workers build and prove it, Ark opens one MR, you merge on the host. [Scenario 1](explanation/scenarios.md) walks through a real run.                                                       |
 | **You, on a multi-repo workspace.** A GitLab meta-repo with repos under `repos/*`; one ticket changes two or more repos. | The run lead plans steps per repo in merge order (the repo edges of the plan, upstream first). The run folder mirrors the workspace with a worktree per touched repo, and tests run through docker compose against the composed worktrees. Ark opens one MR per repo in order. [Scenario 2](explanation/scenarios.md).                                     |
 | **You, on a repo Ark may not push to.** The project sets `merge_requests: none`.                                         | The run does everything up to the host and leaves `building` with the branches (`ark/<ticket id>-<slug>`) in their clones. After you say you took them, Master Chief closes the run `handed_off`. [Scenario 3](explanation/scenarios.md).                                                                                                                  |
 | **You, reviewing retros.**                                                                                               | While a run's MRs are open, the run lead writes `retro.md`: cost, time, rework, your own interventions, escaped defects, compared with earlier runs. Nobody asks you questions after a single run. Every 10 closed runs, or on request, Master Chief runs a deep interview of at most 8 questions, one at a time, and you approve or reject each proposal. |
@@ -58,7 +58,7 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 
 | ID      | Requirement                                                                                                                                                                                                                      |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1.1    | The system shall provide one Master Chief session per project through which you name tickets, receive every gate question and give every gate answer.                                                                            |
+| R1.1    | The system shall provide one Master Chief session per project through which you name tickets, receive every gate question that waits for you and give every gate answer.                                                         |
 | R1.2    | **When** you approve a ticket, Master Chief shall queue it as an Orca task (Orca's own object, not an Ark run) and start one run lead for it, up to the project's `concurrency`.                                                 |
 | R1.3    | **If** a second Master Chief is started for a project, **then** it shall refuse to start and name the live terminal.                                                                                                             |
 | R1.4    | **While** a run has an open MR, Master Chief shall poll `ark merge-request status` and, on a failed check, a human comment or a conflict, start the run lead again for an MR round.                                              |
@@ -70,7 +70,7 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 
 | ID      | Requirement                                                                                                                                                                                         |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R2.1    | **When** `ark run start <ticket>` runs, the system shall create the run folder with a snapshot of the ticket, an empty event log and derived state.                                                 |
+| R2.1    | **When** `ark run start <ticket>` runs, the system shall create the run folder with a snapshot of the ticket, an event log that starts with `run.started` and derived state.                        |
 | R2.2    | The system shall derive `state.json` from `events.ndjson` so that the state can be rebuilt from the log alone.                                                                                      |
 | R2.3    | **When** a new run lead takes over a stopped run, it shall resume at the phase and the first unfinished step that `ark status <run>` shows, and shall not ask for a gate the log shows as answered. |
 | R2.4    | The system shall allow at most one open run per ticket.                                                                                                                                             |
@@ -90,15 +90,15 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 
 ### R4 · Strategy and plan gates
 
-| ID      | Requirement                                                                                                                                                                                                                                                          |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R4.1    | **When** `strategies.md` has two or more cards, the system shall open the strategy gate and shall not plan until you pick a card or ask for a design round. **Where** `gates.strategy` is `auto`, Ark shall record the recommended card by auto instead.             |
-| R4.2    | The system shall refuse a plan with a cycle, an unknown `needs`, a step with no repo or role, a missing summary, a `method: test` criterion with no integration or E2E test case in its `verified_by`, an interface with no name or no callers, or an open decision. |
-| R4.3    | **When** a plan passes `ark plan check`, the system shall render `plan.md` with the summary, the change table, the design block, the step diagram and the test cases as Gherkin.                                                                                     |
-| R4.4    | The system shall not enter `building` before the plan gate is answered `approve`, by you or, **where** `gates.plan` is `auto` and the plan has no open decision, by auto. It shall not approve a plan while a decision is open.                                      |
-| Tickets | ARK-153, ARK-156, ARK-173, ARK-311                                                                                                                                                                                                                                   |
-| Held by | `ark plan check`; `cli/transitions.ts`; `test/plan.test.ts`; Plannotator for review                                                                                                                                                                                  |
-| Cases   | R4.4: ARK-T219                                                                                                                                                                                                                                                       |
+| ID      | Requirement                                                                                                                                                                                                                                              |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R4.1    | **When** `strategies.md` has two or more cards, the system shall open the strategy gate and shall not plan until you pick a card or ask for a design round. **Where** `gates.strategy` is `auto`, Ark shall record the recommended card by auto instead. |
+| R4.2    | The system shall refuse a plan with a cycle, an unknown `needs`, a step with no repo or role, a missing summary, a `method: test` criterion with no integration or E2E test case in its `verified_by`, or an interface with no name or no callers.       |
+| R4.3    | **When** a plan passes `ark plan check`, the system shall render `plan.md` with the summary, the change table, the design block, the step diagram and the test cases as Gherkin.                                                                         |
+| R4.4    | The system shall not enter `building` before the plan gate is answered `approve`, by you or, **where** `gates.plan` is `auto` and the plan has no open decision, by auto. It shall not approve a plan while a decision is open.                          |
+| Tickets | ARK-153, ARK-156, ARK-173, ARK-311                                                                                                                                                                                                                       |
+| Held by | `ark plan check`; `cli/transitions.ts`; `test/plan.test.ts`; Plannotator for review                                                                                                                                                                      |
+| Cases   | R4.4: ARK-T219                                                                                                                                                                                                                                           |
 
 ### R5 · Multi-repo by local composition
 
@@ -237,7 +237,7 @@ Each requirement belongs to the milestones that built it. The state of a milesto
 - Run leads show as "no live run lead" in `ark chief state` while structured workers report liveness `unverifiable` (known gap).
 - `same_vendor_review` reads true when the harness also ran a Sonnet model inside a Codex review session (ARK-293).
 - A GitLab tier without MR dependencies falls back to `Depends on !N` in the description.
-- Usage parsers read OMP and Claude Code session files; Codex follows.
+- Usage parsers read OMP, Claude Code and Codex session files.
 
 ## Why the first design was replaced
 
