@@ -6,7 +6,7 @@ technique: "process counting through a git shim on PATH, grouped by repo and by 
 priority: high
 risk: "open asks each repo for rev-parse HEAD in staleHeads, evidenceProblems and the ledger separately, or the ledger repeats remote get-url or symbolic-ref for one repo, so each open starts about 20 git processes more than it needs; or the single head read is taken before a step that moves HEAD and the stale check or the ledger uses an old head"
 status: active
-changed_by: 2026-11-09-ARK-398-1
+changed_by: 2026-11-14-ARK-380-1
 ---
 
 ## Objective
@@ -18,7 +18,7 @@ Expected: When `ark merge-request open` runs on a run with 3 repos, the system s
 ## Preconditions
 
 - A run with 3 repos built with `scenario()` in `test/helpers.ts`, each repo with its own files (so the heads differ) and an `origin` remote, ready for `merge-request open` (tests passed at head, evidence recorded, gates answered), as in the existing `test/merge-request.test.ts` cases.
-- A git shim on PATH that appends `<cwd>\t<args>` to a log and runs the real git. The test restores PATH afterward.
+- A git shim on PATH that appends `<cwd>\t<args>` to a log and runs the real git. The security scan of ARK-380 runs git in a scratch clone that it removes, so the test reads only the calls whose cwd still exists. The test restores PATH afterward.
 
 ## Steps
 

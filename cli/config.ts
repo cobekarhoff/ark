@@ -45,6 +45,8 @@ export type ProjectConfig = {
   setup?: string;
   /** Files a command writes. `ark worktree sync` runs the command in each repo worktree when only listed paths conflict. `path` is relative to the repo root. */
   generated?: { path: string; command: string }[];
+  /** `accepted`: findings of the security scan that do not block `ark merge-request open`. `id` is a vulnerability id, one of its aliases, or a gitleaks fingerprint. */
+  security?: { accepted: { id: string; reason: string }[] };
   suites: {
     name: string;
     level: "unit" | "integration" | "e2e";
@@ -113,6 +115,12 @@ const topLevelKeys = keysOf<ProjectConfig>({
   escalation_rounds: true,
   gates: true,
   generated: true,
+  security: true,
+});
+const securityKeys = keysOf<NonNullable<ProjectConfig["security"]>>({ accepted: true });
+const acceptedKeys = keysOf<NonNullable<ProjectConfig["security"]>["accepted"][number]>({
+  id: true,
+  reason: true,
 });
 const suiteKeys = keysOf<ProjectConfig["suites"][number]>({
   name: true,
@@ -371,6 +379,25 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     }
   }
 
+  let security: ProjectConfig["security"];
+  if (fields.security !== undefined) {
+    const securityField = asObject(fields.security, "security");
+    onlyKeys(securityField, "security", securityKeys);
+    if (!Array.isArray(securityField.accepted))
+      fail("security.accepted must be a list of { id, reason }");
+    const acceptedIds = new Set<string>();
+    security = {
+      accepted: (securityField.accepted as unknown[]).map((entry, i) => {
+        const accepted = asObject(entry, `security.accepted[${i}]`);
+        onlyKeys(accepted, `security.accepted[${i}]`, acceptedKeys);
+        const id = text(accepted, "id", `security.accepted[${i}].id`);
+        if (acceptedIds.has(id)) fail(`security.accepted[${i}].id duplicates another entry: ${id}`);
+        acceptedIds.add(id);
+        return { id, reason: text(accepted, "reason", `security.accepted[${i}].reason`) };
+      }),
+    };
+  }
+
   const prWritingField = asObject(fields.pr_writing ?? {}, "pr_writing");
   onlyKeys(prWritingField, "pr_writing", prWritingKeys);
   const stringList = (key: string): string[] => {
@@ -428,5 +455,6 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   if (fields.compose !== undefined) config.compose = fields.compose as string;
   if (fields.setup !== undefined) config.setup = fields.setup as string;
   if (fields.generated !== undefined) config.generated = generated;
+  if (security !== undefined) config.security = security;
   return config;
 }
