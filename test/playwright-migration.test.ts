@@ -16,7 +16,9 @@ const forbidden = "Web" + "View";
 const hubSpecIds = [
   "ARK-T133",
   "ARK-T260",
-  ...["AC3", "AC7", "AC8", "AC9", "AC11"].map((ac) => `ARK-277-${ac}`),
+  "ARK-T367",
+  "ARK-T368",
+  ...["AC3", "AC7", "AC9", "AC11"].map((ac) => `ARK-277-${ac}`),
 ];
 
 function playwright(args: string[], options: { cwd?: string; env?: Record<string, string> } = {}) {
