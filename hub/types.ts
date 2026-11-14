@@ -555,3 +555,45 @@ export type TranscriptPage = { entries: TranscriptEntry[]; next: number | null; 
 
 /** One full tool result, cut at 64,000 characters. `size` is its length before the cut, `cut` says whether it was cut. */
 export type TranscriptResult = { text: string; size: number; cut: boolean };
+
+/**
+ * What the Orca worker of a companion is doing. `unavailable` is Orca not answering: never `stopped`,
+ * because an unanswered read says nothing about the worker.
+ */
+export type CompanionState = "running" | "retained" | "none" | "unavailable";
+
+export type CompanionRow = {
+  name: string;
+  harness: string;
+  model: string;
+  /** The triggers of its `ark.yml` entry. */
+  on: string[];
+  state: CompanionState;
+  /** The last line of `companions/<name>/wake.log`: a trigger wake or a question. Null before the first. */
+  last_wake: { time: string; trigger: string; run: string | null } | null;
+  /** Cost of the session file of `worker.json`; null (unknown) with no session or when any message has no price. */
+  cost: number | null;
+};
+
+/** A proposed ticket or an idea of a companion. `done` marks it after an action: `approved` (ticket at `ready`) or `dismissed` (named in `dismissed.md`). */
+export type CompanionItem = {
+  kind: "ticket" | "idea";
+  /** The ticket id, or the id (or whole heading) of the `## ` section of `ideas.md`. */
+  ref: string;
+  companion: string;
+  title: string;
+  body: string | null;
+  done: "approved" | "dismissed" | null;
+};
+
+export type CompanionsProject =
+  | { project: string; error: string }
+  | {
+      project: string;
+      companions: CompanionRow[];
+      tickets: CompanionItem[];
+      ideas: CompanionItem[];
+    };
+
+/** `GET /api/companions`: every project whose `ark.yml` exists and lists companions, or does not load. `orca` is `unavailable` when `run-list` or `worker-list` failed. */
+export type CompanionsReply = { orca: "ok" | "unavailable"; projects: CompanionsProject[] };

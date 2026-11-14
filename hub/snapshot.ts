@@ -64,6 +64,7 @@ import { readRunEvidence, readTicketCases } from "./evidence.ts";
 import { escapedDefects } from "../cli/retro.ts";
 import { chainOf, needsRepoFacts, readRepoFacts, repoViews, type RepoFacts } from "./repos.ts";
 import { isProved, listRunFiles, timelineOf } from "./run-detail.ts";
+import { companionSessionFiles } from "./companions.ts";
 import { createResourcesReader } from "./resources.ts";
 import { UsageIndex, readMetricsCost, readMetricsRounds, type RunCost } from "./usage.ts";
 
@@ -617,7 +618,7 @@ export function createSnapshotReader() {
         const timer = setTimeout(resolve, usageTimeoutMilliseconds, null);
         // A hung refresh is a failed read: the slot keeps its last good value and shows its age.
         const done = await Promise.race([
-          usage.refresh(directories).then(() => true as const),
+          usage.refresh(directories, companionSessionFiles()).then(() => true as const),
           timeout,
         ]);
         clearTimeout(timer);

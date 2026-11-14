@@ -69,7 +69,7 @@ Every run meets two gates, criteria and plan, and ends with your merge on the gi
 
 - **It does not merge.** Ark's agents and the `ark` command never merge; you merge on the git host. One optional exception: `ark services install` (macOS, launchd) installs an auto-merger service. It merges an MR only once the host reports it CLEAN under your branch protection, the run's `retro.md` exists, the ticket is not done or superseded and the run is still in `merge_requests_open`.
 - **It is not regulated software.** Your product repos keep their own validation; Ark's job is to produce the evidence that validation needs, in the MR and the run folder.
-- **It is not a chat UI.** You talk to one agent session, Master Chief. The hub (`ark ui`) is a read-only view with one action, "Open in Orca". You steer through Master Chief; the hub steers nothing.
+- **It is not a chat UI.** You talk to one agent session, Master Chief. The hub (`ark ui`) is a read-only view with one focus action, "Open in Orca", and the three writes of its Companions page (approve a proposed ticket, dismiss it, ask a companion). You steer through Master Chief; the hub steers nothing.
 - **It does not cap cost.** It shows cost while a run is live and judges it in the retro.
 
 ## Numbers from one real run

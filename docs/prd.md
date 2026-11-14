@@ -27,7 +27,7 @@ This page states what Ark promises, in EARS form, with the tickets that built ea
 - Merging by an Ark agent or command. No agent and no `ark` command merges. The optional auto-merger service (`scripts/auto-merger.sh`, installed by you with `ark services install` on macOS) merges an MR only when the host reports it CLEAN under your branch protection, the run's `retro.md` exists, the ticket is not done or superseded and the run is still in `merge_requests_open`.
 - Hard cost caps. Ark shows cost while a run is live and judges it in retros.
 - Audit machinery of the kind the FDA expects of a regulated system. Ark is not regulated; it produces evidence for the product repos' own validation.
-- A custom web interface that watches agents, answers gates or changes a run. Orca shows agents, you answer gates through Master Chief or Plannotator, and the hub only reads, with one action, "Open in Orca" ([ADR 0009](adr/0009-hub-is-a-read-only-live-view.md)).
+- A custom web interface that watches agents, answers gates or changes a run. Orca shows agents, you answer gates through Master Chief or Plannotator, and the hub only reads, with four actions: "Open in Orca", and approve, dismiss and ask on the Companions page ([ADR 0009](adr/0009-hub-is-a-read-only-live-view.md)).
 - An enforced cross-vendor rule. Plans default to a different vendor for the reviewer, and you can change it per step.
 - Red-green proof for every run. Only a `bug` run with a `method: test` AC must show a failing `ark test` before its implementer starts, and only a `refactor` run with a `method: test` AC must pass at base (R6.7, R6.8). Other kinds are decided at head; a base failure is recorded as data ([ADR 0010](adr/0010-test-cases-describe-the-product.md)).
 
@@ -196,13 +196,13 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 
 ### R13 · Hub
 
-| ID      | Requirement                                                                                                                                                                                                                      |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R13.1   | The system shall serve one browser page, `ark ui`, that shows what needs you across projects, every open run with its agents, models, MRs and cost, every run on one board with the cross-run dependency graph, and the roadmap. |
-| R13.2   | **While** the hub is open, it shall reflect changes in Ark, Orca and Plannotator within 5 seconds; **if** a source does not answer, **then** it shall keep the last good value and show its age.                                 |
-| R13.3   | The hub's one action shall be "Open in Orca" for a live agent; it shall send no text and change no run state, and shall refuse any request that is not local.                                                                    |
-| Tickets | ARK-176, ARK-177, ARK-179, ARK-277, ARK-290, ARK-300, ARK-314                                                                                                                                                                    |
-| Held by | `hub/`; [ADR 0009](adr/0009-hub-is-a-read-only-live-view.md); `isLocalRequest`; live checks in `~/.ark/projects/ark/verify.md`                                                                                                   |
+| ID      | Requirement                                                                                                                                                                                                                                                                                                   |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R13.1   | The system shall serve one browser page, `ark ui`, that shows what needs you across projects, every open run with its agents, models, MRs and cost, every run on one board with the cross-run dependency graph, and the roadmap.                                                                              |
+| R13.2   | **While** the hub is open, it shall reflect changes in Ark, Orca and Plannotator within 5 seconds; **if** a source does not answer, **then** it shall keep the last good value and show its age.                                                                                                              |
+| R13.3   | The hub's actions shall be "Open in Orca" for a live agent and the three writes of the Companions page (approve a proposed ticket to `ready`, dismiss with a reason, ask); they shall send no text into a terminal and change no run state, and shall refuse any request that is not from the hub's own page. |
+| Tickets | ARK-176, ARK-177, ARK-179, ARK-277, ARK-290, ARK-300, ARK-314                                                                                                                                                                                                                                                 |
+| Held by | `hub/`; [ADR 0009](adr/0009-hub-is-a-read-only-live-view.md); `isLocalRequest`; live checks in `~/.ark/projects/ark/verify.md`                                                                                                                                                                                |
 
 ## Milestones
 
@@ -263,5 +263,5 @@ Three facts made that machinery unnecessary:
 | [0006 Integration and E2E proof only](adr/0006-integration-and-e2e-proof-only.md)               | 2026-10-29 | Superseded by 0010                                                                       |
 | [0007 A read-only control center](adr/0007-control-center.md)                                   | 2026-10-30 | Superseded in part by 0008 and 0009; the three-tools split stays                         |
 | [0008 The hub steers through Master Chief](adr/0008-hub-steers-through-master-chief.md)         | 2026-11-01 | Superseded in part by 0009; the name "hub" and one Master Chief per project stay         |
-| [0009 The hub is a read-only live view](adr/0009-hub-is-a-read-only-live-view.md)               | 2026-11-02 | Accepted                                                                                 |
+| [0009 The hub is a read-only live view](adr/0009-hub-is-a-read-only-live-view.md)               | 2026-11-02 | Accepted; amended by ARK-284 and ARK-480                                                 |
 | [0010 Test cases describe the product](adr/0010-test-cases-describe-the-product.md)             | 2026-11-05 | Accepted; supersedes 0006                                                                |
