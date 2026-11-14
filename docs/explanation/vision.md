@@ -44,7 +44,7 @@ flowchart TB
   class tele,triage,gate,evals future
 ```
 
-Amber is where you act. Teal is agents, grey is the `ark` command, dashed is planned. You decide at the gates inside the run and you merge, which is not a gate. A project can set the plan and escalation gates to `auto`; the criteria gate is always a person.
+Amber is where you act. Teal is agents, grey is the `ark` command, dashed is planned. You decide at the gates inside the run and you merge, which is not a gate. A project can set the strategy, plan and escalation gates to `auto` (for escalation, Ark answers only up to `escalation_rounds` extra rounds, then asks you); the criteria gate is always a person.
 
 ## Where each stage stands
 
@@ -74,7 +74,7 @@ Amber is where you act. Teal is agents, grey is the `ark` command, dashed is pla
 
 ## What never changes
 
-- **People decide at the gates and own what ships.** The criteria gate and manual checks are always a person's answer. Plan, strategy and escalation are a person's unless you set them to `auto`; then Ark answers and records `by: auto`, never as a person.
+- **People decide at the gates and own what ships.** The criteria gate and manual checks are always a person's answer. Plan, strategy and escalation are a person's unless you set them to `auto`; then Ark answers and records `by: auto`, never as a person. For escalation, Ark grants up to `escalation_rounds` extra rounds (default two) and then asks you.
 - **Proof is test cases passing at head**, or a person's recorded `ok`. Nothing ships on a claim.
 - **Repeatable steps are commands; judgment is skills.** When a retro finds a repeatable mistake, it becomes a refusal.
 - **Ark is not the regulated system.** Product repos keep their validation. Ark produces the evidence that validation reads, in the run folder and the MR, and never a second record of truth.

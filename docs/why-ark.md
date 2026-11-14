@@ -26,7 +26,7 @@ Ark puts a small fixed process around the agents and keeps the people in it wher
 flowchart TB
   t[Ticket with<br/>acceptance criteria] --> g1{Criteria:<br/>you accept}
   g1 --> p[Run lead writes a plan<br/>and test cases]
-  p --> g2{Plan:<br/>you approve}
+  p --> g2{Plan:<br/>you approve<br/>Ark, if gates.plan is auto}
   g2 --> b[Workers build,<br/>write tests, review]
   b -->|"every AC proven<br/>at head"| mr[One MR per repo,<br/>in order]
   mr --> retro[Retro: cost, rounds,<br/>what to change]
@@ -49,7 +49,7 @@ flowchart TB
 
 Amber means you decide or act. Teal is an agent. Grey is the `ark` command. Diamonds are gates; your merge is a rounded node because it is not a gate.
 
-Every run meets two gates, criteria and plan, and ends with your merge on the git host. Three more gates open when needed: strategy (the run lead offers 2 or more approach cards), manual (an AC only a person can judge) and escalation (the round budget is spent). The criteria gate is always a person. A project can set strategy, plan and escalation to `auto` in `ark.yml`: Ark then answers and records `by: auto`. Everything between the gates runs by itself, under a round budget, with a reviewer that must show evidence for every finding.
+Every run meets two gates, criteria and plan, and ends with your merge on the git host. Three more gates open when needed: strategy (the run lead offers 2 or more approach cards), manual (an AC only a person can judge) and escalation (the round budget is spent). The criteria gate is always a person. A project can set strategy, plan and escalation to `auto` in `ark.yml`: Ark then answers and records `by: auto`. For escalation, Ark grants up to `escalation_rounds` extra rounds (default two) and then asks you. Everything between the gates runs by itself, under a round budget, with a reviewer that must show evidence for every finding.
 
 ## What you get
 
