@@ -180,7 +180,7 @@ function gitleaksFindings(path: string, base: string, folder: string): Finding[]
       [
         "gitleaks",
         "git",
-        `--log-opts=--first-parent --no-merges --text --no-textconv ${baseCommit}..${headCommit}`,
+        `--log-opts=--first-parent --remerge-diff --text --no-textconv ${baseCommit}..${headCommit}`,
         "--redact",
         "--no-banner",
         "--ignore-gitleaks-allow",
@@ -201,7 +201,7 @@ function gitleaksFindings(path: string, base: string, folder: string): Finding[]
   } catch {
     // no report or an unreadable one falls through to the refusal
   }
-  // gitleaks exits 1 for a leak and for a crash alike, and exits 0 after an `ERR` of a bad git argument.
+  // gitleaks exits 1 for a leak and for a crash alike, and exits 0 after an `ERR` of a bad git argument (`--remerge-diff` needs git 2.36).
   const crashed =
     (exitCode !== 0 && exitCode !== 1) ||
     entries === undefined ||
@@ -212,7 +212,8 @@ function gitleaksFindings(path: string, base: string, folder: string): Finding[]
       `gitleaks failed in ${path} (exit ${exitCode}${configSource}): ${tail(stderr) || "no readable report"}`,
     );
   return entries!.map((entry) => {
-    const where = `${entry.RuleID} in ${entry.File}:${entry.StartLine}`;
+    // gitleaks keeps the `b/` of a `--remerge-diff` header in the file name
+    const where = `${entry.RuleID} in ${entry.File.replace(/^b\//, "")}:${entry.StartLine}`;
     return {
       ids: [entry.Fingerprint],
       blocks: true,

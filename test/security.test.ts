@@ -537,6 +537,32 @@ test("ARK-T401 a secret merged in from the target does not block, and a secret c
   expect(branchTip(own.core)).toBe("");
 });
 
+test("ARK-T401 a secret that a merge commit adds in its conflict resolution refuses, named by the merge commit", () => {
+  let mergeCommit = "";
+  const { core } = setup({
+    commits: ({ worktree, bare }) => {
+      commitFiles(worktree, { "src/conflict.ts": "ours\n" }, "ours");
+      const folder = mkdtempSync(join(tmpdir(), "ark-target-"));
+      git(folder, "clone", "-q", bare, "target");
+      commitFiles(join(folder, "target"), { "src/conflict.ts": "theirs\n" }, "theirs");
+      git(join(folder, "target"), "push", "-q", "origin", "HEAD:main");
+      git(worktree, "fetch", "-q", "origin");
+      const merge = Bun.spawnSync(["git", "merge", "--no-edit", "origin/main"], { cwd: worktree });
+      expect(merge.exitCode).not.toBe(0);
+      writeFileSync(join(worktree, "src/conflict.ts"), markerFile("generic-api-key", 7));
+      git(worktree, "add", "-A");
+      git(worktree, "commit", "-m", "resolve");
+      mergeCommit = git(worktree, "rev-parse", "HEAD");
+    },
+  });
+  const result = openMergeRequest();
+  expect(result.code).not.toBe(0);
+  expect(said(result)).toContain(
+    `generic-api-key in src/conflict.ts:7 (commit ${mergeCommit.slice(0, 8)})`,
+  );
+  expect(branchTip(core)).toBe("");
+});
+
 test("ARK-T401 a refresh of an open MR scans again and refuses before it pushes or edits", () => {
   const { runDirectory, repositories, core } = setup();
   expect(openMergeRequest().code).toBe(0);

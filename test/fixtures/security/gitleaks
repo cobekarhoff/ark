@@ -4,8 +4,9 @@
 // printed to stderr with its Secret, as the real gitleaks logs it. Exit 1 on a leak, 0 when clean. As the real gitleaks does,
 // it skips a line with `gitleaks:allow` unless --ignore-gitleaks-allow is given, a file that `paths = ["<file>"]` of the
 // --config file (else `.gitleaks.toml` of the working directory) allowlists, and a fingerprint listed in the
-// `.gitleaksignore` of --gitleaks-ignore-path (default: the working directory). It runs `git log -p` in the working directory, so a
+// `.gitleaksignore` of the working directory or of --gitleaks-ignore-path. It runs `git log -p` in the working directory, so a
 // `-diff` or `binary` attribute of the `.gitattributes` there hides a file's lines, and `--text` shows them again, as for the real tool.
+// The log options go to git as they are, so `--remerge-diff` shows what a merge commit's resolution added.
 // Overrides: FAKE_GITLEAKS_EXIT (exit with it, write no report), FAKE_GITLEAKS_STDERR, FAKE_GITLEAKS_REPORT (raw report text).
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 
@@ -25,8 +26,8 @@ const configPath = value("--config") ?? ".gitleaks.toml";
 const pathsLine = existsSync(configPath) ? /^\s*paths\s*=\s*\[(.*)\]/m.exec(readFileSync(configPath, "utf8")) : null;
 const allowedPaths = [...(pathsLine?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((match) => match[1]);
 const ignoreBase = value("--gitleaks-ignore-path") ?? ".";
-const ignoreFile = statSync(ignoreBase).isDirectory() ? `${ignoreBase}/.gitleaksignore` : ignoreBase;
-const ignored = existsSync(ignoreFile) ? readFileSync(ignoreFile, "utf8").split("\n") : [];
+const ignoreFiles = [".gitleaksignore", statSync(ignoreBase).isDirectory() ? `${ignoreBase}/.gitleaksignore` : ignoreBase];
+const ignored = ignoreFiles.flatMap((file) => (existsSync(file) ? readFileSync(file, "utf8").split("\n") : []));
 
 if (process.env.FAKE_GITLEAKS_EXIT !== undefined) {
   if (process.env.FAKE_GITLEAKS_STDERR) console.error(process.env.FAKE_GITLEAKS_STDERR);
