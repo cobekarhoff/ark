@@ -137,7 +137,7 @@ function reviewerFindingLacksRepro(directory: string, state: RunState): boolean 
   const text = readFileSync(newest.file, "utf8");
   return text.split(/^(?=#{2,3} )/m).some((block) => {
     if (!/^### P[01]\b/.test(block) || /^- \*\*Repro:\*\*/m.test(block)) return false;
-    return !isDropped(text, /^### P[01]\b:?[ \t]*(.*)$/.exec(block)?.[1] ?? "");
+    return !isDropped(text, /^### P[01]\b:?[ \t]*(.*)$/m.exec(block)?.[1] ?? "");
   });
 }
 
