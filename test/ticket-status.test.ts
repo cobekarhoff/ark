@@ -24,7 +24,7 @@ function writeConfig(ticketSource: string): void {
         name: "e2e",
         level: "e2e",
         repo: ".",
-        command: "bun test",
+        command: "bun test {report}",
         parser: "bun",
       },
     ],

@@ -31,7 +31,9 @@ beforeEach(() => {
   projectDirectory = writeProject("demo", {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "cli", level: "integration", repo: ".", command: "true", parser: "bun" }],
+    suites: [
+      { name: "cli", level: "integration", repo: ".", command: "true {report}", parser: "bun" },
+    ],
     roles: {
       implementer: { harness: "omp", model: "pi/task" },
       validator: { harness: "omp", model: "pi/validate" },
@@ -247,7 +249,9 @@ test("ARK-173-AC5 multiple strategies wait for a valid card choice or abort", ()
   projectDirectory = writeProject("demo", {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "cli", level: "integration", repo: ".", command: "true", parser: "bun" }],
+    suites: [
+      { name: "cli", level: "integration", repo: ".", command: "true {report}", parser: "bun" },
+    ],
     roles: {
       implementer: { harness: "omp", model: "pi/task" },
       validator: { harness: "omp", model: "pi/validate" },

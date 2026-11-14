@@ -47,7 +47,7 @@ function validConfig(overrides: Record<string, unknown> = {}): Record<string, un
   return {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "bun test", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "bun test {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "claude", model: "claude-sonnet" },
       validator: { harness: "codex", model: "gpt-codex" },
@@ -167,7 +167,7 @@ const invalidConfigs: [string, (config: Record<string, unknown>) => void, string
         name: "api",
         level: "integration",
         repo: ".",
-        command: "x",
+        command: "x {report}",
         parser: "junit",
       }),
     "suites[1].parser must be one of bun, pytest, behave",
@@ -1359,7 +1359,15 @@ function claraRun(
     validConfig({
       workspace: workspaceWithRepos(Object.values(clara)),
       merge_requests: "none",
-      suites: [{ name: "e2e", level: "e2e", repo: clara.platform, command: "true", parser: "bun" }],
+      suites: [
+        {
+          name: "e2e",
+          level: "e2e",
+          repo: clara.platform,
+          command: "true {report}",
+          parser: "bun",
+        },
+      ],
     }),
   );
   const { runId, directory } = startRun();
@@ -2035,7 +2043,7 @@ const methodTicket = [
 test("ARK-311-AC3 the reader names every AC <ticket>/AC<k>, reads each method, and ark test lists non-test methods through the manual gate with both id forms", () => {
   writeProject("methods", {
     ...validConfig(),
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
   });
   const ticketFile = writeTicket("methods", "ARK-910", methodTicket);
   const started = ark("run", "start", ticketFile, "--project", "methods");

@@ -42,7 +42,9 @@ beforeEach(() => {
   projectDirectory = writeProject("demo", {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "cli", level: "integration", repo: ".", command: "bun test", parser: "bun" }],
+    suites: [
+      { name: "cli", level: "integration", repo: ".", command: "bun test {report}", parser: "bun" },
+    ],
     roles: {
       implementer: { harness: "omp", model: "task" },
       evaluator: { harness: "omp", model: "validate" },

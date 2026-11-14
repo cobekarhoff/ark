@@ -2883,7 +2883,7 @@ test("ARK-293-AC2 an agent gets the model Orca reports, else the last message of
   writeProject("p", {
     workspace: scratch("ark-workspace-"),
     ticket_source: "local",
-    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "omp", model: "m" },
       validator: { harness: "omp", model: "m" },

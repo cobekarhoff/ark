@@ -90,7 +90,7 @@ function startRun(
         name: "integration",
         level: "integration",
         repo: ".",
-        command: "true",
+        command: "true {report}",
         parser: "bun",
       },
     ],

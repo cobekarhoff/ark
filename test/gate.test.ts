@@ -64,7 +64,7 @@ beforeEach(() => {
   projectDirectory = writeProject("demo", {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "claude", model: "claude-sonnet" },
       validator: { harness: "codex", model: "gpt-codex" },
@@ -265,7 +265,7 @@ describe("plan approval survives only an unchanged valid recheck", () => {
     writeProject("demo", {
       workspace: tempGitRepo(),
       ticket_source: "local",
-      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
       roles: {
         implementer: { harness: "omp", model: "other" },
         validator: { harness: "codex", model: "gpt-codex" },
@@ -399,7 +399,7 @@ describe("manual gate", () => {
     writeProject("demo", {
       workspace: tempGitRepo(),
       ticket_source: "local",
-      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
       roles: {
         implementer: { harness: "claude", model: "claude-sonnet" },
         validator: { harness: "codex", model: "gpt-codex" },

@@ -65,7 +65,7 @@ function openRun(steps: PlanStep[], options: { planExtras?: object; withOrigin?:
         name: "integration",
         level: "integration",
         repo: ".",
-        command: "true",
+        command: "true {report}",
         parser: "bun",
       },
     ],

@@ -121,7 +121,7 @@ describe("test case entry format", () => {
     const projectDirectory = writeProject("demo", {
       workspace,
       ticket_source: "local",
-      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
       roles: {
         implementer: { harness: "claude", model: "claude-sonnet" },
         validator: { harness: "codex", model: "gpt-codex" },
@@ -381,7 +381,7 @@ describe("test case ids across worktrees (ARK-319)", () => {
     const projectDirectory = writeProject("demo", {
       workspace,
       ticket_source: "local",
-      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+      suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
       roles: {
         implementer: { harness: "claude", model: "claude-sonnet" },
         validator: { harness: "codex", model: "gpt-codex" },

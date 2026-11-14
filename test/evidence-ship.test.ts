@@ -171,7 +171,7 @@ function gateRun() {
   writeProject("demo", {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles,
   });
   const methods: Method[] = [
@@ -307,7 +307,7 @@ function shipRun(criteria: ShipCriterion[], proven: string[]) {
   const projectDirectory = writeProject("demo", {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles,
   });
   const ticketFile = writeTicket("demo", "ARK-900", criteria, "Show units");

@@ -88,7 +88,7 @@ function runCleanPullRequestScenario() {
   const projectDirectory = writeProject("demo", {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "claude", model: "claude-sonnet" },
       validator: { harness: "codex", model: "gpt-codex" },
@@ -328,7 +328,7 @@ function setUpMergerRuns(runs: MergerRun[]) {
   const projectDirectory = writeProject("demo", {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "claude", model: "claude-sonnet" },
       validator: { harness: "codex", model: "gpt-codex" },
