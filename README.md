@@ -1,14 +1,14 @@
 # Ark
 
-Ark takes a ticket to merge-ready changes in one repo or across several dependent repos. You talk to one agent session. Agents plan, build, test and review. You decide at a few gates and you merge. [Open the interactive tour](docs/tour.html) to see a run move, or read on.
+Ark takes a ticket to merge-ready changes in one repo or across several dependent repos. You talk to one agent session. Agents plan, build, test and review. You decide at a few gates (a project can let Ark answer some of them) and you merge. [Open the interactive tour](docs/tour.html) to see a run move, or read on.
 
 Ark builds itself: every change to this repo goes through an Ark run.
 
-|                       |                                                                                                                                                                                                     |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **What you give it**  | A ticket: a Markdown file with acceptance criteria (ACs), from the project's ticket source. The source is local files, GitHub or Jira, as the project's `ark.yml` says.                             |
-| **What you get back** | One merge request (MR) per repo, in merge order, each with passing test cases for every AC, plus a run folder with the plan, the evidence, the cost and a retro. On GitHub an MR is a pull request. |
-| **What you do**       | Name the ticket. Answer the gates: accept the criteria, approve the plan, and a few others when they apply. Merge on your git host.                                                                 |
+|                       |                                                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What you give it**  | A ticket: a Markdown file with acceptance criteria (ACs), from the project's ticket source. The source is local files, GitHub or Jira, as the project's `ark.yml` says.                                  |
+| **What you get back** | One merge request (MR) per repo, in merge order, each with passing test cases for every AC, plus a run folder with the plan, the evidence, the cost and a retro. On GitHub an MR is a pull request.      |
+| **What you do**       | Name the ticket. Answer the gates: accept the criteria, approve the plan, and a few others when they apply. A project can set the strategy, plan and escalation gates to `auto`. Merge on your git host. |
 
 ## How a run goes
 
@@ -20,13 +20,13 @@ flowchart TB
   end
   subgraph before ["Before any code"]
     direction LR
-    ev["Evaluator<br/>blockers, risks"] --> g1{{"YOU 1<br/>accept the criteria"}} --> plan["Strategy, test cases,<br/>plan.yml<br/>ark plan check"] --> g2{{"YOU 2<br/>approve the plan"}}
+    ev["Evaluator<br/>blockers, risks"] --> g1{{"YOU 1<br/>accept the criteria"}} --> plan["Strategy, test cases,<br/>plan.yml<br/>ark plan check"] --> g2{{"YOU 2<br/>approve the plan<br/>(Ark, if gates.plan is auto)"}}
   end
   subgraph build ["Build, prove, review: under a round budget"]
     direction LR
     impl["Implementer<br/>code"] --> val["Validator<br/>tests"] --> t["ark test<br/>every AC at head"] --> rev["Reviewer<br/>other vendor by default"]
     rev -. "findings sent back" .-> impl
-    rev -. "budget spent" .-> esc{{"YOU<br/>one more round,<br/>take over, abort"}}
+    rev -. "budget spent" .-> esc{{"YOU<br/>one more round,<br/>take over, abort<br/>(Ark first, if gates.escalation is auto)"}}
   end
   subgraph ship ["Ship"]
     direction LR
@@ -44,7 +44,7 @@ flowchart TB
   class t,mr,retro cmd
 ```
 
-Amber is you. Teal is an agent. Grey is the `ark` command, which keeps run state and refuses a step the run may not take yet. A strategy choice (when there are 2 or more approach cards) and manual checks (for an AC only a person can judge) also ask you when they apply.
+Amber is you. Teal is an agent. Grey is the `ark` command, which keeps run state and refuses a step the run may not take yet. A strategy choice (when there are 2 or more approach cards) and manual checks (for an AC only a person can judge) also ask you when they apply. Where `ark.yml` sets the strategy or plan gate to `auto`, Ark answers it instead. With `gates.escalation: auto`, Ark grants the first escalation rounds and asks you after that.
 
 ### A run in one screen
 
@@ -54,11 +54,11 @@ Each step names the `ark` command or the file it leaves behind. [Scenarios](docs
 2. **Evaluate.** An evaluator reads the ticket and the code and writes `evaluation.md` with blockers and risks.
 3. **Criteria gate.** You accept, edit or abort each AC's method and test cases: `ark gate record <run> criteria accept`.
 4. **Strategy, test cases, plan.** The run lead writes `strategies.md` (`ark strategy record`), a test case writer and reviewer settle the test cases, then the run lead writes `plan.yml` (`ark plan check`).
-5. **Plan gate.** You review the plan and approve, change or abort: `ark gate record <run> plan approve`. No code exists yet.
-6. **Build, test, review.** Implementers and validators work in their own worktrees. `ark test` runs every AC at head. A reviewer returns findings, and the run lead sends fixes back until the round budget is spent. Then you decide at an escalation.
+5. **Plan gate.** You review the plan and approve, change or abort: `ark gate record <run> plan approve`. With `gates.plan: auto`, Ark approves a valid plan that has no open decision. No code exists yet.
+6. **Build, test, review.** Implementers and validators work in their own worktrees. `ark test` runs every AC at head. A reviewer returns findings, and the run lead sends fixes back until the round budget is spent. Then you decide at an escalation; with `gates.escalation: auto`, Ark first grants up to `escalation_rounds` more rounds (default two).
 7. **Merge request.** `ark merge-request open` refuses until every AC passes, then opens one MR per repo, upstream first.
 8. **Retro.** While the MRs are open, the run lead runs `ark retro` and writes `retro.md`: cost, time, rework and improvement proposals.
-9. **You merge.** You merge on your git host. Ark's agents and the `ark` command never merge. Optionally, `ark services install` (macOS) installs an auto-merger that merges an MR once the host reports it clean under your branch protection and the run's `retro.md` exists. See [Run background services](docs/how-to/background-services.md).
+9. **You merge.** You merge on your git host. Ark's agents and the `ark` command never merge. Optionally, `ark services install` (macOS) installs an auto-merger that merges an MR once the host reports it clean under your branch protection, the run's `retro.md` exists, the ticket is not done or superseded and the run is still in `merge_requests_open`. See [Run background services](docs/how-to/background-services.md).
 
 A repo that is hand-off only opens no MR: the run ends with your branches, named `ark/<ticket id>-<slug>`.
 
@@ -67,7 +67,7 @@ A repo that is hand-off only opens no MR: the run ends with your branches, named
 - **Master Chief:** the one agent session you talk to. It starts run leads and never writes product code.
 - **Run lead:** the agent that owns one ticket. It plans, starts workers and judges their findings.
 - **Worker:** an agent that does one step, such as implementer, validator or reviewer. It starts no other agent.
-- **Gate:** a point where the run stops and asks you.
+- **Gate:** a point where the run stops and asks you. A project can set the strategy, plan and escalation gates to `auto`: Ark then answers and records `by: auto` (for escalation, only up to `escalation_rounds` extra rounds; then it asks you). The criteria gate and manual checks are always a person's answer.
 - **Run folder:** the directory that holds everything about one run: events, plan, evidence, findings, retro.
 - **Orca:** the desktop app that hosts every agent session and carries messages between them.
 
@@ -75,18 +75,18 @@ A repo that is hand-off only opens no MR: the run ends with your branches, named
 
 ## Who does what
 
-| Who                                      | Does                                                                                                              | Never                                              |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| **You**                                  | Name the ticket. Answer the gates. Merge.                                                                         | Leave a gate to an agent's guess.                  |
-| **Master Chief**                         | Queues tickets, starts one run lead per ticket, brings you every gate question, watches open MRs, closes the run. | Write product code.                                |
-| **Run lead**                             | Plans across every repo, starts workers, judges each finding, opens the MRs, writes `retro.md`.                   | Write product code. Answer a gate that needs you.  |
-| **Evaluator**                            | Reads the ticket and code, lists blockers and risks.                                                              | Edit product code.                                 |
-| **Designer** (optional)                  | Makes mockups for the strategy cards when a person will see the change.                                           | Edit product code.                                 |
-| **Test case writer, test case reviewer** | The writer drafts the test cases. A reviewer from another vendor approves or rejects them.                        | Start an implementer before the reviewer approves. |
-| **Implementer**                          | Writes product code in one repo.                                                                                  | Start another agent.                               |
-| **Validator**                            | Turns the test cases into tagged integration and E2E tests and makes them pass.                                   | Write a test for a manual AC.                      |
-| **Reviewer**                             | Finds defects and reports findings.                                                                               | Edit.                                              |
-| **`ark` command**                        | Run state, worktrees, tests, MRs, metrics. Refuses a step the run may not take.                                   | Decide anything that needs judgment.               |
+| Who                                      | Does                                                                                                                        | Never                                              |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **You**                                  | Name the ticket. Answer the gates. Merge.                                                                                   | Leave a gate to an agent's guess.                  |
+| **Master Chief**                         | Queues tickets, starts one run lead per ticket, brings you every gate that waits for you, watches open MRs, closes the run. | Write product code.                                |
+| **Run lead**                             | Plans across every repo, starts workers, judges each finding, opens the MRs, writes `retro.md`.                             | Write product code. Answer a gate that needs you.  |
+| **Evaluator**                            | Reads the ticket and code, lists blockers and risks.                                                                        | Edit product code.                                 |
+| **Designer** (optional)                  | Makes mockups for the strategy cards when a person will see the change.                                                     | Edit product code.                                 |
+| **Test case writer, test case reviewer** | The writer drafts the test cases. A reviewer from another vendor approves or rejects them.                                  | Start an implementer before the reviewer approves. |
+| **Implementer**                          | Writes product code in one repo.                                                                                            | Start another agent.                               |
+| **Validator**                            | Turns the test cases into tagged integration and E2E tests and makes them pass.                                             | Write a test for a manual AC.                      |
+| **Reviewer**                             | Finds defects and reports findings.                                                                                         | Edit.                                              |
+| **`ark` command**                        | Run state, worktrees, tests, MRs, metrics. Refuses a step the run may not take.                                             | Decide anything that needs judgment.               |
 
 Agents nest two levels: Master Chief starts run leads, run leads start workers, workers start nobody.
 
@@ -115,7 +115,7 @@ stateDiagram-v2
   class awaiting_criteria,awaiting_strategy,escalation,merge_requests_open waits
 ```
 
-`ark status` prints the phase. `planning` waits for you once `ark plan check` passes: that is the plan gate. Evaluation, test design and the strategy cards happen inside `awaiting_criteria` and `planning`. Testing and review happen inside `building`. `merge_requests_open` waits for your merge.
+`ark status` prints the phase. `planning` waits for the plan gate once `ark plan check` passes: your answer, unless `gates.plan` is `auto`. Evaluation, test design and the strategy cards happen inside `awaiting_criteria` and `planning`. Testing and review happen inside `building`. `merge_requests_open` waits for your merge, which is not a gate.
 
 ## What you see
 
