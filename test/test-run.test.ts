@@ -1359,7 +1359,7 @@ describe("ark test runs only the suites of the repos in the run (ARK-416)", () =
       expect(ark(...args).code).toBe(0);
     return { runId, runDirectory, markers };
   }
-  const bFails = "sh -c 'touch MARKERS/b.marker; exit 1'";
+  const bFails = "sh -c 'touch MARKERS/b.marker; exit 1' {report}";
   const bPasses = "sh -c 'touch MARKERS/b.marker; bun test REPORT'";
 
   test("ARK-T323 the head pass of ark test skips the suite of a repo the run has no worktree for, prints the skipped line, and runs nothing there", () => {

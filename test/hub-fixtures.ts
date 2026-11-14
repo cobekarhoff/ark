@@ -1137,7 +1137,9 @@ export function repoRunFixture(options: {
 export const repoProjectConfig = (workspace: string): Record<string, unknown> => ({
   workspace,
   ticket_source: "local",
-  suites: [{ name: "unit", level: "unit", repo: "core-lib", command: "true", parser: "bun" }],
+  suites: [
+    { name: "unit", level: "unit", repo: "core-lib", command: "true {report}", parser: "bun" },
+  ],
   roles: {
     implementer: { harness: "omp", model: "m" },
     validator: { harness: "omp", model: "m" },

@@ -53,42 +53,11 @@ You need:
    2. Set it to 2.
    3. Tell Master Chief. It tests again.
 
-7. Master Chief writes `~/.ark/projects/ark/ark.yml` and validates it with `ark status`. For Ark, the result looks like this:
-
-   ```yaml
-   workspace: /Users/you/Dev/abbott/ark
-   ticket_source: local
-   generated:
-     - path: docs/reference/cli.md
-       command: bun scripts/cli-reference.ts
-   suites:
-     - name: integration
-       level: integration
-       repo: .
-       command: bun test --reporter=junit --reporter-outfile={report}
-       parser: bun
-   roles:
-     implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
-     evaluator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     designer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     test_reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
-   ```
+7. Master Chief writes `~/.ark/projects/ark/ark.yml` and validates it with `ark status`. For Ark, the file has one `bun` integration suite and every role. The keys and an example file are in [the `ark.yml` fields](../reference/cli.md#arkyml-fields).
 
    `generated` lists files that a command writes. When `ark worktree sync` finds conflicts only in those files, it runs the command, commits the result as the merge and succeeds, with no merge worker. Conflicts in the hand-written parts of such a file still reach a worker: the sync checks that no conflict marker is left, and aborts as before when one is. Add the list to your own `ark.yml` by hand: bootstrap does not write it.
 
-   `ark status` fails without `implementer`, `validator` and `reviewer`. The other roles are optional in the file, but each run needs them:
-
-   | Role            | Used for                                                                                                                     | Without it                                                |
-   | --------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-   | `evaluator`     | Reads the ticket and the code before the criteria gate                                                                       | `ark evaluation record` refuses every run                 |
-   | `designer`      | Makes mockups and strategy cards for a change a person will see                                                              | `ark strategy record` refuses a ticket that needs mockups |
-   | `test_writer`   | Designs the test cases after the strategy, before `plan.yml`                                                                 | The run lead stops and escalates to Master Chief          |
-   | `test_reviewer` | Reviews the test cases. No implementer starts before it approves. Use a different vendor from the implementer and the writer | The run lead stops and escalates to Master Chief          |
-   | `chief`         | Master Chief                                                                                                                 | `ark chief handover` stops and names the role             |
+   `ark status` fails without `implementer`, `validator` and `reviewer`. The other roles are optional in the file, but each run needs them: the `roles` row of the reference says what stops without each.
 
    If a repo has UI code, Master Chief also offers to make `PRODUCT.md` with impeccable `init` and `DESIGN.md` with impeccable `document` in that repo. With no UI code, it asks one question: is the project designed for a UI that does not exist yet? On yes it offers `PRODUCT.md` only. On no it makes no design file. It never writes over an existing `PRODUCT.md` or `DESIGN.md`: it skips the file and names it in the summary.
 
@@ -115,36 +84,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
 
 4. Ark makes the workspace's own skills reachable. Clara keeps skills in `.claude/skills`, and OMP does not find them from a run's nested worktrees. `ark worktree anchor` and `ark worktree create` write `skills.customDirectories` into each nested worktree's `.omp/config.yml`, with the mirror path of each of `.claude/skills`, `.agents/skills` and `.omp/skills` that the workspace root has. Your global OMP config does not change. Master Chief only checks that each `SKILL.md` has a `description`. For Claude Code and Codex workers, the run lead passes the skill paths in each worker's prompt.
 
-5. Check the written `ark.yml`. For a meta-repo, it has one suite for each integration or E2E suite, and each suite names its repo. This example shows the shape. Your detected values differ:
-
-   ```yaml
-   workspace: /Users/you/Dev/abbott/clara-agentic-environment
-   ticket_source: jira
-   compose: docker compose
-   setup: bun install --frozen-lockfile
-   suites:
-     - name: platform-integration
-       level: integration
-       repo: repos/platform
-       command: pytest -o junit_family=xunit1 --junitxml={report} tests/integration
-       parser: pytest
-     - name: end-to-end
-       level: e2e
-       repo: repos/end-to-end-tests
-       command: behave --format json -o {report} features
-       parser: behave
-   roles:
-     implementer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     validator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
-     evaluator: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     designer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     chief: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
-     test_reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
-   ```
-
-   The roles are the same as for a single repo, and each one is described in the table in step 7 above. Without `roles.evaluator`, `ark evaluation record` refuses every run. Without `roles.designer`, `ark strategy record` refuses a ticket that needs mockups. Without `roles.test_writer` or `roles.test_reviewer`, the run lead stops and escalates to Master Chief.
+5. Check the written `ark.yml`. For a meta-repo, it has one suite for each integration or E2E suite, and each suite names its repo, as `repos/platform`. Your detected values differ from Ark's. Its `command` is the runner's own command with the report path in `{report}`: `pytest` takes `--junitxml={report}`, `behave` takes `-o {report}`. The [`ark.yml` fields](../reference/cli.md#arkyml-fields) hold the keys and an example. Set the same roles as for a single repo.
 
    `ark test` runs each suite from `<run folder>/workspace/<repo>`. Before the suites it runs `docker compose --project-directory <run folder>/workspace -p <run id in lowercase> up -d --wait`, so the compose file resolves every `./repos/*` path to the run's worktrees. After the suites it runs `down`.
 
@@ -170,6 +110,8 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
    ark: 1 project config(s) invalid
    ```
 
+   A key that Ark does not know is an error too, and it names the nearest valid key: `merge_request is not a key; did you mean merge_requests?`. A suite `command` with no `{report}` is refused with `suites[0].command must write its JUnit report to {report}`.
+
    A role that cannot run prints the project, each role and the reason, then exits 1. Here a role names a harness that is not installed:
 
    ```text
@@ -189,7 +131,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
    ark: 2 role(s) cannot run
    ```
 
-   `ark status` does not check `evaluator`, `designer`, `test_writer` or `test_reviewer`, because they are optional in the file. Read the table in step 7 and confirm you set them.
+   `ark status` does not check `evaluator`, `designer`, `test_writer` or `test_reviewer`, because they are optional in the file. Read the `roles` row of [the `ark.yml` fields](../reference/cli.md#arkyml-fields) and confirm you set them.
 
 2. Run `orca repo list --json` and check that each repo of the project appears with `externalWorktreeVisibility` set to `show`. The output is JSON; each repo is an entry in `result.repos`:
 

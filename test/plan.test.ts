@@ -96,7 +96,7 @@ beforeEach(() => {
   const projectDirectory = writeProject("demo", {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "claude", model: "claude-sonnet" },
       validator: { harness: "codex", model: "gpt-codex" },
@@ -1065,7 +1065,9 @@ describe("plan check repos block", () => {
     writeProject("demo", {
       workspace: workspaceWithRepos(repos),
       ticket_source: "local",
-      suites: [{ name: "e2e", level: "e2e", repo: repos[0], command: "true", parser: "bun" }],
+      suites: [
+        { name: "e2e", level: "e2e", repo: repos[0], command: "true {report}", parser: "bun" },
+      ],
       roles: {
         implementer: { harness: "claude", model: "claude-sonnet" },
         validator: { harness: "codex", model: "gpt-codex" },

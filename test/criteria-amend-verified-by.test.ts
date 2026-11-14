@@ -29,7 +29,7 @@ function startProject(options: { files?: Record<string, string>; command?: strin
         name: "cli",
         level: "integration",
         repo: ".",
-        command: options.command ?? "true",
+        command: options.command ?? "true {report}",
         parser: "bun",
       },
     ],

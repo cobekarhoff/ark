@@ -819,14 +819,14 @@ test("ARK-T368 an unread question and an escalation of live workers wait on Home
   await expect(page.getByText("Needs me · 2")).toBeVisible();
 });
 
-test("ARK-277-AC7 a run lead without harness and model shows roles.chief of ark.yml, marked configured", async ({
+test("ARK-T398 a run lead without harness and model shows roles.chief of ark.yml, marked configured", async ({
   page,
 }) => {
   isolate();
   writeProject("p", {
     workspace: tempDirectory("ark-workspace-"),
     ticket_source: "local",
-    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "omp", model: "m" },
       validator: { harness: "omp", model: "m" },
@@ -5062,7 +5062,7 @@ function stageModelWorld(options: { designerSession: boolean }) {
   writeProject("p", {
     workspace: tempDirectory("ark-workspace-"),
     ticket_source: "local",
-    suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "unit", level: "unit", repo: ".", command: "true {report}", parser: "bun" }],
     roles: {
       implementer: { harness: "omp", model: "m" },
       validator: { harness: "omp", model: "m" },
@@ -7668,7 +7668,7 @@ function queueProject(
         name: "unit",
         level: "unit",
         repo: ".",
-        command: "true",
+        command: "true {report}",
         parser: "bun",
       },
     ],
