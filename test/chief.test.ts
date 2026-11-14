@@ -237,7 +237,7 @@ test("ARK-T115 chief state prints each live source in one Markdown snapshot", ()
   expect(section(out, "Interview")).toMatch(/last interview: 1\s*$/);
   expect(section(out, "Host")).toMatch(/free disk: \d+ GB/);
   // Nothing is installed for this project: the refused launchctl and no plist both read as not installed.
-  expect(section(out, "Services").match(/not installed/g)).toHaveLength(3);
+  expect(section(out, "Services").match(/not installed/g)).toHaveLength(4);
 });
 
 test("ARK-T331 chief state lists each red on main file with its run id once, from the last full test of the run, and says unavailable when a run cannot be read", () => {

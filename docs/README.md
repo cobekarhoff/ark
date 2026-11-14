@@ -22,7 +22,8 @@ Ark takes a ticket to merge-ready changes in one repo or across several dependen
 - [Run a ticket](how-to/run-a-ticket.md): from naming a ticket to a merged MR.
 - [Project checks and ticket kinds](how-to/project-checks.md): checks in `ark.yml`, `kind: bug|perf|refactor`, and how `ark test` proves a ticket.
 - [Reach the hub by a local name](how-to/local-names.md): open the hub as `http://ark.localhost`.
-- [Run background services](how-to/background-services.md): install the auto-merger and the other launchd services.
+- [Run background services](how-to/background-services.md): install the auto-merger and the other launchd services, including the project autocommit.
+- [Restore a project file from git](how-to/restore-project-files.md): read the history of a file of `~/.ark/projects/<project>` and restore it.
 - [Work on Ark](how-to/work-on-ark.md): install, the four checks, the opt-in hook and the test conventions for a change to Ark.
 
 ## Look something up
