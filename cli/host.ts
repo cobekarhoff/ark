@@ -84,7 +84,7 @@ export type HostReaders = {
   /** Load averages over 1, 5 and 15 minutes. */
   loadAverages: () => [number, number, number] | null;
   cores: () => number | null;
-  cpuPercent: () => number | null;
+  cpuPercent: () => number | null | Promise<number | null>;
   freeGigabytesOf: (path: string) => number | null;
 };
 
@@ -121,6 +121,15 @@ function readCpuPercent(): number | null {
   previousTicks = ticks;
   if (before === null || ticks.total === before.total) return null;
   return Math.round(((ticks.busy - before.busy) / (ticks.total - before.total)) * 1000) / 10;
+}
+
+/** CPU percent over a fresh span of `milliseconds`. One-shot commands use it: `readCpuPercent` has no span on its first call. */
+export async function sampleCpuPercent(milliseconds = 1000): Promise<number | null> {
+  const before = cpuTicks();
+  await Bun.sleep(milliseconds);
+  const after = cpuTicks();
+  if (after.total === before.total) return null;
+  return Math.round(((after.busy - before.busy) / (after.total - before.total)) * 1000) / 10;
 }
 
 const defaultReaders: HostReaders = {
@@ -225,22 +234,25 @@ export function memoryReasons(
 /** Master Chief starts no run while free disk is under this many GB. */
 export const minimumFreeDiskGigabytes = 10;
 
+/** Master Chief starts no run while CPU use is over this percent. */
+export const maximumCpuPercent = 90;
+
 /**
- * Every reason `ark chief state` holds new runs, in the order free memory, swap, load, disk. Load is over `cores`;
- * disk is under `minimumFreeDiskGigabytes`. A missing reading never holds.
+ * Every reason `ark chief state` holds new runs, in the order free memory, swap, CPU, disk. CPU is over
+ * `maximumCpuPercent`; disk is under `minimumFreeDiskGigabytes`. A missing reading never holds.
  */
 export function holdReasons(
   reading: HostReading,
-  limits: { minimumFreePercent: number; maximumSwapGigabytes: number; cores: number },
+  limits: { minimumFreePercent: number; maximumSwapGigabytes: number },
 ): string[] {
   const reasons = memoryReasons(
     reading,
     limits.minimumFreePercent,
     limits.maximumSwapGigabytes,
   ).reasons;
-  const { load, freeDiskGigabytes } = reading;
-  if (load !== null && load > limits.cores)
-    reasons.push(`load ${load.toFixed(1)} is above the ${limits.cores} cores`);
+  const { cpuPercent, freeDiskGigabytes } = reading;
+  if (cpuPercent !== null && cpuPercent > maximumCpuPercent)
+    reasons.push(`CPU ${cpuPercent.toFixed(1)}% is above the ${maximumCpuPercent}% busy limit`);
   if (freeDiskGigabytes !== null && freeDiskGigabytes < minimumFreeDiskGigabytes)
     reasons.push(
       `free disk ${freeDiskGigabytes} GB is below the ${minimumFreeDiskGigabytes} GB floor`,

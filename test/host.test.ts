@@ -26,27 +26,22 @@ test("ARK-T188 holds nothing on a healthy host", () => {
   expect(holdReasons(healthyHost, limits)).toEqual([]);
 });
 
-test("ARK-T188 holds on load above the core count and not at it", () => {
-  expect(reasonsFor({ load: 8.1 })).toEqual(["load 8.1 is above the 8 cores"]);
-  expect(reasonsFor({ load: 8 })).toEqual([]);
-});
-
 test("ARK-T188 holds on free disk below 10 GB and not at 10 GB", () => {
   expect(reasonsFor({ freeDiskGigabytes: 9 })).toEqual(["free disk 9 GB is below the 10 GB floor"]);
   expect(reasonsFor({ freeDiskGigabytes: 10 })).toEqual([]);
 });
 
-test("ARK-T188 lists reasons in the order memory, swap, load, disk", () => {
+test("ARK-T188 lists reasons in the order memory, swap, CPU, disk", () => {
   const reasons = reasonsFor({
     freeMemoryPercent: 19,
     swapUsedGigabytes: 8.1,
-    load: 9,
+    cpuPercent: 95,
     freeDiskGigabytes: 9,
   });
   expect(reasons).toEqual([
     "free 19% is below the 20% floor",
     "swap 8.1 GB is above the 8 GB ceiling",
-    "load 9.0 is above the 8 cores",
+    "CPU 95.0% is above the 90% busy limit",
     "free disk 9 GB is below the 10 GB floor",
   ]);
 });

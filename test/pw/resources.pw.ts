@@ -13,21 +13,19 @@ import {
 } from "../resources-fixtures.ts";
 import {
   checkpoint,
+  dateOf,
   installFakeTools,
   startHub,
   stopHub,
   tempArkHome,
   tempDirectory,
+  testNow,
   useCleanup,
   writeFakeCommand,
   type StartedHub,
 } from "./helpers.ts";
 
 useCleanup();
-// useCleanup freezes ARK_NOW for the hub clock; the hub reads real time here, as the fixtures do.
-test.beforeAll(() => {
-  delete process.env.ARK_NOW;
-});
 
 const started: StartedHub[] = [];
 test.afterEach(async () => {
@@ -212,7 +210,7 @@ test("ARK-T290 the header strip is on every hub page and the Resources page grou
   ]);
   // RUN-A holds `ark test`, RUN-B waits 42 s. Both pids are alive.
   writeStartedTicket(runA, process.pid);
-  writeWaitingTicket(runB, process.ppid, new Date(Date.now() - 42_000));
+  writeWaitingTicket(runB, process.ppid, dateOf(testNow() - 42_000));
   void directoryA;
   void directoryB;
 

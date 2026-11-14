@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { now } from "../cli/clock.ts";
 import { canonicalCriterion } from "../cli/criterion-id.ts";
 import { execJson } from "../cli/exec.ts";
 import {
@@ -933,7 +934,7 @@ const runWorkspace = /\/runs\/([^/]+)\/workspace(?:\/|$)/;
  * The agents of each run, from the worktrees whose path is under `runs/<run>/workspace`. An agent
  * with no task title cannot be joined to a step and is left out. Null when the command fails.
  */
-export async function readAgentWait(now = Date.now()): Promise<Map<string, PsAgent[]> | null> {
+export async function readAgentWait(at = now()): Promise<Map<string, PsAgent[]> | null> {
   const ps = await execJson<OrcaPs>(
     ["orca", "worktree", "ps", "--agent-wait", "--json"],
     agentWaitTimeoutMilliseconds,
@@ -950,7 +951,7 @@ export async function readAgentWait(now = Date.now()): Promise<Map<string, PsAge
       list.push({
         title: agent.taskTitle,
         harness: typeof agent.agentType === "string" ? agent.agentType : null,
-        activity: activityOf(agent, now),
+        activity: activityOf(agent, at),
       });
     }
     byRun.set(run, list);

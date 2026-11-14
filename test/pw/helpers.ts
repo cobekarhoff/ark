@@ -194,6 +194,9 @@ export async function serve(
   return { server, url: `http://127.0.0.1:${address.port}` };
 }
 
+/** The instant useCleanup freezes the hub clock at; testNow also gives it before the hooks run (describe-time fixtures). */
+const frozenNow = "2026-11-04T12:00:00Z";
+
 /**
  * Registers hooks for the calling file: freezes the hub clock (keeps a caller's ARK_NOW), and after
  * the tests stops every hub, closes every server, removes every temp directory and restores the
@@ -202,7 +205,7 @@ export async function serve(
 export function useCleanup(): void {
   test.beforeAll(() => {
     savedEnvironment = { ...process.env };
-    if ((process.env.ARK_NOW ?? "") === "") process.env.ARK_NOW = "2026-11-04T12:00:00Z";
+    if ((process.env.ARK_NOW ?? "") === "") process.env.ARK_NOW = frozenNow;
   });
   test.afterAll(async () => {
     await Promise.all(hubs.splice(0).map(stopHub));
@@ -218,7 +221,17 @@ export function useCleanup(): void {
 
 /** The frozen hub clock (ARK_NOW) in epoch milliseconds. */
 export function testNow(): number {
-  return Date.parse(process.env.ARK_NOW as string);
+  return Date.parse(process.env.ARK_NOW || frozenNow);
+}
+
+/** ISO instant `offsetMs` after the frozen clock (negative: before). */
+export function isoAt(offsetMs = 0): string {
+  return dateOf(testNow() + offsetMs).toISOString();
+}
+
+/** The one place specs make a Date: from epoch milliseconds or an ISO string; no argument is the frozen clock. */
+export function dateOf(value: number | string = testNow()): Date {
+  return new Date(value);
 }
 
 /** ISO instant `millisecondsAgo` before the frozen clock. */

@@ -1,8 +1,9 @@
 // Fixtures for the hub tests, shared by test/hub.test.ts (Bun) and test/pw/hub.pw.ts (Node):
-// no bun:test, no Bun.* globals. Every time comes from `new Date()`, never from a literal.
+// no bun:test, no Bun.* globals. Every time comes from `new Date(now())`, never from a literal.
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { now } from "../cli/clock.ts";
 
 export type FixtureStep = {
   id: string;
@@ -58,7 +59,7 @@ export type FixtureRun = {
 };
 
 /** `YYYY-MM-DD` of today, for run ids. */
-export const today = (): string => new Date().toISOString().slice(0, 10);
+export const today = (): string => new Date(now()).toISOString().slice(0, 10);
 
 export const runDirectoryOf = (project: string, run: string): string =>
   join(process.env.ARK_HOME as string, "projects", project, "runs", run);
@@ -70,7 +71,7 @@ export const runDirectoryOf = (project: string, run: string): string =>
 export function writeRun(fixture: FixtureRun): string {
   const directory = runDirectoryOf(fixture.project, fixture.run);
   mkdirSync(directory, { recursive: true });
-  const started = (fixture.startedAt ?? new Date(Date.now() - 3_600_000)).getTime();
+  const started = (fixture.startedAt ?? new Date(now() - 3_600_000)).getTime();
   let seq = 0;
   const events: string[] = [];
   const add = (secondsAfterStart: number, type: string, data: Record<string, unknown>) =>
@@ -174,7 +175,7 @@ export function appendRawEvent(
 ): void {
   appendFileSync(
     join(directory, "events.ndjson"),
-    `${JSON.stringify({ seq, time: new Date().toISOString(), type, data })}\n`,
+    `${JSON.stringify({ seq, time: new Date(now()).toISOString(), type, data })}\n`,
   );
 }
 
@@ -290,7 +291,7 @@ export type FixtureMessage = { time: Date; costUsd: number; model?: string; purp
 export function ompSessionText(
   cwd: string,
   messages: FixtureMessage[],
-  start: Date = new Date(),
+  start: Date = new Date(now()),
 ): string {
   const lines = [
     JSON.stringify({ type: "session", version: 3, id: "fixture", timestamp: start, cwd }),
@@ -447,7 +448,7 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
       additions: 12,
       deletions: 3,
       changedFiles: 4,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(now()).toISOString(),
     });
   put("gh.pass", view("SUCCESS"));
   put("gh.fail", view("FAILURE"));
