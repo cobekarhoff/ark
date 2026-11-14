@@ -1,19 +1,19 @@
 ---
 id: ARK-T283
-title: ARK-T283 the command table is the same as at base - order, usage, description, usage-advertised flags with arity, argument counts
+title: ARK-T283 the command table is the same as at base except the companions commands - order, usage, description, usage-advertised flags with arity, argument counts
 level: integration
 technique: characterization snapshot (golden master) with boundary values on argument counts
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-14-ARK-380-1
+changed_by: 2026-11-14-ARK-480-1
 ---
 
 ## Objective
 
 Prove that each `ark` command's record (usage, description, each flag its usage advertises with its arity, and its argument counts) and the table order equal the committed snapshot, so a move of the table out of `cli/ark.ts` changes none of them. Serves ARK-372/AC1. Flags in the parser table that the usage string does not advertise are out of scope: the process cannot enumerate them.
 
-Expected: When the command table changes, the system shall match the snapshot of the test, including `ark merge-request check`; the same commands keep the same order, usage, description, usage-advertised flags with their arity, minimum and maximum as the table in `cli/ark.ts` at base.
+Expected: When the command table changes, the system shall match the snapshot of the test: every command keeps the order, usage, description, usage-advertised flags with their arity, minimum and maximum it has at base, and the table gains only `companions sync`, `companion ask`, `companion answer`, `companion advise` and `companion propose`.
 
 The test reads the table only through the `ark` process, so it does not depend on the file that holds the table, and it does not import `cli/ark.ts` (importing it runs `main`). The snapshot was first captured at the ARK-372 base (27 commands); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test fails at this run's base by design, because the snapshot holds the new description.
 
@@ -41,13 +41,14 @@ ARK-380 changed three descriptions in the snapshot, together with `cli/commands/
 
 ## Expected results
 
-- The command lines of `ark --help` equal the snapshot order exactly; the count is 31 (the base table of 30 and `merge-request check`). The snapshot holds the new `merge-request check` command, the new count, the new `ark test` description of ARK-333 (suite failure exit code, log path and last 20 lines; test case hint) and the changed text of `test` (stage `head`), `run step` and `gate record`.
+- The command lines of `ark --help` equal the snapshot order exactly; the count is 36 (the base table of 31 and the five companions commands). The snapshot holds the new `merge-request check` command, the new count, the new `ark test` description of ARK-333 (suite failure exit code, log path and last 20 lines; test case hint) and the changed text of `test` (stage `head`), `run step` and `gate record`.
 - For each command: usage, description, each usage-advertised flag with its parser-measured arity (`absent`, `switch`, `value`; step 3a) equal the snapshot; each probed bound behaves as in the snapshot; `F --zz-first --zz-second` names `--zz-first` for every advertised switch, `--zz-second` for every advertised value flag; an unknown flag fails with `unknown flag --zz-first`.
 - `test-runner` is absent from `ark --help`.
 - `test/command-table.snapshot.json` holds the `retro` description with the `rework.rules_added` text (the count of rule lines in `rules.md`, the same text as `cli/commands/retro.ts`); the snapshot record changes together with the description, and the case still compares the process output with it.
 - The snapshot was first captured at the ARK-372 base (27 commands); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test passes after the move with the new description, and fails at this run's base by design (the snapshot holds the new description). A command dropped, duplicated or moved, a description edited away from the snapshot, a usage-advertised flag deleted from the parser table, a usage-advertised flag changed from switch to value or back in the parser table (even with the usage string unchanged), or a changed probed minimum or finite maximum fails it. A flag added to the parser table but not advertised in usage is not detected.
 - `test/command-table.snapshot.json` holds the `worktree sync` description of ARK-371 (it names `conflicts` and the regeneration of the files `ark.yml` lists under `generated`); the snapshot is updated together with `cli/commands/worktree.ts`, and the case still compares the process output with it.
 - `test/command-table.snapshot.json` holds the ARK-380 descriptions of `run close`, `merge-request open` and `status` (the security scan and its refusals, the `security.accepted` block, the `Security` section of the MR body, and the `scanner: <tool> is not installed` line of `ark status`); the snapshot is regenerated together with `cli/commands/run.ts` and `cli/commands/merge-request.ts`, and the case still compares the process output with it.
+- The table equals the table at base except the five companions commands: `companions sync`, `companion ask`, `companion answer`, `companion advise` and `companion propose` appear in the snapshot with their usage, description, flags (`--project` is a value flag) and argument bounds, and no other record differs.
 
 ## Screenshot checkpoints
 
