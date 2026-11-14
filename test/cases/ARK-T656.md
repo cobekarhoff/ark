@@ -27,7 +27,7 @@ Prove `ark companions sync` keeps exactly one live Orca worker for each companio
 4. Remove `alpha` from `ark.yml` and run it again. Put a line in `companions/alpha/ideas.md` before this step.
 5. Failures, each from a fresh state with both companions listed: (a) no Master Chief Run in `run-list`; (b) `worker-start` fails for `alpha` only; (c) `worker-stop` fails when a removed companion is stopped; (d) every Orca verb fails.
 6. Remove both companions from `ark.yml` (no `companions` key) and clear the call log, with no `companions/` folder. Run `ark companions sync --project p` and `ark chief state --project p`.
-7. Restore both entries, then run `ark chief state --project p` with live workers for both. Run `bun test test/chief.test.ts`.
+7. Restore both entries, then run `ark chief state --project p` with live workers for both.
 
 ## Expected results
 
@@ -37,7 +37,7 @@ Prove `ark companions sync` keeps exactly one live Orca worker for each companio
 - Step 4: a line for `alpha` says `stopped` and the log has one `worker-stop` for its recorded dispatch id; `beta` says `running`; `companions/alpha/ideas.md` still holds its line.
 - Step 5: (a) exit 1, `ark: ` line that says there is no Master Chief Run, no `worker-start` call, no record written; (b) exit 1 with an `ark: ` line naming `alpha`, no dispatch id recorded for `alpha` (the next sync starts it again), and `beta` is still handled; (c) exit 1 with an `ark: ` line, and the record of the removed companion is kept so the next sync tries the stop again; (d) exit 1 with an `ark: ` line naming the Orca error, never a line that says `stopped` or `running`.
 - Step 6: both commands make no Orca call (empty log), print no companions section, and `chief state` exits 0 with the same sections as before this ticket.
-- Step 7: `chief state` prints the sync as its own section with `running` for each companion, and its `Red on main`, `Run leads` and `Host` sections are unchanged; with Orca down, the companions section says `unavailable` and the command exits 0 as for the other live sources. `bun test test/chief.test.ts` exits 0.
+- Step 7: `chief state` prints the sync as its own section with `running` for each companion, and its `Red on main`, `Run leads` and `Host` sections are unchanged; with Orca down, the companions section says `unavailable` and the command exits 0 as for the other live sources.
 
 ## Screenshot checkpoints
 
