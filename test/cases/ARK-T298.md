@@ -6,12 +6,12 @@ technique: "equivalence classes on merge_requests (none, github, gitlab) and sta
 priority: medium
 risk: "a none project gets an auto-merger that merges nothing or fails each pass; the temp cleaner or sweep is skipped as well; status calls the missing auto-merger an error; a project changed to none keeps a loaded auto-merger"
 status: active
-changed_by: 2026-11-12-ARK-358-1
+changed_by: 2026-11-14-ARK-482-1
 ---
 
 ## Objective
 
-For a project whose `ark.yml` says `merge_requests: none`, `ark services install` installs the temp cleaner and the sweep and no auto-merger.
+For a project whose `ark.yml` says `merge_requests: none`, `ark services install` installs the temp cleaner, the sweep and the project autocommit and no auto-merger.
 
 ## Preconditions
 
@@ -27,10 +27,10 @@ For a project whose `ark.yml` says `merge_requests: none`, `ark services install
 
 ## Expected results
 
-- Step 1: two plists (temp cleaner, sweep); no `auto-merger` plist, no `load` of that label.
-- Step 2: auto-merger `not installed`, the other two as installed; exit code 0.
-- Step 3: three plists.
-- Step 4: the auto-merger label is unloaded and its plist removed (the plan's decision; the case follows it); the other two unchanged.
+- Step 1: three plists (temp cleaner, sweep, project autocommit); no `auto-merger` plist, no `load` of that label.
+- Step 2: auto-merger `not installed`, the other three as installed; exit code 0.
+- Step 3: four plists.
+- Step 4: the auto-merger label is unloaded and its plist removed (the plan's decision; the case follows it); the other three unchanged.
 - Step 5: exit code 0 though the auto-merger never existed.
 
 ## Screenshot checkpoints
