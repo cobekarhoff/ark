@@ -2,7 +2,7 @@
 id: ARK-T409
 title: ARK-T409 the spec built for a step of each plan role starts that role's own skill by name, and that name is a skill that exists
 level: integration
-technique: equivalence classes (one step of each plan role: implementer, validator, reviewer; skill name matches a skill folder; spec names the old router form)
+technique: "equivalence classes (one step of each plan role: implementer, validator, reviewer; skill name matches a skill folder; spec names the old router form)"
 priority: high
 risk: "the first line of the spec of an implementer, validator or reviewer worker still starts the old router skill (or a misspelled role skill name) after the router is deleted, so every plan step starts on a skill omp does not list and gets no role instructions"
 status: active
