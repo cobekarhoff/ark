@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { decisionLines, droppedLines } from "./findings.ts";
+import { decisionLines, droppedLines, ruleLines } from "./findings.ts";
 import { ArkError } from "./errors.ts";
 import {
   type ArkEvent,
@@ -509,6 +509,12 @@ function findingsTexts(runDirectory: string): string[] {
     .map((name) => readFileSync(join(findingsDirectory, name), "utf8"));
 }
 
+/** Rule lines of `<run folder>/rules.md`. A missing file means 0. */
+function countRulesAdded(runDirectory: string): number {
+  const rulesFile = join(runDirectory, "rules.md");
+  return existsSync(rulesFile) ? ruleLines(readFileSync(rulesFile, "utf8")).length : 0;
+}
+
 /** P0 and P1 lines of `## Run lead decision` whose first of `leave` and `send back` is `leave`. */
 function countFindingsLeftP0P1(runDirectory: string): number {
   return findingsTexts(runDirectory)
@@ -797,6 +803,7 @@ export function retro(runId: string, inProject?: string): void {
       merge_steps: withoutInterrupted(events).filter(
         (event) => event.type === "step.started" && event.data.merge,
       ).length,
+      rules_added: countRulesAdded(runDirectory),
     },
     tests: testMetrics(events),
     design_rounds: designRounds,
