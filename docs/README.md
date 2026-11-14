@@ -40,6 +40,7 @@ Agents follow these files. Read them to learn exactly what an agent does.
 - [Reviewer rubric](../skills/ark/rubrics/reviewer.md): what a reviewer checks.
 - [Rules](../rules/): the checklists for code: [naming](../rules/naming.md), [state machines](../rules/state-machines.md) and [test authoring](../rules/test-audit.md).
 - [Test case writer](../skills/test-case-writer/SKILL.md) and [test case reviewer](../skills/test-case-reviewer/SKILL.md): the skills of those two workers.
+- [Test audit](../skills/test-audit/SKILL.md): how to audit the tests of any Ark project and run a campaign that prunes them.
 - [PR writing](../skills/pr-writing/SKILL.md): how an MR description is written.
 
 ## Research and history
