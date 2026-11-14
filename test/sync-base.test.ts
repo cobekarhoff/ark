@@ -1,5 +1,14 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
@@ -8,6 +17,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeEvidenceFile,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -66,15 +76,39 @@ import { existsSync } from "node:fs";
 test("late ${file}", () => { expect(existsSync(${JSON.stringify(file)})).toBe(true); });
 `;
 
+type FixtureCriterion = { id: string; method: string; text: string; verified_by?: string[] };
+type FixtureStep = {
+  id: string;
+  role: "implementer" | "validator";
+  needs: string[];
+  criteria: string[];
+};
+
 /**
  * Starts a run at the building phase over a repo with a local bare origin; the run has one own commit.
  * `verified`: `FAKE-1-AC1` is `verified_by: [FAKE-T1]`, so `ark merge-request open` also checks the head evidence of `FAKE-T1`.
  * `baseFiles`: more files in the base commit, pushed to the origin before the run starts.
+ * `criteria`, `steps`, `title` and `summary` are written before `ark run start` and `plan check`: a later edit of the
+ * criteria or the plan would send the run back to planning. They go with `verified: true` (the one plan test case is `FAKE-T1`).
  */
-function syncedRun(
-  kind: "feature" | "refactor",
-  options: { verified?: boolean; baseFiles?: Record<string, string> } = {},
-) {
+type SyncedRunOptions = {
+  verified?: boolean;
+  baseFiles?: Record<string, string>;
+  criteria?: FixtureCriterion[];
+  steps?: FixtureStep[];
+  title?: string;
+  summary?: string;
+};
+type SyncedRun = {
+  arkHome: string;
+  runId: string;
+  runDirectory: string;
+  workspace: string;
+  mirror: string;
+  createdBase: string;
+};
+
+function syncedRun(kind: "feature" | "refactor", options: SyncedRunOptions = {}): SyncedRun {
   const arkHome = tempArkHome();
   const workspace = tempGitRepo({
     "test/probe.test.ts": probe,
@@ -109,20 +143,23 @@ function syncedRun(
     ],
     roles,
   });
-  const ticket = writeTicket(
-    "demo",
-    "FAKE-1",
-    [
-      {
-        id: "FAKE-1-AC1",
-        method: "test",
-        text: "criterion FAKE-1-AC1",
-        ...(options.verified ? { verified_by: ["FAKE-T1"] } : {}),
-      },
-    ],
-    "Ticket FAKE-1",
-    kind,
-  );
+  const criteria = options.criteria ?? [
+    {
+      id: "FAKE-1-AC1",
+      method: "test",
+      text: "criterion FAKE-1-AC1",
+      ...(options.verified ? { verified_by: ["FAKE-T1"] } : {}),
+    },
+  ];
+  const ticket = writeTicket("demo", "FAKE-1", criteria, options.title ?? "Ticket FAKE-1", kind);
+  if (options.summary !== undefined)
+    writeFileSync(
+      ticket,
+      readFileSync(ticket, "utf8").replace(
+        "status: ready\n",
+        `status: ready\nsummary: ${JSON.stringify(options.summary)}\n`,
+      ),
+    );
   const runId = ark("run", "start", ticket, "--project", "demo").out.match(
     /\d{4}-\d{2}-\d{2}-FAKE-1-\d+/,
   )![0];
@@ -135,19 +172,11 @@ function syncedRun(
       design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
       summary: {
         why: "Test the base.",
-        changes: [{ criterion: "FAKE-1-AC1", where: "tests", now: "x", fix: "y" }],
+        changes: criteria.map(({ id }) => ({ criterion: id, where: "tests", now: "x", fix: "y" })),
       },
-      steps: [
-        {
-          id: "build",
-          role: "implementer",
-          repo: ".",
-          harness: "claude",
-          model: "claude-sonnet",
-          needs: [],
-          criteria: ["FAKE-1-AC1"],
-        },
-      ],
+      steps: (
+        options.steps ?? [{ id: "build", role: "implementer", needs: [], criteria: ["FAKE-1-AC1"] }]
+      ).map((step) => ({ repo: ".", ...roles[step.role], ...step })),
       test_cases: options.verified
         ? [{ id: "FAKE-T1", action: "reuse", level: "integration" }]
         : [
@@ -175,7 +204,7 @@ function syncedRun(
   const mirror = join(runDirectory, "workspace");
   writeFileSync(join(mirror, "src.txt"), "own\n");
   git(mirror, "commit", "-qam", "own change");
-  return { runId, runDirectory, workspace, mirror, createdBase };
+  return { arkHome, runId, runDirectory, workspace, mirror, createdBase };
 }
 
 /** Commits `files` on the origin target in a fresh clone and returns the new tip. */
@@ -558,4 +587,345 @@ test("ARK-T375 a synced commit that HEAD does not hold leaves the target's work 
   expect(result.code, result.err + result.out).toBe(0);
   expect(result.out.match(oldIdLine)?.[1]).toBe("passed");
   expect(result.out).not.toContain("old id touched");
+});
+
+// --- ARK-405: ark merge-request check, the head block of ark test, and the manual answer ----------------------------------
+
+const noString = "`no-such-string-405` and `no-such-other-405`";
+const allCriteria = ["FAKE-1-AC1", "FAKE-1-AC2", "FAKE-1-AC3"];
+/** A test AC, an analysis AC and a demonstration AC. `text` is the text of the test AC: it holds the strings of the AC check. */
+const stageCriteria = (text = `criterion with ${noString}`): FixtureCriterion[] => [
+  { id: "FAKE-1-AC1", method: "test", verified_by: ["FAKE-T1"], text },
+  { id: "FAKE-1-AC2", method: "analysis", text: "analysis criterion" },
+  { id: "FAKE-1-AC3", method: "demonstration", text: "demonstration criterion" },
+];
+const stageSteps: FixtureStep[] = [
+  { id: "build", role: "implementer", needs: [], criteria: allCriteria },
+  { id: "check", role: "validator", needs: ["build"], criteria: allCriteria },
+];
+const stageRun = (options: SyncedRunOptions = {}) =>
+  syncedRun("feature", {
+    verified: true,
+    criteria: stageCriteria(),
+    steps: stageSteps,
+    ...options,
+  });
+
+/** Each fixture has its own ARK_HOME and `tempArkHome` switches the variable: every command names its fixture. */
+function arkIn(run: Pick<SyncedRun, "arkHome">, ...args: string[]) {
+  process.env.ARK_HOME = run.arkHome;
+  return ark(...args);
+}
+
+const outputLines = (result: { out: string }) =>
+  result.out.split("\n").filter((line) => line !== "");
+const manualLine = 'evidence malformed: AC3: missing section "What the human saw"';
+const evidencePath = (run: SyncedRun, id: string) =>
+  join(run.runDirectory, "results", "evidence", `${id}.md`);
+const readEvidence = (run: SyncedRun, id: string) => readFileSync(evidencePath(run, id), "utf8");
+const writeEvidence = (run: SyncedRun, id: string, text: string) =>
+  writeFileSync(evidencePath(run, id), text);
+/** A demonstration file without its last line `human: ok`. `saw: false` drops the section `What the human saw`. */
+function writeDemonstration(run: SyncedRun, { saw = true } = {}) {
+  writeEvidenceFile(run.runDirectory, "AC3", "demonstration", { humanOk: false });
+  if (!saw)
+    writeEvidence(
+      run,
+      "AC3",
+      readEvidence(run, "AC3").replace(/## What the human saw\n\nThe feature\.\n\n/, ""),
+    );
+}
+
+function commitTracked(run: SyncedRun, name: string, content: string): void {
+  writeFileSync(join(run.mirror, name), content);
+  git(run.mirror, "add", name);
+  git(run.mirror, "commit", "-qm", name);
+}
+
+const answerManual = (run: SyncedRun, id: string) => {
+  const answered = arkIn(run, "gate", "record", run.runId, "manual", id, "ok");
+  expect(answered.code, answered.err + answered.out).toBe(0);
+};
+
+function fullTest(run: SyncedRun, expectedCode = 0) {
+  const tested = arkIn(run, "test", run.runId);
+  expect(tested.code, tested.err + tested.out).toBe(expectedCode);
+  return tested;
+}
+
+const names = (directory: string): string[] =>
+  readdirSync(directory, { recursive: true })
+    .map(String)
+    .filter((name) => !name.split("/").includes(".git"))
+    .sort()
+    .map((name) => `${name} ${lstatSync(join(directory, name)).size}`);
+
+/** What a read-only command must leave alone: the event log, the files of the run and the worktree, and the origin refs. */
+const readOnlyRecord = (run: SyncedRun) => ({
+  events: readFileSync(join(run.runDirectory, "events.ndjson"), "utf8"),
+  porcelain: git(run.mirror, "status", "--porcelain"),
+  refs: git(run.mirror, "ls-remote", "origin"),
+  runFiles: names(run.runDirectory),
+  worktreeFiles: names(run.mirror),
+});
+
+/**
+ * Runs `ark merge-request check` and expects exactly `expected` as its lines (every line if `exact`, else at least these),
+ * the exit code 1 for a problem line and 0 for none or only warnings, and no change to what the run holds.
+ */
+function expectStage(run: SyncedRun, args: string[], expected: string[], exact = true) {
+  const before = readOnlyRecord(run);
+  const result = arkIn(run, "merge-request", "check", run.runId, ...args);
+  const lines = outputLines(result);
+  if (exact) expect(lines.toSorted(), result.err).toEqual(expected.toSorted());
+  else expect(lines, result.err).toEqual(expect.arrayContaining(expected));
+  expect(result.code, result.err).toBe(lines.some((line) => !line.startsWith("warning: ")) ? 1 : 0);
+  expect(readOnlyRecord(run)).toEqual(before);
+  return result;
+}
+
+const stringsLine = (...strings: string[]) =>
+  `AC string in no tracked file at head: ${strings.map((text) => `FAKE-1/AC1 \`${text}\``).join("; ")}`;
+const absentLine = stringsLine("no-such-string-405", "no-such-other-405");
+const seventyThree = `FAKE-1: ${"s".repeat(65)}`;
+
+test("ARK-T379 ark merge-request check lists the problems of stage head, step and final, one line each, and changes nothing", () => {
+  useFakeHost();
+  // Problem fixture: no string in a tracked file, no file for AC2, a demonstration file without a section.
+  const problem = stageRun();
+  writeDemonstration(problem, { saw: false });
+  expectStage(problem, ["--stage", "head"], [absentLine, manualLine]);
+  // --summary makes a title of 73 characters.
+  expectStage(
+    problem,
+    ["--stage", "head", "--summary", "s".repeat(65)],
+    [
+      absentLine,
+      manualLine,
+      `--summary makes a title of 73 characters, 72 allowed: ${seventyThree}`,
+    ],
+  );
+  // The step that serves the analysis AC owns the missing file; a step without it does not.
+  const stepLines = [absentLine, manualLine, "evidence missing: AC2 (analysis)"];
+  expectStage(problem, ["--stage", "step", "--step", "check"], stepLines);
+  expectStage(problem, ["--stage", "step"], stepLines);
+  expectStage(
+    problem,
+    ["--stage", "final"],
+    [...stepLines, "no test result yet: run `ark test` first"],
+    false,
+  );
+  const narrow = stageRun({
+    steps: [stageSteps[0]!, { ...stageSteps[1]!, criteria: ["FAKE-1-AC1"] }],
+  });
+  writeDemonstration(narrow, { saw: false });
+  expectStage(narrow, ["--stage", "step", "--step", "check"], [absentLine, manualLine]);
+  expectStage(narrow, ["--stage", "step"], stepLines);
+
+  // The title: the ticket's own summary and title are both too long.
+  const long = stageRun({
+    criteria: stageCriteria("criterion with no string"),
+    title: "t".repeat(70),
+    summary: "s".repeat(70),
+  });
+  expectStage(long, ["--stage", "head"], ["ticket has no summary: pass --summary"]);
+  expectStage(long, ["--stage", "head", "--summary", "short"], []);
+
+  // Passing fixture, then the control: the same files, the last line of AC3 added by the human's answer.
+  const control = stageRun();
+  commitTracked(control, "strings.txt", `${noString}\n`);
+  writeEvidenceFile(control.runDirectory, "AC2", "analysis");
+  writeDemonstration(control);
+  answerManual(control, "AC2");
+  fullTest(control, 1);
+  expectStage(control, ["--stage", "head"], []);
+  expectStage(control, ["--stage", "step", "--step", "check"], []);
+  expectStage(control, ["--stage", "final"], ["manual criterion without ok: FAKE-1/AC3"], false);
+  answerManual(control, "AC3");
+  fullTest(control);
+  for (const stage of ["head", "step", "final"]) expectStage(control, ["--stage", stage], []);
+
+  // Final lines of open: the files that open checks come out as the lines that open refuses with.
+  const demonstration = readEvidence(control, "AC3");
+  const analysis = readEvidence(control, "AC2");
+  rmSync(evidencePath(control, "AC2"));
+  writeEvidence(
+    control,
+    "AC3",
+    demonstration.replace("## What the human saw\n\nThe feature.\n\n", ""),
+  );
+  const evidenceLines = ["evidence missing: AC2 (analysis)", manualLine];
+  expectStage(control, ["--stage", "final"], evidenceLines);
+  let before = readOnlyRecord(control);
+  const refused = arkIn(control, "merge-request", "open", control.runId);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toBe(`ark: refused: evidence is not complete\n${evidenceLines.join("\n")}\n`);
+  expect(readOnlyRecord(control)).toEqual(before);
+
+  // An AC string: the one joined line is the open refusal, byte for byte.
+  writeEvidence(control, "AC2", analysis);
+  writeEvidence(control, "AC3", demonstration);
+  const ticketFile = join(control.runDirectory, "ticket.md");
+  writeFileSync(
+    ticketFile,
+    readFileSync(ticketFile, "utf8").replace(noString, "`absent-one-405` and `absent-two-405`"),
+  );
+  const absent = stringsLine("absent-one-405", "absent-two-405");
+  expectStage(control, ["--stage", "head"], [absent]);
+  before = readOnlyRecord(control);
+  const refusedString = arkIn(control, "merge-request", "open", control.runId);
+  expect(refusedString.err).toBe(`ark: ${absent}\n`);
+  expect(readOnlyRecord(control)).toEqual(before);
+});
+
+const headBlock = (text: string) =>
+  text.match(/^merge-request check\n(?:.+\n?)*/m)?.[0] ?? "no merge-request check block";
+const lastCompleted = (run: SyncedRun) => completed(run.runDirectory).at(-1);
+
+test("ARK-T380 ark test prints the head problems under merge-request check, keeps its exit code and passed, and open refuses with the printed line", () => {
+  useFakeHost();
+  // AC2 is answered, so the run exits 0 and only the head block differs between the two fixtures.
+  const problem = stageRun({
+    criteria: stageCriteria().slice(0, 2),
+    steps: stageSteps.slice(0, 1),
+  });
+  const control = stageRun({
+    criteria: stageCriteria().slice(0, 2),
+    steps: stageSteps.slice(0, 1),
+  });
+  commitTracked(control, "strings.txt", `${noString}\n`);
+  for (const run of [problem, control]) answerManual(run, "AC2");
+
+  const printed = fullTest(problem);
+  expect(printed.out).toContain(`merge-request check\n${absentLine}\n`);
+  expect(headBlock(printed.out)).not.toContain("evidence missing");
+  expect(lastCompleted(problem).passed).toBe(true);
+
+  const clean = fullTest(control);
+  expect(clean.out).not.toContain("merge-request check");
+  expect(lastCompleted(control).passed).toBe(true);
+  // Only the block differs; the suite lines may carry a `reused` suffix.
+  const withoutSuites = (text: string) =>
+    text
+      .replace(headBlock(text), "")
+      .split("\n")
+      .filter((line) => !line.startsWith("suite "));
+  expect(withoutSuites(printed.out)).toEqual(withoutSuites(clean.out));
+  expect(Object.keys(lastCompleted(problem)).sort()).toEqual(
+    Object.keys(lastCompleted(control)).sort(),
+  );
+
+  // Open refuses with the printed line; after the fix it refuses for the evidence file, a problem of stage final.
+  expect(arkIn(problem, "merge-request", "open", problem.runId).err).toBe(`ark: ${absentLine}\n`);
+  commitTracked(problem, "strings.txt", `${noString}\n`);
+  expect(fullTest(problem).out).not.toContain("merge-request check");
+  const refused = arkIn(problem, "merge-request", "open", problem.runId);
+  expect(refused.err).toBe(
+    "ark: refused: evidence is not complete\nevidence missing: AC2 (analysis)\n",
+  );
+});
+
+test("ARK-T380 a failing run still prints the head block before the failure, with the exit code and passed of the run without the problem", () => {
+  const failing = (withString: boolean) => {
+    const run = stageRun({ criteria: stageCriteria().slice(0, 2), steps: stageSteps.slice(0, 1) });
+    if (withString) commitTracked(run, "strings.txt", `${noString}\n`);
+    answerManual(run, "AC2");
+    writeFileSync(
+      join(run.mirror, "test/own.test.ts"),
+      readFileSync(join(run.mirror, "test/own.test.ts"), "utf8").replace(
+        'test("FAKE-T1 works", () => {});',
+        'test("FAKE-T1 works", () => { throw new Error("red"); });',
+      ),
+    );
+    git(run.mirror, "commit", "-qam", "break FAKE-T1");
+    return { run, result: fullTest(run, 1) };
+  };
+  const problem = failing(false);
+  const control = failing(true);
+  expect(problem.result.out).toContain(`merge-request check\n${absentLine}\n`);
+  expect(control.result.out).not.toContain("merge-request check");
+  expect(problem.result.err).toContain("suite e2e failed");
+  expect(problem.result.err).toBe(control.result.err);
+  expect(lastCompleted(problem.run).passed).toBe(false);
+  expect(lastCompleted(control.run).passed).toBe(false);
+});
+
+const warningLine = "warning: manual answer older than head: FAKE-1/AC2";
+const answeredHeads = (run: SyncedRun) =>
+  readEvents(run.runDirectory).findLast(
+    (event) => event.type === "gate.answered" && event.data.criterion === "FAKE-1/AC2",
+  )?.data.heads;
+
+/** A run whose AC2 (demonstration) has a well-formed file that lacks `human: ok`. AC1 has no string, so stage final is clean at its head. */
+function answeredRun() {
+  const run = stageRun({
+    criteria: [
+      stageCriteria("criterion without a string")[0]!,
+      { id: "FAKE-1-AC2", method: "demonstration", text: "demonstration criterion" },
+    ],
+    steps: [{ ...stageSteps[0]!, criteria: ["FAKE-1-AC1", "FAKE-1-AC2"] }],
+  });
+  writeEvidenceFile(run.runDirectory, "AC2", "demonstration", { humanOk: false });
+  return run;
+}
+const commitAndTest = (run: SyncedRun, name: string) => {
+  commitTracked(run, name, `${name}\n`);
+  fullTest(run);
+};
+
+test("ARK-T383 a manual answer records the head of each repo and stage final warns when a head moved after it, with the exit code and open unchanged", () => {
+  useFakeHost();
+  const run = answeredRun();
+  const answeredAt = git(run.mirror, "rev-parse", "HEAD");
+  answerManual(run, "AC2");
+  fullTest(run);
+  expect(answeredHeads(run)).toEqual({ ".": answeredAt });
+  expectStage(run, ["--stage", "final"], []);
+
+  commitAndTest(run, "later.txt");
+  expectStage(run, ["--stage", "final"], [warningLine]);
+  expectStage(run, ["--stage", "head"], []);
+  expectStage(run, ["--stage", "step"], []);
+
+  const opened = arkIn(run, "merge-request", "open", run.runId);
+  expect(opened.code, opened.err + opened.out).toBe(0);
+  expect(opened.err + opened.out).not.toContain("warning:");
+});
+
+test("ARK-T383 stage final warns about an old answer beside a problem with the exit code of the problem alone, and not after a clean ark worktree sync", () => {
+  useFakeHost();
+  const moved = answeredRun();
+  answerManual(moved, "AC2");
+  fullTest(moved);
+  commitAndTest(moved, "later.txt");
+  const still = answeredRun();
+  answerManual(still, "AC2");
+  fullTest(still);
+  const longSummary = ["--stage", "final", "--summary", "s".repeat(65)];
+  const titleLine = `--summary makes a title of 73 characters, 72 allowed: ${seventyThree}`;
+  expectStage(moved, longSummary, [titleLine, warningLine]);
+  expectStage(still, longSummary, [titleLine]);
+
+  // A clean merge of the target after the answer: the sync is the only change, so no warning and no stale head.
+  const synced = answeredRun();
+  answerManual(synced, "AC2");
+  fullTest(synced);
+  moveTarget(synced.workspace, { "target.txt": "t1\n" });
+  process.env.ARK_HOME = synced.arkHome;
+  sync(synced);
+  expectStage(synced, ["--stage", "final"], []);
+});
+
+test("ARK-T383 an answer with no recorded heads gives no warning", () => {
+  const run = answeredRun();
+  writeEvidence(run, "AC2", `${readEvidence(run, "AC2")}\nhuman: ok\n`);
+  process.env.ARK_HOME = run.arkHome;
+  appendEvent(run.runDirectory, "gate.answered", {
+    gate: "manual",
+    criterion: "FAKE-1/AC2",
+    answer: "ok",
+    by: "human",
+  });
+  commitAndTest(run, "later.txt");
+  expectStage(run, ["--stage", "final"], []);
 });
