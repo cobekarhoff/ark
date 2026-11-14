@@ -212,7 +212,9 @@ export type StartedHub = {
   baseUrl: string;
 };
 
-const pages = new WeakMap<object, AbortController>();
+// The page's fetch promise stays here with its AbortController: Bun 1.4.3 and later close a dropped
+// Response when it is collected, which would end the page's `/events` stream and pause the hub.
+const pages = new WeakMap<object, { controller: AbortController; request: Promise<unknown> }>();
 
 /**
  * Starts `bun hub/main.ts --port 0` and resolves once it prints its address. The hub reads only
@@ -242,9 +244,9 @@ export async function startHub(limitMs?: number): Promise<StartedHub> {
       const port = output.match(/127\.0\.0\.1:(\d+)/)?.[1];
       if (port) {
         const baseUrl = `http://127.0.0.1:${port}`;
-        const page = new AbortController();
-        pages.set(hub, page);
-        fetch(`${baseUrl}/events`, { signal: page.signal }).catch(() => {});
+        const controller = new AbortController();
+        const request = fetch(`${baseUrl}/events`, { signal: controller.signal }).catch(() => {});
+        pages.set(hub, { controller, request });
         return { process: hub, baseUrl };
       }
     }
@@ -259,7 +261,7 @@ export async function startHub(limitMs?: number): Promise<StartedHub> {
 }
 
 export async function stopHub(hub: { kill(): void; exited: Promise<number> }): Promise<void> {
-  pages.get(hub)?.abort();
+  pages.get(hub)?.controller.abort();
   hub.kill();
   await hub.exited;
 }
