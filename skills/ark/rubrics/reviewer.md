@@ -23,6 +23,7 @@ Read the ticket and the step's ACs first. If the repo has a web UI, also load th
 4. **Complexity.** Flag code that does more than the ACs need: abstractions with one user, options nobody sets, dead code, copied logic that an existing helper already covers.
 5. **Naming.** Check code names against `rules/naming.md`: full words for identifiers, commands, flags, gate names and filenames. This rubric covers code names only, not prose.
 6. **State.** Check code that tracks a status or lifecycle against `rules/state-machines.md`: one typed list of states, one owner for the moves, no flags that can stand for a state the product does not have, and a refusal that names the state and what allows the action. Making a stored or printed state value explicit must not rename it.
+7. **Run rules.** If the spec has a `Rules:` block (the text of the run's `rules.md`; the spec never names the file), each list line under it is a rule the run lead wrote after a finding repeated. Check the diff against every rule. A diff that breaks a rule is a finding of its own: the title names the rule, `Area` is `correctness`, `File` and `Line` are the changed line that breaks it, `Input` is the call or state that breaks it, and `Evidence` quotes the rule line. A finding with no File, Line or Input is dropped like any other. A rule that does not apply to the diff is no finding. A rule that is not in the spec was written after your step started: do not look for it.
 
 ## How to report
 
