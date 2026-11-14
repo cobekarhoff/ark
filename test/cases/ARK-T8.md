@@ -6,7 +6,7 @@ technique: decision table (folder missing base / head, stale head SHA, valid, no
 priority: high
 risk: a verified_by case ships without base or head evidence, a stale head SHA passes because it is compared to the wrong head function, or an old-scheme AC is wrongly refused
 status: active
-changed_by: 2026-11-06-ARK-312-1
+changed_by: 2026-11-13-ARK-463-1
 ---
 
 ## Objective
@@ -34,7 +34,7 @@ Prove both commands refuse a `method: test` AC whose `verified_by` case lacks a 
 ## Expected results
 
 - When a `verified_by` case has no `base/` or `head/` evidence folder, the system shall refuse with `test evidence missing: <AC id> <test case id> (<base|head>)` on both commands, naming the exact missing folder only.
-- When the SHA in the `head` `result.json` is not the git head of the repo that ran the case (the `repo` in that `result.json`), also when the `sha` is not a string or the `repo` is missing or unknown, also when it is the current head of another repo of the run, the system shall refuse with `test evidence stale: <AC id> <test case id>` on both commands.
+- When the SHA in the `head` `result.json` is not the git head of the repo that ran the case (the `repo` in that `result.json`), and the git head was not reached from that SHA only by clean `ark worktree sync` merges of the target (ARK-T373 owns that accepted shape), also when the `sha` is not a string or the `repo` is missing or unknown, also when it is the current head of another repo of the run, the system shall refuse with `test evidence stale: <AC id> <test case id>` on both commands.
 - The system shall check every case in `verified_by`, not only the first.
 - Where an AC has no `verified_by`, the system shall not require test evidence.
 - When the refusal fires, the system shall push nothing and append no event.
