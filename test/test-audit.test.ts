@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -8,6 +10,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import {
@@ -516,14 +519,23 @@ describe("ark test old-id gate", () => {
   });
 
   /** A building run on a repo whose base commit holds old-id tests; a bun suite and a pytest suite. */
-  function run(planned = ["proves", "ARK-T1"], source = baseSource) {
+  function run(planned = ["proves", "ARK-T1"], source = baseSource, suiteMarker?: string) {
     const arkHome = tempArkHome();
     const workspace = tempGitRepo({ "e2e.test.ts": source });
     writeProject("fx", {
       workspace,
       ticket_source: "local",
       suites: [
-        { name: "e2e", level: "e2e", repo: ".", command: junit("e2e.test.ts"), parser: "bun" },
+        {
+          name: "e2e",
+          level: "e2e",
+          repo: ".",
+          command:
+            suiteMarker === undefined
+              ? junit("e2e.test.ts")
+              : `touch ${suiteMarker}; ${junit("e2e.test.ts")}`,
+          parser: "bun",
+        },
         { name: "py", level: "unit", repo: ".", command: pytestCommand, parser: "pytest" },
       ],
       roles,
@@ -743,4 +755,45 @@ describe("ark test old-id gate", () => {
     expect(result.out).toMatch(/plan-membership suite e2e \(bun\)\s+passed/);
     expect(result.code).not.toBe(0);
   });
+
+  // The old-id and plan-membership checks are checks like a lint: a failed one stops `ark test` before the suites.
+  test.each([
+    {
+      check: "old-id",
+      planned: ["proves", "ARK-T1"] as string[],
+      source: baseSource,
+      edit: (text: string) => text.replace("const x = 1;", "const x = 2;"),
+      line: "old id touched: e2e.test.ts:4 ARK-9-AC2 target",
+    },
+    {
+      check: "plan-membership",
+      planned: ["ARK-T1"] as string[],
+      source: membershipSource,
+      edit: (text: string) => text.replaceAll("const x = 1;", "const x = 2;"),
+      line: "case id not in plan test_cases: ARK-T2 in e2e.test.ts",
+    },
+  ])(
+    "ARK-T664 a failed $check check runs no suite and exits 1, and --keep-going runs the suites",
+    ({ check, planned, source, edit, line }) => {
+      const stopMessage = `ark: tests did not prove every criterion: check ${check} e2e failed`;
+      const attempt = (flags: string[]) => {
+        const suiteMarker = join(mkdtempSync(join(tmpdir(), "ark-suite-marker-")), "suite-ran");
+        const { runId, mirror } = run(planned, source, suiteMarker);
+        commitAll(mirror, { "e2e.test.ts": edit(source) });
+        return { result: ark("test", runId, ...flags), ran: existsSync(suiteMarker) };
+      };
+
+      const stopped = attempt([]);
+      expect(stopped.result.code).toBe(1);
+      expect(stopped.result.out).toContain(line);
+      expect(stopped.result.err).toBe(`${stopMessage}\n`);
+      expect(stopped.result.out.split("\n").filter((out) => out.startsWith("suite "))).toEqual([]);
+      expect(stopped.ran).toBe(false);
+
+      const keptGoing = attempt(["--keep-going"]);
+      expect(keptGoing.result.code).toBe(1);
+      expect(keptGoing.result.err).toContain(stopMessage);
+      expect(keptGoing.ran).toBe(true);
+    },
+  );
 });

@@ -22,6 +22,7 @@ import {
   writeProject,
   writeTicket,
 } from "./helpers.ts";
+import { installFakeOrca, removeFakeOrca } from "./fake-orca.ts";
 import {
   expectHookEndedOnlyItsRuns,
   holdRunners,
@@ -71,6 +72,8 @@ function buildingRun(options: {
   /** Extra fields for one suite, by suite name (for example `base_files` on the e2e suite only). */
   suiteOverrides?: Record<string, Record<string, unknown>>;
   checks?: { name: string; repo: string; command: string }[];
+  /** Replaces the plan steps (default: one `build` implementer step). A bug run needs a validator step first. */
+  steps?: Record<string, unknown>[];
   /** Give the repo a GitHub origin whose pushes go to a local bare repo, so `merge-request open` can run against the fake `gh`. */
   forge?: boolean;
 }): { runId: string; runDirectory: string; workspace: string; arkHome: string } {
@@ -142,7 +145,7 @@ function buildingRun(options: {
         fix: "Suites prove each criterion.",
       })),
     },
-    steps: [
+    steps: options.steps ?? [
       {
         id: "build",
         role: "implementer",
@@ -500,27 +503,258 @@ describe("ark test checks", () => {
     expect(testCompleted(runDirectory)[0].passed).toBe(true);
   });
 
-  test("ARK-302-AC1 a failing check records passed false, prints check <name> failed and the last 20 lines before the suites", () => {
-    const { runId, runDirectory } = buildingRun({
+  /** A building run whose e2e suite touches `suiteMarker` outside the worktree: a marker still absent after `ark test` proves that no suite started. */
+  function markedRun(options: Partial<Parameters<typeof buildingRun>[0]>) {
+    const suiteMarker = join(mkdtempSync(join(tmpdir(), "ark-suite-marker-")), "suite-ran");
+    const run = buildingRun({
       criteria: ["FAKE-1-AC1"],
       e2e: [passing("FAKE-1-AC1 works")],
+      e2eCommand: `touch ${suiteMarker}; ${junit("e2e.test.ts")}`,
+      ...options,
+    });
+    return { ...run, suiteMarker };
+  }
+  // The old-id and plan-membership lines of the checks contain `suite ` too: only a line that starts with it is a suite line.
+  const suiteLines = (out: string) => out.split("\n").filter((line) => line.startsWith("suite "));
+  const lintFailed = "ark: tests did not prove every criterion: check lint-fail failed\n";
+
+  test.each([
+    ["after a passing check", [checkFixtures.passing, checkFixtures.failing]],
+    ["before a passing check", [checkFixtures.failing, checkFixtures.passing]],
+  ])(
+    "ARK-T664 a failed check runs no suite, records every check, names the failed check and exits 1 (%s)",
+    (_position, checks) => {
+      const { runId, runDirectory, suiteMarker } = markedRun({ checks });
+      const result = ark("test", runId);
+
+      expect(result.code).toBe(1);
+      expect(result.err).toBe(lintFailed);
+      expect(result.out).toContain("check lint-fail failed");
+      expect(result.out).not.toContain("check in-worktree failed");
+      const lines = result.out.split("\n");
+      expect(lines).not.toContain("out-5");
+      for (const line of ["out-6", "out-25"]) expect(lines).toContain(line);
+      expect(suiteLines(result.out)).toEqual([]);
+      expect(result.out).not.toContain("FAKE-1/AC1");
+      expect(existsSync(suiteMarker)).toBe(false);
+      const [event] = testCompleted(runDirectory);
+      expect(event.passed).toBe(false);
+      expect(event.suites).toEqual([]);
+      // The stop comes after the last check, whichever position the failed one had.
+      for (const check of [
+        { name: "in-worktree", passed: true },
+        { name: "lint-fail", passed: false },
+        { name: "old-id unit", passed: true },
+        { name: "old-id e2e", passed: true },
+        { name: "plan-membership unit", passed: true },
+        { name: "plan-membership e2e", passed: true },
+      ])
+        expect(event.checks).toContainEqual(check);
+    },
+  );
+
+  test("ARK-T664 ark test --keep-going runs the suites after a failed check and still exits 1", () => {
+    const { runId, runDirectory, suiteMarker } = markedRun({
       checks: [checkFixtures.passing, checkFixtures.failing],
+    });
+    const result = ark("test", runId, "--keep-going");
+
+    expect(result.code).toBe(1);
+    expect(result.err).toBe(lintFailed);
+    expect(existsSync(suiteMarker)).toBe(true);
+    expect(result.out).toContain("FAKE-1/AC1  passing");
+    expect(suiteLines(result.out)).toHaveLength(2);
+    const [event] = testCompleted(runDirectory);
+    expect(event.passed).toBe(false);
+    expect(event.checks).toContainEqual({ name: "lint-fail", passed: false });
+    expect(event.suites.map((suite: { name: string }) => suite.name)).toEqual(["unit", "e2e"]);
+  });
+
+  test("ARK-T664 a quick run stops after a failed check and --keep-going runs its suites", () => {
+    const checks = [checkFixtures.passing, checkFixtures.failing];
+    const stopped = markedRun({ checks });
+    const stoppedResult = ark("test", stopped.runId, "--quick");
+    expect(stoppedResult.code).toBe(1);
+    expect(stoppedResult.err).toBe(lintFailed);
+    expect(existsSync(stopped.suiteMarker)).toBe(false);
+    expect(testCompleted(stopped.runDirectory)[0].suites).toEqual([]);
+
+    const keptGoing = markedRun({ checks });
+    const keptResult = ark("test", keptGoing.runId, "--quick", "--keep-going");
+    expect(keptResult.code).toBe(1);
+    expect(existsSync(keptGoing.suiteMarker)).toBe(true);
+    expect(testCompleted(keptGoing.runDirectory)[0].suites).toHaveLength(2);
+  });
+
+  test.each([[[]], [["--keep-going"]]])(
+    "ARK-T664 a run with no failed check runs its suites and exits 0 (flags %j)",
+    (flags) => {
+      const { runId, runDirectory, suiteMarker } = markedRun({ checks: [checkFixtures.passing] });
+      const result = ark("test", runId, ...flags);
+
+      expect(result.code).toBe(0);
+      expect(existsSync(suiteMarker)).toBe(true);
+      const [event] = testCompleted(runDirectory);
+      expect(event.passed).toBe(true);
+      expect(event.suites).toHaveLength(2);
+    },
+  );
+
+  test("ARK-T664 a check whose command does not exist is a failed check that stops the run", () => {
+    const { runId, suiteMarker } = markedRun({
+      checks: [{ name: "no-such-tool-481", repo: ".", command: "no-such-tool-481" }],
     });
     const result = ark("test", runId);
 
     expect(result.code).toBe(1);
-    expect(result.err).toContain("check lint-fail failed");
-    expect(result.out).toContain("check lint-fail failed");
-    expect(result.out).not.toContain("check in-worktree failed");
-    const lines = result.out.split("\n");
-    expect(lines).not.toContain("out-5");
-    for (const line of ["out-6", "out-25"]) expect(lines).toContain(line);
-    expect(result.out.indexOf("check lint-fail failed")).toBeLessThan(result.out.indexOf("suite "));
-    // The suites still ran and the AC passes: only the check fails the run.
-    expect(result.out).toContain("FAKE-1/AC1  passing");
-    const [event] = testCompleted(runDirectory);
-    expect(event.passed).toBe(false);
-    expect(event.criteria).toEqual({ "FAKE-1/AC1": "passing" });
+    expect(result.out).toContain("check no-such-tool-481 failed");
+    expect(result.err).toContain("check no-such-tool-481 failed");
+    expect(existsSync(suiteMarker)).toBe(false);
+  });
+
+  describe("a stopped run", () => {
+    afterEach(removeFakeOrca);
+    const validatorStep = {
+      id: "tests",
+      role: "validator",
+      repo: ".",
+      harness: "codex",
+      model: "gpt-codex",
+      needs: [],
+      criteria: ["FAKE-1/AC1"],
+    };
+    const implementerStep = {
+      ...validatorStep,
+      id: "build",
+      role: "implementer",
+      needs: ["tests"],
+    };
+    // A bug run: a validator step first, and a ticket criterion of method test, so the red proof is required.
+    const bugRun = (options: Partial<Parameters<typeof buildingRun>[0]> = {}) => {
+      const failureSwitch = join(mkdtempSync(join(tmpdir(), "ark-check-switch-")), "check-fails");
+      const run = markedRun({
+        kind: "bug",
+        criteria: ["FAKE-1/AC1"],
+        steps: [validatorStep, implementerStep],
+        ticketCriteria: [{ id: "AC1", method: "test", verified_by: ["FAKE-T1"] }],
+        testCases: [
+          {
+            id: "FAKE-T1",
+            action: "add",
+            level: "e2e",
+            given: [],
+            when: ["run it"],
+            // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+            then: ["it works"],
+            expected: "it works",
+          },
+        ],
+        e2e: [passing("FAKE-T1 works")],
+        checks: [{ name: "lint", repo: ".", command: `! test -e ${failureSwitch}` }],
+        ...options,
+      });
+      return { ...run, failureSwitch };
+    };
+    const evidenceFiles = (runDirectory: string) =>
+      readdirSync(join(runDirectory, "results/evidence"), { recursive: true })
+        .map(String)
+        .toSorted((a, b) => a.localeCompare(b));
+    const lintOnlyStderr = "ark: tests did not prove every criterion: check lint failed\n";
+
+    test("ARK-T665 a full run stopped by a failed check records its criteria as missing, keeps the last evidence and the heads, and is no red proof", () => {
+      const { runId, runDirectory, failureSwitch } = bugRun();
+      expect(ark("test", runId).code).toBe(0);
+      const evidenceBefore = evidenceFiles(runDirectory);
+      expect(evidenceBefore.length).toBeGreaterThan(0);
+      const [good] = testCompleted(runDirectory);
+
+      writeFileSync(failureSwitch, "");
+      const stopped = ark("test", runId);
+      expect(stopped.code).toBe(1);
+      expect(stopped.err).toBe(lintOnlyStderr);
+      expect(stopped.out).not.toContain("FAKE-1/AC1");
+      const event = testCompleted(runDirectory).at(-1);
+      expect(event).toMatchObject({
+        passed: false,
+        suites: [],
+        passed_count: 0,
+        skipped: 0,
+        mode: "full",
+        criteria: { "FAKE-1/AC1": "missing" },
+      });
+      expect(event.checks).toContainEqual({ name: "lint", passed: false });
+      expect(event.heads).toEqual(good.heads);
+      expect(evidenceFiles(runDirectory)).toEqual(evidenceBefore);
+      expect(existsSync(join(runDirectory, "results/evidence.next"))).toBe(false);
+      expect(ark("status", runId).out).toContain("test head: current");
+
+      // A stopped run records no failing criterion: the bug run's implementer cannot start on it.
+      installFakeOrca();
+      const refused = ark("run", "step", runId, "build", "start");
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain("record a failing ark test of the ACs before the fix");
+    });
+
+    test("ARK-T665 --keep-going records the failing criterion that lets the bug run's implementer start", () => {
+      const { runId, runDirectory, failureSwitch } = bugRun();
+      writeFileSync(failureSwitch, "");
+      const mirror = join(runDirectory, "workspace");
+      writeFileSync(join(mirror, "e2e.test.ts"), suiteTests([failing("FAKE-T1 works")]));
+      for (const args of [
+        ["add", "-A"],
+        ["commit", "-q", "-m", "red test"],
+      ])
+        Bun.spawnSync(["git", "-C", mirror, ...args]);
+
+      const result = ark("test", runId, "--keep-going");
+      expect(result.code).toBe(1);
+      expect(result.out).toContain("FAKE-1/AC1  failing");
+      expect(result.err).toContain("check lint failed");
+      expect(result.err).toContain("suite e2e failed");
+      expect(testCompleted(runDirectory).at(-1).criteria).toEqual({ "FAKE-1/AC1": "failing" });
+      installFakeOrca();
+      expect(ark("run", "step", runId, "build", "start").code).toBe(0);
+    });
+
+    test("ARK-T665 a stopped quick run records its criteria as not run", () => {
+      const { runId, runDirectory, failureSwitch } = bugRun();
+      writeFileSync(failureSwitch, "");
+      const result = ark("test", runId, "--quick");
+
+      expect(result.code).toBe(1);
+      expect(result.out).not.toContain("FAKE-1/AC1");
+      expect(result.err).toBe(lintOnlyStderr);
+      expect(testCompleted(runDirectory)[0]).toMatchObject({
+        passed: false,
+        mode: "quick",
+        criteria: { "FAKE-1/AC1": "not run" },
+      });
+    });
+
+    test("ARK-T665 a refactor run stopped by a failed check runs no base suite and records no base result", () => {
+      const failureSwitch = join(mkdtempSync(join(tmpdir(), "ark-check-switch-")), "check-fails");
+      writeFileSync(failureSwitch, "");
+      const refactorRun = () =>
+        markedRun({
+          kind: "refactor",
+          ticketCriteria: [{ id: "FAKE-1-AC1", method: "test" }],
+          checks: [{ name: "lint", repo: ".", command: `! test -e ${failureSwitch}` }],
+        });
+      const baseLog = (runDirectory: string) => join(runDirectory, "results/base-e2e.log");
+
+      const stopped = refactorRun();
+      const result = ark("test", stopped.runId);
+      expect(result.code).toBe(1);
+      expect(result.err).toBe(lintOnlyStderr);
+      expect(result.out).not.toMatch(/^base /m);
+      expect(existsSync(baseLog(stopped.runDirectory))).toBe(false);
+      expect(testCompleted(stopped.runDirectory)[0]).not.toHaveProperty("base_passed");
+
+      // Control: with --keep-going the same run reaches its base suites, so the absent log above is a real proof.
+      const kept = refactorRun();
+      ark("test", kept.runId, "--keep-going");
+      expect(existsSync(baseLog(kept.runDirectory))).toBe(true);
+    });
   });
 });
 
