@@ -684,23 +684,26 @@ interrupted counts no round), `escalations` (escalation gate answers) and `findi
 findings file whose first of the words `leave` and `send back` is `leave`. `rework.findings_dropped`
 counts the list lines under `## Run lead decision` in each findings file that start, after `-` or
 `*` and bold marks, with `dropped` (any case); a `dropped` line under another heading counts 0.
-`rework.merge_steps` counts steps started with `--merge`. `human_intervention.plan_changes` counts
-the plan `change` answers plus every plan `approve` answer after the first, whoever gave it (`by`
-human or auto): `plan_changes: 0` for a plan approved once, `plan_changes: 2` for one change and a
-second approve. `actual_models` maps each plan step ID to the sorted, unique models of its sessions
-(an empty list when no session was found). For each step whose session models differ from its model
-in plan.yml (compared without a provider prefix, so `anthropic/claude-x` matches `claude-x`), it
-prints `model changed: step <step> planned <plan model>, ran <models>`; a run with no readable
-plan.yml prints none. `same_vendor_review` is true when a reviewer step ran all of its models on one
-vendor that an implementer step in the same repo also ran (`claude-` is anthropic, `gpt-` is openai,
-any other model has no vendor). A reviewer step that ran models of two vendors is `mixed`: it is not
-same vendor, `ark retro` prints `mixed review steps: <steps>`. It prints `same vendor review: true
-(<steps>)` or `false`. Both are reports only. The `resources` object holds `peak_mb` (the largest
-single peak of the run's suites and agents, from `results/resources.json`: the peaks overlap, so
-they are never added), `cpu_s` (the CPU seconds of every suite side and agent, added) and `top` (the
-3 entries with the largest peak, each with `kind`, `name`, `peak_mb` and `cpu_s`); it is `unknown`
-when the run has no `resources.json` or it holds no figure. It prints `resources: peak <MB> MB, <s>
-CPU s; top 3 by memory: ...` or `resources: unknown`.
+`rework.merge_steps` counts steps started with `--merge`. `rework.rules_added` counts the list lines
+(`-` or `*` marker) of `rules.md` in the run folder, one for each rule the run lead wrote; a
+heading, a prose line or a blank line counts 0, and a missing file counts 0.
+`human_intervention.plan_changes` counts the plan `change` answers plus every plan `approve` answer
+after the first, whoever gave it (`by` human or auto): `plan_changes: 0` for a plan approved once,
+`plan_changes: 2` for one change and a second approve. `actual_models` maps each plan step ID to the
+sorted, unique models of its sessions (an empty list when no session was found). For each step whose
+session models differ from its model in plan.yml (compared without a provider prefix, so
+`anthropic/claude-x` matches `claude-x`), it prints `model changed: step <step> planned <plan
+model>, ran <models>`; a run with no readable plan.yml prints none. `same_vendor_review` is true
+when a reviewer step ran all of its models on one vendor that an implementer step in the same repo
+also ran (`claude-` is anthropic, `gpt-` is openai, any other model has no vendor). A reviewer step
+that ran models of two vendors is `mixed`: it is not same vendor, `ark retro` prints `mixed review
+steps: <steps>`. It prints `same vendor review: true (<steps>)` or `false`. Both are reports only.
+The `resources` object holds `peak_mb` (the largest single peak of the run's suites and agents, from
+`results/resources.json`: the peaks overlap, so they are never added), `cpu_s` (the CPU seconds of
+every suite side and agent, added) and `top` (the 3 entries with the largest peak, each with `kind`,
+`name`, `peak_mb` and `cpu_s`); it is `unknown` when the run has no `resources.json` or it holds no
+figure. It prints `resources: peak <MB> MB, <s> CPU s; top 3 by memory: ...` or `resources:
+unknown`.
 ```
 
 ### chief state

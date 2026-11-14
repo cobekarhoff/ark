@@ -274,7 +274,7 @@ See [Project checks, ticket kinds and proof](project-checks.md) for each. On a r
 
 ## 9. Retro
 
-While the MRs are open, before merge or close, the run lead runs `ark retro` and writes `retro.md` for the run: the numbers (cost, time, rework) and proposals for improvement. Nobody asks you questions after a single run.
+While the MRs are open, before merge or close, the run lead runs `ark retro` and writes `retro.md` for the run: the numbers (cost, time, rework) and proposals for improvement, one for each rule in `rules.md` (a rule the run lead wrote when a finding repeated). Nobody asks you questions after a single run.
 
 Every 10 closed runs, or when you ask (`/skill:ark retro interview`), Master Chief runs a deep interview. It asks at most 8 questions, one at a time. You approve or reject each proposal. Nothing changes without your approval.
 

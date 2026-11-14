@@ -6,7 +6,7 @@ technique: equivalence classes (entry of this run, entry of another run) and cou
 priority: high
 risk: retro miscounts rework rounds, escalations, findings sent back or plan changes, or lists an escaped defect of another run, so the run's metrics.json misstates how much human and review effort the run took
 status: active
-changed_by: 2026-11-14-ARK-391-1
+changed_by: 2026-11-14-ARK-392-1
 ---
 
 ## Objective
@@ -29,7 +29,7 @@ Expected: When ark retro runs for a run, the system shall report rework, plan ch
 
 ## Expected results
 
-- `rework` is `rounds: 2`, `escalations: 1`, `findings_sent_back: 1`, `findings_left_p0p1: 0`, `findings_dropped: 0`, `merge_steps: 0`.
+- `rework` is `rounds: 2`, `escalations: 1`, `findings_sent_back: 1`, `findings_left_p0p1: 0`, `findings_dropped: 0`, `merge_steps: 0`, `rules_added: 0`.
 - `human_intervention` is `plan_changes: 1`, `mr_comments: 0`, `mr_commits_after_open: 0`, `mr_sync_commits: 0`, `mr_fix_commits: 0`. `mr_commits_after_open` is the sum of the other two.
 - `escaped_defects` holds only the ARK-901 entry, with its note and empty `fix` and `reviewer`. The entry of the other run is not listed.
 
