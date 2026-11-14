@@ -1173,7 +1173,16 @@ test("ARK-T384 a generated command that fails, leaves a conflict marker or dirti
 
     expect(synced.code, variant.command).toBe(1);
     expect(synced.err, variant.command).toContain("repo .:");
-    expect(treeState(worktree), variant.command).toEqual(before);
+    // head, GEN.txt and the index are as before; the status differs only by the untracked file the command wrote, which stays
+    const after = treeState(worktree);
+    expect(after.head, variant.command).toBe(before.head);
+    expect(after.generated, variant.command).toBe(before.generated);
+    expect(
+      after.status
+        .split("\n")
+        .filter((line) => !variant.untracked.some((file) => line === `?? ${file}`)),
+      variant.command,
+    ).toEqual(before.status.split("\n"));
     expect(hasMergeHead(worktree), variant.command).toBe(false);
     expect(syncedEvents(scenario.runDirectory), variant.command).toEqual([
       { repo: ".", conflict: true, conflicts: ["GEN.txt"] },
@@ -1286,109 +1295,113 @@ test("ARK-T385 a clean merge records no conflicts", () => {
   ]);
 });
 
-test("ARK-T386 the documented Ark generated entry regenerates docs/reference/cli.md when a run and the target both changed cli/ark.ts", () => {
-  const repositoryRoot = join(import.meta.dir, "..");
-  const guide = readFileSync(join(repositoryRoot, "docs/how-to/bootstrap-a-project.md"), "utf8");
-  const example = guide.match(
-    /```yaml\n( {3}workspace: \/Users\/you\/Dev\/abbott\/ark\n[\s\S]*?)```/,
-  );
-  if (!example) throw new Error("bootstrap-a-project.md has no Ark ark.yml example");
-  const { generated } = Bun.YAML.parse(example[1].replace(/^ {3}/gm, "")) as {
-    generated?: { path: string; command: string }[];
-  };
-  expect(generated).toContainEqual({
-    path: "docs/reference/cli.md",
-    command: "bun scripts/cli-reference.ts",
-  });
-
-  const generate = (directory: string) => {
-    const result = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: directory });
-    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
-  };
-  const replaceInFile = (directory: string, file: string, from: string, to: string) => {
-    const path = join(directory, file);
-    const text = readFileSync(path, "utf8");
-    if (!text.includes(from)) throw new Error(`${file} lacks ${from}`);
-    writeFileSync(path, text.replace(from, to));
-  };
-  const scenario = startRun(["."], false, { generated }, (workspace) => {
-    const tracked = Bun.spawnSync(
-      [
-        "git",
-        "-C",
-        repositoryRoot,
-        "ls-files",
-        "-z",
-        "--",
-        "cli",
-        "scripts",
-        "skills",
-        "hub",
-        "docs/reference/cli.md",
-        "package.json",
-      ],
-      { stdout: "pipe" },
-    )
-      .stdout.toString()
-      .split("\0")
-      .filter(Boolean);
-    for (const file of tracked) {
-      mkdirSync(dirname(join(workspace, file)), { recursive: true });
-      copyFileSync(join(repositoryRoot, file), join(workspace, file));
-    }
-    generate(workspace);
-    git(workspace, "add", "-A");
-    git(workspace, "commit", "-m", "ark tree");
-    git(workspace, "push", "origin", "main");
-  });
-  const worktree = scenario.worktreePath();
-  // the two sides change the contents-table rows of two neighbouring commands, so cli.md conflicts;
-  // cli/ark.ts and cli/commands/*.ts change in different places and merge
-  replaceInFile(
-    worktree,
-    "cli/commands/run.ts",
-    "Prints the state of one run:",
-    "Prints the state of a single run:",
-  );
-  writeFileSync(
-    join(worktree, "cli/ark.ts"),
-    `${readFileSync(join(worktree, "cli/ark.ts"), "utf8")}// run side\n`,
-  );
-  generate(worktree);
-  git(worktree, "add", "-A");
-  git(worktree, "commit", "-m", "run side");
-  const tip = originCommit(scenario.workspace, (clone) => {
-    replaceInFile(
-      clone,
-      "cli/commands/retro.ts",
-      "Computes the run's cost, time,",
-      "Computes the cost, time,",
+test(
+  "ARK-T386 the documented Ark generated entry regenerates docs/reference/cli.md when a run and the target both changed cli/ark.ts",
+  () => {
+    const repositoryRoot = join(import.meta.dir, "..");
+    const guide = readFileSync(join(repositoryRoot, "docs/how-to/bootstrap-a-project.md"), "utf8");
+    const example = guide.match(
+      /```yaml\n( {3}workspace: \/Users\/you\/Dev\/abbott\/ark\n[\s\S]*?)```/,
     );
+    if (!example) throw new Error("bootstrap-a-project.md has no Ark ark.yml example");
+    const { generated } = Bun.YAML.parse(example[1].replace(/^ {3}/gm, "")) as {
+      generated?: { path: string; command: string }[];
+    };
+    expect(generated).toContainEqual({
+      path: "docs/reference/cli.md",
+      command: "bun scripts/cli-reference.ts",
+    });
+
+    const generate = (directory: string) => {
+      const result = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: directory });
+      if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+    };
+    const replaceInFile = (directory: string, file: string, from: string, to: string) => {
+      const path = join(directory, file);
+      const text = readFileSync(path, "utf8");
+      if (!text.includes(from)) throw new Error(`${file} lacks ${from}`);
+      writeFileSync(path, text.replace(from, to));
+    };
+    const scenario = startRun(["."], false, { generated }, (workspace) => {
+      const tracked = Bun.spawnSync(
+        [
+          "git",
+          "-C",
+          repositoryRoot,
+          "ls-files",
+          "-z",
+          "--",
+          "cli",
+          "scripts",
+          "skills",
+          "hub",
+          "docs/reference/cli.md",
+          "package.json",
+        ],
+        { stdout: "pipe" },
+      )
+        .stdout.toString()
+        .split("\0")
+        .filter(Boolean);
+      for (const file of tracked) {
+        mkdirSync(dirname(join(workspace, file)), { recursive: true });
+        copyFileSync(join(repositoryRoot, file), join(workspace, file));
+      }
+      generate(workspace);
+      git(workspace, "add", "-A");
+      git(workspace, "commit", "-m", "ark tree");
+      git(workspace, "push", "origin", "main");
+    });
+    const worktree = scenario.worktreePath();
+    // the two sides change the contents-table rows of two neighbouring commands, so cli.md conflicts;
+    // cli/ark.ts and cli/commands/*.ts change in different places and merge
     replaceInFile(
-      clone,
-      "cli/ark.ts",
-      "#!/usr/bin/env bun\n",
-      "#!/usr/bin/env bun\n// origin side\n",
+      worktree,
+      "cli/commands/run.ts",
+      "Prints the state of one run:",
+      "Prints the state of a single run:",
     );
-    generate(clone);
-  });
-  const headBefore = git(worktree, "rev-parse", "HEAD");
+    writeFileSync(
+      join(worktree, "cli/ark.ts"),
+      `${readFileSync(join(worktree, "cli/ark.ts"), "utf8")}// run side\n`,
+    );
+    generate(worktree);
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-m", "run side");
+    const tip = originCommit(scenario.workspace, (clone) => {
+      replaceInFile(
+        clone,
+        "cli/commands/retro.ts",
+        "Computes the run's cost, time,",
+        "Computes the cost, time,",
+      );
+      replaceInFile(
+        clone,
+        "cli/ark.ts",
+        "#!/usr/bin/env bun\n",
+        "#!/usr/bin/env bun\n// origin side\n",
+      );
+      generate(clone);
+    });
+    const headBefore = git(worktree, "rev-parse", "HEAD");
 
-  const synced = ark("worktree", "sync", scenario.runId);
+    const synced = ark("worktree", "sync", scenario.runId);
 
-  expect(synced.code, synced.err).toBe(0);
-  expect(git(worktree, "log", "-1", "--format=%P")).toBe(`${headBefore} ${tip}`);
-  expect(git(worktree, "status", "--porcelain")).toBe("");
-  const reference = readFileSync(join(worktree, "docs/reference/cli.md"), "utf8");
-  expect(reference).not.toContain("<<<<<<<");
-  expect(reference).toContain("Prints the state of a single run");
-  expect(reference).toContain("Computes the cost, time,");
-  const entry = readFileSync(join(worktree, "cli/ark.ts"), "utf8");
-  expect(entry).toContain("// origin side");
-  expect(entry).toContain("// run side");
-  generate(worktree);
-  expect(git(worktree, "status", "--porcelain")).toBe("");
-  expect(syncedEvents(scenario.runDirectory)).toEqual([
-    { repo: ".", conflict: false, target_commit: tip, conflicts: ["docs/reference/cli.md"] },
-  ]);
-});
+    expect(synced.code, synced.err).toBe(0);
+    expect(git(worktree, "log", "-1", "--format=%P")).toBe(`${headBefore} ${tip}`);
+    expect(git(worktree, "status", "--porcelain")).toBe("");
+    const reference = readFileSync(join(worktree, "docs/reference/cli.md"), "utf8");
+    expect(reference).not.toContain("<<<<<<<");
+    expect(reference).toContain("Prints the state of a single run");
+    expect(reference).toContain("Computes the cost, time,");
+    const entry = readFileSync(join(worktree, "cli/ark.ts"), "utf8");
+    expect(entry).toContain("// origin side");
+    expect(entry).toContain("// run side");
+    generate(worktree);
+    expect(git(worktree, "status", "--porcelain")).toBe("");
+    expect(syncedEvents(scenario.runDirectory)).toEqual([
+      { repo: ".", conflict: false, target_commit: tip, conflicts: ["docs/reference/cli.md"] },
+    ]);
+  },
+  { timeout: 120_000 },
+);

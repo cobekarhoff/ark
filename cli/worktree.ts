@@ -3,6 +3,7 @@ import {
   lstatSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -508,6 +509,66 @@ function syncSetup(
   return undefined;
 }
 
+/** Paths git left unmerged, repo-relative and sorted. */
+function unmergedPaths(path: string): string[] {
+  const listed = Bun.spawnSync(["git", "-C", path, "diff", "--name-only", "--diff-filter=U", "-z"]);
+  return listed.stdout
+    .toString()
+    .split("\0")
+    .filter((file) => file !== "")
+    .sort();
+}
+
+const untrackedFiles = (path: string): string[] =>
+  git(path, "ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean);
+
+/**
+ * Finishes a conflicted merge whose unmerged paths are all in `generated`: runs the command of each path in the worktree, then commits the merge.
+ * Returns the reason when it cannot, after putting the worktree back at `headBefore`; untracked files stay (never `git clean`).
+ */
+function regenerateConflicts(
+  worktree: { repo: string; path: string },
+  generated: { path: string; command: string }[],
+  conflicted: string[],
+  headBefore: string,
+): string | undefined {
+  const { repo, path } = worktree;
+  const untrackedBefore = new Set(untrackedFiles(path));
+  const fail = (reason: string): string => {
+    Bun.spawnSync(["git", "-C", path, "reset", "--hard", headBefore]);
+    return reason;
+  };
+  for (const entry of generated.filter((item) => conflicted.includes(item.path))) {
+    console.error(`${repo}  regenerate: ${entry.path}, running \`${entry.command}\``);
+    const result = Bun.spawnSync(["sh", "-c", entry.command], { cwd: path });
+    if (result.exitCode !== 0) {
+      const output = `${result.stdout.toString()}${result.stderr.toString()}`.trim();
+      return fail(
+        `\`${entry.command}\` for ${entry.path} failed (exit ${result.exitCode}): ${output.split("\n").slice(-10).join("\n")}`,
+      );
+    }
+  }
+  for (const file of conflicted) {
+    const text = pathExists(join(path, file)) ? readFileSync(join(path, file), "utf8") : "";
+    if (/^<{7}( |$)/m.test(text))
+      return fail(`${file} still holds a conflict marker after its command`);
+  }
+  git(path, "add", "--", ...conflicted);
+  const changed = [
+    ...unmergedPaths(path),
+    ...git(path, "diff", "--name-only", "-z").split("\0").filter(Boolean),
+    ...untrackedFiles(path).filter((file) => !untrackedBefore.has(file)),
+  ];
+  if (changed.length > 0)
+    return fail(`the commands changed files outside the generated paths: ${changed.join(", ")}`);
+  const committed = Bun.spawnSync(["git", "-C", path, "commit", "--no-edit"]);
+  if (committed.exitCode !== 0)
+    return fail(
+      `git commit failed: ${committed.stdout.toString().trim()}${committed.stderr.toString().trim()}`,
+    );
+  return undefined;
+}
+
 /** Merges origin/<target> into every worktree and pushes the branch of each repo with an open MR. A conflicting repo is recorded and skipped; after the last repo one error names every conflicting repo. */
 export function worktreeSync(runId: string, inProject?: string): void {
   const { project, directory } = findRun(runId, inProject);
@@ -546,18 +607,27 @@ export function worktreeSync(runId: string, inProject?: string): void {
       "--no-edit",
       `origin/${target}`,
     ]);
+    // read before any abort or reset: the index holds the unmerged paths only until then
+    const conflicted = merged.exitCode === 0 ? [] : unmergedPaths(worktree.path);
+    const generated = config.generated ?? [];
+    const regenerable =
+      conflicted.length > 0 &&
+      conflicted.every((file) => generated.some((entry) => entry.path === file));
+    const regenerationFailure = regenerable
+      ? regenerateConflicts(worktree, generated, conflicted, headBefore)
+      : undefined;
+    const failed = merged.exitCode !== 0 && (!regenerable || regenerationFailure !== undefined);
     appendEvent(directory, "worktree.synced", {
       repo: worktree.repo,
-      conflict: merged.exitCode !== 0,
+      conflict: failed,
       // the merged tip, not HEAD (the merge commit); a conflict merged nothing
-      ...(merged.exitCode === 0
-        ? { target_commit: git(worktree.path, "rev-parse", `origin/${target}`) }
-        : {}),
+      ...(failed ? {} : { target_commit: git(worktree.path, "rev-parse", `origin/${target}`) }),
+      ...(conflicted.length > 0 ? { conflicts: conflicted } : {}),
     });
-    if (merged.exitCode !== 0) {
-      Bun.spawnSync(["git", "-C", worktree.path, "merge", "--abort"]);
+    if (failed) {
+      if (!regenerable) Bun.spawnSync(["git", "-C", worktree.path, "merge", "--abort"]);
       conflicts.push(
-        `repo ${worktree.repo}: merging origin/${target} failed, worktree left unchanged: ${merged.stdout.toString().trim()}${merged.stderr.toString().trim()}`,
+        `repo ${worktree.repo}: merging origin/${target} failed, worktree left unchanged: ${regenerationFailure ?? `${merged.stdout.toString().trim()}${merged.stderr.toString().trim()}`}`,
       );
       continue;
     }

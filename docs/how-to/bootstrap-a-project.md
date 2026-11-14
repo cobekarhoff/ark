@@ -58,6 +58,9 @@ You need:
    ```yaml
    workspace: /Users/you/Dev/abbott/ark
    ticket_source: local
+   generated:
+     - path: docs/reference/cli.md
+       command: bun scripts/cli-reference.ts
    suites:
      - name: integration
        level: integration
@@ -74,6 +77,8 @@ You need:
      test_writer: { harness: omp, model: anthropic/claude-sonnet-5-5 }
      test_reviewer: { harness: omp, model: openai-codex/gpt-6.1-sol }
    ```
+
+   `generated` lists files that a command writes. When `ark worktree sync` finds conflicts only in those files, it runs the command, commits the result as the merge and succeeds, with no merge worker. Conflicts in the hand-written parts of such a file still reach a worker: the sync checks that no conflict marker is left, and aborts as before when one is. Add the list to your own `ark.yml` by hand: bootstrap does not write it.
 
    `ark status` fails without `implementer`, `validator` and `reviewer`. The other roles are optional in the file, but each run needs them:
 
