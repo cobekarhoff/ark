@@ -11,7 +11,7 @@ changed_by: 2026-11-14-ARK-479-1
 
 ## Objective
 
-Prove that each kind of process call that `test/worker-start.test.ts` makes (the `ark` helper, the `git` of `tempGitRepo`, the raw git call of `snapshotOf`) has a time limit below the file's 30 s test timeout, and that a call that exceeds it fails the case with its command line, the limit and what the command wrote to stderr. Serves ARK-479/AC1.
+Prove that each kind of process call that `test/worker-start.test.ts` makes (the `ark` helper, the `git` of `tempGitRepo`, the raw git call of `snapshotOf`) has a time limit below the file's 30 s test timeout, and that a call that exceeds it fails the case with its command line, the limit and what the command wrote to stderr. The file does not use the default repo of `addWorktree` (`test/fake-orca.ts`), which would reach the shared `tempGitRepo` at 45 s: `buildRun` passes the file's own bounded `tempGitRepo()`. Serves ARK-479/AC1.
 
 Ownership (`rules/test-audit.md`, one contract one owner): ARK-T400 owns the behavior of the shared helpers `arkWithin` and `tempGitRepo`'s git against the 60 s timeout of `test/worktree-submodule.test.ts`: the stall message shape, the fast failure and the healthy output, with a bound below 60 000. ARK-T569 owns one thing: the value of each limit that worker-start uses against its own 30 s timeout, with a bound below 30 000. The two bounds differ (30 000 against 60 000) and both stay, because the same helpers run under two test timeouts. A limit of 45 s (today's `commandLimitMs`) passes ARK-T400 and fails ARK-T569, so ARK-T400 does not prove the value for `tempGitRepo` in worker-start. The `ark` helper and `tempGitRepo`'s `git` are two call paths with no shared constant: `ark` passes no timeout (`test/helpers.ts:106-114`), only `git` reads `commandLimitMs` (`:75`). Each needs its own bound below 30 000 in this case: ARK-T569 step 1 for `ark`, step 2 for `tempGitRepo`. The `tempGitRepo` stall of ARK-T569 uses a file set no other test builds, as ARK-T400 does, so a cached template cannot hide the stall; the call and message shape stay with ARK-T400, ARK-T569 adds only the stricter bound.
 
@@ -24,7 +24,7 @@ The authoring gate:
 
 Why `snapshotOf` stays: it is a raw `Bun.spawnSync` of the file, not the shared `git` helper, so a lowered shared limit does not bound it. This is a separate risk from the shared value: the helpers bounded and `snapshotOf` left unbounded.
 
-Residual risk: the three raw `Bun.spawnSync` calls of the file (`git init` in `buildRun`, `git symbolic-ref` inline in an ARK-T210 test, `git status --porcelain` in `snapshotOf`) are three sites. The case drives only `snapshotOf`; the plan puts all three through one bounded call, so one stall proves the bound, and the reviewer reads the diff for the other two (no source grep as a test).
+Residual risk: the three raw `Bun.spawnSync` calls of the file (`git init` in `buildRun`, `git symbolic-ref` inline in an ARK-T210 test, `git status --porcelain` in `snapshotOf`) are three sites. The case drives only `snapshotOf`; the plan puts all three through one bounded call, so one stall proves the bound, and the reviewer reads the diff for the other two (no source grep as a test). `addWorktree`'s default repo is not used by the file: `buildRun` passes the file's bounded `tempGitRepo()`, so no call of the file reaches the 45 s default through `test/fake-orca.ts`.
 
 `arkAt` is not a second stall: it sets `ARK_NOW` and returns `ark(...args)`, the same spawn.
 

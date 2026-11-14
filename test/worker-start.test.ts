@@ -177,7 +177,7 @@ function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boo
     // a step worktree is a git repo: finish refuses when `git status` fails
     expect(git(["init", "-q", worktree]).exitCode).toBe(0);
   }
-  return { runId, directory, worktree: addWorktree(directory, ".", worktree) };
+  return { runId, directory, worktree: addWorktree(directory, ".", worktree ?? tempGitRepo()) };
 }
 
 type Recorded = { type: string; time: string; data: Record<string, any> };
