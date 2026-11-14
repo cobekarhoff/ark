@@ -122,21 +122,14 @@ function checkPlan(runId: string, directory: string, decisions: unknown[] = []) 
   return ark("plan", "check", runId);
 }
 
-test("ARK-234-AC1 a gates value other than human or auto exits 1 and names the field", () => {
+test("ARK-T537 ARK-234-AC1 a gates value other than human or auto exits 1 and names the field", () => {
   writeProject("demo", { ...baseConfig(), gates: { plan: "maybe" } });
   const result = ark("status");
   expect(result.code).toBe(1);
   expect(result.out).toContain("gates.plan");
 });
 
-test("ARK-234-AC1 an unknown gates key exits 1 and names the field", () => {
-  writeProject("demo", { ...baseConfig(), gates: { setup: "auto" } });
-  const result = ark("status");
-  expect(result.code).toBe(1);
-  expect(result.out).toContain("gates.setup");
-});
-
-test("ARK-T168 a gates map with only plan set loads, and the other keys stay human", () => {
+test("ARK-T168 ARK-234-AC3 a gates map with only plan set loads, and the other keys stay human", () => {
   const { runId, directory } = startRun({ plan: "auto" });
   withFakeHarnesses(["pi/task", "pi/validate", "pi/design"], () =>
     expect(ark("status").code).toBe(0),
@@ -159,7 +152,7 @@ test("ARK-T219 gates.plan auto approves a valid plan with no open decision by au
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
 });
 
-test("ARK-234-AC2 gates.plan auto leaves the plan gate open while a decision is open", () => {
+test("ARK-T538 ARK-234-AC2 gates.plan auto leaves the plan gate open while a decision is open", () => {
   const { runId, directory } = startRun({ plan: "auto" });
   recordEvaluation(directory);
   const result = checkPlan(runId, directory, [
@@ -176,7 +169,7 @@ test("ARK-234-AC2 gates.plan auto leaves the plan gate open while a decision is 
   expect(deriveState(eventsOf(directory)).phase).toBe("planning");
 });
 
-test("ARK-234-AC2 gates.plan auto does not answer an invalid plan", () => {
+test("ARK-T539 ARK-234-AC2 gates.plan auto does not answer an invalid plan", () => {
   const { runId, directory } = startRun({ plan: "auto" });
   recordEvaluation(directory);
   writeFileSync(join(directory, "plan.yml"), JSON.stringify({ ...planWith(), test_cases: [] }));
@@ -202,7 +195,7 @@ function recordTwoCards(
   return ark("strategy", "record", runId);
 }
 
-test("ARK-234-AC3 gates.strategy auto answers with the recommended card by auto", () => {
+test("ARK-T540 ARK-234-AC3 gates.strategy auto answers with the recommended card by auto", () => {
   const { runId, directory } = startRun({ strategy: "auto" });
   expect(recordTwoCards(runId, directory, "no", "yes").code).toBe(0);
   const strategy = answers(directory, "strategy");
@@ -211,7 +204,7 @@ test("ARK-234-AC3 gates.strategy auto answers with the recommended card by auto"
   expect(deriveState(eventsOf(directory)).phase).toBe("planning");
 });
 
-test("ARK-234-AC3 a strategy with no valid recommended card is refused and the gate stays open", () => {
+test("ARK-T541 ARK-234-AC3 a strategy with no valid recommended card is refused and the gate stays open", () => {
   const { runId, directory } = startRun({ strategy: "auto" });
   const result = recordTwoCards(runId, directory, "no", "no");
   expect(result.code).toBe(1);
@@ -220,27 +213,7 @@ test("ARK-234-AC3 a strategy with no valid recommended card is refused and the g
   expect(checkPlan(runId, directory).code).toBe(1);
 });
 
-test("ARK-234-AC3 a human strategy gate stays open after strategy record", () => {
-  const { runId, directory } = startRun();
-  expect(recordTwoCards(runId, directory, "yes", "no").code).toBe(0);
-  expect(answers(directory, "strategy")).toHaveLength(0);
-  expect(deriveState(eventsOf(directory)).phase).toBe("awaiting_strategy");
-});
-
-test("ARK-234-AC4 with no gates key plan check answers nothing and gate record writes by human", () => {
-  const { runId, directory } = startRun();
-  recordEvaluation(directory);
-  expect(checkPlan(runId, directory).code).toBe(0);
-  expect(answers(directory, "plan")).toHaveLength(0);
-  expect(ark("gate", "record", runId, "plan", "approve").code).toBe(0);
-  expect(answers(directory, "plan")[0].data).toEqual({
-    gate: "plan",
-    answer: "approve",
-    by: "human",
-  });
-});
-
-test("ARK-234-AC5 status and metrics.json separate auto answers from human answers", () => {
+test("ARK-T542 ARK-234-AC5 ARK-288-AC7 status and metrics.json separate auto answers from human answers", () => {
   const { runId, directory } = startRun({ plan: "auto" });
   expect(recordTwoCards(runId, directory, "yes", "no").code).toBe(0);
   expect(ark("gate", "record", runId, "strategy", "S2").code).toBe(0);
@@ -256,7 +229,7 @@ test("ARK-234-AC5 status and metrics.json separate auto answers from human answe
   expect(metrics.gates).toEqual({ auto_answers: 1, human_answers: 2 });
 });
 
-test("ARK-234-AC5 an answer from before the by field reads as human", () => {
+test("ARK-T543 ARK-234-AC5 an answer from before the by field reads as human", () => {
   const { runId, directory } = startRun();
   recordEvaluation(directory);
   expect(checkPlan(runId, directory).code).toBe(0);
@@ -330,7 +303,7 @@ test("ARK-T220 a spent budget with gates.escalation auto records the answer by a
   expect(deriveState(eventsOf(directory)).steps[0].status).toBe("running");
 });
 
-test("ARK-288-AC1 a spent budget in phase building with no test or a passing test is answered by auto", () => {
+test("ARK-T544 ARK-288-AC1 a spent budget in phase building with no test or a passing test is answered by auto", () => {
   for (const passing of [false, true]) {
     tempArkHome(); // one open run per ticket: each case needs its own home
     const { runId, directory } = buildingRun({ escalation: "auto" });
@@ -352,7 +325,7 @@ test("ARK-288-AC1 a spent budget in phase building with no test or a passing tes
   }
 });
 
-test("ARK-288-AC1 a start refused for a running step or a --merge with no failed sync leaves no gate.answered", () => {
+test("ARK-T545 ARK-288-AC1 a start refused for a running step or a --merge with no failed sync leaves no gate.answered", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   spendRounds(runId, directory);
   expect(start(runId).code).toBe(0); // round 3, auto answer 1
@@ -370,26 +343,6 @@ test("ARK-288-AC1 a start refused for a running step or a --merge with no failed
   expect(refusedMerge.err).toContain("--merge needs a failed ark worktree sync");
   expect(eventsOf(directory)).toHaveLength(merge);
   expect(autoAnswers(directory)).toHaveLength(1);
-});
-
-// ARK-288-AC2 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC2`
-test("ARK-288-AC2 the third spent budget is refused and the phase is escalation", () => {
-  const { runId, directory } = buildingRun({ escalation: "auto" });
-  spendRounds(runId, directory);
-  for (const count of [1, 2]) {
-    const result = start(runId);
-    expect(result.code).toBe(0);
-    expect(result.out).toContain(`escalation one_more_round by auto (${count} of 2)`);
-    expect(finish(runId).code).toBe(0);
-    failTest(directory);
-  }
-  const before = eventsOf(directory).length;
-  const refused = start(runId);
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("round budget spent");
-  expect(autoAnswers(directory)).toHaveLength(2);
-  expect(eventsOf(directory)).toHaveLength(before);
-  expect(ark("status", runId).out).toContain("phase: escalation");
 });
 
 // ARK-T224 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T224`
@@ -430,7 +383,7 @@ test("ARK-T224 after the MRs open, 3 merge starts are answered and not counted, 
 });
 
 // ARK-288-AC4 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC4`
-test("ARK-288-AC4 a requested escalation is never answered by auto and the phase stays escalation", () => {
+test("ARK-T546 ARK-288-AC4 a requested escalation is never answered by auto and the phase stays escalation", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" });
   spendRounds(runId, directory, false);
   expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
@@ -447,7 +400,7 @@ test("ARK-288-AC4 a requested escalation is never answered by auto and the phase
   expect(start(runId).code).toBe(0);
 });
 
-test("an event refused outside a gate phase names the phases that allow it", () => {
+test("ARK-T547 an event refused outside a gate phase names the phases that allow it", () => {
   const { runId, directory } = buildingRun({});
   spendRounds(runId, directory, false);
   expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
@@ -463,7 +416,7 @@ for (const [label, gates] of [
   ["no setting", {}],
 ] as const) {
   // ARK-288-AC5 proof: gates.escalation: human or none, test/gates.test.ts, `bun test test/gates.test.ts -t ARK-288-AC5`
-  test(`ARK-288-AC5 gates.escalation ${label} refuses a spent budget as before`, () => {
+  test(`ARK-T548 ARK-288-AC5 gates.escalation ${label} refuses a spent budget as before`, () => {
     const { runId, directory } = buildingRun(gates);
     spendRounds(runId, directory);
     const spent = start(runId);
@@ -474,7 +427,7 @@ for (const [label, gates] of [
     expect(types(directory).filter((type) => type === "step.started")).toHaveLength(2);
   });
 
-  test(`ARK-288-AC5 gates.escalation ${label} refuses a post-MR repair start and merge start as before`, () => {
+  test(`ARK-T549 ARK-288-AC5 gates.escalation ${label} refuses a post-MR repair start and merge start as before`, () => {
     const { runId, directory } = buildingRun(gates);
     expect(start(runId).code).toBe(0);
     expect(finish(runId).code).toBe(0);
@@ -508,7 +461,7 @@ test("ARK-T351 escalation_rounds loads as 2 by default, accepts 4, and a value o
 });
 
 // ARK-T352 proof: test/gates.test.ts, `bun test test/gates.test.ts -t ARK-T352`
-test("ARK-T352 escalation_rounds 4 grants four extra rounds by auto and refuses the fifth", () => {
+test("ARK-T352 ARK-288-AC2 escalation_rounds 4 grants four extra rounds by auto and refuses the fifth", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" }, { escalation_rounds: 4 });
   spendRounds(runId, directory);
   for (let count = 1; count <= 4; count++) {

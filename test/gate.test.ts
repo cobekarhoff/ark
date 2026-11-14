@@ -91,7 +91,7 @@ const stateOf = (directory: string) =>
   JSON.parse(readFileSync(join(directory, "state.json"), "utf8"));
 
 describe("gate record", () => {
-  test("ARK-153-AC5 refuses an unknown gate and lists the legal ones", () => {
+  test("ARK-T517 ARK-153-AC5 refuses an unknown gate and lists the legal ones", () => {
     const { runId, directory } = startRun(criteria);
     const before = eventsOf(directory).length;
     const result = ark("gate", "record", runId, "setup", "accept");
@@ -100,7 +100,7 @@ describe("gate record", () => {
     expect(eventsOf(directory).length).toBe(before);
   });
 
-  test("ARK-153-AC5 refuses an unknown answer and lists the legal ones", () => {
+  test("ARK-T518 ARK-153-AC5 refuses an unknown answer and lists the legal ones", () => {
     const { runId, directory } = startRun(criteria);
     const before = eventsOf(directory).length;
     const result = ark("gate", "record", runId, "plan", "accept");
@@ -109,7 +109,7 @@ describe("gate record", () => {
     expect(eventsOf(directory).length).toBe(before);
   });
 
-  test("ARK-153-AC5 criteria accept re-reads the ticket, needs one criterion, and moves to planning", () => {
+  test("ARK-T519 ARK-153-AC5 ARK-170-AC3 criteria accept re-reads the ticket, needs one criterion, and moves to planning", () => {
     const { runId, directory } = startRun([]);
     expect(stateOf(directory).phase).toBe("awaiting_criteria");
 
@@ -143,7 +143,7 @@ describe("gate record", () => {
     ]);
   });
 
-  test("ARK-153-AC5 criteria edit keeps waiting and criteria abort closes the run", () => {
+  test("ARK-T520 ARK-153-AC5 ARK-170-AC2 criteria edit keeps waiting and criteria abort closes the run", () => {
     const { runId, directory } = startRun([]);
     expect(ark("gate", "record", runId, "criteria", "edit").code).toBe(0);
     expect(stateOf(directory).phase).toBe("awaiting_criteria");
@@ -152,21 +152,21 @@ describe("gate record", () => {
     expect(stateOf(directory).outcome).toBe("aborted");
   });
 
-  test("ARK-153-AC5 refuses a criteria answer once the run has left awaiting_criteria", () => {
+  test("ARK-T521 ARK-153-AC5 refuses a criteria answer once the run has left awaiting_criteria", () => {
     const { runId, directory } = startRun(criteria);
     const before = eventsOf(directory).length;
     expect(ark("gate", "record", runId, "criteria", "accept").code).toBe(1);
     expect(eventsOf(directory).length).toBe(before);
   });
 
-  test("ARK-153-AC5 refuses an escalation answer while the round budget is not spent", () => {
+  test("ARK-T522 ARK-153-AC5 refuses an escalation answer while the round budget is not spent", () => {
     const { runId, directory } = startRun(criteria);
     const before = eventsOf(directory).length;
     expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(1);
     expect(eventsOf(directory).length).toBe(before);
   });
 
-  test("ARK-T217 plan approve after a valid check starts the first build step", () => {
+  test("ARK-T217 ARK-234-AC4 plan approve after a valid check starts the first build step", () => {
     const { runId, directory } = startRun(criteria);
     writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
 
@@ -187,7 +187,7 @@ describe("gate record", () => {
     expect(stateOf(directory).current_step).toBe("build");
   });
 
-  test("ARK-153-AC6 plan approve is refused before any plan check", () => {
+  test("ARK-T523 ARK-153-AC6 plan approve is refused before any plan check", () => {
     const { runId, directory } = startRun(criteria);
     writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
     const result = ark("gate", "record", runId, "plan", "approve");
@@ -195,7 +195,7 @@ describe("gate record", () => {
     expect(stateOf(directory).phase).toBe("planning");
   });
 
-  test("ARK-153-AC6 plan approve is refused when the last check was invalid", () => {
+  test("ARK-T524 ARK-153-AC6 plan approve is refused when the last check was invalid", () => {
     const { runId, directory } = startRun(criteria);
     writeFileSync(join(directory, "plan.yml"), JSON.stringify({ ...plan, test_cases: [] }));
     expect(ark("plan", "check", runId).code).toBe(1);
@@ -203,7 +203,7 @@ describe("gate record", () => {
     expect(stateOf(directory).phase).toBe("planning");
   });
 
-  test("ARK-153-AC6 plan approve is refused when plan.yml changed since the check", () => {
+  test("ARK-T525 ARK-153-AC6 ARK-152-AC4 plan approve is refused when plan.yml changed since the check", () => {
     const { runId, directory } = startRun(criteria);
     writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
     expect(ark("plan", "check", runId).code).toBe(0);
@@ -218,7 +218,7 @@ describe("gate record", () => {
     expect(stateOf(directory).phase).toBe("planning");
   });
 
-  test("ARK-153-AC6 plan change stays in planning and plan abort closes the run", () => {
+  test("ARK-T526 ARK-153-AC6 plan change stays in planning and plan abort closes the run", () => {
     const { runId, directory } = startRun(criteria);
     expect(ark("gate", "record", runId, "plan", "change").code).toBe(0);
     expect(stateOf(directory).phase).toBe("planning");
@@ -247,7 +247,7 @@ describe("plan approval survives only an unchanged valid recheck", () => {
     expect(stateOf(directory).current_step).toBe("build");
   });
 
-  test("ARK-187-AC2 a recheck of an edited plan clears approval and step start names the plan gate", () => {
+  test("ARK-T527 ARK-187-AC2 a recheck of an edited plan clears approval and step start names the plan gate", () => {
     const { runId, directory } = approvedRun();
     // Pretty-printing keeps the plan valid but changes its bytes, so only the hash compare can clear approval.
     writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan, null, 2));
@@ -313,7 +313,7 @@ describe("manual gate", () => {
   const manualEvents = (directory: string) =>
     eventsOf(directory).filter((event) => event.data?.gate === "manual");
 
-  test("ARK-283-AC2 records gate manual with the field criterion for ok and for problem with a note", () => {
+  test("ARK-T528 ARK-283-AC2 records gate manual with the field criterion for ok and for problem with a note", () => {
     const { runId, directory } = buildingRun();
     expect(ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok").code).toBe(0);
     const second = ark(
@@ -341,7 +341,7 @@ describe("manual gate", () => {
     expect(stateOf(directory).phase).toBe("building");
   });
 
-  test("ARK-283-AC2 refuses an unknown id and a criterion that is not manual, and names the id", () => {
+  test("ARK-T529 ARK-283-AC2 refuses an unknown id and a criterion that is not manual, and names the id", () => {
     const { runId, directory } = buildingRun();
     const before = eventsOf(directory).length;
     const unknown = ark("gate", "record", runId, "manual", "ARK-901-AC9", "ok");
@@ -354,7 +354,7 @@ describe("manual gate", () => {
     expect(eventsOf(directory).length).toBe(before);
   });
 
-  test("ARK-283-AC2 refuses an answer that is not ok or problem, and a missing criterion id", () => {
+  test("ARK-T530 ARK-283-AC2 refuses an answer that is not ok or problem, and a missing criterion id", () => {
     const { runId, directory } = buildingRun();
     const before = eventsOf(directory).length;
     const wrong = ark("gate", "record", runId, "manual", "ARK-901-AC1", "accept");
@@ -365,7 +365,7 @@ describe("manual gate", () => {
     expect(eventsOf(directory).length).toBe(before);
   });
 
-  test("ARK-283-AC2 refuses a manual answer while the run is still planning", () => {
+  test("ARK-T531 ARK-283-AC2 refuses a manual answer while the run is still planning", () => {
     const { runId, directory } = startRun(manualCriteria);
     const result = ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok");
     expect(result.code).toBe(1);
@@ -373,7 +373,7 @@ describe("manual gate", () => {
     expect(manualEvents(directory)).toEqual([]);
   });
 
-  test("ARK-283-AC2 two manual criteria keep separate answers", () => {
+  test("ARK-T532 ARK-283-AC2 two manual criteria keep separate answers", () => {
     const { runId, directory } = buildingRun();
     expect(ark("gate", "record", runId, "manual", "ARK-901-AC1", "ok").code).toBe(0);
     expect(ark("gate", "record", runId, "manual", "ARK-901-AC3", "problem").code).toBe(0);
@@ -388,14 +388,14 @@ describe("manual gate", () => {
     });
   });
 
-  test("ARK-283-AC2 ark status lists the manual criteria that are not ok", () => {
+  test("ARK-T533 ARK-283-AC2 ark status lists the manual criteria that are not ok", () => {
     const { runId } = buildingRun();
     expect(ark("status", runId).out).toContain("manual pending: ARK-901/AC1, ARK-901/AC3");
     expect(ark("gate", "record", runId, "manual", "ARK-901/AC1", "ok").code).toBe(0);
     expect(ark("status", runId).out).toContain("manual pending: ARK-901/AC3");
   });
 
-  test("ARK-T394 gates.manual in ark.yml stays an error, because the manual gate is never automatic", () => {
+  test("ARK-T394 ARK-234-AC1 gates.manual in ark.yml stays an error, because the manual gate is never automatic", () => {
     writeProject("demo", {
       workspace: tempGitRepo(),
       ticket_source: "local",
@@ -426,7 +426,7 @@ describe("criteria gate on every run", () => {
     return { runId, directory };
   }
 
-  test("ARK-311-AC5 a ticket with ACs and no blockers waits in awaiting_criteria until the human accepts", () => {
+  test("ARK-T534 ARK-311-AC5 ARK-170-AC3 a ticket with ACs and no blockers waits in awaiting_criteria until the human accepts", () => {
     const { runId, directory } = startUnaccepted([
       { id: "AC1", text: "first", verified_by: ["ARK-T1"] },
       { id: "AC2", text: "second", method: "demonstration" },
@@ -444,7 +444,7 @@ describe("criteria gate on every run", () => {
     );
   });
 
-  test("ARK-311-AC5 a ticket with a blocker waits in awaiting_criteria too, and accept still ends the wait", () => {
+  test("ARK-T535 ARK-311-AC5 ARK-170-AC2 a ticket with a blocker waits in awaiting_criteria too, and accept still ends the wait", () => {
     const { runId, directory } = startUnaccepted(
       [{ id: "AC1", text: "first", verified_by: ["ARK-T1"] }],
       ["ARK-901/AC1: no test can prove it"],
@@ -454,7 +454,7 @@ describe("criteria gate on every run", () => {
     expect(stateOf(directory).phase).not.toBe("awaiting_criteria");
   });
 
-  test("ARK-311-AC5 accept refuses a new-scheme method test AC with an empty verified_by, names the AC id, and takes the fixed ticket", () => {
+  test("ARK-T536 ARK-311-AC5 accept refuses a new-scheme method test AC with an empty verified_by, names the AC id, and takes the fixed ticket", () => {
     const { runId, directory } = startUnaccepted([
       { id: "AC1", text: "first", verified_by: ["ARK-T1"] },
       { id: "AC2", text: "second", verified_by: [] },
@@ -478,7 +478,7 @@ describe("criteria gate on every run", () => {
   });
 });
 
-test("ARK-T102 a spent round budget names ark escalate in building and ark gate record in escalation", () => {
+test("ARK-T102 ARK-152-AC4 a spent round budget names ark escalate in building and ark gate record in escalation", () => {
   const { runId, directory } = startRun(criteria);
   writeFileSync(join(directory, "plan.yml"), JSON.stringify(plan));
   expect(ark("plan", "check", runId).code).toBe(0);
