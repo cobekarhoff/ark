@@ -1354,7 +1354,12 @@ test(
       }
     });
 
+    // Every directory that runs the generator needs `typescript` (cli/test-audit.ts) and the
+    // registry is unreachable: link the repo's node_modules, as test/tooling.test.ts does.
     const generate = (directory: string) => {
+      const dependencies = join(directory, "node_modules");
+      if (!existsSync(dependencies))
+        symlinkSync(join(repositoryRoot, "node_modules"), dependencies);
       const result = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: directory });
       if (result.exitCode !== 0) throw new Error(result.stderr.toString());
     };
@@ -1389,6 +1394,9 @@ test(
         mkdirSync(dirname(join(workspace, file)), { recursive: true });
         copyFileSync(join(repositoryRoot, file), join(workspace, file));
       }
+      // Without the trailing slash the pattern also ignores the symlink. It is in the base commit,
+      // so the run, the clone and the merge all agree on it.
+      writeFileSync(join(workspace, ".gitignore"), "node_modules\n");
       generate(workspace);
       git(workspace, "add", "-A");
       git(workspace, "commit", "-m", "ark tree");
