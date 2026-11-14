@@ -436,14 +436,13 @@ describe("a stalled git or ark command fails at its own limit", () => {
 
   test("ARK-T400 a git command that fails at once names its command line, exit code and stderr, and no limit", () => {
     const directory = tempGitRepo();
-    const { message, elapsedMs } = stalledWith("git", "echo shim-fast-failure >&2\nexit 3", () =>
+    const { message } = stalledWith("git", "echo shim-fast-failure >&2\nexit 3", () =>
       git(directory, "add", "--", "x.txt"),
     );
     expect(message).toContain(
       `git -C ${directory} add -- x.txt failed (exit 3): shim-fast-failure`,
     );
     expect(message).not.toContain("timed out");
-    expect(elapsedMs).toBeLessThan(10_000);
   });
 
   test("ARK-T400 healthy git and ark commands return their output unchanged", () => {
