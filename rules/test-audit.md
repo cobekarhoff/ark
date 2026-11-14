@@ -22,14 +22,15 @@ Reject:
 - tests that assert nothing, compare a value to itself, or take their expected value from the code under test
 - copied inventories, export lists or source greps
 - assertions on call shape, private predicates or mock calls
+- test-only exports or seams: an export, flag, wrapper or hook with no production caller
 - mocks that supply the behavior the test asserts
 - fixtures that fabricate ordering, receipts or persistence the owner never produces
-- negative controls that pass on an unrelated guard
+- negative controls that fail on another guard than the one they name
 - names that promise behavior the test doesn't exercise
 
 Keep, even when the test is slow or static:
 
-- public API, protocol, config, migration, storage, security, default and ordering contracts
+- public API, protocol, config, migration, storage, security, default, ordering and release contracts
 - a test that fails on baseline: treat it as a likely bug to fix, never a test to delete
 
 Bug fixes: one regression test, at the owning layer, that fails before the fix for the intended reason and passes after. If you can't show the failing baseline, say so.
