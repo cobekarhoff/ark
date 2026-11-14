@@ -173,8 +173,6 @@ omp plugin link .   # install this repo as an OMP plugin
 
 ## Contributing
 
-```sh
-bun test --parallel # run the tests
-```
+Rules, checks and test conventions for work on Ark: [Work on Ark](docs/how-to/work-on-ark.md).
 
 To undo the install, run `bun unlink` and `omp plugin uninstall ark`.

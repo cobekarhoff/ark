@@ -23,6 +23,7 @@ Ark takes a ticket to merge-ready changes in one repo or across several dependen
 - [Project checks and ticket kinds](how-to/project-checks.md): checks in `ark.yml`, `kind: bug|perf|refactor`, and how `ark test` proves a ticket.
 - [Reach the hub by a local name](how-to/local-names.md): open the hub as `http://ark.localhost`.
 - [Run background services](how-to/background-services.md): install the auto-merger and the other launchd services.
+- [Work on Ark](how-to/work-on-ark.md): install, the four checks, the opt-in hook and the test conventions for a change to Ark.
 
 ## Look something up
 
@@ -45,11 +46,11 @@ Agents follow these files. Read them to learn exactly what an agent does.
 
 These pages are dated reports and frozen files. They show how Ark was measured or designed at one time. They do not describe how Ark works today.
 
-| Folder                 | What it holds                                                                                                                                                                                                               | Status                                                                       |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [research/](research/) | Spike reports: [Orca spikes](research/orca-spikes.md), [Master Chief pickup](research/master-chief-pickup.md) and [review panel spike](research/review-panel-spike.md).                                                     | Dated measurements. Check the code before you rely on a number.              |
-| [evidence/](evidence/) | Committed copies of manual-AC evidence, one file per AC.                                                                                                                                                                    | Frozen at the date of the run. Hub wording from before ADR 0009 is expected. |
-| [design/](design/)     | Hub prototypes. `hub/` and `hub-v2/` predate [ADR 0009](adr/0009-hub-is-a-read-only-live-view.md) and show removed views. `roadmap/` and `rendering/` are the design reference for the current Roadmap page and plan graph. | Frozen prototypes.                                                           |
+| Folder                 | What it holds                                                                                                                                                                                                                                          | Status                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| [research/](research/) | Spike reports: [Orca spikes](research/orca-spikes.md), [Master Chief pickup](research/master-chief-pickup.md) and [review panel spike](research/review-panel-spike.md).                                                                                | Dated measurements. Check the code before you rely on a number.              |
+| [evidence/](evidence/) | Committed copies of manual-AC evidence, one file per AC.                                                                                                                                                                                               | Frozen at the date of the run. Hub wording from before ADR 0009 is expected. |
+| [design/](design/)     | Hub prototypes. `hub/` and `hub-v2/` predate [ADR 0009](adr/0009-hub-is-a-read-only-live-view.md) and show removed views. `roadmap/`, `rendering/` and `repo-graph/` are the design reference for the current Roadmap page, plan graph and repo graph. | Frozen prototypes.                                                           |
 
 ## Decision records
 

@@ -136,6 +136,8 @@ export type RoleTimes = Record<string, { median: number; p90: number; count: num
 export type PlanStepView = {
   id: string;
   role: string;
+  /** The repo the step works in (`.` for a one-repo project). */
+  repo: string;
   harness: string;
   model: string;
   needs: string[];
@@ -177,6 +179,10 @@ export type MergeRequestView = {
   repo: string;
   url: string;
   number: number;
+  /** Merge position (1-based) from the plan's repo graph; null for a run that has none. */
+  order: number | null;
+  /** Numbers of the upstream MRs this one waits for; `[]` when it waits for none. */
+  waits_for: number[];
   /** `unknown` when `gh pr view` has never answered for this MR: never a guess. */
   state: "open" | "merged" | "closed" | "unknown";
   ci: "passing" | "failing" | "pending" | "unknown";
@@ -186,6 +192,43 @@ export type MergeRequestView = {
   changed_files: number | null;
   created_at: string | null;
 };
+
+/**
+ * Where a repo stands in a multi-repo run. An MR repo shows its MR state. A repo with no MR is `pending` until its
+ * worktree exists, then `ahead` (commits beyond its base), `clean` (none) or `unknown` (the count could not be read).
+ */
+export type RepoState = MergeRequestView["state"] | "pending" | "ahead" | "clean";
+
+/** An edge of the repo graph: the repo that owns the edge depends on `repo`. */
+export type RepoEdgeView = {
+  repo: string;
+  kind: string;
+  pin: string;
+  /** Free text from `plan.yml`: render as text, never as HTML. */
+  evidence: string;
+  /** The bump step id, or "" when no step moves the pin. */
+  bump: string;
+  /** The bump in the CLI's words (`refreshed to ...`, `points at upstream branch ...`, `waits for upstream merge`); null with no bump step. */
+  bump_state: string | null;
+};
+
+/** One repo of a run with two or more step repos, in merge (or hand-off) order. */
+export type RepoView = {
+  repo: string;
+  /** Free text from `plan.yml`: render as text, never as HTML. */
+  why: string;
+  /** 1-based position in the order of `repoGraph`. */
+  order: number;
+  depends_on: RepoEdgeView[];
+  state: RepoState;
+  /** The MR number, or null when the repo has no MR (a hand-off or an MR not opened yet). */
+  mr: number | null;
+  /** The run's branch of this repo and the commits it is ahead of its base; `ahead` is null when git could not tell. Null with no worktree. */
+  branch: { name: string; ahead: number | null } | null;
+};
+
+/** One repo of the chain on the ticket page. */
+export type ChainRepo = { repo: string; order: number; state: RepoState };
 
 export type GateKind = PhaseGate;
 
@@ -212,6 +255,8 @@ export type RunView = {
   updated_at: string;
   /** Null until `plan.yml` exists and parses. */
   plan: PlanStepView[] | null;
+  /** The repo graph; null when the run has fewer than two step repos, no plan, or a plan whose repos cannot be ordered (a cycle). */
+  repos: RepoView[] | null;
   merge_requests: MergeRequestView[];
   /** Live agents of the run, or "unknown" until Orca has answered once. */
   agents: Agent[] | "unknown";
@@ -331,6 +376,8 @@ export type TicketRunView = {
   waiting: boolean;
   /** Closed run: from `metrics.json`. Open run: from the usage index. */
   cost_usd: number | null;
+  /** The newest run's repo chain in merge or hand-off order; null for a run with no repo graph. Set for a closed run too, which has no RunView here. */
+  chain: ChainRepo[] | null;
   /** Every run of the ticket, newest first. Small on purpose: an open run has no outcome and no cost here; a closed run's cost_usd is null when metrics.json holds none. */
   all: { run: string; phase: Phase; outcome: string | null; cost_usd: number | null }[];
 };

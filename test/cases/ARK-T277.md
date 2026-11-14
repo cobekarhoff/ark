@@ -6,7 +6,7 @@ technique: performance boundary (p95 under load), boundary values of the page (2
 priority: high
 risk: "a page holds more or fewer than 200 entries or Load more does not append; the result read runs on the request thread or blocks the hub, so `/` and `/nope` answer slowly while a 200 MB file is read; a result read queued on the transcript slot starves page reads; pages with 20 KB arguments grow without a measure; the project checks (tests, typecheck, lint, format) fail after the change"
 status: active
-changed_by: 2026-11-12-ARK-324-1
+changed_by: 2026-11-13-ARK-339-1
 ---
 
 ## Objective
@@ -20,21 +20,23 @@ Expected: While the usage worker thread reads a 200 MB session file, the system 
 - The setup of `test/hub.test.ts` "ARK-284-AC7 while the worker thread reads a 200 MB session file": a 200 MB session file of a run, 250 messages.
 - A second file of 201 entries whose tool calls have 20 KB arguments.
 - A project checkout where the change is built.
+- A 3-repo run (the fixture of ARK-T358) in the hub project, so the snapshot carries the repos block while `/` is sampled.
 
 ## Steps
 
 1. Open the 200 MB file's page 1 and, while it is read, sample `/` and `/nope` repeatedly; compute the p95.
-2. Repeat with a result request for a call near the end of the same file queued behind the page read; sample again.
-3. Read page 1 of the 201-entry file: entries count, the cursor; read the next page; record the response size of page 1.
-4. Read the page of the largest real session file in `ARK_HOME` and record its size, for the validator report.
-5. Run `bun test`, `bun run typecheck`, `bun run lint` and `bun run format:check`.
+2. With the 3-repo run present, sample `/` and `/nope` again under the same load; compute the p95.
+3. Repeat with a result request for a call near the end of the same file queued behind the page read; sample again.
+4. Read page 1 of the 201-entry file: entries count, the cursor; read the next page; record the response size of page 1.
+5. Read the page of the largest real session file in `ARK_HOME` and record its size, for the validator report.
+6. Run `bun test`, `bun run typecheck`, `bun run lint` and `bun run format:check`.
 
 ## Expected results
 
-- The p95 of `/` and `/nope` is below 200 ms in steps 1 and 2.
+- The p95 of `/` and `/nope` is below 200 ms in steps 1 to 3.
 - Page 1 has 200 entries and a cursor; the next page has the remaining ones; no entry is lost or doubled.
 - The response size of the 20 KB-argument page is recorded and the page answers.
-- The result request of step 2 answers (found) and its read does not delay `/`.
+- The result request of step 3 answers (found) and its read does not delay `/`.
 - All four commands exit 0, with the old ARK-284 tests changed only where a new limit required it.
 
 ## Screenshot checkpoints
