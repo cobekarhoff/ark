@@ -5,8 +5,9 @@ level: integration
 technique: help output and generated-file equality
 priority: medium
 risk: Help of run close loses the handed_off branch-retention sentence, or the reference is stale
-status: active
-changed_by: 2026-11-07-ARK-322-1
+status: retired
+retired_reason: "the only test grepped the help sentence; ARK-T283 compares the whole run close description, which holds the sentence, to test/command-table.snapshot.json, and the cli-reference check keeps docs/reference/cli.md equal to the generator output"
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
