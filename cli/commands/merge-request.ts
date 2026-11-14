@@ -1,4 +1,9 @@
-import { mergeRequestOpen, mergeRequestStatus, bumpRefresh } from "../merge-request.ts";
+import {
+  bumpRefresh,
+  mergeRequestCheck,
+  mergeRequestOpen,
+  mergeRequestStatus,
+} from "../merge-request.ts";
 import type { Command } from "./types.ts";
 
 export const mergeRequestOpenCommand: Command = {
@@ -10,6 +15,22 @@ export const mergeRequestOpenCommand: Command = {
   maximum: 1,
   run: ([runId], flags) =>
     mergeRequestOpen(runId, flags["--project"] as string | undefined, {
+      summary: flags["--summary"] as string | undefined,
+    }),
+};
+
+export const mergeRequestCheckCommand: Command = {
+  usage:
+    "merge-request check <run> --stage <head|step|final> [--step <id>] [--summary <text>] [--project <name>]",
+  description:
+    "Prints each problem that `ark merge-request open` would refuse, one line for each, and exits 1 when any exists; with none it prints nothing and exits 0. It changes no file, event or ref and never fetches. The text of a line is the text of the open refusal, and the AC strings are the one joined line `AC string in no tracked file at head: <AC id> `<string>`; ...`. `--stage head` checks what needs only the current head: each backticked AC string against the tracked files, the MR title (`ticket has no summary: pass --summary`, or the title of 73 characters or more that `--summary` makes), and the shape of each evidence file that exists, except the last line `human: ok` of a demonstration file and the `reviewer:` line of an inspection file. `--stage step` adds `evidence missing: <AC id> (<method>)` for each non-test AC that the plan step named by `--step <id>` serves, or for every non-test AC when no `--step` is given. `--stage final` adds every other refusal of open, in its order: no test result, a quick test, a manual criterion without ok, criteria not passing, a repo that changed since the last test, the `perf` and `refactor` rules, and every evidence problem including the last lines, each on its own line. In stage `final` it also prints `warning: manual answer older than head: <AC id>` for a manual answer whose recorded head differs from the repo head now (a clean `ark worktree sync` merge is not a difference; an answer with no recorded head never warns); a warning does not change the exit code. `--summary` is the `--summary` of `ark merge-request open`.",
+  flags: { "--stage": true, "--step": true, "--summary": true, "--project": true },
+  minimum: 1,
+  maximum: 1,
+  run: ([runId], flags) =>
+    mergeRequestCheck(runId, flags["--project"] as string | undefined, {
+      stage: flags["--stage"] as string | undefined,
+      step: flags["--step"] as string | undefined,
       summary: flags["--summary"] as string | undefined,
     }),
 };

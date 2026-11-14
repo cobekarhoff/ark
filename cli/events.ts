@@ -37,6 +37,8 @@ export type RunState = {
     escalation?: string;
     [manual: `manual:${string}`]: string;
   };
+  /** The head of each repo at the manual answer of a criterion (`gate.answered` `heads`), by criterion id. An old answer has none. */
+  manual_heads: Record<string, Record<string, string>>;
   post_mr_escalation_answered: boolean;
   /** escalation.requested is pending: no answer has followed it. */
   escalation_requested: boolean;
@@ -160,6 +162,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   let criteriaIds: string[] = [];
   let criteriaStatus: Record<string, CriterionStatus> = {};
   const gates: Record<string, string> = {};
+  const manualHeads: Record<string, Record<string, string>> = {};
   let plan: RunState["plan"] = null;
   const amendments = new Map<string, RunState["amended_criteria"][number]>();
   // The plan gate's approval and the plan.yml hash it approved; null until approve, and again once a check finds plan.yml changed.
@@ -210,7 +213,10 @@ export function deriveState(events: ArkEvent[]): RunState {
             reason: data.reason ?? "",
           });
           // New text needs a new human decision, unless the human gave carry_manual words.
-          if (!data.carry_manual) delete gates[`manual:${id}`];
+          if (!data.carry_manual) {
+            delete gates[`manual:${id}`];
+            delete manualHeads[id];
+          }
         }
         // The amendment changes what plan.md must show, so the plan needs a new check.
         if (!approval) plan = null;
@@ -249,6 +255,10 @@ export function deriveState(events: ArkEvent[]): RunState {
         break;
       case "gate.answered":
         gates[data.gate === "manual" ? `manual:${alias(data.criterion)}` : data.gate] = data.answer;
+        if (data.gate === "manual") {
+          if (data.heads) manualHeads[alias(data.criterion)] = data.heads;
+          else delete manualHeads[alias(data.criterion)];
+        }
         if (data.gate === "strategy" && strategy && strategy.cards.includes(data.answer))
           strategy.chosen = data.answer;
         if (data.gate === "criteria" && data.answer === "accept") blocked = false;
@@ -398,6 +408,7 @@ export function deriveState(events: ArkEvent[]): RunState {
       ...(gates.escalation === undefined ? {} : { escalation: gates.escalation }),
       ...Object.fromEntries(Object.entries(gates).filter(([key]) => key.startsWith("manual:"))),
     },
+    manual_heads: manualHeads,
     post_mr_escalation_answered: escalation === "answered" && mergeRequests.length > 0,
     escalation_requested: escalation === "requested",
     evaluation,

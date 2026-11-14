@@ -230,6 +230,7 @@ function gateRun() {
   const evidenceFile = (id: string) => join(runDirectory, "results", "evidence", `${id}.md`);
   return {
     runId,
+    directory: runDirectory,
     evidenceFile,
     write(id: string, text: string) {
       mkdirSync(dirname(evidenceFile(id)), { recursive: true });
@@ -282,6 +283,51 @@ describe("manual gate and evidence files", () => {
     const run = gateRun();
     expect(ark("gate", "record", run.runId, "manual", "AC6", "ok").code).toBe(0);
     expect(existsSync(run.evidenceFile("AC6"))).toBe(false);
+  });
+
+  const lineOf = (id: string, reason: string) => `evidence malformed: ${id}: ${reason}`;
+
+  test("ARK-T382 a malformed file is refused with the open text, and the refusal writes no event and no file", () => {
+    const run = gateRun();
+    const events = () => readFileSync(join(run.directory, "events.ndjson"), "utf8");
+    const cases: [string, string][] = [
+      [demonstration({ without: "saw", tail: "" }), 'missing section "What the human saw"'],
+      [
+        demonstration({ override: { before: "## Before\n\nnothing\n" }, tail: "" }),
+        'section "Before" has no screenshot path',
+      ],
+    ];
+    for (const [text, reason] of cases) {
+      run.write("AC1", text);
+      const eventsBefore = events();
+      const refused = ark("gate", "record", run.runId, "manual", "AC1", "ok");
+      expect(refused.code).toBe(1);
+      expect(refused.err).toBe(`ark: ${lineOf("AC1", reason)}\n`);
+      expect(readFileSync(run.evidenceFile("AC1"), "utf8")).toBe(text);
+      expect(events()).toBe(eventsBefore);
+      // Stage head of the check prints the line that the gate refused with.
+      const checked = ark("merge-request", "check", run.runId, "--stage", "head");
+      expect(checked.code).toBe(1);
+      expect(checked.out.split("\n")).toContain(lineOf("AC1", reason));
+    }
+  });
+
+  test("ARK-T382 the first ok of a well-formed file that lacks the last line is recorded, once, as the last line", () => {
+    const run = gateRun();
+    // A refusal first leaves no state that blocks the next answer.
+    run.write("AC4", demonstration({ without: "saw", tail: "" }));
+    expect(ark("gate", "record", run.runId, "manual", "AC4", "ok").code).toBe(1);
+    const text = demonstration({ tail: "" });
+    run.write("AC4", text);
+    const answered = ark("gate", "record", run.runId, "manual", "AC4", "ok");
+    expect(answered.code, answered.err).toBe(0);
+    const written = readFileSync(run.evidenceFile("AC4"), "utf8");
+    expect(written).toBe(`${text.trimEnd()}\n\nhuman: ok\n`);
+    expect(humanOkLines(written)).toHaveLength(1);
+    const events = readEvents(run.directory).filter(
+      (event) => event.type === "gate.answered" && event.data.criterion === "FAKE-6/AC4",
+    );
+    expect(events).toHaveLength(1);
   });
 });
 
