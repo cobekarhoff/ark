@@ -3,10 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ark,
+  arkWithin,
+  commandLimitMs,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeFakeCommand,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -22,12 +24,21 @@ const roles = {
 };
 const fileProtocol = "protocol.file.allow=always";
 
-function git(directory: string, ...args: string[]): string {
-  const result = Bun.spawnSync(["git", "-C", directory, ...args]);
+const ark = (...args: string[]) => arkWithin(commandLimitMs, ...args);
+
+/** Runs a command; throws with the command line and stderr on a timeout or a non-zero exit. Returns trimmed stdout. */
+function run(command: string[]): string {
+  const result = Bun.spawnSync(command, { timeout: commandLimitMs });
+  const line = command.join(" ");
+  if (result.exitedDueToTimeout)
+    throw new Error(`${line} timed out after ${commandLimitMs} ms: ${result.stderr.toString()}`);
   if (result.exitCode !== 0)
-    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+    throw new Error(`${line} failed (exit ${result.exitCode}): ${result.stderr.toString()}`);
   return result.stdout.toString().trim();
 }
+
+const git = (directory: string, ...args: string[]): string =>
+  run(["git", "-C", directory, ...args]);
 
 /** Writes a file and commits it; returns the new HEAD. */
 function commitFile(directory: string, name: string, content: string): string {
@@ -60,16 +71,16 @@ function submoduleMeta(): Meta {
   git(other, "reset", "-q", "--hard", otherRecorded);
   const libraryRepo = tempGitRepo({ "lib.txt": "lib one\n" });
   const first = git(libraryRepo, "rev-parse", "HEAD");
-  Bun.spawnSync(["mv", libraryRepo, library]);
+  run(["mv", libraryRepo, library]);
 
   const consumer = tempGitRepo({ "app.txt": "app\n" });
   git(consumer, "-c", fileProtocol, "submodule", "add", "-q", library, "vendor/lib");
   git(consumer, "-c", fileProtocol, "submodule", "add", "-q", other, "vendor/other");
   git(consumer, "commit", "-q", "-m", "add submodules");
-  Bun.spawnSync(["mv", consumer, join(workspace, "repos/consumer")]);
+  run(["mv", consumer, join(workspace, "repos/consumer")]);
   const second = commitFile(library, "lib.txt", "lib two\n");
   commitFile(other, "other.txt", "other two\n");
-  Bun.spawnSync(["mv", tempGitRepo({ "plain.txt": "plain\n" }), join(workspace, "repos/plain")]);
+  run(["mv", tempGitRepo({ "plain.txt": "plain\n" }), join(workspace, "repos/plain")]);
   return { workspace, first, second, otherRecorded };
 }
 
@@ -174,7 +185,7 @@ describe("worktree create fills submodules", () => {
     const { workspace } = submoduleMeta();
     const broken = join(workspace, "repos/consumer");
     const brokenCopy = join(workspace, "repos/broken");
-    Bun.spawnSync(["git", "clone", "-q", "--no-hardlinks", broken, brokenCopy]);
+    run(["git", "clone", "-q", "--no-hardlinks", broken, brokenCopy]);
     git(brokenCopy, "config", "user.name", "Ark Test");
     git(brokenCopy, "config", "user.email", "ark@example.com");
     git(brokenCopy, "config", "-f", ".gitmodules", "submodule.vendor/lib.url", "/no/such/library");
@@ -214,7 +225,7 @@ describe("worktree create and sync use the run's library head", () => {
     // sync needs origin/HEAD in each repo; the library maps to its worktree by basename, not by origin
     for (const repo of ["lib", "consumer"]) {
       const bare = mkdtempSync(join(tmpdir(), "ark-bare-"));
-      Bun.spawnSync(["git", "init", "-q", "--bare", "-b", "main", bare]);
+      run(["git", "init", "-q", "--bare", "-b", "main", bare]);
       const path = join(workspace, "repos", repo);
       git(path, "remote", "add", "origin", bare);
       git(path, "push", "-q", "-u", "origin", "main");
@@ -371,5 +382,84 @@ describe("worktree cleanup of composed submodules", () => {
     worktreeCleanup(runId, "demo");
     expect(existsSync(consumer)).toBe(true);
     expect(readFileSync(join(folder, file), "utf8")).toBe("edited\n");
+  });
+});
+
+describe("a stalled git or ark command fails at its own limit", () => {
+  const testTimeoutMs = 60_000;
+
+  /** Runs `call` with a shim named `name` first on PATH; returns what it threw and how long it took. */
+  function stalledWith(
+    name: string,
+    script: string,
+    call: () => unknown,
+  ): { message: string; elapsedMs: number } {
+    const saved = process.env.PATH;
+    const started = Date.now();
+    try {
+      writeFakeCommand(name, script);
+      call();
+    } catch (error) {
+      return { message: (error as Error).message, elapsedMs: Date.now() - started };
+    } finally {
+      process.env.PATH = saved;
+    }
+    throw new Error(`the ${name} call returned after ${Date.now() - started} ms and threw nothing`);
+  }
+
+  const limitOf = (message: string): number =>
+    Number(message.match(/timed out after (\d+) ms/)?.[1]);
+
+  test("ARK-T400 a git command that stalls fails with its command line, the limit and its stderr", () => {
+    const directory = tempGitRepo();
+    const { message, elapsedMs } = stalledWith(
+      "git",
+      "echo shim-git-stderr-marker >&2\nexec sleep 90",
+      () => git(directory, "add", "--", "x.txt"),
+    );
+    expect(message).toContain(`git -C ${directory} add -- x.txt timed out after `);
+    expect(message).toContain("shim-git-stderr-marker");
+    expect(limitOf(message)).toBeGreaterThan(0);
+    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+  });
+
+  test("ARK-T400 an ark command that stalls fails with its command line and the limit", () => {
+    const { message, elapsedMs } = stalledWith("bun", "exec sleep 90", () => ark("status"));
+    expect(message).toContain("ark status timed out after ");
+    expect(limitOf(message)).toBeGreaterThan(0);
+    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+  });
+
+  test("ARK-T400 a stalled git of tempGitRepo fails with its command line, the limit and its stderr", () => {
+    const { message, elapsedMs } = stalledWith(
+      "git",
+      "echo shim-git-stderr-marker >&2\nexec sleep 90",
+      () => tempGitRepo({ "stalled-template.txt": "x\n" }),
+    );
+    expect(message).toContain(" init -q -b main timed out after ");
+    expect(message).toContain("shim-git-stderr-marker");
+    expect(limitOf(message)).toBeGreaterThan(0);
+    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+  });
+
+  test("ARK-T400 a git command that fails at once names its command line, exit code and stderr, and no limit", () => {
+    const directory = tempGitRepo();
+    const { message } = stalledWith("git", "echo shim-fast-failure >&2\nexit 3", () =>
+      git(directory, "add", "--", "x.txt"),
+    );
+    expect(message).toContain(
+      `git -C ${directory} add -- x.txt failed (exit 3): shim-fast-failure`,
+    );
+    expect(message).not.toContain("timed out");
+  });
+
+  test("ARK-T400 healthy git and ark commands return their output unchanged", () => {
+    expect(git(tempGitRepo(), "rev-parse", "--git-dir")).toBe(".git");
+    const result = ark("--help");
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("Usage: ark <command>");
   });
 });
