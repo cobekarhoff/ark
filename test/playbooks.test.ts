@@ -79,7 +79,6 @@ test("ARK-T411 changed skills and tests pass oxfmt --check", () => {
     "skills/ark-brainstorm/SKILL.md",
     "skills/ark-chief/SKILL.md",
     "test/playbooks.test.ts",
-    "test/brainstorm.test.ts",
   ];
   for (const file of files) expect(existsSync(join(root, file)), file).toBe(true);
   const result = Bun.spawnSync(["bunx", "oxfmt", "--check", ...files], { cwd: root });

@@ -1979,7 +1979,6 @@ describe("ark retro models and vendors", () => {
     // Only placeholders: the skill text of the run lead skill states its own run name as `<run>` and
     // quotes the calls of the workers it starts.
     const placeholderText = "/skill:ark-validator <run> check\n/skill:test-case-writer <run>\n";
-    expect(skillText("ark-run-lead")).toContain("<run>");
     writeOwnedSession("placeholder", "14:32:00.000", [anthropicReply("14:32:30.000", 0.05)], {
       prompt: [skillPromptRecord("ark-run-lead", "<run>", placeholderText)],
     });

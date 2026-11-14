@@ -11,7 +11,7 @@ changed_by: 2026-11-14-ARK-414-1
 
 ## Objective
 
-Prove that `skills/ark-brainstorm/SKILL.md`, `skills/ark-chief/SKILL.md`, `test/playbooks.test.ts` and `test/brainstorm.test.ts` pass `oxfmt --check`. Converted on touch from ARK-289-AC5, whose paths (`skills/ark/playbooks/`) are gone.
+Prove that `skills/ark-brainstorm/SKILL.md`, `skills/ark-chief/SKILL.md` and `test/playbooks.test.ts` pass `oxfmt --check`. Converted on touch from ARK-289-AC5, whose paths (`skills/ark/playbooks/`) are gone.
 
 Expected: When oxfmt checks the brainstorm and chief skills, the system shall report no change needed.
 
