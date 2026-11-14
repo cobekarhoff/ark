@@ -233,11 +233,11 @@ A git repository in a project's workspace.
 _Avoid_: Package, component
 
 **Repo edge**:
-A fact that one repo builds against another: a submodule, a package pin, a compose service or an API. The plan lists each edge in its `repos` block, with the evidence the run lead found in the workspace. The edges set the merge order of the MRs. A step `needs` makes none.
+A fact that one repo builds against another: a submodule, a package pin, a compose service or an API. The plan lists each edge in its `repos` block, with the evidence the run lead found in the workspace. The edges set the merge order of the MRs, and the hub run page draws them as the repo graph (a card per repo, a labelled edge per repo edge) when the steps work in 2 or more repos. A step `needs` makes none.
 _Avoid_: Dependency, link
 
 **Bump step**:
-An implementer step in the downstream repo that moves a submodule or package pin to the upstream change of the ticket. The plan names it in the `bump` field of the repo edge. `ark merge-request status` shows its state: `points at upstream branch <8 characters>` (submodule not yet refreshed), `waits for upstream merge` and `waits for upstream publish` (package), or `refreshed to <pin>` once `ark bump refresh` recorded the `bump.refreshed` event.
+An implementer step in the downstream repo that moves a submodule or package pin to the upstream change of the ticket. The plan names it in the `bump` field of the repo edge. `ark merge-request status` shows its state: `points at upstream branch <8 characters>` (submodule not yet refreshed), `waits for upstream merge` and `waits for upstream publish` (package), or `refreshed to <pin>` once `ark bump refresh` recorded the `bump.refreshed` event. The hub run page shows the same words (one `bumpState` function) on the edge and in the Bump column.
 _Avoid_: Update step, pin step
 
 **Worktree**:

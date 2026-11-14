@@ -23,7 +23,7 @@ import {
   type QueueTask,
 } from "../cli/orca.ts";
 import { listProjects, projectDirectory, runsDirectory } from "../cli/paths.ts";
-import { loadPlan, type PlanStep } from "../cli/plan.ts";
+import { loadPlan, type PlanRepo, type PlanStep } from "../cli/plan.ts";
 import { frontmatter } from "../cli/ticket.ts";
 import type { Directory, DirectoryWorker, InboxMessage } from "./conversation.ts";
 import { readEventsLeniently } from "./run-detail.ts";
@@ -55,6 +55,8 @@ export type ArkRun = {
   state: RunState;
   events: ArkEvent[];
   plan: PlanStep[] | null;
+  /** The `repos` block of `plan.yml`; empty when there is none or no plan. */
+  repos: PlanRepo[];
   windows: StepWindow[];
 };
 export type ArkValue = {
@@ -204,14 +206,18 @@ export function createArkReader() {
       const events = readEventsLeniently(directory);
       if (events.length === 0) return null;
       let plan: PlanStep[] | null = null;
+      let repos: PlanRepo[] = [];
       try {
-        plan = loadPlan(directory).steps;
+        const loaded = loadPlan(directory);
+        plan = loaded.steps;
+        repos = loaded.repos;
       } catch {}
       const run = {
         directory,
         state: deriveState(events),
         events,
         plan,
+        repos,
         windows: stepWindows(events),
       };
       runCache.set(directory, { signature, run });

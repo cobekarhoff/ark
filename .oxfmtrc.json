@@ -3,6 +3,7 @@
   "ignorePatterns": [
     "docs/design/hub/**",
     "docs/design/agent-comms/**",
+    "docs/design/repo-graph/**",
     "test/fixtures/pr-writing/lint/**"
   ]
 }
