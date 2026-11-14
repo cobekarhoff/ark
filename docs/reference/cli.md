@@ -55,6 +55,7 @@ A command prints a short result and exits 0 on success. On failure it prints `ar
 | Gates            | [`gate record`](#gate-record)                   | Records your answer to a gate                                                                        |
 |                  | [`escalate`](#escalate)                         | Opens the escalation gate when the round budget is spent, also when the last ark test passed         |
 | Merge requests   | [`merge-request open`](#merge-request-open)     | Pushes each repo's branch and posts one ready MR                                                     |
+|                  | [`merge-request check`](#merge-request-check)   | Prints each problem that `ark merge-request open` would refuse, one line for each                    |
 |                  | [`merge-request status`](#merge-request-status) | For a project with `merge_requests: none` it prints `merge requests: none`                           |
 |                  | [`bump refresh`](#bump-refresh)                 | Records `bump.refreshed` for a bump step of the plan                                                 |
 | Master Chief     | [`chief state`](#chief-state)                   | Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a file |
@@ -551,6 +552,31 @@ it refreshes (changing no file and no ref), and refuses when the head does not m
 names the repo, records worktree.synced with a conflict so that `ark run step <run> <step> start
 --merge` is allowed, and pushes nothing for any repo. A merge-tree error that is not a conflict (no
 common history, no origin/<target>, git older than 2.38) is a refusal that shows git's text.
+```
+
+### merge-request check
+
+```text
+ark merge-request check <run> --stage <head|step|final> [--step <id>] [--summary <text>] [--project
+    <name>]
+
+Prints each problem that `ark merge-request open` would refuse, one line for each, and exits 1 when
+any exists; with none it prints nothing and exits 0. It changes no file, event or ref and never
+fetches. The text of a line is the text of the open refusal, and the AC strings are the one joined
+line `AC string in no tracked file at head: <AC id> `<string>`; ...`. `--stage head` checks what
+needs only the current head: each backticked AC string against the tracked files, the MR title
+(`ticket has no summary: pass --summary`, or the title of 73 characters or more that `--summary`
+makes), and the shape of each evidence file that exists, except the last line `human: ok` of a
+demonstration file and the `reviewer:` line of an inspection file. `--stage step` adds `evidence
+missing: <AC id> (<method>)` for each non-test AC that the plan step named by `--step <id>` serves,
+or for every non-test AC when no `--step` is given. `--stage final` adds every other refusal of
+open, in its order: no test result, a quick test, a manual criterion without ok, criteria not
+passing, a repo that changed since the last test, the `perf` and `refactor` rules, and every
+evidence problem including the last lines, each on its own line. In stage `final` it also prints
+`warning: manual answer older than head: <AC id>` for a manual answer whose recorded head differs
+from the repo head now (a clean `ark worktree sync` merge is not a difference; an answer with no
+recorded head never warns); a warning does not change the exit code. `--summary` is the `--summary`
+of `ark merge-request open`.
 ```
 
 ### merge-request status

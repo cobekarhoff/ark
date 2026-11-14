@@ -25,7 +25,7 @@ import {
   tokenOwner,
 } from "../skills/pr-writing/lib/ledger.ts";
 import { lintBody } from "../skills/pr-writing/lib/lint.ts";
-import { buildTitle, postMergeRequest } from "../skills/pr-writing/lib/post.ts";
+import { buildTitle, makeTitle, postMergeRequest } from "../skills/pr-writing/lib/post.ts";
 
 type Worktree = { repo: string; path: string; branch: string; base: string };
 type OpenedMergeRequest = { repo: string; url: string; number: number };
@@ -195,7 +195,7 @@ function blockOnGitLab(
 export type StaleHead = { repo: string; tested: string | undefined; current: string };
 
 /** The current head of each repo's worktree, one `rev-parse HEAD` per repo. The latest `worktree.created` of a repo wins. */
-function currentHeads(events: ArkEvent[]): Map<string, string> {
+export function currentHeads(events: ArkEvent[]): Map<string, string> {
   const heads = new Map<string, string>();
   for (const event of events)
     if (event.type === "worktree.created" && existsSync(event.data.path))
@@ -237,18 +237,17 @@ function cleanSyncMerged(
 /** A repo whose head moved from the tested head only by clean `ark worktree sync` merges of origin/<target>. */
 export type CleanSync = { repo: string; tested: string; target: string; merged: string };
 
-/** The repos whose worktree head differs from the head the last test.completed event recorded, split into clean syncs and stale heads. */
-function headChanges(
+/** The repos of `heads` whose head differs from the `recorded` head, split into clean syncs and stale heads. */
+function classifyHeads(
   events: ArkEvent[],
   config: ProjectConfig | undefined,
   heads: Map<string, string>,
+  recorded: Record<string, string>,
 ): { stale: StaleHead[]; cleanSyncs: CleanSync[] } {
   const changes: { stale: StaleHead[]; cleanSyncs: CleanSync[] } = { stale: [], cleanSyncs: [] };
-  const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
-  if (lastTest === undefined) return changes;
   const worktrees = worktreeMap(events);
   for (const [repo, current] of heads) {
-    const tested: string | undefined = lastTest.data.heads?.[repo];
+    const tested: string | undefined = recorded[repo];
     if (tested === current) continue;
     let cleanSync: CleanSync | undefined;
     try {
@@ -263,6 +262,17 @@ function headChanges(
     else changes.stale.push({ repo, tested, current });
   }
   return changes;
+}
+
+/** The repos whose worktree head differs from the head the last test.completed event recorded, split into clean syncs and stale heads. */
+function headChanges(
+  events: ArkEvent[],
+  config: ProjectConfig | undefined,
+  heads: Map<string, string>,
+): { stale: StaleHead[]; cleanSyncs: CleanSync[] } {
+  const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
+  if (lastTest === undefined) return { stale: [], cleanSyncs: [] };
+  return classifyHeads(events, config, heads, lastTest.data.heads ?? {});
 }
 
 /** Repos whose worktree head differs from the head the last test.completed event recorded, unless only clean sync merges moved it. */
@@ -288,12 +298,15 @@ const localId = (criterionId: string): string => criterionId.split("/").pop()!;
  * The evidence refusals: a non-test AC needs a well-formed `results/evidence/<AC id>.md`; each case in the
  * `verified_by` of a `test` AC needs `base/` and `head/` folders, and the head SHA must be the current head of the repo that ran the case
  * (the tested head for a repo that is not in `currentHeadOf`: a clean sync moved its head, see `cleanSyncMerged`).
- * One line for each missing or bad item, so the refusal names every AC.
+ * One line for each missing or bad item, so the refusal names every AC. `reportMissing` says which absent
+ * files count; `strict` demands the last lines that a later writer adds, and the test evidence of a `test` AC
+ * (it needs `lastTest`).
  */
 function evidenceProblems(
   directory: string,
-  lastTest: ArkEvent,
+  lastTest: ArkEvent | undefined,
   currentHeadOf: Map<string, string>,
+  { strict, reportMissing }: { strict: boolean; reportMissing: (criterionId: string) => boolean },
 ): string[] {
   const lines: string[] = [];
   const criteria = runCriteria(directory);
@@ -301,12 +314,13 @@ function evidenceProblems(
     if (method === "test") continue;
     const file = evidenceFile(directory, id);
     if (!existsSync(file)) {
-      lines.push(`evidence missing: ${localId(id)} (${method})`);
+      if (reportMissing(id)) lines.push(`evidence missing: ${localId(id)} (${method})`);
       continue;
     }
-    const problem = evidenceProblem(method, readFileSync(file, "utf8"));
+    const problem = evidenceProblem(method, readFileSync(file, "utf8"), { lastLine: strict });
     if (problem !== undefined) lines.push(`evidence malformed: ${localId(id)}: ${problem}`);
   }
+  if (!strict || lastTest === undefined) return lines;
   // Each result.json names the repo that ran its case: its SHA must be that repo's current head.
   const heads = new Map<string, string>([
     ...Object.entries((lastTest.data.heads ?? {}) as Record<string, string>),
@@ -336,9 +350,170 @@ function evidenceProblems(
   return lines;
 }
 
+/** `head`: what needs only the current head. `step`: and the evidence files of the ACs a step serves. `final`: and every refusal of `ark merge-request open`. */
+export type Stage = "head" | "step" | "final";
+export const stages: readonly Stage[] = ["head", "step", "final"];
+
+export type StageCheck = {
+  /** One line for each problem, in the order `assertShippable` refuses, except `evidence`. */
+  problems: string[];
+  /** One line for each evidence problem. `ark merge-request open` refuses with all of them in one message. */
+  evidence: string[];
+  /** Information that never fails a check: `manual answer older than head: <AC id>`. Only stage `final` has any. */
+  warnings: string[];
+  /** The head of each repo and the repos that only clean sync merges moved: stage `final` only. */
+  heads: Map<string, string>;
+  cleanSyncs: CleanSync[];
+};
+
 /**
- * The refusals shared by `ark merge-request open` and `ark run close <run> handed_off`: the test result, the
- * manual and non-manual ACs, the head of every repo, the AC strings, and the `perf` and `refactor` rules.
+ * The problems of one stage. Reads files, git and the run folder; writes nothing and never fetches.
+ * `step` names the plan step whose non-test ACs must have an evidence file (every AC when it is absent). `summary`
+ * is the `--summary` of `ark merge-request open`. `title: false` leaves the MR title out and `firstOnly` stops at
+ * the first refusal (`assertShippable` throws that one, so it needs nothing after it).
+ */
+export function checkStage(
+  runId: string,
+  project: string,
+  directory: string,
+  events: ArkEvent[],
+  state: RunState,
+  stage: Stage,
+  options: { step?: string; summary?: string; title?: boolean; firstOnly?: boolean } = {},
+): StageCheck {
+  const { step, summary, title = true, firstOnly = false } = options;
+  const final = stage === "final";
+  const problems: string[] = [];
+  const warnings: string[] = [];
+  let heads = new Map<string, string>();
+  let cleanSyncs: CleanSync[] = [];
+  const outcome = (evidence: string[] = []): StageCheck => ({
+    problems,
+    evidence,
+    warnings,
+    heads,
+    cleanSyncs,
+  });
+  const stop = () => firstOnly && problems.length > 0;
+
+  const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
+  const config = loadConfig(project);
+  if (final) {
+    if (lastTest === undefined) problems.push("no test result yet: run `ark test` first");
+    else if (lastTest.data.mode === "quick")
+      problems.push(`the last test at this head is quick, not a gate: run \`ark test ${runId}\``);
+    if (stop()) return outcome();
+    const manual = new Set(manualCriteria(directory));
+    const unproven = [...manual].filter(
+      (id) => manualStatus(state.gates[`manual:${id}`]) !== "manual ok",
+    );
+    if (unproven.length > 0)
+      problems.push(
+        unproven.length === 1
+          ? `manual criterion without ok: ${unproven.join(", ")}`
+          : `manual criteria without ok: ${unproven.join(", ")}`,
+      );
+    if (stop()) return outcome();
+    if (lastTest !== undefined) {
+      // An old log names an AC `<ticket>-AC<k>` here: read it as `<ticket>/AC<k>`.
+      const tested: Record<string, string> = Object.fromEntries(
+        Object.entries((lastTest.data.criteria ?? {}) as Record<string, string>).map(
+          ([id, status]) => [canonicalCriterion(id, state.ticket.id), status],
+        ),
+      );
+      const notPassing = state.criteria.filter(
+        ({ id }) => !manual.has(id) && tested[id] !== "passing",
+      );
+      if (notPassing.length > 0)
+        problems.push(
+          `criteria not passing in the last test run: ${notPassing.map(({ id }) => `${id} (${tested[id] ?? "missing"})`).join(", ")}`,
+        );
+      if (stop()) return outcome();
+      if (!lastTest.data.passed)
+        problems.push("the last test run did not pass: fix the failures and run `ark test` again");
+    }
+    if (stop()) return outcome();
+    heads = currentHeads(events);
+    const changes = headChanges(events, config, heads);
+    cleanSyncs = changes.cleanSyncs;
+    const [first] = changes.stale;
+    if (first !== undefined)
+      problems.push(
+        `repo ${first.repo} changed since the last test run (tested ${first.tested?.slice(0, 8) ?? "nothing"}, now ${first.current.slice(0, 8)}): run ark test ${runId} again`,
+      );
+    if (stop()) return outcome();
+    // A manual answer given at one head: a later commit may change what the human approved. A clean sync does not.
+    for (const [id, recorded] of Object.entries(state.manual_heads)) {
+      if (manualStatus(state.gates[`manual:${id}`]) !== "manual ok") continue;
+      const answered = new Map([...heads].filter(([repo]) => repo in recorded));
+      if (classifyHeads(events, config, answered, recorded).stale.length > 0)
+        warnings.push(`manual answer older than head: ${id}`);
+    }
+  }
+
+  const worktrees = worktreeMap(events);
+  const repoPaths = discoverRepos(config.workspace).map(
+    (repo) => worktrees.get(repo)?.path ?? join(config.workspace, repo),
+  );
+  const { absent, present } = absentLiterals(criterionTexts(directory), repoPaths);
+  const list = (items: typeof absent) =>
+    items.map(({ criterion, literal }) => `${criterion} \`${literal}\``).join("; ");
+  if (absent.length > 0) problems.push(`AC string in no tracked file at head: ${list(absent)}`);
+  if (present.length > 0)
+    problems.push(`AC string still in a tracked file at head: ${list(present)}`);
+  if (stop()) return outcome();
+  if (title) {
+    const fields = frontmatter(readFileSync(join(directory, "ticket.md"), "utf8")).fields ?? {};
+    try {
+      makeTitle(
+        {
+          id: state.ticket.id,
+          title: state.ticket.title,
+          summary: typeof fields.summary === "string" ? fields.summary : null,
+        },
+        config.pr_writing.title_prefix,
+        summary,
+      );
+    } catch (error) {
+      if (!(error instanceof ArkError)) throw error;
+      problems.push(error.message);
+    }
+  }
+  if (final && state.kind === "perf") {
+    const bad = emptyResultFiles(directory);
+    if (bad.length > 0) problems.push(`perf run: missing or empty result file: ${bad.join(", ")}`);
+  }
+  if (
+    final &&
+    state.kind === "refactor" &&
+    state.base_passed !== true &&
+    hasTestCriterion(directory)
+  )
+    problems.push(
+      `refactor run: the suites ${state.base_passed === false ? "fail" : "were not run"} at the base commit: run ark test ${runId}`,
+    );
+  if (stop()) return outcome();
+
+  // A clean sync moved the head, not the tested code: its evidence still names the tested head.
+  const evidenceHeads = new Map(
+    [...heads].filter(([repo]) => !cleanSyncs.some((sync) => sync.repo === repo)),
+  );
+  const planned =
+    step === undefined
+      ? undefined
+      : loadPlan(directory, state.ticket.id).steps.find(({ id }) => id === step);
+  if (step !== undefined && planned === undefined)
+    throw new ArkError(`step ${step} is not in plan.yml`);
+  const reportMissing = (id: string) =>
+    final || (stage === "step" && (planned === undefined || planned.criteria.includes(id)));
+  return outcome(
+    evidenceProblems(directory, lastTest, evidenceHeads, { strict: final, reportMissing }),
+  );
+}
+
+/**
+ * The refusals shared by `ark merge-request open` and `ark run close <run> handed_off`: stage `final` without the
+ * MR title, which `open` refuses itself. Throws the first problem; the evidence problems are one message.
  * Returns the head of each repo and the repos whose head moved from the tested head only by clean sync merges.
  */
 export function assertShippable(
@@ -348,74 +523,48 @@ export function assertShippable(
   events: ArkEvent[],
   state: RunState,
 ): { heads: Map<string, string>; cleanSyncs: CleanSync[] } {
-  const lastTest = events.filter((event) => event.type === "test.completed").at(-1);
-  if (lastTest === undefined) throw new ArkError("no test result yet: run `ark test` first");
-  if (lastTest.data.mode === "quick")
-    throw new ArkError(
-      `the last test at this head is quick, not a gate: run \`ark test ${runId}\``,
-    );
-  const unproven = manualCriteria(directory).filter(
-    (id) => manualStatus(state.gates[`manual:${id}`]) !== "manual ok",
+  const { problems, evidence, heads, cleanSyncs } = checkStage(
+    runId,
+    project,
+    directory,
+    events,
+    state,
+    "final",
+    { title: false, firstOnly: true },
   );
-  if (unproven.length > 0)
-    throw new ArkError(
-      unproven.length === 1
-        ? `manual criterion without ok: ${unproven.join(", ")}`
-        : `manual criteria without ok: ${unproven.join(", ")}`,
-    );
-  const manual = new Set(manualCriteria(directory));
-  // An old log names an AC `<ticket>-AC<k>` here: read it as `<ticket>/AC<k>`.
-  const tested: Record<string, string> = Object.fromEntries(
-    Object.entries((lastTest.data.criteria ?? {}) as Record<string, string>).map(([id, status]) => [
-      canonicalCriterion(id, state.ticket.id),
-      status,
-    ]),
-  );
-  const notPassing = state.criteria.filter(({ id }) => !manual.has(id) && tested[id] !== "passing");
-  if (notPassing.length > 0)
-    throw new ArkError(
-      `criteria not passing in the last test run: ${notPassing.map(({ id }) => `${id} (${tested[id] ?? "missing"})`).join(", ")}`,
-    );
-  if (!lastTest.data.passed)
-    throw new ArkError("the last test run did not pass: fix the failures and run `ark test` again");
-  const heads = currentHeads(events);
-  const { stale, cleanSyncs } = headChanges(events, loadConfig(project), heads);
-  const [first] = stale;
-  if (first !== undefined) {
-    throw new ArkError(
-      `repo ${first.repo} changed since the last test run (tested ${first.tested?.slice(0, 8) ?? "nothing"}, now ${first.current.slice(0, 8)}): run ark test ${runId} again`,
-    );
-  }
-
-  const worktrees = worktreeMap(events);
-  const repoPaths = discoverRepos(loadConfig(project).workspace).map(
-    (repo) => worktrees.get(repo)?.path ?? join(loadConfig(project).workspace, repo),
-  );
-  const { absent, present } = absentLiterals(criterionTexts(directory), repoPaths);
-  const list = (items: typeof absent) =>
-    items.map(({ criterion, literal }) => `${criterion} \`${literal}\``).join("; ");
-  if (absent.length > 0)
-    throw new ArkError(`AC string in no tracked file at head: ${list(absent)}`);
-  if (present.length > 0)
-    throw new ArkError(`AC string still in a tracked file at head: ${list(present)}`);
-  if (state.kind === "perf") {
-    const bad = emptyResultFiles(directory);
-    if (bad.length > 0)
-      throw new ArkError(`perf run: missing or empty result file: ${bad.join(", ")}`);
-  }
-  if (state.kind === "refactor" && state.base_passed !== true && hasTestCriterion(directory))
-    throw new ArkError(
-      `refactor run: the suites ${state.base_passed === false ? "fail" : "were not run"} at the base commit: run ark test ${runId}`,
-    );
-
-  // A clean sync moved the head, not the tested code: its evidence still names the tested head.
-  const evidenceHeads = new Map(
-    [...heads].filter(([repo]) => !cleanSyncs.some((sync) => sync.repo === repo)),
-  );
-  const evidence = evidenceProblems(directory, lastTest, evidenceHeads);
+  if (problems.length > 0) throw new ArkError(problems[0]!);
   if (evidence.length > 0)
     throw new ArkError(`refused: evidence is not complete\n${evidence.join("\n")}`);
   return { heads, cleanSyncs };
+}
+
+/**
+ * Prints the problems of one stage, one line each, then each warning as `warning: <line>`, and exits 1 when there
+ * is a problem. Changes no file, event or ref: it reads the run folder and git, and never fetches.
+ */
+export function mergeRequestCheck(
+  runId: string,
+  inProject: string | undefined,
+  options: { stage?: string; step?: string; summary?: string },
+): void {
+  const { stage, step, summary } = options;
+  if (!stages.includes(stage as Stage))
+    throw new ArkError(`--stage is required: use ${stages.join(", ")}`);
+  if (step !== undefined && stage !== "step") throw new ArkError("--step goes with --stage step");
+  const { project, directory } = findRun(runId, inProject);
+  const events = readEvents(directory);
+  const { problems, evidence, warnings } = checkStage(
+    runId,
+    project,
+    directory,
+    events,
+    deriveState(events),
+    stage as Stage,
+    { step, summary },
+  );
+  for (const line of [...problems, ...evidence]) console.log(line);
+  for (const line of warnings) console.log(`warning: ${line}`);
+  if (problems.length + evidence.length > 0) process.exitCode = 1;
 }
 
 /**

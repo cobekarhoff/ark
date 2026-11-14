@@ -4,6 +4,7 @@ import { ArkError } from "./errors.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { evidenceFile, frontmatter, manualCriteria, parseCriteria, runCriteria } from "./ticket.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
+import { currentHeads } from "./merge-request.ts";
 import { findRun } from "./paths.ts";
 import { type Gate, gateAnswers, gates } from "./lifecycle.ts";
 
@@ -74,12 +75,16 @@ export function gateRecord(
   // Only the awaiting_criteria phase refreshes criteria; in any other phase the transition table refuses the answer.
   if (accepting && deriveState(readEvents(directory)).phase === "awaiting_criteria")
     acceptCriteria(directory);
+  // A manual answer records the head of each repo it was given at: a later commit may change what was approved.
+  const heads =
+    criterion === undefined ? new Map<string, string>() : currentHeads(readEvents(directory));
   appendEvent(directory, "gate.answered", {
     gate,
     ...(criterion === undefined ? {} : { criterion }),
     answer,
     by: "human",
     ...(note === undefined ? {} : { note }),
+    ...(heads.size === 0 ? {} : { heads: Object.fromEntries(heads) }),
   });
   // A demonstration file ends with the human's `human: ok`, once. The other methods' files are the reviewer's or a command's.
   if (criterion !== undefined && answer === "ok") {

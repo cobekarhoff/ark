@@ -187,9 +187,14 @@ function hasLabel(body: string[], label: string): boolean {
 
 /**
  * The shape of `results/evidence/<AC id>.md` for its method. Returns the reason the file is malformed, naming the
- * section, or undefined. Screenshot paths are checked for shape, not for existence.
+ * section, or undefined. Screenshot paths are checked for shape, not for existence. `lastLine: false` skips exactly
+ * the lines that a later writer adds: `human: ok` of a demonstration file and `reviewer: pass|fail` of an inspection file.
  */
-export function evidenceProblem(method: Method, text: string): string | undefined {
+export function evidenceProblem(
+  method: Method,
+  text: string,
+  { lastLine = true }: { lastLine?: boolean } = {},
+): string | undefined {
   const lines = text.split("\n").map((line) => line.trimEnd());
   const missing = (name: string) => `missing section "${name}"`;
   const empty = (name: string) => `section "${name}" is empty`;
@@ -204,6 +209,7 @@ export function evidenceProblem(method: Method, text: string): string | undefine
       )
         return `section "${name}" has no screenshot path`;
     }
+    if (!lastLine) return undefined;
     return lines.findLast((line) => line !== "") === "human: ok"
       ? undefined
       : 'the last line is not "human: ok"';
@@ -225,6 +231,7 @@ export function evidenceProblem(method: Method, text: string): string | undefine
       if (entry !== undefined)
         return `section "Files": "${entry}" has no path:start-end line range`;
     }
+    if (!lastLine) return undefined;
     return sectionOf(lines, "Verdict")!.some((line) => /^reviewer: (pass|fail)$/.test(line.trim()))
       ? undefined
       : 'section "Verdict" has no reviewer line: write "reviewer: pass" or "reviewer: fail"';
