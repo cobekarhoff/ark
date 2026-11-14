@@ -211,10 +211,13 @@ export const orcaOrchestration = async <T>(...args: string[]): Promise<T | null>
 // Orca actions of `ark run step start`. Each returns the value or the reason it failed; none throws.
 // The run lead's terminal env (ORCA_AGENT_SESSION_ID) names the coordinator, so `worker_done` reaches the lead.
 const actionTimeout = () => orcaTimeout(120_000);
-const coordinator = (): string[] =>
+/** `--from` for an action: the session of the calling agent, else `from` (a terminal handle). Outside any Orca session Orca refuses an action that names no sender. */
+const coordinator = (from?: string): string[] =>
   process.env.ORCA_AGENT_SESSION_ID
     ? ["--from", `orca_session_id:${process.env.ORCA_AGENT_SESSION_ID}`]
-    : [];
+    : from
+      ? ["--from", from]
+      : [];
 
 /** A started worker. A field the receipt lacks is `unknown`: the worker runs, so it is never a failed start. */
 export type StartedWorker = { dispatch: string; terminal: string };
@@ -248,12 +251,14 @@ export async function startWorker(options: {
   model: string;
   keepOpen?: boolean;
   run?: string;
+  /** The terminal handle to send as when the caller has no Orca session. */
+  from?: string;
 }): Promise<OrcaRead<StartedWorker>> {
   const started = await orcaCommand<Receipt>(
     [
       "orchestration",
       "worker-start",
-      ...coordinator(),
+      ...coordinator(options.from),
       ...(options.run ? ["--run", options.run] : []),
       ...(options.keepOpen ? ["--keep-open"] : []),
       "--spec",
@@ -286,12 +291,14 @@ export async function sendMessage(options: {
   subject: string;
   body: string;
   type?: string;
+  /** The terminal handle to send as when the caller has no Orca session. */
+  from?: string;
 }): Promise<OrcaRead<unknown>> {
   return orcaCommand(
     [
       "orchestration",
       "send",
-      ...coordinator(),
+      ...coordinator(options.from),
       "--to",
       options.to,
       "--subject",

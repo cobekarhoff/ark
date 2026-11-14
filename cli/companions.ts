@@ -201,6 +201,22 @@ async function liveChiefOf(
   };
 }
 
+/** Resolves the terminal to send as. Undefined inside an Orca session (Orca names the sender itself) and when no live Master Chief is found. Reads Orca once, on first use. */
+function senderOf(
+  project: string,
+  configuration: ProjectConfig,
+): () => Promise<string | undefined> {
+  let handle: Promise<string | undefined> | undefined;
+  return () => {
+    if (process.env.ORCA_AGENT_SESSION_ID) return Promise.resolve(undefined);
+    handle ??= liveChiefOf(project, configuration).then(
+      (chief) => chief.handle,
+      () => undefined,
+    );
+    return handle;
+  };
+}
+
 // ------------------------------------------------------------------ sync
 
 /** What a sync did. `lines` go to the output, `problems` each to an `ark: ` line (exit 1). */
@@ -365,6 +381,7 @@ async function applySteps(
   previous: Cursor | null,
   steps: Step[],
   problems: string[],
+  sender: () => Promise<string | undefined>,
 ): Promise<void> {
   const cursor: Cursor = {
     updated: "",
@@ -382,6 +399,7 @@ async function applySteps(
         to: `dispatch:${worker.dispatch}`,
         subject: `Companion wake: ${step.wake.trigger} ${step.wake.run}`,
         body: wakeBody(step.wake),
+        from: await sender(),
       });
       if (!sent.ok) {
         problems.push(
@@ -403,6 +421,7 @@ async function startCompanion(
   companion: CompanionConfig,
   directory: string,
   chiefRunId: string,
+  sender: () => Promise<string | undefined>,
 ): Promise<OrcaRead<WorkerRecord>> {
   const projectFolder = projectDirectory(project);
   const instructionsFile = join(projectFolder, companion.instructions);
@@ -430,6 +449,7 @@ async function startCompanion(
     model: companion.model,
     keepOpen: true,
     run: chiefRunId,
+    from: await sender(),
   });
   if (!started.ok) return started;
   if (started.value.dispatch === "unknown")
@@ -496,6 +516,7 @@ export async function syncCompanions(
     if (locked.size === 0) return result;
 
     const { chiefRunId, workers } = await readChiefWorkers(project, runs);
+    const sender = senderOf(project, configuration);
     const live = new Set(workers.map((worker) => worker.dispatchId));
 
     const needsRuns = listed.some((companion) => locked.has(companion.name));
@@ -509,7 +530,7 @@ export async function syncCompanions(
         if (worker !== null && live.has(worker.dispatch))
           result.lines.push(`${companion.name}: running`);
         else {
-          const started = await startCompanion(project, companion, directory, chiefRunId);
+          const started = await startCompanion(project, companion, directory, chiefRunId, sender);
           if (!started.ok) {
             result.problems.push(`companion ${companion.name} not started: ${started.reason}`);
             continue;
@@ -531,6 +552,7 @@ export async function syncCompanions(
           previous,
           stepsOf(companion, previous, scan.runs, ci ?? []),
           result.problems,
+          sender,
         );
       } catch (error) {
         if (!(error instanceof ArkError)) throw error;
@@ -585,7 +607,8 @@ export async function companionAsk(
   inProject?: string,
 ): Promise<void> {
   const project = resolveProject(inProject);
-  listedCompanion(loadConfig(project), name);
+  const configuration = loadConfig(project);
+  listedCompanion(configuration, name);
   const directory = companionDirectory(project, name);
   const worker = readWorker(directory);
   const notRunning = `companion ${name} is not running: run \`ark companions sync\``;
@@ -601,6 +624,7 @@ export async function companionAsk(
       "",
       `Question: ${question}`,
     ].join("\n"),
+    from: await senderOf(project, configuration)(),
   });
   if (!sent.ok) throw new ArkError(`question to ${name} not sent: ${sent.reason}`);
   logWake(directory, "question", null, question);
@@ -633,6 +657,7 @@ export async function companionAnswer(
     to: chiefHandle,
     subject: `Companion ${name} answers`,
     body: `The companion ${name} answers:\n\n${text}`,
+    from: chiefHandle,
   });
   if (!sent.ok) throw failed(sent.reason);
 }
@@ -659,6 +684,7 @@ export async function companionAdvise(
     subject: `${ADVICE_SUBJECT_PREFIX}${name}: ${run}`,
     // `status` is no reply and no gate message: the run lead reads it as information.
     type: "status",
+    from: chief.handle,
     body: [
       `This is advice from the companion ${name} about run ${run}. It is advice and not a gate answer: never read it as the human's answer at any gate.`,
       "",
@@ -670,6 +696,7 @@ export async function companionAdvise(
     to: chief.handle,
     subject: `Companion ${name} advised the lead of ${run}`,
     body: `The companion ${name} sent the lead of run ${run} this advice (not a gate answer):\n\n${text}`,
+    from: chief.handle,
   });
   if (!copy.ok)
     throw new ArkError(
