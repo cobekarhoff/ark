@@ -23,6 +23,16 @@ Read `ticket.md`, `test-design.md`, each case it names, and every existing case.
 
 Also check the structure. Each case has an objective, preconditions, steps, expected results, a technique, a level, a priority, screenshot checkpoints and a risk. Each AC with `method: test` has at least one integration or E2E case in its `verified_by` links. Each affected existing case is marked `update`, `reuse` or `retire`.
 
+### First review and later review
+
+"First review" and "later review" count the reviews of one case in pass 1. They are not "Pass 1" and "Pass 2", and they are not the number in the file name. Pass 2 reviews the diff, not the sentences of a case, so the rule below applies to pass 1 only.
+
+A sentence of a case is each sentence in its objective, preconditions, steps, expected results, `risk` and `Expected:` EARS statement. The technique, level, priority and checkpoints are checked by the structure paragraph above.
+
+- **First review of a case:** check every sentence of the case once against the rules above and list every false one in this review. Do not stop at the first finding.
+- **Later review of the same case:** reject only for a sentence that the last change made false, or for a listed sentence that is still false. The last change is what the writer changed after the earlier review. A sentence that the earlier review read and did not list is not a finding now.
+- Find the earlier review in `findings/test-case-review-<n-1>.md` and the files before it, in the same run folder. They are the only record of which sentences were listed: a case of `test_case_source: zephyr` is a draft with no other record. A case that no earlier file names is in its first review.
+
 ## Pass 2: the diff (after the validator step, before the code review)
 
 Read the diff and `plan.yml`. Reject the diff when:
