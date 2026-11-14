@@ -7,6 +7,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeFakeCommand,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -371,5 +372,72 @@ describe("worktree cleanup of composed submodules", () => {
     worktreeCleanup(runId, "demo");
     expect(existsSync(consumer)).toBe(true);
     expect(readFileSync(join(folder, file), "utf8")).toBe("edited\n");
+  });
+});
+
+describe("a stalled git or ark command fails at its own limit", () => {
+  const testTimeoutMs = 60_000;
+
+  /** Runs `call` with a shim named `name` first on PATH; returns what it threw and how long it took. */
+  function stalledWith(
+    name: string,
+    script: string,
+    call: () => unknown,
+  ): { message: string; elapsedMs: number } {
+    const saved = process.env.PATH;
+    const started = Date.now();
+    try {
+      writeFakeCommand(name, script);
+      call();
+    } catch (error) {
+      return { message: (error as Error).message, elapsedMs: Date.now() - started };
+    } finally {
+      process.env.PATH = saved;
+    }
+    throw new Error(`the ${name} call returned after ${Date.now() - started} ms and threw nothing`);
+  }
+
+  const limitOf = (message: string): number =>
+    Number(message.match(/timed out after (\d+) ms/)?.[1]);
+
+  test("ARK-T400 a git command that stalls fails with its command line, the limit and its stderr", () => {
+    const directory = tempGitRepo();
+    const { message, elapsedMs } = stalledWith(
+      "git",
+      "echo shim-git-stderr-marker >&2\nexec sleep 90",
+      () => git(directory, "add", "--", "x.txt"),
+    );
+    expect(message).toContain(`git -C ${directory} add -- x.txt timed out after `);
+    expect(message).toContain("shim-git-stderr-marker");
+    expect(limitOf(message)).toBeGreaterThan(0);
+    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+  });
+
+  test("ARK-T400 an ark command that stalls fails with its command line and the limit", () => {
+    const { message, elapsedMs } = stalledWith("bun", "exec sleep 90", () => ark("status"));
+    expect(message).toContain("ark status timed out after ");
+    expect(limitOf(message)).toBeGreaterThan(0);
+    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+  });
+
+  test("ARK-T400 a git command that fails at once names its command line, exit code and stderr, and no limit", () => {
+    const directory = tempGitRepo();
+    const { message, elapsedMs } = stalledWith("git", "echo shim-fast-failure >&2\nexit 3", () =>
+      git(directory, "add", "--", "x.txt"),
+    );
+    expect(message).toContain(
+      `git -C ${directory} add -- x.txt failed (exit 3): shim-fast-failure`,
+    );
+    expect(message).not.toContain("timed out");
+    expect(elapsedMs).toBeLessThan(10_000);
+  });
+
+  test("ARK-T400 healthy git and ark commands return their output unchanged", () => {
+    expect(git(tempGitRepo(), "rev-parse", "--git-dir")).toBe(".git");
+    const result = ark("--help");
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("Usage: ark <command>");
   });
 });
