@@ -15,14 +15,16 @@ const focusable = 'a[href], button:not(:disabled), [tabindex="0"]';
  * copy, so test ids stay unique), closes on Esc, Close and a route change, and returns the focus.
  */
 export function GraphViewport({
-  width,
+  width: widthProp,
   height,
   label,
   scrollClass,
   focusY = null,
+  onFullChange,
   children,
 }: {
-  width: number;
+  /** A function lays the graph out for the zoom mode and the room (graph pixels) the box has; 0 before it is measured. */
+  width: number | ((mode: "fit" | "actual", available: number) => number);
   height: number;
   /** Names the scroll region and the dialog. */
   label: string;
@@ -30,9 +32,13 @@ export function GraphViewport({
   scrollClass: string;
   /** Unscaled y of a spot to keep in the middle of the box, such as the running step. */
   focusY?: number | null;
-  children: ReactNode;
+  /** Called when Full screen opens or closes, for a panel that must stay above the layer. */
+  onFullChange?: (full: boolean) => void;
+  /** A function receives the zoom mode and the laid-out width, for a graph that draws fewer marks at Fit. */
+  children: ReactNode | ((mode: "fit" | "actual", width: number) => ReactNode);
 }) {
   const [full, setFull] = useState(false);
+  useEffect(() => onFullChange?.(full), [full, onFullChange]);
   const [mode, setMode] = useState<"fit" | "actual">("fit");
   const [available, setAvailable] = useState(0);
   const root = useRef<HTMLDivElement>(null);
@@ -51,6 +57,7 @@ export function GraphViewport({
     return () => observer.disconnect();
   }, [full]);
 
+  const width = typeof widthProp === "function" ? widthProp(mode, available) : widthProp;
   const fit = available > 0 ? Math.min(1, Math.max(minScale, available / width)) : 1;
   const scale = mode === "fit" ? fit : 1;
 
@@ -159,7 +166,7 @@ export function GraphViewport({
             className="gv-graph"
             style={{ width, height, transform: `scale(${scale})`, transformOrigin: "0 0" }}
           >
-            {children}
+            {typeof children === "function" ? children(mode, width) : children}
           </div>
         </div>
       </div>

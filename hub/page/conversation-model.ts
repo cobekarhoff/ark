@@ -335,3 +335,340 @@ export function atPlayhead(conversation: RunConversation, playhead: number): Run
     ),
   };
 }
+
+// ---------- project view (Runs page, Conversation mode) ----------
+
+/** One run line of the metro map. `close` is null for an open run: its line stays open. */
+export type ProjectRun = {
+  run: string;
+  conversation: RunConversation;
+  start: number;
+  close: number | null;
+};
+
+const lastKnown = (conversation: RunConversation): number =>
+  Math.max(
+    ...finite([
+      ...conversation.messages.map(sentAt),
+      ...conversation.spans.flatMap((span) => [
+        Date.parse(span.start),
+        span.end === null ? NaN : Date.parse(span.end),
+      ]),
+      ...conversation.answers.map((answer) => Date.parse(answer.time)),
+    ]),
+  );
+
+/**
+ * The runs of the scoped project, oldest start first. `openStarted` maps each open run of the snapshot to
+ * its `started_at` (null while the snapshot is unknown: a run is then open when a step has no end). A run
+ * is open when the snapshot lists it; otherwise it closed at its last known time. The reply has no close
+ * event, and a run with no message in the window is not in it at all.
+ */
+export function projectRuns(
+  runs: readonly RunConversation[],
+  project: string | null,
+  openStarted: ReadonlyMap<string, string> | null,
+): ProjectRun[] {
+  return runs
+    .filter((conversation) => project === null || conversation.project === project)
+    .map((conversation): ProjectRun => {
+      const known = lastKnown(conversation);
+      const snapshotStart = Date.parse(openStarted?.get(conversation.run) ?? "");
+      const times = finite([
+        snapshotStart,
+        ...conversation.spans.map((span) => Date.parse(span.start)),
+        ...conversation.messages.map(sentAt),
+        ...conversation.answers.map((answer) => Date.parse(answer.time)),
+      ]);
+      const open = openStarted
+        ? openStarted.has(conversation.run)
+        : conversation.spans.some((span) => span.end === null);
+      return {
+        run: conversation.run,
+        conversation,
+        start: times.length ? Math.min(...times) : 0,
+        close: open || !Number.isFinite(known) ? null : known,
+      };
+    })
+    .sort((left, right) => left.start - right.start || left.run.localeCompare(right.run));
+}
+
+/** The window of the project view: the earliest start to the latest known time, at least one minute wide. */
+export function projectRange(
+  runs: readonly ProjectRun[],
+  other: readonly ConversationMessage[],
+): Range {
+  const times = finite([
+    ...runs.flatMap((run) => [run.start, run.close ?? lastKnown(run.conversation)]),
+    ...other.map(sentAt),
+  ]);
+  if (times.length === 0) return { start: 0, end: 60_000 };
+  const start = Math.min(...times);
+  const end = Math.max(...times);
+  return { start, end: end > start ? end : start + 60_000 };
+}
+
+/** A message with a usable time. One without (`created_at` null) has no position on any axis and no count. */
+const timed = (message: ConversationMessage) => Number.isFinite(sentAt(message));
+const touchesChief = (message: ConversationMessage) =>
+  message.from === "chief" || message.to === "chief";
+
+// -- filters --
+
+export type ProjectFilter = {
+  /** Chosen types; empty is all. */
+  types: ReadonlySet<string>;
+  /** One run, or null for every run. */
+  run: string | null;
+  /** Matches the subject only: the project reply holds no message body. */
+  search: string;
+};
+export const noFilter: ProjectFilter = { types: new Set(), run: null, search: "" };
+
+/**
+ * The same runs with only the messages (and their questions) that pass the filter. Master Chief's line,
+ * the answers and the run lines stay. A run filter drops every other run and the messages of no run.
+ */
+export function filterProject(
+  runs: readonly ProjectRun[],
+  other: readonly ConversationMessage[],
+  filter: ProjectFilter,
+): { runs: ProjectRun[]; other: ConversationMessage[] } {
+  const query = filter.search.trim().toLowerCase();
+  const passes = (message: ConversationMessage) =>
+    (filter.types.size === 0 || filter.types.has(typeOf(message))) &&
+    (query === "" || (message.subject ?? "").toLowerCase().includes(query));
+  if (filter.types.size === 0 && query === "" && filter.run === null)
+    return { runs: [...runs], other: [...other] };
+  return {
+    runs: runs
+      .filter((run) => filter.run === null || run.run === filter.run)
+      .map((run) => {
+        const messages = run.conversation.messages.filter(passes);
+        const ids = new Set(messages.map((message) => message.id));
+        return {
+          ...run,
+          conversation: {
+            ...run.conversation,
+            messages,
+            questions: run.conversation.questions.filter((question) => ids.has(question.id)),
+          },
+        };
+      }),
+    other: filter.run === null ? other.filter(passes) : [],
+  };
+}
+
+/** The message types of the project, for the chips, with their counts. */
+export function projectTypes(
+  runs: readonly ProjectRun[],
+  other: readonly ConversationMessage[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const message of [...runs.flatMap((run) => run.conversation.messages), ...other])
+    counts.set(typeOf(message), (counts.get(typeOf(message)) ?? 0) + 1);
+  return counts;
+}
+
+// -- map: in order, not to scale --
+
+/**
+ * The order axis: every distinct time the map draws gets the next slot, so the map is in order and not to
+ * scale. `at` is the slot of a time; a time the axis does not hold is a bug, not a guess.
+ */
+export type Axis = { times: number[]; at: (time: number) => number };
+
+export function buildAxis(
+  runs: readonly ProjectRun[],
+  other: readonly ConversationMessage[],
+): Axis {
+  const set = new Set<number>();
+  const add = (time: number) => Number.isFinite(time) && set.add(time);
+  for (const run of runs) {
+    add(run.start);
+    if (run.close !== null) add(run.close);
+    for (const message of run.conversation.messages) add(sentAt(message));
+    for (const answer of run.conversation.answers) add(Date.parse(answer.time));
+    for (const question of run.conversation.questions) {
+      add(Date.parse(question.sent ?? ""));
+      add(Date.parse(question.delivered ?? ""));
+      add(Date.parse(question.answered ?? ""));
+    }
+  }
+  for (const message of other) add(sentAt(message));
+  const times = [...set].sort((left, right) => left - right);
+  const slot = new Map(times.map((time, index) => [time, index]));
+  return { times, at: (time) => slot.get(time) ?? NaN };
+}
+
+export type Bead = {
+  id: string;
+  /** The owning run, or null for a message of no run. */
+  run: string | null;
+  message: ConversationMessage;
+  time: number;
+  /** A message to or from Master Chief touches the central line. */
+  onChief: boolean;
+  /** A question or an escalation to or from Master Chief is a thick spur. */
+  spur: boolean;
+};
+
+/** Every message with a time, in time order. */
+export function buildBeads(
+  runs: readonly ProjectRun[],
+  other: readonly ConversationMessage[],
+): Bead[] {
+  const bead = (run: string | null, message: ConversationMessage): Bead => ({
+    id: message.id,
+    run,
+    message,
+    time: sentAt(message),
+    onChief: touchesChief(message),
+    spur: touchesChief(message) && (message.type === "question" || message.type === "escalation"),
+  });
+  return [
+    ...runs.flatMap((run) =>
+      run.conversation.messages.filter(timed).map((message) => bead(run.run, message)),
+    ),
+    ...other.filter(timed).map((message) => bead(null, message)),
+  ].sort((left, right) => left.time - right.time);
+}
+
+/**
+ * Beads of the central line grouped into fixed buckets of `bucket` graph pixels (`step` pixels a slot): at Fit
+ * a crowd becomes several clusters along the line, at 100% (`zoomed`) every bead stands alone. Buckets are
+ * fixed, not chained, so a steady stream does not merge into one cluster.
+ */
+export function clusterBeads(
+  beads: readonly Bead[],
+  axis: Axis,
+  zoomed: boolean,
+  step: number,
+  bucket = 24,
+): Bead[][] {
+  const chief = beads.filter((bead) => bead.onChief);
+  if (zoomed) return chief.map((bead) => [bead]);
+  const clusters: Bead[][] = [];
+  let last = NaN;
+  for (const bead of chief) {
+    const key = Math.floor((axis.at(bead.time) * step) / bucket);
+    if (key === last) clusters.at(-1)!.push(bead);
+    else clusters.push([bead]);
+    last = key;
+  }
+  return clusters;
+}
+
+export type Band = { question: string; run: string; start: number; end: number; open: boolean };
+
+/**
+ * The time each run waited for the human: a question or escalation to Master Chief, from delivery (sent,
+ * when delivery is not recorded) to its answer. An unanswered one runs to the run's close or to `playhead`,
+ * whichever is first: a closed run waits for no one. It is open only while the run is open at the playhead.
+ * A question not yet sent at the playhead has no band; one answered after it is waiting again.
+ */
+export function waitingBands(runs: readonly ProjectRun[], playhead: number = Infinity): Band[] {
+  return runs.flatMap((run) => {
+    const toChief = new Set(
+      run.conversation.messages
+        .filter((message) => message.to === "chief")
+        .map((message) => message.id),
+    );
+    return run.conversation.questions.flatMap((question): Band[] => {
+      if (!toChief.has(question.id)) return [];
+      const start = Date.parse(question.delivered ?? question.sent ?? "");
+      if (!Number.isFinite(start) || start > playhead) return [];
+      const answered = Date.parse(question.answered ?? "");
+      const done = Number.isFinite(answered) && answered <= playhead;
+      const closed = run.close !== null && run.close <= playhead;
+      const stop = Math.min(done ? answered : Infinity, run.close ?? Infinity, playhead);
+      return [
+        {
+          question: question.id,
+          run: run.run,
+          start,
+          end: Math.max(start, stop),
+          open: !done && !closed,
+        },
+      ];
+    });
+  });
+}
+
+// -- replay --
+
+/** The send times that count, for `useReplay`: messages with no time are left out. */
+export const sentTimes = (
+  runs: readonly ProjectRun[],
+  other: readonly ConversationMessage[],
+): number[] =>
+  finite([...runs.flatMap((run) => run.conversation.messages), ...other].map(sentAt)).sort(
+    (left, right) => left - right,
+  );
+
+/** Density of messages in `bins` equal slices of the range, for the strip. */
+export function density(times: readonly number[], range: Range, bins: number): number[] {
+  const out = Array.from({ length: bins }, () => 0);
+  const width = range.end - range.start;
+  for (const time of times)
+    if (time >= range.start && time <= range.end)
+      out[Math.min(bins - 1, Math.floor(((time - range.start) / width) * bins))]++;
+  return out;
+}
+
+// -- Now panel --
+
+export type Now = {
+  /** Open at the playhead; a run between two steps is live. */
+  live: { run: string; step: string | null }[];
+  messages: number;
+  answers: number;
+  /** Newest first. */
+  latest: ConversationMessage[];
+};
+
+/** The numbers of the scrubber time, not of the window. */
+export function nowAt(
+  runs: readonly ProjectRun[],
+  other: readonly ConversationMessage[],
+  playhead: number,
+  latestCount = 5,
+): Now {
+  const live = runs
+    .filter((run) => run.start <= playhead && (run.close === null || playhead <= run.close))
+    .map((run) => {
+      const span = run.conversation.spans.find(
+        (s) => Date.parse(s.start) <= playhead && (s.end === null || playhead < Date.parse(s.end)),
+      );
+      return { run: run.run, step: span?.step ?? null };
+    });
+  const messages = [...runs.flatMap((run) => run.conversation.messages), ...other]
+    .filter((message) => sentAt(message) <= playhead)
+    .sort((left, right) => sentAt(right) - sentAt(left));
+  return {
+    live,
+    messages: messages.length,
+    answers: runs.reduce(
+      (sum, run) =>
+        sum + run.conversation.answers.filter((a) => Date.parse(a.time) <= playhead).length,
+      0,
+    ),
+    latest: messages.slice(0, latestCount),
+  };
+}
+
+/** The fractional slot of any time on the axis (a span start or the playhead holds no slot of its own). */
+export function slotOf(axis: Axis, time: number): number {
+  const { times } = axis;
+  if (times.length === 0) return 0;
+  if (time <= times[0]) return 0;
+  if (time >= times[times.length - 1]) return times.length - 1;
+  let low = 0;
+  let high = times.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if (times[middle] <= time) low = middle;
+    else high = middle;
+  }
+  return low + (time - times[low]) / (times[high] - times[low]);
+}
