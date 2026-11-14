@@ -67,6 +67,7 @@ import {
   startHub,
   stopHub,
   tempArkHome,
+  writeFakeCommand,
   writeProject,
   type StartedHub,
 } from "./helpers.ts";
@@ -3927,6 +3928,28 @@ const repoUrl = (repo: string, number: number) =>
 const detailOf = async (baseUrl: string, run: string): Promise<RunDetail> =>
   (await (await fetch(`${baseUrl}/api/run/${run}`)).json()) as RunDetail;
 
+/**
+ * Puts a `git` first on PATH that sleeps 1 s before `ls-tree` and passes every other command through. The hub reads
+ * git with spawnSync, so each run that reads a pointer holds its repo facts back by 1 s while the fake `gh` answers
+ * at once: the facts of a run publish well after its merge request shows `merged`, on any host.
+ */
+function delayLsTree(): void {
+  const realGit = Bun.which("git");
+  if (!realGit) throw new Error("git is not on PATH");
+  writeFakeCommand(
+    "git",
+    `for argument in "$@"; do [ "$argument" = ls-tree ] && sleep 1; done\nexec ${realGit} "$@"`,
+  );
+}
+
+/** The `bump_state` of each bump step in a run's repo graph, keyed by the bump step. */
+const bumpStates = (view: RunView) =>
+  Object.fromEntries(
+    (view.repos ?? []).flatMap((entry) =>
+      entry.depends_on.map((edge) => [edge.bump, edge.bump_state] as const),
+    ),
+  );
+
 test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGraph order, step repos, MR waits and bump states, and a run with no usable graph carries none", async () => {
   isolatedEnvironment();
   const workspace = scratch("ark-repo-workspace-");
@@ -4023,13 +4046,25 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
       },
     },
   });
+  delayLsTree();
   const { baseUrl } = await start();
 
   // The MR run: repos in merge order (the plan lists them the other way round), each with its facts.
-  const snapshot = await snapshotWhen(baseUrl, (next) => {
-    const view = Array.isArray(next.runs) ? next.runs.find((run) => run.run === mrRun) : undefined;
-    return view?.merge_requests.some((request) => request.state === "merged") === true;
-  });
+  // Control: the MR loop shows `merged` while the repo-facts loop still holds its facts back, so the bump reads
+  // unknown. This is the read race of ARK-468: a test that reads the bump after this wait alone is red.
+  const merged = (next: Snapshot) => {
+    const early = Array.isArray(next.runs) ? next.runs.find((run) => run.run === mrRun) : undefined;
+    return early?.merge_requests.some((request) => request.state === "merged") === true;
+  };
+  const mergedOnly = await snapshotWhen(baseUrl, merged);
+  expect(bumpStates(openRunOf(mergedOnly, mrRun))["web-bump"]).toBe(
+    "points at upstream branch unknown",
+  );
+  // The facts of the run are read: a repo of the run has its branch measured, in the read that sets the pointer.
+  // Loaded here, not at the top of the file: the helper is the fix of ARK-468, and a static import of a module that
+  // does not exist yet would fail every test of this file, not only these two.
+  const { waitForRepoFacts } = await import("./hub-facts-wait");
+  const snapshot = await snapshotWhen(baseUrl, waitForRepoFacts(mrRun));
   const view = openRunOf(snapshot, mrRun);
   expect(view.repos?.map(({ repo, order, why }) => [repo, order, why])).toEqual([
     ["core-lib", 1, "Shared <b>core</b> types"],
@@ -4125,4 +4160,73 @@ test("ARK-T358 The run snapshot of a multi-repo run carries its repos in repoGra
   // The design reference is in the tree.
   for (const file of ["hybrid-1.html", "data.js"])
     expect(existsSync(join(root, "docs/design/repo-graph", file)), file).toBe(true);
+});
+
+test("ARK-T393 A submodule bump whose downstream worktree is missing still reads upstream branch unknown, after the repo facts are read", async () => {
+  isolatedEnvironment();
+  const workspace = scratch("ark-repo-workspace-");
+  const branch = "ark/ARK-339-fixture";
+  const { bases } = writeRepoWorkspace(workspace, branch, {
+    "core-lib": { ahead: 3 },
+    service: { ahead: 2 },
+    web: { ahead: 0, gitlink: { pin: "vendor/service", sha: submodulePointerSha } },
+  });
+  writeProject("p", repoProjectConfig(workspace));
+  const fixture = (run: string, id: string, owner: string) =>
+    repoRunFixture({
+      project: "p",
+      run,
+      ticket: { id, title: `Missing worktree ${id}` },
+      repoCount: 3,
+      mode: "mr",
+      workspace,
+      branch,
+      bases,
+      owner,
+    });
+  const controlRun = `${today()}-ARK-911-1`;
+  const missingRun = `${today()}-ARK-912-1`;
+  writeRun(fixture(controlRun, "ARK-911", "control"));
+  // The same run, whose web worktree path was never created: only the workspace repo holds the gitlink.
+  const missing = fixture(missingRun, "ARK-912", "missing");
+  writeRun({
+    ...missing,
+    worktrees: missing.worktrees?.map((worktree) =>
+      worktree.repo === "web" ? { ...worktree, path: join(workspace, "never-created") } : worktree,
+    ),
+  });
+  const merged = {
+    state: "MERGED",
+    statusCheckRollup: [],
+    additions: 1,
+    deletions: 1,
+    changedFiles: 1,
+    createdAt: new Date().toISOString(),
+  };
+  installFakeTools({
+    orca: orcaAnswersFor(controlRun),
+    mergeRequestViews: {
+      "https://github.com/control/core-lib/pull/11": merged,
+      "https://github.com/missing/core-lib/pull/11": merged,
+    },
+  });
+  delayLsTree();
+  const { baseUrl } = await start();
+
+  // Loaded here, not at the top of the file: the helper is the fix of ARK-468, and a static import of a module that
+  // does not exist yet would fail every test of this file, not only these two.
+  const { waitForRepoFacts } = await import("./hub-facts-wait");
+  const snapshot = await snapshotWhen(baseUrl, waitForRepoFacts(controlRun, missingRun));
+
+  // The control proves the facts were read and a pointer can be found; the missing run must not invent one.
+  expect(bumpStates(openRunOf(snapshot, controlRun))["web-bump"]).toBe(
+    `points at upstream branch ${submodulePointerSha.slice(0, 8)}`,
+  );
+  const missingView = openRunOf(snapshot, missingRun);
+  expect(bumpStates(missingView)["web-bump"]).toBe("points at upstream branch unknown");
+  expect(missingView.repos?.map((entry) => [entry.repo, entry.branch?.ahead])).toEqual([
+    ["core-lib", 3],
+    ["service", 2],
+    ["web", 0],
+  ]);
 });
