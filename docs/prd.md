@@ -56,15 +56,15 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 
 ### R1 · Master Chief
 
-| ID      | Requirement                                                                                                                                                                                                                      |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1.1    | The system shall provide one Master Chief session per project through which you name tickets, receive every gate question and give every gate answer.                                                                            |
-| R1.2    | **When** you approve a ticket, Master Chief shall queue it as an Orca task (Orca's own object, not an Ark run) and start one run lead for it, up to the project's `concurrency`.                                                 |
-| R1.3    | **If** a second Master Chief is started for a project, **then** it shall refuse to start and name the live terminal.                                                                                                             |
-| R1.4    | **While** a run has an open MR, Master Chief shall poll `ark merge-request status` and, on a failed check, a human comment or a conflict, start the run lead again for an MR round.                                              |
-| R1.5    | Master Chief shall never write product code.                                                                                                                                                                                     |
-| Tickets | ARK-151, ARK-156, ARK-177, ARK-202, ARK-281                                                                                                                                                                                      |
-| Held by | `skills/ark/playbooks/chief.md`; `ark chief state`; [ADR 0008](adr/0008-hub-steers-through-master-chief.md) (one Master Chief per project; the rest of it is superseded by [ADR 0009](adr/0009-hub-is-a-read-only-live-view.md)) |
+| ID      | Requirement                                                                                                                                                                                                                  |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1.1    | The system shall provide one Master Chief session per project through which you name tickets, receive every gate question and give every gate answer.                                                                        |
+| R1.2    | **When** you approve a ticket, Master Chief shall queue it as an Orca task (Orca's own object, not an Ark run) and start one run lead for it, up to the project's `concurrency`.                                             |
+| R1.3    | **If** a second Master Chief is started for a project, **then** it shall refuse to start and name the live terminal.                                                                                                         |
+| R1.4    | **While** a run has an open MR, Master Chief shall poll `ark merge-request status` and, on a failed check, a human comment or a conflict, start the run lead again for an MR round.                                          |
+| R1.5    | Master Chief shall never write product code.                                                                                                                                                                                 |
+| Tickets | ARK-151, ARK-156, ARK-177, ARK-202, ARK-281                                                                                                                                                                                  |
+| Held by | `skills/ark-chief/SKILL.md`; `ark chief state`; [ADR 0008](adr/0008-hub-steers-through-master-chief.md) (one Master Chief per project; the rest of it is superseded by [ADR 0009](adr/0009-hub-is-a-read-only-live-view.md)) |
 
 ### R2 · Runs and resume
 
@@ -123,7 +123,7 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 | R6.7    | **Where** a ticket has `kind: bug` and a `method: test` AC, `ark run step <run> <implementer step> start` shall refuse until one `ark test` shows every `method: test` AC failing.                                                                       |
 | R6.8    | **Where** a ticket has `kind: refactor` and a `method: test` AC, `ark test` shall run the suites at the base commit and exit 1 when they fail there, and the system shall refuse to open an MR unless the suites passed at base.                         |
 | Tickets | ARK-154, ARK-158, ARK-243, ARK-311, ARK-312, ARK-315, ARK-351                                                                                                                                                                                            |
-| Held by | `ark test`; `cli/parsers/*`; `skills/ark/rubrics/reviewer.md` Proof; [ADR 0010](adr/0010-test-cases-describe-the-product.md); `cli/transitions.ts` and `cli/test-run.ts` for R6.7 and R6.8                                                               |
+| Held by | `ark test`; `cli/parsers/*`; `skills/ark-reviewer/rubrics/reviewer.md` Proof; [ADR 0010](adr/0010-test-cases-describe-the-product.md); `cli/transitions.ts` and `cli/test-run.ts` for R6.7 and R6.8                                                      |
 | Cases   | R6.4: ARK-T134 · R6.5: ARK-T207 · R6.7: ARK-T62, ARK-T64 · R6.8: ARK-T12, ARK-T63                                                                                                                                                                        |
 
 ### R7 · Merge requests
@@ -143,10 +143,10 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 | ID      | Requirement                                                                                                                                                                                          |
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | R8.1    | The system shall keep each project's configuration in `~/.ark/projects/<project>/ark.yml`: workspace, ticket source, setup command, suites with their parsers, roles, gates, concurrency and checks. |
-| R8.2    | **When** a project is bootstrapped, the playbook shall detect the stack, suites and repos, and ask only what it cannot detect.                                                                       |
+| R8.2    | **When** a project is bootstrapped, the bootstrap skill shall detect the stack, suites and repos, and ask only what it cannot detect.                                                                |
 | R8.3    | **When** a worktree is created, the system shall run the project's `setup` command in it.                                                                                                            |
 | Tickets | ARK-150, ARK-158, ARK-198                                                                                                                                                                            |
-| Held by | `skills/ark/playbooks/bootstrap.md`; `cli/config.ts`; [bootstrap-a-project.md](how-to/bootstrap-a-project.md)                                                                                        |
+| Held by | `skills/ark-bootstrap/SKILL.md`; `cli/config.ts`; [bootstrap-a-project.md](how-to/bootstrap-a-project.md)                                                                                            |
 
 ### R9 · Gates and rounds
 
@@ -181,7 +181,7 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 | R11.2   | The run lead shall write `retro.md` on top of those numbers before the run is closed, and shall not rewrite it in an MR round.                                                                                                                                                                                                                               |
 | R11.3   | **When** you bring a bug ticket, Master Chief shall ask whether it traces to an earlier run and link it as an escaped defect.                                                                                                                                                                                                                                |
 | Tickets | ARK-160, ARK-161, ARK-173, ARK-288                                                                                                                                                                                                                                                                                                                           |
-| Held by | `ark retro`; `skills/ark/playbooks/retro.md`                                                                                                                                                                                                                                                                                                                 |
+| Held by | `ark retro`; `skills/ark-retro/SKILL.md`                                                                                                                                                                                                                                                                                                                     |
 | Cases   | R11.1: ARK-T170, ARK-T174, ARK-T178, ARK-T195                                                                                                                                                                                                                                                                                                                |
 
 ### R12 · Improvement proposals

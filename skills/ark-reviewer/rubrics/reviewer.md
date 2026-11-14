@@ -27,7 +27,7 @@ Read the ticket and the step's ACs first. Load each skill in the `skills` list o
 
 ## How to report
 
-Report each problem once, at the place where it matters most. Do not repeat a problem under a second area or a second finding. Do not report style the repo's formatter or linter already enforces. Do not report a finding without evidence. Name the principle from [`principles.md`](../principles.md) that the finding breaks, when one applies.
+Report each problem once, at the place where it matters most. Do not repeat a problem under a second area or a second finding. Do not report style the repo's formatter or linter already enforces. Do not report a finding without evidence. Name the principle from [`principles.md`](../../shared/principles.md) that the finding breaks, when one applies.
 
 Use these priorities:
 

@@ -4,7 +4,7 @@ title: ARK-T85 every link in principles.md points to a file and heading that exi
 level: unit
 technique: link resolution
 priority: medium
-risk: A link in skills/ark/principles.md points to a missing file or heading
+risk: A link in skills/shared/principles.md points to a missing file or heading
 status: active
 changed_by: 2026-11-07-ARK-322-1
 ---

@@ -88,7 +88,7 @@ export function buildSpec(options: {
 }): string {
   const { run, directory, state, step, interrupted, mergeBase } = options;
   const lines = [
-    `/skill:ark worker ${run} ${step.id}`,
+    `/skill:ark-${step.role} ${run} ${step.id}`,
     `You are the ${step.role.toUpperCase()} for step ${step.id} of run ${run}.`,
   ];
   if (interrupted)

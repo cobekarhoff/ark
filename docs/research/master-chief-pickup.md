@@ -1,8 +1,8 @@
 # Why Master Chief reads some messages late
 
-> Spike report, measured 2026-11-07. A snapshot, not current behavior. Outcome: Fix 1 shipped as ARK-352, so `skills/ark/playbooks/chief.md` now says to never use the blocking `ask` tool for a gate. The note below that `chief.md` still tells Master Chief to `--ack` is obsolete.
+> Spike report, measured 2026-11-07. A snapshot, not current behavior. Outcome: Fix 1 shipped as ARK-352, so `skills/ark-chief/SKILL.md` now says to never use the blocking `ask` tool for a gate. The note below that `skills/ark-chief/SKILL.md` still tells Master Chief to `--ack` is obsolete.
 
-ARK-347 spike. Measurement and recommendation only: the spike itself changed no product code, playbook or setting.
+ARK-347 spike. Measurement and recommendation only: the spike itself changed no product code, skill or setting.
 
 ## Summary
 
@@ -150,6 +150,6 @@ The remaining cause, a failed model request (50 min, 1.0%), is below 20% and has
 ### Fix 1: relay a gate without holding Master Chief's turn (ask gate, 99.0% of the wait)
 
 - **Change:** Master Chief stops using the blocking `ask` tool for gate relays. It writes the gate as chat text (run, ticket, the run lead's options and recommended answer, the file paths, the message id) and ends its turn. Before it ends the turn it arms `check --wait` in the background (one consumer only), and re-arms it after each wake-up; that wait and the pointer wake Master Chief for new mail while the gate waits. When the human answers in chat, Master Chief sends the words back unchanged with `orca orchestration reply --id <message id>`. Master Chief keeps one open list in its reply (message id for run lead items, a local label such as `local-only-handoff <run>` for its own questions, which are routed to the local action and never to `reply`) so the answer maps to one item. Rules that stay: never answer a gate for the human, never relay an `auto` plan or strategy gate.
-- **Files:** `skills/ark/playbooks/chief.md` (section 1 step 2; section 4; "Asking the human" in section 7; the gate relay section; the local-only handoff; the escaped-defect step; the rules). No wording test pins these sections. The hub does not post the `reply`: it is a read-only live view (`docs/adr/0009-hub-is-a-read-only-live-view.md`).
+- **Files:** `skills/ark-chief/SKILL.md` (section 1 step 2; section 4; "Asking the human" in section 7; the gate relay section; the local-only handoff; the escaped-defect step; the rules). No wording test pins these sections. The hub does not post the `reply`: it is a read-only live view (`docs/adr/0009-hub-is-a-read-only-live-view.md`).
 - **Expected wait after:** the 26 late messages would behave like the other 269 messages: median 0.0 min, p90 0.8 min, max 14.3 min. Their 4,853 min total falls to about 21 min if every one of them took the p90 time (26 × 0.8). The human's own time to answer a gate does not change; only the wait of the other messages behind it goes away.
 - **Cost:** the human answers by typing a short reply instead of picking an option, and Master Chief must hold several open gates at once.
