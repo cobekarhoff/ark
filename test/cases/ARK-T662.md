@@ -4,7 +4,7 @@ title: ARK-T662 the three hub write routes of the Companions page refuse a reque
 level: integration
 technique: equivalence classes of request origin (own page, no Origin, foreign Origin, foreign Host), of target (listed companion, unlisted, traversal in plain and percent-encoded form, ticket of another source) and of body (inside the cap, over the cap, bad JSON); boundary values on the reason and question length (400 and 401 characters, in 4-byte characters) and on the body cap (4096 and 4097 bytes); route enumeration for the write-method rule
 priority: high
-risk: "any web page open in the user's browser posts to 127.0.0.1 and approves a ticket, writes dismissed.md or wakes a companion, because the new routes use the lax isLocalRequest of the read routes (a missing Origin passes there); a name or ticket id with `..` writes outside companions/ or changes a ticket that no companion proposed; a body over the cap answers an opaque error; the cap stays at 1024 bytes for these routes so a 400-character multibyte reason gets a 413; the server takes a reason or question over 400 characters because only the page checks it; the new GET route crashes the snapshot when ark.yml is invalid; the old read-only rule is re-pinned or dropped, so another route takes a write unnoticed"
+risk: "any web page open in the user's browser posts to 127.0.0.1 and approves a ticket, writes dismissed.md or wakes a companion, because the new routes use the lax isLocalRequest of the read routes (a missing Origin passes there); a name or ticket id with `..` writes outside companions/ or changes a ticket that no companion proposed; a body over the cap answers an opaque error; the cap stays at 1024 bytes for these routes so a 400-character multibyte reason gets a 413; the server takes a reason or question over 400 characters because only the page checks it; the new GET route crashes the snapshot when ark.yml is invalid; the old read-only rule is re-pinned or dropped, so another route takes a write unnoticed; open-in-orca: a foreign page (foreign Origin, no Origin or foreign Host) switches a terminal, or a terminal name over 1024 characters is accepted now that the server cap is 4096 bytes"
 status: active
 changed_by: 2026-11-14-ARK-480-1
 ---
@@ -16,7 +16,7 @@ Prove that the three writes of the Companions page (approve a ticket, dismiss wi
 ## Preconditions
 
 - A real hub on a temp `ARK_HOME` (the harness of `test/hub.test.ts`), the fake orca of ARK-T660 (logs `send`, `task-create`), project `p` with the companion `cortana` listed, a ticket `ARK-901` at `status: proposed` with `source: cortana`, a ticket `ARK-902` at `status: proposed` with no `source`, a ticket `ARK-903` at `status: ready`.
-- For steps 7 and 8, a hub on a project with no companion and an Orca fake that lists one live terminal `term-worker` of an open run and logs every `terminal` call (the harness of `test/hub.test.ts`); for step 9, the project `p` of the first precondition with Orca down.
+- For steps 7 and 8, a hub on a project with no companion and an Orca fake that lists one live terminal `term-worker` of an open run and logs every `terminal` call (the harness of `test/hub.test.ts`). For step 9, two setups: for the first half, the companion hub of the first precondition (project `p` listing `cortana`) with Orca down; for the second half, a run hub with a run and no companion, with the Orca fake of `test/hub.test.ts` in its down mode.
 - Authorities: the hub's `127.0.0.1:<port>` as in `openInOrca`.
 
 ## Steps
