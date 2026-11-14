@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { now } from "../cli/clock.ts";
-import { companionDirectory, type WorkerRecord } from "../cli/companions.ts";
+import { companionDirectory, isRunning, type WorkerRecord } from "../cli/companions.ts";
 import { loadConfig, type ProjectConfig } from "../cli/config.ts";
 import { execResult } from "../cli/exec.ts";
 import {
@@ -195,17 +195,16 @@ async function readWorkerStates(
     states.set(project, dispatches);
     const chief = findChiefRun(project, runs.value);
     if (!chief.ok) continue;
-    const list = (terminalState: string) =>
-      orcaPages<WorkerRow>(
-        "worker-list",
-        "workers",
-        ["--run", chief.value, "--terminal-state", terminalState, "--include-remote"],
-        orcaTimeoutMilliseconds,
-      );
-    const [active, retained] = await Promise.all([list("active"), list("retained")]);
-    if (!active.ok || !retained.ok) return null;
-    for (const worker of retained.value) dispatches.set(worker.dispatchId, "retained");
-    for (const worker of active.value) dispatches.set(worker.dispatchId, "running");
+    const workers = await orcaPages<WorkerRow>(
+      "worker-list",
+      "workers",
+      ["--run", chief.value, "--include-remote"],
+      orcaTimeoutMilliseconds,
+    );
+    if (!workers.ok) return null;
+    for (const worker of workers.value) {
+      if (isRunning(worker)) dispatches.set(worker.dispatchId, "running");
+    }
   }
   return states;
 }

@@ -560,7 +560,7 @@ export type TranscriptResult = { text: string; size: number; cut: boolean };
  * What the Orca worker of a companion is doing. `unavailable` is Orca not answering: never `stopped`,
  * because an unanswered read says nothing about the worker.
  */
-export type CompanionState = "running" | "retained" | "none" | "unavailable";
+export type CompanionState = "running" | "none" | "unavailable";
 
 export type CompanionRow = {
   name: string;

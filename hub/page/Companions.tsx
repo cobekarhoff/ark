@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type SubmitEven
 import { Cost } from "./format.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { ticketHref, useLive, useProject } from "./store.tsx";
-import type { CompanionItem, CompanionRow, CompanionsReply } from "../types.ts";
+import type { CompanionItem, CompanionRow, CompanionsReply, CompanionState } from "../types.ts";
 
 const refreshMilliseconds = 10_000;
 const limitCharacters = 400;
@@ -90,17 +90,6 @@ function StateCell({ row }: { row: CompanionRow }) {
       </span>
     );
   if (row.state === "running") return <span className="pill ok">running</span>;
-  if (row.state === "retained")
-    return (
-      <>
-        <span className="pill warn" title="The worker's terminal is kept but not active">
-          retained
-        </span>
-        <span className="co-why">
-          next <code>ark companions sync</code> starts it
-        </span>
-      </>
-    );
   return (
     <>
       <span className="pill warn">not running</span>
@@ -301,11 +290,12 @@ function ItemForm({
 
 function Item({
   item,
-  orca,
+  askOff,
   onChanged,
 }: {
   item: Shown;
-  orca: "ok" | "unavailable";
+  /** Why Ask is off, or null when the companion's worker runs. */
+  askOff: string | null;
   onChanged: () => void;
 }) {
   const [form, setForm] = useState<Form | null>(null);
@@ -430,8 +420,8 @@ function Item({
               ref={askButton}
               aria-expanded={form === "ask"}
               aria-label={`Ask about ${reference}`}
-              disabled={orca === "unavailable"}
-              title={orca === "unavailable" ? "Ask needs Orca" : undefined}
+              disabled={askOff !== null}
+              title={askOff ?? undefined}
               onClick={() => open("ask")}
             >
               Ask…
@@ -465,23 +455,33 @@ function Item({
 
 function Items({
   list,
-  orca,
+  states,
   onChanged,
 }: {
   list: Shown[];
-  orca: "ok" | "unavailable";
+  /** `project/companion` to state. */
+  states: Map<string, CompanionState>;
   onChanged: () => void;
 }) {
   return (
     <ul className="co-items">
-      {list.map((item) => (
-        <Item
-          key={`${item.project}/${item.companion}/${item.kind}/${item.ref}`}
-          item={item}
-          orca={orca}
-          onChanged={onChanged}
-        />
-      ))}
+      {list.map((item) => {
+        const state = states.get(`${item.project}/${item.companion}`);
+        return (
+          <Item
+            key={`${item.project}/${item.companion}/${item.kind}/${item.ref}`}
+            item={item}
+            askOff={
+              state === "running"
+                ? null
+                : state === "unavailable"
+                  ? "Ask needs Orca"
+                  : "Ask needs the companion running"
+            }
+            onChanged={onChanged}
+          />
+        );
+      })}
     </ul>
   );
 }
@@ -535,6 +535,15 @@ export function Companions() {
     entry.ideas.map((item) => ({ ...item, project: entry.project })),
   );
   const running = rows.filter((row) => row.state === "running").length;
+  const states = new Map(rows.map((row) => [`${row.project}/${row.name}`, row.state]));
+  // The first shownIdeas of each companion: one busy companion never hides the others' latest.
+  const shownPerCompanion = new Map<string, number>();
+  const latestIdeas = ideas.filter((item) => {
+    const key = `${item.project}/${item.companion}`;
+    const count = (shownPerCompanion.get(key) ?? 0) + 1;
+    shownPerCompanion.set(key, count);
+    return count <= shownIdeas;
+  });
   const unavailable = reply.orca === "unavailable";
   return (
     <>
@@ -588,7 +597,7 @@ export function Companions() {
           <Table rows={rows} many={loaded.length > 1} />
           <Section title="Proposed tickets" count={tickets.length} testId="companion-tickets">
             {tickets.length > 0 ? (
-              <Items list={tickets} orca={reply.orca} onChanged={reload} />
+              <Items list={tickets} states={states} onChanged={reload} />
             ) : (
               <div className="co-empty">
                 <p>
@@ -602,20 +611,16 @@ export function Companions() {
           <Section title="Latest ideas" count={ideas.length} testId="companion-ideas">
             {ideas.length > 0 ? (
               <>
-                <Items
-                  list={allIdeas ? ideas : ideas.slice(0, shownIdeas)}
-                  orca={reply.orca}
-                  onChanged={reload}
-                />
-                {ideas.length > shownIdeas ? (
+                <Items list={allIdeas ? ideas : latestIdeas} states={states} onChanged={reload} />
+                {ideas.length > latestIdeas.length ? (
                   <div className="co-more">
                     <span className="mut">
                       {allIdeas
                         ? `All ${ideas.length} shown.`
-                        : `Latest ${shownIdeas} of ${ideas.length} across all companions.`}
+                        : `Latest ${shownIdeas} of each companion: ${latestIdeas.length} of ${ideas.length} shown.`}
                     </span>
                     <button type="button" className="btn" onClick={() => setAllIdeas(!allIdeas)}>
-                      {allIdeas ? "Show fewer" : `Show ${ideas.length - shownIdeas} more`}
+                      {allIdeas ? "Show fewer" : `Show ${ideas.length - latestIdeas.length} more`}
                     </button>
                   </div>
                 ) : null}
