@@ -81,7 +81,13 @@ function validatorRun(
     ticket_source: "local",
     round_budget: 1,
     suites: [
-      { name: "integration", level: "integration", repo: ".", command: "true", parser: "bun" },
+      {
+        name: "integration",
+        level: "integration",
+        repo: ".",
+        command: "true {report}",
+        parser: "bun",
+      },
     ],
     roles: {
       implementer: { harness: "omp", model: "test" },
