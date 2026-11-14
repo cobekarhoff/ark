@@ -72,6 +72,7 @@ import {
   tempDirectory,
   useCleanup,
   dateOf,
+  isoAt,
   testNow,
   writeFakeOrca,
   writeProject,
@@ -10664,7 +10665,7 @@ const mergedView = () => ({
   additions: 1,
   deletions: 1,
   changedFiles: 1,
-  createdAt: new Date().toISOString(),
+  createdAt: isoAt(),
 });
 const repoMergeRequest = (owner: string, repo: string, number: number) =>
   `https://github.com/${owner}/${repo}/pull/${number}`;
