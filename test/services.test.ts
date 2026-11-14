@@ -29,7 +29,7 @@ const config = (mergeRequests: "open" | "none") => ({
   workspace,
   ticket_source: "local",
   merge_requests: mergeRequests,
-  suites: [{ name: "unit", level: "unit", repo: ".", command: "true", parser: "bun" }],
+  suites: [{ name: "unit", level: "unit", repo: ".", command: "true {report}", parser: "bun" }],
   roles: {
     implementer: { harness: "claude", model: "claude-sonnet" },
     validator: { harness: "codex", model: "gpt-codex" },

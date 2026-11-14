@@ -93,7 +93,7 @@ function startRun(
         name: "integration",
         level: "integration",
         repo: ".",
-        command: "true",
+        command: "true {report}",
         parser: "bun",
       },
     ],
@@ -1259,7 +1259,15 @@ test("ARK-T384 ark status refuses a generated entry with an empty path, an empty
     const base = {
       workspace,
       ticket_source: "local",
-      suites: [{ name: "cli", level: "integration", repo: ".", command: "true", parser: "bun" }],
+      suites: [
+        {
+          name: "cli",
+          level: "integration",
+          repo: ".",
+          command: "true {report}",
+          parser: "bun",
+        },
+      ],
       roles: {
         implementer: { harness: "omp", model: "pi/task" },
         validator: { harness: "omp", model: "pi/task" },
@@ -1322,18 +1330,13 @@ test(
   "ARK-T386 the documented Ark generated entry regenerates docs/reference/cli.md when a run and the target both changed cli/ark.ts",
   () => {
     const repositoryRoot = join(import.meta.dir, "..");
-    const guide = readFileSync(join(repositoryRoot, "docs/how-to/bootstrap-a-project.md"), "utf8");
-    const example = guide.match(
-      /```yaml\n( {3}workspace: \/Users\/you\/Dev\/abbott\/ark\n[\s\S]*?)```/,
-    );
-    if (!example) throw new Error("bootstrap-a-project.md has no Ark ark.yml example");
-    const { generated } = Bun.YAML.parse(example[1].replace(/^ {3}/gm, "")) as {
-      generated?: { path: string; command: string }[];
-    };
-    expect(generated).toContainEqual({
-      path: "docs/reference/cli.md",
-      command: "bun scripts/cli-reference.ts",
-    });
+    const documentation = readFileSync(join(repositoryRoot, "docs/reference/cli.md"), "utf8");
+    const documented = documentation.match(/`\{ path: (\S+), command: ([^}]+?) \}`/);
+    if (!documented) throw new Error("the generated row of docs/reference/cli.md has no example");
+    const generated = [{ path: documented[1], command: documented[2] }];
+    expect(generated).toEqual([
+      { path: "docs/reference/cli.md", command: "bun scripts/cli-reference.ts" },
+    ]);
 
     const generate = (directory: string) => {
       const result = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: directory });

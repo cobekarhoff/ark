@@ -169,7 +169,7 @@ async function startControlRunner(markers: string): Promise<{ run: StartedRun; p
         level: "unit",
         repo: ".",
         cores: 1,
-        command: `touch ${markers}/control && sleep 300`,
+        command: `touch ${markers}/control && sleep 300 # {report}`,
         parser: "bun",
       },
     ],

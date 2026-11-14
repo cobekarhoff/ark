@@ -157,7 +157,7 @@ function scenario(
   const projectDirectory = writeProject("demo", {
     workspace,
     ticket_source: "local",
-    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true", parser: "bun" }],
+    suites: [{ name: "e2e", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     // One changed line is tier 0, which allows three prose lines: too few for a two-repo body.
     pr_writing: { tier_floor: 1 },
     roles: {
