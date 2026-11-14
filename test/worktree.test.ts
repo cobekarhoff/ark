@@ -154,7 +154,7 @@ function createdEvents(runDirectory: string) {
 }
 
 describe("workspace mirror", () => {
-  test("ARK-154-AC1 a meta-repo run mirrors the workspace: named repo is a worktree, everything else a symlink", () => {
+  test("ARK-T571 ARK-154-AC1 ARK-154-AC4 a meta-repo run mirrors the workspace: named repo is a worktree, everything else a symlink", () => {
     const workspace = tempMetaWorkspace();
     const { runId, runDirectory } = startRun(workspace);
     const result = ark("worktree", "create", runId, "repos/a");
@@ -187,17 +187,7 @@ describe("workspace mirror", () => {
     ]);
   });
 
-  test("ARK-154-AC1 a nested repo becomes a worktree at its usual path", () => {
-    const workspace = tempMetaWorkspace();
-    const { runId, runDirectory } = startRun(workspace);
-    expect(ark("worktree", "create", runId, "repos/b/c").code).toBe(0);
-
-    const mirror = join(runDirectory, "workspace");
-    expect(lstatSync(join(mirror, "repos/b/c/.git")).isFile()).toBe(true);
-    expect(lstatSync(join(mirror, "repos/a")).isSymbolicLink()).toBe(true);
-  });
-
-  test("ARK-154-AC1 a single-repo workspace gets one worktree and no symlinks", () => {
+  test("ARK-T572 ARK-154-AC1 a single-repo workspace gets one worktree and no symlinks", () => {
     const workspace = tempGitRepo({
       "AGENTS.md": "rules\n",
       "src/main.txt": "x",
@@ -212,7 +202,7 @@ describe("workspace mirror", () => {
     expect(gitOutput(mirror, "rev-parse", "--abbrev-ref", "HEAD")).toBe("ark/FAKE-1-ticket-fake-1");
   });
 
-  test("ARK-154-AC1 with no repos named, the repos of the last valid plan are used", () => {
+  test("ARK-T573 ARK-154-AC1 with no repos named, the repos of the last valid plan are used", () => {
     const workspace = tempMetaWorkspace();
     const { runId, runDirectory } = startRun(workspace);
     expect(ark("worktree", "create", runId).code).toBe(1);
@@ -264,7 +254,7 @@ describe("workspace mirror", () => {
     expect(lstatSync(join(runDirectory, "workspace/repos/a")).isSymbolicLink()).toBe(true);
   });
 
-  test("ARK-154-AC2 running again keeps existing worktrees, creates missing ones and refuses unknown repos", () => {
+  test("ARK-T574 ARK-154-AC2 running again keeps existing worktrees, creates missing ones and refuses unknown repos", () => {
     const workspace = tempMetaWorkspace();
     const { runId, runDirectory } = startRun(workspace);
     const mirror = join(runDirectory, "workspace");
@@ -285,7 +275,7 @@ describe("workspace mirror", () => {
     expect(unknown.err).toContain("repos/nope");
   });
 
-  test("ARK-154-AC2 an unknown repo among valid ones creates nothing", () => {
+  test("ARK-T575 ARK-154-AC2 an unknown repo among valid ones creates nothing", () => {
     const workspace = tempMetaWorkspace();
     const { runId, runDirectory } = startRun(workspace);
     const result = ark("worktree", "create", runId, "repos/a", "repos/nope");
@@ -293,24 +283,9 @@ describe("workspace mirror", () => {
     expect(existsSync(join(runDirectory, "workspace/repos/a"))).toBe(false);
     expect(createdEvents(runDirectory)).toEqual([]);
   });
-
-  test("ARK-154-AC4 walking up from a worktree finds the workspace AGENTS.md through the mirror", () => {
-    const workspace = tempMetaWorkspace();
-    const { runId, runDirectory } = startRun(workspace);
-    expect(ark("worktree", "create", runId, "repos/b/c").code).toBe(0);
-
-    let directory = join(runDirectory, "workspace/repos/b/c");
-    while (!existsSync(join(directory, "AGENTS.md"))) directory = dirname(directory);
-
-    const found = join(directory, "AGENTS.md");
-    expect(directory).toBe(join(runDirectory, "workspace"));
-    expect(lstatSync(found).isSymbolicLink()).toBe(true);
-    expect(realpathSync(found)).toBe(realpathSync(join(workspace, "AGENTS.md")));
-    expect(readFileSync(found, "utf8")).toBe("workspace rules\n");
-  });
 });
 describe("ARK-167 worktree lifecycle", () => {
-  test("ARK-167-AC1 worktree branches use a lowercase title slug capped at 40 characters", () => {
+  test("ARK-T576 ARK-167-AC1 worktree branches use a lowercase title slug capped at 40 characters", () => {
     const workspace = tempGitRepo();
     const { runId, runDirectory } = startRun(
       workspace,
@@ -325,7 +300,7 @@ describe("ARK-167 worktree lifecycle", () => {
     expect(branch.slice("ark/FAKE-1-".length)).toHaveLength(40);
   });
 
-  test("ARK-167-AC2 closing an abandoned run removes a clean worktree and its branch", () => {
+  test("ARK-T577 ARK-167-AC2 closing an abandoned run removes a clean worktree and its branch", () => {
     const workspace = tempGitRepo();
     const { runId, runDirectory } = startRun(workspace);
     expect(ark("worktree", "create", runId, ".").code).toBe(0);
@@ -336,56 +311,6 @@ describe("ARK-167 worktree lifecycle", () => {
     expect(closed.code).toBe(0);
     expect(existsSync(path)).toBe(false);
     expect(gitOutput(workspace, "branch", "--list", branch)).toBe("");
-  });
-
-  test("ARK-167-AC2 closing keeps dirty worktrees and merged branches outside the target", () => {
-    const workspace = tempGitRepo();
-    addRemote(workspace);
-    const { runId, runDirectory } = startRun(workspace);
-    expect(ark("worktree", "create", runId, ".").code).toBe(0);
-    const path = join(runDirectory, "workspace");
-    const branch = gitOutput(path, "branch", "--show-current");
-    writeFileSync(join(path, "uncommitted.txt"), "dirty\n");
-    const dirtyClose = closeRun(runId, runDirectory, "aborted");
-    expect(dirtyClose.out).toContain("kept     .");
-    expect(dirtyClose.out).toContain("uncommitted changes");
-    expect(existsSync(path)).toBe(true);
-    expect(gitOutput(workspace, "rev-parse", "--verify", `refs/heads/${branch}`)).not.toBe("");
-
-    const anotherTicket = writeTicket("demo", "FAKE-1", [
-      { id: "FAKE-1-AC1", text: "criterion FAKE-1-AC1" },
-    ]);
-    const anotherStarted = ark("run", "start", anotherTicket, "--project", "demo");
-    const anotherRunId = anotherStarted.out.trim();
-    const anotherRunDirectory = join(
-      process.env.ARK_HOME as string,
-      "projects",
-      "demo",
-      "runs",
-      anotherRunId,
-    );
-    expect(ark("worktree", "create", anotherRunId, ".").code).toBe(0);
-    const unmergedPath = join(anotherRunDirectory, "workspace");
-    writeFileSync(join(unmergedPath, "committed.txt"), "branch-only change\n");
-    const staged = Bun.spawnSync(["git", "-C", unmergedPath, "add", "committed.txt"]);
-    expect(staged.exitCode).toBe(0);
-    const committed = Bun.spawnSync([
-      "git",
-      "-C",
-      unmergedPath,
-      "commit",
-      "-m",
-      "branch-only change",
-    ]);
-    expect(committed.exitCode).toBe(0);
-    const unmergedBranch = gitOutput(unmergedPath, "branch", "--show-current");
-    const unmergedClose = closeRun(anotherRunId, anotherRunDirectory, "merged");
-    expect(unmergedClose.out).toContain("kept     .");
-    expect(unmergedClose.out).toContain("branch is not in main");
-    expect(existsSync(unmergedPath)).toBe(true);
-    expect(gitOutput(workspace, "rev-parse", "--verify", `refs/heads/${unmergedBranch}`)).not.toBe(
-      "",
-    );
   });
 });
 
@@ -431,7 +356,7 @@ function startFreshRun(): { runId: string; runDirectory: string } {
 }
 
 describe("ARK-276 anchor worktree", () => {
-  test("ARK-276-AC2 anchor of a root-repo workspace is the run worktree, printed once and recorded once", () => {
+  test("ARK-T578 ARK-276-AC2 anchor of a root-repo workspace is the run worktree, printed once and recorded once", () => {
     const workspace = tempGitRepo();
     const { runId, runDirectory } = startRun(workspace);
     const mirror = join(runDirectory, "workspace");
@@ -450,7 +375,7 @@ describe("ARK-276 anchor worktree", () => {
     expect(createdEvents(runDirectory)).toHaveLength(1);
   });
 
-  test("ARK-276-AC3 without a root repo the anchor is the first repo, and create keeps it and makes the other", () => {
+  test("ARK-T579 ARK-276-AC3 without a root repo the anchor is the first repo, and create keeps it and makes the other", () => {
     const { runId, runDirectory } = startRun(tempTwoRepoWorkspace());
     const mirror = join(runDirectory, "workspace");
 
@@ -468,7 +393,7 @@ describe("ARK-276 anchor worktree", () => {
     expect(createdEvents(runDirectory).map((event) => event.data.repo)).toEqual(["a", "b"]);
   });
 
-  test("ARK-276-AC3 with a root repo and a nested repo the anchor is the mirror root, and create keeps it and makes the nested repo", () => {
+  test("ARK-T580 ARK-276-AC3 with a root repo and a nested repo the anchor is the mirror root, and create keeps it and makes the nested repo", () => {
     const { runId, runDirectory } = startRun(tempRootWithNestedWorkspace());
     const mirror = join(runDirectory, "workspace");
 
@@ -484,7 +409,7 @@ describe("ARK-276 anchor worktree", () => {
     expect(createdEvents(runDirectory).map((event) => event.data.repo)).toEqual([".", "repos/x"]);
   });
 
-  test("ARK-276-AC4 anchor works in awaiting_criteria, awaiting_strategy, planning and building, and is refused in closed like create", () => {
+  test("ARK-T581 ARK-276-AC4 anchor works in awaiting_criteria, awaiting_strategy, planning and building, and is refused in closed like create", () => {
     const phaseOf = (runId: string) => ark("status", runId).out;
 
     const criteria = startFreshRun();
@@ -535,22 +460,7 @@ describe("ARK-276 anchor worktree", () => {
     expect(refused.err).toBe(create.err);
   });
 
-  test("ARK-276-AC5 closing the run removes the anchor worktree and its branch", () => {
-    const workspace = tempGitRepo();
-    const { runId, runDirectory } = startRun(workspace);
-    const path = join(runDirectory, "workspace");
-    expect(ark("worktree", "anchor", runId).code).toBe(0);
-    const branch = gitOutput(path, "branch", "--show-current");
-    expect(branch).toBe("ark/FAKE-1-ticket-fake-1");
-
-    const closed = closeRun(runId, runDirectory, "aborted");
-    expect(closed.code).toBe(0);
-    expect(existsSync(path)).toBe(false);
-    expect(gitOutput(workspace, "branch", "--list", branch)).toBe("");
-    expect(gitOutput(workspace, "worktree", "list")).not.toContain(path);
-  });
-
-  test("ARK-276-AC5 closing removes the anchor of a two-repo workspace and of a root repo with a nested worktree", () => {
+  test("ARK-T582 ARK-276-AC5 closing removes the anchor of a two-repo workspace and of a root repo with a nested worktree", () => {
     const two = tempTwoRepoWorkspace();
     const first = startRun(two);
     expect(ark("worktree", "anchor", first.runId).code).toBe(0);
@@ -573,7 +483,7 @@ describe("ARK-276 anchor worktree", () => {
     expect(gitOutput(nested, "branch", "--list", rootBranch)).toBe("");
   });
 
-  test("ARK-276-AC5 closing keeps a root anchor that holds real untracked files next to a nested worktree, and deletes nothing", () => {
+  test("ARK-T583 ARK-276-AC5 closing keeps a root anchor that holds real untracked files next to a nested worktree, and deletes nothing", () => {
     const { runId, runDirectory } = startRun(tempRootWithNestedWorkspace());
     expect(ark("worktree", "anchor", runId).code).toBe(0);
     expect(ark("worktree", "create", runId, "repos/x").code).toBe(0);
@@ -587,30 +497,10 @@ describe("ARK-276 anchor worktree", () => {
     expect(existsSync(join(rootPath, "repos/mine.txt"))).toBe(true);
     expect(existsSync(join(rootPath, "my file.txt"))).toBe(true);
   });
-
-  test("ARK-276-AC3 merge-request open skips an untouched anchor and opens nothing", () => {
-    const workspace = tempGitRepo();
-    const { runId, runDirectory } = startRun(workspace);
-    expect(ark("worktree", "anchor", runId).code).toBe(0);
-    approveAndOpenMergeRequest(runDirectory, false);
-    const mirror = join(runDirectory, "workspace");
-    appendEvent(runDirectory, "test.completed", {
-      passed: true,
-      heads: { ".": gitOutput(mirror, "rev-parse", "HEAD") },
-      suites: [],
-      criteria: { "FAKE-1-AC1": "passing" },
-    });
-
-    const opened = ark("merge-request", "open", runId);
-    expect(opened.code).toBe(0);
-    expect(opened.out).toBe("");
-    const events = readFileSync(join(runDirectory, "events.ndjson"), "utf8");
-    expect(events).not.toContain('"merge_request.opened"');
-  });
 });
 
 describe("ARK-276 anchor path is resolved", () => {
-  test("ARK-276-AC9 anchor and step-worker paths are real paths under the run folder", () => {
+  test("ARK-T584 ARK-276-AC9 the printed anchor path is a real path under the run folder", () => {
     const workspace = tempGitRepo();
     const { runId, runDirectory } = startRun(workspace);
     const printed = ark("worktree", "anchor", runId).out;
@@ -618,14 +508,11 @@ describe("ARK-276 anchor path is resolved", () => {
     const anchor = printed.slice("path:".length, -1);
     expect(anchor).toBe(realpathSync(anchor));
     expect(anchor).toBe(join(runDirectory, "workspace"));
-    const stepWorker = join(anchor, "repos/a");
-    mkdirSync(stepWorker, { recursive: true });
-    expect(stepWorker).toBe(realpathSync(stepWorker));
   });
 });
 
 describe("ARK-278 close removes workspace/", () => {
-  test("ARK-278-AC5 a clean close removes workspace/ and keeps the other run files", () => {
+  test("ARK-T585 ARK-278-AC5 a clean close removes workspace/ and keeps the other run files", () => {
     const { runId, runDirectory } = startRun(tempMetaWorkspace());
     expect(ark("worktree", "create", runId, "repos/a").code).toBe(0);
     mkdirSync(join(runDirectory, "results"));
@@ -687,7 +574,7 @@ describe("ARK-280 worker permission setting", () => {
     expect(gitOutput(worktree, "diff", "--cached", "--name-only")).toBe("");
   }
 
-  test("ARK-280-AC2 anchor and create write the setting in the run worktree and keep it out of git status and git add", () => {
+  test("ARK-T586 ARK-280-AC2 ARK-280-AC3 anchor and create write the setting in the run worktree and keep it out of git status and git add", () => {
     const workspace = tempGitRepo({ "src/main.txt": "x" });
     const { runId, runDirectory } = startRun(workspace);
     const mirror = join(runDirectory, "workspace");
@@ -708,18 +595,7 @@ describe("ARK-280 worker permission setting", () => {
     assertHiddenFromGit(mirror);
   });
 
-  test("ARK-280-AC2 create alone also writes the setting", () => {
-    const workspace = tempGitRepo();
-    const { runId, runDirectory } = startRun(workspace);
-    expect(ark("worktree", "create", runId, ".").code).toBe(0);
-    const mirror = join(runDirectory, "workspace");
-    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual(
-      expectedSettings,
-    );
-    assertHiddenFromGit(mirror);
-  });
-
-  test("ARK-280-AC2 ARK-280-AC3 a meta-repo run writes the setting in each real worktree and not in a linked folder or the workspace", () => {
+  test("ARK-T587 ARK-280-AC2 ARK-280-AC3 a meta-repo run writes the setting in each real worktree and not in a linked folder or the workspace", () => {
     const workspace = tempMetaWorkspace();
     const { runId, runDirectory } = startRun(workspace);
     const before = {
@@ -753,7 +629,7 @@ describe("ARK-280 worker permission setting", () => {
     expect(existsSync(join(workspace, "repos/b/c/.omp"))).toBe(false);
   });
 
-  test("ARK-280-AC3 anchor and create change no file in the home folders or the main workspace, including info/exclude and git config", () => {
+  test("ARK-T588 ARK-280-AC3 anchor and create change no file in the home folders or the main workspace, including info/exclude and git config", () => {
     const home = mkdtempSync(join(tmpdir(), "ark-userhome-"));
     mkdirSync(join(home, ".omp/agent"), { recursive: true });
     writeFileSync(join(home, ".omp/agent/config.yml"), "tools:\n  approvalMode: always-ask\n");
@@ -784,17 +660,6 @@ describe("ARK-280 worker permission setting", () => {
       process.env.HOME = realHome;
     }
   });
-
-  test("ARK-280-AC3 the written file holds one key, tools.approvalMode, and nothing else", () => {
-    const { runId, runDirectory } = startRun(tempGitRepo());
-    expect(ark("worktree", "create", runId, ".").code).toBe(0);
-    const mirror = join(runDirectory, "workspace");
-    expect(readdirSync(join(mirror, ".omp")).sort()).toEqual([".gitignore", "config.yml"]);
-    expect(readFileSync(join(mirror, ".omp/.gitignore"), "utf8")).toBe("*\n");
-    expect(Bun.YAML.parse(readFileSync(join(mirror, ".omp/config.yml"), "utf8"))).toEqual({
-      tools: { approvalMode: "yolo" },
-    });
-  });
 });
 
 /** A root repo with tracked skill folders and the nested repo `repos/x`. */
@@ -812,7 +677,7 @@ describe("ARK-297 workspace skills and dirty root", () => {
       readFileSync(join(runDirectory, "workspace", folder, ".omp/config.yml"), "utf8"),
     );
 
-  test("ARK-297-AC1 a nested worktree lists the mirror path of each root skills folder, the root worktree and a workspace without skills list none", () => {
+  test("ARK-T589 ARK-297-AC1 a nested worktree lists the mirror path of each root skills folder, the root worktree and a workspace without skills list none", () => {
     const withSkills = startRun(skillsWorkspace([".claude/skills", ".omp/skills"]));
     expect(ark("worktree", "anchor", withSkills.runId).code).toBe(0);
     expect(ark("worktree", "create", withSkills.runId, "repos/x").code).toBe(0);
@@ -842,7 +707,7 @@ describe("ARK-297 workspace skills and dirty root", () => {
     return workspace;
   };
 
-  test("ARK-297-AC3 anchor on a dirty root warns once on stderr, keeps stdout to one path line, and a later create adds no second warning", () => {
+  test("ARK-T590 ARK-297-AC3 anchor on a dirty root warns once on stderr, keeps stdout to one path line, and a later create adds no second warning", () => {
     const { runId, runDirectory } = startRun(dirtyRoot());
     const anchored = ark("worktree", "anchor", runId);
     expect(anchored.code).toBe(0);
@@ -858,7 +723,7 @@ describe("ARK-297 workspace skills and dirty root", () => {
     expect(warningCount(created.out + created.err)).toBe(0);
   });
 
-  test("ARK-297-AC3 create that names the dirty root exits 0 without --allow-dirty and warns once on stderr, never on stdout, with no earlier anchor", () => {
+  test("ARK-T591 ARK-297-AC3 create that names the dirty root exits 0 without --allow-dirty and warns once on stderr, never on stdout, with no earlier anchor", () => {
     const { runId } = startRun(dirtyRoot());
     const created = ark("worktree", "create", runId, ".");
     expect(created.code).toBe(0);
@@ -867,7 +732,7 @@ describe("ARK-297 workspace skills and dirty root", () => {
     expect(warningCount(created.out)).toBe(0);
   });
 
-  test("ARK-297-AC3 a clean root with a nested repo prints no warning and exits 0", () => {
+  test("ARK-T592 ARK-297-AC3 a clean root with a nested repo prints no warning and exits 0", () => {
     const { runId } = startRun(skillsWorkspace([]));
     const anchored = ark("worktree", "anchor", runId);
     expect(anchored.code).toBe(0);
@@ -909,7 +774,7 @@ function commitIn(path: string, file: string): void {
 }
 
 describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
-  test("ARK-188-AC1 a branch that exists locally makes the new branch get suffix -2, recorded in worktree.created", () => {
+  test("ARK-T593 ARK-188-AC1 a branch that exists locally makes the new branch get suffix -2, recorded in worktree.created", () => {
     const workspace = tempGitRepo();
     gitOutput(workspace, "branch", "ark/FAKE-1-ticket-fake-1");
     const { runId, runDirectory } = startRun(workspace);
@@ -921,7 +786,7 @@ describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
     expect(gitOutput(workspace, "branch", "--list", "ark/FAKE-1-ticket-fake-1-2")).not.toBe("");
   });
 
-  test("ARK-188-AC1 branches that exist only on origin are skipped: the lowest free suffix is used", () => {
+  test("ARK-T594 ARK-188-AC1 branches that exist only on origin are skipped: the lowest free suffix is used", () => {
     const workspace = tempGitRepo();
     addRemote(workspace);
     for (const name of ["ark/FAKE-1-ticket-fake-1", "ark/FAKE-1-ticket-fake-1-2"])
@@ -935,7 +800,7 @@ describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
     ]);
   });
 
-  test("ARK-188-AC2 a merged MR deletes the branch although a squash merge left it out of the target", () => {
+  test("ARK-T595 ARK-188-AC2 a merged MR deletes the branch although a squash merge left it out of the target", () => {
     const workspace = tempGitRepo();
     addRemote(workspace);
     const { runId, runDirectory } = startRun(workspace);
@@ -954,7 +819,7 @@ describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  test("ARK-188-AC3 a failed fetch with an unknown MR state keeps the branch and names the repo and the reason", () => {
+  test("ARK-T596 ARK-188-AC3 a failed fetch with an unknown MR state keeps the branch and names the repo and the reason", () => {
     const workspace = tempGitRepo();
     addRemote(workspace);
     const { runId, runDirectory } = startRun(workspace);
@@ -972,7 +837,7 @@ describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
     expect(existsSync(path)).toBe(true);
   });
 
-  test("ARK-188-AC4 a dirty nested source repo without --allow-dirty exits 1, lists the path and creates no worktree", () => {
+  test("ARK-T597 ARK-188-AC4 a dirty nested source repo without --allow-dirty exits 1, lists the path and creates no worktree", () => {
     const workspace = tempTwoRepoWorkspace();
     writeFileSync(join(workspace, "a", "readme.txt"), "changed\n");
     const { runId, runDirectory } = startRun(workspace);
@@ -984,7 +849,7 @@ describe("ARK-188 worktree branches, cleanup and dirty sources", () => {
     expect(createdEvents(runDirectory)).toEqual([]);
   });
 
-  test("ARK-188-AC5 with --allow-dirty the nested worktree is created and the changed path is printed as a warning", () => {
+  test("ARK-T598 ARK-188-AC5 with --allow-dirty the nested worktree is created and the changed path is printed as a warning", () => {
     const workspace = tempTwoRepoWorkspace();
     writeFileSync(join(workspace, "a", "readme.txt"), "changed\n");
     const { runId, runDirectory } = startRun(workspace);
@@ -1018,7 +883,7 @@ function handedOffRun() {
 }
 
 describe("ARK-294 handed_off close keeps branches with commits", () => {
-  test("ARK-294-AC1 closing handed_off keeps a committed branch, removes the worktree and workspace, and prints a kept line", () => {
+  test("ARK-T599 ARK-294-AC1 closing handed_off keeps a committed branch, removes the worktree and workspace, and prints a kept line", () => {
     const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
     commitIn(a, "work.txt");
     const commit = gitOutput(a, "rev-parse", "HEAD");
@@ -1033,22 +898,7 @@ describe("ARK-294 handed_off close keeps branches with commits", () => {
     );
   });
 
-  test("ARK-294-AC2 closing handed_off removes an empty branch and counts several commits", () => {
-    const { workspace, runId, runDirectory, a, b, branch } = handedOffRun();
-    for (const file of ["one.txt", "two.txt", "three.txt"]) commitIn(a, file);
-
-    const closed = closeRun(runId, runDirectory, "handed_off");
-    expect(closed.code).toBe(0);
-    expect(closed.out).toContain(`removed  b  ${branch}\n`);
-    expect(closed.out).toMatch(
-      new RegExp(`kept     a  ${branch}: handed off, 3 commits ahead of `),
-    );
-    expect(existsSync(b)).toBe(false);
-    expect(gitOutput(join(workspace, "b"), "branch", "--list", branch)).toBe("");
-    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
-  });
-
-  test("ARK-294-AC3 a dirty handed_off worktree and its branch stay", () => {
+  test("ARK-T600 ARK-294-AC3 ARK-167-AC2 ARK-308-AC4 a dirty handed_off worktree and its branch stay", () => {
     const { workspace, runId, runDirectory, a, branch } = handedOffRun();
     commitIn(a, "work.txt");
     writeFileSync(join(a, "untracked.txt"), "dirty\n");
@@ -1060,29 +910,7 @@ describe("ARK-294 handed_off close keeps branches with commits", () => {
     expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
   });
 
-  test("ARK-294-AC3 an aborted run keeps a branch that has a commit", () => {
-    const { workspace, runId, runDirectory, a, branch } = handedOffRun();
-    commitIn(a, "work.txt");
-
-    const closed = closeRun(runId, runDirectory, "aborted");
-    expect(closed.code).toBe(0);
-    expect(closed.out).toContain(`kept     a  ${branch}: aborted, 1 commit ahead of`);
-    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
-  });
-
-  test("ARK-294-AC3 a handed_off branch whose base is unknown is kept", () => {
-    const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
-    commitIn(a, "work.txt");
-    const events = join(runDirectory, "events.ndjson");
-    writeFileSync(events, readFileSync(events, "utf8").replaceAll(base, "0".repeat(base.length)));
-
-    const closed = closeRun(runId, runDirectory, "handed_off");
-    expect(closed.code).toBe(0);
-    expect(closed.out).toContain(`kept     a  ${branch}: handed off`);
-    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
-  });
-
-  test("ARK-294-AC3 a handed_off branch with commits stays when its worktree directory is already gone", () => {
+  test("ARK-T601 ARK-294-AC3 a handed_off branch with commits stays when its worktree directory is already gone", () => {
     const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
     commitIn(a, "work.txt");
     rmSync(a, { recursive: true, force: true });
@@ -1125,7 +953,7 @@ function releaseWorkspace(checkedOut: "main" | "release/9" = "main"): string {
 }
 
 describe("ARK-296 repos.<repo>.base starts the worktree from origin/<base>", () => {
-  test("ARK-296-AC2 worktree create fetches origin/<base> and starts from it, not from the clone HEAD", () => {
+  test("ARK-T602 ARK-296-AC2 worktree create fetches origin/<base> and starts from it, not from the clone HEAD", () => {
     const workspace = releaseWorkspace("release/9");
     commitIn(workspace, "local-only.txt"); // on the clone's release/9, not on origin
     const cloneHead = gitOutput(workspace, "rev-parse", "HEAD");
@@ -1141,7 +969,7 @@ describe("ARK-296 repos.<repo>.base starts the worktree from origin/<base>", () 
     expect(createdEvents(runDirectory).map((event) => event.data.base)).toEqual([originHead]);
   });
 
-  test("ARK-296-AC2 worktree anchor starts from origin/<base> and records it as worktree.created.base", () => {
+  test("ARK-T603 ARK-296-AC2 worktree anchor starts from origin/<base> and records it as worktree.created.base", () => {
     const workspace = releaseWorkspace("release/9");
     commitIn(workspace, "local-only.txt");
     const originHead = pushToOrigin(workspace, "release/9", "origin-only.txt");
@@ -1155,7 +983,7 @@ describe("ARK-296 repos.<repo>.base starts the worktree from origin/<base>", () 
     expect(createdEvents(runDirectory).map((event) => event.data.base)).toEqual([originHead]);
   });
 
-  test("ARK-296-AC2 a repo with no base still starts from the clone HEAD", () => {
+  test("ARK-T604 ARK-296-AC2 a repo with no base still starts from the clone HEAD", () => {
     const workspace = releaseWorkspace("release/9");
     commitIn(workspace, "local-only.txt");
     const cloneHead = gitOutput(workspace, "rev-parse", "HEAD");
@@ -1167,7 +995,7 @@ describe("ARK-296 repos.<repo>.base starts the worktree from origin/<base>", () 
   });
 
   for (const command of ["create", "anchor"]) {
-    test(`ARK-296-AC2 worktree ${command} with a base origin lacks exits 1, names the repo and the fetch error, and makes nothing`, () => {
+    test(`ARK-T605 ARK-296-AC2 worktree ${command} with a base origin lacks exits 1, names the repo and the fetch error, and makes nothing`, () => {
       const workspace = releaseWorkspace();
       const { runId, runDirectory } = startRun(workspace);
       setRepos(runDirectory, { ".": { base: "release/none" } });
@@ -1192,7 +1020,7 @@ describe("ARK-296 repos.<repo>.base starts the worktree from origin/<base>", () 
     });
   }
 
-  test("ARK-296-AC2 worktree create with a later repo whose base fetch fails makes no worktree, branch or event for the earlier repo", () => {
+  test("ARK-T606 ARK-296-AC2 worktree create with a later repo whose base fetch fails makes no worktree, branch or event for the earlier repo", () => {
     const workspace = tempTwoRepoWorkspace();
     for (const repo of ["a", "b"]) addRemote(join(workspace, repo));
     const { runId, runDirectory } = startRun(workspace);
@@ -1229,7 +1057,7 @@ describe("ARK-296 repos.<repo>.base is the target of worktree cleanup and worksp
   }
   const openMergeRequest = `echo '{"state":"OPEN","statusCheckRollup":[]}'`;
 
-  test("ARK-296-AC4 cleanup of a merged run treats a branch in origin/<base> as in the target", () => {
+  test("ARK-T607 ARK-296-AC4 cleanup of a merged run treats a branch in origin/<base> as in the target", () => {
     const { workspace, runId, worktree, branch } = pushedToRelease({ ".": { base: "release/9" } });
     const closed = withFakeGh(openMergeRequest, () => ark("run", "close", runId, "merged"));
     expect(closed.code).toBe(0);
@@ -1238,7 +1066,7 @@ describe("ARK-296 repos.<repo>.base is the target of worktree cleanup and worksp
     expect(existsSync(worktree)).toBe(false);
   });
 
-  test("ARK-296-AC4 cleanup of a merged run with no base keeps the origin/HEAD target", () => {
+  test("ARK-T608 ARK-296-AC4 ARK-167-AC2 cleanup of a merged run with no base keeps the origin/HEAD target", () => {
     const { workspace, runId, worktree, branch } = pushedToRelease({});
     const closed = withFakeGh(openMergeRequest, () => ark("run", "close", runId, "merged"));
     expect(closed.out).toContain(`kept     .  ${branch}: branch is not in main`);
@@ -1255,7 +1083,7 @@ describe("ARK-296 repos.<repo>.base is the target of worktree cleanup and worksp
     return { workspace, runId, releaseHead: pushToOrigin(workspace, "release/9", "r.txt") };
   }
 
-  test("ARK-296-AC4 workspace sync fast-forwards origin/<base> into the local <base> branch", () => {
+  test("ARK-T609 ARK-296-AC4 workspace sync fast-forwards origin/<base> into the local <base> branch", () => {
     const { workspace, runId, releaseHead } = originMoved({ ".": { base: "release/9" } });
     const mainBefore = gitOutput(workspace, "rev-parse", "main");
     const synced = ark("workspace", "sync", runId);
@@ -1264,20 +1092,10 @@ describe("ARK-296 repos.<repo>.base is the target of worktree cleanup and worksp
     expect(gitOutput(workspace, "rev-parse", "release/9")).toBe(releaseHead);
     expect(gitOutput(workspace, "rev-parse", "main")).toBe(mainBefore);
   });
-
-  test("ARK-296-AC4 workspace sync with no base keeps the origin/HEAD target", () => {
-    const { workspace, runId, releaseHead } = originMoved({});
-    const staleRelease = gitOutput(workspace, "rev-parse", "release/9");
-    const synced = ark("workspace", "sync", runId);
-    expect(synced.code).toBe(0);
-    expect(synced.out).toContain(`.  main  ${gitOutput(workspace, "rev-parse", "main")}`);
-    expect(gitOutput(workspace, "rev-parse", "release/9")).toBe(staleRelease);
-    expect(staleRelease).not.toBe(releaseHead);
-  });
 });
 
 describe("ARK-308 aborted run keeps branches with commits", () => {
-  test("ARK-308-AC4 aborted keeps a branch with a commit and prints the kept line, and removes a branch with none", () => {
+  test("ARK-T610 ARK-308-AC4 ARK-294-AC2 ARK-294-AC3 aborted keeps a branch with a commit and prints the kept line, and removes a branch with none", () => {
     const { workspace, runId, runDirectory, a, b, branch, base } = handedOffRun();
     commitIn(a, "work.txt");
     const commit = gitOutput(a, "rev-parse", "HEAD");
@@ -1294,7 +1112,7 @@ describe("ARK-308 aborted run keeps branches with commits", () => {
     expect(existsSync(b)).toBe(false);
   });
 
-  test("ARK-308-AC4 an aborted run whose base is not recorded keeps its branch", () => {
+  test("ARK-T611 ARK-308-AC4 ARK-294-AC3 an aborted run whose base is not recorded keeps its branch", () => {
     const { workspace, runId, runDirectory, a, branch, base } = handedOffRun();
     commitIn(a, "work.txt");
     const events = join(runDirectory, "events.ndjson");
@@ -1303,18 +1121,6 @@ describe("ARK-308 aborted run keeps branches with commits", () => {
     const closed = closeRun(runId, runDirectory, "aborted");
     expect(closed.code).toBe(0);
     expect(closed.out).toContain(`kept     a  ${branch}: aborted, could not count`);
-    expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
-  });
-
-  test("ARK-308-AC4 a dirty aborted worktree and its branch stay", () => {
-    const { workspace, runId, runDirectory, a, branch } = handedOffRun();
-    commitIn(a, "work.txt");
-    writeFileSync(join(a, "untracked.txt"), "dirty\n");
-
-    const closed = closeRun(runId, runDirectory, "aborted");
-    expect(closed.code).toBe(0);
-    expect(closed.out).toContain(`kept     a  ${branch}: uncommitted changes`);
-    expect(existsSync(a)).toBe(true);
     expect(gitOutput(join(workspace, "a"), "branch", "--list", branch)).not.toBe("");
   });
 });

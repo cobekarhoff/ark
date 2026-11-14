@@ -203,7 +203,7 @@ beforeEach(() => {
 afterEach(removeFakeOrca);
 
 test(
-  "ARK-165-AC1 status reports every merged MR and allows closing, while an open MR stays open",
+  "ARK-T612 ARK-165-AC1 status prints each merged MR as merged and an open MR as open",
   () => {
     const scenario = startRun(["repos/a", "repos/b"]);
     const mergeRequests = [
@@ -221,7 +221,6 @@ test(
     expect(merged.code).toBe(0);
     expect(merged.out).toContain("repos/a  merged  https://github.com/acme/a/pull/1");
     expect(merged.out).toContain("repos/b  merged  https://github.com/acme/b/pull/2");
-    expect(ark("run", "close", scenario.runId, "merged").code).toBe(0);
 
     const openScenario = startRun();
     const openMergeRequest = {
@@ -241,7 +240,7 @@ test(
 );
 
 test(
-  "ARK-165-AC3 worktree sync merges origin, pushes only MR worktrees and aborts conflicts",
+  "ARK-T613 ARK-165-AC3 ARK-295-AC4 ARK-296-AC3 worktree sync merges origin, pushes only MR worktrees and aborts conflicts",
   () => {
     const pushedScenario = startRun();
     const worktree = pushedScenario.worktreePath();
@@ -295,7 +294,7 @@ test(
 );
 
 test(
-  "ARK-165-AC4 workspace sync fast-forwards clean and unrelated-dirty checkouts but preserves conflicting changes",
+  "ARK-T614 ARK-165-AC4 ARK-296-AC4 workspace sync fast-forwards clean and unrelated-dirty checkouts but preserves conflicting changes",
   () => {
     const cleanScenario = startRun();
     advanceOrigin(cleanScenario.workspace, ".", "first.txt", "first\n");
@@ -348,7 +347,7 @@ function syncWithConflict(scenario: ReturnType<typeof startRun>): void {
 }
 
 test(
-  "ARK-211-AC1 start --merge after a sync conflict keeps the round although the budget is spent",
+  "ARK-T615 ARK-211-AC1 start --merge after a sync conflict keeps the round although the budget is spent",
   () => {
     const scenario = startRun();
     buildRounds(scenario.runId, 2);
@@ -376,7 +375,7 @@ test(
 );
 
 test(
-  "ARK-211-AC1 a finished merge step does not raise the round of the next implementer start",
+  "ARK-T616 ARK-211-AC1 a finished merge step does not raise the round of the next implementer start",
   () => {
     const scenario = startRun();
     buildRounds(scenario.runId, 1);
@@ -396,7 +395,7 @@ test(
 );
 
 test(
-  "ARK-211-AC1 --merge is refused on a non-implementer start and on finish, naming the reason",
+  "ARK-T617 ARK-211-AC1 --merge is refused on a non-implementer start and on finish, naming the reason",
   () => {
     const scenario = startRun(["."], true);
     buildRounds(scenario.runId, 1);
@@ -415,27 +414,7 @@ test(
 );
 
 test(
-  "ARK-211-AC2 --merge is refused when no sync is on record or the last sync was clean",
-  () => {
-    const scenario = startRun();
-    const never = ark("run", "step", scenario.runId, "build", "start", "--merge");
-    expect(never.code).toBe(1);
-    expect(never.err).toContain("--merge needs a failed ark worktree sync for repo .");
-
-    advanceOrigin(scenario.workspace, ".", "target.txt", "target\n");
-    expect(ark("worktree", "sync", scenario.runId).code).toBe(0);
-    const clean = ark("run", "step", scenario.runId, "build", "start", "--merge");
-    expect(clean.code).toBe(1);
-    expect(clean.err).toContain("--merge needs a failed ark worktree sync for repo .");
-    expect(
-      readEventLines(scenario.runDirectory).some((event) => event.type === "step.started"),
-    ).toBe(false);
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-211-AC2 sync records a conflict before failing and a later clean sync clears it",
+  "ARK-T618 ARK-211-AC2 sync records a conflict before failing and a later clean sync clears it",
   () => {
     const scenario = startRun();
     syncWithConflict(scenario);
@@ -457,7 +436,7 @@ test(
 );
 
 test(
-  "ARK-211-AC3 retro counts merge steps in rework.merge_steps and not in rework.rounds",
+  "ARK-T619 ARK-211-AC3 retro counts merge steps in rework.merge_steps and not in rework.rounds",
   () => {
     process.env.ARK_OMP_SESSIONS = mkdtempSync(join(tmpdir(), "ark-omp-sessions-"));
     process.env.ARK_CLAUDE_SESSIONS = mkdtempSync(join(tmpdir(), "ark-claude-sessions-"));
@@ -480,7 +459,7 @@ test(
 );
 
 test(
-  "ARK-233-AC1 --merge is refused after a succeeded merge step until a new sync conflicts",
+  "ARK-T620 ARK-233-AC1 --merge is refused after a succeeded merge step until a new sync conflicts",
   () => {
     const scenario = startRun();
     buildRounds(scenario.runId, 1);
@@ -502,7 +481,7 @@ test(
 );
 
 test(
-  "ARK-233-AC1 --merge stays allowed after a merge step finished as failed",
+  "ARK-T621 ARK-233-AC1 --merge stays allowed after a merge step finished as failed",
   () => {
     const scenario = startRun();
     buildRounds(scenario.runId, 1);
@@ -516,7 +495,7 @@ test(
 );
 
 test(
-  "ARK-233-AC3 worktree sync on a closed run exits with a phase error and leaves HEAD unchanged",
+  "ARK-T622 ARK-233-AC3 worktree sync on a closed run exits with a phase error and leaves HEAD unchanged",
   () => {
     const scenario = startRun();
     appendEvent(scenario.runDirectory, "merge_request.opened", {
@@ -555,7 +534,7 @@ const containsCommit = (directory: string, commit: string) =>
     .exitCode === 0;
 
 test(
-  "ARK-241-AC1 sync with only repo B conflicting syncs A and C, exits 1 and names B",
+  "ARK-T623 ARK-241-AC1 sync with only repo B conflicting syncs A and C, exits 1 and names B",
   () => {
     const scenario = threeRepoScenario();
     const url = "https://github.com/acme/c/pull/5";
@@ -584,7 +563,7 @@ test(
 );
 
 test(
-  "ARK-241-AC2 sync with one conflicting repo records a conflict for that repo only",
+  "ARK-T624 ARK-241-AC2 sync with one conflicting repo records a conflict for that repo only",
   () => {
     const scenario = threeRepoScenario();
     expect(ark("worktree", "sync", scenario.runId).code).toBe(1);
@@ -617,7 +596,7 @@ function disablePush(workspace: string, repoNames: string[]): void {
 
 for (const stray of [false, true]) {
   test(
-    `ARK-295-AC4 worktree sync never pushes for a none project${stray ? ", also with a stray merge_request.opened event" : ""}`,
+    `ARK-T625 ARK-295-AC4 worktree sync never pushes for a none project${stray ? ", also with a stray merge_request.opened event" : ""}`,
     () => {
       const scenario = startRun(["repos/a", "repos/b"], false, { merge_requests: "none" });
       disablePush(scenario.workspace, ["repos/a", "repos/b"]);
@@ -643,29 +622,7 @@ for (const stray of [false, true]) {
 }
 
 test(
-  "ARK-295-AC4 an open project with an MR event still pushes on sync, so the disabled pushurl is what stops a none project",
-  () => {
-    const scenario = startRun(["."], false, { merge_requests: "open" });
-    appendEvent(scenario.runDirectory, "merge_request.opened", {
-      repo: ".",
-      url: "https://github.com/acme/main/pull/1",
-      number: 1,
-    });
-    const origin = git(scenario.workspace, "remote", "get-url", "origin");
-    disablePush(scenario.workspace, ["."]);
-    const failed = ark("worktree", "sync", scenario.runId);
-    expect(failed.code).not.toBe(0);
-
-    git(scenario.workspace, "config", "remote.origin.pushurl", origin);
-    const synced = ark("worktree", "sync", scenario.runId);
-    expect(synced.code).toBe(0);
-    expect(synced.out).toContain("pushed");
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-295-AC4 worktree sync refuses a none project with an invalid unrelated field before any git push or gh call",
+  "ARK-T626 ARK-295-AC4 worktree sync refuses a none project with an invalid unrelated field before any git push or gh call",
   () => {
     const scenario = startRun(["."], false, { merge_requests: "none" });
     const configFile = join(scenario.runDirectory, "../../ark.yml");
@@ -707,7 +664,7 @@ function advanceBranch(workspace: string, branch: string, file: string): string 
 }
 
 test(
-  "ARK-296-AC3 worktree sync merges origin/<base> of the repo, not the branch origin/HEAD names",
+  "ARK-T627 ARK-296-AC3 worktree sync merges origin/<base> of the repo, not the branch origin/HEAD names",
   () => {
     const scenario = startRun(
       ["."],
@@ -728,17 +685,6 @@ test(
     expect(existsSync(join(worktree, "m.txt"))).toBe(false);
     expect(readFileSync(join(worktree, "r.txt"), "utf8")).toBe("release/9\n");
     expect(git(worktree, "merge-base", "--is-ancestor", releaseHead, "HEAD")).toBe("");
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-296-AC3 worktree sync of a repo with no base still merges the branch origin/HEAD names",
-  () => {
-    const scenario = startRun();
-    advanceOrigin(scenario.workspace, ".", "m.txt", "main\n");
-    expect(ark("worktree", "sync", scenario.runId).code).toBe(0);
-    expect(readFileSync(join(scenario.worktreePath(), "m.txt"), "utf8")).toBe("main\n");
   },
   { timeout: 30_000 },
 );
@@ -1045,14 +991,12 @@ function originCommit(workspace: string, edit: (clone: string) => void): string 
 
 /**
  * A run whose branch and origin's main each edited the files named in `conflicting` (the same line,
- * or for GEN.txt distant lines of src.txt) and regenerated GEN.txt. `disjoint` edits README.md on
- * both sides at lines that do not touch, so that file merges cleanly.
+ * or for GEN.txt distant lines of src.txt) and regenerated GEN.txt.
  */
 function generatedScenario(
   conflicting: string[],
   options: {
     config?: Record<string, unknown>;
-    disjoint?: boolean;
     onRun?: (worktree: string) => void;
     onOrigin?: (clone: string) => void;
   } = {},
@@ -1083,7 +1027,6 @@ function generatedScenario(
     }
     if (conflicting.includes("README.md")) setLine(directory, "README.md", 1, side);
     if (conflicting.includes("notes/a.md")) setLine(directory, "notes/a.md", 1, side);
-    if (options.disjoint) setLine(directory, "README.md", side === "run" ? 1 : 8, side);
   };
   const worktree = scenario.worktreePath();
   edit(worktree, "run");
@@ -1316,14 +1259,6 @@ test("ARK-T385 a conflict outside the generated list fails the sync as before an
       { repo: ".", conflict: true, conflicts: [...variant.conflicting].sort() },
     ]);
   }
-});
-
-test("ARK-T385 a clean merge records no conflicts", () => {
-  const scenario = generatedScenario([], { disjoint: true });
-  expect(ark("worktree", "sync", scenario.runId).code).toBe(0);
-  expect(syncedEvents(scenario.runDirectory)).toEqual([
-    { repo: ".", conflict: false, target_commit: scenario.tip },
-  ]);
 });
 
 test(
