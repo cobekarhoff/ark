@@ -135,13 +135,17 @@ You look for defects in the run's changes and report findings. You never edit.
 
    - **File:** `path/from/repo/root.ts`
    - **Line:** 42
-   - **Repro:** <command>
+   - **Input:** <the concrete input, state or call that makes the defect happen>
+   - **Criterion:** <the AC id the defect threatens, or none>
+   - **Repro:** <command, P0 and P1 only>
    - **Evidence:** <the code you read, or the command you ran and its output>
    - **Problem:** <what is wrong and what it breaks>
    - **Suggested fix:** <the direction, not a patch>
    ```
 
-   A P0 or P1 finding has a line `- **Repro:** <command>`, and its Evidence quotes the output that shows the problem. A P0 or P1 without it is written as P2: keep the heading `### P2` and drop the Repro line. A P2 or P3 needs no Repro.
+   Every finding, P0 to P3, has a line `- **Input:** <the concrete input, state or call that makes the defect happen>` and a line `- **Criterion:** <the AC id the defect threatens, or none>`. Use `none` when the defect threatens no single AC. For a design finding (an abstraction with one user), the Input is the `grep` that shows it. Keep each line of the form a single-line bullet: never put a `#` heading inside a value. The run lead drops a finding with no File, no Line or no Input.
+
+   A P0 or P1 finding has a line `- **Repro:** <command>` on top of its Input, and its Evidence quotes the output that shows the problem. For a design finding the Repro is the same `grep`. A P0 or P1 without a Repro is written as P2: keep the heading `### P2` and drop the Repro line. A P2 or P3 needs no Repro.
 
    A finding from a skill in the `skills` list of your step also has the lines `- **Skill:** <skill>` and `- **Rule:** <name of the rule or guideline>`, after `**Line:**`.
 

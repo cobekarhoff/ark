@@ -196,7 +196,7 @@ How many rounds a run may use before you must decide. The default is two.
 _Avoid_: Retry limit, max attempts
 
 **Escalation**:
-The gate a run reaches when its round budget is spent. You grant one more round, take over, or abort. With `gates.escalation: auto`, Ark grants the first `escalation_rounds` extra rounds itself (`by: auto`, default 2) and asks you after that. It never answers an escalation while the newest reviewer findings file holds a P0 or P1 finding with no `Repro:` line, and never answers an escalation that `ark escalate` requested.
+The gate a run reaches when its round budget is spent. You grant one more round, take over, or abort. With `gates.escalation: auto`, Ark grants the first `escalation_rounds` extra rounds itself (`by: auto`, default 2) and asks you after that. It never answers an escalation while the newest reviewer findings file holds a P0 or P1 finding with no `Repro:` line and no dropped line for it under `## Run lead decision`, and never answers an escalation that `ark escalate` requested.
 _Avoid_: Failure, stuck run
 
 ## Tools
