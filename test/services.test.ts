@@ -16,7 +16,7 @@ import { tempArkHome, tempGitRepo, writeProject } from "./helpers";
 setDefaultTimeout(60_000);
 
 const repositoryRoot = join(import.meta.dir, "..");
-const serviceNames = ["auto-merger", "temp-cleaner", "sweep"];
+const serviceNames = ["auto-merger", "temp-cleaner", "sweep", "project-autocommit"];
 
 let home = "";
 let arkHomeDirectory = "";
@@ -121,6 +121,7 @@ test("ARK-T294 ark services install writes and loads one LaunchAgent per service
   expect(first.code, first.err).toBe(0);
   expect(installed()).toEqual([
     "dev.ark.ark.auto-merger.plist",
+    "dev.ark.ark.project-autocommit.plist",
     "dev.ark.ark.sweep.plist",
     "dev.ark.ark.temp-cleaner.plist",
     "dev.ark.hub.plist",
@@ -141,14 +142,25 @@ test("ARK-T294 ark services install writes and loads one LaunchAgent per service
     expect(contents).toContain(`<key>StandardOutPath</key><string>${log}</string>`);
     expect(contents).toContain(`<key>StandardErrorPath</key><string>${log}</string>`);
   }
-  expect(launchCalls().filter((call) => call.startsWith("load"))).toHaveLength(3);
+  // The autocommit loop passes an interval under 300 s (a change is committed within 5 minutes) and no --once.
+  const autocommit = readFileSync(plist("ark", "project-autocommit"), "utf8");
+  const interval = Number(
+    autocommit.match(
+      /project-autocommit\.sh<\/string>\s*<string>[^<]*<\/string>\s*<string>(\d+)<\/string>/,
+    )?.[1],
+  );
+  expect(interval).toBeGreaterThan(0);
+  const fiveMinutesInSeconds = 300;
+  expect(interval).toBeLessThan(fiveMinutesInSeconds);
+  expect(autocommit).not.toContain("--once");
+  expect(launchCalls().filter((call) => call.startsWith("load"))).toHaveLength(4);
 
   // 2. Same plists: nothing is loaded again.
   const callsAfterFirst = launchCalls();
   const second = arkServices({}, "services", "install", "--project", "ark");
   expect(second.code, second.err).toBe(0);
   expect(launchCalls()).toEqual(callsAfterFirst);
-  expect(installed()).toHaveLength(5);
+  expect(installed()).toHaveLength(6);
 
   // 3. A different PATH changes the plists: unload then load for each, still one copy.
   const third = arkServices(
@@ -166,25 +178,25 @@ test("ARK-T294 ark services install writes and loads one LaunchAgent per service
     expect(updated.indexOf(`load -w ${path}`)).toBeGreaterThan(updated.indexOf(`unload ${path}`));
     expect(readFileSync(path, "utf8")).toContain("/usr/sbin");
   }
-  expect(installed()).toHaveLength(5);
+  expect(installed()).toHaveLength(6);
 
   // 4. Another project gets its own labels and leaves the first alone.
   const arkPlist = readFileSync(plist("ark", "sweep"), "utf8");
   expect(arkServices({}, "services", "install", "--project", "other").code).toBe(0);
-  expect(installed()).toHaveLength(8);
+  expect(installed()).toHaveLength(10);
   expect(readFileSync(plist("other", "sweep"), "utf8")).toContain(
     "<key>ARK_PROJECT</key><string>other</string>",
   );
   expect(readFileSync(plist("ark", "sweep"), "utf8")).toBe(arkPlist);
 
-  // 5. Uninstall unloads and deletes the three of ark only.
+  // 5. Uninstall unloads and deletes the four of ark only.
   const before = launchCalls().length;
   const removed = arkServices({}, "services", "uninstall", "--project", "ark");
   expect(removed.code, removed.err).toBe(0);
   const unloads = launchCalls().slice(before);
   for (const service of serviceNames) expect(unloads).toContain(`unload ${plist("ark", service)}`);
   expect(installed().filter((file) => file.startsWith("dev.ark.ark."))).toEqual([]);
-  expect(installed().filter((file) => file.startsWith("dev.ark.other."))).toHaveLength(3);
+  expect(installed().filter((file) => file.startsWith("dev.ark.other."))).toHaveLength(4);
 
   // 6. Nothing left to remove is not an error.
   expect(arkServices({}, "services", "uninstall", "--project", "ark").code).toBe(0);
@@ -215,7 +227,7 @@ test("ARK-T294 ark services uninstall keeps the plist and exits 1 when launchctl
   expect(result.code).toBe(1);
   expect(result.err).toContain("still loaded");
   expect(result.out).not.toContain("Removed LaunchAgent");
-  expect(installed()).toHaveLength(3);
+  expect(installed()).toHaveLength(4);
 
   // Once the unload works, a retry still finds the plists.
   Bun.spawnSync(["rm", join(commandDirectory, "failunload")]);
@@ -234,7 +246,7 @@ test("ARK-T294 ark services uninstall keeps the plist and exits 1 when launchctl
 
   expect(result.code).toBe(1);
   expect(result.err).toContain("did not say it is unloaded");
-  expect(installed()).toHaveLength(3);
+  expect(installed()).toHaveLength(4);
 });
 
 test("ARK-T298 ark services install keeps a loaded auto-merger and exits 1 when its unload fails after the project changed to none", () => {
@@ -257,7 +269,7 @@ test("ARK-T297 ark services status shows each service as not installed, loaded o
   const line = (output: string, service: string) =>
     output.split("\n").find((row) => row.startsWith(service))!;
 
-  // 1. Nothing installed: all three, exit 0.
+  // 1. Nothing installed: all four, exit 0.
   const none = status();
   expect(none.code, none.err).toBe(0);
   for (const service of serviceNames) {
@@ -268,8 +280,10 @@ test("ARK-T297 ark services status shows each service as not installed, loaded o
   expect(arkServices({}, "services", "install", "--project", "ark").code).toBe(0);
   setLoaded("ark", "temp-cleaner", "4242");
   setLoaded("ark", "sweep", null);
+  setLoaded("ark", "project-autocommit", "555");
   const logs = join(arkHomeDirectory, "projects", "ark", "services");
   writeFileSync(join(logs, "temp-cleaner.log"), "first\nsecond\nlast line\n\n");
+  writeFileSync(join(logs, "project-autocommit.log"), "autocommit failed at 12:00:00\n");
   const mixed = status();
   expect(mixed.code, mixed.err).toBe(0);
   expect(line(mixed.out, "auto-merger")).toMatch(/^auto-merger\s+loaded\s+pid -\s+last log: none$/);
@@ -277,6 +291,9 @@ test("ARK-T297 ark services status shows each service as not installed, loaded o
     /^temp-cleaner\s+running\s+pid 4242\s+last log: last line$/,
   );
   expect(line(mixed.out, "sweep")).toMatch(/^sweep\s+not installed$/);
+  expect(line(mixed.out, "project-autocommit")).toMatch(
+    /^project-autocommit\s+running\s+pid 555\s+last log: autocommit failed at 12:00:00$/,
+  );
 
   // 4. Running with pid 777 and the last non-empty log line.
   setLoaded("ark", "sweep", "777");
@@ -288,10 +305,14 @@ test("ARK-T298 ark services install installs no auto-merger for merge_requests n
   writeProject("nomr", config("none"));
   writeProject("ark", config("open"));
 
-  // 1-2. A none project: the cleaner and the sweep only; status calls the auto-merger not installed.
+  // 1-2. A none project: the cleaner, the sweep and the autocommit only; status calls the auto-merger not installed.
   const none = arkServices({}, "services", "install", "--project", "nomr");
   expect(none.code, none.err).toBe(0);
-  expect(installed()).toEqual(["dev.ark.nomr.sweep.plist", "dev.ark.nomr.temp-cleaner.plist"]);
+  expect(installed()).toEqual([
+    "dev.ark.nomr.project-autocommit.plist",
+    "dev.ark.nomr.sweep.plist",
+    "dev.ark.nomr.temp-cleaner.plist",
+  ]);
   expect(launchCalls().join("\n")).not.toContain("auto-merger");
   const status = arkServices({}, "services", "status", "--project", "nomr");
   expect(status.code, status.err).toBe(0);
@@ -299,9 +320,9 @@ test("ARK-T298 ark services install installs no auto-merger for merge_requests n
   expect(status.out).toMatch(/^temp-cleaner\s+loaded/m);
   expect(status.out).toMatch(/^sweep\s+loaded/m);
 
-  // 3. Control: an open project gets all three.
+  // 3. Control: an open project gets all four.
   expect(arkServices({}, "services", "install", "--project", "ark").code).toBe(0);
-  expect(installed().filter((file) => file.startsWith("dev.ark.ark."))).toHaveLength(3);
+  expect(installed().filter((file) => file.startsWith("dev.ark.ark."))).toHaveLength(4);
 
   // 4. The project changes to none: its auto-merger is unloaded and deleted, the rest stays.
   writeProject("ark", config("none"));
@@ -310,6 +331,7 @@ test("ARK-T298 ark services install installs no auto-merger for merge_requests n
   expect(changed.code, changed.err).toBe(0);
   expect(launchCalls().slice(calls)).toEqual([`unload ${plist("ark", "auto-merger")}`]);
   expect(installed().filter((file) => file.startsWith("dev.ark.ark."))).toEqual([
+    "dev.ark.ark.project-autocommit.plist",
     "dev.ark.ark.sweep.plist",
     "dev.ark.ark.temp-cleaner.plist",
   ]);
