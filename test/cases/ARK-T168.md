@@ -6,12 +6,14 @@ technique: boundary values (partial gates map) and state transition (strategy ga
 priority: medium
 risk: a partial gates map is refused, or an unset key defaults to auto and skips a human gate
 status: active
-changed_by: 2026-11-09-ARK-340-1
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
 
 Prove that a `gates` map that sets only `plan` is a valid config and that the keys it leaves out stay `human`.
+
+It keeps ARK-234-AC3 too: the ARK-386 campaign removed the copy test of that criterion (CAMPAIGN.md section 3, Carry).
 
 ## Preconditions
 

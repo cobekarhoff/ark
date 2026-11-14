@@ -6,12 +6,14 @@ technique: "error guessing (a value the schema once allowed: gates.manual set to
 priority: medium
 risk: "a gates.manual setting in ark.yml loads without error, so a project turns the manual gate automatic and a manual criterion (analysis, inspection, demonstration) passes with no human answer"
 status: active
-changed_by: 2026-11-13-ARK-332-1
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
 
 Prove that a project config that is valid except for `gates: { manual: auto }` is refused, and that `ark status` exits 1 with an error that names `gates.manual`.
+
+It keeps ARK-234-AC1 too: the ARK-386 campaign removed the copy test of that criterion (CAMPAIGN.md section 3, Carry).
 
 ## Preconditions
 
