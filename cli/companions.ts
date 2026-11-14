@@ -31,6 +31,7 @@ import {
   runOfLead,
   sendMessage,
   startWorker,
+  releaseWorker,
   stopWorker,
   type OrcaRead,
   type OrcaRunRow,
@@ -153,9 +154,13 @@ function acquireLock(directory: string): () => void {
 
 type ChiefWorkers = { chiefRunId: string; runs: OrcaRunRow[]; workers: WorkerRow[] };
 
+/** A worker runs while its agent is live: after a worker_done a kept-open companion is live and retained. */
+const isRunning = (worker: WorkerRow): boolean => worker.liveness === "live";
+
 /**
- * The live workers of Master Chief's Run, read now. Every companion worker, run lead and nothing
- * else lives there. `runs` is a `run-list --full` the caller already read, to save the call.
+ * Every worker row of Master Chief's Run, read now: companion workers, run leads and nothing else,
+ * live or not. Companions pass `isRunning`; a lead counts only while its terminalState is active.
+ * `runs` is a `run-list --full` the caller already read, to save the call.
  */
 async function readChiefWorkers(
   project: string,
@@ -169,7 +174,7 @@ async function readChiefWorkers(
   const workers = await orcaPages<WorkerRow>(
     "worker-list",
     "workers",
-    ["--run", chiefRun.value, "--terminal-state", "active", "--include-remote"],
+    ["--run", chiefRun.value, "--include-remote"],
     orcaTimeoutMilliseconds,
   );
   if (!workers.ok) throw new ArkError(`orca orchestration worker-list failed: ${workers.reason}`);
@@ -525,7 +530,7 @@ export async function syncCompanions(
 
     const { chiefRunId, workers } = await readChiefWorkers(project, runs);
     const sender = senderOf(project, configuration);
-    const live = new Set(workers.map((worker) => worker.dispatchId));
+    const live = new Set(workers.filter(isRunning).map((worker) => worker.dispatchId));
 
     const needsRuns = listed.some((companion) => locked.has(companion.name));
     const scan = needsRuns ? scanRuns(project) : { runs: [], unreadable: [] };
@@ -587,6 +592,14 @@ export async function syncCompanions(
           );
           continue;
         }
+        // A kept-open worker stays live and retained after worker-stop: only a release ends it.
+        const released = await releaseWorker(worker.dispatch);
+        if (!released.ok && !released.reason.includes("dispatch_inactive")) {
+          result.problems.push(
+            `companion ${name} not stopped: worker-release failed: ${released.reason}`,
+          );
+          continue;
+        }
       }
       // The folder keeps its ideas and answers. A companion listed again later starts from the present.
       rmSync(join(directory, "worker.json"), { force: true });
@@ -629,7 +642,8 @@ export async function companionAsk(
   const notRunning = `companion ${name} is not running: run \`ark companions sync\``;
   if (worker === null) throw new ArkError(notRunning);
   const { workers } = await readChiefWorkers(project);
-  if (!workers.some((row) => row.dispatchId === worker.dispatch)) throw new ArkError(notRunning);
+  if (!workers.some((row) => row.dispatchId === worker.dispatch && isRunning(row)))
+    throw new ArkError(notRunning);
   const sent = await sendMessage({
     to: `dispatch:${worker.dispatch}`,
     subject: "Question for you",
@@ -692,7 +706,9 @@ export async function companionAdvise(
     throw new ArkError(`run ${run} is closed: advice goes only to the lead of an open run`);
   const chief = await liveChiefOf(project, configuration);
   const { workers, runs } = await readChiefWorkers(project, { ok: true, value: chief.runs });
-  const lead = workers.find((worker) => runOfLead(runs, worker) === run);
+  const lead = workers.find(
+    (worker) => (worker.terminalState ?? "active") === "active" && runOfLead(runs, worker) === run,
+  );
   if (!lead) throw new ArkError(`run ${run} has no live run lead`);
   const toLead = await sendMessage({
     to: lead.terminal ?? `dispatch:${lead.dispatchId}`,

@@ -19,7 +19,15 @@ export type OrcaTerminal = {
 /** A row of `run-list --full`. */
 export type OrcaRunRow = { id: string; objective?: string; coordinator_handle?: string };
 /** A `worker-list --json` row. A structured worker has `liveness: "unverifiable"` and no terminal handle; its `workspace` is `<host>::<run folder>/workspace`. */
-export type WorkerRow = { dispatchId: string; terminal?: string; workspace?: string };
+export type WorkerRow = {
+  dispatchId: string;
+  terminal?: string;
+  workspace?: string;
+  /** `live` while the agent runs, also after its worker_done of a kept-open worker. */
+  liveness?: string;
+  /** `active`, `retained` (kept open after its turn), `released`, and others. */
+  terminalState?: string;
+};
 
 /**
  * The Ark run a worker of Master Chief's Run leads, or undefined. A run lead is the worker whose
@@ -280,6 +288,11 @@ export async function startWorker(options: {
 /** `worker-stop`: fences one Dispatch and stops its agent. */
 export async function stopWorker(dispatch: string): Promise<OrcaRead<unknown>> {
   return orcaCommand(["orchestration", "worker-stop", "--dispatch", dispatch], actionTimeout());
+}
+
+/** `worker-release`: frees the terminal of a stopped worker. A kept-open worker stays live and retained after `worker-stop` until it is released. */
+export async function releaseWorker(dispatch: string): Promise<OrcaRead<unknown>> {
+  return orcaCommand(["orchestration", "worker-release", "--dispatch", dispatch], actionTimeout());
 }
 
 /**
