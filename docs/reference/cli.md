@@ -340,8 +340,12 @@ criterion with `manual: true` in ticket.md has no test: it shows `manual pending
 AC is passing or manual ok. `passed` in test.completed counts the automated criteria only, so a
 manual pending never opens the escalation gate. It first runs each entry of `checks` in `ark.yml`
 (`{ name, repo, command }`) in its repo worktree, before the suites. A check that exits non-zero
-prints `check <name> failed` and the last 20 lines of its output, and records `passed: false`. On
-every `ark test` it also runs suites on a throwaway checkout at the base commit of each worktree:
+prints `check <name> failed` and the last 20 lines of its output, and records `passed: false`. A
+suite that fails prints `suite <name> (<level>) failed`, then its exit code, its log path
+`results/<suite>.log` and the last 20 lines of the log. A criterion with `verified_by` prints `no
+test title starts with <test case id>` on a new line after its `criterion` line for each test case
+that reads `missing`, except on a quick run that selected test files for a suite with `base_files`.
+On every `ark test` it also runs suites on a throwaway checkout at the base commit of each worktree:
 the `target_commit` of its newest `worktree.synced` event that has one (a conflict event has none),
 else the `worktree.created` base. A suite whose `repo` has no worktree in the run (an untouched
 repo) is skipped at head and at base, with `skipped <suite> (repo <repo> not in run)` at head, and
