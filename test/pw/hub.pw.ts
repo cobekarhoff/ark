@@ -10653,18 +10653,20 @@ async function projectWorld(): Promise<ProjectWorld> {
   const b = runId("ARK-9432");
   const c = runId("ARK-9433");
   const d = runId("ARK-9434");
-  for (const [run, project, phase, ticket] of [
-    [a, "p", "closed", "ARK-9431"],
-    [b, "p", "closed", "ARK-9432"],
-    [c, "p", "building", "ARK-9433"],
-    [d, "other", "closed", "ARK-9434"],
+  // Start each run at its first fixture time: the hub sorts the map by the earliest time it knows of,
+  // and the frozen clock puts `ago()` before the 2026-11-12 fixture times.
+  for (const [run, project, phase, ticket, startTime] of [
+    [a, "p", "closed", "ARK-9431", minuteOf(8, 0)],
+    [b, "p", "closed", "ARK-9432", minuteOf(8, 30)],
+    [c, "p", "building", "ARK-9433", minuteOf(8, 5)],
+    [d, "other", "closed", "ARK-9434", minuteOf(8, 0)],
   ] as const)
     writeRun({
       project,
       run,
       ticket: { id: ticket, title: `Run ${ticket}` },
       phase,
-      startedAt: ago(7_200),
+      startedAt: dateOf(startTime),
     });
   installFakeTools({});
   const cDirectory = join(process.env.ARK_HOME as string, "projects", "p", "runs", c);
@@ -10987,12 +10989,12 @@ test("ARK-T356 the To scale strip is the replay scrubber: moving it changes the 
 }) => {
   const world = await projectWorld();
   const page = await conversationPage(browser);
-  await page.clock.install({ time: new Date("2026-11-13T00:00:00Z") });
+  await page.clock.install({ time: dateOf("2026-11-13T00:00:00Z") });
   const served = await serveProject(page, () => projectReply(world));
   await open(page, world.baseUrl, "runs?project=p");
   await page.locator('[data-testid="runs-mode"][data-mode="conversation"]').click();
   await expect(page.getByTestId("map")).toBeVisible();
-  await page.clock.pauseAt(new Date("2026-11-13T01:00:00Z"));
+  await page.clock.pauseAt(dateOf("2026-11-13T01:00:00Z"));
 
   const scrubber = page.getByTestId("replay-scrubber");
   const seek = (time: number) => scrubber.fill(String(time));
