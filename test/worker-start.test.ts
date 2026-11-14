@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { addWorktree, fakeSessionFolder, useFakeOrca } from "./fake-orca.ts";
 import {
-  ark,
+  arkWithin,
   recordEvaluation,
   startHub,
   stopHub,
   tempArkHome,
-  tempGitRepo,
+  tempGitRepo as tempGitRepoWithin,
   writeFakeCommand,
   writeProject,
   writeTicket,
@@ -17,6 +17,21 @@ import {
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
+
+/** Limit of every process call of this file, below the 30 s test timeout so a stalled call fails with its command line and stderr. */
+const processLimitMs = 25_000;
+const ark = (...args: string[]) => arkWithin(processLimitMs, ...args);
+const tempGitRepo = (files?: Record<string, string>) => tempGitRepoWithin(files, processLimitMs);
+
+/** A git call of this file; throws with the command line, the limit and stderr when it stalls. */
+function git(args: string[], cwd?: string) {
+  const result = Bun.spawnSync(["git", ...args], { cwd, timeout: processLimitMs });
+  if (result.exitedDueToTimeout)
+    throw new Error(
+      `git ${args.join(" ")} timed out after ${processLimitMs} ms: ${result.stderr.toString()}`,
+    );
+  return result;
+}
 
 // ARK-T210 to ARK-T216: `ark run step <run> <step> start|interrupted` against a fake `orca` on PATH, a fake omp
 // session folder and the test clock (ARK_NOW, set for each `ark` call, so no test waits 60 s). No real orca, omp or
@@ -160,7 +175,7 @@ function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boo
     worktree = join(directory, "workspace");
     mkdirSync(worktree, { recursive: true });
     // a step worktree is a git repo: finish refuses when `git status` fails
-    expect(Bun.spawnSync(["git", "init", "-q", worktree]).exitCode).toBe(0);
+    expect(git(["init", "-q", worktree]).exitCode).toBe(0);
   }
   return { runId, directory, worktree: addWorktree(directory, ".", worktree) };
 }
@@ -250,10 +265,7 @@ test("ARK-T210 a --merge start launches a worker briefed to merge the target bra
   started(run, "a");
   expect(ark("run", "step", run.runId, "a", "finish").code).toBe(0);
   // The creation base is "main"; the brief must name the target branch origin/HEAD resolves to.
-  Bun.spawnSync(
-    ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"],
-    { cwd: run.worktree },
-  );
+  git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"], run.worktree);
   appendEvent(run.directory, "worktree.synced", { repo: ".", conflict: true });
   const before = workerStarts().length;
   const merged = ark("run", "step", run.runId, "a", "start", "--merge");
@@ -366,7 +378,7 @@ function dirtyWorktree(worktree: string): Snapshot {
   return snapshotOf(worktree);
 }
 const snapshotOf = (worktree: string): Snapshot => ({
-  status: Bun.spawnSync(["git", "status", "--porcelain"], { cwd: worktree }).stdout.toString(),
+  status: git(["status", "--porcelain"], worktree).stdout.toString(),
   tracked: readFileSync(join(worktree, "README.md"), "utf8"),
   untracked: readFileSync(join(worktree, "scratch.txt"), "utf8"),
 });

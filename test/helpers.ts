@@ -71,31 +71,35 @@ export function writeTicket(
 /** Per-command limit of the git and ark helpers; below the 60 s test timeout so a stalled command fails with its own message. */
 export const commandLimitMs = 45_000;
 
-function git(directory: string, ...args: string[]): void {
-  const result = Bun.spawnSync(["git", "-C", directory, ...args], { timeout: commandLimitMs });
+function git(directory: string, limitMs: number, ...args: string[]): void {
+  const result = Bun.spawnSync(["git", "-C", directory, ...args], { timeout: limitMs });
   const line = `git -C ${directory} ${args.join(" ")}`;
   if (result.exitedDueToTimeout)
-    throw new Error(`${line} timed out after ${commandLimitMs} ms: ${result.stderr.toString()}`);
+    throw new Error(`${line} timed out after ${limitMs} ms: ${result.stderr.toString()}`);
   if (result.exitCode !== 0) throw new Error(`${line} failed: ${result.stderr.toString()}`);
 }
 
 /** One built repo for each distinct file set in this process: repos with the same files share commit ids. */
 const repoTemplates = new Map<string, string>();
 
-export function tempGitRepo(files: Record<string, string> = { "README.md": "# test\n" }): string {
+/** `limitMs` bounds each git call that builds the template; a file under a shorter test timeout passes its own. */
+export function tempGitRepo(
+  files: Record<string, string> = { "README.md": "# test\n" },
+  limitMs = commandLimitMs,
+): string {
   const key = JSON.stringify(Object.entries(files));
   let template = repoTemplates.get(key);
   if (template === undefined) {
     template = mkdtempSync(join(tmpdir(), "ark-repo-template-"));
-    git(template, "init", "-q", "-b", "main");
-    git(template, "config", "user.name", "Ark Test");
-    git(template, "config", "user.email", "ark@example.com");
+    git(template, limitMs, "init", "-q", "-b", "main");
+    git(template, limitMs, "config", "user.name", "Ark Test");
+    git(template, limitMs, "config", "user.email", "ark@example.com");
     for (const [name, content] of Object.entries(files)) {
       mkdirSync(dirname(join(template, name)), { recursive: true });
       writeFileSync(join(template, name), content);
     }
-    git(template, "add", "-A");
-    git(template, "commit", "-q", "-m", "initial");
+    git(template, limitMs, "add", "-A");
+    git(template, limitMs, "commit", "-q", "-m", "initial");
     repoTemplates.set(key, template);
   }
   const directory = mkdtempSync(join(tmpdir(), "ark-repo-"));
