@@ -147,29 +147,53 @@ type GitleaksEntry = {
   Fingerprint: string;
 };
 
+function revParse(path: string, ref: string): string {
+  const { exitCode, stdout, stderr } = spawn(
+    ["git", "rev-parse", "--verify", `${ref}^{commit}`],
+    path,
+  );
+  if (exitCode !== 0) throw new ArkError(`git rev-parse ${ref} failed in ${path}: ${tail(stderr)}`);
+  return stdout.toString().trim();
+}
+
 function gitleaksFindings(path: string, base: string, folder: string): Finding[] {
   const work = mkdtempSync(join(folder, "gitleaks-"));
   const report = join(work, "report.json");
-  // The run branch must not switch the gate off: no `gitleaks:allow` comment, no `.gitleaksignore` of the repo, and the
-  // `.gitleaks.toml` of the base (else the defaults) in place of whatever the run committed.
+  const baseCommit = revParse(path, base);
+  const headCommit = revParse(path, "HEAD");
+  // The run branch must not switch the gate off: no `gitleaks:allow` comment, and the `.gitleaks.toml` of the base (else
+  // the defaults) in place of whatever the run committed. gitleaks also reads `.gitleaksignore` and `.gitattributes` (`-diff`,
+  // `binary` hide a file from `git log -p`) from the working tree, so it scans a clone with no working tree.
   const config = join(work, "gitleaks.toml");
-  writeFileSync(config, gitBlob(path, `${base}:.gitleaks.toml`) ?? "[extend]\nuseDefault = true\n");
-  const { exitCode, stderr } = spawn(
-    [
-      "gitleaks",
-      "git",
-      `--log-opts=--first-parent --no-merges ${base}..HEAD`,
-      "--redact",
-      "--ignore-gitleaks-allow",
-      "--config",
-      config,
-      "--gitleaks-ignore-path",
-      mkdtempSync(join(work, "no-ignore-")),
-      "--report-path",
-      report,
-    ],
-    path,
-  );
+  const baseConfig = gitBlob(path, `${baseCommit}:.gitleaks.toml`);
+  writeFileSync(config, baseConfig ?? "[extend]\nuseDefault = true\n");
+  const configSource =
+    baseConfig === null ? "" : `, config: ${baseCommit.slice(0, 8)}:.gitleaks.toml`;
+  const scratch = join(work, "repo");
+  const clone = spawn(["git", "clone", "--shared", "--no-checkout", path, scratch], work);
+  if (clone.exitCode !== 0)
+    throw new ArkError(`git clone of ${path} for gitleaks failed: ${tail(clone.stderr)}`);
+  let exitCode: number;
+  let stderr: string;
+  try {
+    ({ exitCode, stderr } = spawn(
+      [
+        "gitleaks",
+        "git",
+        `--log-opts=--first-parent --no-merges --text --no-textconv ${baseCommit}..${headCommit}`,
+        "--redact",
+        "--no-banner",
+        "--ignore-gitleaks-allow",
+        "--config",
+        config,
+        "--report-path",
+        report,
+      ],
+      scratch,
+    ));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
   let entries: GitleaksEntry[] | undefined;
   try {
     const parsed = JSON.parse(readFileSync(report, "utf8"));
@@ -185,7 +209,7 @@ function gitleaksFindings(path: string, base: string, folder: string): Finding[]
     (exitCode === 0 && (entries.length > 0 || /\bERR\b/.test(stderr)));
   if (crashed)
     throw new ArkError(
-      `gitleaks failed in ${path} (exit ${exitCode}): ${tail(stderr) || "no readable report"}`,
+      `gitleaks failed in ${path} (exit ${exitCode}${configSource}): ${tail(stderr) || "no readable report"}`,
     );
   return entries!.map((entry) => {
     const where = `${entry.RuleID} in ${entry.File}:${entry.StartLine}`;

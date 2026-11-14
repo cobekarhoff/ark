@@ -576,19 +576,23 @@ not scanned), and osv-scanner on each lockfile of the head, with its licences. I
 <lockfile>`, for a secret and for a high or critical vulnerability, also one that the base already
 has, and never prints a secret value. A finding that `security.accepted` of ark.yml lists (`id` and
 `reason`; `id` is the vulnerability id, one of its aliases, or the gitleaks fingerprint
-`<commit>:<file>:<rule>:<line>`) does not block. A scanner that exits with an unexpected code,
-prints a report that cannot be read or cannot reach the network (osv-scanner needs osv.dev and
-deps.dev) refuses with its stderr: a failed scan never reads as clean. When gitleaks or osv-scanner
-is not installed it refuses first, with the lines that `ark status` prints (`scanner: <tool> is not
-installed: brew install <tool>`), whatever the repo holds. Medium and low vulnerabilities, accepted
-findings and the licences of the packages that are new at the head against the base lockfile do not
-block: the body lists them in a `Security` section (`**Security**` at tier 0), and no section when
-there is nothing to list. Before any push, lint or event it runs `git fetch origin` and `git
-merge-tree --write-tree HEAD origin/<target>` in each repo it pushes, a new MR or an open one it
-refreshes (changing no file and no ref), and refuses when the head does not merge cleanly: it names
-the repo, records worktree.synced with a conflict so that `ark run step <run> <step> start --merge`
-is allowed, and pushes nothing for any repo. A merge-tree error that is not a conflict (no common
-history, no origin/<target>, git older than 2.38) is a refusal that shows git's text.
+`<commit>:<file>:<rule>:<line>`) does not block. A `.gitleaks.toml`, `.gitleaksignore` or
+`gitleaks:allow` in the run branch has no effect: gitleaks scans a clone of the branch with no
+working tree, the `.gitleaks.toml` of the base applies, and a relative `extend.path` in it is not
+supported; `security.accepted` is the way to accept a finding. A scanner that exits with an
+unexpected code, prints a report that cannot be read or cannot reach the network (osv-scanner needs
+osv.dev and deps.dev) refuses with its stderr: a failed scan never reads as clean. When gitleaks or
+osv-scanner is not installed it refuses first, with the lines that `ark status` prints (`scanner:
+<tool> is not installed: brew install <tool>`), whatever the repo holds. Medium and low
+vulnerabilities, accepted findings and the licences of the packages that are new at the head against
+the base lockfile do not block: the body lists them in a `Security` section (`**Security**` at tier
+0), and no section when there is nothing to list. Before any push, lint or event it runs `git fetch
+origin` and `git merge-tree --write-tree HEAD origin/<target>` in each repo it pushes, a new MR or
+an open one it refreshes (changing no file and no ref), and refuses when the head does not merge
+cleanly: it names the repo, records worktree.synced with a conflict so that `ark run step <run>
+<step> start --merge` is allowed, and pushes nothing for any repo. A merge-tree error that is not a
+conflict (no common history, no origin/<target>, git older than 2.38) is a refusal that shows git's
+text.
 ```
 
 ### merge-request check

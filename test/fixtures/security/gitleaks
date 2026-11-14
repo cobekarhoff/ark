@@ -4,7 +4,8 @@
 // printed to stderr with its Secret, as the real gitleaks logs it. Exit 1 on a leak, 0 when clean. As the real gitleaks does,
 // it skips a line with `gitleaks:allow` unless --ignore-gitleaks-allow is given, a file that `paths = ["<file>"]` of the
 // --config file (else `.gitleaks.toml` of the working directory) allowlists, and a fingerprint listed in the
-// `.gitleaksignore` of --gitleaks-ignore-path (default: the working directory).
+// `.gitleaksignore` of --gitleaks-ignore-path (default: the working directory). It runs `git log -p` in the working directory, so a
+// `-diff` or `binary` attribute of the `.gitattributes` there hides a file's lines, and `--text` shows them again, as for the real tool.
 // Overrides: FAKE_GITLEAKS_EXIT (exit with it, write no report), FAKE_GITLEAKS_STDERR, FAKE_GITLEAKS_REPORT (raw report text).
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 

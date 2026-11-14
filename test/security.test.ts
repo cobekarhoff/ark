@@ -434,7 +434,7 @@ test("ARK-T401 a secret in a commit before the base does not block", () => {
   expect(created()).toHaveLength(1);
 });
 
-test("ARK-T401 a run commit cannot switch the secret gate off: an inline allow, a committed allowlist and a committed ignore file still refuse", () => {
+test("ARK-T401 a run commit cannot switch the secret gate off: an inline allow, a committed allowlist, a committed or untracked ignore file and a `-diff` or `binary` attribute still refuse", () => {
   const secret = markerFile("generic-api-key");
   const bypasses: Record<string, (worktree: string) => void> = {
     "gitleaks:allow comment": (worktree) =>
@@ -457,6 +457,25 @@ test("ARK-T401 a run commit cannot switch the secret gate off: an inline allow, 
         "ignore",
       );
     },
+    ".gitleaksignore left untracked in the worktree": (worktree) => {
+      const commit = commitFiles(worktree, { "src/config.ts": secret }, "config");
+      writeFileSync(
+        join(worktree, ".gitleaksignore"),
+        `${commit}:src/config.ts:generic-api-key:12\n`,
+      );
+    },
+    ".gitattributes -diff": (worktree) =>
+      commitFiles(
+        worktree,
+        { ".gitattributes": "src/config.ts -diff\n", "src/config.ts": secret },
+        "config",
+      ),
+    ".gitattributes binary": (worktree) =>
+      commitFiles(
+        worktree,
+        { ".gitattributes": "src/config.ts binary\n", "src/config.ts": secret },
+        "config",
+      ),
   };
   for (const [name, commit] of Object.entries(bypasses)) {
     const { repositories } = setup({ commits: ({ worktree }) => commit(worktree) });
