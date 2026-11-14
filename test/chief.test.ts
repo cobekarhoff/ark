@@ -237,7 +237,7 @@ test("ARK-T115 chief state prints each live source in one Markdown snapshot", ()
   expect(section(out, "Interview")).toMatch(/last interview: 1\s*$/);
   expect(section(out, "Host")).toMatch(/free disk: \d+ GB/);
   // Nothing is installed for this project: the refused launchctl and no plist both read as not installed.
-  expect(section(out, "Services").match(/not installed/g)).toHaveLength(3);
+  expect(section(out, "Services").match(/not installed/g)).toHaveLength(4);
 });
 
 test("ARK-T331 chief state lists each red on main file with its run id once, from the last full test of the run, and says unavailable when a run cannot be read", () => {
@@ -320,11 +320,13 @@ printf '};\\n'
   mkdirSync(agents, { recursive: true });
   const logs = join(process.env.ARK_HOME as string, "projects", project, "services");
   mkdirSync(logs, { recursive: true });
-  for (const service of ["auto-merger", "temp-cleaner"])
+  for (const service of ["auto-merger", "temp-cleaner", "project-autocommit"])
     writeFileSync(join(agents, `dev.ark.${project}.${service}.plist`), "");
   writeFileSync(join(home, `dev.ark.${project}.auto-merger.loaded`), "");
   writeFileSync(join(home, `dev.ark.${project}.temp-cleaner.loaded`), "4242");
+  writeFileSync(join(home, `dev.ark.${project}.project-autocommit.loaded`), "555");
   writeFileSync(join(logs, "temp-cleaner.log"), "swept\nfree 31 GB\n\n");
+  writeFileSync(join(logs, "project-autocommit.log"), "autocommit failed at 12:00:00\n");
 
   const previous = { HOME: process.env.HOME, ARK_LAUNCHCTL: process.env.ARK_LAUNCHCTL };
   process.env.HOME = home;
@@ -342,6 +344,9 @@ printf '};\\n'
     expect(status.out).toMatch(/^auto-merger\s+loaded\s+pid -/m);
     expect(status.out).toMatch(/^temp-cleaner\s+running\s+pid 4242\s+last log: free 31 GB$/m);
     expect(status.out).toMatch(/^sweep\s+not installed$/m);
+    expect(status.out).toMatch(
+      /^project-autocommit\s+running\s+pid 555\s+last log: autocommit failed at 12:00:00$/m,
+    );
   } finally {
     for (const [key, value] of Object.entries(previous))
       if (value === undefined) delete process.env[key];

@@ -2,15 +2,16 @@
 
 macOS only. The services run under launchd, so `ark services` does nothing useful on Linux.
 
-`ark services install` starts three small jobs for one project. They run all the time, in the background, and restart if they stop. You do not need them to run a ticket, but they do three chores for you: one of them can merge MRs. On GitHub an MR is a pull request.
+`ark services install` starts four small jobs for one project. They run all the time, in the background, and restart if they stop. You do not need them to run a ticket, but they do four chores for you: one of them can merge MRs, and one keeps the project folder in git. On GitHub an MR is a pull request.
 
 ## What the services do
 
-| Service        | Script                    | Runs every | What it does                                                                                                                                                                                                                  |
-| -------------- | ------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auto-merger`  | `scripts/auto-merger.sh`  | 60 s       | Merges an open MR when the rules in [The auto-merger](#the-auto-merger) hold. Sends `Merged: <run> !<number>` to Master Chief after each merge. Not installed for a project with `merge_requests: none`.                      |
-| `temp-cleaner` | `scripts/temp-cleaner.sh` | 300 s      | Removes Ark test temp folders from `$TMPDIR` after their test process ended, then runs `git worktree prune` in the workspace. When `/` has less than 15 GB free, it sends `Disk low: <n> GB free` to Master Chief.            |
-| `sweep`        | `scripts/sweep.sh`        | 300 s      | Closes the Orca terminal of each settled worker of the project's runs, and lists terminals with no output for more than a day. It only lists those; it never stops them. Sends `Sweep: closed <n>, idle <m>` to Master Chief. |
+| Service              | Script                          | Runs every | What it does                                                                                                                                                                                                                                                           |
+| -------------------- | ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto-merger`        | `scripts/auto-merger.sh`        | 60 s       | Merges an open MR when the rules in [The auto-merger](#the-auto-merger) hold. Sends `Merged: <run> !<number>` to Master Chief after each merge. Not installed for a project with `merge_requests: none`.                                                               |
+| `temp-cleaner`       | `scripts/temp-cleaner.sh`       | 300 s      | Removes Ark test temp folders from `$TMPDIR` after their test process ended, then runs `git worktree prune` in the workspace. When `/` has less than 15 GB free, it sends `Disk low: <n> GB free` to Master Chief.                                                     |
+| `sweep`              | `scripts/sweep.sh`              | 300 s      | Closes the Orca terminal of each settled worker of the project's runs, and lists terminals with no output for more than a day. It only lists those; it never stops them. Sends `Sweep: closed <n>, idle <m>` to Master Chief.                                          |
+| `project-autocommit` | `scripts/project-autocommit.sh` | 120 s      | Keeps `~/.ark/projects/<project>` in its own git repository and commits each change in it with the message `autocommit: <count> changed files`, so a file that a script emptied can be restored. Never pushes. See [Restore a project file](restore-project-files.md). |
 
 The messages go to Master Chief's Orca Run, `Master Chief: <project> tickets`. Master Chief passes a low disk and a list of idle terminals on to you.
 
@@ -29,18 +30,19 @@ ark services status --project ark
 ark services uninstall --project ark
 ```
 
-| Command                  | What it does                                                                                                                                                                                  |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ark services install`   | Writes and loads one LaunchAgent for each service, named `dev.ark.<project>.<service>`. Run it again after a change: an unchanged service prints `... is already installed. Nothing changed.` |
-| `ark services status`    | Prints one line for each service: `not installed`, `loaded` or `running` with its pid, and the last line of its log.                                                                          |
-| `ark services uninstall` | Unloads and deletes all three LaunchAgents of the project. With none installed it prints `No services of project <project> are installed. Nothing changed.`                                   |
+| Command                  | What it does                                                                                                                                                                                                                |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ark services install`   | Writes and loads one LaunchAgent for each service, named `dev.ark.<project>.<service>`. Run it again after a change: an unchanged service prints `... is already installed. Nothing changed.`                               |
+| `ark services status`    | Prints one line for each service: `not installed`, `loaded` or `running` with its pid, and the last line of its log.                                                                                                        |
+| `ark services uninstall` | Unloads and deletes all four LaunchAgents of the project. It leaves the logs and the git repository of the project folder. With none installed it prints `No services of project <project> are installed. Nothing changed.` |
 
-A real `ark services status`:
+Example output of `ark services status`:
 
 ```text
-auto-merger   running   pid 80115   last log: CHANGE: 2026-11-12-ARK-435-1 #194 merged;
-temp-cleaner  running   pid 80117   last log: none
-sweep         running   pid 80121   last log: none
+auto-merger         running   pid 80115   last log: CHANGE: 2026-11-12-ARK-435-1 #194 merged;
+temp-cleaner        running   pid 80117   last log: none
+sweep               running   pid 80121   last log: none
+project-autocommit  running   pid 80130   last log: none
 ```
 
 `merge_requests: none` in `ark.yml` means the project has no MRs. Install then skips the auto-merger, and removes one that an earlier setting loaded.
@@ -89,7 +91,7 @@ After a merge, Master Chief gets `Merged: <run> !<number>` and closes the run wh
 
 Merge by hand, or stop the service:
 
-- `ark services uninstall --project <project>` removes the auto-merger. It removes the other two services as well: there is no switch for one service.
+- `ark services uninstall --project <project>` removes the auto-merger. It removes the other three services as well: there is no switch for one service.
 - Run `ark services install --project <project>` again to start them.
 
 Without these services, only you merge. Ark's agents and the `ark` command never merge.

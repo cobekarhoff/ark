@@ -10,6 +10,8 @@ const services = [
   { name: "auto-merger", script: "auto-merger.sh", interval: 60 },
   { name: "temp-cleaner", script: "temp-cleaner.sh", interval: 300 },
   { name: "sweep", script: "sweep.sh", interval: 300 },
+  // Under 300 s so a change is committed less than 5 minutes after it (ARK-482).
+  { name: "project-autocommit", script: "project-autocommit.sh", interval: 120 },
 ] as const;
 
 const label = (project: string, service: string) => `dev.ark.${project}.${service}`;
@@ -103,7 +105,7 @@ export function servicesStatusText(project: string): string {
   return services
     .map((service) => {
       const listed = launchctl("list", label(project, service.name));
-      const name = service.name.padEnd(14);
+      const name = service.name.padEnd(20);
       if (!listed.ok || !existsSync(plistPath(label(project, service.name))))
         return `${name}not installed`;
       const pid = listed.output.match(/"PID"\s*=\s*(\d+)/)?.[1];
