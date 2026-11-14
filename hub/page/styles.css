@@ -4863,3 +4863,403 @@ button.cv-name:hover {
     background: var(--panel-3);
   }
 }
+
+/* ---------- Runs, Conversation mode: Master Chief's metro map, the to-scale strip, the Now panel ---------- */
+.pc-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.pc-controls input[type="search"] {
+  min-width: 200px;
+}
+.pc-map > header h3,
+.tscale > header h3,
+.pc-now > header h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.pc-scroll {
+  overflow: auto;
+  padding: 8px;
+  max-height: 560px;
+}
+.map {
+  position: relative;
+}
+.map-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.map-chief-line {
+  stroke: var(--violet);
+  stroke-width: 3;
+}
+.map-branch {
+  stroke-width: 2;
+}
+.map-spur {
+  stroke: var(--line-3);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+.map-spur[data-thick="true"] {
+  stroke: var(--amber);
+  stroke-width: 4;
+  stroke-dasharray: none;
+}
+.map-spur[data-thick="true"][data-type="escalation"] {
+  stroke: var(--red);
+}
+.map-chief-label {
+  position: absolute;
+  left: 8px;
+  color: var(--violet-t);
+  font-weight: 600;
+}
+.map-run {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+.map-run[data-state="idle"] {
+  opacity: 0.7;
+}
+.map-run-row {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.map-run-row:hover {
+  background: var(--sel);
+}
+.map-run-badge {
+  position: absolute;
+  left: 8px;
+  top: 7px;
+  width: calc(var(--label, 190px) - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-left: 3px solid var(--c);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 11px;
+}
+.map-run-line {
+  position: absolute;
+  top: 11px;
+  height: 12px;
+  min-width: 8px;
+}
+.map-run-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--c);
+}
+.map-run-line[data-open="true"]::before {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--c),
+    var(--c) 8px,
+    transparent 8px,
+    transparent 12px
+  );
+}
+.map-band {
+  position: absolute;
+  height: 18px;
+  border: 1px solid var(--amber);
+  border-radius: 3px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--amber),
+    var(--amber) 3px,
+    var(--amber-bg) 3px,
+    var(--amber-bg) 7px
+  );
+  pointer-events: none;
+}
+.map-station {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  padding: 0;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--c, var(--line-3));
+  cursor: pointer;
+}
+.map-bead {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  padding: 0;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--line-3);
+  cursor: pointer;
+}
+.map-bead.ty-question {
+  background: var(--panel);
+  border-color: var(--amber);
+}
+.map-bead.ty-escalation {
+  background: var(--panel);
+  border-color: var(--red);
+}
+.map-bead.sel {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+.map-cluster {
+  position: absolute;
+  min-width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  padding: 0 4px;
+  border: 1.5px solid var(--line-3);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.map-person {
+  position: absolute;
+  margin-left: -7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--violet-t);
+  cursor: pointer;
+}
+.map-person svg {
+  fill: currentColor;
+  display: block;
+}
+.map-playhead {
+  position: absolute;
+  top: 0;
+  width: 0;
+  border-left: 1.5px dashed var(--blue-t);
+  pointer-events: none;
+}
+.map-train {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: var(--blue);
+  border: 2px solid var(--panel);
+  pointer-events: none;
+}
+.map-dot {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--text);
+  opacity: 0;
+  pointer-events: none;
+}
+.tscale {
+  position: relative;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.tscale > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.tscale-grid {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.tscale-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.tscale-density {
+  display: flex;
+  align-items: flex-end;
+  height: 36px;
+  gap: 1px;
+}
+.tscale-density span {
+  flex: 1;
+  min-height: 1px;
+  background: var(--line-3);
+}
+.tscale-lane {
+  position: relative;
+  height: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.tscale-tick {
+  position: absolute;
+  top: 1px;
+  width: 3px;
+  height: 10px;
+  margin-left: -1px;
+  background: var(--line-3);
+}
+.tscale-tick,
+.tscale-answer {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+/* A 3 px tick is hard to hit: a wider invisible target. */
+.tscale-tick::after,
+.tscale-answer::after {
+  content: "";
+  position: absolute;
+  inset: -2px -3px;
+}
+.tscale-tick.ty-question {
+  background: var(--amber);
+}
+.tscale-tick.ty-escalation {
+  background: var(--red);
+}
+.tscale-answer {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 12px;
+  margin-left: -4px;
+  background: var(--violet);
+  border-radius: 4px 4px 0 0;
+}
+.tscale-hit {
+  pointer-events: none;
+  position: absolute;
+  top: 34px;
+  bottom: 0;
+  left: 170px;
+  right: 12px;
+  cursor: col-resize;
+}
+.tscale-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1.5px dashed var(--blue-t);
+  pointer-events: none;
+}
+.pc-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 12px;
+  align-items: start;
+}
+/* The side column stays in view while the map scrolls, so a click shows its inspector at once. */
+.pc-side {
+  position: sticky;
+  top: 8px;
+  display: grid;
+  gap: 8px;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+@media (max-width: 1100px) {
+  .pc-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pc-side {
+    position: static;
+    max-height: none;
+  }
+}
+/* Full screen: the inspector is a panel at the right and the map gives it the room, so it hides no line. */
+.pc-inspecting .gv.full {
+  right: min(444px, 50vw);
+}
+.pc-over .cv-inspector {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  z-index: 60;
+  width: min(420px, 90vw);
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.pc-now {
+  padding: 0 12px 8px;
+}
+.pc-now > header {
+  padding: 8px 0;
+}
+.pc-now h4 {
+  margin: 8px 0 4px;
+  font-size: 12px;
+}
+.pc-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pc-list button {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .map-train {
+    animation: map-train 1.2s var(--ease) infinite alternate;
+  }
+  @keyframes map-train {
+    to {
+      transform: scale(1.35);
+    }
+  }
+  .map-dot {
+    animation: map-dot 600ms var(--ease) forwards;
+  }
+  @keyframes map-dot {
+    from {
+      opacity: 1;
+      transform: translateY(var(--from));
+    }
+    to {
+      opacity: 0;
+      transform: translateY(var(--to));
+    }
+  }
+}

@@ -299,7 +299,7 @@ function changedLines(repoPath: string, base: string): Map<string, { from: numbe
 /**
  * The declarations that the diff from `base` to HEAD changes, read from git objects: hunks from `git diff`,
  * file content from `git show HEAD:<path>`. Neither the working tree nor a checkout is read. A deleted file has none.
- * With `oldIdsOnly`, a file whose text holds no old AC id is not parsed: it has no `old` declaration, and the
+ * With `wanted`, a file whose text it rejects is not parsed: it has no declaration of that kind, and the
  * TypeScript server (a child process, slow and fragile on a loaded host) never starts for a diff with none.
  */
 async function changedDeclarations(
@@ -308,7 +308,7 @@ async function changedDeclarations(
   base: string,
   suites: Suite[],
   only?: Suite,
-  oldIdsOnly = false,
+  wanted: (text: string) => boolean = () => true,
 ): Promise<{ path: string; declaration: Declaration }[]> {
   const files = [...changedLines(repoPath, base)]
     .filter(([path]) => {
@@ -318,7 +318,7 @@ async function changedDeclarations(
       );
     })
     .map(([path, lines]) => ({ path, lines, text: git(repoPath, ["show", `HEAD:${path}`]) }))
-    .filter(({ text }) => !oldIdsOnly || text.match(criterionPattern) !== null)
+    .filter(({ text }) => wanted(text))
     .map(({ path, lines, text }) => [path, lines, text] as const);
   const found = await scanSources(
     files.map(([path, , text]) => ({ text, extension: extname(path) })),
@@ -352,10 +352,43 @@ export async function oldIdsTouched(
   suite: Suite,
   suites: Suite[],
 ): Promise<string[]> {
-  const changed = await changedDeclarations(repoPath, suite.repo, base, suites, suite, true);
+  const changed = await changedDeclarations(
+    repoPath,
+    suite.repo,
+    base,
+    suites,
+    suite,
+    (text) => text.match(criterionPattern) !== null,
+  );
   return changed
     .filter(({ declaration }) => declaration.kind === "old")
     .map(({ path, declaration }) => oldIdLine(path, declaration));
+}
+
+/**
+ * ARK-431: the case ids that a changed test holds (its own or its describe's) and `planned` does not list, one line per
+ * id and file. Compares ids only, never the action. A declaration with no case id adds nothing.
+ */
+export async function caseIdsOutsidePlan(
+  repoPath: string,
+  base: string,
+  suite: Suite,
+  suites: Suite[],
+  planned: Set<string>,
+): Promise<string[]> {
+  const changed = await changedDeclarations(
+    repoPath,
+    suite.repo,
+    base,
+    suites,
+    suite,
+    (text) => caseIdsIn(text).length > 0,
+  );
+  const lines = new Set<string>();
+  for (const { path, declaration } of changed)
+    for (const id of declaration.cases)
+      if (!planned.has(id)) lines.add(`case id not in plan test_cases: ${id} in ${path}`);
+  return [...lines];
 }
 
 /** Case id -> the criteria whose `verified_by` names it, from the project's tickets and the tickets copied into its runs. */

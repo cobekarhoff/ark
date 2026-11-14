@@ -251,6 +251,8 @@ describe("ark test", () => {
       checks: [
         { name: "old-id unit", passed: true },
         { name: "old-id e2e", passed: true },
+        { name: "plan-membership unit", passed: true },
+        { name: "plan-membership e2e", passed: true },
       ],
       criteria: { "FAKE-1/AC1": "passing", "FAKE-1/AC2": "passing" },
       mode: "full",
@@ -580,7 +582,18 @@ describe("ark test on a refactor run", () => {
         forge: true,
         criteria: ["FAKE-1-AC1"],
         ticketCriteria: [{ id: "FAKE-1-AC1", method: "inspection" }],
-        testCases: [],
+        testCases: [
+          {
+            id: "ARK-T1",
+            criterion: "FAKE-1-AC1",
+            level: "e2e",
+            given: [],
+            when: ["run it"],
+            // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+            then: ["it works"],
+            expected: "it works",
+          },
+        ],
         e2e: [failing("ARK-T1 works")],
       });
       // A case-id title: touching an old-id test title fails `ark test`.
