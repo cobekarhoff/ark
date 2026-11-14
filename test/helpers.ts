@@ -68,10 +68,15 @@ export function writeTicket(
   return file;
 }
 
+/** Per-command limit of the git and ark helpers; below the 60 s test timeout so a stalled command fails with its own message. */
+export const commandLimitMs = 45_000;
+
 function git(directory: string, ...args: string[]): void {
-  const result = Bun.spawnSync(["git", ...args], { cwd: directory });
-  if (result.exitCode !== 0)
-    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+  const result = Bun.spawnSync(["git", "-C", directory, ...args], { timeout: commandLimitMs });
+  const line = `git -C ${directory} ${args.join(" ")}`;
+  if (result.exitedDueToTimeout)
+    throw new Error(`${line} timed out after ${commandLimitMs} ms: ${result.stderr.toString()}`);
+  if (result.exitCode !== 0) throw new Error(`${line} failed: ${result.stderr.toString()}`);
 }
 
 /** One built repo for each distinct file set in this process: repos with the same files share commit ids. */
@@ -98,10 +103,32 @@ export function tempGitRepo(files: Record<string, string> = { "README.md": "# te
   return directory;
 }
 
-export function ark(...args: string[]): { code: number; out: string; err: string } {
-  const result = Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...args], {
+function spawnArk(args: string[], timeout?: number) {
+  return Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...args], {
     env: process.env,
+    timeout,
   });
+}
+
+export function ark(...args: string[]): { code: number; out: string; err: string } {
+  const result = spawnArk(args);
+  return {
+    code: result.exitCode ?? 1,
+    out: result.stdout.toString(),
+    err: result.stderr.toString(),
+  };
+}
+
+/** Like `ark`, but kills the command after `timeoutMs` and throws with the command line, the limit and the stderr read so far. */
+export function arkWithin(
+  timeoutMs: number,
+  ...args: string[]
+): { code: number; out: string; err: string } {
+  const result = spawnArk(args, timeoutMs);
+  if (result.exitedDueToTimeout)
+    throw new Error(
+      `ark ${args.join(" ")} timed out after ${timeoutMs} ms: ${result.stderr.toString()}`,
+    );
   return {
     code: result.exitCode ?? 1,
     out: result.stdout.toString(),
