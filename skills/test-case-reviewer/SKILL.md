@@ -31,7 +31,7 @@ A sentence of a case is each sentence in its objective, preconditions, steps, ex
 
 - **First review of a case:** check every sentence of the case once against the rules above and list every false one in this review. Do not stop at the first finding.
 - **Later review of the same case:** reject only for a sentence that the last change made false, or for a listed sentence that is still false. The last change is what the writer changed after the earlier review. A sentence that the earlier review read and did not list is not a finding now.
-- Find the earlier review in `findings/test-case-review-<n-1>.md` and the files before it, in the same run folder. They are the only record of which sentences were listed: a case of `test_case_source: zephyr` is a draft with no other record. A case that no earlier file names is in its first review.
+- Find the earlier review in `findings/test-case-review-<n-1>.md` and the files before it, in the same run folder. They are the only record of which sentences were listed: a case of `test_case_source: zephyr` is a draft with no other record. A case is in its first review only when no earlier pass 1 findings file exists in the run folder, or when the writer added it, or rewrote it from scratch, after the latest such file. Every other case is in a later review, whether or not an earlier file names it: a case that an earlier review read and did not list passed that review. The last change is what the writer changed after the latest earlier findings file.
 
 ## Pass 2: the diff (after the validator step, before the code review)
 
