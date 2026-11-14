@@ -113,7 +113,7 @@ const markerFile = (rule: string, line = 12) =>
 const sha1 = (text: string) => createHash("sha1").update(text).digest("hex");
 const lockfileText = (label: string) => `{"lockfileVersion":1,"label":"${label}"}\n`;
 
-type Vulnerability = { id: string; severity: string; aliases?: string[] };
+type Vulnerability = { id: string; severity?: string; aliases?: string[] };
 type PackageEntry = {
   name: string;
   version: string;
@@ -434,6 +434,53 @@ test("ARK-T401 a secret in a commit before the base does not block", () => {
   expect(created()).toHaveLength(1);
 });
 
+test("ARK-T401 a run commit cannot switch the secret gate off: an inline allow, a committed allowlist and a committed ignore file still refuse", () => {
+  const secret = markerFile("generic-api-key");
+  const bypasses: Record<string, (worktree: string) => void> = {
+    "gitleaks:allow comment": (worktree) =>
+      commitFiles(
+        worktree,
+        { "src/config.ts": secret.replace("generic-api-key", "generic-api-key # gitleaks:allow") },
+        "config",
+      ),
+    ".gitleaks.toml allowlist": (worktree) =>
+      commitFiles(
+        worktree,
+        { "src/config.ts": secret, ".gitleaks.toml": '[allowlist]\npaths = ["src/config.ts"]\n' },
+        "config",
+      ),
+    ".gitleaksignore": (worktree) => {
+      const commit = commitFiles(worktree, { "src/config.ts": secret }, "config");
+      commitFiles(
+        worktree,
+        { ".gitleaksignore": `${commit}:src/config.ts:generic-api-key:12\n` },
+        "ignore",
+      );
+    },
+  };
+  for (const [name, commit] of Object.entries(bypasses)) {
+    const { repositories } = setup({ commits: ({ worktree }) => commit(worktree) });
+    const result = openMergeRequest();
+    expect(result.code, name).not.toBe(0);
+    expect(said(result), name).toContain("generic-api-key in src/config.ts:12");
+    expectNothingShipped(repositories);
+  }
+});
+
+test("ARK-T401 a .gitleaks.toml allowlist that the base already holds still applies", () => {
+  setup({
+    baseFiles: {
+      "README.md": "# test\n",
+      ".gitleaks.toml": '[allowlist]\npaths = ["src/legacy.ts"]\n',
+    },
+    commits: ({ worktree }) =>
+      commitFiles(worktree, { "src/legacy.ts": markerFile("generic-api-key") }, "legacy"),
+  });
+  const result = openMergeRequest();
+  expect(result.code, said(result)).toBe(0);
+  expect(created()).toHaveLength(1);
+});
+
 /** The run branch merges origin/main, which holds a commit with a marker that local `main` lacks, as `ark worktree sync` does. */
 function mergeTargetWithSecret({ worktree, bare }: Repository) {
   commitFiles(worktree, { "core.txt": "core" }, "core");
@@ -574,6 +621,24 @@ test("ARK-T402 medium and low vulnerabilities do not block", () => {
   expect(created()).toHaveLength(1);
 });
 
+test("ARK-T402 a vulnerability with no severity blocks when it is a malicious-package advisory, and lists when it is not", () => {
+  setup({ commits: commitLockfile });
+  osvReports(headLockfile, [
+    { name: "left-pad", version: "1.3.0", vulnerabilities: [{ id: "GHSA-nnnn-5555-6666" }] },
+  ]);
+  const unscored = openMergeRequest();
+  expect(unscored.code, said(unscored)).toBe(0);
+
+  const { repositories } = setup({ commits: commitLockfile });
+  osvReports(headLockfile, [
+    { name: "evil-pkg", version: "1.0.0", vulnerabilities: [{ id: "MAL-2026-1234" }] },
+  ]);
+  const malicious = openMergeRequest();
+  expect(malicious.code).not.toBe(0);
+  expect(rowWith(said(malicious), "MAL-2026-1234")).toContain("evil-pkg");
+  expectNothingShipped(repositories);
+});
+
 test("ARK-T402 a high vulnerability that the base already holds still blocks", () => {
   const { repositories } = setup({
     baseFiles: { "README.md": "# test\n", "bun.lock": headLockfile },
@@ -605,10 +670,11 @@ test("ARK-T402 a failing osv-scanner never reads as clean: crash, unreadable rep
     { exit: "1", stdout: "not json", shown: "cannot be read" },
     { exit: "0", stdout: "", shown: "cannot be read" },
     {
-      exit: "2",
+      exit: "127",
       stderr: "failed to fetch: lookup api.osv.dev: no such host",
       shown: "lookup api.osv.dev: no such host",
     },
+    { exit: "127", stderr: "could not extract bun.lock: malformed", shown: "malformed" },
   ];
   for (const failure of failures) {
     const { repositories } = setup({ commits: commitLockfile });

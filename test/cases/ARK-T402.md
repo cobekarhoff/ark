@@ -16,7 +16,7 @@ Prove that `ark merge-request open` runs osv-scanner on each lockfile of the hea
 ## Preconditions
 
 - Fixture, host and gitleaks fake as in ARK-T401 (one-repo `scenario`, fake `gh`, a clean fake `gitleaks` that exits 0), so an osv-scanner result is the only possible cause of a refusal. The run branch commits a lockfile `bun.lock` (and for step 5 a second lockfile `docs/package-lock.json`); the test passes the files to its commit helper.
-- Fake `osv-scanner` on `PATH`, in a directory the test owns. It emulates osv-scanner 2.x: `scan source ... -L <lockfile> --format json` prints the content of the file `$FAKE_OSV_DIR/<sha1 of the lockfile's bytes>.json` on stdout (else `$FAKE_OSV_DIR/default.json`, else `{"results":[]}`); the test computes each sha1 itself from the lockfile text it wrote. A report holds `results[].packages[]` with `package: {name, version, ecosystem}` and `vulnerabilities[]` of `{id, aliases, database_specific: {severity}}` (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`). Exit code: 1 when the printed report holds any vulnerability, 0 when none, the value of `FAKE_OSV_EXIT` when set, and 128 with the message `No package sources found` on stderr when the file is not a lockfile osv knows. The fake is the same one ARK-T403 and ARK-T404 use.
+- Fake `osv-scanner` on `PATH`, in a directory the test owns. It emulates osv-scanner 2.x: `scan source ... -L <lockfile> --format json` prints the content of the file `$FAKE_OSV_DIR/<sha1 of the lockfile's bytes>.json` on stdout (else `$FAKE_OSV_DIR/default.json`, else `{"results":[]}`); the test computes each sha1 itself from the lockfile text it wrote. A report holds `results[].packages[]` with `package: {name, version, ecosystem}` and `vulnerabilities[]` of `{id, aliases, database_specific: {severity}}` (`CRITICAL`, `HIGH`, `MODERATE`, `LOW`, or no severity). Exit code: 1 when the printed report holds any vulnerability, 0 when none, the value of `FAKE_OSV_EXIT` when set. As the real tool does, an offline lookup or a malformed lockfile exits 127, and a file with no packages exits 128 with `No package sources found` on stderr. The fake is the same one ARK-T403 and ARK-T404 use.
 - The run is at the point where the open accepts it, so the scan is the only possible refusal. The test records `git ls-remote origin` and the `FAKE_LOG` `create` calls before each call.
 
 ## Steps
@@ -27,9 +27,10 @@ Prove that `ark merge-request open` runs osv-scanner on each lockfile of the hea
 4. Severity boundary. A report with only `MODERATE` and `LOW` vulnerabilities. Assert exit 0 and one `create` call: medium and low do not block (ARK-T403 owns what the body shows).
 5. Pre-existing. The same high vulnerability is in the lockfile at the base commit and unchanged by the run's commits. Assert the refusal still happens: the scan reads the lockfile of the head, so a vulnerability that main already has blocks until it is fixed or accepted (ARK-T404 owns accepted).
 6. No lockfile. The run commits no lockfile and the fake exits 128 with `No package sources found`. Assert exit 0 and one `create` call. Control: a repo with a clean lockfile (exit 0) also opens.
-7. Fail closed, osv-scanner. For each of: exit 2 with `panic: boom` on stderr; exit 1 with stdout `not json`; exit 0 with stdout that is empty; exit 2 with `failed to fetch ... lookup api.osv.dev: no such host` on stderr. Assert a non-zero exit, no `create` call and no pushed branch each time, an error that holds the scanner's stderr text, and for the offline case an error that tells the reader the lookup needs the network.
+7. Fail closed, osv-scanner. For each of: exit 2 with `panic: boom` on stderr; exit 1 with stdout `not json`; exit 0 with stdout that is empty; exit 127 with `failed to fetch ... lookup api.osv.dev: no such host` on stderr (offline, as the real tool exits); exit 127 with a malformed-lockfile message on stderr. Assert a non-zero exit, no `create` call and no pushed branch each time, an error that holds the scanner's stderr text, and an error that tells the reader the lookup needs the network. Only exit 128 (no packages) reads as no lockfile (step 6).
 8. Fail closed, gitleaks. With a clean osv-scanner, a fake gitleaks that exits 2 with `fatal: boom` on stderr, and one that exits 0 but writes `not json` to the report path. Assert each refuses, with the stderr text for the first, and that neither reads as clean.
 9. Refresh. Open the clean fixture, add a commit that changes the lockfile to the one whose report holds the critical vulnerability, and call `ark merge-request open <run>` again. Assert a non-zero exit naming the finding and an origin branch tip unchanged by the second call.
+10. Malicious package. A report with `MAL-2026-1234` and no severity label, on `evil-pkg`, blocks and names the id and package. A report with a `GHSA-` id and no severity label does not block.
 
 ## Expected results
 
@@ -38,6 +39,7 @@ Prove that `ark merge-request open` runs osv-scanner on each lockfile of the hea
 - When osv-scanner reports only medium or low vulnerabilities, or finds no lockfile, the system shall not refuse.
 - If a scanner exits with an unexpected code, prints a report that cannot be parsed, or cannot reach the network, then the system shall refuse and show the scanner's stderr; it shall never treat the scan as clean.
 - When the MR is open and the head gained a vulnerable lockfile, the system shall refuse again before it pushes.
+- A malicious-package advisory (`MAL-` id) shall block although it has no severity.
 
 ## Screenshot checkpoints
 

@@ -30,6 +30,8 @@ Prove that `ark merge-request open` runs gitleaks on the commits the run branch 
 5. Range, merged-in target. Put a marker commit on `main` after the run branch was cut and merge `main` into the run branch with `git merge` (what `ark worktree sync` does). Assert exit 0: the merged target commit is not scanned, because only the run's own commits are (`--first-parent --no-merges <base>..HEAD`). A marker in a commit made on the run branch after that merge still refuses.
 6. Refresh of an open MR. Open the clean fixture (exit 0, one `create`, branch pushed). Commit a marker file on the run branch and run the guard path again (`ark merge-request open <run>` on the same run, the MR now open). Assert a non-zero exit naming the finding, the origin branch tip still equals the tip before the second call, and `FAKE_LOG` has no `edit` or `update` call after the first open.
 7. `handed_off`. In the fixture of `test/run.test.ts` that closes a run as `handed_off` (`ark run close <run> handed_off`, as the tests at the lines that call it do), with a marker on the run branch, assert a non-zero exit with the same finding named, and that the run stays open (no `run.closed` event). With a clean branch the same call exits 0.
+8. No bypass from the run branch. Three run commits, each with the marker on line 12 of `src/config.ts`: one with `# gitleaks:allow` on the marker line, one that also commits `.gitleaks.toml` with an `[allowlist]` of `paths = ["src/config.ts"]`, and one followed by a commit of `.gitleaksignore` holding the secret's fingerprint. For each, assert a non-zero exit naming the finding and nothing shipped.
+9. Base policy. The base holds a `.gitleaks.toml` that allowlists `src/legacy.ts`; the run commits the marker in that file. Assert exit 0 and one `create` call: the allowlist of the base stays in force.
 
 ## Expected results
 
@@ -38,6 +40,7 @@ Prove that `ark merge-request open` runs gitleaks on the commits the run branch 
 - When a secret sits only in a commit before the base or in a commit merged in from the target, the system shall not refuse.
 - When the MR is already open, the system shall run the scan again on each call, and refuse before any push or edit of the MR.
 - When `ark run close <run> handed_off` is called, the system shall refuse the same way and leave the run open.
+- A `gitleaks:allow` comment, a `.gitleaks.toml` or a `.gitleaksignore` that the run branch commits shall not hide a secret; only the `.gitleaks.toml` of the base applies.
 
 ## Screenshot checkpoints
 

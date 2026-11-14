@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Fake `osv-scanner scan source -L <lockfile> --format json`: prints $FAKE_OSV_DIR/<sha1 of the lockfile's bytes>.json, else
-// default.json, else an empty report. Exit 1 when the report holds a vulnerability, else 0.
+// default.json, else an empty report. Exit 1 when the report holds a vulnerability, else 0. As the real tool does, an
+// offline lookup or a malformed lockfile exits 127, and "no packages" exits 128.
 // Overrides: FAKE_OSV_EXIT, FAKE_OSV_STDERR, FAKE_OSV_STDOUT (raw stdout).
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";

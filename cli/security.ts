@@ -21,7 +21,6 @@ export function missingScannerLines(): string[] {
 /** Basenames osv-scanner reads as a lockfile or a manifest of resolved packages. */
 const lockfileNames = new Set([
   "bun.lock",
-  "bun.lockb",
   "package-lock.json",
   "npm-shrinkwrap.json",
   "yarn.lock",
@@ -69,7 +68,7 @@ type OsvPackage = {
   licenses?: string[];
 };
 
-/** The packages of one lockfile with their vulnerabilities and licences, or `null` when osv-scanner knows no lockfile there (exit 127 or 128). */
+/** The packages of one lockfile with their vulnerabilities and licences, or `null` when osv-scanner finds no packages there (exit 128). */
 function osvScan(directory: string, lockfile: string, name: string): OsvPackage[] | null {
   const { exitCode, stdout, stderr } = spawn(
     [
@@ -85,7 +84,7 @@ function osvScan(directory: string, lockfile: string, name: string): OsvPackage[
     ],
     directory,
   );
-  if (exitCode === 127 || exitCode === 128) return null;
+  if (exitCode === 128) return null;
   if (exitCode !== 0 && exitCode !== 1)
     throw new ArkError(
       `osv-scanner failed on ${name} (exit ${exitCode}): ${tail(stderr)}\n${NETWORK_HINT}`,
@@ -115,7 +114,10 @@ function severityOf(
   const score = Number(
     pkg.groups?.find((group) => group.ids?.includes(vulnerability.id))?.max_severity,
   );
-  // ponytail: a vulnerability with no label and no score is listed, not blocked; block it if osv data proves too sparse
+  // a malicious-package advisory carries no severity label and no score
+  if ([vulnerability.id, ...(vulnerability.aliases ?? [])].some((id) => id.startsWith("MAL-")))
+    return "CRITICAL";
+  // ponytail: any other vulnerability with no label and no score is listed, not blocked; block it if osv data proves too sparse
   return score >= 9
     ? "CRITICAL"
     : score >= 7
@@ -145,13 +147,24 @@ type GitleaksEntry = {
   Fingerprint: string;
 };
 
-function gitleaksFindings(path: string, base: string, report: string): Finding[] {
+function gitleaksFindings(path: string, base: string, folder: string): Finding[] {
+  const work = mkdtempSync(join(folder, "gitleaks-"));
+  const report = join(work, "report.json");
+  // The run branch must not switch the gate off: no `gitleaks:allow` comment, no `.gitleaksignore` of the repo, and the
+  // `.gitleaks.toml` of the base (else the defaults) in place of whatever the run committed.
+  const config = join(work, "gitleaks.toml");
+  writeFileSync(config, gitBlob(path, `${base}:.gitleaks.toml`) ?? "[extend]\nuseDefault = true\n");
   const { exitCode, stderr } = spawn(
     [
       "gitleaks",
       "git",
       `--log-opts=--first-parent --no-merges ${base}..HEAD`,
       "--redact",
+      "--ignore-gitleaks-allow",
+      "--config",
+      config,
+      "--gitleaks-ignore-path",
+      mkdtempSync(join(work, "no-ignore-")),
       "--report-path",
       report,
     ],
@@ -244,6 +257,14 @@ function scanBlob(folder: string, name: string, blob: Buffer): OsvPackage[] | nu
   return osvScan(directory, file, name);
 }
 
+/** Whether the head has commits past the base; a failed `git rev-list` refuses, never reads as none. */
+function hasCommitsAhead(path: string, base: string): boolean {
+  const { exitCode, stdout, stderr } = spawn(["git", "rev-list", "--count", `${base}..HEAD`], path);
+  if (exitCode !== 0)
+    throw new ArkError(`git rev-list ${base}..HEAD failed in ${path}: ${tail(stderr)}`);
+  return Number(stdout) > 0;
+}
+
 export type RepoSecurity = { repo: string; path: string; base: string };
 
 /**
@@ -264,21 +285,12 @@ export function securityScan(
   try {
     // ponytail: a worktree directory that is already gone (a handed_off run whose branch stays in the clone) is not scanned; scan the branch in the clone if that gap matters
     const scanned = repos.filter(
-      ({ path, base }) =>
-        existsSync(path) &&
-        Number(spawn(["git", "rev-list", "--count", `${base}..HEAD`], path).stdout) > 0,
+      ({ path, base }) => existsSync(path) && hasCommitsAhead(path, base),
     );
     for (const { repo, path, base } of scanned) {
       const prefix = scanned.length > 1 ? `${repo}: ` : "";
       const osv = osvFindings(path, base, folder);
-      const found = [
-        ...gitleaksFindings(
-          path,
-          base,
-          join(mkdtempSync(join(folder, "gitleaks-")), "report.json"),
-        ),
-        ...osv.findings,
-      ];
+      const found = [...gitleaksFindings(path, base, folder), ...osv.findings];
       const repoRows: string[] = [];
       for (const finding of found) {
         const entry = accepted.find(({ id }) => finding.ids.includes(id));
