@@ -559,6 +559,40 @@ test("ARK-T353 a P0 or P1 with no Repro line in the newest reviewer file holds t
   expect(fixed.result.out).toContain("(3 of 4)");
 });
 
+test("ARK-T353 a dropped P1 without Repro frees the auto answer; an undropped one or a dropped line outside the decision section does not", () => {
+  const { runId, directory } = buildingRun({ escalation: "auto" }, { escalation_rounds: 4 });
+  spendRounds(runId, directory);
+  const noRepro = (title: string) =>
+    `### P1: ${title}\n\n- **File:** \`a.ts\`\n- **Problem:** x\n\n`;
+  const attempt = (text: string) => {
+    mkdirSync(join(directory, "findings"), { recursive: true });
+    writeFileSync(join(directory, "findings", "review.md"), text);
+    const before = autoAnswers(directory).length;
+    const result = start(runId);
+    return { result, answered: autoAnswers(directory).length - before };
+  };
+  const dropped = "## Run lead decision\n\n- dropped slow export: no Input\n";
+  // The only P1 without Repro is dropped: answered by auto.
+  expect(attempt(`${noRepro("slow export")}${dropped}`).answered).toBe(1);
+  expect(finish(runId).code).toBe(0);
+  failTest(directory);
+  // A second P1 without Repro is not dropped: the human decides.
+  const partial = attempt(`${noRepro("slow export")}${noRepro("leaks handle")}${dropped}`);
+  expect(partial.result.code).toBe(1);
+  expect(partial.result.err).toContain("record gate escalation");
+  expect(partial.answered).toBe(0);
+  // A dropped line outside `## Run lead decision` drops nothing.
+  const outside = attempt(`${noRepro("slow export")}## Notes\n\n- dropped slow export: no Input\n`);
+  expect(outside.result.code).toBe(1);
+  expect(outside.result.err).toContain("record gate escalation");
+  expect(outside.answered).toBe(0);
+  // A dropped title that only starts with this finding's title drops nothing.
+  const prefix = attempt(`${noRepro("slow")}${dropped}`);
+  expect(prefix.result.code).toBe(1);
+  expect(prefix.result.err).toContain("record gate escalation");
+  expect(prefix.answered).toBe(0);
+});
+
 /** Two reviewer steps and a run lead file, each with its own findings file and modification time. */
 test("ARK-T353 the newest reviewer file by mtime decides, and a run lead file is ignored", () => {
   const { runId, directory } = buildingRun({ escalation: "auto" }, { escalation_rounds: 4 });

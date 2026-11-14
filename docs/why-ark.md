@@ -76,16 +76,16 @@ Every run meets two gates, criteria and plan, and ends with your merge on the gi
 
 Run `2026-11-11-ARK-423-1`: tests that raced git background maintenance and depended on the wall clock. Figures come from the run's `metrics.json` and `state.json`; the run's `retro.md` was written before the last metrics refresh, so where the two differ this page uses `metrics.json`.
 
-| Measure                     | Value                                                                                                           | Field                                                         |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Acceptance criteria         | 3. AC1 and AC2 passing at head by 3 test cases (ARK-T261, ARK-T262, ARK-T227); AC3 by your recorded manual `ok` | `state.json` `criteria`                                       |
-| Gate answers                | 2 by you (criteria, manual check), 2 by Ark (plan, escalation)                                                  | `gates`                                                       |
-| Rounds                      | 3. The budget was 2; one escalation, answered `auto`, allowed a third                                           | `rework.rounds`, `rework.escalations`                         |
-| Findings sent back          | 3 P1: one from review with a repro command, two from CI logs; none left open at P0 or P1                        | `rework.findings_sent_back`, `rework.findings_left_p0p1`      |
-| Test runs                   | 9                                                                                                               | `tests.runs`                                                  |
-| Your changes after the plan | 0 plan changes, 0 MR comments, 0 commits after the MR opened                                                    | `human_intervention`                                          |
-| Cost                        | $6.45 and 26.8 M tokens. A typical run costs $2.65 (median of 152 earlier runs)                                 | `cost.total_usd`, `cost.tokens`, `comparison.median_cost_usd` |
-| Wall time                   | 3.9 hours (14,171 s). A typical run takes 3.2 hours                                                             | `time.wall_seconds`, `comparison.median_wall_seconds`         |
+| Measure                     | Value                                                                                                           | Field                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Acceptance criteria         | 3. AC1 and AC2 passing at head by 3 test cases (ARK-T261, ARK-T262, ARK-T227); AC3 by your recorded manual `ok` | `state.json` `criteria`                                                             |
+| Gate answers                | 2 by you (criteria, manual check), 2 by Ark (plan, escalation)                                                  | `gates`                                                                             |
+| Rounds                      | 3. The budget was 2; one escalation, answered `auto`, allowed a third                                           | `rework.rounds`, `rework.escalations`                                               |
+| Findings sent back          | 3 P1: one from review with a repro command, two from CI logs; none left open at P0 or P1                        | `rework.findings_sent_back`, `rework.findings_left_p0p1`, `rework.findings_dropped` |
+| Test runs                   | 9                                                                                                               | `tests.runs`                                                                        |
+| Your changes after the plan | 0 plan changes, 0 MR comments, 0 commits after the MR opened                                                    | `human_intervention`                                                                |
+| Cost                        | $6.45 and 26.8 M tokens. A typical run costs $2.65 (median of 152 earlier runs)                                 | `cost.total_usd`, `cost.tokens`, `comparison.median_cost_usd`                       |
+| Wall time                   | 3.9 hours (14,171 s). A typical run takes 3.2 hours                                                             | `time.wall_seconds`, `comparison.median_wall_seconds`                               |
 
 The run cost more and took longer than a typical run. Its third round came from two CI failures that showed only on Linux. The retro proposed four changes; none applies until you approve it.
 
