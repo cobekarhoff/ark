@@ -17,7 +17,7 @@ ark test-audit inventory --project <name> --summary
 ark test-audit inventory --project <name> --json
 ```
 
-`--project` is required, and `ARK_PROJECT` is ignored. The command changes no file. Each row has `file`, `line`, `title`, `kind`, `id`, `acs` and `last`. `kind` is `case` (a test case id in the title), `old` (an old AC id such as `ARK-12-AC3`) or `none`. A `test.each` table is one row marked `[table xN]`; a skipped or `only` declaration carries its modifier. `--changed <base>` lists only the declarations that the diff from `<base>` to HEAD changes, and prints `old id touched:` for each one with an old AC id.
+`--project` is required, and `ARK_PROJECT` is ignored. The command changes no file. It reads the `workspace` checkout of `ark.yml`, not the run's worktree, and takes `last` from the newest report of any run of the project: use it on a run only when that checkout is on the run's branch. Each row has `file`, `line`, `title`, `kind`, `id`, `acs` and `last`. `kind` is `case` (a test case id in the title), `old` (an old AC id such as `ARK-12-AC3`) or `none`. A `test.each` table is one row marked `[table xN]`; a skipped or `only` declaration carries its modifier. `--changed <base>` lists only the declarations that the diff from `<base>` to HEAD changes, and prints `old id touched:` for each one with an old AC id. A deleted file has no declaration, so `--changed` never lists a deleted test.
 
 ### A suite that is not `parser: bun`
 
@@ -33,8 +33,8 @@ Write one ledger row for each test or scenario the list shows. Take the test cas
 
 `ark test` prints no time for a test file. Two sources have it:
 
-- `results/<suite>.report` in the run folder: JUnit, one time for each test case.
-- `ark test-audit inventory --project <name> --json`, column `durationMs`: the time of the newest report, one row for each declaration, joined to the report by file and title.
+- `results/<suite>.report` in the run folder: JUnit, one time for each test case. It is the run's own report.
+- `ark test-audit inventory --project <name> --json`, column `durationMs`: the time of the newest `<suite>.report` of any run of the project, one row for each declaration, joined to the report by file and title. It is the project's time, not necessarily this run's.
 
 The time of a file is the sum of the times of its rows. `durationMs` is null (`last` is `-`) when no report matches: a new file, a renamed title, or no `ark test` yet. Write `time unknown` for it; never guess. Report each file over 5 s. A file over 30 s needs a named contract that no cheaper level proves, or a cut.
 

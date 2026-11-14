@@ -42,9 +42,9 @@ Read the diff and `plan.yml`. Reject the diff when:
    - a negative control that fails on another guard than the one it names
    - a name that the assertions do not exercise
 4. **A test file over its time budget.** A new or changed test file has more than 30 s in the last `ark test` report, and no case names a contract that no cheaper level proves. Report each file over 5 s in the findings file, even when you do not reject it. `ark test` prints no time for a file; read it so:
-   - `results/<suite>.report` in the run folder is JUnit with the time of each test case. The time of a file is the sum of its test cases.
-   - `ark test-audit inventory --project <name> --json` prints the same time as `durationMs`, one row for each declaration. Join the rows to the changed files by file, and sum the rows of one file. `--project` is required. The command changes no file, so you may run it. It reads only suites with `parser: bun`; read the report of any other suite directly.
-   - `durationMs` is null (`last` is `-`) when no report matches: a new file, or no `ark test` yet. Then you cannot judge the budget: write `time unknown` for the file in the findings file, and do not reject for time. Never guess a time.
+   - `results/<suite>.report` in the run folder is JUnit with the time of each test case. The time of a file is the sum of its test cases. This is the source of the 5 s and 30 s budget: it is the run's own report.
+   - A new or changed file with no matching test case in the report has no time: write `time unknown` for it in the findings file, and do not reject for time. Never guess a time.
+   - `ark test-audit inventory` is not a source for this rule. It reads the `workspace` checkout of `ark.yml` and the newest report of any run of the project, so its `durationMs` may belong to another run or another commit. Use it only to audit the workspace, with `--project <name>` (required); it changes no file, and it reads only suites with `parser: bun`.
 
 ### The retention bar
 
