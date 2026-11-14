@@ -26,7 +26,7 @@ flowchart TB
     direction LR
     impl["Implementer<br/>code"] --> val["Validator<br/>tests"] --> t["ark test<br/>every AC at head"] --> rev["Reviewer<br/>other vendor by default"]
     rev -. "findings sent back" .-> impl
-    rev -. "budget spent" .-> esc{{"YOU<br/>one more round,<br/>take over, abort"}}
+    rev -. "budget spent" .-> esc{{"YOU<br/>one more round,<br/>take over, abort<br/>(Ark, if gates.escalation is auto)"}}
   end
   subgraph ship ["Ship"]
     direction LR
@@ -44,7 +44,7 @@ flowchart TB
   class t,mr,retro cmd
 ```
 
-Amber is you. Teal is an agent. Grey is the `ark` command, which keeps run state and refuses a step the run may not take yet. A strategy choice (when there are 2 or more approach cards) and manual checks (for an AC only a person can judge) also ask you when they apply. Where `ark.yml` sets the strategy or plan gate to `auto`, Ark answers it instead.
+Amber is you. Teal is an agent. Grey is the `ark` command, which keeps run state and refuses a step the run may not take yet. A strategy choice (when there are 2 or more approach cards) and manual checks (for an AC only a person can judge) also ask you when they apply. Where `ark.yml` sets the strategy, plan or escalation gate to `auto`, Ark answers it instead.
 
 ### A run in one screen
 
@@ -55,7 +55,7 @@ Each step names the `ark` command or the file it leaves behind. [Scenarios](docs
 3. **Criteria gate.** You accept, edit or abort each AC's method and test cases: `ark gate record <run> criteria accept`.
 4. **Strategy, test cases, plan.** The run lead writes `strategies.md` (`ark strategy record`), a test case writer and reviewer settle the test cases, then the run lead writes `plan.yml` (`ark plan check`).
 5. **Plan gate.** You review the plan and approve, change or abort: `ark gate record <run> plan approve`. With `gates.plan: auto`, Ark approves a valid plan that has no open decision. No code exists yet.
-6. **Build, test, review.** Implementers and validators work in their own worktrees. `ark test` runs every AC at head. A reviewer returns findings, and the run lead sends fixes back until the round budget is spent. Then you decide at an escalation.
+6. **Build, test, review.** Implementers and validators work in their own worktrees. `ark test` runs every AC at head. A reviewer returns findings, and the run lead sends fixes back until the round budget is spent. Then you decide at an escalation, unless `gates.escalation` is `auto`.
 7. **Merge request.** `ark merge-request open` refuses until every AC passes, then opens one MR per repo, upstream first.
 8. **Retro.** While the MRs are open, the run lead runs `ark retro` and writes `retro.md`: cost, time, rework and improvement proposals.
 9. **You merge.** You merge on your git host. Ark's agents and the `ark` command never merge. Optionally, `ark services install` (macOS) installs an auto-merger that merges an MR once the host reports it clean under your branch protection and the run's `retro.md` exists. See [Run background services](docs/how-to/background-services.md).
@@ -75,18 +75,18 @@ A repo that is hand-off only opens no MR: the run ends with your branches, named
 
 ## Who does what
 
-| Who                                      | Does                                                                                                              | Never                                              |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| **You**                                  | Name the ticket. Answer the gates. Merge.                                                                         | Leave a gate to an agent's guess.                  |
-| **Master Chief**                         | Queues tickets, starts one run lead per ticket, brings you every gate question, watches open MRs, closes the run. | Write product code.                                |
-| **Run lead**                             | Plans across every repo, starts workers, judges each finding, opens the MRs, writes `retro.md`.                   | Write product code. Answer a gate that needs you.  |
-| **Evaluator**                            | Reads the ticket and code, lists blockers and risks.                                                              | Edit product code.                                 |
-| **Designer** (optional)                  | Makes mockups for the strategy cards when a person will see the change.                                           | Edit product code.                                 |
-| **Test case writer, test case reviewer** | The writer drafts the test cases. A reviewer from another vendor approves or rejects them.                        | Start an implementer before the reviewer approves. |
-| **Implementer**                          | Writes product code in one repo.                                                                                  | Start another agent.                               |
-| **Validator**                            | Turns the test cases into tagged integration and E2E tests and makes them pass.                                   | Write a test for a manual AC.                      |
-| **Reviewer**                             | Finds defects and reports findings.                                                                               | Edit.                                              |
-| **`ark` command**                        | Run state, worktrees, tests, MRs, metrics. Refuses a step the run may not take.                                   | Decide anything that needs judgment.               |
+| Who                                      | Does                                                                                                                        | Never                                              |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **You**                                  | Name the ticket. Answer the gates. Merge.                                                                                   | Leave a gate to an agent's guess.                  |
+| **Master Chief**                         | Queues tickets, starts one run lead per ticket, brings you every gate that waits for you, watches open MRs, closes the run. | Write product code.                                |
+| **Run lead**                             | Plans across every repo, starts workers, judges each finding, opens the MRs, writes `retro.md`.                             | Write product code. Answer a gate that needs you.  |
+| **Evaluator**                            | Reads the ticket and code, lists blockers and risks.                                                                        | Edit product code.                                 |
+| **Designer** (optional)                  | Makes mockups for the strategy cards when a person will see the change.                                                     | Edit product code.                                 |
+| **Test case writer, test case reviewer** | The writer drafts the test cases. A reviewer from another vendor approves or rejects them.                                  | Start an implementer before the reviewer approves. |
+| **Implementer**                          | Writes product code in one repo.                                                                                            | Start another agent.                               |
+| **Validator**                            | Turns the test cases into tagged integration and E2E tests and makes them pass.                                             | Write a test for a manual AC.                      |
+| **Reviewer**                             | Finds defects and reports findings.                                                                                         | Edit.                                              |
+| **`ark` command**                        | Run state, worktrees, tests, MRs, metrics. Refuses a step the run may not take.                                             | Decide anything that needs judgment.               |
 
 Agents nest two levels: Master Chief starts run leads, run leads start workers, workers start nobody.
 

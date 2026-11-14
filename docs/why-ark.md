@@ -26,7 +26,7 @@ Ark puts a small fixed process around the agents and keeps the people in it wher
 flowchart TB
   t[Ticket with<br/>acceptance criteria] --> g1{Criteria:<br/>you accept}
   g1 --> p[Run lead writes a plan<br/>and test cases]
-  p --> g2{Plan:<br/>you approve}
+  p --> g2{Plan:<br/>you approve<br/>Ark, if gates.plan is auto}
   g2 --> b[Workers build,<br/>write tests, review]
   b -->|"every AC proven<br/>at head"| mr[One MR per repo,<br/>in order]
   mr --> retro[Retro: cost, rounds,<br/>what to change]
