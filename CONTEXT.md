@@ -32,7 +32,7 @@ A ticket field: `feature` (the default), `bug`, `perf` or `refactor`. It changes
 _Avoid_: Type, category
 
 **Evidence**:
-What shows that an AC holds, kept in the run folder under `results/evidence/`: for each `verified_by` test case, a `base/` and a `head/` folder with `result.json`, `command.log` and any `screenshots/` from the base and head runs of `ark test`; for a method other than `test`, one file `<AC id>.md` in the shape of its method plus the human's `manual` gate answer. A manual AC may also commit its evidence file under `docs/evidence/`.
+What shows that an AC holds, kept in the run folder under `results/evidence/`: for each `verified_by` test case, a `base/` and a `head/` folder with `result.json`, `command.log` and any `screenshots/` from the base and head runs of `ark test`; for a method other than `test`, one file `<AC id>.md` in the shape of its method plus the human's `manual` gate answer. Evidence is never committed to the repo.
 _Avoid_: Proof file, report
 
 **Run**:
