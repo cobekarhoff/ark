@@ -26,7 +26,7 @@ flowchart TB
     direction LR
     impl["Implementer<br/>code"] --> val["Validator<br/>tests"] --> t["ark test<br/>every AC at head"] --> rev["Reviewer<br/>other vendor by default"]
     rev -. "findings sent back" .-> impl
-    rev -. "budget spent" .-> esc{{"YOU<br/>one more round,<br/>take over, abort<br/>(Ark, if gates.escalation is auto)"}}
+    rev -. "budget spent" .-> esc{{"YOU<br/>one more round,<br/>take over, abort<br/>(Ark first, if gates.escalation is auto)"}}
   end
   subgraph ship ["Ship"]
     direction LR
@@ -44,7 +44,7 @@ flowchart TB
   class t,mr,retro cmd
 ```
 
-Amber is you. Teal is an agent. Grey is the `ark` command, which keeps run state and refuses a step the run may not take yet. A strategy choice (when there are 2 or more approach cards) and manual checks (for an AC only a person can judge) also ask you when they apply. Where `ark.yml` sets the strategy, plan or escalation gate to `auto`, Ark answers it instead.
+Amber is you. Teal is an agent. Grey is the `ark` command, which keeps run state and refuses a step the run may not take yet. A strategy choice (when there are 2 or more approach cards) and manual checks (for an AC only a person can judge) also ask you when they apply. Where `ark.yml` sets the strategy or plan gate to `auto`, Ark answers it instead. With `gates.escalation: auto`, Ark grants the first escalation rounds and asks you after that.
 
 ### A run in one screen
 
@@ -55,7 +55,7 @@ Each step names the `ark` command or the file it leaves behind. [Scenarios](docs
 3. **Criteria gate.** You accept, edit or abort each AC's method and test cases: `ark gate record <run> criteria accept`.
 4. **Strategy, test cases, plan.** The run lead writes `strategies.md` (`ark strategy record`), a test case writer and reviewer settle the test cases, then the run lead writes `plan.yml` (`ark plan check`).
 5. **Plan gate.** You review the plan and approve, change or abort: `ark gate record <run> plan approve`. With `gates.plan: auto`, Ark approves a valid plan that has no open decision. No code exists yet.
-6. **Build, test, review.** Implementers and validators work in their own worktrees. `ark test` runs every AC at head. A reviewer returns findings, and the run lead sends fixes back until the round budget is spent. Then you decide at an escalation, unless `gates.escalation` is `auto`.
+6. **Build, test, review.** Implementers and validators work in their own worktrees. `ark test` runs every AC at head. A reviewer returns findings, and the run lead sends fixes back until the round budget is spent. Then you decide at an escalation; with `gates.escalation: auto`, Ark first grants up to `escalation_rounds` more rounds (default two).
 7. **Merge request.** `ark merge-request open` refuses until every AC passes, then opens one MR per repo, upstream first.
 8. **Retro.** While the MRs are open, the run lead runs `ark retro` and writes `retro.md`: cost, time, rework and improvement proposals.
 9. **You merge.** You merge on your git host. Ark's agents and the `ark` command never merge. Optionally, `ark services install` (macOS) installs an auto-merger that merges an MR once the host reports it clean under your branch protection and the run's `retro.md` exists. See [Run background services](docs/how-to/background-services.md).
@@ -67,7 +67,7 @@ A repo that is hand-off only opens no MR: the run ends with your branches, named
 - **Master Chief:** the one agent session you talk to. It starts run leads and never writes product code.
 - **Run lead:** the agent that owns one ticket. It plans, starts workers and judges their findings.
 - **Worker:** an agent that does one step, such as implementer, validator or reviewer. It starts no other agent.
-- **Gate:** a point where the run stops and asks you. A project can set the strategy, plan and escalation gates to `auto`: Ark then answers and records `by: auto`. The criteria gate and manual checks are always a person's answer.
+- **Gate:** a point where the run stops and asks you. A project can set the strategy, plan and escalation gates to `auto`: Ark then answers and records `by: auto` (for escalation, only up to `escalation_rounds` extra rounds; then it asks you). The criteria gate and manual checks are always a person's answer.
 - **Run folder:** the directory that holds everything about one run: events, plan, evidence, findings, retro.
 - **Orca:** the desktop app that hosts every agent session and carries messages between them.
 
