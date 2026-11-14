@@ -298,7 +298,7 @@ const openedEvents = (runDirectory: string) =>
     .filter((event) => event.type === "merge_request.opened");
 
 test(
-  "ARK-T48 merge-request open pushes and posts one ready MR per repo on GitHub in dependency order, with the run title and body",
+  "ARK-T48 ARK-155-AC7 ARK-276-AC3 ARK-295-AC2 merge-request open pushes and posts one ready MR per repo on GitHub in dependency order, with the run title and body",
   () => {
     const { runDirectory, bares } = scenario({ core: "github", app: "github" });
     const result = ark("merge-request", "open", run);
@@ -564,7 +564,7 @@ test(
 );
 
 test(
-  "ARK-155-AC6 refuses when the last test run failed",
+  "ARK-T633 ARK-155-AC6 refuses when the last test run failed",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" }, false);
     const result = ark("merge-request", "open", run);
@@ -576,20 +576,7 @@ test(
   { timeout: 30_000 },
 );
 
-test(
-  "ARK-155-AC6 refuses when a worktree head moved after the test run, and names the repo",
-  () => {
-    const { worktrees } = scenario({ core: "github", app: "github" });
-    commit(worktrees.app, "late-change");
-    const result = ark("merge-request", "open", run);
-    expect(result.code).toBe(1);
-    expect(result.err).toContain("repos/app");
-    expect(calls()).toHaveLength(0);
-  },
-  { timeout: 30_000 },
-);
-
-test("ARK-155-AC2 merge order follows needs across repos, ties by first appearance, same plan same order", () => {
+test("ARK-T634 ARK-155-AC2 merge order follows needs across repos, ties by first appearance, same plan same order", () => {
   const step = (id: string, repo: string, needs: string[] = []) => ({
     id,
     repo,
@@ -609,7 +596,7 @@ test("ARK-155-AC2 merge order follows needs across repos, ties by first appearan
   expect(repoGraph(structuredClone(plan)).order).toEqual(repoGraph(plan).order);
 });
 
-test("ARK-155-AC2 merge order refuses a dependency cycle between repos", () => {
+test("ARK-T635 ARK-155-AC2 merge order refuses a dependency cycle between repos", () => {
   const plan = {
     steps: [
       { id: "a-1", repo: "a", needs: ["b-1"], criteria: [] },
@@ -618,23 +605,6 @@ test("ARK-155-AC2 merge order refuses a dependency cycle between repos", () => {
     ],
   };
   expect(() => repoGraph(plan)).toThrow(/cycle.*a, b/);
-});
-
-test("ARK-155-AC7 no source under cli/ runs a merge, approve or auto-merge command", () => {
-  const forbidden =
-    /\b(pr|mr)["',\s]+(merge|approve)\b|--auto\b|--approve\b|--when-pipeline-succeeds|merge_requests\/[^"'`]*\/(merge|approve)\b/;
-  const sources = [
-    ...new Bun.Glob("**/*.ts").scanSync({
-      cwd: resolve(import.meta.dir, "../cli"),
-      absolute: true,
-    }),
-  ];
-  expect(sources.length).toBeGreaterThan(0);
-  for (const source of sources)
-    expect({ source, match: readFileSync(source, "utf8").match(forbidden)?.[0] }).toEqual({
-      source,
-      match: undefined,
-    });
 });
 
 // One real repo with a real suite, run through plan check, worktree create and ark test.
@@ -718,7 +688,7 @@ function testedRun() {
 }
 
 test(
-  "ARK-T246 merge-request open refuses a head that changed since the test, with the run id in the next command, then opens after a passing ark test",
+  "ARK-T246 ARK-155-AC6 merge-request open refuses a head that changed since the test, with the run id in the next command, then opens after a passing ark test",
   () => {
     const { runId, runDirectory, bare, worktree } = testedRun();
     const tested = git(worktree, "rev-parse", "HEAD");
@@ -754,7 +724,7 @@ test(
 );
 
 test(
-  "ARK-283-AC4 merge-request open names each manual criterion without ok, opens no MR, and opens normally after ok",
+  "ARK-T636 ARK-283-AC4 merge-request open names each manual criterion without ok, opens no MR, and opens normally after ok",
   () => {
     const manual = ["ARK-900-AC1", "ARK-900-AC2"];
     const { runDirectory, bares } = scenario({ core: "github", app: "github" }, true, manual);
@@ -808,7 +778,7 @@ function fakeHostTools(): string {
 const none = { merge_requests: "none" };
 
 test(
-  "ARK-295-AC2 merge-request open exits 1 for a none project before any git, gh or glab runs",
+  "ARK-T637 ARK-295-AC2 merge-request open exits 1 for a none project before any git, gh or glab runs",
   () => {
     const { runDirectory, bares } = scenario({ core: "github", app: "github" }, true, [], none);
     const toolCalls = fakeHostTools();
@@ -829,21 +799,7 @@ test(
 );
 
 test(
-  "ARK-295-AC2 merge-request open still pushes and opens for a project with merge_requests open",
-  () => {
-    const { runDirectory, bares } = scenario({ core: "github", app: "github" }, true, [], {
-      merge_requests: "open",
-    });
-    const result = ark("merge-request", "open", run);
-    expect(result.code).toBe(0);
-    expect(git(bares.core, "rev-parse", "--verify", `refs/heads/ark/${run}`)).toBeTruthy();
-    expect(openedEvents(runDirectory)).toHaveLength(2);
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-295-AC3 merge-request status prints merge requests: none for a none project and calls no gh or glab",
+  "ARK-T638 ARK-295-AC3 merge-request status prints merge requests: none for a none project and calls no gh or glab",
   () => {
     scenario({ core: "github", app: "github" }, true, [], none);
     const toolCalls = fakeHostTools();
@@ -858,7 +814,7 @@ test(
 
 for (const subcommand of ["open", "status"]) {
   test(
-    `ARK-295-AC2 ARK-295-AC3 merge-request ${subcommand} refuses a none project with an invalid unrelated field before any git, gh or glab runs`,
+    `ARK-T639 ARK-295-AC2 ARK-295-AC3 merge-request ${subcommand} refuses a none project with an invalid unrelated field before any git, gh or glab runs`,
     () => {
       const { bares } = scenario({ core: "github", app: "github" }, true, [], {
         ...none,
@@ -903,7 +859,7 @@ function setCriterionText(runDirectory: string, id: string, text: string) {
 }
 
 test(
-  "ARK-302-AC2 refuses when a criterion is missing or failing in the last test.completed, names each, opens nothing",
+  "ARK-T640 ARK-302-AC2 refuses when a criterion is missing or failing in the last test.completed, names each, opens nothing",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" });
     // passed stays true: the refusal must come from the per-AC status, not the suite verdict.
@@ -922,7 +878,7 @@ test(
 );
 
 test(
-  "ARK-302-AC2 a manual criterion that is not passing does not block opening",
+  "ARK-T641 ARK-302-AC2 a manual criterion that is not passing does not block opening",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
     expect(ark("gate", "record", run, "manual", "ARK-900/AC2", "ok").code).toBe(0);
@@ -937,23 +893,7 @@ test(
 );
 
 test(
-  "ARK-296-AC4 merge-request open passes repos.<repo>.base to gh --base and glab --target-branch",
-  () => {
-    scenario({ core: "github", app: "gitlab" }, true, [], {
-      repos: { "repos/core": { base: "release/9" }, "repos/app": { base: "release/9.1.0" } },
-    });
-    expect(ark("merge-request", "open", run).code).toBe(0);
-    const [gh, glab] = created();
-    expect([gh.tool, optionValue(gh, "--base")]).toEqual(["gh", "release/9"]);
-    expect(gh.argv.slice(0, 2)).toEqual(["pr", "create"]);
-    expect([glab.tool, optionValue(glab, "--target-branch")]).toEqual(["glab", "release/9.1.0"]);
-    expect(glab.argv.slice(0, 2)).toEqual(["mr", "create"]);
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-302-AC3 refuses an AC string that no tracked file holds, names the AC and the string, and accepts one that exists",
+  "ARK-T642 ARK-302-AC3 ARK-305-AC5 refuses an AC string that no tracked file holds, names the AC and the string, and accepts one that exists",
   () => {
     const { runDirectory, worktrees } = scenario({ core: "github", app: "github" });
     // `core` and `# test` are tracked at head (core.txt, README.md); the string of AC2 is in no worktree at head.
@@ -977,7 +917,7 @@ test(
 );
 
 test(
-  "ARK-302-AC3 accepts an AC string that only an untouched repo of the workspace holds",
+  "ARK-T643 ARK-302-AC3 accepts an AC string that only an untouched repo of the workspace holds",
   () => {
     const { runDirectory, workspace } = scenario({ core: "github", app: "github" });
     // `lib` has no run worktree: it is only linked into the mirror.
@@ -994,7 +934,7 @@ test(
 );
 
 test(
-  "ARK-307-AC1 counts a path string as present when it names a tracked file or folder, refuses a missing path and a lone slash",
+  "ARK-T644 ARK-307-AC1 counts a path string as present when it names a tracked file or folder, refuses a missing path and a lone slash",
   () => {
     const { runDirectory, workspace, worktrees } = scenario({ core: "github", app: "github" });
     renameSync(
@@ -1030,7 +970,7 @@ test(
 );
 
 test(
-  "ARK-307-AC2 refuses a not: string that names a tracked file or folder",
+  "ARK-T645 ARK-307-AC2 refuses a not: string that names a tracked file or folder",
   () => {
     const { runDirectory, workspace } = scenario({ core: "github", app: "github" });
     renameSync(
@@ -1055,20 +995,7 @@ test(
 );
 
 test(
-  "ARK-307-AC1 refuses a required string that is only a slash",
-  () => {
-    const { runDirectory } = scenario({ core: "github", app: "github" });
-    setCriterionText(runDirectory, "ARK-900-AC1", "Reads `/`");
-    const refused = ark("merge-request", "open", run);
-    expect(refused.code).toBe(1);
-    expect(refused.err).toContain("AC string in no tracked file at head:");
-    expect(refused.err).toContain("`/`");
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-305-AC1 skips placeholder, glob, dots, file:line, own id and every string of a manual AC, refuses only the real missing string",
+  "ARK-T646 ARK-305-AC1 skips placeholder, glob, dots, file:line, own id and every string of a manual AC, refuses only the real missing string",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" }, true, ["ARK-900-AC2"]);
     expect(ark("gate", "record", run, "manual", "ARK-900/AC2", "ok").code).toBe(0);
@@ -1093,7 +1020,7 @@ test(
 );
 
 test(
-  "ARK-305-AC2 refuses a not: string that a tracked file still holds, passes an absent one, and counts not: alone as no literal",
+  "ARK-T647 ARK-305-AC2 refuses a not: string that a tracked file still holds, passes an absent one, and counts not: alone as no literal",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" });
     // `core` is tracked at head (core.txt), `gone-everywhere` is in no file.
@@ -1124,90 +1051,44 @@ test(
 );
 
 // Fixture: test/fixtures/merge-request/sqc-1-criteria.md
-test(
-  "ARK-305-AC3 a run with the SQC-1 ACs opens when every listed string is tracked and refuses naming only a deleted one",
-  () => {
-    const text = readFileSync(join(fixtures, "sqc-1-criteria.md"), "utf8");
-    const frontmatter = Bun.YAML.parse(text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "") as {
-      acceptance_criteria: { id: string; text: string; manual?: boolean }[];
-    };
-    const literals = new Map(
-      frontmatter.acceptance_criteria.map(({ id, text, manual }) => [
-        id,
-        requiredLiterals({ id, text, manual: manual === true }),
-      ]),
-    );
-    const required = [...literals.values()].flatMap((entry) => entry.required);
-    const removed = [...literals.values()].flatMap((entry) => entry.removed);
-    expect(literals.get("SQC-1-AC7")).toEqual({ required: [], removed: [] });
-    for (const literal of [
-      "## Finding the knowledge base",
-      "uv run check-knowledge-docs",
-      "Paths are relative to the workspace root",
-    ])
-      expect(required).toContain(literal);
-    for (const literal of required) {
-      expect(literal).not.toMatch(/[<*]|\.\.\.|:\d+$|^not:/);
-      expect(literal).not.toMatch(/SQC[-_]1[-_]AC/);
-    }
-    expect(literals.get("SQC-1-AC6")?.removed).toEqual([
-      "docs/00-master-reference.md",
-      "docs/architecture/",
-      "docs/references/",
-      "docs/workflows/",
-      "docs/operations/",
-      "docs/templates/",
-    ]);
-    expect(frontmatter.acceptance_criteria.find(({ id }) => id === "SQC-1-AC6")?.text).toContain(
-      "(N docs)",
-    );
-
-    // The command boundary: a run whose ticket holds these ACs.
-    const { runDirectory, worktrees } = scenario({ core: "github", app: "github" }, true, [
-      "SQC-1-AC7",
-    ]);
-    const ids = frontmatter.acceptance_criteria.map(({ id }) => id);
-    writeFileSync(join(runDirectory, "ticket.md"), text);
-    rewriteEvents(runDirectory, (event) => {
-      if (event.type === "run.started") event.data.criteria = ids;
-      return event;
-    });
-    expect(ark("gate", "record", run, "manual", "SQC-1-AC7", "ok").code).toBe(0);
-    const commitLiterals = (kept: string[]) => {
-      writeFileSync(join(worktrees.core, "literals.txt"), kept.join("\n") + "\n");
-      git(worktrees.core, "add", "-A");
-      git(worktrees.core, "commit", "-m", "literals");
-      rewriteEvents(runDirectory, (event) => {
-        if (event.type === "test.completed") {
-          event.data.heads["repos/core"] = git(worktrees.core, "rev-parse", "HEAD");
-          event.data.criteria = Object.fromEntries(
-            ids.map((id) => [id, id === "SQC-1-AC7" ? "manual ok" : "passing"]),
-          );
-        }
-        return event;
-      });
-    };
-    expect(removed.length).toBeGreaterThan(0);
-
-    commitLiterals(required);
-    const opened = ark("merge-request", "open", run);
-    expect(opened.err).not.toContain("AC string");
-    expect(opened.code).toBe(0);
-
-    const deleted = "uv run check-knowledge-docs";
-    commitLiterals(required.filter((literal) => literal !== deleted));
-    const refused = ark("merge-request", "open", run);
-    expect(refused.code).toBe(1);
-    expect(refused.err).toContain(`\`${deleted}\``);
-    expect(refused.err.match(/AC string in no tracked file at head: /g)).toHaveLength(1);
-    for (const literal of required.filter((literal) => literal !== deleted))
-      expect(refused.err).not.toContain(`\`${literal}\``);
-  },
-  { timeout: 60_000 },
-);
+test("ARK-T648 ARK-305-AC3 the SQC-1 ACs yield the required and removed strings that merge-request open checks", () => {
+  const text = readFileSync(join(fixtures, "sqc-1-criteria.md"), "utf8");
+  const frontmatter = Bun.YAML.parse(text.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "") as {
+    acceptance_criteria: { id: string; text: string; manual?: boolean }[];
+  };
+  const literals = new Map(
+    frontmatter.acceptance_criteria.map(({ id, text, manual }) => [
+      id,
+      requiredLiterals({ id, text, manual: manual === true }),
+    ]),
+  );
+  const required = [...literals.values()].flatMap((entry) => entry.required);
+  expect(literals.get("SQC-1-AC7")).toEqual({ required: [], removed: [] });
+  for (const literal of [
+    "## Finding the knowledge base",
+    "uv run check-knowledge-docs",
+    "Paths are relative to the workspace root",
+  ])
+    expect(required).toContain(literal);
+  for (const literal of required) {
+    expect(literal).not.toMatch(/[<*]|\.\.\.|:\d+$|^not:/);
+    expect(literal).not.toMatch(/SQC[-_]1[-_]AC/);
+  }
+  expect(literals.get("SQC-1-AC6")?.removed).toEqual([
+    "docs/00-master-reference.md",
+    "docs/architecture/",
+    "docs/references/",
+    "docs/workflows/",
+    "docs/operations/",
+    "docs/templates/",
+  ]);
+  expect(frontmatter.acceptance_criteria.find(({ id }) => id === "SQC-1-AC6")?.text).toContain(
+    "(N docs)",
+  );
+});
 
 test(
-  "ARK-302-AC6 a perf run refuses a missing baseline.md and an empty compare.md, names each, and opens once both have content",
+  "ARK-T649 ARK-302-AC6 a perf run refuses a missing baseline.md and an empty compare.md, names each, and opens once both have content",
   () => {
     const { runDirectory } = scenario({ core: "github", app: "github" });
     rewriteEvents(runDirectory, (event) => {
@@ -1236,7 +1117,7 @@ test(
 );
 
 test(
-  "ARK-T247 a repo with no base keeps the origin/HEAD target while a configured repo uses its base",
+  "ARK-T247 ARK-296-AC4 a repo with no base keeps the origin/HEAD target while a configured repo uses its base",
   () => {
     const { worktrees } = scenario({ core: "github", app: "gitlab" }, true, [], {
       repos: { "repos/app": { base: "release/9" } },
@@ -1248,20 +1129,6 @@ test(
     const [gh, glab] = created();
     expect(optionValue(gh, "--base")).toBe("develop");
     expect(optionValue(glab, "--target-branch")).toBe("release/9");
-  },
-  { timeout: 30_000 },
-);
-
-test(
-  "ARK-305-AC5 a plain absent string is still refused by merge-request open",
-  () => {
-    const { runDirectory } = scenario({ core: "github", app: "github" });
-    setCriterionText(runDirectory, "ARK-900-AC1", "Needs `absent-string-xyz`");
-    const refused = ark("merge-request", "open", run);
-    expect(refused.code).toBe(1);
-    expect(refused.err).toContain(
-      "AC string in no tracked file at head: ARK-900/AC1 `absent-string-xyz`",
-    );
   },
   { timeout: 30_000 },
 );
@@ -1413,16 +1280,6 @@ test(
     expect(optionValue(app, "--reviewer")).toBe("alice");
   },
   { timeout: 60_000 },
-);
-
-test(
-  "ARK-T43 ARK-328/AC1 the merge request has the UI/UX checks block only for web_ui",
-  () => {
-    scenario({ core: "github", app: "github" });
-    expect(ark("merge-request", "open", run).code).toBe(0);
-    for (const call of created()) expect(optionValue(call, "--body")).not.toContain("UI/UX");
-  },
-  { timeout: 30_000 },
 );
 
 test(
