@@ -54,6 +54,10 @@ import {
   writeSessionFile,
   type FixtureRun,
   type SessionHarness,
+  repoProjectConfig,
+  repoRunFixture,
+  submodulePointerSha,
+  writeRepoWorkspace,
 } from "../hub-fixtures.ts";
 import {
   ark,
@@ -68,6 +72,7 @@ import {
   tempDirectory,
   useCleanup,
   dateOf,
+  isoAt,
   testNow,
   writeFakeOrca,
   writeProject,
@@ -8728,6 +8733,8 @@ type LiveWindow = Window & {
   /** Times the banner went missing after it showed, and when the last snapshot arrived (T310). */
   __gaps: number;
   __lastSnapshotAt: number;
+  /** Script animations started per element since `resetSlides`: their durations. */
+  __slides: Map<Element, number[]>;
 };
 
 /**
@@ -8766,11 +8773,28 @@ async function fakeStream(page: Page): Promise<void> {
         );
         return transition;
       };
+    // Records every script animation (the FLIP slides) when it starts, so no test has to catch it running.
+    live.__slides = new Map();
+    const { animate } = Element.prototype as { animate: Element["animate"] };
+    Element.prototype.animate = function (
+      this: Element,
+      keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+      options?: number | KeyframeAnimationOptions,
+    ) {
+      const animation = animate.call(this, keyframes, options);
+      const durations = live.__slides.get(this) ?? [];
+      durations.push(Number(animation.effect!.getTiming().duration));
+      live.__slides.set(this, durations);
+      return animation;
+    };
   });
 }
 
 const push = (page: Page, snapshot: Snapshot) =>
   page.evaluate((next) => (window as unknown as LiveWindow).__push(next), snapshot);
+
+const resetSlides = (page: Page) =>
+  page.evaluate(() => (window as unknown as LiveWindow).__slides.clear());
 
 /** Opens the page on the fed stream and waits until the first snapshot is on screen. */
 async function openFed(page: Page, baseUrl: string, hash: string, first: Snapshot): Promise<void> {
@@ -9095,6 +9119,7 @@ const listsOf = (page: Page, selectors: Record<string, string>) =>
           key: key(element),
           top: element.getBoundingClientRect().top,
           transform: getComputedStyle(element).transform,
+          slid: (window as unknown as LiveWindow).__slides.get(element) ?? [],
           moving: element
             .getAnimations()
             .filter(
@@ -9109,8 +9134,8 @@ const listsOf = (page: Page, selectors: Record<string, string>) =>
 type Lists = Awaited<ReturnType<typeof listsOf>>;
 
 /**
- * Pushes `snapshot`, waits (up to 20 frames) until some list changed its order, and reads the
- * lists at that moment: the FLIP animations of the moved items are running now.
+ * Pushes `snapshot`, waits until some list changed its order (`settle`) or five frames, and reads
+ * the lists: `slid` holds the FLIP slides the page started since the push, whatever their speed.
  */
 async function pushAndRead(
   page: Page,
@@ -9119,15 +9144,16 @@ async function pushAndRead(
   settle: boolean,
 ): Promise<{ before: Lists; during: Lists }> {
   const before = await listsOf(page, selectors);
+  await resetSlides(page);
   await push(page, snapshot);
-  let during = await listsOf(page, selectors);
   const order = (lists: Lists) =>
     JSON.stringify(Object.values(lists).map((l) => l.map((i) => i.key)));
-  for (let frame = 0; frame < 20 && settle && order(during) === order(before); frame++) {
-    await frames(page, 1);
-    during = await listsOf(page, selectors);
-  }
-  if (!settle) {
+  let during = await listsOf(page, selectors);
+  if (settle)
+    await expect
+      .poll(async () => order((during = await listsOf(page, selectors))))
+      .not.toBe(order(before));
+  else {
     await frames(page, 5);
     during = await listsOf(page, selectors);
   }
@@ -9172,7 +9198,7 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
       );
       expect(moved.length, `${name} moved items`).toBeGreaterThanOrEqual(2);
       for (const item of items) {
-        const running = during[name].find((started) => started.key === item.key)!.moving;
+        const running = during[name].find((started) => started.key === item.key)!.slid;
         if (moved.includes(item)) {
           expect(running.length, `${name} ${item.key} animates`).toBeGreaterThan(0);
           for (const duration of running) expect(duration).toBeLessThanOrEqual(250);
@@ -9197,7 +9223,18 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
   // The same order again: nothing animates.
   const { during: still } = await pushAndRead(page, first, homeLists, false);
   for (const [name, items] of Object.entries(still))
-    for (const item of items) expect(item.moving, `${name} ${item.key}`).toEqual([]);
+    for (const item of items) expect(item.slid, `${name} ${item.key}`).toEqual([]);
+
+  // The window resizes a pixel at a time (the grid tracks have fractional widths): the same order
+  // still does not animate.
+  const size = page.viewportSize()!;
+  for (let step = 1; step <= 8; step++) {
+    await page.setViewportSize({ width: size.width + step, height: size.height });
+    const { during: resized } = await pushAndRead(page, first, homeLists, false);
+    for (const [name, items] of Object.entries(resized))
+      for (const item of items) expect(item.slid, `${name} ${item.key} at +${step}px`).toEqual([]);
+  }
+  await page.setViewportSize(size);
 
   // A list above grows and pushes the lists below down the page: they did not reorder, so nothing
   // in them slides (a place is measured in its own container).
@@ -9219,7 +9256,7 @@ test("ARK-T313 Reordered Home lists and Runs board items move by FLIP in at most
     if (!["gates", "waiting"].includes(name))
       // waiting shares the Needs me container with the gates
       for (const item of items)
-        expect(item.moving, `${name} ${item.key} did not reorder`).toEqual([]);
+        expect(item.slid, `${name} ${item.key} did not reorder`).toEqual([]);
 
   // A view change is a view transition of 200 ms or less, and the new view is in the DOM.
   const views: [string, Locator][] = [
@@ -10617,6 +10654,626 @@ test("ARK-T345 the replay plays at 600x, moves the playhead, animates arrows, di
       .evaluate((node) => node.getAnimations({ subtree: true }).length),
   ).toBe(0);
   await checkpoint(still, "reduced-motion-player");
+});
+
+// ---------- ARK-339: the repo graph of a multi-repo run ----------
+
+const repoBranch = "ark/ARK-339-fixture";
+const mergedView = () => ({
+  state: "MERGED",
+  statusCheckRollup: [],
+  additions: 1,
+  deletions: 1,
+  changedFiles: 1,
+  createdAt: isoAt(),
+});
+const repoMergeRequest = (owner: string, repo: string, number: number) =>
+  `https://github.com/${owner}/${repo}/pull/${number}`;
+
+type RepoWorld = {
+  /** Three repos, one MR each; !11 is merged. */
+  merged3: string;
+  /** Three repos, closed handed_off; ARK-951 has an older one-repo run before it. */
+  handedOff3: string;
+  /** Four repos, closed handed_off. */
+  handedOff4: string;
+  /** One repo, building. */
+  single: string;
+  /** Three repos, MRs !11 and !12 merged and `web-tests` running. */
+  running3: string;
+  /** Three repos, core-lib and service both own `!12`; only core-lib's is merged. */
+  sameNumber3: string;
+};
+
+/** Git repos, an `ark.yml` that loads, and the runs and tickets that the repo graph tests open. Call before `launch`. */
+function repoWorld(): RepoWorld {
+  isolate();
+  const workspace = tempDirectory("ark-repo-workspace-");
+  const { bases } = writeRepoWorkspace(workspace, repoBranch, {
+    "core-lib": { ahead: 3 },
+    service: { ahead: 2 },
+    web: { ahead: 0, gitlink: { pin: "vendor/service", sha: submodulePointerSha } },
+    e2e: { ahead: 1 },
+  });
+  writeProject("p", repoProjectConfig(workspace));
+  const fixture = (
+    ticket: string,
+    number: number,
+    mode: "building" | "mr" | "handed_off",
+    repoCount: 3 | 4,
+    owner?: string,
+    sameNumber?: boolean,
+  ) =>
+    repoRunFixture({
+      owner,
+      sameNumber,
+      project: "p",
+      run: runId(ticket, number),
+      ticket: { id: ticket, title: `Repo graph ${ticket}` },
+      repoCount,
+      mode,
+      workspace,
+      branch: repoBranch,
+      bases,
+    });
+  const ticket = (id: string) =>
+    writeBacklogTicket({ project: "p", id, title: `Repo graph ${id}`, status: "ready" });
+  // ARK-951: an older one-repo run, then the newest three-repo run with MRs.
+  writeRun({
+    project: "p",
+    run: runId("ARK-951", 1),
+    ticket: { id: "ARK-951", title: "Repo graph ARK-951" },
+    phase: "closed",
+    startedAt: ago(3 * 86_400),
+    closedAfter: 600,
+    outcome: "merged",
+    steps: [
+      {
+        id: "old",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 20,
+        finishedAfter: 100,
+      },
+    ],
+  });
+  writeRun(fixture("ARK-951", 2, "mr", 3));
+  writeRun(fixture("ARK-952", 1, "handed_off", 3));
+  writeRun(fixture("ARK-953", 1, "handed_off", 4));
+  writeRun({
+    project: "p",
+    run: runId("ARK-954"),
+    ticket: { id: "ARK-954", title: "Repo graph ARK-954" },
+    phase: "building",
+    steps: [
+      {
+        id: "one",
+        role: "implementer",
+        harness: "omp",
+        model: "m",
+        needs: [],
+        startedAfter: 20,
+        finishedAfter: 100,
+      },
+      {
+        id: "two",
+        role: "validator",
+        harness: "omp",
+        model: "m",
+        needs: ["one"],
+        startedAfter: 200,
+      },
+    ],
+  });
+  const running = fixture("ARK-955", 1, "mr", 3, "both-merged");
+  writeRun({
+    ...running,
+    steps: running.steps!.map((step) =>
+      step.id === "web-tests" ? { ...step, finishedAfter: undefined } : step,
+    ),
+  });
+  for (const id of ["ARK-951", "ARK-952", "ARK-953", "ARK-954", "ARK-955"]) ticket(id);
+  writeRun(fixture("ARK-956", 1, "mr", 3, "same-number", true));
+  installFakeTools({
+    mergeRequestViews: {
+      [repoMergeRequest("example", "core-lib", 11)]: mergedView(),
+      [repoMergeRequest("both-merged", "core-lib", 11)]: mergedView(),
+      [repoMergeRequest("both-merged", "service", 12)]: mergedView(),
+      [repoMergeRequest("same-number", "core-lib", 12)]: mergedView(),
+    },
+  });
+  return {
+    merged3: runId("ARK-951", 2),
+    handedOff3: runId("ARK-952"),
+    handedOff4: runId("ARK-953"),
+    single: runId("ARK-954"),
+    running3: runId("ARK-955"),
+    sameNumber3: runId("ARK-956"),
+  };
+}
+
+const cardOf = (page: Page, repo: string) =>
+  page.locator(`[data-testid="repo-card"][data-repo="${repo}"]`);
+const toggleOf = (page: Page, repo: string) => cardOf(page, repo).getByTestId("repo-toggle");
+/** `data-repo` and `data-order` of every card, in document order. */
+const cardOrder = (page: Page) =>
+  page
+    .getByTestId("repo-card")
+    .evaluateAll((cards) =>
+      cards.map((card) => [card.getAttribute("data-repo"), card.getAttribute("data-order")]),
+    );
+const pillOf = (page: Page, from: string, to: string) =>
+  page.locator(`[data-testid="edge-pill"][data-from="${from}"][data-to="${to}"]`);
+
+test("ARK-T359 The run page draws repo cards in merge or hand-off order with labelled repo edges, collapsed at 4 or more repos", async ({
+  page,
+}) => {
+  test.slow();
+  const world = repoWorld();
+  const baseUrl = await launch();
+
+  // Three repos with MRs: three open cards in merge order, with their facts.
+  await open(page, baseUrl, `run/${world.merged3}`);
+  await checkpoint(page, "cards-3-repo");
+  const cards = page.getByTestId("repo-card");
+  await expect(cards).toHaveCount(3);
+  // Wait for the MR facts of the first state: !11 is merged only once GitHub has been read.
+  await expect(cardOf(page, "core-lib").getByTestId("repo-mr")).toContainText("merged");
+  expect(await cardOrder(page)).toEqual([
+    ["core-lib", "1"],
+    ["service", "2"],
+    ["web", "3"],
+  ]);
+  await expect(page.getByTestId("repo-order")).toHaveText("merge order · 3 repos");
+  const lefts = await cards.evaluateAll((all) =>
+    all.map((card) => card.getBoundingClientRect().left),
+  );
+  expect(lefts[0]).toBeLessThan(lefts[1]);
+  expect(lefts[1]).toBeLessThan(lefts[2]);
+  const facts = [
+    ["core-lib", "Shared <b>core</b> types", "!11", "no upstream", "1/1 steps", 1],
+    ["service", "Service that consumes the core", "!12", "waits for !11 ✓", "2/2 steps", 2],
+    ["web", "Web app that embeds the service", "!13", "waits for !12", "3/3 steps", 3],
+  ] as const;
+  for (const [repo, why, number, waits, steps, dots] of facts) {
+    const card = cardOf(page, repo);
+    await expect(toggleOf(page, repo)).toHaveAttribute("aria-expanded", "true"); // fewer than 4 repos
+    await expect(card.getByTestId("repo-why")).toHaveText(why);
+    await expect(card.getByTestId("repo-mr")).toContainText(number);
+    await expect(card.getByTestId("repo-waits")).toHaveText(waits);
+    await expect(card).toContainText(steps);
+    await expect(card.getByTestId("step-dot")).toHaveCount(dots);
+    await expect(card.getByTestId("repo-handoff")).toHaveCount(0);
+  }
+  await expect(cardOf(page, "service").getByTestId("repo-mr")).toContainText("CI passed");
+  // The wait shows the state of the upstream MR: !12 is open, so the wait of web is not met.
+  await expect(cardOf(page, "web").locator(".unmet")).toHaveText("!12");
+  await expect(cardOf(page, "service").locator(".met")).toContainText("!11");
+
+  // Each edge carries its kind and pin; hover shows evidence and bump state, and so does keyboard focus.
+  await expect(page.getByTestId("edge-pill")).toHaveCount(2);
+  const toService = pillOf(page, "core-lib", "service");
+  await expect(toService.locator(".kind")).toHaveText("package");
+  await expect(toService.locator(".pin")).toHaveText("@acme/core");
+  await expect(page.getByTestId("edge-tip")).toHaveCount(0);
+  await toService.hover();
+  await checkpoint(page, "edge-hover");
+  await expect(page.getByTestId("edge-evidence")).toHaveText("@acme/core:1");
+  await expect(page.getByTestId("edge-tip")).toContainText("service-bump refreshed to 1.4.0");
+  await page.mouse.move(0, 0);
+  await expect(page.getByTestId("edge-tip")).toHaveCount(0);
+  const toWeb = pillOf(page, "service", "web");
+  await expect(toWeb.locator(".kind")).toHaveText("submodule");
+  await toWeb.focus();
+  await expect(page.getByTestId("edge-evidence")).toHaveText("vendor/service:1");
+  await expect(page.getByTestId("edge-tip")).toContainText(
+    `web-bump points at upstream branch ${submodulePointerSha.slice(0, 8)}`,
+  );
+  await toWeb.blur();
+  await expect(page.getByTestId("edge-tip")).toHaveCount(0);
+
+  // The wait of web is for service's !12, not core-lib's merged !12 of the same number.
+  await open(page, baseUrl, `run/${world.sameNumber3}`);
+  await expect(cardOf(page, "core-lib").getByTestId("repo-mr")).toContainText("merged");
+  await expect(cardOf(page, "web").locator(".unmet")).toHaveText("!12");
+  await expect(cardOf(page, "service").locator(".met")).toContainText("!12");
+
+  // A hand-off run has no MR to wait for: the bump is worded from its step (done here), never "waits for upstream merge".
+  await open(page, baseUrl, `run/${world.handedOff4}`);
+  await pillOf(page, "core-lib", "service").hover();
+  await expect(page.getByTestId("edge-tip")).toContainText("service-bump bump step done");
+  await expect(page.getByTestId("edge-tip")).not.toContainText("waits for upstream");
+  await page.mouse.move(0, 0);
+
+  // Four repos, handed off: collapsed, in hand-off order, a branch and no MR number on each card.
+  await open(page, baseUrl, `run/${world.handedOff4}`);
+  await expect(cards).toHaveCount(4);
+  await checkpoint(page, "cards-4-repo-collapsed");
+  await expect(page.getByTestId("repo-order")).toHaveText("hand-off order · 4 repos");
+  expect(await cardOrder(page)).toEqual([
+    ["core-lib", "1"],
+    ["service", "2"],
+    ["web", "3"],
+    ["e2e", "4"],
+  ]);
+  for (const repo of ["core-lib", "service", "web", "e2e"])
+    await expect(toggleOf(page, repo)).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("repo-mr")).toHaveCount(0);
+  const handoffs = [
+    ["core-lib", "3 commits ahead"],
+    ["service", "2 commits ahead"],
+    ["web", "no commits yet"],
+    ["e2e", "1 commit ahead"],
+  ];
+  for (const [repo, text] of handoffs) {
+    const handoff = cardOf(page, repo).getByTestId("repo-handoff");
+    await expect(handoff).toContainText(text);
+    await expect(cardOf(page, repo).getByTestId("repo-branch")).toHaveText(repoBranch);
+  }
+
+  // Free text is text: the markup of a `why` is shown as typed and makes no element.
+  await expect(cardOf(page, "core-lib").getByTestId("repo-why")).toHaveText(
+    "Shared <b>core</b> types",
+  );
+  await expect(page.locator('[data-testid="repo-why"] b')).toHaveCount(0);
+});
+
+test("ARK-T360 An expanded card shows its steps in phase columns, and a step edge between repos draws only on hover or focus", async ({
+  page,
+}) => {
+  test.slow();
+  const world = repoWorld();
+  const baseUrl = await launch();
+  await open(page, baseUrl, `run/${world.handedOff4}`);
+  const cards = page.getByTestId("repo-card");
+  await expect(cards).toHaveCount(4);
+  const toggle = page.getByTestId("expand-all");
+  await expect(toggle).toHaveText("Expand all");
+  await expect(page.locator('[data-testid="repo-toggle"][aria-expanded="true"]')).toHaveCount(0);
+
+  // Expand all opens every card.
+  await toggle.click();
+  await checkpoint(page, "expanded-all");
+  await expect(page.locator('[data-testid="repo-toggle"][aria-expanded="true"]')).toHaveCount(4);
+  await expect(toggle).toHaveText("Collapse all");
+
+  // Each card has only the columns its steps need, and a bump step is in Bump although its role is implementer.
+  const columns = (repo: string) => cardOf(page, repo).getByTestId("phase-head").allTextContents();
+  expect(await columns("core-lib")).toEqual(["Implement"]);
+  expect(await columns("service")).toEqual(["Implement", "Bump"]);
+  expect(await columns("web")).toEqual(["Implement", "Bump", "Validate"]);
+  expect(await columns("e2e")).toEqual(["Bump", "Review"]);
+  const chip = (step: string) => page.locator(`[data-testid="step-chip"][data-step="${step}"]`);
+  await expect(chip("service-bump")).toHaveAttribute("data-phase", "bump");
+  await expect(chip("service-impl")).toHaveAttribute("data-phase", "implement");
+  await expect(chip("web-tests")).toHaveAttribute("data-phase", "validate");
+  await expect(chip("e2e-review")).toHaveAttribute("data-phase", "review");
+  await expect(chip("service-bump")).toContainText("bump · ");
+  // The bump chip sits under its own column head, right of the Implement column of the same card.
+  const left = async (locator: Locator) => (await locator.boundingBox())!.x;
+  const service = cardOf(page, "service");
+  const heads = service.getByTestId("phase-head");
+  const implementLeft = await left(heads.nth(0));
+  const bumpLeft = await left(heads.nth(1));
+  expect(bumpLeft).toBeGreaterThan(implementLeft);
+  expect(Math.abs((await left(chip("service-bump"))) - bumpLeft)).toBeLessThan(
+    Math.abs((await left(chip("service-bump"))) - implementLeft),
+  );
+  expect(Math.abs((await left(chip("service-impl"))) - implementLeft)).toBeLessThan(
+    Math.abs((await left(chip("service-impl"))) - bumpLeft),
+  );
+
+  // At rest: the edges inside a card are drawn, no edge between repos is.
+  const edge = (from: string, to: string) =>
+    page.locator(`[data-testid="intra-edge"][data-from="${from}"][data-to="${to}"]`);
+  await expect(edge("service-bump", "service-impl")).toHaveCount(1);
+  await expect(edge("web-bump", "web-impl")).toHaveCount(1);
+  await expect(page.getByTestId("cross-edge")).toHaveCount(0);
+  await expect(page.locator(".rcanvas.tracing")).toHaveCount(0);
+
+  // Hover a step that needs a step of another repo: its edge between repos draws, the steps that do not join it dim.
+  const dimmed = (locator: Locator) => locator.evaluate((node) => getComputedStyle(node).opacity);
+  await chip("service-bump").hover();
+  await checkpoint(page, "cross-repo-hover");
+  const cross = page.getByTestId("cross-edge");
+  await expect(cross).toHaveCount(1);
+  await expect(cross).toHaveAttribute("data-from", "core-impl");
+  await expect(cross).toHaveAttribute("data-to", "service-bump");
+  await expect(chip("service-bump")).toHaveClass(/(^|\s)self(\s|$)/);
+  await expect(chip("core-impl")).toHaveClass(/(^|\s)rel(\s|$)/);
+  await expect(chip("service-impl")).toHaveClass(/(^|\s)rel(\s|$)/);
+  await expect.poll(() => dimmed(chip("web-impl"))).toBe("0.38");
+  await expect.poll(() => dimmed(chip("core-impl"))).toBe("1");
+  await expect.poll(() => dimmed(cardOf(page, "e2e"))).toBe("0.38");
+  await expect.poll(() => dimmed(cardOf(page, "core-lib"))).toBe("1"); // a card with a joined step stays clear
+
+  // Away: the edge is gone and nothing is dimmed.
+  await page.mouse.move(0, 0);
+  await expect(cross).toHaveCount(0);
+  await expect(page.locator(".rcanvas.tracing")).toHaveCount(0);
+  await expect.poll(() => dimmed(chip("web-impl"))).toBe("1"); // the dim fades out
+
+  // Keyboard focus does the same as hover.
+  await chip("web-bump").focus();
+  await expect(cross).toHaveCount(1);
+  await expect(cross).toHaveAttribute("data-from", "service-impl");
+  await expect(cross).toHaveAttribute("data-to", "web-bump");
+  await expect.poll(() => dimmed(chip("e2e-review"))).toBe("0.38");
+  await chip("web-bump").blur();
+  await expect(cross).toHaveCount(0);
+  await expect.poll(() => dimmed(chip("e2e-review"))).toBe("1");
+
+  // Collapse all closes every card.
+  await toggle.click();
+  await checkpoint(page, "collapsed-all");
+  await expect(page.locator('[data-testid="repo-toggle"][aria-expanded="true"]')).toHaveCount(0);
+  await expect(page.getByTestId("step-chip")).toHaveCount(0);
+  await expect(toggle).toHaveText("Expand all");
+});
+
+test("ARK-T361 The ticket page shows the repo chain of the newest run and links to the run page card, and a single-repo run shows none", async ({
+  page,
+}) => {
+  test.slow();
+  const world = repoWorld();
+  const baseUrl = await launch();
+  const chain = page.getByTestId("repo-chain");
+  const items = page.getByTestId("chain-repo");
+  const targeted = (repo: string) =>
+    page.locator(`[data-testid="repo-card"][data-repo="${repo}"].targeted`);
+
+  // The newest run of ARK-951 has three repos and MRs (the older run has one repo): one line, merge order, a dot per state.
+  await open(page, baseUrl, "ticket/ARK-951");
+  await expect(chain).toBeVisible();
+  await expect(items).toHaveCount(3);
+  await expect(items.locator(".rname")).toHaveText(["core-lib", "service", "web"]);
+  await expect(items.locator("i.dot")).toHaveCount(3);
+  const stateOf = () =>
+    items.evaluateAll((all) => all.map((item) => item.getAttribute("data-state")));
+  await expect.poll(stateOf).toEqual(["merged", "open", "open"]); // MR facts arrive after the first state
+  await checkpoint(page, "ticket-chain");
+  const tops = await items.evaluateAll((all) =>
+    all.map((item) => Math.round(item.getBoundingClientRect().top)),
+  );
+  expect(new Set(tops).size).toBe(1); // one line
+  const states = await items.evaluateAll((all) =>
+    all.map((item) => item.getAttribute("data-state")),
+  );
+  expect(states).toEqual(["merged", "open", "open"]);
+
+  // A click opens the run page at that card.
+  await items.nth(1).click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${world.merged3}/repo/service$`));
+  await checkpoint(page, "run-card-target");
+  await expect(targeted("service")).toBeInViewport();
+  await expect(toggleOf(page, "service")).toBeFocused();
+  // The card of the chain has the state of its dot.
+  await expect(cardOf(page, "service")).toHaveAttribute("data-state", states[1]!);
+  await expect(cardOf(page, "core-lib")).toHaveAttribute("data-state", states[0]!);
+
+  // The same URL, loaded again, targets the same card.
+  await page.reload();
+  await expect(targeted("service")).toBeInViewport();
+  await expect(page.locator(".rcard.targeted")).toHaveCount(1);
+
+  // A closed newest run shows its chain too, with hand-off states.
+  await open(page, baseUrl, "ticket/ARK-952");
+  await expect(items.locator(".rname")).toHaveText(["core-lib", "service", "web"]);
+  await expect
+    .poll(() => items.evaluateAll((all) => all.map((item) => item.getAttribute("data-state"))))
+    .toEqual(["ahead", "ahead", "clean"]);
+
+  // Four repos start collapsed: the click on the third opens that card only, and shows it.
+  await open(page, baseUrl, "ticket/ARK-953");
+  await expect(items).toHaveCount(4);
+  await items.nth(2).click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${world.handedOff4}/repo/web$`));
+  await expect(toggleOf(page, "web")).toHaveAttribute("aria-expanded", "true");
+  for (const repo of ["core-lib", "service", "e2e"])
+    await expect(toggleOf(page, repo)).toHaveAttribute("aria-expanded", "false");
+  await expect(targeted("web")).toBeInViewport();
+  await expect(page.locator('[data-testid="step-chip"][data-repo="web"]').first()).toBeVisible();
+
+  // One repo: no chain, no repo graph, and the step graph stays.
+  await open(page, baseUrl, "ticket/ARK-954");
+  await expect(page.getByTestId("ticket-page")).toBeVisible();
+  await checkpoint(page, "single-repo-no-chain");
+  await expect(chain).toHaveCount(0);
+  await open(page, baseUrl, `run/${world.single}`);
+  await expect(page.getByTestId("step-node")).toHaveCount(2);
+  await expect(page.getByTestId("repo-graph")).toHaveCount(0);
+  await expect(page.getByTestId("repo-card")).toHaveCount(0);
+});
+
+/** The hub's snapshot once the running 3-repo run shows its MR facts. The hub reads only while a stream is open, so one is held. */
+async function repoSnapshot(baseUrl: string, run: string): Promise<Snapshot> {
+  const read = async () => (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
+  const reading = new AbortController();
+  const stream = await fetch(`${baseUrl}/events`, { signal: reading.signal });
+  try {
+    let snapshot = await read();
+    await expect
+      .poll(async () => {
+        snapshot = await read();
+        const view = Array.isArray(snapshot.runs)
+          ? snapshot.runs.find((candidate) => candidate.run === run)
+          : undefined;
+        return view?.merge_requests.filter((request) => request.state === "merged").length;
+      })
+      .toBe(2);
+    return structuredClone(snapshot);
+  } finally {
+    reading.abort();
+    await stream.body?.cancel().catch(() => undefined);
+  }
+}
+
+/** A copy of `snapshot` with `change` applied to the view of `run`. */
+function withRun(snapshot: Snapshot, run: string, change: (view: RunView) => void): Snapshot {
+  const next = structuredClone(snapshot);
+  change((next.runs as RunView[]).find((candidate) => candidate.run === run)!);
+  return next;
+}
+
+test("ARK-T362 The repo graph uses the graph controls and the motion of the other graphs, and none of it animates with prefers-reduced-motion", async ({
+  page,
+  browser,
+}) => {
+  test.slow();
+  const world = repoWorld();
+  const baseUrl = await launch();
+  const first = await repoSnapshot(baseUrl, world.running3);
+  const hash = `run/${world.running3}`;
+  const highlighted = /(^|\s)hl(\s|$)/;
+
+  // The same three pushes in both passes: a step finishes, a card's CI fails, two cards swap places.
+  const stepDone = withRun(first, world.running3, (view) => {
+    view.plan!.find((step) => step.id === "web-tests")!.status = "succeeded";
+  });
+  const ciFailed = withRun(stepDone, world.running3, (view) => {
+    view.merge_requests.find((request) => request.repo === "web")!.ci = "failing";
+  });
+  // core-lib and service lose their edge and swap order: both stand in the first column, service on top.
+  const swapped = withRun(ciFailed, world.running3, (view) => {
+    const [core, service, web] = view.repos!;
+    view.repos = [{ ...service, order: 1, depends_on: [] }, { ...core, order: 2 }, web];
+  });
+  const topOf = (repo: string) =>
+    cardOf(page, repo).evaluate((card) => card.getBoundingClientRect().top);
+
+  await openFed(page, baseUrl, hash, first);
+  await expect(page.getByTestId("repo-card")).toHaveCount(3);
+
+  // Fit, 100% and Full screen of the graph viewport work on the repo graph.
+  const controls = controlsOf(page);
+  await expect(viewOf(page)).toHaveAttribute("data-mode", "fit");
+  await controls.actual.click();
+  await expect(viewOf(page)).toHaveAttribute("data-mode", "actual");
+  await expect(viewOf(page)).toHaveAttribute("data-scale", "1.000");
+  await controls.fit.click();
+  await expect(viewOf(page)).toHaveAttribute("data-mode", "fit");
+  await controls.full.click();
+  await expect(page.getByRole("dialog", { name: "Repo graph, full screen" })).toBeVisible();
+  await expect(page.getByRole("dialog").getByTestId("repo-card")).toHaveCount(3);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await controls.actual.click(); // cards and steps at full size for the rest
+  // A new render after a scale change moves nothing: no card or step slides because the zoom changed.
+  await resetSlides(page);
+  await push(page, first);
+  await frames(page, 2);
+  expect(await page.evaluate(() => (window as unknown as LiveWindow).__slides.size)).toBe(0);
+
+  // The running step pulses, and the edge into its repo flows, each for a few cycles and not for ever.
+  await page.waitForFunction(() => document.querySelectorAll(".rstep.s-running").length === 1);
+  const loops = (locator: Locator) =>
+    locator.evaluate((element) =>
+      element.getAnimations().map((animation) => ({
+        name: (animation as CSSAnimation).animationName,
+        iterations: animation.effect!.getTiming().iterations,
+      })),
+    );
+  expect(await loops(page.locator(".rstep.s-running"))).toEqual([
+    { name: "chip-pulse", iterations: 4 },
+  ]);
+  expect(await loops(page.locator('.sdot.s-running[data-step="web-tests"]'))).toEqual([
+    { name: "step-pulse-dot", iterations: 4 },
+  ]);
+  const flowing = page.locator('[data-testid="repo-edge"].into-running');
+  await expect(flowing).toHaveCount(1);
+  await expect(flowing).toHaveAttribute("data-from", "service");
+  await expect(flowing).toHaveAttribute("data-to", "web");
+  expect(await loops(flowing)).toEqual([{ name: "edge-flow", iterations: 5 }]);
+  const endless = () =>
+    page.evaluate(
+      () =>
+        document
+          .getAnimations()
+          .filter((animation) => animation.effect?.getComputedTiming().iterations === Infinity)
+          .length,
+    );
+  expect(await endless()).toBe(0);
+
+  // A step finishes: its chip highlights for 600 ms, and the pulse is gone.
+  await finiteAnimationsEnded(page);
+  await push(page, stepDone);
+  const chip = page.locator('[data-testid="step-chip"][data-step="web-tests"]');
+  await expect(chip).toHaveAttribute("data-status", "succeeded");
+  await expect(chip).toHaveClass(highlighted);
+  await checkpoint(page, "step-highlight");
+  const fade = await chip.evaluate((element) =>
+    element.getAnimations().map((animation) => ({
+      name: (animation as CSSAnimation).animationName,
+      duration: animation.effect!.getTiming().duration,
+    })),
+  );
+  expect(fade).toEqual([{ name: "highlight-fade", duration: 600 }]);
+  await expect(page.locator(".hl")).toHaveCount(0, { timeout: 3000 });
+  await expect(page.locator(".rstep.s-running")).toHaveCount(0);
+
+  // A card's CI changes: that card highlights, the others do not.
+  await push(page, ciFailed);
+  await expect(cardOf(page, "web")).toHaveClass(highlighted);
+  await expect(cardOf(page, "service")).not.toHaveClass(highlighted);
+  await expect(page.locator(".hl")).toHaveCount(0, { timeout: 3000 });
+
+  // Two cards swap order: each moves by a transform animation (FLIP) of at most 250 ms and ends in its new place.
+  await finiteAnimationsEnded(page);
+  const before = { core: await topOf("core-lib"), service: await topOf("service") };
+  expect(before.core).toBeLessThanOrEqual(before.service + 1);
+  await resetSlides(page);
+  await push(page, swapped);
+  // Read what the page started, not what runs at a sampled frame: a loaded host can skip the 250 ms slide.
+  const slid = () =>
+    cardOf(page, "service").evaluate(
+      (card) => (window as unknown as LiveWindow).__slides.get(card) ?? [],
+    );
+  await expect.poll(async () => (await slid()).length).toBeGreaterThan(0);
+  for (const duration of await slid()) expect(duration).toBeLessThanOrEqual(250);
+  await finiteAnimationsEnded(page);
+  await expect(cardOf(page, "service")).toHaveAttribute("data-order", "1");
+  expect(await topOf("service")).toBeLessThan(await topOf("core-lib"));
+  expect(await cardOf(page, "service").evaluate((card) => getComputedStyle(card).transform)).toBe(
+    "none",
+  );
+  await checkpoint(page, "cards-swapped");
+
+  // Reduced motion: the same pushes show their results and animate nothing.
+  const still = await browser.newPage({ reducedMotion: "reduce" });
+  try {
+    await openFed(still, baseUrl, hash, first);
+    await expect(still.getByTestId("repo-card")).toHaveCount(3);
+    await expect(still.locator('[data-testid="repo-edge"].into-running')).toHaveCount(1);
+    await expect(still.locator(".rstep.s-running")).toHaveCount(1);
+    await frames(still, 4);
+    expect(await animationsOf(still)).toEqual([]); // no pulse, no flow
+    await push(still, stepDone);
+    await expect(still.locator('[data-testid="step-chip"][data-step="web-tests"]')).toHaveAttribute(
+      "data-status",
+      "succeeded",
+    );
+    await push(still, ciFailed);
+    await expect(still.locator('[data-testid="repo-card"][data-repo="web"]')).toHaveAttribute(
+      "data-tone",
+      "failed",
+    );
+    await frames(still, 4);
+    expect(await animationsOf(still)).toEqual([]); // no highlight
+    await expect(still.locator(".hl")).toHaveCount(0);
+    await push(still, swapped);
+    await expect(still.locator('[data-testid="repo-card"][data-repo="service"]')).toHaveAttribute(
+      "data-order",
+      "1",
+    );
+    await frames(still, 4);
+    expect(await animationsOf(still)).toEqual([]); // no FLIP
+    expect(await still.evaluate(() => (window as unknown as LiveWindow).__slides.size)).toBe(0);
+    await checkpoint(still, "reduced-motion-graph");
+  } finally {
+    await still.close();
+  }
 });
 
 // ---------------------------------------------------------------- ARK-346: the project Conversation view
