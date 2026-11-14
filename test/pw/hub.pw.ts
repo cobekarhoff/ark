@@ -10618,3 +10618,692 @@ test("ARK-T345 the replay plays at 600x, moves the playhead, animates arrows, di
   ).toBe(0);
   await checkpoint(still, "reduced-motion-player");
 });
+
+// ---------------------------------------------------------------- ARK-346: the project Conversation view
+// One fixture for ARK-T355 to ARK-T357: Master Chief over runs A, B, C of project p and run D of another.
+// Every time is a fixed clock time of 2026-11-12 (UTC), never `ago()`. The reply holds no message body.
+
+type ProjectWorld = {
+  baseUrl: string;
+  a: string;
+  b: string;
+  c: string;
+  /** The run folder of the open run C, for a live change. */
+  cDirectory: string;
+};
+
+const minuteOf = (hours: number, minutes: number) => conversationMinute((hours - 8) * 60 + minutes);
+/** A message of the project reply: the reply carries no `body` field, so the inspector reads it from the hub. */
+const projectMessage = (
+  id: string,
+  from: string,
+  to: string,
+  time: number | null,
+  fields: Partial<ConversationMessage> = {},
+) =>
+  messageOf(id, from, to, time ?? 0, {
+    body: undefined,
+    ...(time === null ? { created_at: null, delivered_at: null } : {}),
+    ...fields,
+  });
+
+async function projectWorld(): Promise<ProjectWorld> {
+  isolate();
+  const a = runId("ARK-9431");
+  const b = runId("ARK-9432");
+  const c = runId("ARK-9433");
+  const d = runId("ARK-9434");
+  for (const [run, project, phase, ticket] of [
+    [a, "p", "closed", "ARK-9431"],
+    [b, "p", "closed", "ARK-9432"],
+    [c, "p", "building", "ARK-9433"],
+    [d, "other", "closed", "ARK-9434"],
+  ] as const)
+    writeRun({
+      project,
+      run,
+      ticket: { id: ticket, title: `Run ${ticket}` },
+      phase,
+      startedAt: ago(7_200),
+    });
+  installFakeTools({});
+  const cDirectory = join(process.env.ARK_HOME as string, "projects", "p", "runs", c);
+  return { baseUrl: await launch(), a, b, c, cDirectory };
+}
+
+/** What `GET /api/conversation` answers: every project's runs, and the messages that no run owns. */
+function projectReply(
+  world: ProjectWorld,
+  state: { truncated?: boolean; directory?: string } = {},
+) {
+  const at = (hours: number, minutes: number) => minuteOf(hours, minutes);
+  const run = (
+    id: string,
+    project: string,
+    spans: ConversationSpan[],
+    messages: ConversationMessage[],
+    parts: Partial<{
+      answers: { time: string; gate: string | null; answer: string | null }[];
+      questions: ConversationQuestion[];
+    }> = {},
+  ) => ({
+    run: id,
+    project,
+    agents: [chiefAgent, leadAgent, ...spans.map((s) => workerAgent(s.step, s.role, s.group!))],
+    spans,
+    answers: [],
+    questions: [],
+    messages,
+    ...parts,
+  });
+  const span = (step: string, from: number, to: number | null): ConversationSpan => ({
+    ...spanOf(step, "implementer", "Implementers", 0, 0),
+    start: isoOf(from),
+    end: to === null ? null : isoOf(to),
+  });
+  return {
+    truncated: false,
+    stale: false,
+    directory: "ready",
+    read_at: isoOf(at(11, 30)),
+    ...state,
+    runs: [
+      run(
+        world.a,
+        "p",
+        [span("A1", at(8, 0), at(9, 0))],
+        [
+          projectMessage("m1", "lead", "chief", at(8, 2), { subject: "alder" }),
+          projectMessage("m3", "lead", "chief", at(8, 9), { type: "question", subject: "cedar" }),
+          projectMessage("m4", "chief", "lead", at(8, 25), { type: "answer", subject: "dogwood" }),
+        ],
+        {
+          answers: [{ time: isoOf(at(8, 25)), gate: "criteria", answer: "ship it" }],
+          questions: [
+            {
+              id: "m3",
+              sent: isoOf(at(8, 9)),
+              delivered: isoOf(at(8, 10)),
+              answered: isoOf(at(8, 25)),
+              pickup_seconds: 60,
+            },
+          ],
+        },
+      ),
+      run(
+        world.b,
+        "p",
+        [span("B1", at(8, 30), at(10, 55))],
+        [
+          projectMessage("m5", "lead", "chief", at(8, 40), { type: "question", subject: "elm" }),
+          projectMessage("m7", "lead", "chief", at(10, 50), {
+            type: "question",
+            subject: "ginkgo",
+          }),
+        ],
+        {
+          questions: [
+            {
+              id: "m5",
+              sent: isoOf(at(8, 40)),
+              delivered: isoOf(at(8, 40)),
+              answered: null,
+              pickup_seconds: 0,
+            },
+            {
+              id: "m7",
+              sent: isoOf(at(10, 50)),
+              delivered: null,
+              answered: null,
+              pickup_seconds: "not recorded",
+            },
+          ],
+        },
+      ),
+      run(
+        world.c,
+        "p",
+        [span("C1", at(8, 5), at(8, 50)), span("C2", at(10, 30), null)],
+        [
+          projectMessage("m2", "lead", "chief", at(8, 5), { subject: "birch" }),
+          projectMessage("m6", "lead", "chief", at(10, 40), { subject: "fir" }),
+          projectMessage("m8", "lead", "chief", at(11, 0), { subject: "hazel" }),
+          projectMessage("m9", "lead", "chief", null, { subject: "juniper" }),
+        ],
+      ),
+      run(
+        "other-run",
+        "other",
+        [span("D1", at(8, 0), at(9, 0))],
+        [projectMessage("m10", "lead", "chief", at(8, 20), { subject: "kite" })],
+      ),
+    ],
+    other: { agents: [chiefAgent], messages: [] },
+  };
+}
+
+/** Serves the project read, the body of m5, a 404 for m6, and an empty run read for the run tabs a click opens. */
+async function serveProject(
+  page: Page,
+  reply: () => object | number,
+): Promise<{ reads: () => number }> {
+  let reads = 0;
+  await page.route("**/api/conversation", (route) => {
+    reads += 1;
+    const answer = reply();
+    return typeof answer === "number"
+      ? route.fulfill({ status: answer, body: "" })
+      : route.fulfill({ json: answer });
+  });
+  await page.route("**/api/conversation/message/*", (route) =>
+    route.request().url().endsWith("/m5")
+      ? route.fulfill({ json: { body: "The plover is back at the pond." } })
+      : route.fulfill({ status: 404, body: "" }),
+  );
+  await page.route("**/api/run/*/conversation", (route) =>
+    route.fulfill({
+      json: conversationReply(route.request().url().split("/").at(-2)!, {
+        agents: [chiefAgent],
+        messages: [],
+      }),
+    }),
+  );
+  return { reads: () => reads };
+}
+
+/** The `data-id` of each element of a test id, sorted: the strip lists its ticks by lane, the map by time. */
+const projectIds = (page: Page, testId: string) =>
+  page
+    .getByTestId(testId)
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-id") ?? ""))
+    .then((ids) => ids.sort((left, right) => left.localeCompare(right)));
+
+/** The topmost element at the centre of `target` is `target` or inside it. */
+async function topmostAtCentre(target: Locator): Promise<boolean> {
+  return target.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return hit === node || node.contains(hit);
+  });
+}
+
+test("ARK-T355 the Runs page switches to Conversation and draws the metro map of Master Chief, 4 runs, 2 questions with waiting bands and 1 answer, and a run click opens its Conversation tab", async ({
+  browser,
+}) => {
+  const world = await projectWorld();
+  const page = await conversationPage(browser);
+  await serveProject(page, () => projectReply(world));
+
+  // List is the default and keeps its test ids; the map is not there.
+  await open(page, world.baseUrl, "runs?project=p");
+  await expect(page.locator('[data-testid="runs-mode"][data-mode="list"]')).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByTestId("run-card").first()).toBeVisible();
+  const cards = await page.getByTestId("run-card").count();
+  await expect(page.getByTestId("graph-filter")).toHaveCount(3);
+  await expect(page.getByTestId("map")).toHaveCount(0);
+  await checkpoint(page, "list-default");
+
+  await page.locator('[data-testid="runs-mode"][data-mode="conversation"]').click();
+  await expect(page.getByTestId("map")).toBeVisible();
+  await expect(page.getByTestId("run-card")).toHaveCount(0);
+  await expect(page.getByText("In order, not to scale", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("map").getByText("Master Chief", { exact: true })).toBeVisible();
+
+  // 3 run lines of project p; run D (another project) is not drawn.
+  const lines = page.getByTestId("map-run-line");
+  await expect(lines).toHaveCount(3);
+  expect(
+    await lines.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-run"))),
+  ).toEqual([world.a, world.c, world.b]);
+  await expect(page.locator('[data-testid="map-run-line"][data-run="other-run"]')).toHaveCount(0);
+
+  // A (08:00 to 09:00) and B (08:30 to 10:55) close; C (08:05) is open. Left edges follow the start order.
+  const line = (run: string) => page.locator(`[data-testid="map-run-line"][data-run="${run}"]`);
+  await expect(line(world.a)).toHaveAttribute("data-open", "false");
+  await expect(line(world.b)).toHaveAttribute("data-open", "false");
+  await expect(line(world.c)).toHaveAttribute("data-open", "true");
+  const box = async (locator: Locator) => (await locator.boundingBox())!;
+  const [boxA, boxB, boxC] = [
+    await box(line(world.a)),
+    await box(line(world.b)),
+    await box(line(world.c)),
+  ];
+  expect(boxA.x).toBeLessThan(boxC.x);
+  expect(boxC.x).toBeLessThan(boxB.x);
+  // A returns at 09:00, long before B at 10:55; the open C runs on to the window end 11:00, past B's close.
+  expect(boxA.x + boxA.width).toBeLessThan(boxB.x + boxB.width);
+  expect(boxC.x + boxC.width).toBeGreaterThan(boxB.x + boxB.width + 3);
+
+  // 3 thick spurs (the questions m3, m5, m7); the other messages of Master Chief are thin.
+  const thick = page.locator('[data-testid="map-spur"][data-thick="true"]');
+  await expect(thick).toHaveCount(3);
+  expect(await projectIds(page, "map-spur")).toEqual([
+    "m1",
+    "m2",
+    "m3",
+    "m4",
+    "m5",
+    "m6",
+    "m7",
+    "m8",
+  ]);
+  expect(
+    await thick.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-id"))),
+  ).toEqual(["m3", "m5", "m7"]);
+  const strokeOf = (locator: Locator) =>
+    locator.first().evaluate((node) => parseFloat(getComputedStyle(node).strokeWidth));
+  expect(await strokeOf(thick)).toBeGreaterThan(
+    await strokeOf(page.locator('[data-testid="map-spur"][data-thick="false"]')),
+  );
+
+  // 3 hatched bands: Q1 from 08:10 to the answer at 08:25 (the person marker); Q2 from 08:40 and Q3, which has
+  // no delivery time, from its sent time 10:50. Neither is answered, so each ends where B closes (10:55), not
+  // at the window end, and is not open.
+  const spurX = async (id: string) => {
+    const spur = await box(page.locator(`[data-testid="map-spur"][data-id="${id}"]`));
+    expect(spur.height).toBeGreaterThan(0);
+    return spur.x;
+  };
+  const band = (question: string) =>
+    page.locator(`[data-testid="map-band"][data-question="${question}"]`);
+  await expect(page.getByTestId("map-band")).toHaveCount(3);
+  const [q1, q2, q3] = [await box(band("m3")), await box(band("m5")), await box(band("m7"))];
+  const person = page.getByTestId("map-person");
+  await expect(person).toHaveCount(1);
+  const marker = await box(person);
+  // The person marker sits on Master Chief's line at the answer (08:25): the spur of m4.
+  expect(Math.abs(marker.x + marker.width / 2 - (await spurX("m4")))).toBeLessThan(3);
+  expect(q1.x).toBeGreaterThan(await spurX("m3"));
+  expect(Math.abs(q1.x + q1.width - (await spurX("m4")))).toBeLessThan(3);
+  expect(Math.abs(q2.x - (await spurX("m5")))).toBeLessThan(3);
+  expect(Math.abs(q3.x - (await spurX("m7")))).toBeLessThan(3);
+  for (const unanswered of [q2, q3])
+    expect(Math.abs(unanswered.x + unanswered.width - (boxB.x + boxB.width))).toBeLessThan(3);
+  await expect(band("m3")).toHaveAttribute("data-open", "false");
+  await expect(band("m5")).toHaveAttribute("data-open", "false");
+  await expect(band("m7")).toHaveAttribute("data-open", "false");
+
+  // Every drawn thing has a box and no overlay hides it.
+  const mapBox = await box(page.getByTestId("map"));
+  for (const locator of [
+    line(world.a),
+    line(world.b),
+    line(world.c),
+    band("m3"),
+    band("m5"),
+    band("m7"),
+    person,
+  ]) {
+    const inside = await box(locator);
+    expect(inside.width).toBeGreaterThan(0);
+    expect(inside.x).toBeGreaterThanOrEqual(mapBox.x - 1);
+    expect(inside.x + inside.width).toBeLessThanOrEqual(mapBox.x + mapBox.width + 1);
+  }
+  expect(await topmostAtCentre(person)).toBe(true);
+  expect(await topmostAtCentre(page.getByTestId("map-run-badge").first())).toBe(true);
+  await checkpoint(page, "map-dark");
+
+  // At 09:30 B is still open, so Q2 waits: its band is open and ends at the scrubber, not at B's close.
+  await page.getByTestId("replay-scrubber").fill(String(minuteOf(9, 30)));
+  await expect(band("m5")).toHaveAttribute("data-open", "true");
+  await expect(band("m7")).toHaveCount(0);
+  const waiting = await box(band("m5"));
+  expect(waiting.x + waiting.width).toBeLessThan(q2.x + q2.width - 3);
+  await page.getByTestId("replay-exit").click();
+  await expect(band("m7")).toHaveAttribute("data-open", "false");
+
+  // A click on the line of B opens B's Conversation tab; back, the badge of A opens A's.
+  await page
+    .getByTestId("map-run-line")
+    .nth(2)
+    .click({ position: { x: 20, y: 6 } });
+  await expect(page).toHaveURL(new RegExp(`#/run/${world.b}/conversation`));
+  await expect(page.getByTestId("trace")).toBeVisible();
+  await page.goBack();
+  await expect(page.getByTestId("map")).toBeVisible();
+  await page.getByTestId("map-run-badge").first().click();
+  await expect(page).toHaveURL(new RegExp(`#/run/${world.a}/conversation`));
+  await expect(page.getByTestId("trace")).toBeVisible();
+  await page.goBack();
+
+  // List brings the board back with its test ids.
+  await page.locator('[data-testid="runs-mode"][data-mode="list"]').click();
+  await expect(page.getByTestId("run-card")).toHaveCount(cards);
+  await expect(page.getByTestId("graph-filter")).toHaveCount(3);
+  await expect(page.getByTestId("map")).toHaveCount(0);
+
+  // The map is readable (4.5:1) in the dark and the light theme.
+  await page.locator('[data-testid="runs-mode"][data-mode="conversation"]').click();
+  await expect(page.getByTestId("map")).toBeVisible();
+  await expectReadableInBothThemes(page);
+  await checkpoint(page, "map-light");
+});
+
+test("ARK-T356 the To scale strip is the replay scrubber: moving it changes the shown count, play runs at 10x, 60x and 600x with trains and message dots, and reduced motion keeps the scrubber but stops motion", async ({
+  browser,
+}) => {
+  const world = await projectWorld();
+  const page = await conversationPage(browser);
+  await page.clock.install({ time: new Date("2026-11-13T00:00:00Z") });
+  const served = await serveProject(page, () => projectReply(world));
+  await open(page, world.baseUrl, "runs?project=p");
+  await page.locator('[data-testid="runs-mode"][data-mode="conversation"]').click();
+  await expect(page.getByTestId("map")).toBeVisible();
+  await page.clock.pauseAt(new Date("2026-11-13T01:00:00Z"));
+
+  const scrubber = page.getByTestId("replay-scrubber");
+  const seek = (time: number) => scrubber.fill(String(time));
+  const playhead = async () => Number(await scrubber.inputValue());
+  const speed = (rate: number) =>
+    page.locator(`[data-testid="replay-speed"][data-speed="${rate}"]`);
+  const play = page.getByTestId("replay-play");
+  const messages = page.getByTestId("now-messages");
+  const [t1, t2, t3] = [minuteOf(8, 10), minuteOf(11, 0), minuteOf(9, 30)];
+
+  // The strip: density, a lane for Master Chief and one for each run, the answer, and the player.
+  const strip = page.getByTestId("strip");
+  await expect(strip.getByRole("heading", { name: "To scale" })).toBeVisible();
+  await expect(page.getByTestId("strip-lane")).toHaveCount(4);
+  await expect(page.getByTestId("strip-answer")).toHaveCount(1);
+  await expect(page.getByTestId("replay-speed")).toHaveText(["10x", "60x", "600x"]);
+  await expect(play).toHaveText("Play");
+
+  // True time axis: m1 (08:02) to m2 (08:05) is 3 minutes, m5 (08:40) to m6 (10:40) is 120. m9 has no time, so 8 ticks.
+  await expect(page.getByTestId("strip-tick")).toHaveCount(8);
+  const tickX = async (id: string) =>
+    (await page.locator(`[data-testid="strip-tick"][data-id="${id}"]`).boundingBox())!.x;
+  const [x1, x2, x5, x6] = [
+    await tickX("m1"),
+    await tickX("m2"),
+    await tickX("m5"),
+    await tickX("m6"),
+  ];
+  expect((x6 - x5) / (x2 - x1)).toBeGreaterThan(40 * 0.95);
+  expect((x6 - x5) / (x2 - x1)).toBeLessThan(40 * 1.05);
+  expect(await projectIds(page, "strip-tick")).not.toContain("m9");
+
+  // The scrubber sets the playhead on the strip and the map, and the count: 3 at T1, 8 at T2, 3 again.
+  await seek(t1);
+  await expect(messages).toHaveText("3");
+  await expect(page.getByTestId("strip-playhead")).toBeVisible();
+  await expect(page.getByTestId("map-playhead")).toBeVisible();
+  await checkpoint(page, "strip-t1-dark");
+  await seek(t2);
+  await expect(messages).toHaveText("8");
+  await seek(t1);
+  await expect(messages).toHaveText("3");
+  // The strip and the map keep every message with a time; only the cut at the playhead dims or drops the future.
+  await page.getByTestId("replay-exit").click();
+  await expect(messages).toHaveText("8");
+  await expect(page.getByTestId("strip-tick")).toHaveCount(8);
+
+  // 600x, 60x and 10x for one second of the page clock move the playhead about 600, 60 and 10 run seconds.
+  for (const rate of [600, 60, 10]) {
+    await speed(rate).click();
+    await expect(speed(rate)).toHaveAttribute("aria-pressed", "true");
+    await seek(t1);
+    const from = await playhead();
+    await play.click();
+    await expect(play).toHaveText("Pause");
+    await page.clock.runFor(1_000);
+    await play.click();
+    await expect(play).toHaveText("Play");
+    const moved = await playhead();
+    // A frame of 16 ms is the clock's resolution.
+    expect(moved - from, `${rate}x`).toBeGreaterThan(rate * 1_000 * 0.8);
+    expect(moved - from, `${rate}x`).toBeLessThanOrEqual(rate * 1_000);
+    // Pause stops it.
+    await page.clock.runFor(2_000);
+    expect(await playhead()).toBe(moved);
+  }
+
+  // At T3 B and C are live and have a train; A closed at 09:00 has none.
+  await seek(t3);
+  expect(
+    await page
+      .getByTestId("map-train")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-run"))),
+  ).toEqual([world.c, world.b]);
+  await expect(page.getByTestId("map-dot")).toHaveCount(0);
+
+  // A message sent while playing moves a dot on the map: m6 (10:40) is 70 run minutes after T3.
+  await speed(600).click();
+  await play.click();
+  await page.clock.runFor(7_100);
+  const dot = page.getByTestId("map-dot");
+  await expect(dot).toHaveAttribute("data-id", "m6");
+  expect(
+    await dot.evaluate((node) =>
+      node.getAnimations().map((animation) => (animation as CSSAnimation).animationName),
+    ),
+  ).toContain("map-dot");
+  expect(
+    await page
+      .getByTestId("map-train")
+      .first()
+      .evaluate((node) =>
+        node.getAnimations().map((animation) => (animation as CSSAnimation).animationName),
+      ),
+  ).toContain("map-train");
+  await play.click();
+  await expect(play).toHaveText("Play");
+
+  // A live change of run C re-reads the conversation and leaves the playhead and the speed.
+  await seek(t3);
+  await speed(60).click();
+  const readsBefore = served.reads();
+  appendRawEvent(
+    world.cDirectory,
+    "worker.started",
+    { step: "work", dispatch: "ctx_w", terminal: "t" },
+    6,
+  );
+  await expect.poll(served.reads).toBeGreaterThan(readsBefore);
+  expect(await playhead()).toBe(t3);
+  await expect(speed(60)).toHaveAttribute("aria-pressed", "true");
+  await expect(messages).toHaveText("5");
+
+  // Reduced motion: Play is off, nothing animates, the scrubber still sets the playhead and the count.
+  const still = await conversationPage(browser, { reducedMotion: "reduce" });
+  await serveProject(still, () => projectReply(world));
+  await open(still, world.baseUrl, "runs?project=p");
+  await still.locator('[data-testid="runs-mode"][data-mode="conversation"]').click();
+  await expect(still.getByTestId("map")).toBeVisible();
+  await expect(still.getByTestId("replay-play")).toBeDisabled();
+  await still.getByTestId("replay-scrubber").fill(String(t1));
+  await expect(still.getByTestId("now-messages")).toHaveText("3");
+  await still.getByTestId("replay-scrubber").fill(String(t2));
+  await expect(still.getByTestId("now-messages")).toHaveText("8");
+  await finiteAnimationsEnded(still);
+  await expect(still.getByTestId("map-dot")).toHaveCount(0);
+  expect(
+    await still
+      .getByTestId("project-conversation")
+      .evaluate((node) => node.getAnimations({ subtree: true }).length),
+  ).toBe(0);
+  await checkpoint(still, "reduced-motion-strip");
+});
+
+test("ARK-T357 the Now panel follows the scrubber, a type chip, a run filter and the search filter the map and strip, a click opens the shared inspector, and the map has Fit, 100% and Full screen", async ({
+  browser,
+}) => {
+  const world = await projectWorld();
+  const page = await conversationPage(browser);
+  await serveProject(page, () => projectReply(world));
+  await open(page, world.baseUrl, "runs?project=p");
+  await page.locator('[data-testid="runs-mode"][data-mode="conversation"]').click();
+  await expect(page.getByTestId("map")).toBeVisible();
+
+  const scrubber = page.getByTestId("replay-scrubber");
+  const seek = (time: number) => scrubber.fill(String(time));
+  const now = async () => ({
+    live: await page
+      .getByTestId("now-run")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => [
+          node.getAttribute("data-run"),
+          node.querySelector('[data-testid="now-step"]')?.textContent,
+        ]),
+      ),
+    messages: await page.getByTestId("now-messages").textContent(),
+    answers: await page.getByTestId("now-answers").textContent(),
+    latest: await page
+      .getByTestId("now-latest")
+      .locator("li")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-id"))),
+  });
+  const settle = async (messages: string) =>
+    expect(page.getByTestId("now-messages")).toHaveText(messages);
+
+  // The Now panel is the numbers of the scrubber time, not the totals. T3 09:30: B in B1 and C between steps.
+  await seek(minuteOf(9, 30));
+  await settle("5");
+  expect(await now()).toEqual({
+    live: [
+      [world.c, "between steps"],
+      [world.b, "B1"],
+    ],
+    messages: "5",
+    answers: "1",
+    latest: ["m5", "m4", "m3", "m2", "m1"],
+  });
+  await checkpoint(page, "now-t3-dark");
+  // T4 08:20: A and C in a step; T5 08:01: A only; T2 11:00: B has closed, only C in C2.
+  await seek(minuteOf(8, 20));
+  await settle("3");
+  expect(await now()).toEqual({
+    live: [
+      [world.a, "A1"],
+      [world.c, "C1"],
+    ],
+    messages: "3",
+    answers: "0",
+    latest: ["m3", "m2", "m1"],
+  });
+  await seek(minuteOf(8, 1));
+  await settle("0");
+  expect(await now()).toEqual({ live: [[world.a, "A1"]], messages: "0", answers: "0", latest: [] });
+  await seek(minuteOf(11, 0));
+  await settle("8");
+  expect(await now()).toMatchObject({
+    messages: "8",
+    answers: "1",
+  });
+  await page.getByTestId("replay-exit").click();
+
+  // A type chip, a run filter and the search change the map and the strip the same way.
+  const both = async () => ({
+    map: await projectIds(page, "map-spur"),
+    strip: await projectIds(page, "strip-tick"),
+  });
+  const all = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"];
+  expect(await both()).toEqual({ map: all, strip: all });
+  const chip = page.locator('[data-testid="map-type"][data-type="question"]');
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  expect(await both()).toEqual({ map: ["m3", "m5", "m7"], strip: ["m3", "m5", "m7"] });
+  await chip.click();
+  expect(await both()).toEqual({ map: all, strip: all });
+
+  await page.getByTestId("map-run-filter").selectOption(world.b);
+  expect(await both()).toEqual({ map: ["m5", "m7"], strip: ["m5", "m7"] });
+  await expect(page.getByTestId("map-run")).toHaveCount(1);
+  await expect(page.getByTestId("strip-lane")).toHaveCount(2);
+  await expect(page.getByTestId("map").getByText("Master Chief", { exact: true })).toBeVisible();
+  await checkpoint(page, "filtered-dark");
+  await page.getByTestId("map-run-filter").selectOption("");
+
+  // The search reads the subject only: "plover" is in the body of m5, which the project reply does not hold.
+  await page.getByTestId("map-search").fill("elm");
+  expect(await both()).toEqual({ map: ["m5"], strip: ["m5"] });
+  await page.getByTestId("map-search").fill("plover");
+  expect(await both()).toEqual({ map: [], strip: [] });
+  await page.getByTestId("map-search").fill("");
+  expect(await both()).toEqual({ map: all, strip: all });
+
+  // The map controls, on a page narrower than the 100% map: Fit lays the whole window out in the room, 100% scrolls.
+  await page.setViewportSize({ width: 900, height: 900 });
+  const viewport = page.getByTestId("graph-viewport");
+  const scale = async () => Number(await viewport.getAttribute("data-scale"));
+  const mapWidth = async () => (await page.getByTestId("map").boundingBox())!.width;
+  const room = async () => (await viewport.getByRole("region").boundingBox())!.width;
+  await page.getByRole("button", { name: "100%", exact: true }).click();
+  expect(await scale()).toBe(1);
+  expect(await mapWidth()).toBeGreaterThan(await room());
+  await page.getByRole("button", { name: "Fit", exact: true }).click();
+  expect(await scale()).toBeGreaterThanOrEqual(0.6);
+  expect(await mapWidth()).toBeLessThanOrEqual(await room());
+  await page.getByRole("button", { name: "100%", exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // The inspector from each target, for the run that owns it. At 100% no bead hides in a cluster.
+  const inspector = page.getByTestId("inspector");
+  const click = async (target: Locator) => {
+    await target.scrollIntoViewIfNeeded();
+    expect(await topmostAtCentre(target)).toBe(true);
+    await target.click();
+  };
+  const bead = (id: string) => page.locator(`[data-testid="map-bead"][data-id="${id}"]`);
+  await click(bead("m5"));
+  await expect(inspector).toContainText("elm");
+  await expect(page.getByTestId("inspector-type")).toHaveText("question");
+  await expect(page.getByTestId("inspector-body")).toContainText("plover");
+  await checkpoint(page, "inspector-message-dark");
+
+  await click(page.locator('[data-testid="map-station"][data-step="C1"]'));
+  await expect(inspector).toContainText("Step C1");
+  await expect(inspector).toContainText(world.c);
+  await expect(page.getByTestId("inspector-role")).toHaveText("implementer");
+
+  await click(page.getByTestId("map-person"));
+  await expect(inspector).toContainText("You answered");
+  await expect(inspector).toContainText(world.a);
+  await expect(inspector).toContainText("criteria");
+  await expect(page.getByTestId("inspector-person-answer")).toHaveText("ship it");
+  await expect(page.getByTestId("inspector-asked")).toContainText("cedar");
+
+  // The row button inspects a run; the line itself opens its tab. Click the row past the end of the lines.
+  const row = page.getByTestId("map-run-row").nth(2);
+  await row.scrollIntoViewIfNeeded();
+  const rowBox = (await row.boundingBox())!;
+  await row.click({ position: { x: rowBox.width - 6, y: 3 } });
+  await expect(inspector).toContainText(world.b);
+  await expect(page.getByTestId("inspector-closed")).toHaveText("10:55:00");
+  await expect(page.getByTestId("inspector-counts")).toHaveText("2");
+  await expect(page.getByTestId("inspector-open-run")).toHaveAttribute(
+    "href",
+    new RegExp(`#/run/${world.b}/conversation`),
+  );
+
+  // A message the hub no longer holds (404) shows a text, not an error, and the page stays up.
+  await click(bead("m6"));
+  await expect(inspector).toContainText("fir");
+  await expect(page.getByTestId("inspector-body-missing")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  // Full screen is one copy of the map in a fixed layer.
+  await page.getByRole("button", { name: "Full screen" }).click();
+  await expect(viewport).toHaveClass(/full/);
+  await expect(viewport).toHaveCount(1);
+  await expect(page.getByTestId("map")).toHaveCount(1);
+  await expect(page.getByTestId("map-run-line")).toHaveCount(3);
+  await expect(page.getByTestId("map")).toBeVisible();
+  await checkpoint(page, "full-screen-dark");
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(viewport).not.toHaveClass(/full/);
+  await expect(viewport).toHaveCount(1);
+
+  // In Full screen a click still opens the inspector, and the layer does not cover it.
+  await page.getByRole("button", { name: "Full screen" }).click();
+  await click(page.locator('[data-testid="map-station"][data-step="B1"]'));
+  await expect(inspector).toContainText("Step B1");
+  expect(await topmostAtCentre(inspector), "the inspector is under the full-screen layer").toBe(
+    true,
+  );
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(viewport).not.toHaveClass(/full/);
+  await expect(page.getByTestId("map")).toHaveCount(1);
+});
