@@ -15,13 +15,13 @@ Prove that every `ark` command, its usage, its description, each flag its usage 
 
 Expected: When the command table is built from cli/commands, the system shall present the same commands in the same order with the same usage, flags and argument counts, and the new ark test description.
 
-The test reads the table only through the `ark` process, so it holds before and after the move except for the `test` description, and does not import `cli/ark.ts` (importing it runs `main`). The snapshot was captured at the ARK-372 base and ARK-333 updated the `test` description in it; every other record still equals the base table. The test fails at this run's base by design, because the snapshot holds the new description.
+The test reads the table only through the `ark` process, so it holds before and after the move except for the `test` description, and does not import `cli/ark.ts` (importing it runs `main`). The snapshot was first captured at the ARK-372 base; later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test fails at this run's base by design, because the snapshot holds the new description.
 
 ## Preconditions
 
 - The worktree on the latest commit of the branch, with dependencies installed.
 - Every probe of steps 2 to 6 runs in an empty temporary directory used as `HOME`, `ARK_HOME` and the working directory, with `ARK_PROJECT` cleared, addressing the CLI by absolute path (`bun <worktree>/cli/ark.ts`), so no handler that does run can touch real projects. The directory is removed afterwards.
-- A snapshot file committed in `test/`, captured at the ARK-372 base (before any move) by running the probe below at base; ARK-333 then updated the `test` description in it, and every other record still equals the base table. The snapshot holds, for each command in table order: usage, description, each usage-advertised flag with arity, probed minimum, probed maximum or unbounded.
+- A snapshot file committed in `test/`, first captured at the ARK-372 base (before any move) by running the probe below; later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description), and every record other than `test` equals the table at this run's base (c8dc7f3). The snapshot holds, for each command in table order: usage, description, each usage-advertised flag with arity, probed minimum, probed maximum or unbounded.
 
 ## Steps
 
@@ -35,14 +35,14 @@ The test reads the table only through the `ark` process, so it holds before and 
 5. Build the record list (command, usage, description, flag arity, probed minimum, probed maximum or unbounded) and compare it with the committed snapshot, deep-equal, with the list order significant.
 6. Run `bun cli/ark.ts ui install --help` and `bun cli/ark.ts ui --help`, and `test`, `test-case`, `test-audit` likewise. Each must print its own usage (longest match).
 
-`docs/reference/cli.md` equality with the generator is not checked here: `test/project-checks.test.ts` (ARK-302-AC10) owns it. This case keeps the snapshot (the ARK-372 base table plus the ARK-333 `test` description), which catches table and documentation changing together.
+`docs/reference/cli.md` equality with the generator is not checked here: `test/project-checks.test.ts` (ARK-302-AC10) owns it. This case keeps the snapshot (the table at this run's base plus the ARK-333 `test` description), which catches table and documentation changing together.
 
 ## Expected results
 
-- The command lines of `ark --help` equal the snapshot order exactly; the count is 30 (the base table). The snapshot holds the new `ark test` description (suite failure exit code, log path and last 20 lines; test case hint) and no other changed record.
+- The command lines of `ark --help` equal the snapshot order exactly; the count is 30. The snapshot holds the new `ark test` description (suite failure exit code, log path and last 20 lines; test case hint) and no other record that differs from this run's base.
 - For each command: usage, description, each usage-advertised flag with its parser-measured arity (`absent`, `switch`, `value`; step 3a) equal the snapshot; each probed bound behaves as in the snapshot; `F --zz-first --zz-second` names `--zz-first` for every advertised switch, `--zz-second` for every advertised value flag; an unknown flag fails with `unknown flag --zz-first`.
 - `test-runner` is absent from `ark --help`.
-- The snapshot was captured at the ARK-372 base and ARK-333 updated the `test` description in it; every other record equals the base table. The test passes after the move with the new description, and fails at this run's base by design (the snapshot holds the new description). A command dropped, duplicated or moved, a description edited away from the snapshot, a usage-advertised flag deleted from the parser table, a usage-advertised flag changed from switch to value or back in the parser table (even with the usage string unchanged), or a changed probed minimum or finite maximum fails it. A flag added to the parser table but not advertised in usage is not detected.
+- The snapshot was first captured at the ARK-372 base; later runs updated descriptions in it when they changed a command description (ARK-333 changed the `test` description). Every record other than `test` equals the table at this run's base (c8dc7f3). The test passes after the move with the new description, and fails at this run's base by design (the snapshot holds the new description). A command dropped, duplicated or moved, a description edited away from the snapshot, a usage-advertised flag deleted from the parser table, a usage-advertised flag changed from switch to value or back in the parser table (even with the usage string unchanged), or a changed probed minimum or finite maximum fails it. A flag added to the parser table but not advertised in usage is not detected.
 
 ## Screenshot checkpoints
 
