@@ -60,6 +60,8 @@ function buildingRun(options: {
   testCases?: Record<string, unknown>[];
   e2e?: string[];
   unit?: string[];
+  /** Replaces the command of the e2e suite (default: `bun test` on e2e.test.ts through the JUnit reporter). */
+  e2eCommand?: string;
   compose?: string;
   manual?: string[];
   roundBudget?: number;
@@ -96,7 +98,13 @@ function buildingRun(options: {
     ...(options.roundBudget === undefined ? {} : { round_budget: options.roundBudget }),
     suites: [
       { name: "unit", level: "unit", repo: ".", command: junit("unit.test.ts"), parser: "bun" },
-      { name: "e2e", level: "e2e", repo: ".", command: junit("e2e.test.ts"), parser: "bun" },
+      {
+        name: "e2e",
+        level: "e2e",
+        repo: ".",
+        command: options.e2eCommand ?? junit("e2e.test.ts"),
+        parser: "bun",
+      },
     ].map((suite) =>
       options.selectiveBase
         ? { ...suite, base_files: "nomatch/*.test.ts", base_command: `${suite.command} # {files}` }
@@ -514,6 +522,58 @@ describe("ark test checks", () => {
   });
 });
 
+describe("ark test on a failed suite", () => {
+  test("ARK-T387 ark test prints the exit code, the log path and the last 20 log lines of a failed suite", () => {
+    // The e2e command prints 40 marker lines to stderr, after the bun test output, and exits 3 (bun test exits 1).
+    // The suite has no base_command, so no retry appends to the log after the command.
+    const { runId, runDirectory } = buildingRun({
+      criteria: ["FAKE-1-AC1"],
+      e2e: [failing("FAKE-1-AC1 breaks")],
+      unit: [passing("FAKE-1-AC1 unit works")],
+      e2eCommand: `${junit("e2e.test.ts")}; for i in $(seq 1 40); do echo out-$i >&2; done; exit 3`,
+    });
+    const result = ark("test", runId);
+
+    // The expected tail comes from the log on disk; check first that the log is the fixture this case describes.
+    const logLines = readFileSync(join(runDirectory, "results/e2e.log"), "utf8")
+      .trimEnd()
+      .split("\n");
+    const markers = Array.from({ length: 40 }, (_, index) => `out-${index + 1}`);
+    expect(logLines.length).toBeGreaterThan(40);
+    expect(logLines.slice(-40)).toEqual(markers);
+    expect(logLines.filter((line) => line === "out-20" || line === "out-21")).toHaveLength(2);
+    const tail = logLines.slice(-20);
+    const boundary = logLines.at(-21)!;
+    expect(tail[0]).toBe("out-21");
+    expect(boundary).toBe("out-20");
+
+    expect(result.code).not.toBe(0);
+    expect(result.err).toContain("suite e2e failed");
+    const lines = result.out.split("\n").map((line) => line.trim());
+    const failedAt = lines.indexOf("suite      e2e (e2e)  failed");
+    expect(failedAt).toBeGreaterThanOrEqual(0);
+
+    // The tail is exactly the last 20 lines of the log: contiguous, in order, one line more or less fails.
+    const tailStart = lines.indexOf(tail[0]!, failedAt);
+    expect(lines.slice(tailStart, tailStart + 20)).toEqual(tail);
+    expect(lines).not.toContain(boundary);
+    expect(lines).not.toContain("out-1");
+    expect(lines).toContain("out-40");
+
+    // The exit code of the suite (3, not the 1 of bun test) and the run-relative log path come next to the failed line.
+    expect(tailStart - failedAt).toBeLessThanOrEqual(5);
+    const between = lines.slice(failedAt + 1, tailStart);
+    expect(between.some((line) => /exit code/.test(line) && /\b3\b/.test(line))).toBe(true);
+    expect(between.some((line) => line.includes("results/e2e.log"))).toBe(true);
+
+    // A passed suite prints none of the three parts.
+    expect(result.out).not.toContain("results/unit.log");
+    expect(lines.filter((line) => line.includes("unit")).some((line) => /\b3\b/.test(line))).toBe(
+      false,
+    );
+  });
+});
+
 describe("ark test on a refactor run", () => {
   const fixHead = (runDirectory: string, title = "FAKE-1-AC1 works") => {
     const mirror = join(runDirectory, "workspace");
@@ -813,6 +873,60 @@ describe("ark test verified_by join", () => {
     expect(result.err).toContain("FAKE-1/AC3 is failing");
     expect(result.err).toContain("FAKE-1/AC4 is missing");
     expect(result.err).toContain("FAKE-1/AC7 is missing");
+  });
+
+  /** The hint lines that follow the `criterion  <id>` line, up to the next criterion, evidence or mode line. */
+  const hintsAfter = (output: string, criterion: string): string[] => {
+    const lines = output.split("\n");
+    const start = lines.findIndex((line) => line.startsWith(`criterion  ${criterion} `));
+    expect(start).toBeGreaterThanOrEqual(0);
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((line) => /^(criterion|evidence|mode)\b/.test(line));
+    return rest.slice(0, end === -1 ? undefined : end).map((line) => line.trim());
+  };
+  const hint = (id: string) => `no test title starts with ${id}`;
+
+  test("ARK-T388 ark test says no test title starts with the id after the criterion line of a test case that reads missing", () => {
+    // AC1: T1 passes, T2 and T3 have no test. AC2: T4 fails. AC3: matched by tag, no test.
+    const fixture = (selectiveBase: boolean) =>
+      buildingRun({
+        selectiveBase,
+        criteria: ["FAKE-1/AC1", "FAKE-1/AC2", "FAKE-1-AC3"],
+        ticketCriteria: [
+          { id: "AC1", verified_by: ["FAKE-T1", "FAKE-T2", "FAKE-T3"] },
+          { id: "AC2", verified_by: ["FAKE-T4"] },
+          { id: "FAKE-1-AC3" },
+        ],
+        testCases: [
+          addCase("FAKE-T1", "e2e"),
+          addCase("FAKE-T2", "e2e"),
+          addCase("FAKE-T3", "e2e"),
+          addCase("FAKE-T4", "e2e"),
+          { ...addCase("proves-AC3", "e2e"), action: "", criterion: "FAKE-1-AC3" },
+        ],
+        e2e: [passing("FAKE-T1 passes"), failing("FAKE-T4 breaks")],
+      });
+
+    // Full run: one hint for each missing case, none for the passed or failed case or the tag criterion.
+    const full = ark("test", fixture(false).runId);
+    expect(full.out).toContain("via FAKE-T1 passed, FAKE-T2 missing, FAKE-T3 missing");
+    expect(hintsAfter(full.out, "FAKE-1/AC1")).toEqual([hint("FAKE-T2"), hint("FAKE-T3")]);
+    expect(hintsAfter(full.out, "FAKE-1/AC2")).toEqual([]);
+    expect(full.out).toMatch(/criterion {2}FAKE-1\/AC3 {2}missing +via tag/);
+    expect(hintsAfter(full.out, "FAKE-1/AC3")).toEqual([]);
+
+    // Quick run, whole suites: the criterion reads `not run`, the cases still read `missing`, so the hint stays.
+    const quick = ark("test", fixture(false).runId, "--quick");
+    expect(quick.out).toMatch(
+      /criterion {2}FAKE-1\/AC1 {2}not run .*FAKE-T2 missing, FAKE-T3 missing/,
+    );
+    expect(hintsAfter(quick.out, "FAKE-1/AC1")).toEqual([hint("FAKE-T2"), hint("FAKE-T3")]);
+    expect(hintsAfter(quick.out, "FAKE-1/AC2")).toEqual([]);
+
+    // Quick run with every suite skipped: the cases read `not run`, so no hint at all.
+    const skipped = ark("test", fixture(true).runId, "--quick");
+    expect(skipped.out).toMatch(/criterion {2}FAKE-1\/AC1 {2}not run .*FAKE-T2 not run/);
+    expect(skipped.out).not.toContain("no test title starts with");
   });
 });
 
