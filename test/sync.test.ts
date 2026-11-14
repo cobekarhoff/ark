@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, beforeEach, expect, onTestFinished, setDefaultTimeout, test } from "bun:test";
 import {
   chmodSync,
   copyFileSync,
@@ -1337,6 +1337,22 @@ test(
     expect(generated).toEqual([
       { path: "docs/reference/cli.md", command: "bun scripts/cli-reference.ts" },
     ]);
+    // CI-like: Bun cannot auto-install a missing package from a registry or a cache.
+    // process.env, because `ark worktree sync` runs the generated command with it too.
+    const ciEnvironment = {
+      BUN_CONFIG_REGISTRY: "http://127.0.0.1:9",
+      BUN_INSTALL_CACHE_DIR: mkdtempSync(join(tmpdir(), "ark-sync-bun-cache-")),
+    };
+    const savedEnvironment = Object.fromEntries(
+      Object.keys(ciEnvironment).map((key) => [key, process.env[key]]),
+    );
+    Object.assign(process.env, ciEnvironment);
+    onTestFinished(() => {
+      for (const [key, value] of Object.entries(savedEnvironment)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
 
     const generate = (directory: string) => {
       const result = Bun.spawnSync(["bun", "scripts/cli-reference.ts"], { cwd: directory });
