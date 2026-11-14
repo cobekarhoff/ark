@@ -27,6 +27,18 @@ for (const tool of ["orca", "gh", "glab", "omp", "plannotator", "launchctl", "po
 }
 process.env.PATH = `${shimDirectory}:${process.env.PATH}`;
 
+// ARK-380: `ark merge-request open` and `ark run close <run> handed_off` refuse without gitleaks and osv-scanner, and a
+// real scan must never run in a test. Clean fakes come first on PATH; a test's own fake goes in front of them and wins.
+const cleanScanners: Record<string, string> = {
+  gitleaks:
+    '#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = --report-path ] && echo "[]" > "$2"; shift; done\nexit 0\n',
+  "osv-scanner": "#!/bin/sh\necho '{\"results\":[]}'\nexit 0\n",
+};
+for (const [tool, script] of Object.entries(cleanScanners)) {
+  writeFileSync(join(shimDirectory, tool), script);
+  chmodSync(join(shimDirectory, tool), 0o755);
+}
+
 // ARK-423: background `git maintenance` and `gc --auto` race the template copy and the tests' own commits.
 // Every git process of a test inherits these through process.env.
 Object.assign(process.env, {
