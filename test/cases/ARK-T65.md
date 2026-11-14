@@ -6,7 +6,7 @@ technique: state transition on file ownership (run lead, one step, unassigned) w
 priority: high
 risk: a run lead session in the same worktree that overlaps a reviewer step window still lands in the reviewer's actual_models, vendors or cost; an unassigned file vanishes from the output; the ARK-310 fixtures that put several steps in one file pass for the wrong reason
 status: active
-changed_by: 2026-11-07-ARK-348-1
+changed_by: 2026-11-13-ARK-460-1
 ---
 
 ## Objective
@@ -39,7 +39,7 @@ Expected: When a run lead session overlaps a reviewer step window in the same wo
 - The implementer's `actual_models` is the Anthropic model of file I only.
 - The reviewer's cost is the cost of file R; cost of file L is not in any step cost.
 - File U counts for no step; its cost is shown as its own unassigned line in the output and in `metrics.json`.
-- `by_role` keys (evaluator, designer, orchestration) and `cost.by_step` keys are the same as before the change.
+- `cost.by_step` keys are the same as before the change. `cost.by_role` has the keys `implementer`, `orchestration`, `reviewer` and `unassigned`: file U, which nothing places, is the role `unassigned` and no longer counts as `orchestration` (ARK-460/AC3).
 - The same fixtures, given to the shared owner function, give the same owners the hub gets (see ARK-T75).
 - Old-form variant: `ark retro` gives the same step models, vendors and cost and the same unassigned line for file U as the base fixture.
 - `bun test test/retro.test.ts` exits 0.
