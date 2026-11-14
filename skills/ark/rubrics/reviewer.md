@@ -45,12 +45,16 @@ Write each finding in this form:
 - **File:** <path relative to the repo>
 - **Line:** <line number or range>
 - **Area:** correctness | proof | security | complexity | naming
-- **Repro:** <command>
+- **Input:** <the concrete input, state or call that makes the defect happen>
+- **Criterion:** <the AC id the defect threatens, or none>
+- **Repro:** <command, P0 and P1 only>
 - **Evidence:** <what you read or ran, and what it shows: the code, the missing test, the command and its output>
 - **Fix:** <one sentence>
 ```
 
-A P0 or P1 finding has a line `- **Repro:** <command>`, and its Evidence quotes the output that shows the problem. For a design finding (an abstraction with one user), the command is a `grep`. A P0 or P1 without it is written as P2: keep the heading `### P2` and drop the Repro line. A P2 or P3 needs no Repro.
+Every finding, P0 to P3, has a line `- **Input:** <the concrete input, state or call that makes the defect happen>` and a line `- **Criterion:** <the AC id the defect threatens, or none>`. Use `none` when the defect threatens no single AC. For a design finding (an abstraction with one user), the Input is the `grep` that shows it. Keep each line of the form a single-line bullet: never put a `#` heading inside a value. The run lead drops a finding with no File, no Line or no Input.
+
+A P0 or P1 finding has a line `- **Repro:** <command>` on top of its Input, and its Evidence quotes the output that shows the problem. For a design finding the Repro is the same `grep`. A P0 or P1 without a Repro is written as P2: keep the heading `### P2` and drop the Repro line. A P2 or P3 needs no Repro.
 
 If you find nothing, say "No findings" and name the areas you checked. End with a count by priority (for example `P0: 0, P1: 1, P2: 0, P3: 2`), then finish with `worker_done`. The run lead decides which findings send work back.
 

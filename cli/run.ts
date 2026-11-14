@@ -21,6 +21,7 @@ import {
 import { buildSpec, reviewRangeStart } from "./spec.ts";
 import { watchSession } from "./usage/index.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
+import { isDropped } from "./findings.ts";
 import { ArkError } from "./errors.ts";
 import { checkRoles } from "./role-check.ts";
 import {
@@ -133,9 +134,11 @@ function reviewerFindingLacksRepro(directory: string, state: RunState): boolean 
     .map((file) => ({ file, time: statSync(file).mtimeMs }))
     .sort((left, right) => right.time - left.time)[0];
   if (!newest) return false;
-  return readFileSync(newest.file, "utf8")
-    .split(/^(?=#{2,3} )/m)
-    .some((block) => /^### P[01]\b/.test(block) && !/^- \*\*Repro:\*\*/m.test(block));
+  const text = readFileSync(newest.file, "utf8");
+  return text.split(/^(?=#{2,3} )/m).some((block) => {
+    if (!/^### P[01]\b/.test(block) || /^- \*\*Repro:\*\*/m.test(block)) return false;
+    return !isDropped(text, /^### P[01]\b:?[ \t]*(.*)$/m.exec(block)?.[1] ?? "");
+  });
 }
 
 function refused(action: () => void): boolean {

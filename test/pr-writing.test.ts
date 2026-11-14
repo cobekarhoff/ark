@@ -465,10 +465,12 @@ test("ARK-T53 the run ledger holds the last test result, the open findings, evid
       // A P0 that a later file closes with `No findings.`.
       "build-review-1.md": "### P0: Gone bug\n",
       "build-review-2.md": "No findings.\n",
-      // A P1 closed by a send-back decision, then an open P2 and an open P3 in the latest file.
+      // A P1 closed by a send-back decision, then an open P2 and an open P3 in the latest file,
+      // next to a P1 that a `- dropped <title>: <reason>` line closes.
       "final-1.md":
         "### P1: Fixed bug\n\n## Run lead decision\n\n- P1 Fixed bug: send back, fix it\n",
-      "final-2.md": "### P2: Slow path\n\n### P3: Naming\n",
+      "final-2.md":
+        "### P2: Slow path\n\n### P3: Naming\n\n### P1: slow export\n\n## Run lead decision\n\n- dropped slow export: no Input\n",
     },
   });
   const ledger = run.ledger();
