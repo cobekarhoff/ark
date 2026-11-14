@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import { evidenceFile, frontmatter, parseCriteria } from "../../../cli/ticket.ts";
 import { loadConfig, type PrWriting, type ProjectConfig } from "../../../cli/config.ts";
+import { isDropped } from "../../../cli/findings.ts";
 import { ArkError } from "../../../cli/errors.ts";
 import { deriveState, readEvents, type ArkEvent } from "../../../cli/events.ts";
 import type { CriterionStatus } from "../../../cli/lifecycle.ts";
@@ -266,7 +267,9 @@ function openFindings(files: FindingsFile[]): Finding[] {
       openByGroup.set(file.group, []);
       continue;
     }
-    const kept = parseFindings(file).filter((finding) => !sentBack(file, finding));
+    const kept = parseFindings(file).filter(
+      (finding) => !sentBack(file, finding) && !isDropped(file.text, finding.title),
+    );
     openByGroup.set(file.group, [...(openByGroup.get(file.group) ?? []), ...kept]);
   }
   return [...openByGroup.values()]

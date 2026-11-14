@@ -11,6 +11,7 @@ import {
   type RunState,
   type StepWindow,
 } from "../cli/events.ts";
+import { isDropped } from "../cli/findings.ts";
 import { loadConfig } from "../cli/config.ts";
 import {
   orcaOrchestration,
@@ -1019,10 +1020,12 @@ export function readJunitProof(xml: string): Map<string, ProofCase[]> {
   return proof;
 }
 
-/** Counts the `### P1`, `### P2` and `### P3` headings of a findings file. */
+/** Counts the `### P1`, `### P2` and `### P3` headings of a findings file, except findings with a dropped line. */
 export function countFindings(markdown: string): { p1: number; p2: number; p3: number } {
-  const count = (rank: number) => markdown.match(new RegExp(`^### P${rank}\\b`, "gm"))?.length ?? 0;
-  return { p1: count(1), p2: count(2), p3: count(3) };
+  const counts = { p1: 0, p2: 0, p3: 0 };
+  for (const match of markdown.matchAll(/^### P([123])\b:?[ \t]*(.*)$/gm))
+    if (!isDropped(markdown, match[2])) counts[`p${match[1]}` as keyof typeof counts]++;
+  return counts;
 }
 
 export type EvidenceRun = { run: string; directory: string; reviewerSteps: string[] };

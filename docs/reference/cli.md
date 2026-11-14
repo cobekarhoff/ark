@@ -669,18 +669,20 @@ interrupted counts no round), `escalations` (escalation gate answers) and `findi
 (lines in each `findings/round-<n>.md` file that start, after optional `#` marks, one list marker
 (`N.`, `-` or `*`) and bold marks, with `P0`, `P1`, `P2` or `P3`; no findings folder counts 0).
 `rework.findings_left_p0p1` counts the P0 and P1 list lines under `## Run lead decision` in each
-findings file whose first of the words `leave` and `send back` is `leave`. `rework.merge_steps`
-counts steps started with `--merge`. `human_intervention.plan_changes` counts the plan `change`
-answers plus every plan `approve` answer after the first, whoever gave it (`by` human or auto):
-`plan_changes: 0` for a plan approved once, `plan_changes: 2` for one change and a second approve.
-`actual_models` maps each plan step ID to the sorted, unique models of its sessions (an empty list
-when no session was found). For each step whose session models differ from its model in plan.yml
-(compared without a provider prefix, so `anthropic/claude-x` matches `claude-x`), it prints `model
-changed: step <step> planned <plan model>, ran <models>`; a run with no readable plan.yml prints
-none. `same_vendor_review` is true when a reviewer step ran all of its models on one vendor that an
-implementer step in the same repo also ran (`claude-` is anthropic, `gpt-` is openai, any other
-model has no vendor). A reviewer step that ran models of two vendors is `mixed`: it is not same
-vendor, `ark retro` prints `mixed review steps: <steps>`. It prints `same vendor review: true
+findings file whose first of the words `leave` and `send back` is `leave`. `rework.findings_dropped`
+counts the list lines under `## Run lead decision` in each findings file that start, after `-` or
+`*` and bold marks, with `dropped` (any case); a `dropped` line under another heading counts 0.
+`rework.merge_steps` counts steps started with `--merge`. `human_intervention.plan_changes` counts
+the plan `change` answers plus every plan `approve` answer after the first, whoever gave it (`by`
+human or auto): `plan_changes: 0` for a plan approved once, `plan_changes: 2` for one change and a
+second approve. `actual_models` maps each plan step ID to the sorted, unique models of its sessions
+(an empty list when no session was found). For each step whose session models differ from its model
+in plan.yml (compared without a provider prefix, so `anthropic/claude-x` matches `claude-x`), it
+prints `model changed: step <step> planned <plan model>, ran <models>`; a run with no readable
+plan.yml prints none. `same_vendor_review` is true when a reviewer step ran all of its models on one
+vendor that an implementer step in the same repo also ran (`claude-` is anthropic, `gpt-` is openai,
+any other model has no vendor). A reviewer step that ran models of two vendors is `mixed`: it is not
+same vendor, `ark retro` prints `mixed review steps: <steps>`. It prints `same vendor review: true
 (<steps>)` or `false`. Both are reports only. The `resources` object holds `peak_mb` (the largest
 single peak of the run's suites and agents, from `results/resources.json`: the peaks overlap, so
 they are never added), `cpu_s` (the CPU seconds of every suite side and agent, added) and `top` (the

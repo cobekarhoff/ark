@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { decisionLines, droppedLines } from "./findings.ts";
 import { ArkError } from "./errors.ts";
 import {
   type ArkEvent,
@@ -500,22 +501,20 @@ const RANKED_LINE = /^\s*#*\s*(?:(?:\d+\.|[-*])\s+)?(?:\*\*|__)?P[0-3]\b/;
 /** Ranked P0 to P3 lines in every findings/round-<number>.md file. No findings folder means 0. */
 const DECISION_LINE = /^\s*(?:[-*]\s+)?(?:\*\*|__)?P[01]\b/;
 
+function findingsTexts(runDirectory: string): string[] {
+  const findingsDirectory = join(runDirectory, "findings");
+  if (!existsSync(findingsDirectory)) return [];
+  return readdirSync(findingsDirectory)
+    .filter((file) => file.endsWith(".md"))
+    .map((name) => readFileSync(join(findingsDirectory, name), "utf8"));
+}
+
 /** P0 and P1 lines of `## Run lead decision` whose first of `leave` and `send back` is `leave`. */
 function countFindingsLeftP0P1(runDirectory: string): number {
-  const findingsDirectory = join(runDirectory, "findings");
-  if (!existsSync(findingsDirectory)) return 0;
-  let count = 0;
-  for (const name of readdirSync(findingsDirectory).filter((file) => file.endsWith(".md"))) {
-    let inDecision = false;
-    for (const line of readFileSync(join(findingsDirectory, name), "utf8").split("\n")) {
-      if (/^#{1,6}\s/.test(line)) inDecision = /^##\s+Run lead decision\s*$/i.test(line);
-      else if (inDecision && DECISION_LINE.test(line)) {
-        const decision = /\b(leave|send back)\b/i.exec(line)?.[1].toLowerCase();
-        if (decision === "leave") count++;
-      }
-    }
-  }
-  return count;
+  return findingsTexts(runDirectory)
+    .flatMap(decisionLines)
+    .filter((line) => DECISION_LINE.test(line))
+    .filter((line) => /\b(leave|send back)\b/i.exec(line)?.[1].toLowerCase() === "leave").length;
 }
 
 function countFindingsSentBack(runDirectory: string): number {
@@ -790,6 +789,11 @@ export function retro(runId: string, inProject?: string): void {
       ).length,
       findings_sent_back: findingsSentBack,
       findings_left_p0p1: countFindingsLeftP0P1(runDirectory),
+      // Dropped lines of `## Run lead decision` in every findings file.
+      findings_dropped: findingsTexts(runDirectory).reduce(
+        (sum, text) => sum + droppedLines(text).length,
+        0,
+      ),
       merge_steps: withoutInterrupted(events).filter(
         (event) => event.type === "step.started" && event.data.merge,
       ).length,
