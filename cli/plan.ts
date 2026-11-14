@@ -237,7 +237,7 @@ export function renderMermaid(plan: Plan): string {
   return `${lines.join("\n")}\n`;
 }
 
-export const hasMultipleRepos = (plan: Plan): boolean =>
+export const hasMultipleRepos = (plan: Pick<Plan, "steps">): boolean =>
   new Set(plan.steps.map((step) => step.repo)).size > 1;
 
 /**

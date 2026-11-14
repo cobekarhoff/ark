@@ -21,6 +21,7 @@ import {
 import type { Attention } from "./format.tsx";
 import { TestEvidence } from "./Evidence.tsx";
 import { MergeRequest } from "./Home.tsx";
+import { RepoGraph } from "./RepoGraph.tsx";
 import { layout } from "./layout.ts";
 import { Conversation } from "./Conversation.tsx";
 import {
@@ -307,11 +308,14 @@ function Body({
   detail,
   loading,
   open,
+  card,
 }: {
   run: RunView;
   detail: RunDetail | null;
   loading: boolean;
   open: boolean;
+  /** The repo a `#/run/<run>/repo/<repo>` link names. */
+  card: string | null;
 }) {
   const age = useAge();
   const closed = run.phase === "closed";
@@ -353,7 +357,17 @@ function Body({
             </div>
           ) : (
             <>
-              <Dag run={run.run} plan={run.plan} attention={attention} />
+              {run.repos ? (
+                <RepoGraph
+                  run={run}
+                  repos={run.repos}
+                  plan={run.plan}
+                  attention={attention}
+                  target={card}
+                />
+              ) : (
+                <Dag run={run.run} plan={run.plan} attention={attention} />
+              )}
               <table>
                 <thead>
                   <tr>
@@ -507,7 +521,7 @@ export function Run({
 
   if (sub?.kind === "file" && sub.arg)
     return <FileView run={run.run} ticket={run.ticket.id} path={sub.arg} />;
-  if (sub && sub.kind !== "conversation") {
+  if (sub && sub.kind !== "conversation" && sub.kind !== "repo") {
     const sessions =
       sub.kind === "step"
         ? detail?.sessions.filter((s) => s.owner.kind === "step" && s.owner.step === sub.arg)
@@ -571,7 +585,7 @@ export function Run({
         <a
           className="tab"
           href={runHref(run.run)}
-          aria-current={sub === null ? "page" : undefined}
+          aria-current={sub === null || sub.kind === "repo" ? "page" : undefined}
           data-testid="run-tab-overview"
         >
           Overview
@@ -593,7 +607,13 @@ export function Run({
           plan={run.plan}
         />
       ) : (
-        <Body run={run} detail={detail} loading={state.status === "loading"} open={open !== null} />
+        <Body
+          run={run}
+          detail={detail}
+          loading={state.status === "loading"}
+          open={open !== null}
+          card={sub?.kind === "repo" ? sub.arg : null}
+        />
       )}
     </>
   );

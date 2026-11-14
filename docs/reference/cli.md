@@ -735,14 +735,22 @@ Views: Home (tiles for what needs you, then blockers, the review queue and run p
 Runs (every run on one board and a cross-run dependency graph; #/map redirects here), a run page
 (any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts) and Roadmap
 (grouped table; a ticket opens as a full page with its dependency graph; the ticket text is read
-when the page asks, GET /api/ticket/<project>/<id>). The hub's one action is POST /api/open-in-orca,
-which runs orca terminal switch for a live terminal; it sends no text to a terminal, changes no run
-state and steers no agent. One hub runs per Ark repo: a second hub for the same repo (any port)
-prints `Ark hub already runs on http://127.0.0.1:<port>` with the port of the running hub and exits
-0 (lock file in ARK_HOME; a lock of a dead pid is taken over). The reader runs only while a page is
-connected to /events: an idle hub runs no Orca, Plannotator or GitHub read and watches no Ark folder
-(GET /api/snapshot does not wake it), and it reads Plannotator only while an open run has an open
-gate.
+when the page asks, GET /api/ticket/<project>/<id>). A run whose steps work in 2 or more repos draws
+its repo graph instead of the step DAG: one card per repo in merge order (hand-off order when no MR
+exists) with the repo's why, its MR, CI and `waits for !N` or its hand-off branch, a ring and a dot
+per step, repo edges labelled with kind and pin (evidence and bump state on hover or focus), and, in
+an open card, the steps in the columns Implement, Bump, Validate and Review. Cards start closed from
+4 repos. Cross-repo step edges show only while a step has hover or focus. The ticket page shows the
+repo chain of its newest run; a click opens `#/run/<run>/repo/<repo>`. A run with one step repo, a
+dependency cycle between repos, or no plan keeps the step DAG and no chain. Branch commits and
+submodule pointers are read by git in the background, never per request. The hub's one action is
+POST /api/open-in-orca, which runs orca terminal switch for a live terminal; it sends no text to a
+terminal, changes no run state and steers no agent. One hub runs per Ark repo: a second hub for the
+same repo (any port) prints `Ark hub already runs on http://127.0.0.1:<port>` with the port of the
+running hub and exits 0 (lock file in ARK_HOME; a lock of a dead pid is taken over). The reader runs
+only while a page is connected to /events: an idle hub runs no Orca, Plannotator or GitHub read and
+watches no Ark folder (GET /api/snapshot does not wake it), and it reads Plannotator only while an
+open run has an open gate.
 ```
 
 ### ui install
