@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { execJson, execResult, failureReason, readerTimeoutMilliseconds } from "./exec.ts";
+import { execJson, execResult, failureReason, readerTimeout } from "./exec.ts";
 
 // Only the fields the hub reads. Orca output is local and trusted, so it is cast, not parsed.
 export type OrcaRun = {
@@ -84,7 +84,7 @@ export async function readTerminals(): Promise<{
 /** The result of an Orca read: the value, or the reason it failed. */
 export type OrcaRead<T> = { ok: true; value: T } | { ok: false; reason: string };
 
-/** ARK_ORCA_TIMEOUT_MS overrides every Orca read timeout, so a test can force a timeout. */
+/** ARK_ORCA_TIMEOUT_MS overrides every Orca read timeout, and wins over ARK_READER_TIMEOUT_MS, so a test can force a timeout. */
 export function orcaTimeout(fallbackMilliseconds: number): number {
   const forced = Number(process.env.ARK_ORCA_TIMEOUT_MS);
   return forced > 0 ? forced : fallbackMilliseconds;
@@ -115,7 +115,7 @@ async function orcaCommand<T>(words: string[], timeoutMilliseconds: number): Pro
 /** One `orca orchestration <args> --json` call: its `result`, or why it failed. */
 export const orcaRead = <T>(
   args: string[],
-  timeoutMilliseconds = readerTimeoutMilliseconds,
+  timeoutMilliseconds = readerTimeout(),
 ): Promise<OrcaRead<T>> => orcaCommand<T>(["orchestration", ...args], timeoutMilliseconds);
 
 /**
@@ -126,7 +126,7 @@ export async function orcaPages<Row>(
   verb: string,
   key: string,
   scope: string[] = [],
-  timeoutMilliseconds = readerTimeoutMilliseconds,
+  timeoutMilliseconds = readerTimeout(),
 ): Promise<OrcaRead<Row[]>> {
   const rows: Row[] = [];
   let cursor: string | undefined;
@@ -165,7 +165,7 @@ export function findChiefRun(
 /** The queue of Master Chief's Run: its ready Tasks, then its pending Tasks. task-list has no cursor. */
 export async function readChiefTasks(
   chiefRunId: string,
-  timeoutMilliseconds = readerTimeoutMilliseconds,
+  timeoutMilliseconds = readerTimeout(),
 ): Promise<OrcaRead<QueueTask[]>> {
   const [ready, pending] = await Promise.all([
     orcaRead<{ tasks?: TaskRow[] }>(
@@ -200,7 +200,7 @@ export async function readChiefTasks(
 /** The whole queue read for a caller that needs nothing else from Orca: the hub. The reason is text for a person. */
 export async function readChiefQueue(
   project: string,
-  timeoutMilliseconds = readerTimeoutMilliseconds,
+  timeoutMilliseconds = readerTimeout(),
 ): Promise<OrcaRead<QueueTask[]>> {
   const runs = await orcaPages<{ id: string; objective?: string }>(
     "run-list",
