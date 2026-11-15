@@ -6,6 +6,7 @@
 import { realpathSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { ArkError } from "../../../cli/errors.ts";
+import { isProjectFolder } from "../../../cli/paths.ts";
 import type { Ledger } from "../lib/ledger.ts";
 import { buildTitle } from "../lib/post.ts";
 
@@ -106,17 +107,24 @@ export async function runCli<Options extends Record<string, OptionSpec>>(
   }
 }
 
-/** The root of the git repo that holds the current directory, or `null` outside a repo or without git. */
+/** The root of the git repo that holds the current directory, or `null` outside a repo or without git. Refuses a project folder, which is no repo of a run. */
 export function repoRoot(): string | null {
+  let root: string;
   try {
     const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
       stdout: "pipe",
       stderr: "pipe",
     });
-    return result.exitCode === 0 ? result.stdout.toString().trim() : null;
+    if (result.exitCode !== 0) return null;
+    root = result.stdout.toString().trim();
   } catch {
     return null;
   }
+  if (isProjectFolder(root))
+    throw new ArkError(
+      `${realpathSync(root)} is a project folder (ARK_HOME/projects/<project>), not the repo of a run: run this in the worktree of the run`,
+    );
+  return root;
 }
 
 /** The branch checked out at `root`, or `""` when HEAD is detached. */

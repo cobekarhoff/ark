@@ -11,7 +11,7 @@ import {
 import { dirname, join } from "node:path";
 import { ArkError, yamlQuoteHint } from "./errors.ts";
 import { deriveState, readEvents } from "./events.ts";
-import { findRun, listProjects, projectDirectory } from "./paths.ts";
+import { findRun, isProjectFolder, listProjects, projectDirectory } from "./paths.ts";
 import { frontmatter } from "./ticket.ts";
 import { discoverRepos, mirrorRoot } from "./workspace.ts";
 
@@ -196,6 +196,10 @@ export function testCaseNew(key: string, runId?: string, project?: string): void
     runId === undefined
       ? git(process.cwd(), "rev-parse", "--show-toplevel")
       : git(runRoot(runId, project), "rev-parse", "--show-toplevel");
+  if (runId === undefined && isProjectFolder(root))
+    throw new ArkError(
+      `refusing to write a test case into the project folder ${realpathSync(root)}: it belongs to no run\nuse: ark test-case new ${key} --run <run>`,
+    );
   if (runId === undefined && isWorkspaceCheckout(root))
     throw new ArkError(
       `refusing to write a test case into the workspace checkout ${root}: it belongs to no run\nuse: ark test-case new ${key} --run <run>`,
