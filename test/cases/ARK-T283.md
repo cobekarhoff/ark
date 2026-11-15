@@ -6,7 +6,7 @@ technique: characterization snapshot (golden master) with boundary values on arg
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-14-ARK-480-1
+changed_by: 2026-11-14-ARK-494-1
 ---
 
 ## Objective
@@ -18,6 +18,8 @@ Expected: When the command table changes, the system shall match the snapshot of
 The test reads the table only through the `ark` process, so it does not depend on the file that holds the table, and it does not import `cli/ark.ts` (importing it runs `main`). The snapshot was first captured at the ARK-372 base (27 commands); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs updated descriptions in it when they changed a command description. At this run's base (56fd31d) it holds 31 commands. ARK-480 changes seven records of it: the five added commands, the `chief state` description (it adds a sentence: the command also runs `ark companions sync`, prints its lines and its failures under `Companions`, adds no section and no Orca call when ark.yml has no `companions` and no companion worker is recorded, and a failing sync never changes the exit code) and the `ui` description (it names the Companions view and `GET /api/companions` among the views, and the three write routes of the Companions page next to open-in-orca). Every other record equals the table at base. The test fails at this run's base by design, because the snapshot holds those seven records.
 
 ARK-380 changed three descriptions in the snapshot, together with `cli/commands/run.ts` and `cli/commands/merge-request.ts`: `run close` (it now names the security scan as a refusal for `handed_off`), `merge-request open` (the security scan: gitleaks and osv-scanner refusals, the `security.accepted` block of ark.yml, the `Security` section of the body) and `status` (the `scanner: <tool> is not installed: brew install <tool>` line, exit 0). The test compares the process output with the snapshot, so it fails if a description and the snapshot drift apart.
+
+ARK-494 changed the `test-case new` description in the snapshot, together with `cli/commands/test-case.ts` (it now says the command also refuses in a project folder, `ARK_HOME/projects/<project>`, and names the `--run` form). No other record changes.
 
 ## Preconditions
 
