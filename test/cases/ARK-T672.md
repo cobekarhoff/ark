@@ -13,7 +13,7 @@ changed_by: 2026-11-14-ARK-496-1
 
 Prove that implementer finish passes the plan membership check when the plan lists every touched case id, for each action, when the diff holds no case id, and when a case id appears only in a non-test file. Serves ARK-496/AC1.
 
-Expected: When every case id in a test the run's diff changes appears in `test_cases` of `plan.yml`, whatever its action (add, update, reuse, retire), or when no changed test holds a case id (a case id in a non-test file does not count), the command shall exit 0 and append `step.finished` with the outcome `finished`.
+Expected: When every case id in a test the run's diff changes appears in `test_cases` of `plan.yml`, whatever its action (add, update, reuse, retire), or when no changed test holds a case id (a case id in a non-test file does not count), the command shall exit 0 and append `step.finished` with the outcome `succeeded`.
 
 ## Preconditions
 

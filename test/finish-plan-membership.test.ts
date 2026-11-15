@@ -440,7 +440,9 @@ test("ARK-T676 implementer finish skips with a printed line when the scan fails,
   const third = ark("run", "step", broken.runId, "build-a", "finish");
   expect(third.code, third.err).toBe(0);
   expect(third.out).toMatch(/plan-membership suite unit-a \(bun\) {2}skipped {2}\(scan failed: /);
+  // Only the bun suite of the step repo is scanned: no line for the pytest suite or repo B's suite.
   expect(third.out + third.err).not.toContain("unit-b");
+  expect(third.out + third.err).not.toContain("suite py");
   expect(third.err).not.toContain("    at ");
   expect(finishedEvents(broken.directory)).toHaveLength(1);
 });

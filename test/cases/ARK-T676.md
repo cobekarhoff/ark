@@ -13,7 +13,7 @@ changed_by: 2026-11-14-ARK-496-1
 
 Prove the skip rules of the finish check: a failed scan skips with a printed line; a suite of another repo is not scanned by this step; a non-bun suite or a repo with no base commit prints no line. Serves ARK-496/AC1. The plan-membership `scan failed` skip has no other owning case: ARK-T207 owns the skip of the old-id check and ARK-T346 the missing-plan skip.
 
-Expected: When the scan of a suite fails, the command shall print `plan-membership suite <name> (bun)  skipped  (scan failed: <reason>)` and finish. The command shall scan only the suites of the step's repo (`ark test` scans the suites of every repo). For a suite with a parser other than `bun`, or a repo with no base commit, the command shall print no line, as the plan-membership loop of `ark test` does (`cli/test-run.ts:1175-1186`: `continue` when `suite.parser !== "bun" || base === undefined`). Only a missing or invalid plan and a failed scan print a skip line; a `--merge` step prints none (ARK-T674).
+Expected: When the scan of a suite fails, the command shall print `plan-membership suite <name> (bun)  skipped  (scan failed: <reason>)` and finish. The command shall scan only the suites of the step's repo (`ark test` scans the suites of every repo). For a suite with a parser other than `bun`, or a repo with no base commit, the command shall print no line, as `planMembership` in `cli/test-audit.ts` does (`continue` when `suite.parser !== "bun" || base === undefined`). Only a missing or invalid plan and a failed scan print a skip line; a `--merge` step prints none (ARK-T674).
 
 ## Preconditions
 
@@ -32,7 +32,7 @@ Expected: When the scan of a suite fails, the command shall print `plan-membersh
 
 - Step 1: exit 0, no mention of `ARK-T2` (repo B's suite is not scanned by repo A's step), no `skipped` line for the pytest suite or repo B's suite, one `step.finished` event.
 - Step 2: exit 0, no `skipped` line and no `case id not in plan test_cases` line (nothing is scanned without a base), no stack trace, one `step.finished` event.
-- Step 3: exit 0, a printed line `plan-membership suite <name> (bun)  skipped  (scan failed: ...)`, no stack trace, one `step.finished` event.
+- Step 3: exit 0, a printed line `plan-membership suite <name> (bun)  skipped  (scan failed: ...)` for the bun suite of repo A only, and no line for the pytest suite (`suite py`) or repo B's suite; no stack trace, one `step.finished` event.
 
 ## Screenshot checkpoints
 
