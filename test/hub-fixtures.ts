@@ -1,7 +1,7 @@
 // Fixtures for the hub tests, shared by test/hub.test.ts (Bun) and test/pw/hub.pw.ts (Node):
 // no bun:test, no Bun.* globals. Every time comes from `new Date(now())`, never from a literal.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { now } from "../cli/clock.ts";
 
@@ -383,8 +383,12 @@ export type FakeToolOptions = {
   mergeRequestViews?: Record<string, unknown>;
   /** `orca worktree ps --agent-wait --json` exits 1. */
   orcaPsFails?: boolean;
-  /** The full `orca orchestration inbox` read (any `--limit` but the liveness read's 200) exits 1; every other call still answers. */
+  /** The full conversation `orca orchestration inbox` read (any `--limit` but the liveness read's 200, no `--terminal`) exits 1; every other call still answers. */
   orcaInboxFails?: boolean;
+  /** The unread messages of each project's Master Chief Run, by project: the `inbox --terminal run:<id> --full` rows, or `"fails"` to make that read exit 1. A project not listed has none. */
+  chiefUnread?: Record<string, unknown[] | "fails">;
+  /** Projects with no Master Chief Run in `run-list` (every other project of the fixture has one). */
+  noChiefRun?: string[];
   /** `up` answers `omp usage --json`, `down` fails, `once` answers once and then exits 1. */
   ompMode?: "up" | "down" | "once";
   /** The JSON `omp usage --json` prints. */
@@ -412,7 +416,11 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
       [
         ...runs,
         ...[...projects]
-          .filter((project) => !objectives.has(`Master Chief: ${project} tickets`))
+          .filter(
+            (project) =>
+              !objectives.has(`Master Chief: ${project} tickets`) &&
+              !options.noChiefRun?.includes(project),
+          )
           .map((project) => ({
             id: `orca-chief-${project}`,
             objective: `Master Chief: ${project} tickets`,
@@ -425,6 +433,14 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   put("orca.tasks", wrap(options.orca?.tasks, "tasks"));
   put("orca.inbox", wrap(options.orca?.messages, "messages"));
   put("orca.inboxfails", options.orcaInboxFails ? "1" : "0");
+  // The per-project read of the Master Chief Run: rows as ndjson (newest first), or a marker file for a failing read.
+  for (const name of readdirSync(stateDirectory))
+    if (name.startsWith("orca.unread.")) rmSync(join(stateDirectory, name), { force: true });
+  for (const [project, rows] of Object.entries(options.chiefUnread ?? {})) {
+    const key = `orca.unread.${`run:orca-chief-${project}`.replace(/[^A-Za-z0-9]/g, "_")}`;
+    if (rows === "fails") put(`${key}.fails`, "");
+    else put(key, rows.map((row) => `${JSON.stringify(row)}\n`).join(""));
+  }
   for (const [orcaRun, workers] of Object.entries(options.orca?.workersByRun ?? {}))
     put(`orca.workers.${orcaRun}`, wrap(workers, "workers"));
   put("orca.sleep", String(options.orcaSleepSeconds ?? 0));
@@ -501,14 +517,30 @@ cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
 # The hub's queue source reads task-list with --ready or --status: its own count, so it never uses up the agents' two answers.
 case " $* " in *" --ready "*|*" --status "*) cmd="\${cmd}_queue" ;; esac
 ${modeGate(state, "orca", "$cmd")}
-run=""; previous=""; for argument in "$@"; do [ "$previous" = --run ] && run="$argument"; previous="$argument"; done
+run=""; terminal=""; limit=""; previous=""
+for argument in "$@"; do
+  [ "$previous" = --run ] && run="$argument"
+  [ "$previous" = --terminal ] && terminal="$argument"
+  [ "$previous" = --limit ] && limit="$argument"
+  previous="$argument"
+done
 case "$1 $2" in
   "terminal list") cat '${state}/orca.terminals' ;;
   "terminal switch") [ "$(cat '${state}/orca.switchfails')" = 1 ] && exit 1; echo '{"result":{}}' ;;
   "orchestration run-list") cat '${state}/orca.runs' ;;
   "orchestration worker-list") if [ -f "${state}/orca.workers.$run" ]; then cat "${state}/orca.workers.$run"; else cat '${state}/orca.workers'; fi ;;
   "orchestration task-list") cat '${state}/orca.tasks' ;;
-  "orchestration inbox") case " $* " in *" --limit 200 "*) ;; *) [ "$(cat '${state}/orca.inboxfails')" = 1 ] && exit 1 ;; esac; cat '${state}/orca.inbox' ;;
+  "orchestration inbox")
+    if [ -n "$terminal" ]; then
+      key=$(printf '%s' "$terminal" | tr -c 'A-Za-z0-9' _)
+      [ -e "${state}/orca.unread.$key.fails" ] && exit 1
+      # Like real orca: rows of --limit (20 without it), and no created_at without --full.
+      rows=$(sed -n "1,\${limit:-20}p" "${state}/orca.unread.$key" 2>/dev/null)
+      case " $* " in *" --full "*) ;; *) rows=$(printf '%s\\n' "$rows" | sed 's/,"created_at":"[^"]*"//') ;; esac
+      printf '{"result":{"messages":[%s]}}\\n' "$(printf '%s\\n' "$rows" | paste -sd, -)"
+    else
+      case " $* " in *" --limit 200 "*) ;; *) [ "$(cat '${state}/orca.inboxfails')" = 1 ] && exit 1 ;; esac; cat '${state}/orca.inbox'
+    fi ;;
   "worktree ps") [ "$(cat '${state}/orca.psfails')" = 1 ] && exit 1; cat '${state}/orca.ps' ;;
   *) exit 1 ;;
 esac`,

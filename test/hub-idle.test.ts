@@ -85,11 +85,11 @@ const validView = JSON.stringify({
 type Fixture = {
   state: string;
   path: string;
-  /** Lines the tool has logged: for orca, the `terminal list` reads. */
-  reads(tool: "orca" | "plannotator" | "gh"): number;
+  /** Lines the tool has logged: for orca, the `terminal list` reads; for chiefUnread, the per-project `inbox --terminal` reads. */
+  reads(tool: "orca" | "plannotator" | "gh" | "chiefUnread"): number;
   /** Every orca call, whatever the command. */
   orcaCalls(): number;
-  /** The full conversation inbox reads: `inbox` calls with a `--limit` other than the liveness read's 200. */
+  /** The full conversation inbox reads: `inbox` calls with a `--limit` other than the liveness read's 200 and no `--terminal`. */
   conversationReads(): number;
   control(name: string, on: boolean): void;
   setLeadModel(model: string): void;
@@ -125,7 +125,13 @@ case "$1 $2" in
   "orchestration run-list") cat "$S/orca.runs" ;;
   "orchestration worker-list") echo '{"result":{"workers":[]}}' ;;
   "orchestration task-list") echo '{"result":{"tasks":[]}}' ;;
-  "orchestration inbox") echo '{"result":{"messages":[]}}' ;;
+  "orchestration inbox")
+    case " $* " in
+      *" --terminal "*)
+        echo x >> "$S/orca.chief-unread"
+        [ -e "$S/orca.unread-fail" ] && exit 1 ;;
+    esac
+    echo '{"result":{"messages":[]}}' ;;
   "worktree ps") echo '{"result":{"worktrees":[]}}' ;;
   *) exit 1 ;;
 esac`,
@@ -158,14 +164,24 @@ cat "$S/gh.view"`,
   const fake: Fixture = {
     state,
     path: process.env.PATH,
-    reads: (tool) => lines(tool === "orca" ? "orca.terminal-list" : `${tool}.log`),
+    reads: (tool) =>
+      lines(
+        tool === "orca"
+          ? "orca.terminal-list"
+          : tool === "chiefUnread"
+            ? "orca.chief-unread"
+            : `${tool}.log`,
+      ),
     orcaCalls: () => lines("orca.log"),
     conversationReads: () =>
       existsSync(join(state, "orca.log"))
         ? readFileSync(join(state, "orca.log"), "utf8")
             .split("\n")
             .filter(
-              (line) => line.startsWith("orchestration inbox") && !line.includes("--limit 200 "),
+              (line) =>
+                line.startsWith("orchestration inbox") &&
+                !line.includes("--limit 200 ") &&
+                !line.includes("--terminal "),
             ).length
         : 0,
     control(name, on) {
@@ -421,7 +437,7 @@ test("ARK-T240 With no change in any source, 10 reads of every source send 0 pus
   expect(quiet.sources).toEqual(baseline.sources);
 
   // A changed answer pushes once, and shows the new terminal set.
-  const afterReads = (tool: "orca" | "plannotator" | "gh", more: number) => {
+  const afterReads = (tool: "orca" | "plannotator" | "gh" | "chiefUnread", more: number) => {
     const target = fake.reads(tool) + more;
     return until(`${more} more ${tool} reads`, () => fake.reads(tool) >= target);
   };
@@ -438,6 +454,7 @@ test("ARK-T240 With no change in any source, 10 reads of every source send 0 pus
     { name: "github", tool: "gh", control: "gh.fail" },
     { name: "orca", tool: "orca", control: "orca.fail" },
     { name: "plannotator", tool: "plannotator", control: "plannotator.fail" },
+    { name: "chiefUnread", tool: "chiefUnread", control: "orca.unread-fail" },
   ] as const;
   for (const { name, tool, control } of sources) {
     const before = client.pushes.at(-1)!;
@@ -507,12 +524,13 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   );
 
   // Step 3: reads run at the interval.
-  // The fourth count is the full conversation inbox read (ARK-344): its own loop, so it has its own rate.
+  // The fourth count is the full conversation inbox read (ARK-344): its own loop, so it has its own rate. The fifth is the Master Chief unread read of each project (ARK-499), also its own loop.
   const counts = () => [
     fake.reads("orca"),
     fake.reads("plannotator"),
     fake.reads("gh"),
     fake.conversationReads(),
+    fake.reads("chiefUnread"),
   ];
   const windowOf = async () => {
     const start = counts();
@@ -577,9 +595,11 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   await sleep(500); // a read in flight ends
   const settled = everyCall();
   const settledConversation = fake.conversationReads();
+  const settledUnread = fake.reads("chiefUnread");
   await sleep(1500);
   expect(everyCall()).toBe(settled);
   expect(fake.conversationReads()).toBe(settledConversation);
+  expect(fake.reads("chiefUnread")).toBe(settledUnread);
 
   // Step 7: every tool fails; the hub stays up and the page gets the failures.
   for (const control of ["orca.fail", "plannotator.fail", "gh.fail"]) fake.control(control, true);
